@@ -9,6 +9,10 @@ pulp_add_test_suite(pulp-test-auto-ui LIBRARIES pulp::view)
 
 # ViewBridge lifecycle tests
 pulp_add_test_suite(pulp-test-view-bridge LIBRARIES pulp::format)
+catch_discover_tests(pulp-test-view-bridge
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 
 # Remote View Protocol loopback tests.
 pulp_add_test_suite(pulp-test-remote-view LIBRARIES pulp::format pulp::runtime)
@@ -186,6 +190,29 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-canvas-cg-gradients)
 
+# CoreGraphicsCanvas image-draw verbs [#6223 S34]. Apple-only TU: encodes a
+# known PNG, draws it back through the CG decoder + CGContextDrawImage, reads
+# the pixels, and proves the actual image (color + orientation) lands instead
+# of the pre-S34 filename-placeholder fallback.
+add_executable(pulp-test-canvas-cg-image test_canvas_cg_image.cpp)
+target_link_libraries(pulp-test-canvas-cg-image PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(APPLE)
+    target_link_libraries(pulp-test-canvas-cg-image PRIVATE
+        "-framework CoreGraphics" "-framework ImageIO" "-framework CoreServices")
+endif()
+catch_discover_tests(pulp-test-canvas-cg-image)
+
+# ImageFileCache path-keyed decoded/GPU-uploaded image cache [#6223 S35].
+# Skia-gated (value type is sk_sp<SkImage>); asserts hit/miss, backend-token
+# partitioning, clear() invalidation, disabled passthrough, and LRU eviction.
+if(PULP_HAS_SKIA)
+    add_executable(pulp-test-image-file-cache test_image_file_cache.cpp)
+    target_link_libraries(pulp-test-image-file-cache PRIVATE pulp::canvas Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-image-file-cache PRIVATE PULP_HAS_SKIA=1)
+    target_include_directories(pulp-test-image-file-cache PRIVATE ${SKIA_INCLUDE_DIRS})
+    catch_discover_tests(pulp-test-image-file-cache)
+endif()
+
 # CSS filter chain coverage: Skia-only pixel readback (contrast /
 # invert / opacity ordering with drop-shadow, set_filter drop-shadow
 # parser) plus portable filter-chain matrix math (contrast bias,
@@ -295,23 +322,6 @@ target_include_directories(pulp-test-partial-rendering-poc PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
 target_link_libraries(pulp-test-partial-rendering-poc PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-partial-rendering-poc)
-
-# Dawn GPU timestamp queries. The pure tick->ms resolution
-# math plus the CPU-only GpuTimestamps stub compile without a GPU link,
-# so this builds the gpu_timestamps.cpp translation unit directly (it
-# falls back to the no-op stub when PULP_HAS_SKIA is undefined). Live-
-# device QuerySet resolution is covered by CI's GPU matrix.
-add_executable(pulp-test-gpu-timestamps
-    test_gpu_timestamps.cpp
-    ${CMAKE_SOURCE_DIR}/core/render/src/gpu_timestamps.cpp)
-target_include_directories(pulp-test-gpu-timestamps PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/render/include)
-target_link_libraries(pulp-test-gpu-timestamps PRIVATE
-    pulp::runtime
-    Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-gpu-timestamps
-    PROPERTIES
-        LABELS coverage)
 
 add_executable(pulp-test-gpu-render-time
     test_gpu_render_time.cpp)

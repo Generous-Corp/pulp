@@ -11,6 +11,11 @@
   },
   "hotspots": [
     {
+      "path": "core/view/include/pulp/view/widget_bridge.hpp",
+      "max_loc": 509,
+      "note": "WidgetBridge public header. The ~75 sub-API registrar declarations moved out to the src-only widget_bridge/registrars.hpp (BridgeRegistrars friend), shrinking this header 571->509 and cutting the recompile blast radius of adding a bridge API. Keep new registrars out of this header; ceiling locks the win."
+    },
+    {
       "path": "core/view/src/widget_bridge.cpp",
       "max_loc": 930,
       "note": "WidgetBridge shell after callback wiring + subtree cleanup extraction; keep widget callbacks in widget_bridge/widget_callbacks.cpp, cleanup in widget_bridge/subtree_cleanup.cpp, JS event dispatch in widget_bridge/bridge_dispatch.cpp, and the CSS color parser in widget_bridge/css_color.cpp; registrar table + shared value-widget access in widget_bridge/value_widget_access.hpp"
@@ -87,8 +92,8 @@
     },
     {
       "path": "core/view/platform/mac/window_host_mac.mm",
-      "max_loc": 2690,
-      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver."
+      "max_loc": 2459,
+      "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver. Lowered 2690->2551 (S33) after the CPU + GPU hosts' duplicated NSWindow construction/positioning/teardown collapsed onto shared mac_geometry helpers (create_configured_window / position_window_beside / detach_and_close_window) and scrollWheel routing moved to portable pulp::view::deliver_mouse_wheel (S31). Lowered 2551->2459 (S31) after mouseDown/mouseUp delivery (modern+legacy channels, W3C pointer bubble, same-target click suppression) moved to portable pulp::view::deliver_mouse_down / deliver_mouse_up and the dispatch_mouse_down_if_live helper was deleted."
     },
     {
       "path": "core/view/src/design_import.cpp",

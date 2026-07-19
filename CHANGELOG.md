@@ -8,6 +8,84 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07150"></a>
+## [0.715.0] - 2026-07-19
+
+- test(host): pin MIDI sidecar drain resumes ([#6317](https://github.com/danielraffel/pulp/pull/6317))
+
+<a id="v07140"></a>
+## [0.714.0] - 2026-07-19
+
+- feat(audio): wire render workgroups into graph workers ([#6224](https://github.com/danielraffel/pulp/pull/6224))
+- test(ci): gate Windows runner policy across workflows ([#6315](https://github.com/danielraffel/pulp/pull/6315))
+- feat(import-design): emit Figma resize constraints from all three producers ([#6314](https://github.com/danielraffel/pulp/pull/6314))
+- fix(ci): guard scheduled workflows in forks ([#6303](https://github.com/danielraffel/pulp/pull/6303))
+- fix(design-import): honor Figma mask layers as clips, never as painted fills ([#6311](https://github.com/danielraffel/pulp/pull/6311))
+
+<a id="v07130"></a>
+## [0.713.0] - 2026-07-18
+
+- feat(canvas): real GPU post-effects + honest facades, filter/mask fixes ([#6262](https://github.com/danielraffel/pulp/pull/6262))
+
+<a id="v07122"></a>
+## [0.712.2] - 2026-07-18
+
+- fix(view): overflow:hidden clips to the rounded border box, not a square ([#6307](https://github.com/danielraffel/pulp/pull/6307))
+
+<a id="v07121"></a>
+## [0.712.1] - 2026-07-18
+
+- fix(design-import): honor .fig overriddenSymbolID swaps and Clip content ([#6288](https://github.com/danielraffel/pulp/pull/6288))
+- fix(ship): preserve every plugin in combined installers ([#6301](https://github.com/danielraffel/pulp/pull/6301))
+
+<a id="v07120"></a>
+## [0.712.0] - 2026-07-18
+
+- feat(signal): add physical-modeling SDK foundations ([#6304](https://github.com/danielraffel/pulp/pull/6304))
+
+<a id="v07110"></a>
+## [0.711.0] - 2026-07-18
+
+- feat(audio): add generic AU instrument probe ([#6300](https://github.com/danielraffel/pulp/pull/6300))
+
+<a id="v07100"></a>
+## [0.710.0] - 2026-07-18
+
+- fix(view): group and scroll large AutoUi parameter surfaces ([#6298](https://github.com/danielraffel/pulp/pull/6298))
+- feat(runtime): add realtime UI activity channel ([#6295](https://github.com/danielraffel/pulp/pull/6295))
+
+<a id="v07090"></a>
+## [0.709.0] - 2026-07-18
+
+- fix(format): harden adapter lifecycle and bus validation ([#6297](https://github.com/danielraffel/pulp/pull/6297))
+- test: close remaining cross-platform strategy gaps ([#6290](https://github.com/danielraffel/pulp/pull/6290))
+
+<a id="v07070"></a>
+## [0.707.0] - 2026-07-18
+
+- fix(design-import): don't double-stroke a .fig stroke-band vector ([#6287](https://github.com/danielraffel/pulp/pull/6287))
+
+<a id="v07050"></a>
+## [0.705.0] - 2026-07-18
+
+- fix(design-import): a "label" token names the caption, not a control ([#6281](https://github.com/danielraffel/pulp/pull/6281))
+- fix(design-import): only rotate non-orthogonal .fig layers (slider fill regression) ([#6277](https://github.com/danielraffel/pulp/pull/6277))
+
+<a id="v07040"></a>
+## [0.704.0] - 2026-07-18
+
+- feature/ci cache save event aware ([#6155](https://github.com/danielraffel/pulp/pull/6155))
+- ci(wclap): run Build+prove on merge_group so the merge queue can land PRs ([#6274](https://github.com/danielraffel/pulp/pull/6274))
+- docs: document reference-free oscillator validation tooling + cross-link ([#6279](https://github.com/danielraffel/pulp/pull/6279))
+- docs(shaders): stop advertising SkSL post-effects that were removed ([#6172](https://github.com/danielraffel/pulp/pull/6172))
+
+<a id="v07030"></a>
+## [0.703.0] - 2026-07-17
+
+- fix(design-import): carry .fig layer rotation so knob needles point radially ([#6270](https://github.com/danielraffel/pulp/pull/6270))
+- fix(osc): Fable-review follow-ups — click half-integer novelty, WP-4 knee pin, nits ([#6271](https://github.com/danielraffel/pulp/pull/6271))
+- build(ci): require a declared VM store instead of guessing one ([#6173](https://github.com/danielraffel/pulp/pull/6173))
+
 <a id="v07010"></a>
 ## [0.701.0] - 2026-07-18
 
@@ -6561,6 +6639,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.715.0]: https://github.com/danielraffel/pulp/releases/tag/v0.715.0
+[0.714.0]: https://github.com/danielraffel/pulp/releases/tag/v0.714.0
+[0.713.0]: https://github.com/danielraffel/pulp/releases/tag/v0.713.0
+[0.712.2]: https://github.com/danielraffel/pulp/releases/tag/v0.712.2
+[0.712.1]: https://github.com/danielraffel/pulp/releases/tag/v0.712.1
+[0.712.0]: https://github.com/danielraffel/pulp/releases/tag/v0.712.0
+[0.711.0]: https://github.com/danielraffel/pulp/releases/tag/v0.711.0
+[0.710.0]: https://github.com/danielraffel/pulp/releases/tag/v0.710.0
+[0.709.0]: https://github.com/danielraffel/pulp/releases/tag/v0.709.0
+[0.707.0]: https://github.com/danielraffel/pulp/releases/tag/v0.707.0
+[0.705.0]: https://github.com/danielraffel/pulp/releases/tag/v0.705.0
+[0.704.0]: https://github.com/danielraffel/pulp/releases/tag/v0.704.0
+[0.703.0]: https://github.com/danielraffel/pulp/releases/tag/v0.703.0
 [0.701.0]: https://github.com/danielraffel/pulp/releases/tag/v0.701.0
 [0.700.0]: https://github.com/danielraffel/pulp/releases/tag/v0.700.0
 [0.699.0]: https://github.com/danielraffel/pulp/releases/tag/v0.699.0

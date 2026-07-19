@@ -36,12 +36,12 @@ bool is_new_widget_factory_api(choc::javascript::ArgumentList& args) {
 
 } // namespace
 
-void WidgetBridge::register_widget_factory_controls_api() {
+void BridgeRegistrars::register_widget_factory_controls_api(WidgetBridge& self) {
     auto isNewApi = is_new_widget_factory_api;
-    BridgeApiContext api{engine_};
+    BridgeApiContext api{self.engine_};
 
     // createKnob(id, parentId) OR createKnob(id, x, y, w, h)
-    register_bridge_function(api, "createKnob", [this, isNewApi](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createKnob", [&self, isNewApi](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto knob = std::make_unique<Knob>();
         knob->set_id(id);
@@ -50,22 +50,22 @@ void WidgetBridge::register_widget_factory_controls_api() {
         if (isNewApi(args)) {
             auto pid = args.get<std::string>(1, "");
             auto* ptr = knob.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            resolve_parent(pid)->add_child(std::move(knob));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.resolve_parent(pid)->add_child(std::move(knob));
         } else {
             knob->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                              (float)args.get<double>(3,48), (float)args.get<double>(4,48)});
             auto* ptr = knob.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            root_.add_child(std::move(knob));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.root_.add_child(std::move(knob));
         }
         return choc::value::createString(id);
     });
 
     // createFader(id, orientation, parentId) OR createFader(id, x, y, w, h, orientation)
-    register_bridge_function(api, "createFader", [this, isNewApi](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createFader", [&self, isNewApi](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto fader = std::make_unique<Fader>();
         fader->set_id(id);
@@ -75,9 +75,9 @@ void WidgetBridge::register_widget_factory_controls_api() {
             auto pid = args.get<std::string>(2, "");
             if (orient == "horizontal") fader->set_orientation(Fader::Orientation::horizontal);
             auto* ptr = fader.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            resolve_parent(pid)->add_child(std::move(fader));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.resolve_parent(pid)->add_child(std::move(fader));
         } else {
             fader->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                               (float)args.get<double>(3,24), (float)args.get<double>(4,200)});
@@ -85,15 +85,15 @@ void WidgetBridge::register_widget_factory_controls_api() {
             if (orient == "horizontal") fader->set_orientation(Fader::Orientation::horizontal);
             fader->set_label(id);
             auto* ptr = fader.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            root_.add_child(std::move(fader));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.root_.add_child(std::move(fader));
         }
         return choc::value::createString(id);
     });
 
     // createToggle(id, parentId) OR createToggle(id, x, y, w, h)
-    register_bridge_function(api, "createToggle", [this, isNewApi](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createToggle", [&self, isNewApi](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto toggle = std::make_unique<Toggle>();
         toggle->set_id(id);
@@ -101,36 +101,36 @@ void WidgetBridge::register_widget_factory_controls_api() {
         if (isNewApi(args)) {
             auto pid = args.get<std::string>(1, "");
             auto* ptr = toggle.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            resolve_parent(pid)->add_child(std::move(toggle));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.resolve_parent(pid)->add_child(std::move(toggle));
         } else {
             toggle->set_bounds({(float)args.get<double>(1,0), (float)args.get<double>(2,0),
                                (float)args.get<double>(3,50), (float)args.get<double>(4,30)});
             toggle->set_label(id);
             auto* ptr = toggle.get();
-            widgets_[id] = ptr;
-            wire_callbacks(id, ptr);
-            root_.add_child(std::move(toggle));
+            self.widgets_[id] = ptr;
+            self.wire_callbacks(id, ptr);
+            self.root_.add_child(std::move(toggle));
         }
         return choc::value::createString(id);
     });
 
     // createRangeSlider(id, parentId)
-    register_bridge_function(api, "createRangeSlider", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createRangeSlider", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto rs = std::make_unique<RangeSlider>();
         rs->set_id(id);
         auto* ptr = rs.get();
-        widgets_[id] = ptr;
-        wire_callbacks(id, ptr);
-        resolve_parent(pid)->add_child(std::move(rs));
+        self.widgets_[id] = ptr;
+        self.wire_callbacks(id, ptr);
+        self.resolve_parent(pid)->add_child(std::move(rs));
         return choc::value::createString(id);
     });
 
     // createIcon(id, type, parentId) - type: "image_upload", "send", "search", "close"
-    register_bridge_function(api, "createIcon", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createIcon", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto type_str = args.get<std::string>(1, "image_upload");
         auto pid = args.get<std::string>(2, "");
@@ -140,57 +140,57 @@ void WidgetBridge::register_widget_factory_controls_api() {
         else if (type_str == "search") icon->set_type(Icon::Type::search);
         else if (type_str == "close") icon->set_type(Icon::Type::close);
         else icon->set_type(Icon::Type::image_upload);
-        widgets_[id] = icon.get();
-        resolve_parent(pid)->add_child(std::move(icon));
+        self.widgets_[id] = icon.get();
+        self.resolve_parent(pid)->add_child(std::move(icon));
         return choc::value::createString(id);
     });
 
     // createImage(id, parentId) - HTML <img> equivalent
-    register_bridge_function(api, "createImage", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createImage", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto img = std::make_unique<ImageView>(); img->set_id(id);
-        widgets_[id] = img.get();
-        resolve_parent(pid)->add_child(std::move(img));
+        self.widgets_[id] = img.get();
+        self.resolve_parent(pid)->add_child(std::move(img));
         return choc::value::createString(id);
     });
 }
 
-void WidgetBridge::register_widget_factory_form_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_factory_form_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // createCheckbox(id, parentId)
-    register_bridge_function(api, "createCheckbox", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createCheckbox", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto cb = std::make_unique<Checkbox>(); cb->set_id(id);
-        auto* ptr = cb.get(); widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto* ptr = cb.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         cb->on_change = [alive, engine, id](bool v) {
             dispatch_event(alive, engine, id, "change", v ? "1" : "0");
         };
-        resolve_parent(pid)->add_child(std::move(cb));
+        self.resolve_parent(pid)->add_child(std::move(cb));
         return choc::value::createString(id);
     });
 
     // createToggleButton(id, parentId)
-    register_bridge_function(api, "createToggleButton", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createToggleButton", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto tb = std::make_unique<ToggleButton>(); tb->set_id(id);
-        auto* ptr = tb.get(); widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto* ptr = tb.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         tb->on_toggle = [alive, engine, id](bool v) {
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
-        resolve_parent(pid)->add_child(std::move(tb));
+        self.resolve_parent(pid)->add_child(std::move(tb));
         return choc::value::createString(id);
     });
 
     // createLabel(id, text, parentId) OR createLabel(id, text, x, y, w, h)
-    register_bridge_function(api, "createLabel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createLabel", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto text = args.get<std::string>(1, "");
 
@@ -208,126 +208,126 @@ void WidgetBridge::register_widget_factory_form_api() {
         if (old) {
             label->set_bounds({(float)args.get<double>(2,0), (float)args.get<double>(3,0),
                               (float)args.get<double>(4,100), (float)args.get<double>(5,20)});
-            widgets_[id] = label.get();
-            root_.add_child(std::move(label));
+            self.widgets_[id] = label.get();
+            self.root_.add_child(std::move(label));
         } else {
             auto pid = args.get<std::string>(2, "");
-            widgets_[id] = label.get();
-            resolve_parent(pid)->add_child(std::move(label));
+            self.widgets_[id] = label.get();
+            self.resolve_parent(pid)->add_child(std::move(label));
         }
         return choc::value::createString(id);
     });
 }
 
-void WidgetBridge::register_widget_factory_container_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_factory_container_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "createRow", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createRow", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<View>(); v->set_id(id);
         v->flex().direction = FlexDirection::row;
-        widgets_[id] = v.get();
-        resolve_parent(pid)->add_child(std::move(v));
+        self.widgets_[id] = v.get();
+        self.resolve_parent(pid)->add_child(std::move(v));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createCol", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createCol", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<View>(); v->set_id(id);
         v->flex().direction = FlexDirection::column;
-        widgets_[id] = v.get();
-        resolve_parent(pid)->add_child(std::move(v));
+        self.widgets_[id] = v.get();
+        self.resolve_parent(pid)->add_child(std::move(v));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createModal", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createModal", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<ModalOverlay>(); v->set_id(id);
         v->flex().direction = FlexDirection::column;
         auto* modal = v.get();
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         modal->on_dismiss = [alive, engine, modal, id]() {
             if (modal) {
                 modal->set_visible(false);
             }
             dispatch_event(alive, engine, id, "dismiss", "0");
         };
-        widgets_[id] = v.get();
-        resolve_parent(pid)->add_child(std::move(v));
+        self.widgets_[id] = v.get();
+        self.resolve_parent(pid)->add_child(std::move(v));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createPanel", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createPanel", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<Panel>(); p->set_id(id);
-        widgets_[id] = p.get();
-        resolve_parent(pid)->add_child(std::move(p));
+        self.widgets_[id] = p.get();
+        self.resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
     });
 }
 
-void WidgetBridge::register_widget_factory_composite_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_factory_composite_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "createMeter", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createMeter", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto o = args.get<std::string>(1, "vertical");
         auto pid = args.get<std::string>(2, "");
         auto m = std::make_unique<Meter>(); m->set_id(id);
         if (o == "horizontal") m->set_orientation(Meter::Orientation::horizontal);
-        widgets_[id] = m.get(); resolve_parent(pid)->add_child(std::move(m));
+        self.widgets_[id] = m.get(); self.resolve_parent(pid)->add_child(std::move(m));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createXYPad", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createXYPad", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<XYPad>(); p->set_id(id);
-        widgets_[id] = p.get(); resolve_parent(pid)->add_child(std::move(p));
+        self.widgets_[id] = p.get(); self.resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createWaveform", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createWaveform", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto w = std::make_unique<WaveformView>(); w->set_id(id);
-        widgets_[id] = w.get(); resolve_parent(pid)->add_child(std::move(w));
+        self.widgets_[id] = w.get(); self.resolve_parent(pid)->add_child(std::move(w));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createSpectrum", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createSpectrum", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto s = std::make_unique<SpectrumView>(); s->set_id(id);
-        widgets_[id] = s.get(); resolve_parent(pid)->add_child(std::move(s));
+        self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createCombo", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createCombo", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto c = std::make_unique<ComboBox>(); c->set_id(id);
-        auto* ptr = c.get(); widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto* ptr = c.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         c->on_change = [alive, engine, id](int idx) {
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
-        resolve_parent(pid)->add_child(std::move(c));
+        self.resolve_parent(pid)->add_child(std::move(c));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createProgress", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createProgress", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<ProgressBar>(); p->set_id(id);
-        widgets_[id] = p.get(); resolve_parent(pid)->add_child(std::move(p));
+        self.widgets_[id] = p.get(); self.resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createScrollView", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createScrollView", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto s = std::make_unique<ScrollView>(); s->set_id(id);
-        widgets_[id] = s.get(); resolve_parent(pid)->add_child(std::move(s));
+        self.widgets_[id] = s.get(); self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });
 
@@ -335,58 +335,58 @@ void WidgetBridge::register_widget_factory_composite_api() {
     // field / video layer). Materializes empty — JS can't mint an OS view
     // handle — so a C++ host binds the native child by id afterwards via
     // `dynamic_cast<NativeViewHost*>(bridge.widget(id))->set_native_child(...)`.
-    register_bridge_function(api, "createNativeView", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createNativeView", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto nv = std::make_unique<NativeViewHost>(); nv->set_id(id);
-        widgets_[id] = nv.get(); resolve_parent(pid)->add_child(std::move(nv));
+        self.widgets_[id] = nv.get(); self.resolve_parent(pid)->add_child(std::move(nv));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createListBox", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createListBox", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto lb = std::make_unique<ListBox>(); lb->set_id(id);
-        auto* ptr = lb.get(); widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto* ptr = lb.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         lb->on_select = [alive, engine, id](int idx) {
             dispatch_event(alive, engine, id, "select", std::to_string(idx));
         };
         lb->on_activate = [alive, engine, id](int idx) {
             dispatch_event(alive, engine, id, "activate", std::to_string(idx));
         };
-        resolve_parent(pid)->add_child(std::move(lb));
+        self.resolve_parent(pid)->add_child(std::move(lb));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createVirtualList", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createVirtualList", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto list = std::make_unique<VirtualList>(); list->set_id(id);
-        auto* ptr = list.get(); widgets_[id] = ptr;
-        wire_callbacks(id, ptr);
-        resolve_parent(pid)->add_child(std::move(list));
+        auto* ptr = list.get(); self.widgets_[id] = ptr;
+        self.wire_callbacks(id, ptr);
+        self.resolve_parent(pid)->add_child(std::move(list));
         return choc::value::createString(id);
     });
 
-    register_bridge_function(api, "createVirtualGrid", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createVirtualGrid", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto grid = std::make_unique<VirtualGrid>(); grid->set_id(id);
-        auto* ptr = grid.get(); widgets_[id] = ptr;
-        wire_callbacks(id, ptr);
-        resolve_parent(pid)->add_child(std::move(grid));
+        auto* ptr = grid.get(); self.widgets_[id] = ptr;
+        self.wire_callbacks(id, ptr);
+        self.resolve_parent(pid)->add_child(std::move(grid));
         return choc::value::createString(id);
     });
 
 }
 
-void WidgetBridge::register_widget_factory_text_editor_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_factory_text_editor_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
-    register_bridge_function(api, "createTextEditor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createTextEditor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto pid = args.get<std::string>(1, "");
         auto ed = std::make_unique<TextEditor>(); ed->set_id(id);
-        auto* ptr = ed.get(); widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        auto* ptr = ed.get(); self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         ed->on_escape = [alive, engine, id]() {
             dispatch_event(alive, engine, id, "escape", "0");
         };
@@ -398,13 +398,13 @@ void WidgetBridge::register_widget_factory_text_editor_api() {
             std::string e; for (char c : text) { if (c=='\'') e+= "\\'"; else if (c=='\n') e+= "\\n"; else e+= c; }
             dispatch_event(alive, engine, id, "change", "'" + e + "'");
         };
-        resolve_parent(pid)->add_child(std::move(ed));
+        self.resolve_parent(pid)->add_child(std::move(ed));
         return choc::value::createString(id);
     });
 }
 
-void WidgetBridge::register_widget_factory_design_system_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_factory_design_system_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
     auto tone_from = [](const std::string& s) {
         if (s == "info") return Tone::info;
         if (s == "success") return Tone::success;
@@ -414,49 +414,49 @@ void WidgetBridge::register_widget_factory_design_system_api() {
     };
 
     // createBadge(id, text, tone, parentId) — Ink & Signal status pill.
-    register_bridge_function(api, "createBadge", [this, tone_from](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createBadge", [&self, tone_from](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto text = args.get<std::string>(1, "");
         auto tone = args.get<std::string>(2, "neutral");
         auto pid = args.get<std::string>(3, "");
         auto b = std::make_unique<Badge>(text, tone_from(tone));
         b->set_id(id);
-        widgets_[id] = b.get();
-        resolve_parent(pid)->add_child(std::move(b));
+        self.widgets_[id] = b.get();
+        self.resolve_parent(pid)->add_child(std::move(b));
         return choc::value::createString(id);
     });
 
     // createStepper(id, parentId) — [-] value [+] numeric nudge.
-    register_bridge_function(api, "createStepper", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createStepper", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto s = std::make_unique<Stepper>();
         s->set_id(id);
         auto* ptr = s.get();
-        widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         s->on_change = [alive, engine, id](double v) {
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
-        resolve_parent(pid)->add_child(std::move(s));
+        self.resolve_parent(pid)->add_child(std::move(s));
         return choc::value::createString(id);
     });
 
     // createPan(id, parentId) — bipolar 1-D pan (-1..+1).
-    register_bridge_function(api, "createPan", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "createPan", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto p = std::make_unique<PanControl>();
         p->set_id(id);
         auto* ptr = p.get();
-        widgets_[id] = ptr;
-        auto alive = callback_alive_;
-        auto* engine = &engine_;
+        self.widgets_[id] = ptr;
+        auto alive = self.callback_alive_;
+        auto* engine = &self.engine_;
         p->on_change = [alive, engine, id](float v) {
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
-        resolve_parent(pid)->add_child(std::move(p));
+        self.resolve_parent(pid)->add_child(std::move(p));
         return choc::value::createString(id);
     });
 }

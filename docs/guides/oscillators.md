@@ -275,3 +275,12 @@ allocation happens at setup (`set_wavetable_set`, `set_tables`,
 nothing, lock nothing, and perform no I/O. All classes compute in `double`
 throughout; a `float` caller narrows once on store. `vco.hpp`'s `exp`/`tanh`
 and `va.hpp`'s `sin` are libcalls but not allocations, locks, or I/O.
+
+## Measuring and validating
+
+These oscillators are validated **reference-free** (one render, no A/B pair) by the
+opt-in [Audio Quality Lab](audio-quality-lab.md#oscillator-validation-reference-free):
+render any engine to a WAV with `pulp-osc-render-wav` (`--engine vco|dco|wt`, `--seed`),
+then reach for the click / edge-smear detector (unexpected discontinuities), the
+overlapping-Allan drift-vs-jitter separation, the synthetic oscillator corpus + ratchet,
+and the offline WP-4 profile fitter. See that guide's *Oscillator validation* section.

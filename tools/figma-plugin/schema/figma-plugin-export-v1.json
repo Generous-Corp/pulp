@@ -132,6 +132,15 @@
         "attributes": { "$ref": "#/$defs/attributes" },
         "style": { "$ref": "#/$defs/style" },
         "layout": { "$ref": "#/$defs/layout" },
+        "constraints": {
+          "type": "object",
+          "description": "Resize constraints in Figma's Plugin-API spelling. Passed through untranslated; design_ir_json.cpp normalizes and codegen lowers to flex within the parent. Only emitted for nodes positioned in the parent's coordinate space (not flowing auto-layout children).",
+          "properties": {
+            "horizontal": { "type": "string", "enum": ["MIN", "MAX", "CENTER", "STRETCH", "SCALE"] },
+            "vertical": { "type": "string", "enum": ["MIN", "MAX", "CENTER", "STRETCH", "SCALE"] }
+          },
+          "additionalProperties": false
+        },
         "figma": { "$ref": "#/$defs/figma_metadata" },
         "asset_ref": {
           "type": "string",

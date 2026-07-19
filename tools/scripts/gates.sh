@@ -84,7 +84,6 @@ CONFLICT_MARKER_GUARD="$ROOT/tools/scripts/conflict_marker_check.py"
 FORK_GUARD="$ROOT/tools/scripts/scheduled_workflow_fork_guard_check.py"
 THREAD_ASSERT_GUARD="$ROOT/tools/scripts/thread_assert_check.py"
 FRAMEWORK_NEUTRALITY="$ROOT/tools/scripts/framework_neutrality_check.py"
-US_ENGLISH="$ROOT/tools/scripts/us_english_check.py"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     echo "gates.sh: gate scripts not found (expected at tools/scripts/)" >&2
@@ -394,14 +393,6 @@ if [ -f "$FRAMEWORK_NEUTRALITY" ]; then
     echo "" >&2
     echo "▸ framework-neutrality guard (no foreign-framework vocabulary in Pulp source)" >&2
     if ! "$PYTHON" "$FRAMEWORK_NEUTRALITY" --mode=report; then
-        fail=1
-    fi
-fi
-
-if [ -f "$US_ENGLISH" ]; then
-    echo "" >&2
-    echo "▸ us-english guard (American spelling — run us_english_check.py --fix to apply)" >&2
-    if ! "$PYTHON" "$US_ENGLISH"; then
         fail=1
     fi
 fi

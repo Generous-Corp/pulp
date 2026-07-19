@@ -377,6 +377,47 @@ broad validation.
 
 To opt out for an individual run, pass `--pipeline default` explicitly.
 
+## Cache-warming runs on `main`
+
+`build.yml` triggers on `push: branches: [main]` in addition to
+`pull_request` / `merge_group` / `workflow_dispatch`. That run gates nothing —
+it exists solely to **publish the GitHub-hosted Linux/Windows ccache and
+FetchContent caches** that PR runs restore from.
+
+It is needed because of how GitHub's cloud cache is scoped: a cache entry
+written by a PR run is visible only to that PR's own ref, so PR runs can never
+warm each other. Only a non-PR run on the default branch writes an entry every
+subsequent PR can read. Without the `push` trigger the `Save …` steps are
+unreachable and the matching `Restore …` steps are a permanent miss.
+
+A push run is deliberately **narrower than a PR run**:
+
+| | PR / merge_group run | `push: main` cache run |
+|---|---|---|
+| Linux + Windows matrix legs | yes | yes (these publish the caches) |
+| macOS matrix leg | yes | **no** — omitted by `resolve-provider` |
+| `macos` / `linux` / `windows` alias jobs | yes | no |
+| `windows-{msvc-release,midi2,ble}-gate` | yes | no |
+| Writes to GitHub's cloud cache | no | Linux + Windows only |
+
+The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
+serve the one required check in this repo, and those machines keep ccache and
+FetchContent on local disk between jobs. Scheduling a macOS leg on a push would
+put the required gate's runners under load to save a cache that is never
+uploaded — strictly a cost. For the same reason the two `Save …` steps are
+scoped `runner.environment == 'github-hosted' && runner.os != 'macOS'`, which
+is narrower than the restore side on purpose.
+
+Push runs are also exempt from `cancel-in-progress`: they share the
+`refs/heads/main` concurrency group, so cancelling a superseded one would kill
+its cache-save step exactly when main is busiest. PR runs still cancel.
+
+The `classify` job diffs an **event-dependent base**
+(`tools/scripts/resolve_classify_base.py`): a PR diffs
+`github.event.pull_request.base.sha`, a push diffs `github.event.before`. On a
+push, `origin/main` resolves to HEAD itself and the diff is always empty — so a
+docs-only merge is indistinguishable from a core merge, and the run never
+skips. A docs-only merge to main now correctly skips the whole matrix.
 ## Routing contract (checked)
 
 Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
@@ -1228,20 +1269,31 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux"]'` |
 | `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows"]'` |
 
-`.tartci/normal-local-fast.toml` is the repo-local profile that documents the
-intended default policy: PR macOS, Linux, and Windows prefer local ARM64 VMs
-where available, while GitHub-hosted x64 Linux/Windows remains the scheduled
-compatibility safety net. Use `tartci profile plan normal-local-fast --repo
-danielraffel/pulp --json` from the tartci checkout to see the concrete variable
-values before changing repository variables.
+`.shipyard/ci-profiles/normal-local-fast.toml` is the repo-local, read-only
+policy mirror. Its PR-only `github.windows-x64-runtime` target records the
+stable `windows-2022` functional lane, while the shared
+`github.windows-x64` target records the `windows-latest` coverage/scheduled
+lane. The current Shipyard profile planner does not apply these selectors to
+a dispatch; `build.yml` remains authoritative. Inspect the profile when
+reviewing policy, then verify the workflow input and repository-variable
+precedence before changing live routing.
 
 Do not put ordered fallback chains directly into GitHub Actions. GitHub receives
 one `runs-on` selector per job; Shipyard/tartci must resolve "Mac Studio, then
 M5/blackbook, then GitHub" before dispatch or variable application.
 
 Windows local QEMU is Windows ARM64. An x64 MSVC/Prism smoke can be useful, but
-it is not a replacement for the GitHub-hosted `windows-latest` Intel/x64 signal
-until explicitly proven.
+it is not a replacement for the GitHub-hosted Intel/x64 functional gate. The
+required `build.yml` functional matrix is pinned to `windows-2022` so its CRT
+and Visual Studio generation do not move underneath the complete runtime
+suite. The standalone MSVC release-path, MIDI 2, and BLE compile gates remain
+on `windows-latest`; release builds and the nightly Intel safety net also keep
+tracking the newest hosted image.
+`tools/scripts/test_windows_runner_policy.py` enforces this split across the
+actual build, release, coverage, and nightly workflows plus the release runner
+resolver and Shipyard mirror. It runs in `workflow-lint`, including when the
+profile or the policy test itself changes, so these surfaces cannot drift while
+an isolated mirror test remains green.
 
 ### Nightly GitHub Intel validation
 

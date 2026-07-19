@@ -186,6 +186,7 @@ public:
                           std::size_t byte_index) override;
 
     // ── Images ──────────────────────────────────────────────────────────
+    bool supports_image_draw() const override { return true; }
     bool draw_image_from_data(const uint8_t* data, size_t size,
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
@@ -333,6 +334,15 @@ public:
                         float x, float y, float w, float h,
                         const ShaderUniforms& uniforms) override;
 
+    // Child-shader compositor: post-process an already-painted layer with a
+    // custom SkSL shader (declares `uniform shader content`).
+    bool save_layer_with_sksl_post_effect(
+        float x, float y, float w, float h,
+        const std::string& sksl, const ShaderUniforms& uniforms,
+        float sample_radius = 0.0f,
+        const std::vector<NamedUniform>& extra_uniforms = {},
+        BlendMode blend_mode = BlendMode::normal) override;
+
     // Draw a Dawn-backed texture into the current Skia canvas when Graphite is active.
     bool draw_native_dawn_texture(void* texture_handle,
                                   uint32_t width,
@@ -383,8 +393,24 @@ public:
                                float opacity,
                                const std::string& mask_image,
                                const std::string& mask_size) override;
+    void save_layer_with_bloom(float x, float y, float w, float h,
+                               float intensity, float threshold,
+                               float radius) override;
 
 private:
+    // Shared saveLayer for every compositing-layer entry point (opacity, blur,
+    // blend, bloom, CSS filter chain, SkSL post-effect). Builds the layer paint
+    // from the given properties — `opacity < 1` sets the layer alpha; a non-null
+    // `image_filter` is used as the layer's image filter, else `blur_radius > 0`
+    // adds a Gaussian blur; `mode != normal` sets the composite blend — pushes
+    // the layer, and tracks it on the non-opaque-layer stack when the layer is
+    // not fully opaque (opacity < 1 OR `force_non_opaque`, e.g. a filter chain
+    // that reduces coverage). Consolidates what were four near-identical bodies.
+    void push_layer(float x, float y, float w, float h,
+                    float opacity, float blur_radius, Canvas::BlendMode mode,
+                    sk_sp<SkImageFilter> image_filter,
+                    bool force_non_opaque = false);
+
     // Build the active fill paint, honoring `gradient_shader_` when set
     // so shape fills (rect / rrect / circle / arc / oval / polygon) render
     // gradients consistently with `fill_current_path()`.
@@ -418,6 +444,16 @@ private:
     // unchanged on the CPU raster path or if the upload fails. Centralised so
     // every draw_image_* method takes the same branch.
     sk_sp<SkImage> ensure_gpu_image(sk_sp<SkImage> image) const;
+
+    // Decode a file image and GPU-upload it, going through the process-wide
+    // ImageFileCache so a file image drawn every frame is read + decoded +
+    // uploaded ONCE instead of per draw. Keyed on (path, this canvas's GPU
+    // backend identity). Returns null on read/decode failure. See
+    // image_file_cache.hpp for the path-keyed (not content-keyed) semantics.
+    sk_sp<SkImage> image_from_file_cached(const std::string& path) const;
+    // The backend identity token used as part of the cache key: the Graphite
+    // recorder or the Ganesh context, or null for a CPU raster canvas.
+    const void* image_cache_backend_key() const;
 
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     skgpu::graphite::Recorder* recorder_ = nullptr; // Non-owning — owned by SkiaSurface

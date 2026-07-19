@@ -195,6 +195,59 @@ test('materializeFrame builds a valid figma-plugin envelope', () => {
   assert.equal(envelope.asset_manifest.assets.length, 1);
 });
 
+test('a rotated box-model layer carries its rotation, not just its origin', () => {
+  // A knob's value needle is a thin ROUNDED_RECTANGLE the .fig rotates to the
+  // value angle. Dropping the rotation (keeping only m02/m12) rendered it as an
+  // axis-aligned stub off-center. The decoder must lower the rotation to
+  // `transform: rotate()` and compensate left/top for the renderer's center
+  // pivot. A VECTOR (path-baked rotation) must NOT get a second rotation.
+  const deg = 45;
+  const rad = deg * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const rot = (m02, m12) => ({ m00: c, m01: -s, m02, m10: s, m11: c, m12 });
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Knob',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 40, y: 40 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'knob indicator',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 2, y: 10 }, transform: rot(28, 9) },
+    { guid: { sessionID: 0, localID: 4 }, type: 'VECTOR', name: 'ring',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
+      size: { x: 20, y: 20 }, transform: rot(4, 4) },
+    // A 180deg-rotated solid fill (a slider's progress bar): orthogonal, so it
+    // stays axis-aligned and must NOT get a transform — applying one shifted the
+    // fill off its track row.
+    { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'fill',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' },
+      size: { x: 18, y: 2 }, transform: { m00: -1, m01: 0, m02: 30, m10: 0, m11: -1, m12: 3 } },
+  ]});
+  const frame = findFrame(scene, 'Knob');
+  const { envelope } = materializeFrame(scene, frame, {
+    images: new Map(), fileKey: 'K', parserVersion: '0.1.0-test',
+    compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
+  });
+  const indicator = envelope.root.children.find((n) => n.name === 'knob indicator');
+  assert.equal(indicator.style.transform, 'rotate(45.00deg)',
+    'box-model layer lowers its rotation to transform: rotate()');
+  // Center-pivot compensation: left/top are shifted off the raw m02/m12 so the
+  // renderer's center rotation reproduces Figma's origin rotation.
+  assert.notEqual(indicator.style.left, 28, 'left compensated for center pivot');
+
+  const ring = envelope.root.children.find((n) => n.name === 'ring');
+  assert.ok(!ring.style.transform,
+    'a VECTOR keeps its path-baked rotation and gets no second rotate()');
+
+  // An orthogonal (180deg) box-model rotation stays axis-aligned: plain
+  // placement, no transform, so a slider's rotated fill does not float off-row.
+  const fill = envelope.root.children.find((n) => n.name === 'fill');
+  assert.ok(!fill.style.transform,
+    'a 180deg (orthogonal) fill stays axis-aligned and gets no rotate()');
+  assert.equal(fill.style.left, 30, 'orthogonal fill keeps plain m02 placement');
+  assert.equal(fill.style.top, 3, 'orthogonal fill keeps plain m12 placement');
+});
+
 test('unterminated string throws instead of hanging', () => {
   const r = new ByteReader(Buffer.from([0x68, 0x69])); // "hi" with no NUL, then EOF
   assert.throws(() => r.string(), /unterminated string/);
@@ -305,6 +358,59 @@ test('absolute children keep their Figma coordinates; auto-layout children do no
   const row = af.envelope.root.children[0];
   assert.ok(!('position' in row.style), 'auto-layout child stays in flow');
   assert.ok(!('top' in row.style), 'auto-layout child carries no coordinates');
+});
+
+test('resize constraints reach the envelope in Figma spelling; flowing auto-layout children drop them', () => {
+  // The bug this pins: the decoder read horizontalConstraint/verticalConstraint
+  // never, so a footer pinned MAX (bottom) or a panel set SCALE re-anchored to
+  // the top-left default on every host resize. The raw kiwi spelling passes
+  // through untranslated — design_ir_json.cpp normalizes and codegen lowers to
+  // flex, so a translation table here would just be a dialect to keep in sync.
+  const plain = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Plain',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Pinned',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 76 },
+      horizontalConstraint: 'SCALE', verticalConstraint: 'MAX' },
+    // Only one axis set — the other must be absent, not undefined/null.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'HalfPinned',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 },
+      horizontalConstraint: 'CENTER' },
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'Default',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 10, y: 10 } },
+  ]});
+  const pf = materializeFrame(plain, findFrame(plain, 'Plain'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [pinned, half, dflt] = pf.envelope.root.children;
+  assert.deepEqual(pinned.constraints, { horizontal: 'SCALE', vertical: 'MAX' });
+  assert.deepEqual(half.constraints, { horizontal: 'CENTER' }, 'single axis stays single');
+  assert.ok(!('constraints' in dflt), 'no source field, no key');
+  assert.ok(!('constraints' in pf.envelope.root), 'the frame under import anchors the space');
+
+  // A FLOWING auto-layout child is sized by the stack; its (stale) constraints
+  // must not ride along to fight the flex pass. A child opted out with
+  // stackPositioning ABSOLUTE is back in the parent's coordinate space, so its
+  // constraints are meaningful again — same gate as absolute placement.
+  const auto = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Auto', stackMode: 'VERTICAL',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Row',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 100, y: 24 },
+      horizontalConstraint: 'STRETCH', verticalConstraint: 'MIN' },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Badge', stackPositioning: 'ABSOLUTE',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 10, y: 10 },
+      transform: { m00: 1, m01: 0, m02: 88, m10: 0, m11: 1, m12: 2 },
+      horizontalConstraint: 'MAX', verticalConstraint: 'MIN' },
+  ]});
+  const af = materializeFrame(auto, findFrame(auto, 'Auto'), { images: new Map(), fileKey: 'K',
+    parserVersion: 't', compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z' });
+  const [flowRow, badge] = af.envelope.root.children;
+  assert.ok(!('constraints' in flowRow), 'flowing auto-layout child drops constraints');
+  assert.deepEqual(badge.constraints, { horizontal: 'MAX', vertical: 'MIN' },
+    'ABSOLUTE opt-out keeps constraints');
 });
 
 test('a blend mode survives; one CSS lacks is diagnosed, not approximated', () => {
@@ -796,6 +902,139 @@ test('a self-recursive symbol terminates instead of expanding forever', () => {
   assert.equal(top.name, 'top');
   assert.equal(top.children.length, 1, 'first level expands');
   assert.ok(!('children' in top.children[0]), 'the cycle is cut, not recursed');
+});
+
+// ── instance swap (`overriddenSymbolID`) ─────────────────────────────────────
+//
+// Files that predate component properties swap a nested instance's component
+// with an override entry carrying `overriddenSymbolID` — there are no
+// componentPropAssignments anywhere. The entry re-points the WHOLE expansion,
+// so reading only the authored symbolID expands every sibling from one shared
+// master: that is how sixteen mixer channels rendered the same instrument icon
+// under sixteen correct labels. Deeper override paths keep resolving after the
+// swap because the swap target's children carry the matching overrideKeys.
+
+function swapScene(swapTarget) {
+  const g = (l, s = 0) => ({ sessionID: s, localID: l });
+  const enc = (...cmds) => Buffer.concat(cmds.map(([tag, ...args]) => {
+    const b = Buffer.alloc(1 + args.length * 4);
+    b.writeUInt8(tag, 0);
+    args.forEach((v, i) => b.writeFloatLE(v, 1 + i * 4));
+    return b;
+  }));
+  const I = { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 };
+  const white = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }];
+  return buildScene({
+    nodeChanges: [
+      { guid: g(1), type: 'CANVAS', name: 'Page' },
+      // Authored icon master: one vector (the kick glyph, blob 0).
+      { guid: g(10), type: 'SYMBOL', name: 'Kick', size: { x: 8, y: 8 } },
+      { guid: g(11), type: 'VECTOR', name: 'Vector', overrideKey: g(700),
+        parentIndex: { guid: g(10), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, fillGeometry: [{ commandsBlob: 0 }], fillPaints: white },
+      // Swap target: its own vector with its own authored geometry (blob 1).
+      { guid: g(12), type: 'SYMBOL', name: 'Layer', size: { x: 8, y: 8 } },
+      { guid: g(13), type: 'VECTOR', name: 'Layer_Vector', overrideKey: g(701),
+        parentIndex: { guid: g(12), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, fillGeometry: [{ commandsBlob: 1 }], fillPaints: white },
+      // Channel master: an icon instance authored to point at Kick.
+      { guid: g(20), type: 'SYMBOL', name: 'Channel', size: { x: 60, y: 100 } },
+      { guid: g(21), type: 'INSTANCE', name: 'Kick', overrideKey: g(710),
+        parentIndex: { guid: g(20), position: 'a' }, size: { x: 8, y: 8 },
+        transform: I, symbolData: { symbolID: g(10) } },
+      // The frame under import: channel 1 keeps the authored icon, channel 2
+      // swaps it. The derived entry resolves through the swap target's child
+      // overrideKey — it can only land if the expansion actually swapped.
+      { guid: g(2), type: 'FRAME', name: 'Root',
+        parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 100 } },
+      { guid: g(30), type: 'INSTANCE', name: 'channel 1',
+        parentIndex: { guid: g(2), position: 'a' }, size: { x: 60, y: 100 },
+        transform: I, symbolData: { symbolID: g(20) } },
+      { guid: g(31), type: 'INSTANCE', name: 'channel 2',
+        parentIndex: { guid: g(2), position: 'b' }, size: { x: 60, y: 100 },
+        transform: { ...I, m02: 70 },
+        symbolData: { symbolID: g(20), symbolOverrides: [
+          { guidPath: { guids: [g(710)] }, overriddenSymbolID: swapTarget },
+        ] },
+        derivedSymbolData: [
+          { guidPath: { guids: [g(710), g(701)] },
+            fillGeometry: [{ commandsBlob: 2 }] },
+        ] },
+    ],
+    blobs: [
+      { bytes: enc([1, 0, 0], [2, 8, 0], [2, 8, 8], [0]) },       // 0: kick
+      { bytes: enc([1, 0, 0], [2, 6, 0], [2, 6, 6], [2, 0, 6], [0]) }, // 1: layer, authored
+      { bytes: enc([1, 0, 0], [2, 5, 0], [2, 5, 5], [0]) },       // 2: layer, instance-solved
+    ],
+  });
+}
+
+test('an override carrying overriddenSymbolID swaps the master an instance expands', () => {
+  const scene = swapScene({ sessionID: 0, localID: 12 });
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const [ch1, ch2] = envelope.root.children;
+  const icon1 = ch1.children[0];
+  const icon2 = ch2.children[0];
+
+  // The unswapped channel renders the authored master's subtree…
+  assert.equal(icon1.children[0].name, 'Vector');
+  assert.equal(icon1.children[0].path_data, 'M0 0 L8 0 L8 8 Z');
+  // …and the swapped channel renders the swap TARGET's subtree, with the
+  // deeper derived-geometry entry resolved through the target's overrideKey.
+  assert.equal(icon2.children[0].name, 'Layer_Vector');
+  assert.equal(icon2.children[0].path_data, 'M0 0 L5 0 L5 5 Z');
+  // Component identity follows the swap — that is what Figma renders, and it
+  // is what the recognition resolver must key on.
+  assert.equal(icon2.figma.main_component_name, 'Layer');
+});
+
+test('a swapped master missing from the file falls back to the authored one', () => {
+  const scene = swapScene({ sessionID: 9, localID: 999 });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const [, ch2] = envelope.root.children;
+  const icon2 = ch2.children[0];
+  assert.equal(icon2.children[0].name, 'Vector',
+    'the authored master still expands rather than dropping the instance');
+  assert.ok(diagnostics.some((d) => d.code === 'external-component'),
+    'the unreachable swap target is surfaced, not silently ignored');
+});
+
+// ── clip content → overflow ──────────────────────────────────────────────────
+//
+// Figma clips a container's content to its bounds unless "Clip content" is
+// unchecked (`frameMaskDisabled: true`); a GROUP is a frame with `resizeToFit`
+// and never clips regardless of the flag. The envelope key is `style.overflow`
+// — the same key parse_ir_style reads and figma_rest_export.py emits — so an
+// expanded master whose decoration overhangs its symbol bounds is clipped the
+// way Figma clips it instead of painting over whatever sits below.
+
+test('a clipping container emits overflow:clip; a group or opted-out frame does not', () => {
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(2), type: 'FRAME', name: 'Root', frameMaskDisabled: false,
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: g(3), type: 'FRAME', name: 'clips', frameMaskDisabled: false,
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 40, y: 40 } },
+    { guid: g(4), type: 'FRAME', name: 'group', frameMaskDisabled: false, resizeToFit: true,
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 40, y: 40 } },
+    { guid: g(5), type: 'FRAME', name: 'open', frameMaskDisabled: true,
+      parentIndex: { guid: g(2), position: 'c' }, size: { x: 40, y: 40 } },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'),
+    { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+      exportedAt: '1970-01-01T00:00:00Z' });
+  const byName = Object.fromEntries(envelope.root.children.map((c) => [c.name, c]));
+  assert.equal(envelope.root.style.overflow, 'clip');
+  assert.equal(byName['clips'].style.overflow, 'clip');
+  assert.ok(!('overflow' in byName['group'].style),
+    'a group never clips, whatever its mask flag says');
+  assert.ok(!('overflow' in byName['open'].style),
+    'an unchecked Clip content stays unclipped — Figma draws that overflow');
 });
 
 // ── geometry sidecar (layout-parity ground truth) ────────────────────────────
@@ -1334,6 +1573,88 @@ test('a stacked fill list composites; taking only the first paints the wrong col
   assert.equal(bg('HiddenTop'), '#000000', 'an invisible paint contributes nothing');
   assert.equal(bg('OpaqueTop'), '#000000', 'the LAST paint is on top and hides the first');
   assert.equal(bg('Single'), '#00000059', 'a lone paint still folds its opacity, unchanged');
+});
+
+test('a box-model mask clips via its synthesized outline', () => {
+  // A rectangle / ellipse used as a mask has no geometry blobs — its outline
+  // is derived from the box. The lowering must still produce a parent-space
+  // clip: corner radii as arc cubics, the transform baked into every point.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'window', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 40, y: 20 }, cornerRadius: 4,
+      transform: { m00: 1, m01: 0, m02: 2, m10: 0, m11: 1, m12: 1 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'content',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 80, y: 80 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const ctx = { images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x' };
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Panel'), ctx);
+  const scope = envelope.root.children.find((n) => n.name === 'window (mask scope)');
+  assert.ok(scope, 'synthetic clip scope missing');
+  // Top-left corner starts at radius offset (2+4, 1), the top edge runs to the
+  // radius before the top-right corner, then an arc cubic takes over.
+  assert.ok(scope.style.clip_path.startsWith('path("M6 1 L38 1 C'),
+    `unexpected outline start: ${scope.style.clip_path}`);
+  assert.ok(scope.style.clip_path.endsWith('Z")'));
+  assert.deepEqual(scope.children.map((n) => n.name), ['content']);
+});
+
+test('inexact mask lowerings say so — and the mask still never paints', () => {
+  const ctx = { images: new Map(), parserVersion: 't', compatSchemaVersion: '1', exportedAt: 'x' };
+  // A translucent alpha mask clips harder than the design intended: the soft
+  // alpha flattens to the hard outline. That must be confessed, not silent —
+  // a mask that over-clips looks like a cropping bug, not a dropped property.
+  const soft = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'fade', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 40, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, opacity: 0.5, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'content',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 80, y: 80 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const softOut = materializeFrame(soft, findFrame(soft, 'Panel'), ctx);
+  assert.ok(softOut.diagnostics.some((d) => d.code === 'mask-approximated' && /alpha mask/.test(d.detail)));
+  assert.equal(DIAGNOSTIC_SEVERITY['mask-approximated'], 'warning');
+  assert.ok(softOut.envelope.root.children.some((n) => n.name === 'fade (mask scope)'),
+    'the outline clip still applies');
+
+  // Inside auto-layout the wrapper would fight the flex pass: no lowering,
+  // but the one invariant that has no exception holds — the mask never paints.
+  const flow = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Row', stackMode: 'HORIZONTAL',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 100, y: 20 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ROUNDED_RECTANGLE', name: 'm', mask: true,
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 20, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'flowed',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 20, y: 20 },
+      transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 }, visible: true }] },
+  ]});
+  const flowOut = materializeFrame(flow, findFrame(flow, 'Row'), ctx);
+  assert.ok(flowOut.diagnostics.some((d) => d.code === 'mask-approximated' && /auto-layout/.test(d.detail)));
+  assert.deepEqual(flowOut.envelope.root.children.map((n) => n.name), ['flowed']);
 });
 
 test('every diagnostic code this module emits is registered with a severity', () => {

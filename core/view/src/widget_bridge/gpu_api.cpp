@@ -176,11 +176,11 @@ wgpu::TextureUsage texture_usage_from_mask(uint32_t usage_mask) {
 
 } // namespace
 
-void WidgetBridge::register_gpu_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_gpu_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
     // WebGPU: getGPUInfo() -> device capabilities
-    register_bridge_function(api, "getGPUInfo", [this](choc::javascript::ArgumentList) {
-        auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
+    register_bridge_function(api, "getGPUInfo", [&self](choc::javascript::ArgumentList) {
+        auto gpu_info = detail::widget_bridge_gpu_info(self.gpu_surface_);
         auto info = choc::value::createObject("");
         info.addMember("backend", choc::value::createString(gpu_info.backend));
         info.addMember("backendType", choc::value::createString(gpu_info.backend_type));
@@ -196,30 +196,30 @@ void WidgetBridge::register_gpu_api() {
         return info;
     });
 
-    auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
+    auto gpu_info = detail::widget_bridge_gpu_info(self.gpu_surface_);
     HostObjectDescriptor gpu;
     gpu.class_name = "GPU";
     gpu.properties.push_back({"backend", choc::value::createString(gpu_info.backend)});
     gpu.properties.push_back({"backendType", choc::value::createString(gpu_info.backend_type)});
     gpu.properties.push_back({"available", choc::value::createBool(gpu_info.available)});
     gpu.properties.push_back({"nativeBridge", choc::value::createBool(gpu_info.native_bridge)});
-    gpu.methods.push_back({"getPreferredCanvasFormat", [this](const choc::value::Value*, size_t) {
-        return choc::value::createString(detail::widget_bridge_gpu_info(gpu_surface_).preferred_canvas_format);
+    gpu.methods.push_back({"getPreferredCanvasFormat", [&self](const choc::value::Value*, size_t) {
+        return choc::value::createString(detail::widget_bridge_gpu_info(self.gpu_surface_).preferred_canvas_format);
     }});
     register_bridge_host_object(api, "navigatorGPU", std::move(gpu));
-    register_bridge_function(api, "__describeNativeAdapterImpl", [this](choc::javascript::ArgumentList) {
-        return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(gpu_surface_));
+    register_bridge_function(api, "__describeNativeAdapterImpl", [&self](choc::javascript::ArgumentList) {
+        return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(self.gpu_surface_));
     });
-    register_bridge_function(api, "__describeNativeDeviceImpl", [this](choc::javascript::ArgumentList) {
-        auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
+    register_bridge_function(api, "__describeNativeDeviceImpl", [&self](choc::javascript::ArgumentList) {
+        auto gpu_info = detail::widget_bridge_gpu_info(self.gpu_surface_);
         auto device = choc::value::createObject("");
         device.addMember("nativeBridge", choc::value::createBool(gpu_info.native_bridge));
         device.addMember("adapterInfo", detail::gpu_adapter_info_to_value(gpu_info));
         return device;
     });
 
-    register_bridge_function(api, "__gpuCanvasConfigureImpl", [this](choc::javascript::ArgumentList args) {
-        auto gpu_info = detail::widget_bridge_gpu_info(gpu_surface_);
+    register_bridge_function(api, "__gpuCanvasConfigureImpl", [&self](choc::javascript::ArgumentList args) {
+        auto gpu_info = detail::widget_bridge_gpu_info(self.gpu_surface_);
         auto canvas_id = args.get<std::string>(0, "");
         auto width = static_cast<uint32_t>(std::max(1, args.get<int32_t>(1, 1)));
         auto height = static_cast<uint32_t>(std::max(1, args.get<int32_t>(2, 1)));
@@ -239,7 +239,7 @@ void WidgetBridge::register_gpu_api() {
         // must gate the call under PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE and
         // report presentable=false when GPU is unavailable.
 #if PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
-        const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+        const bool presentable = (self.gpu_surface_ != nullptr) && self.gpu_surface_->has_surface();
 #else
         const bool presentable = false;
 #endif
@@ -254,19 +254,19 @@ void WidgetBridge::register_gpu_api() {
         result.addMember("usage", choc::value::createInt32(static_cast<int32_t>(usage)));
         result.addMember("alphaMode", choc::value::createString(alpha_mode));
 
-        if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+        if (canvas_id.empty() || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return result;
         }
 
 #ifndef PULP_HAS_SKIA
         return result;
 #else
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
         if (device_ptr == nullptr) {
             return result;
         }
 
-        auto& state = native_gpu_bridge_state_->canvases[canvas_id];
+        auto& state = self.native_gpu_bridge_state_->canvases[canvas_id];
         state.width = width;
         state.height = height;
         state.format = format;
@@ -315,14 +315,14 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    register_bridge_function(api, "__gpuCanvasDescribeCurrentTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCanvasDescribeCurrentTextureImpl", [&self](choc::javascript::ArgumentList args) {
         // Surface the presentable flag here too so JS can verify per-frame that
         // the texture it is about to draw into is the visible swapchain. Same
         // PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE gate as the configure path above:
         // no-GPU configures keep presentable=false because there is no
         // swapchain to address.
 #if PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE
-        const bool presentable = (gpu_surface_ != nullptr) && gpu_surface_->has_surface();
+        const bool presentable = (self.gpu_surface_ != nullptr) && self.gpu_surface_->has_surface();
 #else
         const bool presentable = false;
 #endif
@@ -337,12 +337,12 @@ void WidgetBridge::register_gpu_api() {
         descriptor.addMember("usage", choc::value::createInt32(0));
         descriptor.addMember("label", choc::value::createString("pulp-native-gpu-texture"));
 
-        if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr) {
+        if (canvas_id.empty() || self.native_gpu_bridge_state_ == nullptr) {
             return descriptor;
         }
 
-        auto it = native_gpu_bridge_state_->canvases.find(canvas_id);
-        if (it == native_gpu_bridge_state_->canvases.end() || !it->second.configured) {
+        auto it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+        if (it == self.native_gpu_bridge_state_->canvases.end() || !it->second.configured) {
             return descriptor;
         }
 
@@ -357,9 +357,9 @@ void WidgetBridge::register_gpu_api() {
         return native_descriptor;
     });
 
-    register_bridge_function(api, "__gpuCreateTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCreateTextureImpl", [&self](choc::javascript::ArgumentList args) {
         auto payload_json = args.get<std::string>(0, "");
-        if (payload_json.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+        if (payload_json.empty() || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return choc::value::createString("");
         }
 
@@ -373,7 +373,7 @@ void WidgetBridge::register_gpu_api() {
             return choc::value::createString("");
         }
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
         if (device_ptr == nullptr || !(*device_ptr)) {
             return choc::value::createString("");
         }
@@ -418,8 +418,8 @@ void WidgetBridge::register_gpu_api() {
             return choc::value::createString("");
         }
 
-        auto texture_id = std::string("native-texture-") + std::to_string(native_gpu_bridge_state_->next_texture_id++);
-        auto& state = native_gpu_bridge_state_->textures[texture_id];
+        auto texture_id = std::string("native-texture-") + std::to_string(self.native_gpu_bridge_state_->next_texture_id++);
+        auto& state = self.native_gpu_bridge_state_->textures[texture_id];
         state.width = width;
         state.height = height;
         state.depth_or_array_layers = depth_or_array_layers;
@@ -433,9 +433,9 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    register_bridge_function(api, "__gpuQueueWriteTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueWriteTextureImpl", [&self](choc::javascript::ArgumentList args) {
         auto payload_json = args.get<std::string>(0, "");
-        if (payload_json.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+        if (payload_json.empty() || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
 
@@ -452,13 +452,13 @@ void WidgetBridge::register_gpu_api() {
         auto texture_id = payload.hasObjectMember("textureId")
             ? payload["textureId"].getWithDefault<std::string>("")
             : "";
-        auto texture_it = native_gpu_bridge_state_->textures.find(texture_id);
-        if (texture_id.empty() || texture_it == native_gpu_bridge_state_->textures.end() ||
+        auto texture_it = self.native_gpu_bridge_state_->textures.find(texture_id);
+        if (texture_id.empty() || texture_it == self.native_gpu_bridge_state_->textures.end() ||
             !texture_it->second.configured || !texture_it->second.texture) {
             return choc::value::createBool(false);
         }
 
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (queue_ptr == nullptr || !(*queue_ptr)) {
             return choc::value::createBool(false);
         }
@@ -569,23 +569,23 @@ void WidgetBridge::register_gpu_api() {
         return result;
     });
 
-    register_bridge_function(api, "__gpuDestroyTextureImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuDestroyTextureImpl", [&self](choc::javascript::ArgumentList args) {
         auto texture_id = args.get<std::string>(0, "");
-        if (texture_id.empty() || native_gpu_bridge_state_ == nullptr) {
+        if (texture_id.empty() || self.native_gpu_bridge_state_ == nullptr) {
             return choc::value::createBool(false);
         }
 
-        return choc::value::createBool(native_gpu_bridge_state_->textures.erase(texture_id) > 0);
+        return choc::value::createBool(self.native_gpu_bridge_state_->textures.erase(texture_id) > 0);
     });
 
-    register_bridge_function(api, "__gpuQueueSubmitImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueSubmitImpl", [&self](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
         auto r = static_cast<float>(args.get<double>(1, 0.0));
         auto g = static_cast<float>(args.get<double>(2, 0.0));
         auto b = static_cast<float>(args.get<double>(3, 0.0));
         auto a = static_cast<float>(args.get<double>(4, 1.0));
 
-        if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+        if (canvas_id.empty() || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
 
@@ -596,13 +596,13 @@ void WidgetBridge::register_gpu_api() {
         (void)a;
         return choc::value::createBool(false);
 #else
-        auto it = native_gpu_bridge_state_->canvases.find(canvas_id);
-        if (it == native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
+        auto it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+        if (it == self.native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
             return choc::value::createBool(false);
         }
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (device_ptr == nullptr || queue_ptr == nullptr || !(*device_ptr) || !(*queue_ptr)) {
             return choc::value::createBool(false);
         }
@@ -646,7 +646,7 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    register_bridge_function(api, "__gpuQueueDrawImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuQueueDrawImpl", [&self](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
         auto vertex_code = args.get<std::string>(1, "");
         auto vertex_entry = args.get<std::string>(2, "main");
@@ -660,7 +660,7 @@ void WidgetBridge::register_gpu_api() {
         auto first_instance = static_cast<uint32_t>(std::max(0, args.get<int32_t>(10, 0)));
         auto bind_groups_json = args.get<std::string>(11, "");
 
-        if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr ||
+        if (canvas_id.empty() || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr ||
             vertex_code.empty() || fragment_code.empty() || vertex_count == 0) {
             return choc::value::createBool(false);
         }
@@ -671,13 +671,13 @@ void WidgetBridge::register_gpu_api() {
         (void)first_instance;
         return choc::value::createBool(false);
 #else
-        auto it = native_gpu_bridge_state_->canvases.find(canvas_id);
-        if (it == native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
+        auto it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+        if (it == self.native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
             return choc::value::createBool(false);
         }
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (device_ptr == nullptr || queue_ptr == nullptr || !(*device_ptr) || !(*queue_ptr)) {
             return choc::value::createBool(false);
         }
@@ -811,16 +811,16 @@ void WidgetBridge::register_gpu_api() {
                         {
                             const double t0 = render::bench::now_us();
                             queue_ptr->WriteBuffer(gpu_buffer, 0, upload_data.data(), upload_data.size());
-                            if (bench_counters_) {
-                                bench_counters_->gpu_upload_total_us.fetch_add(
+                            if (self.bench_counters_) {
+                                self.bench_counters_->gpu_upload_total_us.fetch_add(
                                     render::bench::now_us() - t0,
                                     std::memory_order_relaxed);
-                                bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                                self.bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
                                     static_cast<double>(upload_data.size()),
                                     std::memory_order_relaxed);
-                                bench_counters_->gpu_buffer_upload_count.fetch_add(
+                                self.bench_counters_->gpu_buffer_upload_count.fetch_add(
                                     1.0, std::memory_order_relaxed);
-                                bench_counters_->observe_resident_peak(
+                                self.bench_counters_->observe_resident_peak(
                                     static_cast<double>(upload_data.size()));
                             }
                         }
@@ -896,8 +896,8 @@ void WidgetBridge::register_gpu_api() {
                             : 1));
 
                         if (!source_canvas_id.empty()) {
-                            auto source_it = native_gpu_bridge_state_->canvases.find(source_canvas_id);
-                            if (source_it == native_gpu_bridge_state_->canvases.end() ||
+                            auto source_it = self.native_gpu_bridge_state_->canvases.find(source_canvas_id);
+                            if (source_it == self.native_gpu_bridge_state_->canvases.end() ||
                                 !source_it->second.configured || !source_it->second.texture) {
                                 return choc::value::createBool(false);
                             }
@@ -1080,8 +1080,8 @@ void WidgetBridge::register_gpu_api() {
 #endif
     });
 
-    register_bridge_function(api, "__gpuQueueDrawBufferedImpl", [this](choc::javascript::ArgumentList args) {
-        if (args.numArgs < 1 || !args[0] || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+    register_bridge_function(api, "__gpuQueueDrawBufferedImpl", [&self](choc::javascript::ArgumentList args) {
+        if (args.numArgs < 1 || !args[0] || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
 
@@ -1111,24 +1111,24 @@ void WidgetBridge::register_gpu_api() {
             return choc::value::createBool(false);
         }
 
-        NativeGpuBridgeState::CanvasContextState* target_canvas_state = nullptr;
-        NativeGpuBridgeState::TextureState* target_texture_state = nullptr;
+        WidgetBridge::NativeGpuBridgeState::CanvasContextState* target_canvas_state = nullptr;
+        WidgetBridge::NativeGpuBridgeState::TextureState* target_texture_state = nullptr;
         if (!canvas_id.empty()) {
-            auto it = native_gpu_bridge_state_->canvases.find(canvas_id);
-            if (it == native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
+            auto it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+            if (it == self.native_gpu_bridge_state_->canvases.end() || !it->second.configured || !it->second.texture) {
                 return choc::value::createBool(false);
             }
             target_canvas_state = &it->second;
         } else {
-            auto it = native_gpu_bridge_state_->textures.find(target_texture_id);
-            if (it == native_gpu_bridge_state_->textures.end() || !it->second.configured || !it->second.texture) {
+            auto it = self.native_gpu_bridge_state_->textures.find(target_texture_id);
+            if (it == self.native_gpu_bridge_state_->textures.end() || !it->second.configured || !it->second.texture) {
                 return choc::value::createBool(false);
             }
             target_texture_state = &it->second;
         }
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (device_ptr == nullptr || queue_ptr == nullptr || !(*device_ptr) || !(*queue_ptr)) {
             return choc::value::createBool(false);
         }
@@ -1194,16 +1194,16 @@ void WidgetBridge::register_gpu_api() {
             {
                 const double t0 = render::bench::now_us();
                 queue_ptr->WriteBuffer(gpu_buffer, 0, upload_data.data(), upload_data.size());
-                if (bench_counters_) {
-                    bench_counters_->gpu_upload_total_us.fetch_add(
+                if (self.bench_counters_) {
+                    self.bench_counters_->gpu_upload_total_us.fetch_add(
                         render::bench::now_us() - t0,
                         std::memory_order_relaxed);
-                    bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                    self.bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
                         static_cast<double>(upload_data.size()),
                         std::memory_order_relaxed);
-                    bench_counters_->gpu_buffer_upload_count.fetch_add(
+                    self.bench_counters_->gpu_buffer_upload_count.fetch_add(
                         1.0, std::memory_order_relaxed);
-                    bench_counters_->observe_resident_peak(
+                    self.bench_counters_->observe_resident_peak(
                         static_cast<double>(upload_data.size()));
                 }
             }
@@ -1310,16 +1310,16 @@ void WidgetBridge::register_gpu_api() {
                         {
                             const double t0 = render::bench::now_us();
                             queue_ptr->WriteBuffer(gpu_buffer, 0, upload_data.data(), upload_data.size());
-                            if (bench_counters_) {
-                                bench_counters_->gpu_upload_total_us.fetch_add(
+                            if (self.bench_counters_) {
+                                self.bench_counters_->gpu_upload_total_us.fetch_add(
                                     render::bench::now_us() - t0,
                                     std::memory_order_relaxed);
-                                bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                                self.bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
                                     static_cast<double>(upload_data.size()),
                                     std::memory_order_relaxed);
-                                bench_counters_->gpu_buffer_upload_count.fetch_add(
+                                self.bench_counters_->gpu_buffer_upload_count.fetch_add(
                                     1.0, std::memory_order_relaxed);
-                                bench_counters_->observe_resident_peak(
+                                self.bench_counters_->observe_resident_peak(
                                     static_cast<double>(upload_data.size()));
                             }
                         }
@@ -1406,8 +1406,8 @@ void WidgetBridge::register_gpu_api() {
                         wgpu::TextureView texture_view;
 
                         if (!source_texture_id.empty()) {
-                            auto source_it = native_gpu_bridge_state_->textures.find(source_texture_id);
-                            if (source_it == native_gpu_bridge_state_->textures.end() ||
+                            auto source_it = self.native_gpu_bridge_state_->textures.find(source_texture_id);
+                            if (source_it == self.native_gpu_bridge_state_->textures.end() ||
                                 !source_it->second.configured || !source_it->second.texture) {
                                 return choc::value::createBool(false);
                             }
@@ -1435,8 +1435,8 @@ void WidgetBridge::register_gpu_api() {
                                     return source_it->second.texture.CreateView(&texture_view_desc);
                                 }();
                         } else if (!source_canvas_id.empty()) {
-                            auto source_it = native_gpu_bridge_state_->canvases.find(source_canvas_id);
-                            if (source_it == native_gpu_bridge_state_->canvases.end() ||
+                            auto source_it = self.native_gpu_bridge_state_->canvases.find(source_canvas_id);
+                            if (source_it == self.native_gpu_bridge_state_->canvases.end() ||
                                 !source_it->second.configured || !source_it->second.texture) {
                                 return choc::value::createBool(false);
                             }
@@ -1770,16 +1770,16 @@ void WidgetBridge::register_gpu_api() {
             {
                 const double t0 = render::bench::now_us();
                 queue_ptr->WriteBuffer(index_gpu_buffer, 0, upload_index_data.data(), upload_index_data.size());
-                if (bench_counters_) {
-                    bench_counters_->gpu_upload_total_us.fetch_add(
+                if (self.bench_counters_) {
+                    self.bench_counters_->gpu_upload_total_us.fetch_add(
                         render::bench::now_us() - t0,
                         std::memory_order_relaxed);
-                    bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                    self.bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
                         static_cast<double>(upload_index_data.size()),
                         std::memory_order_relaxed);
-                    bench_counters_->gpu_buffer_upload_count.fetch_add(
+                    self.bench_counters_->gpu_buffer_upload_count.fetch_add(
                         1.0, std::memory_order_relaxed);
-                    bench_counters_->observe_resident_peak(
+                    self.bench_counters_->observe_resident_peak(
                         static_cast<double>(upload_index_data.size()));
                 }
             }
@@ -1835,14 +1835,14 @@ void WidgetBridge::register_gpu_api() {
         auto command_buffer = encoder.Finish();
         queue_ptr->Submit(1, &command_buffer);
         if (target_canvas_state != nullptr) {
-            request_repaint();
+            self.request_repaint();
         }
         return choc::value::createBool(true);
 #endif
     });
 
-    register_bridge_function(api, "__gpuQueuePresentTextureImpl", [this](choc::javascript::ArgumentList args) {
-        if (args.numArgs < 1 || !args[0] || native_gpu_bridge_state_ == nullptr || gpu_surface_ == nullptr) {
+    register_bridge_function(api, "__gpuQueuePresentTextureImpl", [&self](choc::javascript::ArgumentList args) {
+        if (args.numArgs < 1 || !args[0] || self.native_gpu_bridge_state_ == nullptr || self.gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
 
@@ -1864,17 +1864,17 @@ void WidgetBridge::register_gpu_api() {
             return choc::value::createBool(false);
         }
 
-        auto canvas_it = native_gpu_bridge_state_->canvases.find(canvas_id);
-        auto source_it = native_gpu_bridge_state_->textures.find(source_texture_id);
-        if (canvas_it == native_gpu_bridge_state_->canvases.end() ||
-            source_it == native_gpu_bridge_state_->textures.end() ||
+        auto canvas_it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+        auto source_it = self.native_gpu_bridge_state_->textures.find(source_texture_id);
+        if (canvas_it == self.native_gpu_bridge_state_->canvases.end() ||
+            source_it == self.native_gpu_bridge_state_->textures.end() ||
             !canvas_it->second.configured || !canvas_it->second.texture ||
             !source_it->second.configured || !source_it->second.texture) {
             return choc::value::createBool(false);
         }
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (device_ptr == nullptr || queue_ptr == nullptr || !(*device_ptr) || !(*queue_ptr)) {
             return choc::value::createBool(false);
         }
@@ -2031,37 +2031,37 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
         auto command_buffer = encoder.Finish();
         queue_ptr->Submit(1, &command_buffer);
-        request_repaint();
+        self.request_repaint();
         return choc::value::createBool(true);
 #endif
     });
 
-    register_bridge_function(api, "__gpuCanvasPresentImpl", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__gpuCanvasPresentImpl", [&self](choc::javascript::ArgumentList args) {
         auto canvas_id = args.get<std::string>(0, "");
-        if (canvas_id.empty() || native_gpu_bridge_state_ == nullptr) {
+        if (canvas_id.empty() || self.native_gpu_bridge_state_ == nullptr) {
             return choc::value::createBool(false);
         }
 
-        auto it = native_gpu_bridge_state_->canvases.find(canvas_id);
-        if (it == native_gpu_bridge_state_->canvases.end()) {
+        auto it = self.native_gpu_bridge_state_->canvases.find(canvas_id);
+        if (it == self.native_gpu_bridge_state_->canvases.end()) {
             return choc::value::createBool(false);
         }
 
         if (it->second.configured) {
-            request_repaint();
+            self.request_repaint();
         }
         return choc::value::createBool(it->second.configured);
     });
 
-    register_bridge_promise_function(api, "__requestAdapterImpl", [this](const choc::value::Value*, size_t) {
-        return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(gpu_surface_));
+    register_bridge_promise_function(api, "__requestAdapterImpl", [&self](const choc::value::Value*, size_t) {
+        return detail::gpu_descriptor_to_value(detail::widget_bridge_gpu_info(self.gpu_surface_));
     });
 
     // -- Compute pipeline dispatch ---------------------------------------
     // Receives JSON from the JS compute pass encoder and dispatches
     // via Dawn's native compute pipeline infrastructure.
-    register_bridge_function(api, "__gpuComputeDispatchImpl", [this](choc::javascript::ArgumentList args) {
-        if (args.numArgs < 1 || !args[0] || gpu_surface_ == nullptr) {
+    register_bridge_function(api, "__gpuComputeDispatchImpl", [&self](choc::javascript::ArgumentList args) {
+        if (args.numArgs < 1 || !args[0] || self.gpu_surface_ == nullptr) {
             return choc::value::createBool(false);
         }
 
@@ -2071,8 +2071,8 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         auto payload_str = args.get<std::string>(0, "");
         if (payload_str.empty()) return choc::value::createBool(false);
 
-        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
-        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        auto* device_ptr = static_cast<wgpu::Device*>(self.gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(self.gpu_surface_->dawn_queue_handle());
         if (!device_ptr || !queue_ptr || !(*device_ptr) || !(*queue_ptr))
             return choc::value::createBool(false);
 
@@ -2145,8 +2145,8 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 #ifdef PULP_BENCHMARK
                                     const double decode_t0 = render::bench::now_us();
                                     auto decoded = runtime::base64_decode(b64);
-                                    if (bench_counters_) {
-                                        bench_counters_->base64_decode_total_us.fetch_add(
+                                    if (self.bench_counters_) {
+                                        self.bench_counters_->base64_decode_total_us.fetch_add(
                                             render::bench::now_us() - decode_t0,
                                             std::memory_order_relaxed);
                                     }
@@ -2163,16 +2163,16 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
                                             queue_ptr->WriteBuffer(gpu_buf, 0,
                                                                    bytes.data(),
                                                                    static_cast<size_t>(to_copy));
-                                            if (bench_counters_) {
-                                                bench_counters_->gpu_upload_total_us.fetch_add(
+                                            if (self.bench_counters_) {
+                                                self.bench_counters_->gpu_upload_total_us.fetch_add(
                                                     render::bench::now_us() - t0,
                                                     std::memory_order_relaxed);
-                                                bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
+                                                self.bench_counters_->cpu_to_gpu_bytes_total.fetch_add(
                                                     static_cast<double>(to_copy),
                                                     std::memory_order_relaxed);
-                                                bench_counters_->gpu_buffer_upload_count.fetch_add(
+                                                self.bench_counters_->gpu_buffer_upload_count.fetch_add(
                                                     1.0, std::memory_order_relaxed);
-                                                bench_counters_->observe_resident_peak(
+                                                self.bench_counters_->observe_resident_peak(
                                                     static_cast<double>(buf_size));
                                             }
 #else
@@ -2225,26 +2225,26 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 
     // -- Binary transfer: register a native buffer for zero-copy GPU upload --
     // Avoids base64 encoding overhead for buffers > 64KB.
-    register_bridge_function(api, "__registerNativeBuffer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__registerNativeBuffer", [&self](choc::javascript::ArgumentList args) {
         auto buffer_id = args.get<std::string>(0, "");
         auto size = static_cast<size_t>(args.get<int64_t>(1, 0));
         if (buffer_id.empty() || size == 0) return choc::value::createBool(false);
 
         // Allocate a native buffer and return a handle
-        if (!native_gpu_bridge_state_) return choc::value::createBool(false);
-        native_gpu_bridge_state_->native_buffers[buffer_id].resize(size, 0);
+        if (!self.native_gpu_bridge_state_) return choc::value::createBool(false);
+        self.native_gpu_bridge_state_->native_buffers[buffer_id].resize(size, 0);
         return choc::value::createBool(true);
     });
 
-    register_bridge_function(api, "__writeNativeBuffer", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__writeNativeBuffer", [&self](choc::javascript::ArgumentList args) {
         auto buffer_id = args.get<std::string>(0, "");
         auto offset = static_cast<size_t>(args.get<int64_t>(1, 0));
         auto data_b64 = args.get<std::string>(2, "");  // Chunked base64 payload.
-        if (buffer_id.empty() || data_b64.empty() || !native_gpu_bridge_state_)
+        if (buffer_id.empty() || data_b64.empty() || !self.native_gpu_bridge_state_)
             return choc::value::createBool(false);
 
-        auto it = native_gpu_bridge_state_->native_buffers.find(buffer_id);
-        if (it == native_gpu_bridge_state_->native_buffers.end())
+        auto it = self.native_gpu_bridge_state_->native_buffers.find(buffer_id);
+        if (it == self.native_gpu_bridge_state_->native_buffers.end())
             return choc::value::createBool(false);
 
         // For now, store the raw base64 chunk reference.

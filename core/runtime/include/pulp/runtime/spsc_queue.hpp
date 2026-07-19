@@ -15,8 +15,9 @@ struct SpscQueueTelemetry {
     std::uint64_t overflow_count = 0;
 };
 
-// Single-Producer Single-Consumer lock-free queue
-// Designed for audio thread → UI thread communication
+// Single-producer/single-consumer lock-free queue. Either endpoint may be the
+// realtime thread: audio -> UI telemetry and UI -> audio commands are both
+// supported, provided there is exactly one producer and one consumer.
 // Wraps choc::fifo::SingleReaderSingleWriterFIFO
 template<typename T, std::size_t Capacity>
 class SpscQueue {
@@ -40,10 +41,15 @@ public:
         return pushed;
     }
 
+    // Consumer: pop an item into reusable storage.
+    bool try_pop(T& item) {
+        return fifo_.pop(item);
+    }
+
     // Consumer: pop an item. Returns nullopt if empty.
     std::optional<T> try_pop() {
         T item{};
-        if (fifo_.pop(item)) {
+        if (try_pop(item)) {
             return item;
         }
         return std::nullopt;

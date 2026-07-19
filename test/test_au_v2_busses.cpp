@@ -10,11 +10,13 @@
 
 #include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/detail/audio_buffer_list_validation.hpp>
 #include <pulp/format/processor.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cstring>
 
 using pulp::format::PluginDescriptor;
 using pulp::format::BusDirection;
@@ -33,6 +35,51 @@ PluginDescriptor multi_out_instrument(std::size_t n_out) {
     return d;
 }
 }  // namespace
+
+TEST_CASE("AU AudioBufferList validation distinguishes valid and malformed storage",
+          "[au][bus-layout][malformed-layout]") {
+    constexpr UInt32 kFrames = 8;
+    std::array<float, kFrames> left{};
+    std::array<float, kFrames> right{};
+    struct StereoBufferList {
+        AudioBufferList list;
+        AudioBuffer extra[1];
+    } buffers{};
+    buffers.list.mNumberBuffers = 2;
+    buffers.list.mBuffers[0] = {1, sizeof(left), left.data()};
+    buffers.list.mBuffers[1] = {1, sizeof(right), right.data()};
+
+    REQUIRE(pulp::format::detail::audio_buffer_list_shape_matches(
+        &buffers.list, 2));
+    REQUIRE(pulp::format::detail::audio_buffer_list_has_storage(
+        &buffers.list, kFrames, sizeof(float)));
+
+    SECTION("fewer buffers") {
+        buffers.list.mNumberBuffers = 1;
+        REQUIRE_FALSE(pulp::format::detail::audio_buffer_list_shape_matches(
+            &buffers.list, 2));
+    }
+    SECTION("more buffers") {
+        buffers.list.mNumberBuffers = 3;
+        REQUIRE_FALSE(pulp::format::detail::audio_buffer_list_shape_matches(
+            &buffers.list, 2));
+    }
+    SECTION("wrong channel count") {
+        buffers.list.mBuffers[1].mNumberChannels = 2;
+        REQUIRE_FALSE(pulp::format::detail::audio_buffer_list_shape_matches(
+            &buffers.list, 2));
+    }
+    SECTION("null active storage") {
+        buffers.list.mBuffers[1].mData = nullptr;
+        REQUIRE_FALSE(pulp::format::detail::audio_buffer_list_has_storage(
+            &buffers.list, kFrames, sizeof(float)));
+    }
+    SECTION("undersized active storage") {
+        buffers.list.mBuffers[1].mDataByteSize = sizeof(float);
+        REQUIRE_FALSE(pulp::format::detail::audio_buffer_list_has_storage(
+            &buffers.list, kFrames, sizeof(float)));
+    }
+}
 
 TEST_CASE("AU v2 instrument: output element count is one per declared output bus",
           "[au][au-v2][bus]") {
@@ -156,4 +203,23 @@ TEST_CASE("AU v2 effect: instrument descriptor (no input bus) reports 0-channel 
     REQUIRE(n == 1);
     REQUIRE(infos[0].declared_channels == 0);
     REQUIRE(infos[0].optional);  // a 0-channel main input is optional
+}
+
+TEST_CASE("AU v2 channel capabilities expose only descriptor-declared layouts",
+          "[au][au-v2][bus-layout][negotiation]") {
+    PluginDescriptor d;
+    d.supported_bus_layouts = {
+        {.inputs = {2}, .outputs = {2}, .name = "Stereo"},
+        {.inputs = {1}, .outputs = {1}, .name = "Mono"},
+        // Duplicate must not leak an extra capability pair to the host.
+        {.inputs = {2}, .outputs = {2}, .name = "Stereo duplicate"},
+    };
+
+    std::array<AUChannelInfo, pulp::format::au::kMaxChannelInfoPairs> capabilities{};
+    const auto count = pulp::format::au::build_channel_info(d, capabilities.data());
+    REQUIRE(count == 2);
+    REQUIRE(capabilities[0].inChannels == 2);
+    REQUIRE(capabilities[0].outChannels == 2);
+    REQUIRE(capabilities[1].inChannels == 1);
+    REQUIRE(capabilities[1].outChannels == 1);
 }

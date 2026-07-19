@@ -52,3 +52,35 @@ pulp_add_test_suite(pulp-test-mpe-buffer
 pulp_add_test_suite(pulp-test-midi-subblock
     SOURCES test_midi_subblock.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::format)
+
+pulp_add_test_suite(pulp-test-modal-bank
+    SOURCES test_modal_bank.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-bridged-t-resonator
+    SOURCES test_bridged_t_resonator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# PULP_SOURCE_DIR locates examples/modal-specs/, which the test loads as real
+# on-disk spec files rather than string literals.
+pulp_add_test_suite(pulp-test-modal-spec
+    SOURCES test_modal_spec.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal-modal-spec
+    COMPILE_DEFINITIONS PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    TIMEOUT 300)
+
+# Header-only metric over caller-supplied render callbacks; its fixtures are
+# source-owned resonators, so it needs no plugin and no library.
+pulp_add_test_suite(pulp-test-interaction-residual
+    SOURCES test_interaction_residual.cpp
+    TIMEOUT 300)
+
+# Reusable band-limited square-oscillator bank. Recover its configured
+# partials, bound its output, measure alias rejection, and hold its realtime
+# allocation contract without depending on an instrument implementation.
+pulp_add_test_suite(pulp-test-square-osc-bank
+    SOURCES test_square_osc_bank.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)

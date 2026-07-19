@@ -448,7 +448,6 @@ reached for. It is not aimed at any contributor or dialect; it is house style.
 - A genuine external contract (a foreign API symbol, a value quoted verbatim from
   a third-party licence) is exempted via `EXEMPT_SUBSTRINGS` in that script — use
   it sparingly, and only when the spelling is not ours to change.
-
 `tools/scripts/docs_noise_lint.py` guards the repo against stale workflow breadcrumbs in long-lived docs and comments.
 Long-lived docs and source comments should explain current behavior, invariants, and upstream/vendor quirks — not workflow history.
 Transient issue/PR/wave/handoff references belong in `planning/`, `docs/migrations/`, `docs/reports/`, or the changelog.
@@ -1156,7 +1155,7 @@ Use only these values for `status:` fields in manifests:
 - The component inspector (pulp-inspect) doubles as a validation tool
 - WebDriver-based automation via tauri-plugin-webdriver patterns
 - **Headless screenshot verification**: Before launching a UI window for visual inspection, use `render_to_file()` or the `--screenshot` flag on preview apps to capture a headless PNG and verify the rendering is correct. Never show the user an empty or broken window. Example: `./build/examples/ui-preview/pulp-ui-preview --screenshot` renders to `/tmp/pulp-animation-preview.png` without opening a window.
-  - **Use the Skia backend for any UI with images** (assets, icons, imported designs). `render_to_png`'s default macOS backend is CoreGraphics, whose canvas does NOT implement `draw_image_from_file` — so `ImageView` renders each image's *filename as placeholder text* (empty boxes + scattered `*.png`), which looks like a broken import but is just the backend. The Skia backend (`ScreenshotBackend::skia`) composites file images correctly. `pulp import-design --validate` defaults to `--screenshot-backend skia` for this reason; only pass `coregraphics` deliberately. Showing a non-faithful CoreGraphics render of an asset-rich design wastes a review cycle — re-render with Skia first. See the `screenshot` skill.
+  - **Prefer the Skia backend for any UI with images** (assets, icons, imported designs). `render_to_png`'s default macOS backend is CoreGraphics. Its canvas now composites file images (`#6223 S34` wired the ImageIO decoder into `draw_image_from_file` / `measure_image_from_file`); before that it rendered each image's *filename as placeholder text* (empty boxes + scattered `*.png`), which looked like a broken import but was just the backend. Even now that CG draws images, the Skia backend (`ScreenshotBackend::skia`) is the fidelity reference — its gradient/anti-aliasing raster matches the live GPU compositor an import runs on, while CG's differs. `pulp import-design --validate` defaults to `--screenshot-backend skia` for this reason; only pass `coregraphics` deliberately. Re-render with Skia before calling a CoreGraphics render the import result. See the `screenshot` skill.
 
 **Audio:**
 - Golden-file comparison: render known input → compare output against reference

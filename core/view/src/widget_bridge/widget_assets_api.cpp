@@ -44,26 +44,26 @@ std::pair<canvas::Color, bool> parse_skin_hex(const std::string& hex) {
 
 } // namespace
 
-void WidgetBridge::register_widget_assets_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setImageSource(id, path) - set image file path.
-    register_bridge_function(api, "setImageSource", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setImageSource", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
-        if (auto* img = dynamic_cast<ImageView*>(widget(id)))
+        if (auto* img = dynamic_cast<ImageView*>(self.widget(id)))
             img->set_image_path(path);
         return choc::value::Value();
     });
 
     // setKnobSpriteStrip(id, pngPath, frameCount, orientation?) - Track A1.
-    register_bridge_function(api, "setKnobSpriteStrip", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setKnobSpriteStrip", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         int frame_count = static_cast<int>(args.get<double>(2, 1));
         std::string orientation_s = args.get<std::string>(3, "vertical");
 
-        auto* k = dynamic_cast<Knob*>(widget(id));
+        auto* k = dynamic_cast<Knob*>(self.widget(id));
         if (!k || path.empty() || frame_count <= 0) return choc::value::Value();
 
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
@@ -95,9 +95,9 @@ void WidgetBridge::register_widget_assets_api() {
     });
 
     // setKnobSpriteCore(id, core_x, core_y, core_w, core_h) - opaque-core rect.
-    register_bridge_function(api, "setKnobSpriteCore", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setKnobSpriteCore", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto* k = dynamic_cast<Knob*>(widget(id));
+        auto* k = dynamic_cast<Knob*>(self.widget(id));
         if (!k) return choc::value::Value();
         k->set_sprite_core(static_cast<float>(args.get<double>(1, 0.0)),
                            static_cast<float>(args.get<double>(2, 0.0)),
@@ -110,8 +110,8 @@ void WidgetBridge::register_widget_assets_api() {
     // setFaderSkin(id, trackColor, fillColor, thumbColor, thumbBorderColor?,
     //              thumbW?, thumbH?, cornerRadius?)
     register_bridge_function(api, "setFaderSkin",
-        [this](choc::javascript::ArgumentList args) {
-            auto* f = dynamic_cast<Fader*>(widget(args.get<std::string>(0, "")));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* f = dynamic_cast<Fader*>(self.widget(args.get<std::string>(0, "")));
             if (!f) return choc::value::Value();
             if (auto [c, ok] = parse_skin_hex(args.get<std::string>(1, "")); ok) f->set_skin_track_color(c);
             if (auto [c, ok] = parse_skin_hex(args.get<std::string>(2, "")); ok) f->set_skin_fill_color(c);
@@ -129,8 +129,8 @@ void WidgetBridge::register_widget_assets_api() {
 
     // setFaderTrackWidth(id, widthPx)
     register_bridge_function(api, "setFaderTrackWidth",
-        [this](choc::javascript::ArgumentList args) {
-            auto* f = dynamic_cast<Fader*>(widget(args.get<std::string>(0, "")));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* f = dynamic_cast<Fader*>(self.widget(args.get<std::string>(0, "")));
             if (!f) return choc::value::Value();
             float w = static_cast<float>(args.get<double>(1, 0));
             if (w > 0.0f) { f->set_skin_track_width(w); f->request_repaint(); }
@@ -139,8 +139,8 @@ void WidgetBridge::register_widget_assets_api() {
 
     // setFaderTrackBorder(id, "#rrggbb")
     register_bridge_function(api, "setFaderTrackBorder",
-        [this](choc::javascript::ArgumentList args) {
-            auto* f = dynamic_cast<Fader*>(widget(args.get<std::string>(0, "")));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* f = dynamic_cast<Fader*>(self.widget(args.get<std::string>(0, "")));
             if (!f) return choc::value::Value();
             if (auto [c, ok] = parse_skin_hex(args.get<std::string>(1, "")); ok) {
                 f->set_skin_track_border_color(c);
@@ -151,8 +151,8 @@ void WidgetBridge::register_widget_assets_api() {
 
     // setMeterColors(id, backgroundColor, "#stop0,#stop1,#stop2,...")
     register_bridge_function(api, "setMeterColors",
-        [this](choc::javascript::ArgumentList args) {
-            auto* m = dynamic_cast<Meter*>(widget(args.get<std::string>(0, "")));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* m = dynamic_cast<Meter*>(self.widget(args.get<std::string>(0, "")));
             if (!m) return choc::value::Value();
             if (auto [bg, ok] = parse_skin_hex(args.get<std::string>(1, "")); ok)
                 m->set_skin_background_color(bg);
@@ -180,8 +180,8 @@ void WidgetBridge::register_widget_assets_api() {
 
     // setMeterBarRatio(id, ratio)
     register_bridge_function(api, "setMeterBarRatio",
-        [this](choc::javascript::ArgumentList args) {
-            auto* m = dynamic_cast<Meter*>(widget(args.get<std::string>(0, "")));
+        [&self](choc::javascript::ArgumentList args) {
+            auto* m = dynamic_cast<Meter*>(self.widget(args.get<std::string>(0, "")));
             if (!m) return choc::value::Value();
             float r = static_cast<float>(args.get<double>(1, 0));
             if (r > 0.0f) { m->set_bar_fill_ratio(r); m->request_repaint(); }

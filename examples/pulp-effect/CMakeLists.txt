@@ -23,9 +23,54 @@ pulp_add_plugin(PulpEffect
 
 # Validation
 if(PULP_HAS_CLAP AND APPLE)
+    add_executable(pulp-clap-bundle-lifecycle-test
+        ${CMAKE_SOURCE_DIR}/test/clap_bundle_lifecycle.cpp)
+    add_dependencies(pulp-clap-bundle-lifecycle-test PulpEffect_CLAP)
+    target_link_libraries(pulp-clap-bundle-lifecycle-test PRIVATE
+        clap ${CMAKE_DL_LIBS})
+
     add_test(NAME clap-dlopen-PulpEffect
         COMMAND bash -c "python3 -c \"import ctypes; ctypes.CDLL('${CMAKE_BINARY_DIR}/CLAP/PulpEffect.clap/Contents/MacOS/PulpEffect'); print('OK')\"")
     set_tests_properties(clap-dlopen-PulpEffect PROPERTIES LABELS "validation;clap" TIMEOUT 10)
+
+    add_test(NAME clap-bundle-lifecycle-PulpEffect
+        COMMAND pulp-clap-bundle-lifecycle-test
+            ${CMAKE_BINARY_DIR}/CLAP/PulpEffect.clap/Contents/MacOS/PulpEffect)
+    set_tests_properties(clap-bundle-lifecycle-PulpEffect PROPERTIES
+        LABELS "validation;clap;lifecycle"
+        TIMEOUT 30)
+endif()
+
+if(PULP_HAS_VST3 AND APPLE)
+    add_executable(pulp-vst3-bundle-lifecycle-test
+        ${CMAKE_SOURCE_DIR}/test/vst3_bundle_lifecycle.cpp)
+    add_dependencies(pulp-vst3-bundle-lifecycle-test PulpEffect_VST3)
+    target_link_libraries(pulp-vst3-bundle-lifecycle-test PRIVATE
+        vst3-sdk ${CMAKE_DL_LIBS} "-framework CoreFoundation")
+
+    add_test(NAME vst3-bundle-lifecycle-PulpEffect
+        COMMAND pulp-vst3-bundle-lifecycle-test
+            ${CMAKE_BINARY_DIR}/VST3/PulpEffect.vst3
+            ${CMAKE_BINARY_DIR}/VST3/PulpEffect.vst3/Contents/MacOS/PulpEffect)
+    set_tests_properties(vst3-bundle-lifecycle-PulpEffect PROPERTIES
+        LABELS "validation;vst3;lifecycle"
+        TIMEOUT 30)
+endif()
+
+if(APPLE AND PULP_HAS_AUSDK)
+    add_executable(pulp-au-bundle-lifecycle-test
+        ${CMAKE_SOURCE_DIR}/test/au_bundle_lifecycle.cpp)
+    add_dependencies(pulp-au-bundle-lifecycle-test PulpEffect_AU)
+    target_link_libraries(pulp-au-bundle-lifecycle-test PRIVATE
+        ${CMAKE_DL_LIBS} "-framework AudioToolbox")
+
+    add_test(NAME au-bundle-lifecycle-PulpEffect
+        COMMAND pulp-au-bundle-lifecycle-test
+            ${CMAKE_BINARY_DIR}/AU/PulpEffect.component/Contents/MacOS/PulpEffect
+            PulpEffectAUFactory)
+    set_tests_properties(au-bundle-lifecycle-PulpEffect PROPERTIES
+        LABELS "validation;au;lifecycle"
+        TIMEOUT 30)
 endif()
 
 if(APPLE AND PULP_HAS_AUSDK)

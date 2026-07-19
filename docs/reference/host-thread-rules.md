@@ -49,8 +49,25 @@ live snapshot. **Never call them from the audio thread.**
   is re-called.
 - `inject_midi` / `extract_midi` — publish/read MIDI through
   snapshot-owned lock-free mailboxes; safe to call concurrently with
-  `process()`. In typical flow, the UI thread injects MIDI and reads
-  extracted events.
+  `process()`. Each `MidiInput` has exactly one injection writer: either a
+  control-side producer, or the audio thread immediately before `process()`,
+  never both concurrently. Injection is allocation-free after `prepare()`, is
+  latest-wins when several blocks are published before processing, and is
+  consumed exactly once. Publication sequence numbers never use zero (the
+  unpublished sentinel), including after 64-bit wrap. A `false` overflow result
+  still publishes the bounded prefix. Preserved `MidiInput` node IDs keep an
+  unconsumed publication across an ingress-only gap-free `prepare_swap()`. MIDI
+  extraction remains a
+  control-side read. If either the current authoring topology or the live
+  snapshot contains `MidiOutput`, the edit uses the eager-prepare fallback;
+  that specific refusal keeps the old snapshot live so the control thread can
+  drain its ordered four-block egress queue before calling ordinary
+  `prepare()`. Empty blocks do not overwrite pending output. If the bounded
+  queue fills, it retains the earliest blocks and `extract_midi()` reports
+  false while draining them. Extraction also returns false if the destination
+  lacks short-event, SysEx, or UMP-sidecar capacity. In that case the mailbox
+  retains the undelivered suffix; attach/provide sufficient storage and call
+  `extract_midi()` again to resume without replaying the delivered prefix.
 - `inject_parameter_events` — publishes one block of sample-offset parameter
   events through a snapshot-owned lock-free mailbox. It is safe to call
   concurrently with `process()` from one control-side writer. The latest
@@ -172,5 +189,7 @@ gap-free; `NeedsEagerPrepare` means the transaction failed closed and the caller
 must use ordinary `prepare()`. Eligibility requires unchanged node/plugin/custom
 instance contracts, sample rate, block size, total latency, and feed-forward PDC
 delay structure. Matching PDC history is shared by private connection identity;
-feedback, MIDI, smoothed sparse automation, anticipation, latency-changing edits,
-and disconnect/reconnect of a delayed edge use the eager path.
+feedback, MIDI output, smoothed sparse automation, anticipation,
+latency-changing edits, and disconnect/reconnect of a delayed edge use the eager
+path. Ingress-only MIDI edges are eligible because a stable `MidiInput` shares
+its mailbox and consumed-sequence state across snapshots.

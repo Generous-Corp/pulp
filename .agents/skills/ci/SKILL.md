@@ -451,6 +451,37 @@ tools/scripts/host_vitals.sh --json     # machine-readable
 
 ## GitHub workflow gotchas
 
+- **A cache-save step gated on `github.event_name != 'pull_request' &&
+  github.ref == 'refs/heads/main'` is dead code unless the workflow has a
+  `push:` trigger.** GitHub's cloud cache scopes a PR-written entry to that
+  PR's own ref, so PR runs can never warm each other and only a default-branch
+  non-PR run publishes a shared entry. `build.yml` had that gate with no `push`
+  trigger, so both `Save …` steps were unreachable and their `Restore …`
+  partners were a permanent miss. Two traps when fixing this:
+
+  1. **The base must be event-aware, or the fix no-ops.** `classify` diffs
+     `<base>...HEAD`. On a push to main the checked-out HEAD *is* the new main
+     tip, so `origin/main` resolves to HEAD and the diff is always empty. The
+     classifier is fail-closed (empty ⇒ build), so this reads as "working"
+     while never once distinguishing a docs merge from a core merge. Use
+     `github.event.before` on push, `github.event.pull_request.base.sha` on PR
+     — `tools/scripts/resolve_classify_base.py` owns that mapping, including
+     the all-zero-sha fallback that `event.before` carries when a push creates
+     a ref.
+  2. **Never let the new trigger schedule work on the self-hosted Macs.** They
+     serve the one required check and keep ccache + FetchContent on local disk,
+     so a macOS leg on a push burns required-gate capacity to upload nothing.
+     `resolve-provider` omits the macOS leg for push events; the aliases and
+     `windows-*-gate` jobs skip too (the `macos` alias polls up to 60 min for a
+     leg that isn't there). Scope saves to
+     `runner.environment == 'github-hosted' && runner.os != 'macOS'` — the
+     restore side's `runner.os != 'macOS' || …` disjunction is wrong here, it
+     re-admits self-hosted non-macOS runners.
+
+  Push runs are also exempt from `cancel-in-progress` (they share the
+  `refs/heads/main` group; cancelling one discards the cache it exists to
+  publish). Covered by `tools/scripts/test_resolve_classify_base.py`.
+
 - **Every `on: schedule` workflow must carry the fork guard.** When someone forks
   the repo, GitHub copies all workflows and runs the scheduled ones on the fork's
   default branch — then emails the fork owner whenever one *fails*, which our
@@ -1042,6 +1073,25 @@ Namespace; do not dispatch with `runner_provider=namespace`. Linux/Windows
 use GitHub-hosted runners by default. macOS routes through the self-hosted
 `pulp-build` pool (`pulp-m1-01`, `pulp-m1-02`) via
 `PULP_LOCAL_MACOS_RUNS_ON_JSON`; repository variables control any overflow.
+
+The authoritative Windows x64 functional matrix is pinned to `windows-2022`
+(Visual Studio 2022) by `.github/workflows/build.yml`. Shipyard's current ship
+path does not send a `windows_runner_selector_json`, so the workflow fallback
+is the operative selector. `.shipyard/ci-profiles/normal-local-fast.toml`
+mirrors that PR policy with its PR-only `github.windows-x64-runtime` target for
+profile inspection; the current profile planner is read-only and does not
+override dispatch. Its shared coverage/scheduled `github.windows-x64` target
+remains `windows-latest`. Keep those mirrors truthful, but never rely on them
+to route a run. The standalone MSVC release-path, MIDI 2, and BLE compile gates
+remain on `windows-latest`, as do release builds, so the newest hosted compiler
+and SDK are still exercised without allowing an in-place runner-image
+migration to change the CRT/toolchain beneath the complete runtime suite.
+`tools/scripts/test_windows_runner_policy.py` reads every operative surface
+(build, release, coverage, nightly, release resolver, and Shipyard profile)
+independently and runs in the PR `workflow-lint` lane. Update that one
+cross-surface invariant whenever the split changes; a profile-only or
+workflow-only assertion is not enough because the two can self-agree while a
+different production lane drifts.
 
 Do not push empty commits just to churn queued macOS checks. Cancel
 superseded SHAs, rebase or push only when a PR needs current `main`, and
@@ -1801,13 +1851,14 @@ Shipyard macOS GUI. The explicit selector has NO capacity fallback, so only set
 it when the pool reliably serves that lane — else legs route to a label with no
 online runner and queue.
 
-Windows is intentionally different. The required `Windows (x64)` gate must stay
-on real GitHub-hosted `windows-latest` unless a local x64 lane is explicitly
-proven and promoted. The current local Windows pool is Windows ARM64 on QEMU
-(`qemu-system-aarch64`): it can maybe smoke x64 via Windows-on-ARM translation,
-but it is not the authoritative Intel/x64 gate. Do not wire
-`PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test Windows x64
-matrix leg; use a separate/dedicated label for any local Windows ARM64 smoke.
+Windows is intentionally different. The required `Windows (x64)` functional
+gate stays on real GitHub-hosted `windows-2022`; the separate build-only MSVC
+release-path gate tracks `windows-latest`. The current local Windows pool is
+Windows ARM64 on QEMU (`qemu-system-aarch64`): it can maybe smoke x64 via
+Windows-on-ARM translation, but it is not the authoritative Intel/x64 gate.
+Do not wire `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` into the required Build-and-Test
+Windows x64 matrix leg; use a separate/dedicated label for any local Windows
+ARM64 smoke.
 
 ### macOS runner routing (current)
 
@@ -4070,6 +4121,14 @@ distinguish the two. Do not start from the workflow log's summary line:
   `clap-validator` exit non-zero both when they run and report findings and
   when they cannot load the plugin at all. A fast fail (well under a second)
   points at the latter — a real `auval` pass takes seconds.
+- **Refresh `AudioComponentRegistrar` after installing and after removing the
+  AU bundle on self-hosted runners.** The registrar caches component metadata
+  across jobs. Without `killall -9 AudioComponentRegistrar` plus a short wait
+  after the copy, `auval` can see the path but fail immediately with `Cannot
+  get Component's Name strings` / error `-50`; without the cleanup refresh, a
+  later job can retain the removed component's metadata. This is the same
+  discipline used by `validate.yml`, the DAW-bench preflight, and
+  `pulp doctor --au-cache`.
 - Nothing outside `--diag-dir` survives: the capture writes into a temp dir the
   diff script deletes on every return path. A run invoked without `--diag-dir`
   leaves no evidence at all.

@@ -15,20 +15,20 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_animation_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_animation_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // animate(id, property, targetValue, durationMs, easingName)
     // animate(id, property, target, duration_ms, easing) - CSS transition equivalent.
     // Smoothly interpolates a property from current to target over duration.
-    register_bridge_function(api, "animate", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "animate", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto prop = args.get<std::string>(1, "value");
         auto target = static_cast<float>(args.get<double>(2, 0));
         auto dur_ms = static_cast<float>(args.get<double>(3, 150));
         auto ease_name = args.get<std::string>(4, "ease_out_cubic");
 
-        auto* v = widget(id);
+        auto* v = self.widget(id);
         if (!v) return choc::value::Value();
 
         float dur = dur_ms / 1000.0f;
@@ -55,15 +55,15 @@ void WidgetBridge::register_animation_api() {
     });
 }
 
-void WidgetBridge::register_animation_style_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_animation_style_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setTransitionDuration(id, seconds) - CSS transition duration for animated property changes.
-    register_bridge_function(api, "setTransitionDuration", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransitionDuration", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto dur = static_cast<float>(args.get<double>(1, 0.15));
         // Store transition duration on the view's theme as a dimension token.
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) {
             auto theme = v->theme();
             theme.dimensions["transition.duration"] = dur;
@@ -75,10 +75,10 @@ void WidgetBridge::register_animation_style_api() {
     // setTransition(id, "opacity 200ms ease, transform 300ms").
     // Parses the full CSS shorthand into View::transitions_ so property
     // application can consult the parsed transition specs when values change.
-    register_bridge_function(api, "setTransition", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransition", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto css = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         if (css.empty() || css == "none") {
             v->clear_transitions();
@@ -93,10 +93,10 @@ void WidgetBridge::register_animation_style_api() {
     // name; durations are picked up from setTransitionDuration / the
     // shorthand path. CSS spec: shorthand wins over longhand when both
     // are set in the same rule; we treat them as additive at this layer.
-    register_bridge_function(api, "setTransitionProperty", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransitionProperty", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto props = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         std::vector<TransitionSpec> ts;
         std::string acc;
@@ -122,10 +122,10 @@ void WidgetBridge::register_animation_style_api() {
     // setTransitionTimingFunction(id, "ease-in-out") - applies to all
     // existing TransitionSpecs on the View. CSS spec: longhand applies
     // uniformly across the property list.
-    register_bridge_function(api, "setTransitionTimingFunction", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransitionTimingFunction", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto easing_str = args.get<std::string>(1, "ease");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         auto current = v->transitions();
         for (auto& t : current) {
@@ -136,10 +136,10 @@ void WidgetBridge::register_animation_style_api() {
     });
 
     // setTransitionDelay(id, seconds)
-    register_bridge_function(api, "setTransitionDelay", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransitionDelay", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto delay = static_cast<float>(args.get<double>(1, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
         auto current = v->transitions();
         for (auto& t : current) t.delay_seconds = delay;
@@ -148,20 +148,20 @@ void WidgetBridge::register_animation_style_api() {
     });
 
     // setTranslate(id, x, y) - CSS transform: translate().
-    register_bridge_function(api, "setTranslate", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTranslate", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto x = static_cast<float>(args.get<double>(1, 0));
         auto y = static_cast<float>(args.get<double>(2, 0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_translate(x, y);
         return choc::value::Value();
     });
 
     // setRotation(id, degrees) - CSS transform: rotate().
-    register_bridge_function(api, "setRotation", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setRotation", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto deg = static_cast<float>(args.get<double>(1, 0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_rotation(deg);
         return choc::value::Value();
     });
@@ -172,7 +172,7 @@ void WidgetBridge::register_animation_style_api() {
     // Layout (Yoga + hit-test) sees the un-transformed bounds: paint-only.
     // Companion to canvasSetTransform, but applied to the View's painting
     // frame rather than a Canvas2D context.
-    register_bridge_function(api, "setTransform", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransform", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto a = static_cast<float>(args.get<double>(1, 1.0));
         auto b = static_cast<float>(args.get<double>(2, 0.0));
@@ -180,7 +180,7 @@ void WidgetBridge::register_animation_style_api() {
         auto d = static_cast<float>(args.get<double>(4, 1.0));
         auto e = static_cast<float>(args.get<double>(5, 0.0));
         auto f = static_cast<float>(args.get<double>(6, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_transform_matrix(a, b, c, d, e, f);
         return choc::value::Value();
     });
@@ -188,19 +188,19 @@ void WidgetBridge::register_animation_style_api() {
     // clearTransform(id) - drop the affine matrix; the View reverts to its
     // CSS-transform scalars (translate/rotate/scale) only. Mirrors removing
     // the inline `transform` property in CSS.
-    register_bridge_function(api, "clearTransform", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "clearTransform", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->clear_transform_matrix();
         return choc::value::Value();
     });
 
     // setTransformOrigin(id, x, y) - CSS transform-origin (0-1 normalized).
-    register_bridge_function(api, "setTransformOrigin", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setTransformOrigin", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto x = static_cast<float>(args.get<double>(1, 0.5));
         auto y = static_cast<float>(args.get<double>(2, 0.5));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_transform_origin(x, y);
         return choc::value::Value();
     });
@@ -213,7 +213,7 @@ void WidgetBridge::register_animation_style_api() {
     //   ]));
     // The CSS shim's @keyframes parser produces this shape directly.
     // Populates the application-wide registry consulted by setAnimation.
-    register_bridge_function(api, "defineKeyframes", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "defineKeyframes", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto stops_json = args.get<std::string>(1, "[]");
         if (name.empty()) return choc::value::Value();
@@ -245,7 +245,7 @@ void WidgetBridge::register_animation_style_api() {
             // Malformed input: silently drop (registry stays unchanged).
             return choc::value::Value();
         }
-        css_keyframes_registry_.define(std::move(block));
+        self.css_keyframes_registry_.define(std::move(block));
         return choc::value::Value();
     });
 
@@ -271,10 +271,10 @@ void WidgetBridge::register_animation_style_api() {
     // dispatch ahead of the positional path; otherwise web-compat
     // longhand calls such as "name" / "duration" are mistaken for
     // animation names and the keyframe registry lookup misses.
-    register_bridge_function(api, "setAnimation", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAnimation", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto arg1 = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (!v) return choc::value::Value();
 
         // Legacy control-token dispatch.
@@ -291,7 +291,7 @@ void WidgetBridge::register_animation_style_api() {
                 // either order is valid; if duration arrives first we
                 // simply seed when name arrives, using whatever
                 // duration was previously staged).
-                const auto* block = css_keyframes_registry_.find(staged.name);
+                const auto* block = self.css_keyframes_registry_.find(staged.name);
                 if (block && !block->stops.empty()) {
                     const auto& first = block->stops.front();
                     for (const auto& [prop, _val] : first.properties) {
@@ -341,7 +341,7 @@ void WidgetBridge::register_animation_style_api() {
         auto duration = static_cast<float>(args.get<double>(2, 0.0));
         (void)args.get<double>(3, 1.0);  // iterations, not driven by playback yet
         (void)args.get<std::string>(4, "normal");  // direction, not driven by playback yet
-        const auto* block = css_keyframes_registry_.find(anim_name);
+        const auto* block = self.css_keyframes_registry_.find(anim_name);
         if (!block || block->stops.empty()) return choc::value::Value();
         // Seed one Animation per property the first stop touches. Playback
         // currently records the parsed property and timing state; property-
@@ -361,10 +361,10 @@ void WidgetBridge::register_animation_style_api() {
     });
 
     // setScale(id, scale) - CSS transform: scale().
-    register_bridge_function(api, "setScale", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setScale", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto s = static_cast<float>(args.get<double>(1, 1.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_scale(s);
         return choc::value::Value();
     });
@@ -377,11 +377,11 @@ void WidgetBridge::register_animation_style_api() {
     // (caller-side accumulation since within-string order is
     // canonical CSS application order). The @pulp/react prop-applier
     // walker accumulates skewX/skewY in its snapshot the same way.
-    register_bridge_function(api, "setSkew", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setSkew", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto x = static_cast<float>(args.get<double>(1, 0.0));
         auto y = static_cast<float>(args.get<double>(2, 0.0));
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_skew(x, y);
         return choc::value::Value();
     });

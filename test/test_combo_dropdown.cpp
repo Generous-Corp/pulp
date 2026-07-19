@@ -687,11 +687,11 @@ TEST_CASE("ComboBox: overflowing menu near the right edge paints clamped with ca
     REQUIRE(combo->is_open());
 
     RecordingCanvas rc;
-    combo->paint(rc);  // queues the dropdown overlay (anchored via the root ancestor)
-    REQUIRE(View::overlay_queue().size() >= 1);
+    combo->paint(rc);  // queues the dropdown overlay on the root's per-root queue (S11)
+    REQUIRE(root->interaction().overlay_queue.size() >= 1);
     const auto before = rc.command_count();
-    View::paint_overlays(rc);
-    REQUIRE(View::overlay_queue().empty());
+    View::paint_overlays(rc, root.get());  // drain the painting root's own queue
+    REQUIRE(root->interaction().overlay_queue.empty());
     REQUIRE(rc.command_count() > before);  // the menu (rows + carets) painted
 
     float x = 0, y = 0, w = 0, h = 0;

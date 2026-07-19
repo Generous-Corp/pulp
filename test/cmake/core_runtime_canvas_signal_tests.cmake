@@ -46,6 +46,10 @@ endif()
 add_dependencies(pulp-test-ipc pulp-connected-child-process-fixture)
 target_compile_definitions(pulp-test-ipc PRIVATE
     "PULP_TEST_CONNECTED_CHILD_FIXTURE=\"$<TARGET_FILE:pulp-connected-child-process-fixture>\"")
+catch_discover_tests(pulp-test-ipc
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 
 pulp_add_test_suite(pulp-test-ipc-endpoints LIBRARIES pulp::events pulp::runtime)
 
@@ -134,9 +138,6 @@ pulp_add_test_suite(pulp-test-svg LIBRARIES pulp::canvas)
 # contract (mutating one child's opacity reports a rect bounded by that
 # sub-tree only).
 pulp_add_test_suite(pulp-test-vector-scene LIBRARIES pulp::canvas)
-
-# Effects tests
-pulp_add_test_suite(pulp-test-effects LIBRARIES pulp::canvas)
 
 # Canvas image placement: affine transform, preserve-aspect fit, tiled fill.
 pulp_add_test_suite(pulp-test-canvas-image-fit LIBRARIES pulp::canvas)
@@ -340,6 +341,11 @@ pulp_add_test_suite(pulp-test-environment LIBRARIES pulp::platform)
 pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::runtime)
+
+# Lock-free realtime/control-thread occurrence signals (pad flashes, UI triggers).
+pulp_add_test_suite(pulp-test-activity-channel
+    LIBRARIES pulp::runtime
+    PROPERTIES LABELS lifecycle)
 
 # SpscRingIndex (index-pair SPSC ring-buffer cursor management)
 pulp_add_test_suite(pulp-test-spsc-ring-index LIBRARIES pulp::runtime)

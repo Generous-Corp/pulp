@@ -30,6 +30,7 @@
 //  │ setShouldBypassEffect:                   │ void      │ main + audio │ NO (RT-safe) │
 //  │ allocateRenderResourcesAndReturnError:   │ BOOL      │ main         │ YES (init)   │
 //  │ deallocateRenderResources                │ void      │ main         │ YES (release)│
+//  │ renderContextObserver                    │ block     │ AUDIO        │ NO (body)    │
 //  │ internalRenderBlock                      │ block     │ main         │ YES (block)  │
 //  │   └─ render block body                   │ OSStatus  │ AUDIO        │ NO           │
 //  │ fullState                                │ NSDict    │ main         │ YES (serdes) │
@@ -55,6 +56,7 @@
 #import <CoreAudioKit/CoreAudioKit.h>
 #import <mach/mach_time.h>
 #include <pulp/events/plugin_main_thread.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/adapter_boundary.hpp>
 #include <pulp/format/plugin_state_io.hpp>
@@ -65,10 +67,12 @@
 #include <pulp/format/ara.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
+#include <pulp/format/detail/audio_buffer_list_validation.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump.hpp>
 #include <pulp/midi/ump_sysex7_reassembler.hpp>
 #include <pulp/runtime/assert.hpp>
+#include <pulp/runtime/alive_token.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
@@ -103,6 +107,7 @@ struct AUBridge {
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store;
     std::unique_ptr<Processor> processor;
+    AudioWorkgroupClient* audio_workgroup_client = nullptr;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;
@@ -258,6 +263,9 @@ struct ScopedAuV3HostWriting {
 
 @interface PulpAudioUnit : AUAudioUnit {
     pulp::format::au::AUBridge _bridge;
+    // Captured by AUv3 view controllers. They may outlive this AUAudioUnit
+    // when a host tears down the audio instance before its retained editor.
+    pulp::runtime::AliveToken _ownerAlive;
     AUAudioUnitBus *_inputBus;
     AUAudioUnitBus *_outputBus;
     AUAudioUnitBusArray *_inputBusArray;
@@ -284,6 +292,7 @@ struct ScopedAuV3HostWriting {
 /// bug that the AU v2 path used to hit).
 - (pulp::format::Processor *)pulpProcessor;
 - (pulp::state::StateStore *)pulpStore;
+- (pulp::runtime::AliveToken::Handle)pulpOwnerAlive;
 
 /// ARA companion factory, surfaced under the KVO-standard property
 /// name Apple's ARA-aware AU hosts observe ("audioUnitARAFactory" —
@@ -349,6 +358,8 @@ struct ScopedAuV3HostWriting {
     }
     _bridge.processor->set_state_store(&_bridge.store);
     _bridge.processor->define_parameters(_bridge.store);
+    _bridge.audio_workgroup_client =
+        dynamic_cast<pulp::format::AudioWorkgroupClient*>(_bridge.processor.get());
 
     // Resolve host accommodations once via the runtime policy
     // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
@@ -485,6 +496,37 @@ struct ScopedAuV3HostWriting {
 
 - (BOOL)supportsUserPresets { return NO; }
 - (BOOL)canProcessInPlace { return YES; }
+
+- (AURenderContextObserver)renderContextObserver {
+    auto* bridge = &_bridge;
+    AURenderContextObserver observer = ^(const AudioUnitRenderContext *context) {
+        // The OS calls this on the realtime render thread immediately before a
+        // render whose workgroup changed. Copy only the host-owned workgroup
+        // value; the AudioUnitRenderContext struct itself is callback-scoped.
+        // GraphRuntimeWorkerPool publishes pointer + generation coherently and
+        // auxiliary workers perform their own leave/join before another batch.
+        // os_retain/os_release are deliberately absent: Apple marks this block
+        // CA_REALTIME_API but does not document reference-count operations as
+        // RT-safe. Lifetime instead follows the render-context observer
+        // protocol described in AudioUnitProperties.h.
+        if (bridge->audio_workgroup_client) {
+            bridge->audio_workgroup_client->set_audio_workgroup_from_render_context(
+                context ? reinterpret_cast<void*>(context->workgroup) : nullptr);
+            // Apple's render-context contract requires auxiliary realtime
+            // threads to leave the preceding workgroup and join the new one as
+            // part of this observer call. The full-participant barrier is
+            // allocation-free, lock-free, and relax-only on the render thread;
+            // it returns only after every worker has completed leave(old) and
+            // acknowledged its join result.
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
+        }
+    };
+#if __has_feature(objc_arc)
+    return [observer copy];
+#else
+    return [[observer copy] autorelease];
+#endif
+}
 
 - (AUParameterTree *)parameterTree {
     // Built once and retained: the host observes THESE AUParameter objects, so a
@@ -744,6 +786,8 @@ struct ScopedAuV3HostWriting {
 }
 
 - (void)deallocateRenderResources {
+    pulp::format::clear_audio_workgroup_after_render_resources(
+        _bridge.audio_workgroup_client);
     if (_bridge.processor) _bridge.processor->release();
     // Drop per-note expression state so a re-allocation does not route a stale
     // noteId to a voice that no longer exists (mirrors VST3's setActive(false)).
@@ -753,6 +797,10 @@ struct ScopedAuV3HostWriting {
 
 // Symmetric teardown of the MainThreadDispatcher backend installed in init.
 - (void)dealloc {
+    // Retained AUv3 editors must stop touching _bridge.processor/_bridge.store
+    // before either C++ object begins destruction.
+    _ownerAlive.retire();
+
     // Tear down parameter-automation wiring while the C++ StateStore (_bridge) is
     // still alive: drop the gesture callbacks + store listener that capture self,
     // remove our host observer token, and release the retained (MRC) tree.
@@ -796,6 +844,13 @@ struct ScopedAuV3HostWriting {
         const AURenderEvent *realtimeEventListHead,
         AURenderPullInputBlock __unsafe_unretained pullInputBlock)
     {
+        // The observer completes a changed borrowed-handle transition before it
+        // returns. Keep this idempotent entry guard so every render path also
+        // verifies the current publication before *any* early exit.
+        if (bridge->audio_workgroup_client) {
+            (void)bridge->audio_workgroup_client->prepare_audio_workgroup_for_render();
+        }
+
         if (!bridge->processor) {
             if (outputData) {
                 for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
@@ -827,10 +882,31 @@ struct ScopedAuV3HostWriting {
         // See docs/guides/dsp-threading.md "Numeric mode".
         pulp::signal::ScopedFlushDenormals flush_denormals;
 
+        const UInt32 expectedOutChans =
+            bridge->output_channels > 0 &&
+                    bridge->output_channels <= pulp::format::au::kMaxChannels
+                ? static_cast<UInt32>(bridge->output_channels)
+                : 0;
+        const auto failClosed = [&] {
+            pulp::format::detail::zero_audio_buffer_list(outputData);
+            if (actionFlags) *actionFlags |= kAudioUnitRenderAction_OutputIsSilence;
+            bridge->processor->set_sidechain(nullptr);
+            bridge->store.reset_triggers_rt();
+            return noErr;
+        };
+        // AUv3 may provide null output mData and ask the Audio Unit to supply
+        // storage, so validate topology here and storage after substitution.
+        // An unknown output bus or wrong/fewer/more channel buffers is not that
+        // valid contract: silence the block and never publish it to DSP.
+        if (outputBusNumber != 0 || expectedOutChans == 0 ||
+            !pulp::format::detail::audio_buffer_list_shape_matches(
+                outputData, expectedOutChans)) {
+            return failClosed();
+        }
+
         bridge->param_events.clear();
 
-        UInt32 outChans = std::min(outputData->mNumberBuffers,
-            static_cast<UInt32>(pulp::format::au::kMaxChannels));
+        const UInt32 outChans = expectedOutChans;
 
         // Hard invariant, not a live allocation: output_storage was sized to
         // kMaxChannels * max_frames in allocateRenderResources, outChans is
@@ -861,16 +937,19 @@ struct ScopedAuV3HostWriting {
         pulp::audio::BufferView<const float> input_view;
         if (pullInputBlock && bridge->input_channels > 0) {
             auto& abl = bridge->input_abl;
-            abl.mNumberBuffers = outChans;
+            const UInt32 inChans = std::min(
+                static_cast<UInt32>(bridge->input_channels),
+                static_cast<UInt32>(pulp::format::au::kMaxChannels));
+            abl.mNumberBuffers = inChans;
             [[maybe_unused]] const std::size_t input_samples =
-                static_cast<std::size_t>(outChans) * frameCount;
+                static_cast<std::size_t>(inChans) * frameCount;
             // Hard invariant (see output_storage above): input_storage is
             // pre-sized to kMaxChannels * max_frames, so it always fits — never
             // an assign() on the audio thread.
             PULP_DBG_ASSERT(bridge->input_storage.size() >= input_samples,
                 "AU render: input_storage undersized; allocateRenderResources "
                 "must pre-size to kMaxChannels * max_frames");
-            for (UInt32 i = 0; i < outChans; ++i) {
+            for (UInt32 i = 0; i < inChans; ++i) {
                 abl.mBuffers[i].mNumberChannels = 1;
                 abl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
                 abl.mBuffers[i].mData =
@@ -882,10 +961,22 @@ struct ScopedAuV3HostWriting {
             auto status = pullInputBlock(&pullFlags, timestamp, frameCount, 0,
                 reinterpret_cast<AudioBufferList*>(&abl));
             if (status == noErr) {
-                for (UInt32 i = 0; i < outChans; ++i)
+                auto* inputAbl = reinterpret_cast<AudioBufferList*>(&abl);
+                if (!pulp::format::detail::audio_buffer_list_shape_matches(
+                        inputAbl, inChans) ||
+                    !pulp::format::detail::audio_buffer_list_has_storage(
+                        inputAbl, frameCount, sizeof(float))) {
+                    return failClosed();
+                }
+                for (UInt32 i = 0; i < inChans; ++i)
                     bridge->input_ptrs[i] = static_cast<const float*>(abl.mBuffers[i].mData);
                 input_view = pulp::audio::BufferView<const float>(
-                    bridge->input_ptrs, outChans, frameCount);
+                    bridge->input_ptrs, inChans, frameCount);
+            } else {
+                // A declared main input that cannot be pulled is a malformed
+                // active render, not an invitation to run effect DSP with an
+                // empty input view.
+                return failClosed();
             }
         }
 
@@ -920,6 +1011,13 @@ struct ScopedAuV3HostWriting {
                 &pullFlags, timestamp, frameCount, 1,
                 reinterpret_cast<AudioBufferList*>(&scAbl));
             if (scStatus == noErr) {
+                auto* sidechainAbl = reinterpret_cast<AudioBufferList*>(&scAbl);
+                if (!pulp::format::detail::audio_buffer_list_shape_matches(
+                        sidechainAbl, scBufs) ||
+                    !pulp::format::detail::audio_buffer_list_has_storage(
+                        sidechainAbl, frameCount, sizeof(float))) {
+                    return failClosed();
+                }
                 for (UInt32 i = 0; i < scBufs; ++i) {
                     bridge->sidechain_ptrs[i] =
                         static_cast<const float*>(scAbl.mBuffers[i].mData);
@@ -1352,6 +1450,10 @@ struct ScopedAuV3HostWriting {
 
 - (pulp::state::StateStore *)pulpStore {
     return &_bridge.store;
+}
+
+- (pulp::runtime::AliveToken::Handle)pulpOwnerAlive {
+    return _ownerAlive.capture();
 }
 
 - (uint32_t)pulpBypassParameterId {

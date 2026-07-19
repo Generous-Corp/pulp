@@ -50,6 +50,13 @@ if(TARGET pulp-signal-fft-backend)
     list(APPEND PULP_SDK_TARGETS pulp-signal-fft-backend)
 endif()
 
+# Modal-spec JSON parsing has a source-bearing library separate from the
+# header-only signal umbrella. Export it or installed consumers can include
+# modal_spec.hpp but cannot link parse_modal_spec()/to_json().
+if(TARGET pulp-signal-modal-spec)
+    list(APPEND PULP_SDK_TARGETS pulp-signal-modal-spec)
+endif()
+
 # pulp-host is platform-conditional: iOS skips the subdirectory entirely
 # (no plugin hosting on iOS), so only include it in the SDK export set on
 # platforms that actually built it.

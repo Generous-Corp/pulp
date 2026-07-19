@@ -21,6 +21,21 @@
 // The VBlank-locked safe-repaint pattern keeps dirty-frame coalescing in
 // RenderLoopState (render_loop_state.hpp), which is platform-agnostic and
 // unit-tested; each platform subclass only owns the native vsync source.
+//
+// Wiring status (important — do not mistake these backends for dead code):
+// only the WEB host (window_host_web.cpp, emscripten) currently drives its
+// frames through RenderLoop::create() in production. The macOS / Windows /
+// iOS / Android / timer backends are fully implemented and unit-tested but are
+// NOT instantiated by their native hosts today — those hosts hand-roll their
+// vsync source directly (macOS drives CVDisplayLink inside window_host_mac.mm;
+// iOS drives CADisplayLink inside window_host_ios.mm; Android via
+// AChoreographer). This class is therefore a *reusable vsync abstraction for
+// host implementors* plus the one live web consumer, not an unused facade.
+// Consolidating the native hosts onto these backends (dedup, one vsync
+// abstraction) is a deliberate future slice, not a bug — it is intentionally
+// deferred because the hand-rolled paths carry host-specific lifecycle
+// (display-link start/stop on show/hide, secondary-window display links) that
+// a migration must preserve.
 
 #include <functional>
 #include <memory>

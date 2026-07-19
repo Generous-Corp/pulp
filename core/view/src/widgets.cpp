@@ -9,6 +9,7 @@
 #include <pulp/view/widget_schema.hpp>
 #include "knob_sprite_paint.hpp"
 #include <pulp/canvas/text_shaper.hpp>
+#include <pulp/runtime/log.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cctype>
 #include <cmath>
@@ -21,6 +22,38 @@ namespace pulp::view {
 // ── Knob animation ──────────────────────────────────────────────────────────
 
 namespace {
+// Draw a shader-capable widget's body via its installed SkSL shader.
+//
+// Returns true when the shader actually painted the body; false means the draw
+// failed at draw time (the SkiaCanvas override returns false without painting
+// anything when the runtime effect can't be produced). A false return is used
+// as the else-if guard at each call site so the paint path FALLS THROUGH to the
+// widget's normal C++ body instead of leaving it blank — the failure used to be
+// swallowed (the bool was ignored), so a bad draw-time shader painted only the
+// labels over an empty body. Logs the failure exactly once per host instance.
+bool draw_custom_shader_body(canvas::Canvas& canvas, CustomShaderHost& host,
+                             View& view, float w, float h,
+                             float value, float shader_time) {
+    canvas::Canvas::ShaderUniforms u;
+    u.value = value;
+    u.time = shader_time;
+    u.accent_color = view.resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+    u.bg_color = view.resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
+    u.track_color = view.resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+    u.fill_color = view.resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+    u.thumb_color = view.resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
+    if (canvas.draw_with_sksl(host.custom_shader(), 0, 0, w, h, u)) {
+        return true;
+    }
+    if (!host.shader_draw_failure_logged()) {
+        runtime::log_info(
+            "[custom-shader] body shader failed to draw; painting the default "
+            "widget body instead");
+        host.mark_shader_draw_failure_logged();
+    }
+    return false;
+}
+
 // Default-path knob geometry shared by paint() and modulation hit-testing so
 // the drawn handles and the draggable hit zones never diverge.
 struct KnobModGeom { float cx, cy, ring_r, arc_w, mod_w, mod_r_base; };
@@ -452,17 +485,13 @@ void Knob::paint(canvas::Canvas& canvas) {
         // Fall through to draw labels on top
     }
     // ── Custom shader path: replaces body/track/fill, keeps labels/glow ──
-    else if (has_custom_shader()) {
-        canvas::Canvas::ShaderUniforms u;
-        u.value = value_;
-        u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
-        // Fall through to draw labels and value text on top of the shader
+    // The `&& draw_custom_shader_body(...)` guard means a draw-time shader
+    // FAILURE falls through to the normal body branches below (not a blank
+    // widget); on success the shader painted the body and we skip them.
+    else if (has_custom_shader() &&
+             draw_custom_shader_body(canvas, *this, *this, b.width, b.height,
+                                     value_, shader_time)) {
+        // Shader painted the body; fall through to draw labels and value text.
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
         float full_r = std::min(cx, cy) - 2.0f;
@@ -671,7 +700,7 @@ void Knob::paint(canvas::Canvas& canvas) {
     }
 
     // Value text in center (always drawn, even with shader)
-    if (format_) {
+    if (show_value_ && format_) {
         auto text_color = resolve_color("text.primary", canvas::Color::rgba8(200, 200, 200));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 11.0f);
@@ -713,16 +742,10 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
     } else if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
-    } else if (has_custom_shader()) {
-        canvas::Canvas::ShaderUniforms u;
-        u.value = value_;
-        u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
+    } else if (has_custom_shader() &&
+               draw_custom_shader_body(canvas, *this, *this, b.width, b.height,
+                                       value_, shader_time)) {
+        // Shader painted the body; a draw-time failure falls through below.
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: thin track only, no fill, no thumb (matches design tools) ──
         auto track_color = resolve_color("control.track", canvas::Color::rgba8(69, 71, 90));
@@ -1070,16 +1093,10 @@ void Toggle::paint(canvas::Canvas& canvas) {
 
     if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, on_ ? 1.0f : 0.0f, *this);
-    } else if (has_custom_shader()) {
-        canvas::Canvas::ShaderUniforms u;
-        u.value = on_ ? 1.0f : 0.0f;
-        u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
-        canvas.draw_with_sksl(custom_shader(), 0, 0, b.width, b.height, u);
+    } else if (has_custom_shader() &&
+               draw_custom_shader_body(canvas, *this, *this, b.width, b.height,
+                                       on_ ? 1.0f : 0.0f, shader_time)) {
+        // Shader painted the body; a draw-time failure falls through below.
     } else {
 
         // Track — blend color based on animated thumb position

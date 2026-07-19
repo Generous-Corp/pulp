@@ -7,8 +7,8 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_style_background_repeat_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_background_repeat_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setBackgroundRepeat(id, kw) - CSS background-repeat keyword. Storage-
     // only on the View (no-op for solid-color backgrounds, which is the
@@ -18,27 +18,27 @@ void WidgetBridge::register_widget_style_background_repeat_api() {
     // Accepts: `repeat` / `repeat-x` / `repeat-y` / `no-repeat` /
     // `space` / `round`. Unknown / empty resets to "" (paint defaults to
     // CSS initial `repeat`).
-    register_bridge_function(api, "setBackgroundRepeat", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setBackgroundRepeat", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto kw = args.get<std::string>(1, "");
-        auto* v = id.empty() ? &root_ : widget(id);
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
         if (v) v->set_background_repeat(kw);
         return choc::value::Value();
     });
 }
 
-void WidgetBridge::register_widget_style_mask_object_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_mask_object_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setMaskImage(id, value) - CSS `mask-image`.
     // The bridge stores the value on the View; mask-capable paint backends
     // consume the slot, while fallback backends still round-trip it through
     // View::mask_image().
     register_bridge_function(api, "setMaskImage",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_mask_image(value);
             return choc::value::Value();
         });
@@ -48,10 +48,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // (web-compat-style-decl.js) is responsible for fanning out into
     // the maskImage longhand.
     register_bridge_function(api, "setMask",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_mask(value);
             return choc::value::Value();
         });
@@ -59,10 +59,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // setMaskSize(id, value) - CSS `mask-size`, stored with mask-image for
     // paint paths that can apply a mask.
     register_bridge_function(api, "setMaskSize",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_mask_size(value);
             return choc::value::Value();
         });
@@ -74,10 +74,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // exists so authors who set `appearance: none` for reset-style
     // consistency see a no-op (not an unsupported drop).
     register_bridge_function(api, "setAppearance",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_appearance(value);
             return choc::value::Value();
         });
@@ -86,10 +86,10 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // keyword; visualizer/image-like paint paths consume it when mapping
     // source content into their bounds.
     register_bridge_function(api, "setObjectFit",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_object_fit(value);
             return choc::value::Value();
         });
@@ -97,43 +97,43 @@ void WidgetBridge::register_widget_style_mask_object_api() {
     // setObjectPosition(id, value) - CSS `object-position`. Stored with
     // object-fit for paint paths that align content inside the destination rect.
     register_bridge_function(api, "setObjectPosition",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto value = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_object_position(value);
             return choc::value::Value();
         });
 }
 
-void WidgetBridge::register_widget_style_background_subproperty_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_style_background_subproperty_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Background sub-property setters. See
     // View::set_background_{attachment,clip,origin}() for the
     // partial-vs-noop semantics; wiring them here lets the JS shim path
     // round-trip these keywords instead of dropping them.
     register_bridge_function(api, "setBackgroundAttachment",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_background_attachment(kw);
             return choc::value::Value();
         });
     register_bridge_function(api, "setBackgroundClip",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_background_clip(kw);
             return choc::value::Value();
         });
     register_bridge_function(api, "setBackgroundOrigin",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_background_origin(kw);
             return choc::value::Value();
         });
@@ -143,18 +143,18 @@ void WidgetBridge::register_widget_style_background_subproperty_api() {
     // functions makes the round-trip explicit (JS -> bridge -> View slot ->
     // get_attribute) while raster background-image paint remains deferred.
     register_bridge_function(api, "setBackgroundPosition",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_background_position(kw);
             return choc::value::Value();
         });
     register_bridge_function(api, "setBackgroundSize",
-        [this](choc::javascript::ArgumentList args) {
+        [&self](choc::javascript::ArgumentList args) {
             auto id = args.get<std::string>(0, "");
             auto kw = args.get<std::string>(1, "");
-            auto* v = id.empty() ? &root_ : widget(id);
+            auto* v = id.empty() ? &self.root_ : self.widget(id);
             if (v) v->set_background_size(kw);
             return choc::value::Value();
         });

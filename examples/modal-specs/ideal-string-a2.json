@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "ideal-string-a2",
+  "description": "Ideal (stiffness-free) string fixed at both ends, A2. Partials are the exact harmonic series 110 Hz * n, and the mode shapes are analytic: phi_n(x) = sin(n * pi * x) for x in [0, 1] along the string. The maps below are that formula sampled on a 9-point uniform grid, so they are checkable by hand rather than fitted to anything. This example exists to exercise position: striking at x = 0.5 cannot excite the even partials at all (sin(2 pi * 0.5) = 0), which is why a string plucked dead centre sounds hollow, and picking up at a node of a partial mutes that partial no matter how it was struck.",
+  "modes": [
+    { "freq_hz": 110.0, "t60_s": 3.2, "gain": 1.0 },
+    { "freq_hz": 220.0, "t60_s": 2.4, "gain": 0.5 },
+    { "freq_hz": 330.0, "t60_s": 1.7, "gain": 0.3333 },
+    { "freq_hz": 440.0, "t60_s": 1.2, "gain": 0.25 }
+  ],
+  "excitation": {
+    "contact_s": 0.0004,
+    "velocity": 1.0
+  },
+  "strike_map": {
+    "grid_points": 9,
+    "weights": [
+      0.0, 0.38268343, 0.70710678, 0.92387953, 1.0, 0.92387953, 0.70710678, 0.38268343, 0.0,
+      0.0, 0.70710678, 1.0, 0.70710678, 0.0, -0.70710678, -1.0, -0.70710678, 0.0,
+      0.0, 0.92387953, 0.70710678, -0.38268343, -1.0, -0.38268343, 0.70710678, 0.92387953, 0.0,
+      0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0
+    ]
+  },
+  "pickup_map": {
+    "grid_points": 9,
+    "weights": [
+      0.0, 0.38268343, 0.70710678, 0.92387953, 1.0, 0.92387953, 0.70710678, 0.38268343, 0.0,
+      0.0, 0.70710678, 1.0, 0.70710678, 0.0, -0.70710678, -1.0, -0.70710678, 0.0,
+      0.0, 0.92387953, 0.70710678, -0.38268343, -1.0, -0.38268343, 0.70710678, 0.92387953, 0.0,
+      0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0, 0.0
+    ]
+  },
+  "tolerances": {
+    "freq_cents": 5.0,
+    "t60_rel": 0.06,
+    "gain_rel": 0.05,
+    "verify_seconds": 2.5
+  }
+}

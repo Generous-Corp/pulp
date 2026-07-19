@@ -21,11 +21,13 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/live_dsp_telemetry.hpp>
 #include <pulp/audio/load_measurer.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/graph_runtime_executor.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <atomic>
@@ -286,7 +288,7 @@ struct GraphNode {
 
 // ── Signal Graph ────────────────────────────────────────────────────────
 
-class SignalGraph {
+class SignalGraph : public format::AudioWorkgroupClient {
 public:
     struct GraphLimits {
         std::size_t max_nodes = 4096;
@@ -471,9 +473,17 @@ public:
     bool audio_rate_modulation_lane(const Connection& connection,
                                     state::ModulationLane& lane) const;
 
-    // Inject a MIDI buffer into a MidiInput source node. Call before
-    // process(); the events become that node's MIDI output this block.
-    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events);
+    // Inject a MIDI buffer into a MidiInput source node. Call before process();
+    // the latest published events become that node's MIDI output exactly once.
+    // Audio-callback-safe after prepare(): the mailbox is fixed-capacity and the
+    // call never allocates or locks. Exactly one thread may inject into a given
+    // MidiInput node; it may be the audio thread immediately before process(), or
+    // a control-side producer, but never concurrent writers. A false return means
+    // the live node is unavailable or the bounded mailbox retained only a prefix;
+    // that retained prefix is still published. A preserved MidiInput NodeId keeps
+    // its unconsumed publication across a gap-free prepare_swap().
+    bool inject_midi(NodeId midi_input_node,
+                     const midi::MidiBuffer& events) noexcept;
 
     // Inject sample-accurate parameter events into a Plugin node. Call before
     // process(); the latest published batch is consumed exactly once by that
@@ -486,8 +496,12 @@ public:
     bool inject_parameter_events(NodeId plugin_node,
                                  const state::ParameterEventQueue& events);
 
-    // Drain the MIDI events that arrived at a MidiOutput sink node during
-    // the last process() call. Appends to `out`.
+    // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
+    // order. Appends to `out`; returns false if bounded egress overflowed, a
+    // queued block was already incomplete, or `out` lacks capacity/UMP sidecar
+    // storage. A destination-copy failure retains the undelivered suffix;
+    // provide more storage and call again to resume without replaying the
+    // delivered prefix.
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
 
     // Disconnect
@@ -514,7 +528,9 @@ public:
         Staged,            // a replacement instance is staged for prepare_swap().
         NeedsEagerPrepare, // not reinit-free (or a latency change) — caller must
                            // call prepare() under the usual no-process/no-pump
-                           // contract; the live snapshot has been invalidated.
+                           // contract. Ordinary failures invalidate the live
+                           // snapshot; the MidiOutput pending-egress refusal keeps
+                           // it live for extraction until that eager prepare.
         NotInSwapEdit,     // prepare_swap called without a matching begin_swap_edit.
     };
     // Begin a transactional topology edit that MAY publish with no silence. Between
@@ -528,7 +544,9 @@ public:
     void begin_swap_edit();
     // Publish the staged topology with no silent block if it is reinit-free (same
     // instances, no re-init, unchanged latency, no per-snapshot state to glitch);
-    // otherwise invalidate + return NeedsEagerPrepare so the caller eager-prepares.
+    // otherwise return NeedsEagerPrepare so the caller eager-prepares. Ordinary
+    // refusals invalidate the live snapshot. The MidiOutput pending-egress refusal
+    // deliberately leaves it live so the caller can drain extract_midi() first.
     SwapResult prepare_swap(double sample_rate, int max_block_size);
     // Abandon the no-silence attempt: invalidate the live snapshot (the staged
     // edits remain in the graph and take effect on the next prepare()).
@@ -555,6 +573,13 @@ public:
     using PluginLoaderForTest =
         std::function<std::unique_ptr<PluginSlot>(const PluginInfo&)>;
     void set_live_swap_plugin_loader_for_test(PluginLoaderForTest loader);
+
+    // Test seam for the non-zero MIDI-ingress publication sequence. The value
+    // becomes the predecessor consumed by the next inject_midi() call.
+    bool seed_midi_input_sequence_for_test(NodeId midi_input_node,
+                                           std::uint64_t predecessor) noexcept;
+    std::uint64_t midi_input_sequence_for_test(
+        NodeId midi_input_node) const noexcept;
 
     // Prepare-time topology bounds. Hosts that accept generated or user-built
     // graphs can lower these before prepare() so oversized graphs fail before
@@ -682,6 +707,24 @@ public:
     }
     bool parallel_routing_enabled() const noexcept {
         return parallel_routing_enabled_.load(std::memory_order_relaxed);
+    }
+    // Publish the native device or AU render workgroup to the persistent
+    // parallel executor. Safe before prepare and on render-context changes.
+    void set_audio_workgroup(void* workgroup) noexcept override {
+        worker_pool_.set_audio_workgroup(workgroup);
+    }
+    void set_audio_workgroup_from_render_context(
+        void* workgroup) noexcept override {
+        worker_pool_.set_audio_workgroup_from_render_context(workgroup);
+    }
+    bool prepare_audio_workgroup_for_render() noexcept override {
+        return worker_pool_.prepare_audio_workgroup_for_render();
+    }
+    void wait_for_audio_workgroup_update() noexcept override {
+        worker_pool_.wait_for_audio_workgroup_update();
+    }
+    void* configured_audio_workgroup() const noexcept {
+        return worker_pool_.configured_audio_workgroup();
     }
     // Break-even threshold for the parallel executor. A level runs across the
     // worker pool only when its static work-weight x frame count reaches this
@@ -842,11 +885,16 @@ private:
     struct MidiBlockSnapshot {
         MidiBlockSnapshot();
         MidiBlockSnapshot(const MidiBlockSnapshot& other);
-        MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other);
+        MidiBlockSnapshot& operator=(const MidiBlockSnapshot& other) noexcept;
         bool set_from_midi(const midi::MidiBuffer& src,
                            uint64_t new_sequence,
-                           bool source_incomplete = false);
-        bool copy_to_midi(midi::MidiBuffer& dst) const;
+                           bool source_incomplete = false) noexcept;
+        bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
+        bool append_to_midi(midi::MidiBuffer& dst,
+                            std::size_t& event_index,
+                            std::size_t& sysex_index,
+                            std::size_t& ump_index) const noexcept;
+        bool has_payload() const noexcept;
 
         midi::MidiBuffer events;
         midi::UmpBuffer ump;
@@ -855,9 +903,28 @@ private:
     };
 
     struct MidiInputMailbox {
+        static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                      "MIDI ingress sequence atomics must be lock-free");
+
         runtime::TripleBuffer<MidiBlockSnapshot> published;
         MidiBlockSnapshot writer_scratch;
         std::atomic<uint64_t> next_sequence{0};
+        std::atomic<uint64_t> sequence_seen{0};
+    };
+
+    struct MidiOutputMailbox {
+        static constexpr std::size_t kBlockCapacity = 4;
+        static_assert(std::atomic<bool>::is_always_lock_free,
+                      "MIDI egress overflow state must be lock-free");
+
+        runtime::SpscQueue<MidiBlockSnapshot, kBlockCapacity> pending;
+        std::atomic<bool> incomplete{false};
+        MidiBlockSnapshot consumer_scratch;
+        bool consumer_has_retry = false;
+        bool consumer_incomplete = false;
+        std::size_t consumer_event_index = 0;
+        std::size_t consumer_sysex_index = 0;
+        std::size_t consumer_ump_index = 0;
     };
 
     struct ParameterBlockSnapshot {
@@ -933,18 +1000,21 @@ private:
         std::vector<uint32_t> sparse_automation_param_ids;
         std::vector<SparseAutomationAccum> sparse_automation_accum;
 
-        // MIDI scratch is audio-thread-owned. Control-thread ingress and
-        // egress use the mailboxes below so inject_midi()/extract_midi() do
-        // not race process() scratch mutation.
+        // MIDI scratch is audio-thread-owned. Single-writer ingress and
+        // control-thread egress use the mailboxes below so inject_midi()/
+        // extract_midi() do not race process() scratch mutation. The shared
+        // ingress mailbox preserves an unconsumed publication when a stable
+        // MidiInput node crosses a gap-free snapshot swap. Egress is an ordered
+        // bounded drain queue so later blocks cannot overwrite a pending
+        // note-off before the control thread extracts it.
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
         midi::UmpBuffer midi_in_ump;
         midi::UmpBuffer midi_out_ump;
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
-        std::unique_ptr<MidiInputMailbox> midi_input_mailbox;
-        std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
-        uint64_t midi_input_sequence_seen = 0;
+        std::shared_ptr<MidiInputMailbox> midi_input_mailbox;
+        std::unique_ptr<MidiOutputMailbox> midi_output_mailbox;
 
         // Control/audio-thread parameter-event ingress for Plugin nodes. The
         // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
@@ -1096,7 +1166,7 @@ private:
 
         // `pending_seq` is audio-thread scratch: the mailbox sequence a MidiInput
         // would consume this block, captured during the ingress pre-fill and
-        // committed to midi_input_sequence_seen only after the routed dispatch
+        // committed to the shared mailbox's sequence_seen only after routed dispatch
         // succeeds (so a fallback to the legacy walk re-consumes the same block).
         struct RoutedMidiNode { std::uint32_t plan_index; NodeId id; std::uint64_t pending_seq = 0; };
 
@@ -1509,9 +1579,12 @@ private:
     // Reinit-free-swap predicate (PRE-compile half). True iff a live topology
     // swap to the current nodes_/connections_ needs NO plugin/custom re-init and
     // carries no per-snapshot mutable state a fresh snapshot would glitch: same
-    // sr/block; unchanged custom registry; anticipation off both sides; no MIDI
-    // edge; no smoothed sparse-automation edge; identical node set + plugin/custom
-    // instance identity; every resolved plugin node has a cached-metadata entry.
+    // sr/block; unchanged custom registry; anticipation off both sides; no
+    // MidiOutput in either the candidate or live snapshot; no smoothed sparse-
+    // automation edge; identical node set + plugin/custom instance identity; every
+    // resolved plugin node has a cached-metadata entry. Ingress-only MIDI is
+    // eligible because a stable MidiInput shares its mailbox and consumed-sequence
+    // state across snapshots.
     // The latency-equality gate is checked POST-compile in prepare_swap(). Pure
     // const read; caller holds the mutation mutex.
     bool snapshot_is_plugin_reinit_free_locked_(const CompiledGraph& old_cg,

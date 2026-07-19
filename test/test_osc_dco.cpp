@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <numbers>
 #include <span>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;

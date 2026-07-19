@@ -212,7 +212,35 @@ public:
     void set_shadow_offset_x(float dx) override;
     void set_shadow_offset_y(float dy) override;
 
+    // ── Images ───────────────────────────────────────────────────────────
+    // CG has a real ImageIO decoder (cg_decode_image_from_path_or_data), so
+    // these verbs decode + CGContextDrawImage instead of leaving the base
+    // no-op that made ImageView render each image's FILENAME as placeholder
+    // text on the macOS CPU paint path (the "filename-placeholder trap").
+    bool supports_image_draw() const override { return true; }
+    bool draw_image_from_data(const uint8_t* data, size_t size,
+                              float x, float y, float w, float h) override;
+    bool draw_image_from_file(const std::string& path,
+                              float x, float y, float w, float h) override;
+    bool draw_image_from_data_rect(const uint8_t* data, size_t size,
+                                   float sx, float sy, float sw, float sh,
+                                   float dx, float dy, float dw, float dh) override;
+    bool draw_image_from_file_rect(const std::string& path,
+                                   float sx, float sy, float sw, float sh,
+                                   float dx, float dy, float dw, float dh) override;
+    bool measure_image_from_file(const std::string& path,
+                                 float& out_width, float& out_height) override;
+
 private:
+    // Draw a decoded CGImage into [dx,dy,dw,dh] (top-down canvas space),
+    // optionally cropping to the source rect [sx,sy,sw,sh] in image pixels
+    // first. Handles the counter-flip against the construction-time CTM flip
+    // so the bitmap paints right-side-up. Consumes (releases) `img`.
+    bool draw_cg_image_in_rect(CGImageRef img,
+                               bool has_src,
+                               float sx, float sy, float sw, float sh,
+                               float dx, float dy, float dw, float dh);
+
     CGContextRef ctx_;
     float width_, height_;
     int in_transparency_layer_ = 0;

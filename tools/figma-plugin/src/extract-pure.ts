@@ -132,6 +132,24 @@ export function mapAxisSize(v: FrameNode["layoutSizingHorizontal"]): ExtractedLa
   }
 }
 
+// Resize constraints, passed through in the Plugin API's own spelling
+// (MIN/MAX/CENTER/STRETCH/SCALE) — the C++ importer normalizes tokens, so a
+// mapping here would just be a second dialect to keep in sync. Not every
+// SceneNode type carries constraints (e.g. groups, slices), hence the
+// property-presence guard. Returns undefined rather than an empty object so
+// the serializer's truthy-passthrough never emits `constraints: {}`.
+export function extractConstraints(
+  node: SceneNode,
+): { horizontal?: string; vertical?: string } | undefined {
+  if (!("constraints" in node)) return undefined;
+  const c = (node as SceneNode & { constraints?: Constraints }).constraints;
+  if (!c) return undefined;
+  const out: { horizontal?: string; vertical?: string } = {};
+  if (typeof c.horizontal === "string") out.horizontal = c.horizontal;
+  if (typeof c.vertical === "string") out.vertical = c.vertical;
+  return out.horizontal || out.vertical ? out : undefined;
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Library recognition fallback — name-based heuristic when the
 // component_set_key match doesn't hit (e.g. unpublished local

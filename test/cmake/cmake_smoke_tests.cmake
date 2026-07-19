@@ -6,6 +6,17 @@
 # Local self-hosted runners can exceed that during cache churn, so leave
 # enough headroom for the Xcode configure to finish instead of racing CTest.
 if(APPLE AND NOT PULP_IOS)
+    # Fast compile-only coverage for the iOS-exclusive translation units. The
+    # full AUv3 configure/build smokes below stay `slow`; this gate runs in the
+    # ordinary PR lane and catches iOS-only source breakage without linking.
+    add_test(NAME cmake-ios-source-syntax
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_source_syntax.sh
+                ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
+    set_tests_properties(cmake-ios-source-syntax PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "cmake;ios;compile"
+        TIMEOUT 180)
+
     add_test(NAME cmake-ios-auv3-configure
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_ios_auv3_configure.sh
                 ${CMAKE_SOURCE_DIR})

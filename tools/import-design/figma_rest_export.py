@@ -726,6 +726,21 @@ def walk(n, parent, z, ctx, inside_widget=False):
     layout = {k: v for k, v in layout.items() if v is not None}
     if style: out["style"] = style
     if layout: out["layout"] = layout
+    # Resize constraints, in the REST API's spelling (LEFT/RIGHT/CENTER/
+    # LEFT_RIGHT/SCALE, TOP/BOTTOM/CENTER/TOP_BOTTOM/SCALE) — passed through
+    # untranslated; design_ir_json.cpp normalizes and codegen lowers to flex.
+    # Same gate as absolute positioning above (plus the layoutPositioning
+    # opt-out): constraints govern a node placed in its parent's coordinate
+    # space, while a FLOWING auto-layout child is sized by the stack and stale
+    # constraints would fight that layout with margins/grow.
+    if parent is not None and (not is_auto_layout(parent)
+                               or n.get("layoutPositioning") == "ABSOLUTE"):
+        c = n.get("constraints")
+        if isinstance(c, dict):
+            cons = {k: c[k] for k in ("horizontal", "vertical")
+                    if isinstance(c.get(k), str)}
+            if cons:
+                out["constraints"] = cons
     out["figma"] = {"parent_id": parent.get("id") if parent else None, "z_order": z,
                     "visible": n.get("visible", True), "locked": n.get("locked", False),
                     "blend_mode": n.get("blendMode", "PASS_THROUGH")}

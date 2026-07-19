@@ -83,6 +83,13 @@ void add_unique_sample_rate(std::vector<double>& rates, double rate) {
 
 // ── CoreAudioDevice ────────────────────────────────────────────────────────
 
+#if defined(__APPLE__)
+void CoreAudioWorkgroupReference::release_os_workgroup(
+    os_workgroup_t value) noexcept {
+    os_release(value);
+}
+#endif
+
 CoreAudioDevice::CoreAudioDevice(AudioDeviceID device_id)
     : device_id_(device_id)
 {
@@ -95,7 +102,12 @@ CoreAudioDevice::~CoreAudioDevice() {
 
 void CoreAudioDevice::query_callback_workgroup() {
 #if defined(__APPLE__)
-    workgroup_ = nullptr;
+    // The kAudioDevicePropertyIOThreadOSWorkgroup contract returns a retained
+    // object to the caller. Every successful query therefore contributes
+    // exactly one reference. Callers only invoke this after the old callback
+    // and every auxiliary client has left, so replacement can release the
+    // previous query reference here without racing a join token.
+    workgroup_reference_.reset();
     if (__builtin_available(macOS 13.0, iOS 16.0, *)) {
         AudioObjectPropertyAddress prop{};
         prop.mSelector = kIOThreadWorkgroupSelector;
@@ -107,7 +119,7 @@ void CoreAudioDevice::query_callback_workgroup() {
         OSStatus status = AudioObjectGetPropertyData(
             device_id_, &prop, 0, nullptr, &size, &wg);
         if (status == noErr && wg != nullptr) {
-            workgroup_ = wg;
+            workgroup_reference_.adopt(wg);
             runtime::log_info(
                 "CoreAudio: extracted IO-thread workgroup for device {}",
                 static_cast<unsigned>(device_id_));
@@ -124,6 +136,7 @@ void CoreAudioDevice::query_callback_workgroup() {
 }
 
 bool CoreAudioDevice::open(const DeviceConfig& config) {
+    workgroup_changes_quiesced_ = false;
     config_ = config;
     // AUHAL bus 0 is output, bus 1 is input. An input-only open (input channels
     // requested, output channels zero) must disable output IO and drive the unit
@@ -421,14 +434,10 @@ bool CoreAudioDevice::open(const DeviceConfig& config) {
         return false;
     }
 
-    // Query the IO-thread workgroup and arm wg_join_ before the callback
-    // starts firing. First callback entry joins on the audio thread.
+    // Query and retain the IO-thread workgroup before callbacks start firing.
+    // The CoreAudio I/O thread is already a member; the cached reference is
+    // published only to auxiliary clients and remains valid until they drain.
     query_callback_workgroup();
-#if defined(__APPLE__)
-    if (workgroup_) {
-        wg_join_.set_workgroup(workgroup_);
-    }
-#endif
 
     // Install a device-overload listener so we can count xruns. The
     // notification fires on a CoreAudio thread; we only increment an
@@ -485,7 +494,24 @@ void CoreAudioDevice::switch_to_default_output() {
     if (new_default == kAudioObjectUnknown || new_default == device_id_) return;
 
     const bool was_running = is_running_;
-    if (was_running) AudioOutputUnitStop(audio_unit_);
+    if (was_running) {
+        const OSStatus stop_status = AudioOutputUnitStop(audio_unit_);
+        if (!coreaudio_stop_allows_device_switch(stop_status)) {
+            // Without a proven callback drain we cannot publish removal,
+            // release the old query reference, or retarget CurrentDevice.
+            runtime::log_warn(
+                "CoreAudio: default-output switch could not stop old device ({})",
+                static_cast<int>(stop_status));
+            return;
+        }
+        fallback_priority_configured_.store(false, std::memory_order_release);
+    }
+
+    // The old device owns its callback workgroup. Stop rendering, make every
+    // auxiliary worker leave it, and wait for that acknowledgment before
+    // CurrentDevice can invalidate the borrowed handle.
+    if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+
     OSStatus st = AudioUnitSetProperty(audio_unit_,
         kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
         &new_default, sizeof(new_default));
@@ -497,7 +523,51 @@ void CoreAudioDevice::switch_to_default_output() {
         runtime::log_warn("CoreAudio: could not follow to new default output ({})",
             static_cast<int>(st));
     }
-    if (was_running) AudioOutputUnitStart(audio_unit_);
+
+    // Re-query even on a failed switch: device_id_ still names the old device,
+    // whose workgroup was deliberately removed above. Arm both the callback
+    // thread and auxiliary clients before rendering resumes.
+    query_callback_workgroup();
+    if (workgroup_change_callback_) {
+        workgroup_change_callback_(
+            reinterpret_cast<void*>(workgroup_reference_.get()));
+    }
+    if (was_running) {
+        const OSStatus start_status = AudioOutputUnitStart(audio_unit_);
+        if (!update_coreaudio_running_after_restart(start_status, is_running_)) {
+            // The replacement unit never entered its callback lifetime. Drain
+            // auxiliary workers from the workgroup published before start so
+            // public running state and scheduling membership stay coherent.
+            fallback_priority_configured_.store(false, std::memory_order_release);
+            if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+            callback_ = nullptr;
+            runtime::log_warn(
+                "CoreAudio: default-output switch could not restart ({})",
+                static_cast<int>(start_status));
+        }
+    }
+}
+
+void CoreAudioDevice::set_workgroup_change_callback(
+    WorkgroupChangeCallback callback) {
+    std::lock_guard<std::mutex> lock(switch_mutex_);
+    if (!workgroup_changes_quiesced_) {
+        workgroup_change_callback_ = std::move(callback);
+        if (workgroup_change_callback_) {
+            workgroup_change_callback_(
+                reinterpret_cast<void*>(workgroup_reference_.get()));
+        }
+    } else if (callback) {
+        callback(nullptr);
+    }
+}
+
+void* CoreAudioDevice::callback_workgroup() const {
+    // Compatibility snapshot for direct callers. Production binding uses the
+    // transactional callback API above. Mutable serialization is required
+    // because a live default-device switch replaces this retained reference.
+    std::lock_guard<std::mutex> lock(switch_mutex_);
+    return reinterpret_cast<void*>(workgroup_reference_.get());
 }
 
 OSStatus CoreAudioDevice::default_output_changed_listener(
@@ -506,9 +576,11 @@ OSStatus CoreAudioDevice::default_output_changed_listener(
     return noErr;
 }
 
-void CoreAudioDevice::close() {
+void CoreAudioDevice::quiesce_workgroup_changes() {
     // Stop new default-change callbacks from firing, then take switch_mutex_ so any
-    // in-flight switch_to_default_output() finishes before we dispose the unit.
+    // in-flight switch_to_default_output() finishes. That switch may have rebound
+    // a replacement workgroup after an earlier external drain, so publish null
+    // once more while holding the serialization boundary before close can proceed.
     if (default_output_listener_installed_) {
         AudioObjectPropertyAddress def_prop{};
         def_prop.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
@@ -518,6 +590,16 @@ void CoreAudioDevice::close() {
             kAudioObjectSystemObject, &def_prop, default_output_changed_listener, this);
         default_output_listener_installed_ = false;
     }
+    std::lock_guard<std::mutex> switch_lock(switch_mutex_);
+    workgroup_changes_quiesced_ = true;
+    if (workgroup_change_callback_) workgroup_change_callback_(nullptr);
+    workgroup_change_callback_ = nullptr;
+}
+
+void CoreAudioDevice::close() {
+    // Direct device users receive the same borrowed-handle guarantee as the
+    // standalone helper. This is idempotent when the helper already quiesced it.
+    quiesce_workgroup_changes();
     std::lock_guard<std::mutex> switch_lock(switch_mutex_);
 
     // Tear the callback path down first. AudioUnitUninitialize blocks
@@ -538,14 +620,13 @@ void CoreAudioDevice::close() {
         AudioComponentInstanceDispose(audio_unit_);
         audio_unit_ = nullptr;
     }
-    // Leave the workgroup (no-op if never joined). After
-    // AudioUnitUninitialize returns no callback can still be in
-    // flight, so this is race-free.
-    wg_join_.leave();
-    wg_joined_.store(false, std::memory_order_relaxed);
 #if defined(__APPLE__)
-    workgroup_ = nullptr;
+    // AudioUnitUninitialize has drained every callback, and quiesce plus the
+    // external AudioWorkgroupClient barrier drained auxiliary workers. The
+    // device's caller-owned property reference is now the final local owner.
+    workgroup_reference_.reset();
 #endif
+    fallback_priority_configured_.store(false, std::memory_order_relaxed);
     if (input_buffer_list_) {
         std::free(input_buffer_list_);
         input_buffer_list_ = nullptr;
@@ -561,6 +642,9 @@ bool CoreAudioDevice::start(AudioCallback callback) {
     if (!is_open_) return false;
     callback_ = std::move(callback);
     sample_position_ = 0;
+    // AudioOutputUnitStart may select a different callback thread from a prior
+    // lifetime. Let that thread establish its own fallback priority.
+    fallback_priority_configured_.store(false, std::memory_order_release);
 
     auto status = AudioOutputUnitStart(audio_unit_);
     if (status != noErr) {
@@ -579,7 +663,10 @@ void CoreAudioDevice::stop() {
         // AudioOutputUnitStop blocks until the I/O thread observes
         // the stop request. Subsequent callbacks observe
         // `is_running_ == false` and bail before invoking `callback_`.
-        AudioOutputUnitStop(audio_unit_);
+        if (AudioOutputUnitStop(audio_unit_) == noErr) {
+            fallback_priority_configured_.store(false,
+                                                std::memory_order_release);
+        }
     }
     is_running_ = false;
     callback_ = nullptr;
@@ -599,24 +686,24 @@ OSStatus CoreAudioDevice::render_callback(
 {
     auto* self = static_cast<CoreAudioDevice*>(inRefCon);
 
-    // First-entry: join the audio device's workgroup on the render
-    // thread. acquire/release on `wg_joined_` keeps the join visible
-    // to subsequent renders without a CAS hot path. The boolean also
-    // means join is at most once per render thread.
-    if (!self->wg_joined_.load(std::memory_order_acquire)) {
-        // join_from_audio_thread() returns immediately if there's no
-        // workgroup set; it falls back to Mach realtime priority in
-        // that case so the thread is still RT-tagged.
-        //
-        // Only flip `wg_joined_` when the join (or fallback RT-priority
-        // bump) actually succeeded. The previous unconditional store
-        // permanently disabled all future join attempts after the first
-        // transient failure (e.g. workgroup setup hadn't completed yet
-        // on the first render), so the audio thread could run the entire
-        // session without workgroup membership or any RT priority bump.
-        if (self->wg_join_.join_from_audio_thread()) {
-            self->wg_joined_.store(true, std::memory_order_release);
-        }
+    // Do not join the callback to callback_workgroup(): Apple's property is the
+    // workgroup the device I/O thread already belongs to. Joining it again
+    // creates an unnecessary token whose only legal owner/consumer is this
+    // callback thread and makes stop/switch cleanup impossible to prove. The
+    // retained property handle exists solely for auxiliary render workers.
+#if defined(__APPLE__)
+    if (!self->workgroup_reference_.get())
+#endif
+    {
+        // A priority policy is thread state rather than workgroup membership;
+        // configure it once instead of repeating the Mach call every block.
+        // Publish success only. A transient failure is retried on the next
+        // callback, and stop/start or a successful device switch resets this
+        // per-callback-thread lifetime state.
+        (void)configure_coreaudio_fallback_priority_once(
+            self->fallback_priority_configured_, [] {
+                return AudioWorkgroup::set_realtime_priority();
+            });
     }
 
     // An input-only unit is driven by an input callback: ioData is null (there is

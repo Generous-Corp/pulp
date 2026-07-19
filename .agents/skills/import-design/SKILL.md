@@ -310,6 +310,53 @@ commit stayed green on bare-metal). If you touch `make_synthetic_fig.mjs`,
 regenerate the fixture from the canonical toolchain, but keep the comparison at
 the decoded layer.
 
+**Gotcha - old-style instance swap lives in `overriddenSymbolID`, not
+componentPropAssignments.** A file that predates component properties swaps a
+nested instance's component with a `symbolOverrides` entry carrying
+`overriddenSymbolID` — there are no `componentPropAssignments` /
+`componentPropertyReferences` anywhere, so searching for the modern swap
+machinery concludes "no swap" while every channel's icon IS swapped.
+`expandInstance` (scene.mjs) honors the field: applyOverrideEntry's generic
+copy lands it on the clone, and the expansion re-points at that master when it
+resolves in-file (falling back to the authored `symbolData.symbolID` plus an
+`external-component` diagnostic when it doesn't). Deeper override paths keep
+resolving after the swap because the swap target's children carry the matching
+`overrideKey`s. Symptom when broken: N siblings render identical component
+content under N correct per-instance text overrides (sixteen mixer channels,
+one kick-drum icon).
+
+**Gotcha - Figma "Clip content" is `frameMaskDisabled` (inverted), and groups
+never clip.** The `.fig` decoder emits `style.overflow = 'clip'` for a
+FRAME/SYMBOL/INSTANCE with `frameMaskDisabled: false` unless the node is a
+GROUP (`resizeToFit: true` — groups store the flag but ignore it). The REST
+lane's equivalent is `clipsContent → overflow`. The native JS codegen lowers a
+non-default `style.overflow` to `setOverflow(id, 'clip')` (bridge maps clip →
+`View::Overflow::hidden`); `visible` is the View default and is deliberately
+not emitted. This matters for expanded instances: a master whose decoration
+overhangs its symbol bounds renders clipped in Figma, so an unclipped import
+paints the overhang over whatever sits below the instance (a channel strip's
+noise card ran 19px past its 235px symbol and buried the transport's step row).
+
+**Gotcha - a `mask: true` child paints NOWHERE; materializing it as content
+occludes everything painted after it.** Figma's mask layer clips the siblings
+painted ABOVE it in the same parent and never renders its own fill. The `.fig`
+decoder lowers this by moving the masked siblings into a synthetic
+`<mask name> (mask scope)` wrapper (spans the parent, `audio_widget: 'none'`,
+node_id `<maskKey>/mask-scope`) whose `style.clip_path = path("<d>")` carries
+the mask outline in PARENT space — `geometryToClipPath` (paths.mjs) skips the
+0,0-viewBox normalization `geometryToPath` does because a CSS clip-path is
+consumed in the clipped view's border-box space, and box-model masks
+(rect/ellipse, no geometry blobs) get a synthesized outline. The chain
+downstream already existed end-to-end (`parse_ir_style('clipPath')` →
+codegen `setClipPath` → `SkPath::FromSVGString` clip); only the extractor
+never emitted it. Siblings BELOW the mask stay outside the wrapper (Figma's
+scope), soft/image alpha masks and auto-layout parents degrade with a
+`mask-approximated` warning — but the mask itself is never painted, in any
+branch. Symptom when broken: a "gray" element whose accent color is right
+there in the data — the selected mixer channel's red tab read gray because the
+master's opaque `Bg PAnel` mask (invisible in Figma) painted over it, and
+every channel body sat one gray lighter than the design.
+
 **Gotcha - a Figma slider stores a value-driven fill position that can detach
 from the thumb.** A slider component (track + progress fill + round thumb) keeps
 the fill's x/width per-instance; Figma's LIVE component render recomputes the
@@ -365,6 +412,59 @@ fallback, verify with a real fixture: import
 drops (the `<script>` label is gone) while the visible `<div>` text survives.
 Note this is the LOSSY fallback — a JSON-IR or runtime-DOM claude/stitch input
 never reaches it; it fires only on raw non-JSON HTML.
+
+**Gotcha - `.fig` layer rotation was dropped, so a rotated needle rendered as an
+axis-aligned stub.** `scene.mjs`'s `styleFor` took only the translation column
+(`m02`/`m12`) of a node's affine transform and threw away the rotation
+(`m00/m01/m10/m11`). A knob's value needle — a thin ROUNDED_RECTANGLE rotated to
+the value angle — then imported as a vertical bar floating off-centre instead of
+a radial pointer (reported on TRIAZ "Rnd Pan"). The fix extracts
+`atan2(m10, m00)`, emits `transform: rotate(<deg>deg)`, and **compensates
+left/top for the renderer's centre transform-origin** (Figma rotates about the
+layer origin; the view rotates about centre) — so NO `setTransformOrigin` is
+emitted and CSS-lane `rotate()` (which is also centre-pivot) stays correct. The
+native codegen lowers `transform: rotate()` to `setRotation` in the shared
+`emit_js_visual_overrides`. TWO scope guards, both load-bearing:
+1. **Non-orthogonal only.** Apply the transform ONLY when the angle is not a
+   multiple of 90deg (`mod90 > 0.5 && mod90 < 89.5`). A multiple of 90deg keeps a
+   rect axis-aligned, and for a solid fill a 180deg spin is a visual no-op — the
+   centre-pivot compensation then only shifts the box off its row. That exact
+   case floated a slider's 180deg-rotated progress fill ABOVE its track (a
+   regression from the first cut of this fix). Orthogonal rotations fall through
+   to plain `m02`/`m12` placement.
+2. **Box-model only.** A `VECTOR_LIKE` node bakes its rotation into `path_data`,
+   so re-applying it double-rotates the glyph (guard `!VECTOR_LIKE.has(node.type)`;
+   verify a rotated icon like the "Reverse" ↩ button is byte-identical
+   before/after).
+Covered by `[rotation]` in `test_design_import_codegen.cpp` + a decoder test in
+`fig/fig.test.mjs` (45deg needle rotates; VECTOR and 180deg fill do not).
+
+**Gotcha - a "label" token names the caption, not the control.**
+`detect_audio_widget` (`design_import.cpp`) whole-token-matches "knob"/"fader"/…
+to promote a node to a built-in widget. A node named `sound / knob label`
+tokenizes to {sound, knob, label} and matched "knob", so the caption FRAME
+promoted to a knob and painted a stock knob disc over its text (a "Classic"
+filter-mode caption imported as a dark knob). The recognizer now returns `none`
+whenever the name carries a `label` token — the caption is text; the real
+control (`sound / knob / small unipolar`, no `label`) keeps its recognition.
+This is the same "the layer name IS the art, not a control" rule as the
+knob-art-layer suppression, one level up. Verified: `createKnob` count on a real
+`.fig` dropped from 6 (all captions) to 0 while every art-layer knob still
+rendered. Covered in `detect_audio_widget` tests.
+
+**Gotcha - a stroke-band vector must not ALSO carry a CSS border.** Figma stores
+a stroke as an already-expanded fillable band (`strokeGeometry`); `geometryToPath`
+resolves it and `scene.mjs` paints it as a FILL in the stroke color (re-stroking
+it would outline the outline). But the generic stroke→`border` lowering
+(`strokePaints` + `strokeWeight` → `style.border`) then fired on that same node,
+so codegen filled the band AND stroked it — two parallel lines where the design
+has one (a triad-pad triangle and every stroked ring rendered doubled/too-thick;
+the button rings even read as dark filled discs). The fix tracks
+`vectorStrokeBand = resolved.paint === 'stroke'` and skips the border for those
+nodes only; a real filled vector with a separate stroke (`paint === 'fill'`)
+keeps its border. Covered by a materialize-level test in `fig/paths.test.mjs`
+(stroke band → no border; fill+stroke → border). One general fix cleared the
+triangle weight AND the transport △○□ button rings at once.
 
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
@@ -1297,6 +1397,26 @@ lower to flex at codegen. Facts / gotchas:
   follow-up. `compat.json features.constraints` tracks this (parsed handled,
   codegen partial); `features` rows are documented-only (not probed by the
   `[object-coverage]` drift guard). Tests: `[view][import][constraints]`.
+- **Producers** (all three Figma lanes emit the shared node-level shape,
+  passing their OWN raw spelling through untranslated — the parser owns
+  normalization, so never add a translation table in a producer):
+  - `.fig` (`fig/scene.mjs`): raw kiwi `horizontalConstraint` /
+    `verticalConstraint` (`MIN/MAX/CENTER/STRETCH/SCALE`), possibly one axis
+    only.
+  - plugin (`figma-plugin/src/extract-pure.ts::extractConstraints` →
+    `serialize.ts`): Plugin-API `node.constraints` (same spelling); guarded
+    with a property check — GROUP/SLICE have no `constraints` member. The
+    export schema enum rejects REST spellings by design (drift guard).
+  - REST (`figma_rest_export.py::walk`): REST `constraints`
+    (`LEFT/RIGHT/CENTER/LEFT_RIGHT/SCALE`, `TOP/BOTTOM/CENTER/TOP_BOTTOM/SCALE`).
+- **Auto-layout gate**: all three producers emit constraints only for a node
+  positioned in its parent's coordinate space — the same gate as absolute
+  positioning (parent not auto-layout, OR the child opted out via
+  `stackPositioning`/`layoutPositioning` `ABSOLUTE`). A FLOWING auto-layout
+  child is sized by the stack; its stale constraints would fight the flex pass
+  with margins/grow the design never asked for. Constraints are a no-op at
+  design size (verified pixel-identical on a 1299-node real file) — they only
+  change resize behavior.
 
 ### Grid containers → native grid bridge (NOT Yoga grid)
 
@@ -3933,3 +4053,22 @@ place, rather than surfacing later as one target's fidelity drift.
 
 `design_ir_helpers.hpp` is private to `core/view/src/` and is not part of the installed SDK
 surface — do not reference it from a public header.
+
+## Importer accommodations are opt-in, not universal
+
+Two point-in-time import fixes used to run in the core paint / hit paths for
+*every* tree. They are now CSS-faithful by default and the materializer opts in
+only where the accommodation is wanted — so imports keep their behavior while
+native/authored trees clip strictly per CSS and pay nothing for the scan:
+
+- **Circle-marker clip tolerance** (`View::set_clip_marker_tolerance()`, default
+  OFF). Expands an `overflow:hidden`/`scroll` container's clip so an
+  XY-pad-style value dot sitting at an edge value is not cropped. The native
+  materializer turns it on for the clipping containers it materializes; the
+  per-frame `O(children)` marker scan only runs when it is on. If an imported
+  circular marker is being clipped, verify the container actually got
+  `set_clip_marker_tolerance(true)` — a hand-built tree will not have it.
+- **ScrollView `overflow:visible` hit inflation** — the old hard-coded ±500px
+  hit expansion is gone; the hit area now follows the real overflow geometry.
+  A tree relying on the old blanket inflation for off-bounds hit-testing must
+  size its interactive children honestly instead.

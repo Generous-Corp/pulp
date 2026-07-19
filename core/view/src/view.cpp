@@ -194,14 +194,19 @@ View::View()
 View::~View() {
     if (gesture_arbiter_)
         gesture_arbiter_->reset();
-    // Clear the overlay slot if this dying View holds it. Without this, an
-    // unmounted React popover leaves a dangling pointer that the platform
-    // window host would dereference on the next click.
+    // Clear the overlay + focus slots if this dying View holds them. Without
+    // this, an unmounted React popover / focused widget leaves a dangling
+    // pointer that the platform window host would dereference on the next click
+    // or keypress (crash via dynamic_cast<TextEditor*> on freed memory in
+    // -[PulpView focusedTextEditor]). Clear BOTH the root-owned slot (S11) and
+    // the process-global shim mirror. Uses existing_interaction() so a tree that
+    // never allocated a state block is not forced to allocate one during
+    // teardown. (~ComboBox does the same for active_popup.)
+    if (RootInteractionState* s = existing_interaction()) {
+        if (s->focused_input == this) s->focused_input = nullptr;
+        if (s->active_overlay == this) s->active_overlay = nullptr;
+    }
     if (active_overlay_ == this) active_overlay_ = nullptr;
-    // Clear the input-focus slot if this dying View holds it. Without this, a
-    // React unmount of the focused widget leaves the platform host's
-    // focused-view pointer dangling; the next keypress crashes via dynamic_cast
-    // on freed memory in -[PulpView focusedTextEditor].
     if (focused_input_ == this) focused_input_ = nullptr;
     // Cancel any running animate() tweens so their FrameClock callbacks (which
     // capture `this`) can't fire after this View is gone.
@@ -503,8 +508,14 @@ void View::paint_all(canvas::Canvas& canvas) {
         // bounds with border-radius >= 40% of the smaller dimension) and expand
         // the clip rect just enough to admit them. Non-marker children still
         // clip normally because they don't match the circle heuristic.
+        //
+        // This is an import-only accommodation, so the heuristic — and its
+        // O(children) per-frame scan — runs only when a container opted in via
+        // set_clip_marker_tolerance(). Native/authored trees keep the strict CSS
+        // `overflow:hidden` clip and pay nothing for a feature they don't use.
         float marker_pad = 0.0f;
-        for (const auto& child : children_) {
+        if (clip_marker_tolerance_) {
+          for (const auto& child : children_) {
             if (!child || !child->visible_) continue;
             if (child->position_ != Position::absolute) continue;
             const auto& cb = child->bounds_;
@@ -524,11 +535,44 @@ void View::paint_all(canvas::Canvas& canvas) {
             const float top_over    = std::max(0.0f, -cb.y);
             marker_pad = std::max({marker_pad, right_over, bottom_over,
                                               left_over, top_over});
+          }
         }
+        const float clip_w = bounds_.width, clip_h = bounds_.height;
+        // A uniform radius (setCornerRadius "All" -> set_border_radius) lives in
+        // corner_radius_, read by effective_corner_radius; the per-corner setters
+        // fill corner_radii_[]. The rounded clip has to honour BOTH, else a card
+        // rounded via the common uniform path clips square. Take the larger of
+        // each per-corner value and the uniform base, matching how a background
+        // painted with either path rounds.
+        const float uni_r = effective_corner_radius(clip_w, clip_h);
+        float ctl = std::max(effective_corner_radius_tl(clip_w, clip_h), uni_r);
+        float ctr = std::max(effective_corner_radius_tr(clip_w, clip_h), uni_r);
+        float cbl = std::max(effective_corner_radius_bl(clip_w, clip_h), uni_r);
+        float cbr = std::max(effective_corner_radius_br(clip_w, clip_h), uni_r);
+        const bool rounded_clip =
+            marker_pad <= 0.0f &&
+            (ctl > 0.5f || ctr > 0.5f || cbl > 0.5f || cbr > 0.5f);
         if (marker_pad > 0.0f) {
             canvas.clip_rect(-marker_pad, -marker_pad,
                              bounds_.width  + 2.0f * marker_pad,
                              bounds_.height + 2.0f * marker_pad);
+        } else if (rounded_clip) {
+            // A rounded frame must clip to its ROUNDED box, not a square: CSS
+            // overflow:hidden with border-radius clips to the rounded border box,
+            // so a square clip saws the corners off (an imported card lost its
+            // rounded top and bottom once it opted into clip). Clip to the same
+            // rounded rect the background paints. Each radius is clamped to half
+            // the shorter side so a large radius cannot self-cross the path.
+            const float m = 0.5f * std::min(clip_w, clip_h);
+            ctl = std::min(ctl, m); ctr = std::min(ctr, m);
+            cbl = std::min(cbl, m); cbr = std::min(cbr, m);
+            std::ostringstream d;
+            d << "M " << ctl << " 0"
+              << " H " << (clip_w - ctr) << " A " << ctr << " " << ctr << " 0 0 1 " << clip_w << " " << ctr
+              << " V " << (clip_h - cbr) << " A " << cbr << " " << cbr << " 0 0 1 " << (clip_w - cbr) << " " << clip_h
+              << " H " << cbl << " A " << cbl << " " << cbl << " 0 0 1 0 " << (clip_h - cbl)
+              << " V " << ctl << " A " << ctl << " " << ctl << " 0 0 1 " << ctl << " 0 Z";
+            canvas.clip_path_svg(d.str());
         } else {
             canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
         }
@@ -768,6 +812,21 @@ void View::paint_all(canvas::Canvas& canvas) {
         // Intentionally empty: TextEditor handles its own focus border, so
         // skip the generic ring.
     }
+
+    // Effect overlay — painted on TOP of the subtree but INSIDE the effect's
+    // compositing layer(s), so it composites as part of the effect (e.g. a
+    // vignette's radial-gradient edge darkening). Only meaningful when the
+    // effect actually pushed a layer.
+    //
+    // LIMITATION (revisit when overlays-in-chains matter): this draws into the
+    // INNERMOST (top) still-open layer — correct for the single-effect path
+    // (the only non-chain path today). In a multi-effect EffectChain like
+    // [vignette, blur], the layers stack vignette→blur, so the vignette's
+    // overlay would draw into the blur layer and get blurred. Wiring an overlay
+    // to composite into a SPECIFIC effect's layer (pop-interleaved with the
+    // overlay draws) is the fix if/when that combination is needed.
+    if (effect_ && layers_pushed > 0)
+        effect_->paint_overlay(canvas, 0, 0, bounds_.width, bounds_.height);
 
     // End compositing layer(s) — each restore pops one saveLayer, compositing
     // the subtree back through that layer's filter / opacity. An EffectChain
@@ -1279,9 +1338,30 @@ View* View::hit_test(Point local_point) {
 
 // ── Overlay paint queue ──────────────────────────────────────────────────────
 
+namespace {
+// True when `v` is not part of a multi-node tree and therefore has no root of
+// its own to own the interaction state. Such a widget shares the process-global
+// fallback with every other detached widget (see interaction() below).
+bool is_detached_widget(const View* v) {
+    return v->parent() == nullptr && v->child_count() == 0;
+}
+
+// The single process-global fallback interaction block — used by detached
+// widgets and, for the overlay paint queue, by legacy `overlay_queue()` callers.
+View::RootInteractionState& fallback_interaction() {
+    static View::RootInteractionState state;
+    return state;
+}
+} // namespace
+
 std::vector<View::OverlayRequest>& View::overlay_queue() {
-    static std::vector<OverlayRequest> queue;
-    return queue;
+    // Legacy process-global entry point. Now backed by the fallback interaction
+    // block so a detached widget that enqueues via interaction().overlay_queue
+    // and a legacy overlay_queue() caller share ONE queue. Root-aware code
+    // (parented ComboBox paint, the standalone inspector idle) enqueues onto the
+    // owning root's queue via interaction() instead; paint_overlays drains the
+    // painting root's queue.
+    return fallback_interaction().overlay_queue;
 }
 
 // Inspector hooks — set by the inspector module via function pointers
@@ -1344,15 +1424,20 @@ View* View::focused_input_ = nullptr;
 // replacement popover doesn't immediately get nulled out by our subsequent
 // clear.
 void View::dismiss_active_overlay() {
+    // Static entry point (ESC / outside-click) has no root in hand, so it acts
+    // on the process-global shim mirror: the most-recently-claimed overlay. Clear
+    // BOTH the mirror and the victim's root-owned slot (S11) BEFORE the callback,
+    // so a replacement popover the callback claims survives our clears.
     View* victim = active_overlay_;
     if (!victim) return;
     active_overlay_ = nullptr;
+    if (RootInteractionState* s = victim->existing_interaction();
+        s && s->active_overlay == victim)
+        s->active_overlay = nullptr;
     if (victim->on_overlay_dismissed) {
         victim->on_overlay_dismissed();
     }
 }
-
-namespace {
 
 // Recursively expand a child's painted-bounds contribution
 // up through any `overflow:visible` descendants. Returns the bounding
@@ -1362,7 +1447,8 @@ namespace {
 //
 // `parent_abs_x` / `parent_abs_y` are the absolute window-coord origin
 // of `v->parent()`. The function consumes those, applies `v`'s own
-// `bounds().x/y`, and recurses.
+// `bounds().x/y`, and recurses. Declared in view.hpp so ScrollView::hit_test
+// (a separate TU) can share the exact same extent math.
 void accumulate_overflow_extent(const View* v,
                                 float parent_abs_x,
                                 float parent_abs_y,
@@ -1387,8 +1473,6 @@ void accumulate_overflow_extent(const View* v,
                                    min_x, min_y, max_x, max_y);
     }
 }
-
-}  // namespace
 
 bool View::overlay_contains(Point window_pt) const {
     // Walk up to compute absolute origin in window/root coords. Same
@@ -1434,7 +1518,14 @@ bool View::overlay_contains(Point window_pt) const {
 }
 
 void View::paint_overlays(canvas::Canvas& canvas, View* painting_root) {
-    auto& queue = overlay_queue();
+    // Drain the queue owned by the root being painted (S11): a parented
+    // ComboBox enqueues its dropdown onto its own root's queue, so a second
+    // hosted editor's paint pass never draws editor A's overlays. When the root
+    // is unknown (nullptr — legacy/headless callers) fall back to the shared
+    // process-global queue. `overlay_queue()` is that same fallback block, so a
+    // detached widget's enqueue is drained here too.
+    auto& queue = painting_root ? painting_root->interaction().overlay_queue
+                                : overlay_queue();
     for (auto& req : queue) {
         if (req.paint_fn) req.paint_fn(canvas);
     }
@@ -1505,6 +1596,60 @@ bool View::drag_active() const {
     const View* root = this;
     while (root->parent_ != nullptr) root = root->parent_;
     return root->active_drag_ != nullptr && root->active_drag_->active;
+}
+
+// ── Per-root interaction state (S11) ─────────────────────────────────────────
+//
+// See the RootInteractionState comment in view.hpp. The state lives on the tree
+// root (like `active_drag_`) so two hosted editors never share focus / overlay /
+// popup slots. A DETACHED widget — one with no parent AND no children, so it is
+// not part of any tree that could own the state — resolves to a single
+// process-global fallback. That fallback preserves the pre-S11 single-focus /
+// single-popup behavior for unhosted widgets and is what the headless
+// characterization smoke (unparented widgets) observes through the shim mirrors.
+// (is_detached_widget / fallback_interaction are defined above, next to
+// overlay_queue() which shares the fallback block's queue.)
+
+View::RootInteractionState& View::interaction() {
+    if (is_detached_widget(this)) return fallback_interaction();
+    View* root = tree_root(this);
+    if (!root->interaction_state_)
+        root->interaction_state_ = std::make_unique<RootInteractionState>();
+    return *root->interaction_state_;
+}
+
+const View::RootInteractionState& View::interaction() const {
+    return const_cast<View*>(this)->interaction();
+}
+
+View::RootInteractionState* View::existing_interaction() {
+    if (is_detached_widget(this)) return &fallback_interaction();
+    View* root = tree_root(this);
+    return root->interaction_state_.get();  // nullptr if never allocated
+}
+
+void View::claim_input_focus() {
+    interaction().focused_input = this;
+    focused_input_ = this;  // process-global shim mirror
+}
+
+void View::release_input_focus() {
+    if (RootInteractionState* s = existing_interaction();
+        s && s->focused_input == this)
+        s->focused_input = nullptr;
+    if (focused_input_ == this) focused_input_ = nullptr;  // shim mirror
+}
+
+void View::claim_overlay() {
+    interaction().active_overlay = this;
+    active_overlay_ = this;  // process-global shim mirror
+}
+
+void View::release_overlay() {
+    if (RootInteractionState* s = existing_interaction();
+        s && s->active_overlay == this)
+        s->active_overlay = nullptr;
+    if (active_overlay_ == this) active_overlay_ = nullptr;  // shim mirror
 }
 
 void View::set_painter(std::shared_ptr<WidgetPainter> p) {

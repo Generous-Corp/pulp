@@ -189,7 +189,10 @@ void ComboBox::paint(canvas::Canvas& canvas) {
         auto border = border_c;
         auto text = text_c;
 
-        overlay_queue().push_back({[=](canvas::Canvas& c) {
+        // Enqueue onto THIS combo's root queue (S11) so a second hosted
+        // editor's paint pass never draws this dropdown. paint_overlays drains
+        // the painting root's queue.
+        interaction().overlay_queue.push_back({[=](canvas::Canvas& c) {
             c.save();
             c.set_fill_color(dropdown_bg);
             c.fill_rounded_rect(abs_x, dd_top, dd_w, dd_h, 4);
@@ -251,33 +254,51 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     }
 }
 
+// Process-global shim mirror. Retained (pulp #6223 S11) so untouched consumers
+// that read it directly — the mac window hosts, pointer_dispatch, virtual
+// list/grid — keep working. The per-root source of truth is
+// interaction().active_popup; the mirror tracks the most-recently-opened popup
+// process-wide.
 ComboBox* ComboBox::active_popup_ = nullptr;
 
 void ComboBox::close_active_popup() {
+    // No target in hand, so this static acts on the process-global mirror: the
+    // most-recently-opened popup. close_dropdown() clears both slots.
     if (active_popup_) {
         active_popup_->close_dropdown();
     }
 }
 
 void ComboBox::notify_global_click(View* target) {
-    if (!active_popup_) return;
-    // Check if click target is the active popup or a child of it
-    View* v = target;
-    while (v) {
-        if (v == active_popup_) return;  // click is inside popup
-        v = v->parent();
+    // Forwarding shim (S11): resolve the popup owned by the CLICK's OWN root, so
+    // an outside-click in one hosted editor never dismisses another editor's
+    // open dropdown. Detached widgets share the fallback slot, so among unhosted
+    // widgets this stays the historical single-popup behavior.
+    if (!target) {
+        close_active_popup();
+        return;
     }
-    close_active_popup();
+    RootInteractionState* s = target->existing_interaction();
+    ComboBox* popup = s ? s->active_popup : nullptr;
+    if (!popup) return;
+    for (View* v = target; v != nullptr; v = v->parent())
+        if (v == popup) return;  // click is inside the popup's owner
+    popup->close_dropdown();
 }
 
 void ComboBox::open_dropdown() {
     if (open_) return;
-    close_active_popup();  // close any other open dropdown first
+    // Close any other open dropdown IN THIS ROOT first (S11): a second hosted
+    // editor's open combo must stay open. Detached combos all resolve to the
+    // fallback slot, so among unhosted widgets this stays "one popup at a time".
+    if (ComboBox* prev = interaction().active_popup; prev && prev != this)
+        prev->close_dropdown();
     set_overflow(Overflow::visible);
     open_ = true;
     hover_index_ = selected_;  // highlight the current selection on open so
                                // keyboard navigation has a visible starting row
-    active_popup_ = this;
+    interaction().active_popup = this;  // root-owned slot
+    active_popup_ = this;               // process-global shim mirror
     // Scroll only enough to reveal the current selection, and only when it sits
     // BELOW the visible window — so the top items stay visible whenever the
     // selection is already in the first page (a menu that fully fits never
@@ -295,6 +316,9 @@ void ComboBox::close_dropdown() {
     if (!open_) return;
     open_ = false;
     set_overflow(Overflow::hidden);
+    // Clear both the root-owned slot (non-allocating) and the shim mirror.
+    if (RootInteractionState* s = existing_interaction(); s && s->active_popup == this)
+        s->active_popup = nullptr;
     if (active_popup_ == this) active_popup_ = nullptr;
 }
 
@@ -1190,15 +1214,28 @@ View* ScrollView::hit_test(Point local_point) {
             Point child_point = {local_point.x + sx - child->bounds().x,
                                  local_point.y + sy - child->bounds().y};
 
-            // overflow:visible: expand hit area symmetrically on all four
-            // sides for popovers that extend in any direction (pulp #1148).
+            // overflow:visible: expand the hit area to the child's TRUE painted
+            // extent — the bounding box of the child plus every descendant
+            // reachable through an unbroken overflow:visible chain — so a
+            // popover that paints outside its own box stays clickable in any
+            // direction (pulp #1148). accumulate_overflow_extent is the same
+            // math View::overlay_contains uses, keyed off actual painted pixels
+            // rather than a blanket ±500px margin that also inflated the hit
+            // area around popovers that don't overflow at all.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();
-                in_bounds = child_point.x >= lb.x - 500 &&
-                            child_point.x <= lb.x + lb.width + 500 &&
-                            child_point.y >= lb.y - 500 &&
-                            child_point.y <= lb.y + lb.height + 500;
+                // Child-local extents: seed with the child's own box, then let
+                // accumulate walk its overflow:visible subtree. Passing
+                // -child->bounds() as the parent origin places the child at the
+                // local origin so the extents share child_point's frame.
+                float min_x = lb.x, min_y = lb.y;
+                float max_x = lb.x + lb.width, max_y = lb.y + lb.height;
+                accumulate_overflow_extent(child, -child->bounds().x,
+                                           -child->bounds().y,
+                                           min_x, min_y, max_x, max_y);
+                in_bounds = child_point.x >= min_x && child_point.x <= max_x &&
+                            child_point.y >= min_y && child_point.y <= max_y;
             }
 
             if (in_bounds) {

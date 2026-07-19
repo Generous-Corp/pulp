@@ -8,19 +8,19 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_widget_value_controls_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_widget_value_controls_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // setValue(id, value) -> set widget value
     // For Knob / Fader / Toggle this is normalized 0..1.
     // For RangeSlider it's the raw value in [min,max]; the widget clamps
     // and quantises against its own configured range.
-    register_bridge_function(api, "setValue", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setValue", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto value = args.get<double>(1, 0);
 
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) return choc::value::Value();
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end()) return choc::value::Value();
 
         if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             knob->set_value(static_cast<float>(value));
@@ -44,11 +44,11 @@ void WidgetBridge::register_widget_value_controls_api() {
 
     // getValue(id) -> get widget value (normalized for Knob/Fader/Toggle,
     // raw for RangeSlider).
-    register_bridge_function(api, "getValue", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getValue", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
 
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) return choc::value::createFloat64(0);
+        auto it = self.widgets_.find(id);
+        if (it == self.widgets_.end()) return choc::value::createFloat64(0);
 
         if (auto* knob = dynamic_cast<Knob*>(it->second.view))
             return choc::value::createFloat64(knob->value());
@@ -66,26 +66,26 @@ void WidgetBridge::register_widget_value_controls_api() {
     // setMin/setMax/setStep mirror the HTMLInputElement attributes
     // `min`, `max`, `step`. Each one re-applies the widget's clamp +
     // quantisation pipeline so out-of-range values stay consistent.
-    register_bridge_function(api, "setMin", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setMin", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto v = args.get<double>(1, 0);
-        if (auto* range = dynamic_cast<RangeSlider*>(widget(id)))
+        if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_min(static_cast<float>(v));
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setMax", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setMax", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto v = args.get<double>(1, 1);
-        if (auto* range = dynamic_cast<RangeSlider*>(widget(id)))
+        if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_max(static_cast<float>(v));
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "setStep", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setStep", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto v = args.get<double>(1, 0);
-        if (auto* range = dynamic_cast<RangeSlider*>(widget(id)))
+        if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id)))
             range->set_step(static_cast<float>(v));
         return choc::value::Value();
     });
@@ -93,10 +93,10 @@ void WidgetBridge::register_widget_value_controls_api() {
     // setOrientation(id, "horizontal" | "vertical")
     // RangeSlider and Fader consume this today; future widgets that need an
     // orientation can extend this dynamic_cast chain.
-    register_bridge_function(api, "setOrientation", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setOrientation", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto orient = args.get<std::string>(1, "horizontal");
-        auto* w = widget(id);
+        auto* w = self.widget(id);
         if (auto* range = dynamic_cast<RangeSlider*>(w)) {
             range->set_orientation(orient == "vertical"
                 ? RangeSlider::Orientation::vertical
@@ -112,10 +112,10 @@ void WidgetBridge::register_widget_value_controls_api() {
     // setAccentColor(id, "#hex" | "rgb(...)" | "")
     // Empty string clears the override and returns to the active theme's
     // `control.fill` / `control.thumb` tokens.
-    register_bridge_function(api, "setAccentColor", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAccentColor", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
-        if (auto* range = dynamic_cast<RangeSlider*>(widget(id))) {
+        if (auto* range = dynamic_cast<RangeSlider*>(self.widget(id))) {
             if (hex.empty()) {
                 range->clear_accent_color();
             } else {

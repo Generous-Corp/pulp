@@ -508,6 +508,41 @@ TEST_CASE("ViewBridge destructor closes view", "[view_bridge]") {
     REQUIRE(p.closed_count == 1);
 }
 
+TEST_CASE("ViewBridge tolerates the host freeing the Processor before the bridge",
+          "[view_bridge][crash][lifecycle]") {
+    // AU gives the audio unit (the Processor) and the view controller (which
+    // owns this bridge) independent, host-ordered lifetimes. Ableton Live 12
+    // freed the Processor while the editor bridge was still alive and its
+    // display-link idle pump was firing -> EXC_BAD_ACCESS inside the pump. Every
+    // processor_ dereference reachable from the pump or teardown must become a
+    // no-op once the adapter reports the Processor gone. Under a sanitizer build
+    // this is a heap-use-after-free if any deref is left unguarded -- which is
+    // how this class of bug is caught, and why the earlier idle-pump test (which
+    // only freed the BRIDGE) missed it.
+    state::StateStore store;
+    auto proc = std::make_unique<StubProcessor>();
+    proc->set_state_store(&store);
+    proc->define_parameters(store);
+
+    format::ViewBridge bridge(*proc, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();  // editor open + attached, as in a host
+
+    auto pump = format::make_scripted_idle_pump(bridge);
+
+    // The adapter's contract: signal death BEFORE freeing the Processor.
+    bridge.notify_processor_destroyed();
+    proc.reset();  // Processor gone; bridge + store still alive
+
+    // A display-link idle tick fires after the Processor is gone. Every path the
+    // pump touches -- poll_editor_reload, scripted_ui -- must be a no-op.
+    pump();
+    REQUIRE_FALSE(bridge.poll_editor_reload());
+    REQUIRE(bridge.scripted_ui() == nullptr);
+    // ~ViewBridge runs at scope exit: close() must not call on_view_closed on the
+    // freed Processor either.
+}
+
 // item 1.3: in-DAW editors enable scripted-UI hot reload only when the developer
 // opts in via PULP_DEV_HOT_RELOAD; default (unset) is OFF so a shipping plugin
 // never watches + reloads from disk inside a host.
@@ -631,6 +666,107 @@ TEST_CASE("scripted idle pump no-ops after its bridge is destroyed (no UAF)",
     SUCCEED("idle pump no-oped after the bridge was destroyed");
 }
 
+// The AU/VST3/CLAP instance owns both Processor and StateStore, while a host may
+// retain its editor after destroying that instance. The bridge itself is still
+// alive in this ordering, so its bridge-lifetime token cannot protect the store.
+// The adapter-owned token must fail closed before either referenced object dies.
+TEST_CASE("scripted idle pump no-ops after its processor owner is destroyed",
+          "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle]") {
+    struct Owner {
+        state::StateStore store;
+        StubProcessor processor;
+        runtime::AliveToken alive;  // destroyed first; declared last
+    };
+
+    auto owner = std::make_unique<Owner>();
+    auto bridge = std::make_unique<format::ViewBridge>(
+        owner->processor, owner->store, owner->alive.capture());
+    auto pump = format::make_scripted_idle_pump(*bridge);
+
+    pump();
+    owner.reset();  // Processor + StateStore are now dangling bridge references.
+    pump();         // must reject the entire owner-facing tick before either use
+    REQUIRE_FALSE(bridge->owner_is_alive());
+    REQUIRE_FALSE(bridge->open());
+    bridge.reset(); // teardown must also avoid Processor lifecycle callbacks
+}
+
+// Hosts are allowed to release the format instance, editor, native host, and
+// queued idle callback in different orders. Exercise every independently-owned
+// participant instead of pinning only the owner-first ordering that originally
+// crashed Ableton. The explicit retire() mirrors the format adapters' teardown
+// contract: no referenced Processor/StateStore object may die while the shared
+// owner token still reports live.
+TEST_CASE("scripted editor teardown-order matrix rejects every stale callback",
+          "[view_bridge][idle-pump][crash][owner-lifetime][lifecycle][matrix]") {
+    struct Fixture {
+        runtime::AliveToken owner_alive;
+        std::unique_ptr<StubProcessor> processor = std::make_unique<StubProcessor>();
+        std::unique_ptr<state::StateStore> store =
+            std::make_unique<state::StateStore>();
+        std::unique_ptr<format::ViewBridge> bridge =
+            std::make_unique<format::ViewBridge>(
+                *processor, *store, owner_alive.capture());
+        std::function<void()> pump = format::make_scripted_idle_pump(*bridge);
+
+        void retire_owner() { owner_alive.retire(); }
+    };
+
+    SECTION("processor first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->owner_is_alive());
+        f.bridge.reset();
+        f.store.reset();
+    }
+
+    SECTION("store first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.store.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->owner_is_alive());
+        f.bridge.reset();
+        f.processor.reset();
+    }
+
+    SECTION("processor and store owner first") {
+        Fixture f;
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+        f.pump();
+        REQUIRE_FALSE(f.bridge->open());
+        f.bridge.reset();
+    }
+
+    SECTION("view bridge first") {
+        Fixture f;
+        f.pump();
+        f.bridge.reset();
+        f.pump();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+    }
+
+    SECTION("native host callback first") {
+        Fixture f;
+        f.pump();
+        f.pump = {};
+        f.bridge.reset();
+        f.retire_owner();
+        f.processor.reset();
+        f.store.reset();
+        SUCCEED("native host released its callback before every referenced owner");
+    }
+}
+
 // ── Runtime host-parameter surface (W3) ──────────────────────────────────────
 //
 // An imported design turns its knobs against `View::host_params()`. Nothing in
@@ -706,6 +842,39 @@ TEST_CASE("ViewBridge installs a StateStore-backed host-param surface on the vie
     // ...and it is detached before the view dies, so nothing dangles.
     bridge.close();
     CHECK(bridge.host_params() == nullptr);
+}
+
+TEST_CASE("routed host-param UI fails closed after its owner is destroyed",
+          "[view-bridge][host-param][crash][owner-lifetime][lifecycle]") {
+    struct Owner {
+        state::StateStore store;
+        RoutedFrameProcessor processor;
+        runtime::AliveToken alive;  // retires before processor/store destruct
+    };
+
+    auto owner = std::make_unique<Owner>();
+    owner->processor.define_parameters(owner->store);
+    auto bridge = std::make_unique<format::ViewBridge>(
+        owner->processor, owner->store, owner->alive.capture());
+    REQUIRE(bridge->open());
+
+    auto* frame = owner->processor.last_frame;
+    auto* surface = bridge->host_params();
+    REQUIRE(frame != nullptr);
+    REQUIRE(surface != nullptr);
+    REQUIRE(surface->has_param("gain"));
+
+    owner.reset();  // frame + surface remain, their Processor/StateStore do not
+
+    CHECK_FALSE(surface->has_param("gain"));
+    CHECK(surface->get_param("gain") == 0.0);
+    CHECK(surface->param_display_text("gain", 0.5).empty());
+    surface->begin_gesture("gain");
+    surface->set_param("gain", 0.75);
+    surface->end_gesture("gain");
+    frame->simulate_drag({20, 20}, {20, 5});
+
+    bridge.reset();
 }
 
 TEST_CASE("a routed design control drives the store exactly once per gesture",

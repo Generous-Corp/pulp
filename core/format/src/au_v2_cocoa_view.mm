@@ -153,7 +153,7 @@ static const char kOwnershipKey = 0;
     }
 
     auto bridge = std::make_unique<format::ViewBridge>(
-        *ctx.processor, *ctx.store,
+        *ctx.processor, *ctx.store, ctx.owner_alive,
         format::ViewBridge::Options{
             .enable_hot_reload = format::dev_editor_hot_reload_enabled(),
             .role = format::ViewRole::Editor});

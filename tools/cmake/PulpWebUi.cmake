@@ -145,7 +145,6 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/recording_canvas.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/svg.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/scene.cpp
-    ${_PULP_WEBUI_ROOT}/core/canvas/src/effects.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_layout.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/attributed_string.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/text_shaper.cpp
@@ -167,6 +166,7 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/image_codecs_gif.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/image_codecs_tiff.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/path.cpp
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/image_file_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_path.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_fonts.cpp

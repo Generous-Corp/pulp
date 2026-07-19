@@ -522,6 +522,24 @@ a working convolution and would hide the bug. Assert
 | Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
 | STFT | `stft.hpp` | Short-time Fourier Transform for visualization (analysis-only; for processing use `spectral_frame_engine.hpp`) |
 
+#### Physical modeling
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Modal Bank | `modal_bank.hpp` | SIMD-friendly bank of coupled-form modes with contact-pulse excitation, independent strike/pickup weights, amplitude-preserving retuning, and up to eight pickup outputs |
+| Modal Specification | `modal_spec.hpp` | Versioned JSON interchange for modal frequencies, T60 values, amplitudes, and optional shapes, with bounded validation before allocation |
+| Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
+| Square Oscillator Bank | `square_osc_bank.hpp` | Allocation-free-after-prepare bank of independently tunable, weighted, band-limited square oscillators for inharmonic metallic excitation and other clustered sources |
+
+`ModalBank::prepare()` allocates its fixed-capacity storage and therefore runs
+off the audio thread. After preparation, `process_add()`, `reset()`, and pickup
+updates are allocation-free; `set_modes()` is allocation-free but evaluates
+transcendentals and should remain control-rate for large banks. Load and
+validate modal-spec JSON away from the audio callback, then pass the resulting
+mode span into a prepared bank. Link `pulp::signal-modal-spec` in addition to
+`pulp::signal` when calling `parse_modal_spec()` or `to_json()`.
+`BridgedTResonator::prepare()` and `process()` allocate nothing.
+
 #### Spectral processing
 
 | Processor | Header | Description |
@@ -848,7 +866,7 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Attributed String | `attributed_string.hpp` | Rich text spans — mixed font, color, weight per range |
-| Effects | `effects.hpp` | Drop shadow, bloom, blur, color adjustment |
+| View effects | `view_effect.hpp` | Per-view GPU post-processing: blur, bloom, vignette, chromatic aberration, EffectChain |
 | Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
 | SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |

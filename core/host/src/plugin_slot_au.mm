@@ -15,9 +15,13 @@
 
 #include "plugin_slot_au_internal.hpp"
 
+#include <pulp/host/hosted_editor_container.hpp>
+
 #include <AudioToolbox/AudioToolbox.h>
 #include <AudioUnit/AudioUnit.h>
+#include <AudioUnit/AUCocoaUIView.h>
 #include <CoreAudioTypes/CoreAudioTypes.h>
+#import <AppKit/AppKit.h>
 
 #include <atomic>
 #include <cstring>
@@ -74,6 +78,7 @@ public:
     AuSlot(PluginInfo info, AudioUnit au) : info_(std::move(info)), au_(au) {}
 
     ~AuSlot() override {
+        close_editor_();  // tear the editor down before disposing the unit
         release();
         if (au_) {
             AudioComponentInstanceDispose(au_);
@@ -320,16 +325,124 @@ public:
         return st == noErr;
     }
 
-    bool has_editor() const override { return false; }
+    bool has_editor() const override {
+        if (!au_) return false;
+        UInt32 size = 0;
+        Boolean writable = false;
+        const OSStatus st = AudioUnitGetPropertyInfo(
+            au_, kAudioUnitProperty_CocoaUI, kAudioUnitScope_Global, 0, &size, &writable);
+        return st == noErr && size >= sizeof(AudioUnitCocoaViewInfo);
+    }
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
+    // The legacy void* path cannot express the Cocoa-UI factory dance (bundle
+    // load + view creation). Hosts reach the AU editor through
+    // create_hosted_editor(); these satisfy the pure-virtual legacy interface.
     void* create_editor_view() override { return nullptr; }
     void destroy_editor_view() override {}
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma clang diagnostic pop
 #endif
+
+    std::unique_ptr<HostedEditor> create_hosted_editor(void* parent_window) override {
+        if (!au_ || !parent_window) return nullptr;
+        if (editor_container_) {
+            runtime::log_error("AU editor: create requested while one is already open");
+            return nullptr;
+        }
+
+        @autoreleasepool {
+            // AU exposes its editor as a Cocoa-view factory: a bundle + a class
+            // conforming to AUCocoaUIBase that vends an NSView for the unit.
+            UInt32 size = 0;
+            Boolean writable = false;
+            if (AudioUnitGetPropertyInfo(au_, kAudioUnitProperty_CocoaUI,
+                                         kAudioUnitScope_Global, 0, &size, &writable) != noErr
+                || size < sizeof(AudioUnitCocoaViewInfo)) {
+                return nullptr;
+            }
+            std::vector<uint8_t> buf(size, 0);
+            auto* view_info = reinterpret_cast<AudioUnitCocoaViewInfo*>(buf.data());
+            if (AudioUnitGetProperty(au_, kAudioUnitProperty_CocoaUI, kAudioUnitScope_Global,
+                                     0, view_info, &size) != noErr) {
+                return nullptr;
+            }
+
+            // The property hands back +1 CF references; own them so they are
+            // released on every exit path.
+            NSURL* bundle_url = (NSURL*) view_info->mCocoaAUViewBundleLocation;
+            NSString* class_name = (NSString*) view_info->mCocoaAUViewClass[0];
+            NSView* au_view = nil;
+            if (bundle_url && class_name) {
+                NSBundle* bundle = [NSBundle bundleWithURL:bundle_url];
+                Class factory_class = [bundle classNamed:class_name];
+                if (factory_class) {
+                    id<AUCocoaUIBase> factory = [[[factory_class alloc] init] autorelease];
+                    au_view = [factory uiViewForAudioUnit:au_ withSize:NSZeroSize];
+                }
+            }
+            if (bundle_url) CFRelease(view_info->mCocoaAUViewBundleLocation);
+            if (class_name) CFRelease(view_info->mCocoaAUViewClass[0]);
+            if (!au_view) {
+                runtime::log_error("AU editor: Cocoa view factory produced no view for '{}'",
+                                   info_.name);
+                return nullptr;
+            }
+
+            // AU views self-size; read the size the factory gave it.
+            const NSSize sz = [au_view frame].size;
+            const uint32_t width = (uint32_t) sz.width;
+            const uint32_t height = (uint32_t) sz.height;
+            if (width == 0 || height == 0) return nullptr;
+
+            void* container = create_editor_container(parent_window, width, height);
+            if (!container) return nullptr;
+            if (!editor_container_adopt_view(container, (__bridge void*) au_view, width, height)) {
+                destroy_editor_container(container);
+                return nullptr;
+            }
+            editor_container_ = container;
+
+            auto ed = std::make_unique<HostedEditor>();
+            ed->native_handle = container;
+            ed->width = width;
+            ed->height = height;
+            ed->resizable = true;
+            return ed;
+        }
+    }
+
+    void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) override {
+        if (!ed) return;
+        if (ed->native_handle != editor_container_) {
+            runtime::log_error(
+                "AU editor: destroy_hosted_editor for '{}' got an editor this slot "
+                "does not own; ignoring",
+                info_.name);
+            return;
+        }
+        close_editor_();
+    }
+
+    bool set_hosted_editor_size(uint32_t& width, uint32_t& height) override {
+        if (!editor_container_) return false;
+        // The adopted AU view tracks the container via its autoresizing mask, so
+        // resizing the container is the whole story (AU has no host-driven size
+        // negotiation like VST3 onSize()).
+        resize_editor_container(editor_container_, width, height);
+        return true;
+    }
+
+    // Destroy the editor container, which also removes and releases the adopted
+    // AU view (it is a subview). Idempotent.
+    void close_editor_() {
+        if (editor_container_) {
+            destroy_editor_container(editor_container_);
+            editor_container_ = nullptr;
+        }
+    }
 
     int latency_samples() const override {
         if (!au_) return 0;
@@ -472,6 +585,7 @@ private:
 
     PluginInfo info_;
     AudioUnit au_ = nullptr;
+    void* editor_container_ = nullptr;  // hosted editor container, null unless open
 
     std::vector<HostParamInfo> params_;
     const audio::BufferView<const float>* current_input_ = nullptr;

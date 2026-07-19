@@ -1,5 +1,16 @@
 #include <pulp/render/skp_capture.hpp>
 
+// Included unconditionally: maybe_capture_skp_from_env (below, outside the
+// PULP_HAS_SKIA split) is defined for both builds — it only forwards to
+// capture_skp_to_file, which already degrades gracefully without Skia.
+#include <pulp/runtime/log.hpp>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <mutex>
+#include <string>
+#include <system_error>
+
 #ifdef PULP_HAS_SKIA
 
 #include <pulp/canvas/skia_canvas.hpp>
@@ -351,3 +362,57 @@ bool skp_capture_supported() { return false; }
 } // namespace pulp::render
 
 #endif // PULP_HAS_SKIA
+
+// ── Env-var one-shot trigger (shared across Skia / non-Skia builds) ──────────
+// Defined once for both builds: it forwards to capture_skp_to_file, which is
+// itself defined in both branches above (the non-Skia one returns a failed
+// result), so a non-Skia build gets an honest no-op here too.
+namespace pulp::render {
+
+SkpCaptureResult maybe_capture_skp_from_env(
+    int width, int height,
+    const std::function<void(canvas::Canvas&)>& paint,
+    skgpu::graphite::Context* graphite_context) {
+    const char* dir = std::getenv("PULP_SKP_CAPTURE_DIR");
+    if (dir == nullptr || dir[0] == '\0') {
+        SkpCaptureResult r;
+        r.reason = "PULP_SKP_CAPTURE_DIR not set";
+        return r;
+    }
+
+    static std::mutex mutex;
+    static std::string last_captured_dir;
+    static std::uint64_t frame_counter = 0;
+    std::lock_guard<std::mutex> lock(mutex);
+
+    std::string dir_str(dir);
+    // One-shot per env value: fire once for a given directory, re-arm only when
+    // the variable changes. A per-frame host paint loop thus writes one file
+    // per arming instead of one per frame.
+    if (dir_str == last_captured_dir) {
+        SkpCaptureResult r;
+        r.reason = "already captured for the current PULP_SKP_CAPTURE_DIR value";
+        return r;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir_str, ec);  // best-effort
+    const std::filesystem::path out =
+        std::filesystem::path(dir_str) /
+        ("pulp-frame-" + std::to_string(frame_counter) + ".skp");
+
+    SkpCaptureResult result =
+        capture_skp_to_file(width, height, out.string(), paint, graphite_context);
+    if (result.ok) {
+        ++frame_counter;
+        last_captured_dir = dir_str;  // disarm until the env value changes
+        runtime::log_info("[skp-capture] wrote {} (PULP_SKP_CAPTURE_DIR trigger)",
+                          result.path);
+    } else {
+        runtime::log_error("[skp-capture] PULP_SKP_CAPTURE_DIR capture failed: {}",
+                           result.reason);
+    }
+    return result;
+}
+
+} // namespace pulp::render

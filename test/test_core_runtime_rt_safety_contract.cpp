@@ -111,6 +111,19 @@ TEST_CASE("Core runtime RT safety contracts pin expected classifications",
     CHECK(graph->safety_class == RtSafetyClass::AudioCallbackSafeAfterPrepare);
     CHECK(graph->requires_prepare);
 
+    const auto* inject_midi =
+        find_core_runtime_rt_safety_contract("SignalGraph", "inject_midi");
+    REQUIRE(inject_midi != nullptr);
+    CHECK(inject_midi->safety_class ==
+          RtSafetyClass::AudioCallbackSafeAfterPrepare);
+    CHECK(inject_midi->audio_callback_allowed);
+    CHECK_FALSE(inject_midi->may_allocate);
+    CHECK_FALSE(inject_midi->may_lock);
+    CHECK_FALSE(inject_midi->may_block);
+    CHECK(inject_midi->requires_prepare);
+    CHECK(inject_midi->owner_boundary ==
+          "exactly one writer per MidiInput node; audio-thread snapshot consumer");
+
     const auto* proc = find_core_runtime_rt_safety_contract("Processor", "process");
     REQUIRE(proc != nullptr);
     CHECK(proc->audio_callback_allowed);

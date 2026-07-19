@@ -30,6 +30,7 @@ struct ViewValueBindings; // pulp/view/src/view.cpp — lazily allocated value-s
 struct FileDragRequest;  // pulp/view/drag_drop.hpp
 struct ActiveDrag;       // pulp/view/drag_drop.hpp
 struct DropData;         // pulp/view/drag_drop.hpp
+class ComboBox;          // pulp/view/ui_components.hpp — held (as View*) in RootInteractionState
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -1109,27 +1110,67 @@ public:
     //
     // The @pulp/react host config calls `claim_overlay()` from a JSX
     // `<View overlay>` mount and `release_overlay()` from its unmount.
-    // The ComboBox path remains untouched and has its own state.
+    //
+    // ── Per-root interaction state (pulp #6223 S11) ───────────────────────
+    //
+    // focused_input, active_overlay, the overlay paint queue, and (migrated in
+    // ui_components.hpp) the ComboBox popup slot were process-wide statics. Two
+    // Pulp editors in one host process — the documented shared-AUHostingService
+    // case — then shared ONE focus and ONE open popup: focusing a field in
+    // editor B stole editor A's keyboard, and opening a dropdown in one closed
+    // the other's. The in-tree drag source already solved this by hanging its
+    // in-flight record off the ROOT View (see `active_drag_`); this mirrors that
+    // precedent so each editor's tree owns its own interaction slots.
+    //
+    // Reached via `interaction()`: walk to `tree_root()` and lazily allocate the
+    // struct on the root. Two DISTINCT parented roots never share. A DETACHED
+    // widget (no parent AND no children — e.g. a bare headless widget) has no
+    // root of its own, so it resolves to one process-global FALLBACK slot; that
+    // fallback is the documented shim preserving the historical single-focus /
+    // single-popup behavior for unhosted widgets. See view.cpp `interaction()`.
+    struct RootInteractionState {
+        View* focused_input = nullptr;
+        View* active_overlay = nullptr;
+        ComboBox* active_popup = nullptr;   // wired from ui_components (migrated last)
+        std::vector<OverlayRequest> overlay_queue;
+    };
+    /// Root-owned interaction state for this view's tree. Root-aware code should
+    /// prefer this over the process-global shim statics below.
+    RootInteractionState& interaction();
+    const RootInteractionState& interaction() const;
+    /// Resolved interaction state WITHOUT lazily allocating — the root's slot if
+    /// one exists, else the process-global fallback, else nullptr. For guarded
+    /// releases and destructors (including ~ComboBox) that must not allocate a
+    /// state block on a tree that never had one.
+    RootInteractionState* existing_interaction();
+
+    // The historical statics are retained as process-global SHIM MIRRORS,
+    // written through on every claim/release so the platform hosts that read
+    // them directly (and already scope the read to their own root — see
+    // plugin_view_host_mac.mm `pulp_focus_under_root`) keep working unchanged.
+    // `active_overlay_` / `focused_input_` reflect the most-recently-acted slot
+    // process-wide; `interaction()` is the per-root source of truth.
     static View* active_overlay_;
-    void claim_overlay() { active_overlay_ = this; }
-    /// Global input-focus slot. The platform window host calls
+    /// Global input-focus shim slot. The platform window host calls
     /// `claim_input_focus()` when a click sets focus to a widget, and reads
     /// `focused_input_` for text-input dispatch. The View destructor auto-clears
-    /// the slot if the focused widget is destroyed before focus is moved off it.
-    /// Without this, the host's raw View* pointer dangles and the next keypress
-    /// segfaults inside dynamic_cast<TextEditor*>(focused).
+    /// the slot (and the owning root slot) if the focused widget is destroyed
+    /// before focus is moved off it. Without this, the host's raw View* pointer
+    /// dangles and the next keypress segfaults inside dynamic_cast<TextEditor*>.
     static View* focused_input_;
-    void claim_input_focus() { focused_input_ = this; }
-    void release_input_focus() {
-        if (focused_input_ == this) focused_input_ = nullptr;
-    }
-    /// Clear the global overlay if (and only if) `this` currently holds it.
+    /// Claim focus / overlay for this view's tree. Writes the root-owned slot
+    /// AND the process-global shim mirror. Defined out-of-line (needs tree_root).
+    void claim_input_focus();
+    void claim_overlay();
+    /// Guarded release — clears the root slot AND the shim mirror only when
+    /// `this` currently holds them. A non-holder is a no-op, so one widget's
+    /// teardown cannot blur an unrelated focused widget.
+    void release_input_focus();
+    /// Clear the overlay if (and only if) `this` currently holds it.
     /// Idempotent — safe to call on unmount even if claim never happened.
     /// Does NOT fire `on_overlay_dismissed` — used by JSX unmount and the
     /// View destructor where React already knows the popover is closing.
-    void release_overlay() {
-        if (active_overlay_ == this) active_overlay_ = nullptr;
-    }
+    void release_overlay();
     /// Dismiss-path release. Releases the active overlay (if any) and fires its
     /// `on_overlay_dismissed` callback so React state can flip `setOpen(false)`
     /// to keep the JSX tree in sync. Called by the platform window host from
@@ -1201,6 +1242,18 @@ public:
     enum class Overflow { hidden, visible, scroll };
     void set_overflow(Overflow o) { overflow_ = o; }
     Overflow overflow() const { return overflow_; }
+
+    /// Import-only accommodation. A common imported-design pattern puts a
+    /// circular value-marker (an XY-pad-style dot) as a position:absolute child
+    /// of an overflow:hidden container, anchored at left:cx-r / top:cy-r. At
+    /// edge values half the dot sits outside the content box and the strict CSS
+    /// clip chops it. Opting in lets paint_all detect such circle-markers and
+    /// expand the clip rect just enough to admit them. OFF by default so native
+    /// (non-imported) trees pay neither the semantic deviation from CSS
+    /// `overflow:hidden` nor the per-frame O(children) marker scan — the design
+    /// importer turns it on for the containers it materializes.
+    void set_clip_marker_tolerance(bool on) { clip_marker_tolerance_ = on; }
+    bool clip_marker_tolerance() const { return clip_marker_tolerance_; }
 
     /// CSS transform properties
     void set_scale(float s) { scale_ = s; }
@@ -1803,6 +1856,10 @@ private:
     /// Only the ROOT's copy is ever populated (start_drag walks up to find it),
     /// so concurrent trees cannot see each other's drag.
     std::unique_ptr<ActiveDrag> active_drag_;
+    /// Per-root interaction slots (S11). Like `active_drag_`, only the ROOT's
+    /// copy is populated; `interaction()` walks up to it. Detached widgets use a
+    /// process-global fallback instead (see view.cpp), never this member.
+    std::unique_ptr<RootInteractionState> interaction_state_;
     View* parent_ = nullptr;
     std::vector<std::unique_ptr<View>> children_;
     std::string id_;
@@ -1915,6 +1972,9 @@ private:
     // intentionally need clipping must call set_overflow(Overflow::hidden)
     // explicitly — same opt-in as `overflow:hidden` in CSS.
     Overflow overflow_ = Overflow::visible;
+    /// Import-only circle-marker clip tolerance (see set_clip_marker_tolerance).
+    /// Default OFF: native trees clip strictly and skip the per-frame scan.
+    bool clip_marker_tolerance_ = false;
     /// CSS box-shadow layers in author order; empty means no shadow.
     std::vector<BoxShadow> shadows_;
     /// The first layer, materialized with default values when absent. Backs
@@ -2036,6 +2096,21 @@ private:
     std::optional<int>   inh_text_align_;
     std::optional<std::string> inh_font_family_;
 };
+
+// Expand min/max window-coord extents to cover `v` and every transitive
+// descendant reachable through an unbroken chain of `overflow:visible` views —
+// i.e. the true painted bounding box, since an `overflow:hidden` ancestor
+// clips whatever is below it. `parent_abs_x/y` are the absolute window-coord
+// origin of `v`'s parent. Shared by View::overlay_contains and
+// ScrollView::hit_test so both size an overflow:visible child's interactive
+// area from its actual painted extent rather than a blanket margin.
+void accumulate_overflow_extent(const View* v,
+                                float parent_abs_x,
+                                float parent_abs_y,
+                                float& min_x,
+                                float& min_y,
+                                float& max_x,
+                                float& max_y);
 
 // ── Accessibility exposure gate ──────────────────────────────────────────────
 //

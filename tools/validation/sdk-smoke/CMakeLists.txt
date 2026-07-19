@@ -42,7 +42,7 @@ set(PULP_SDK_SMOKE_REQUIRE_FORMATS ""
 find_package(Pulp REQUIRED CONFIG)
 
 foreach(_pulp_alias_target
-        dsl events format host signal state view standalone gpu-audio)
+        dsl events format host signal signal-modal-spec state view standalone gpu-audio)
     if(TARGET "Pulp::${_pulp_alias_target}"
        AND NOT TARGET "pulp::${_pulp_alias_target}")
         message(FATAL_ERROR
@@ -82,6 +82,31 @@ if(TARGET Pulp::host)
         "${CMAKE_CURRENT_BINARY_DIR}/host_export_probe.cpp")
     target_link_libraries(PulpSDKSmokeHostProbe PRIVATE
         Pulp::dsl Pulp::events Pulp::host Pulp::state)
+endif()
+
+# Source-bearing modal-spec parser export probe. The public header alone is not
+# enough: parse_modal_spec()/to_json() live in a separate archive, so force a
+# downstream link through the installed target.
+if(TARGET Pulp::signal-modal-spec)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/modal_spec_export_probe.cpp" [=[
+#include <pulp/signal/modal_spec.hpp>
+
+int main() {
+    pulp::signal::ModalSpecDiagnostics diagnostics;
+    const auto spec = pulp::signal::parse_modal_spec(
+        R"({"schema_version":1,"name":"probe","modes":[
+          {"freq_hz":440.0,"t60_s":1.0,"gain":1.0}]})",
+        &diagnostics);
+    return spec && !pulp::signal::to_json(*spec).empty() ? 0 : 1;
+}
+]=])
+    add_executable(PulpSDKSmokeModalSpecProbe
+        "${CMAKE_CURRENT_BINARY_DIR}/modal_spec_export_probe.cpp")
+    target_link_libraries(PulpSDKSmokeModalSpecProbe PRIVATE
+        Pulp::signal-modal-spec)
+else()
+    message(FATAL_ERROR
+        "Pulp SDK smoke: installed SDK does not export Pulp::signal-modal-spec")
 endif()
 
 # C++ baseline export probe.

@@ -170,6 +170,7 @@ public:
 class CapturingProcessor : public Processor {
 public:
     static constexpr state::ParamID kParamId = 9001;
+    static constexpr state::ParamID kBypassParamId = 9002;
     static constexpr std::size_t kMaxCapturedSysex = 8;
     static constexpr std::size_t kMaxCapturedSysexBytes = 256;
 
@@ -190,6 +191,8 @@ public:
     bool opts_ump = false;
     bool opts_node_mpe = false;
     bool opts_node_ump = false;
+    bool declares_bypass = false;
+    bool declares_sidechain = false;
 
     // Mutable state captured each time process() runs.
     mutable midi::MidiBuffer captured_midi;
@@ -229,6 +232,9 @@ public:
         d.supports_ump = opts_ump;
         d.node_capabilities.supports_mpe = opts_node_mpe;
         d.node_capabilities.supports_ump = opts_node_ump;
+        if (declares_sidechain) {
+            d.input_buses.push_back({"Sidechain", 2, true});
+        }
         return d;
     }
     void define_parameters(state::StateStore& store) override {
@@ -237,6 +243,13 @@ public:
             .name = "Capture Gain",
             .range = {0.0f, 1.0f, 0.0f, 0.0f},
         });
+        if (declares_bypass) {
+            store.add_parameter({
+                .id = kBypassParamId,
+                .name = "Bypass",
+                .range = {0.0f, 1.0f, 0.0f, 1.0f},
+            });
+        }
     }
     void prepare(const PrepareContext& context) override {
         captured_prepare = context;
@@ -933,6 +946,8 @@ bool g_pending_opts_mpe = false;
 bool g_pending_opts_ump = false;
 bool g_pending_opts_node_mpe = false;
 bool g_pending_opts_node_ump = false;
+bool g_pending_capturing_bypass = false;
+bool g_pending_capturing_sidechain = false;
 bool g_pending_overflow_sysex = false;
 std::vector<midi::MidiEvent> g_pending_emit;
 std::vector<midi::MidiBuffer::SysexEvent> g_pending_sysex;
@@ -944,10 +959,14 @@ std::unique_ptr<Processor> make_capturing() {
     if (g_pending_opts_ump) up->opts_ump = true;
     if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
     if (g_pending_opts_node_ump) up->opts_node_ump = true;
+    up->declares_bypass = g_pending_capturing_bypass;
+    up->declares_sidechain = g_pending_capturing_sidechain;
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
+    g_pending_capturing_bypass = false;
+    g_pending_capturing_sidechain = false;
     return up;
 }
 
@@ -959,10 +978,12 @@ std::unique_ptr<Processor> make_process_buffers_capturing() {
     if (g_pending_opts_ump) up->opts_ump = true;
     if (g_pending_opts_node_mpe) up->opts_node_mpe = true;
     if (g_pending_opts_node_ump) up->opts_node_ump = true;
+    up->declares_sidechain = g_pending_capturing_sidechain;
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     g_pending_opts_node_mpe = false;
     g_pending_opts_node_ump = false;
+    g_pending_capturing_sidechain = false;
     return up;
 }
 
@@ -1182,7 +1203,10 @@ TEST_CASE("CLAP lifecycle forwards prepare/release and handles no-op callbacks",
     raw->factory = make_capturing;
     raw->plugin.plugin_data = raw;
     REQUIRE(clap_adapter::clap_init(&raw->plugin));
+    auto owner_alive = raw->owner_alive.capture();
+    REQUIRE(runtime::AliveToken::is_alive(owner_alive));
     clap_adapter::clap_destroy(&raw->plugin);
+    REQUIRE_FALSE(runtime::AliveToken::is_alive(owner_alive));
     g_capturing = nullptr;
 }
 
@@ -1215,6 +1239,60 @@ TEST_CASE("CLAP init and process fail cleanly without a processor",
     clap_process_t proc{};
     proc.frames_count = Harness::kFrames;
     REQUIRE(clap_adapter::clap_process(&process_plugin.plugin, &proc) == CLAP_PROCESS_ERROR);
+}
+
+TEST_CASE("CLAP survives repeated init activate process deactivate destroy cycles",
+          "[clap][lifecycle][churn]") {
+    constexpr uint32_t kFrames = 64;
+    std::array<float, kFrames> in_l{};
+    std::array<float, kFrames> in_r{};
+    std::array<float, kFrames> out_l{};
+    std::array<float, kFrames> out_r{};
+    float* inputs[2] = {in_l.data(), in_r.data()};
+    float* outputs[2] = {out_l.data(), out_r.data()};
+    clap_audio_buffer_t input{};
+    input.data32 = inputs;
+    input.channel_count = 2;
+    clap_audio_buffer_t output{};
+    output.data32 = outputs;
+    output.channel_count = 2;
+
+    for (int cycle = 0; cycle < 200; ++cycle) {
+        g_pending_capturing_bypass = true;
+        auto* raw = new clap_adapter::PulpClapPlugin;
+        raw->factory = make_capturing;
+        raw->plugin.plugin_data = raw;
+        REQUIRE(clap_adapter::clap_init(&raw->plugin));
+        REQUIRE(raw->store.param_count() == 2);
+        REQUIRE(raw->store.all_params()[0].id == CapturingProcessor::kParamId);
+        REQUIRE(raw->store.all_params()[1].id == CapturingProcessor::kBypassParamId);
+        REQUIRE(raw->store.get_value(CapturingProcessor::kParamId) == 0.0f);
+        raw->store.set_value(CapturingProcessor::kParamId,
+                             static_cast<float>((cycle % 99) + 1) / 100.0f);
+        auto alive = raw->owner_alive.capture();
+        REQUIRE(clap_adapter::clap_activate(
+            &raw->plugin, cycle % 2 == 0 ? 44100.0 : 96000.0, 16, kFrames));
+        REQUIRE(clap_adapter::clap_start_processing(&raw->plugin));
+
+        clap_process_t process{};
+        process.frames_count = cycle % 2 == 0 ? 32 : kFrames;
+        process.audio_inputs = &input;
+        process.audio_inputs_count = 1;
+        process.audio_outputs = &output;
+        process.audio_outputs_count = 1;
+        raw->store.set_value(CapturingProcessor::kBypassParamId, 1.0f);
+        REQUIRE(clap_adapter::clap_process(&raw->plugin, &process) != CLAP_PROCESS_ERROR);
+        REQUIRE(g_capturing->process_count == 0);
+
+        raw->store.set_value(CapturingProcessor::kBypassParamId, 0.0f);
+        REQUIRE(clap_adapter::clap_process(&raw->plugin, &process) != CLAP_PROCESS_ERROR);
+        REQUIRE(g_capturing->process_count == 1);
+
+        clap_adapter::clap_stop_processing(&raw->plugin);
+        clap_adapter::clap_deactivate(&raw->plugin);
+        clap_adapter::clap_destroy(&raw->plugin);
+        REQUIRE_FALSE(runtime::AliveToken::is_alive(alive));
+    }
 }
 
 TEST_CASE("CLAP zero-frame process block returns without touching processor state",
@@ -1407,10 +1485,11 @@ TEST_CASE("CLAP gesture events forward through StateStore callbacks",
     REQUIRE(ended[0] == CapturingProcessor::kParamId);
 }
 
-TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
+TEST_CASE("CLAP routes a descriptor-declared sidechain input",
           "[clap][audio][sidechain]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
+    g_pending_capturing_sidechain = true;
     Harness h(make_capturing);
 
     std::vector<float> sc_left(Harness::kFrames, 0.25f);
@@ -1420,18 +1499,10 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
     sidechain.data32 = sc_ptrs;
     sidechain.channel_count = 2;
 
-    std::vector<float> aux_left(Harness::kFrames, 12.0f);
-    std::vector<float> aux_right(Harness::kFrames, -6.0f);
-    float* aux_ptrs[3] = {aux_left.data(), nullptr, aux_right.data()};
-    clap_audio_buffer_t aux_out{};
-    aux_out.data32 = aux_ptrs;
-    aux_out.channel_count = 3;
-
     clap_audio_buffer_t inputs[2] = {h.audio_in, sidechain};
-    clap_audio_buffer_t outputs[2] = {h.audio_out, aux_out};
     REQUIRE(h.run_custom(nullptr, nullptr,
                          inputs, 2,
-                         outputs, 2) == CLAP_PROCESS_CONTINUE);
+                         &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
 
     REQUIRE(g_capturing->had_sidechain_input);
     REQUIRE(g_capturing->captured_sidechain_channels == 2);
@@ -1440,8 +1511,6 @@ TEST_CASE("CLAP routes sidechain input and clears secondary output buses",
     REQUIRE(g_capturing->captured_sidechain_second_sample == -0.5f);
     REQUIRE(g_capturing->captured_input_channels == 2);
     REQUIRE(g_capturing->captured_output_channels == 2);
-    REQUIRE(std::all_of(aux_left.begin(), aux_left.end(), [](float v) { return v == 0.0f; }));
-    REQUIRE(std::all_of(aux_right.begin(), aux_right.end(), [](float v) { return v == 0.0f; }));
 }
 
 TEST_CASE("CLAP processes data64 buffers through the f32 boundary path",
@@ -1566,6 +1635,7 @@ TEST_CASE("CLAP supplies ProcessBuffers to processors that override the richer s
           "[clap][audio][process-buffers]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
+    g_pending_capturing_sidechain = true;
     Harness h(make_process_buffers_capturing);
 
     std::vector<float> sc_left(Harness::kFrames, 0.25f);
@@ -1650,12 +1720,8 @@ TEST_CASE("CLAP routes a declared secondary output bus to the Processor",
     REQUIRE(MultiOutProcessor::kMainValue != MultiOutProcessor::kAuxValue);
 }
 
-TEST_CASE("CLAP single-output processor leaves a host aux bus silent",
-          "[clap][audio][multi-out]") {
-    // Regression: a processor declaring ONE output bus is unchanged — the
-    // adapter pre-zeros any extra host output bus and the default
-    // process(ProcessBuffers&) path only writes the main bus, so the aux bus
-    // reads silence (no uninitialised memory, no routing).
+TEST_CASE("CLAP fails closed when the host supplies more buses than advertised",
+          "[clap][audio][multi-out][malformed-layout]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
     Harness h(make_capturing);  // CapturingProcessor declares one output bus
@@ -1673,14 +1739,15 @@ TEST_CASE("CLAP single-output processor leaves a host aux bus silent",
                          &h.audio_in, 1,
                          outputs, 2) == CLAP_PROCESS_CONTINUE);
 
-    REQUIRE(g_capturing->process_count == 1);
-    REQUIRE(g_capturing->captured_output_channels == 2);  // main bus unchanged
+    REQUIRE(g_capturing->process_count == 0);
+    REQUIRE(std::all_of(h.out_left.begin(), h.out_left.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(h.out_right.begin(), h.out_right.end(), [](float v) { return v == 0.0f; }));
     REQUIRE(std::all_of(aux_l.begin(), aux_l.end(), [](float v) { return v == 0.0f; }));
     REQUIRE(std::all_of(aux_r.begin(), aux_r.end(), [](float v) { return v == 0.0f; }));
 }
 
-TEST_CASE("CLAP tolerates an inactive secondary output bus (null data32)",
-          "[clap][audio][multi-out][rt-safety]") {
+TEST_CASE("CLAP fails closed for an active output bus with null storage",
+          "[clap][audio][multi-out][rt-safety][malformed-layout]") {
     // P0 regression: a host can present a deactivated aux output bus with
     // channel_count > 0 but data32 == nullptr. The pre-zero loop and the
     // routing path must both guard the bus pointer — no null deref on the audio
@@ -1706,21 +1773,13 @@ TEST_CASE("CLAP tolerates an inactive secondary output bus (null data32)",
                          nullptr, 0,
                          outputs, 2) == CLAP_PROCESS_CONTINUE);
 
-    REQUIRE(g_multi_out->process_buffer_calls == 1);
-    REQUIRE(g_multi_out->captured_output_bus_count == 2);
-    REQUIRE(g_multi_out->wrote_main);
-    REQUIRE_FALSE(g_multi_out->aux_was_active);  // inactive => not written
-    REQUIRE_FALSE(g_multi_out->wrote_aux);
+    REQUIRE(g_multi_out->process_buffer_calls == 0);
     REQUIRE(std::all_of(main_l.begin(), main_l.end(),
-                        [](float v) { return v == MultiOutProcessor::kMainValue; }));
+                        [](float v) { return v == 0.0f; }));
 }
 
-TEST_CASE("CLAP reports declared aux channels distinct from the routed count",
-          "[clap][audio][multi-out]") {
-    // P1: declared_channels comes from the descriptor; num_channels() carries
-    // the routed count. A processor declaring a 1-channel aux bus that the host
-    // drives with 2 channels must see declared=1, routed=2 — a detectable
-    // mismatch, not a tautology.
+TEST_CASE("CLAP fails closed for a wrong output channel count",
+          "[clap][audio][multi-out][malformed-layout]") {
     g_multi_out = nullptr;
     g_pending_multi_out_aux_channels = 1;  // descriptor declares mono aux
     Harness h(make_multi_out);
@@ -1745,10 +1804,31 @@ TEST_CASE("CLAP reports declared aux channels distinct from the routed count",
                          nullptr, 0,
                          outputs, 2) == CLAP_PROCESS_CONTINUE);
 
-    REQUIRE(g_multi_out->wrote_aux);
-    REQUIRE(g_multi_out->captured_aux_declared == 1);   // descriptor
-    REQUIRE(g_multi_out->captured_aux_channels == 2);    // routed
-    REQUIRE_FALSE(g_multi_out->captured_layouts_match);  // mismatch detectable
+    REQUIRE(g_multi_out->process_buffer_calls == 0);
+    REQUIRE(std::all_of(main_l.begin(), main_l.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(main_r.begin(), main_r.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(aux_l.begin(), aux_l.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(aux_r.begin(), aux_r.end(), [](float v) { return v == 0.0f; }));
+}
+
+TEST_CASE("CLAP fails closed when the host supplies fewer buses than advertised",
+          "[clap][audio][multi-out][malformed-layout]") {
+    g_multi_out = nullptr;
+    Harness h(make_multi_out);
+    REQUIRE(g_multi_out != nullptr);
+
+    std::vector<float> main_l(Harness::kFrames, 99.0f);
+    std::vector<float> main_r(Harness::kFrames, 99.0f);
+    float* main_ptrs[2] = {main_l.data(), main_r.data()};
+    clap_audio_buffer_t main_out{};
+    main_out.data32 = main_ptrs;
+    main_out.channel_count = 2;
+
+    REQUIRE(h.run_custom(nullptr, nullptr, nullptr, 0, &main_out, 1) ==
+            CLAP_PROCESS_CONTINUE);
+    REQUIRE(g_multi_out->process_buffer_calls == 0);
+    REQUIRE(std::all_of(main_l.begin(), main_l.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(main_r.begin(), main_r.end(), [](float v) { return v == 0.0f; }));
 }
 
 TEST_CASE("CLAP clamps an oversized block on a secondary output bus",
@@ -1826,8 +1906,8 @@ TEST_CASE("CLAP leaves a secondary output bus silent while bypassed",
     REQUIRE(std::all_of(aux_r.begin(), aux_r.end(), [](float v) { return v == 0.0f; }));
 }
 
-TEST_CASE("CLAP caps routed output buses and wide channel counts without OOB",
-          "[clap][audio][multi-out][rt-safety]") {
+TEST_CASE("CLAP silences oversized host topology without OOB",
+          "[clap][audio][multi-out][rt-safety][malformed-layout]") {
     // A host that presents more output buses than kMaxOutputBuses, and an aux
     // bus wider than kMaxChannels, must not index past the preallocated storage.
     // Surplus buses are zero-filled but not routed; surplus channels are zeroed.
@@ -1858,15 +1938,8 @@ TEST_CASE("CLAP caps routed output buses and wide channel counts without OOB",
                          buses.data(), static_cast<uint32_t>(kHostBuses))
             != CLAP_PROCESS_ERROR);
 
-    // Only kMaxOutputBuses are routed to the processor.
-    REQUIRE(g_multi_out->captured_output_bus_count ==
-            pulp::format::clap_adapter::kMaxOutputBuses);
-    // The wide aux bus is routed clamped to kMaxChannels; the surplus channels
-    // were pre-zeroed (the pre-zero loop covers all host buses).
-    REQUIRE(g_multi_out->captured_aux_channels ==
-            pulp::format::clap_adapter::kMaxChannels);
-    // Surplus (unrouted) buses beyond kMaxOutputBuses read silence.
-    for (int b = pulp::format::clap_adapter::kMaxOutputBuses; b < kHostBuses; ++b) {
+    REQUIRE(g_multi_out->process_buffer_calls == 0);
+    for (int b = 0; b < kHostBuses; ++b) {
         for (uint32_t c = 0; c < buses[b].channel_count; ++c) {
             const float* ch = buses[b].data32[c];
             REQUIRE(std::all_of(ch, ch + Harness::kFrames,
@@ -1875,10 +1948,11 @@ TEST_CASE("CLAP caps routed output buses and wide channel counts without OOB",
     }
 }
 
-TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
-          "[clap][audio][sidechain]") {
+TEST_CASE("CLAP fails closed for null or partial sidechain storage",
+          "[clap][audio][sidechain][malformed-layout]") {
     g_pending_opts_mpe = false;
     g_pending_opts_ump = false;
+    g_pending_capturing_sidechain = true;
     Harness h(make_capturing);
 
     clap_audio_buffer_t inactive_sidechain{};
@@ -1888,7 +1962,9 @@ TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
     REQUIRE(h.run_custom(nullptr, nullptr,
                          inputs_with_inactive, 2,
                          &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
-    REQUIRE_FALSE(g_capturing->had_sidechain_input);
+    REQUIRE(g_capturing->process_count == 0);
+    REQUIRE(std::all_of(h.out_left.begin(), h.out_left.end(), [](float v) { return v == 0.0f; }));
+    REQUIRE(std::all_of(h.out_right.begin(), h.out_right.end(), [](float v) { return v == 0.0f; }));
 
     std::vector<float> sc_left(Harness::kFrames, 0.5f);
     float* partial_ptrs[2] = {sc_left.data(), nullptr};
@@ -1899,7 +1975,7 @@ TEST_CASE("CLAP treats inactive or partial sidechain buses as disconnected",
     REQUIRE(h.run_custom(nullptr, nullptr,
                          inputs_with_partial, 2,
                          &h.audio_out, 1) == CLAP_PROCESS_CONTINUE);
-    REQUIRE_FALSE(g_capturing->had_sidechain_input);
+    REQUIRE(g_capturing->process_count == 0);
 }
 
 TEST_CASE("CLAP transport state maps into ProcessContext",

@@ -101,7 +101,7 @@ pulp_add_test_suite(pulp-test-workgroup LIBRARIES pulp::audio)
 # AudioWorkgroup ↔ AudioDevice wiring.
 pulp_add_test_suite(pulp-test-audio-workgroup-wiring
     SOURCES test_audio_workgroup_wiring.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio pulp::format)
 
 # CoreAudio follow-default output-device live switch (macOS only).
 if(APPLE AND NOT PULP_IOS)
@@ -149,7 +149,7 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
-add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp)
+add_library(pulp-audio-test-support STATIC support/audio_signal_generators.cpp support/render_scenario.cpp support/audio_contracts.cpp support/audio_doctor.cpp support/wav_bridge.cpp support/osc_wav_scenario.cpp support/modal_analysis.cpp)
 target_link_libraries(pulp-audio-test-support PUBLIC pulp::format pulp::signal pulp::audio-analysis pulp::audio)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
@@ -256,6 +256,12 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-adapter-audio-parity PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-adapter-audio-parity)
 endif()
+
+# Mode-estimator calibration: renders known modes and measures them back, so its
+# fixtures are source-owned and it needs no example plugin.
+add_executable(pulp-test-modal-analysis test_modal_analysis.cpp)
+target_link_libraries(pulp-test-modal-analysis PRIVATE pulp-audio-test-support Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-modal-analysis PROPERTIES TIMEOUT 300)
 # Measured-versus-reported latency. Its fixture is a source-owned delay line, so
 # it needs no example plugin.
 add_executable(pulp-test-latency-contract test_latency_contract.cpp)
@@ -290,6 +296,19 @@ add_executable(pulp-test-audio-matrix test_audio_determinism_matrix.cpp)
 target_link_libraries(pulp-test-audio-matrix PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-audio-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain ${CMAKE_SOURCE_DIR}/examples/pulp-tone)
 catch_discover_tests(pulp-test-audio-matrix)
+# Cross-platform byte golden. Keep contraction policy target-local: this test
+# owns a deliberately exact arithmetic contract; unrelated production/test
+# targets retain the project's normal optimization policy.
+add_executable(pulp-test-cross-platform-audio-golden
+    test_cross_platform_audio_golden.cpp)
+target_link_libraries(pulp-test-cross-platform-audio-golden
+    PRIVATE pulp::audio pulp::signal Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cross-platform-audio-golden PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(pulp-test-cross-platform-audio-golden PRIVATE
+    $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>:-ffp-contract=off>
+    $<$<COMPILE_LANG_AND_ID:CXX,MSVC>:/fp:strict>)
+catch_discover_tests(pulp-test-cross-platform-audio-golden)
 # Audio edge-case corpus: zero blocks, denormals, impulse pos, DC extremes, mid-block param change, re-prepare. Framework contract only.
 add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
 target_link_libraries(pulp-test-audio-edge-cases PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)

@@ -32,23 +32,23 @@ std::string build_shell_command(const std::string& cmd) {
 
 } // namespace
 
-void WidgetBridge::register_platform_services_ai_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_platform_services_ai_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Model-agnostic AI CLI: configurable command for chat integration
-    register_bridge_function(api, "setAICli", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setAICli", [&self](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
-        if (!cmd.empty()) ai_cli_command_ = cmd;
+        if (!cmd.empty()) self.ai_cli_command_ = cmd;
         return choc::value::Value();
     });
 
-    register_bridge_function(api, "getAICli", [this](choc::javascript::ArgumentList) {
-        return choc::value::createString(ai_cli_command_);
+    register_bridge_function(api, "getAICli", [&self](choc::javascript::ArgumentList) {
+        return choc::value::createString(self.ai_cli_command_);
     });
 }
 
-void WidgetBridge::register_platform_services_exec_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_platform_services_exec_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Shell exec
     // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
@@ -67,12 +67,12 @@ void WidgetBridge::register_platform_services_exec_api() {
     // execAsync(cmd, callbackId) - non-blocking shell command
     // Runs cmd on a background thread, dispatches result to JS via
     // __dispatch__(callbackId, 'result', stdout) when poll_async_results() runs.
-    register_bridge_function(api, "execAsync", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "execAsync", [&self](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         auto cbId = args.get<std::string>(1, "");
         if (cmd.empty() || cbId.empty()) return choc::value::Value();
         auto full_cmd = build_shell_command(cmd);
-        auto sink = make_async_result_sink();
+        auto sink = self.make_async_result_sink();
         std::thread([sink, full_cmd, cbId]() {
 #ifdef _WIN32
             auto result = pulp::platform::exec("cmd", {"/c", full_cmd}, 60000);
@@ -85,8 +85,8 @@ void WidgetBridge::register_platform_services_exec_api() {
     });
 }
 
-void WidgetBridge::register_platform_services_dialog_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_platform_services_dialog_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // showOpenDialog(title, filterDesc, extensions) -> path or ""
     // extensions: semicolon-separated, e.g. "js;json;txt"
@@ -121,8 +121,8 @@ void WidgetBridge::register_platform_services_dialog_api() {
     });
 }
 
-void WidgetBridge::register_platform_services_clipboard_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_platform_services_clipboard_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // Clipboard - read/write text via platform::Clipboard
     register_bridge_function(api, "readClipboard", [](choc::javascript::ArgumentList) {

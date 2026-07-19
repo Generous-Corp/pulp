@@ -96,6 +96,21 @@ is where a headless test drives it with a fake `IEditController` / `IPlugView`
 attach is only reachable with a real native window, so it is proven by the
 real-DAW smoke, not the unit test.
 
+### AU: the Cocoa UI RETURNS a view — adopt it, don't offer a parent
+
+An AUv2's editor is a Cocoa-view factory, the mirror image of CLAP/VST3: query
+`kAudioUnitProperty_CocoaUI` for an `AudioUnitCocoaViewInfo` (a bundle URL + a
+class conforming to `AUCocoaUIBase`), load the bundle, and call
+`uiViewForAudioUnit:withSize:` to get an NSView the plug-in already laid out. So
+the host does NOT hand the plug-in an empty container to fill — it creates the
+container and ADOPTS the returned view into it (`editor_container_adopt_view`,
+which sets an autoresize mask so the view tracks the container). Two traps: the
+property hands back +1 CF references (the bundle URL and the class name) —
+`CFRelease` both on every exit path; and destroying the container already
+releases the adopted view (it is a subview), so the slot keeps no separate view
+handle. The Cocoa-UI negotiation needs a real AU with a view, so it is proven by
+the real-DAW smoke; only the container adoption is unit-tested.
+
 ### Defensive boundary for entry / factory calls
 
 `scanner_clap.cpp` wraps `entry->init()` and `entry->get_factory()` in
@@ -142,6 +157,24 @@ already cache via a local. When adding a new format backend that calls
 `dlopen`, mirror the cache-into-local pattern.
 
 ## Testing against a real plug-in
+
+For repeatable black-box measurements of an installed Audio Unit instrument,
+build or install `pulp-au-instrument-probe`. It renders offline without opening
+an audio device, requires an explicit `--name`, lists vendor parameter IDs, can
+apply plain-domain parameter values and timestamped MIDI hits, and writes a
+local float WAV. By default an accidentally silent render is a failure;
+`--allow-silent` is reserved for experiments where silence is itself expected.
+
+```bash
+pulp-au-instrument-probe --name "Reference Instrument" --list-params \
+  --note 60 --seconds 2 --hits "0:100,250:80" --out /tmp/reference.wav
+```
+
+The probe is a bench oracle, not an implementation oracle: keep commercial
+renders out of version control, record the recipe and numeric measurements,
+and derive DSP from published specifications or independently authored models.
+Reference-specific names, parameter maps, and corpora belong in the private
+validation project, not in the SDK tool.
 
 For unattended, scriptable interrogation prefer the isolated CLI/MCP surfaces:
 
@@ -196,6 +229,15 @@ path: shell tab-completion appends a trailing `/` to a bundle *directory*, which
 empties `std::filesystem::path::extension()` (step up via `parent_path()` when
 `filename()` is empty), and a plain `dlopen` of a relative bundle path triggers
 the `@rpath` search dance — pass an absolute path.
+
+`--editor` embeds the loaded plug-in's own editor in a window via the
+hosted-editor path (`create_hosted_editor` → `EditorAttachment`), auto-closing
+after `--editor-ms` (default 3000). It is the manual smoke for the whole
+host-side editor chain (CLAP / VST3 / AU): the negotiation seams are unit-tested
+headlessly, but the editor actually rendering needs a display and a real plug-in
+GUI, so run `--editor` (or load a Pulp-hosted plug-in in a DAW) to confirm it by
+eye. Heads-up: opening an editor can make the plug-in active and audible — the
+bounded duration keeps that contained.
 
 ## Headless Audio Unit event-loop servicing
 
@@ -462,6 +504,21 @@ does not contain crashes in deeper plug-in code.
   count runtime-variable without a drain handshake. The pool's completion barrier
   counts PARTICIPANTS finished (not tasks): an empty-range participant must still
   register done, or it can race the next batch's published state.
+  (4) WORKGROUP CHANGES are generation-published, not applied from the caller:
+  `SignalGraph` implements `format::AudioWorkgroupClient`, and each persistent
+  worker leaves/joins on its own thread. `run()` executes inline while any worker
+  still advertises an older generation, so an AU `renderContextObserver` change
+  cannot dispatch a deadline into the previous workgroup. A failed non-null join
+  does not acknowledge the generation: the worker retries and `run()` stays
+  inline. For an explicitly owned device, publish null and call the
+  off-render-thread acknowledgment barrier before switching or closing it; only
+  then may the borrowed OS handle be invalidated. Re-query and publish the
+  replacement before rendering resumes. Do not cache a device-owned handle past
+  that drain point. Close must first disable new device-change notifications and
+  serialize with any switch already in flight, then publish null and drain again
+  under that serialization boundary; an external null publication alone can race
+  a switch which rebinds immediately before close. AU render-context teardown
+  remains publication-only.
 - **Anticipative-rendering eligibility (`anticipation_eligibility.{hpp,cpp}`).**
   `analyze_anticipation_eligibility(nodes, connections)` is the static SAFETY
   contract for rendering a latent subgraph ahead of the audio deadline: it
@@ -603,9 +660,23 @@ does not contain crashes in deeper plug-in code.
   pointer.
 - `SignalGraph::inject_midi()` and `extract_midi()` cross the
   control/audio-thread boundary through per-node mailboxes, not by mutating
-  audio-thread scratch directly. Keep mailbox snapshots and writer scratch
-  preallocated by `prepare()`; constructing a fresh MIDI snapshot in
-  `inject_midi()` reintroduces realtime-path allocation.
+  audio-thread scratch directly. After `prepare()`, injection is `noexcept`,
+  fixed-capacity, lock-free, and allocation-free, so it may run on the audio
+  callback immediately before `process()`. Each MidiInput has exactly one
+  writer — audio or control, never concurrent. A `false` return means the live
+  node is unavailable or the source was truncated; any retained prefix is
+  still published. Publications are latest-wins and one-shot, and sequence
+  wrap skips zero. A gap-free `prepare_swap()` shares the ingress mailbox and
+  consumed sequence for a stable MidiInput NodeId, preserving unconsumed MIDI
+  across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
+  fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
+  overflow retains the earliest blocks and makes extraction incomplete. When
+  the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
+  extraction returns false and retains the undelivered suffix. Provide storage
+  and call `extract_midi()` again; it resumes without replaying the delivered
+  prefix. When
+  `prepare_swap()` returns `NeedsEagerPrepare`, the old live snapshot remains
+  valid, so drain it with `extract_midi()` before eager `prepare()` replaces it.
 - `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
   mailbox with one control-side writer. Publications are latest-wins and
   one-shot: the next successful serial, routed, parallel, or anticipation

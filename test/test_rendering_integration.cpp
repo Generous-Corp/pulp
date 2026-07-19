@@ -16,40 +16,95 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 using namespace pulp;
 
 // ── ViewEffect tests ────────────────────────────────────────────────────
 
-TEST_CASE("GpuBlurEffect configures layer with blur", "[render][effect]") {
+TEST_CASE("GpuBlurEffect configures a blur layer with its radius", "[render][effect]") {
     canvas::RecordingCanvas rc;
     canvas::GpuBlurEffect blur;
-    blur.radius_x = 8.0f;
+    blur.radius_x = 8.0f;  // radius_y stays 4 → the layer blur is max(8,4)=8
     REQUIRE(blur.needs_layer());
     blur.configure_layer(rc, 0, 0, 100, 100);
-    REQUIRE(rc.command_count() > 0);  // save_layer recorded
+    // Exactly one compositing layer, carrying the blur radius — not just "some
+    // command was emitted" (the tautology this wave is removing).
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 1);
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.type == canvas::DrawCommand::Type::save_layer);
+    REQUIRE(cmd.f[4] == Catch::Approx(1.0f));  // opacity
+    REQUIRE(cmd.f[5] == Catch::Approx(8.0f));  // blur radius
 }
 
-TEST_CASE("GpuBloomEffect configures with intensity", "[render][effect]") {
+// GpuBloomEffect must route through the real bloom layer API, not a plain
+// save_layer. RecordingCanvas records save_layer_with_bloom as its own command
+// carrying intensity / threshold / radius, so a headless test can prove the
+// effect asked for a bloom (not just "some command was emitted").
+TEST_CASE("GpuBloomEffect emits a bloom layer with its parameters",
+          "[render][effect]") {
     canvas::RecordingCanvas rc;
     canvas::GpuBloomEffect bloom;
     bloom.intensity = 0.7f;
     bloom.threshold = 0.9f;
+    bloom.radius = 12.0f;
     bloom.configure_layer(rc, 0, 0, 200, 200);
-    REQUIRE(rc.command_count() > 0);
+
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer_bloom) == 1);
+    REQUIRE(rc.count(canvas::DrawCommand::Type::save_layer) == 0);  // not a plain layer
+    const auto& cmd = rc.commands().back();
+    REQUIRE(cmd.f[4] == Catch::Approx(0.7f));   // intensity
+    REQUIRE(cmd.f[5] == Catch::Approx(0.9f));   // threshold
+    REQUIRE(cmd.floats.size() == 1);
+    REQUIRE(cmd.floats[0] == Catch::Approx(12.0f));  // radius
 }
 
-TEST_CASE("VignetteEffect has meaningful intensity", "[render][effect]") {
-    canvas::VignetteEffect vignette;
-    vignette.intensity = 0.8f;
-    REQUIRE(vignette.intensity == Catch::Approx(0.8f));
-    REQUIRE(vignette.needs_layer());
+// A View with a vignette must paint the edge-darkening overlay INSIDE its
+// compositing layer — i.e. after the subtree draws and before the layer is
+// popped. Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("VignetteEffect darkens the corners more than the center"); here we assert
+// the overlay is emitted in the right place and the save stack stays balanced.
+TEST_CASE("A View with a vignette paints the edge-darkening overlay in its layer",
+          "[render][effect][view]") {
+    view::View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_effect(std::make_shared<canvas::VignetteEffect>());
+
+    canvas::RecordingCanvas canvas;
+    const int depth_before = canvas.save_count();
+    root.paint_all(canvas);
+    REQUIRE(canvas.save_count() == depth_before);  // balanced
+
+    // The overlay drew a radial gradient, and a restore comes AFTER it — so the
+    // darkening composited inside the effect layer, not after the pop.
+    const auto& cmds = canvas.commands();
+    std::size_t grad = SIZE_MAX, last_restore = 0;
+    for (std::size_t i = 0; i < cmds.size(); ++i) {
+        if (cmds[i].type == canvas::DrawCommand::Type::set_fill_gradient_radial)
+            grad = i;
+        if (cmds[i].type == canvas::DrawCommand::Type::restore)
+            last_restore = i;
+    }
+    REQUIRE(grad != SIZE_MAX);
+    REQUIRE(last_restore > grad);
 }
 
-TEST_CASE("ChromaticAberrationEffect has offset", "[render][effect]") {
+// ChromaticAberrationEffect must route its subtree through exactly one
+// compositing layer (the SkSL post-effect on GPU, a plain layer fallback on a
+// recorder). Its pixel behavior is proven on a raster surface in test_canvas.cpp
+// ("ChromaticAberrationEffect splits color channels at an edge"); here we only
+// assert the layer routing so paint_all's pop count stays correct.
+TEST_CASE("ChromaticAberrationEffect pushes exactly one compositing layer",
+          "[render][effect]") {
     canvas::ChromaticAberrationEffect ca;
     ca.offset = 3.0f;
-    REQUIRE(ca.offset == Catch::Approx(3.0f));
+    REQUIRE(ca.needs_layer());
+    REQUIRE(ca.layer_count() == 1);
+
+    canvas::RecordingCanvas rc;
+    const int depth_before = rc.save_count();
+    ca.configure_layer(rc, 0, 0, 100, 100);
+    REQUIRE(rc.save_count() == depth_before + 1);  // exactly one layer pushed
 }
 
 TEST_CASE("EffectChain composes multiple effects", "[render][effect]") {
@@ -140,9 +195,11 @@ TEST_CASE("An empty EffectChain does not swallow the opacity layer",
     const int depth_before = canvas.save_count();
     root.paint_all(canvas);
 
-    // Balanced, and the opacity layer was actually pushed.
+    // Balanced, and the opacity layer was actually pushed. RecordingCanvas now
+    // records the opacity compositing layer as a distinct save_layer command
+    // rather than a bare save(), so assert on that.
     REQUIRE(canvas.save_count() == depth_before);
-    REQUIRE(canvas.count(canvas::DrawCommand::Type::save) >= 1);
+    REQUIRE(canvas.count(canvas::DrawCommand::Type::save_layer) >= 1);
 }
 
 // ── Dimension tests ─────────────────────────────────────────────────────

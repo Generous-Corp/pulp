@@ -35,6 +35,7 @@
 #include <pulp/render/dirty_tracker.hpp>
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
+#include <pulp/render/skp_capture.hpp>
 #import <QuartzCore/CAMetalLayer.h>
 #import <CoreVideo/CVDisplayLink.h>
 #import <Metal/Metal.h>
@@ -144,34 +145,6 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
 using namespace pulp::view::mac_geometry;
 
 extern "C" void pulp_mac_text_input_client_category_anchor();
-
-static bool dispatch_mouse_down_if_live(PulpView* host,
-                                        pulp::view::View*& target,
-                                        const pulp::view::MouseEvent& event,
-                                        pulp::view::Point local) {
-    if (!host || !target) return false;
-    auto* root = [host rootView];
-    if (!root) {
-        target = nullptr;
-        return false;
-    }
-
-    target->on_mouse_event(event);
-    root = [host rootView];
-    if (!view_is_in_tree(target, root)) {
-        target = nullptr;
-        return false;
-    }
-
-    target->on_mouse_down(local);
-    root = [host rootView];
-    if (!view_is_in_tree(target, root)) {
-        target = nullptr;
-        return false;
-    }
-
-    return true;
-}
 
 static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backend(
     std::shared_ptr<std::atomic<bool>> alive) {
@@ -376,85 +349,17 @@ static void install_app_menu(NSString* appName) {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
 
-    // An open ComboBox popup consumes the wheel to scroll its (clamped) item
-    // list, ahead of any enclosing ScrollView (whose scroll would close it).
-    if ([self routeToOpenComboPopup:pt configure:^(pulp::view::MouseEvent& me) {
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-        }]) return;
-
-    auto* target = self.rootView->hit_test(pt);
-    if (!target) {
-        // Hovering over empty background inside a scroll pane returns no hit
-        // because there is no hit-testable child under the point. Route it to
-        // the scroll container the cursor is over so scrolling works anywhere in
-        // the pane without a click first.
-        if (auto* scroll = pulp::view::find_wheel_scroll_view_at(*self.rootView, pt)) {
-            pulp::view::MouseEvent me;
-            me.position = pt;
-            me.window_position = pt;
-            me.is_wheel = true;
-            me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-            me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-            scroll->on_mouse_event(me);
-            scroll->layout_children();
-            [self setNeedsDisplay:YES];
-        }
-        return;
-    }
-
-    pulp::view::MouseEvent me;
-    me.position = pt;
-    // Set window_position so the WidgetBridge wheel registrar can emit
-    // valid clientX/clientY — without this JSX `onWheel` handlers that
-    // do `e.clientX - rect.left` (e.g. anchor-frequency for trackpad
-    // zoom) get 0 - rect.left and the wrong frequency anchor.
-    me.window_position = pt;
-    me.is_wheel = true;
-    me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-    me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
-
-    // Value widgets (knob / fader / slider / stepper / pan) under the cursor
-    // consume the wheel to adjust their value, taking precedence over an
-    // enclosing ScrollView — so "hover + scroll" tweaks the control rather than
-    // scrolling the page.
-    if (target->wants_wheel_value()) {
-        target->on_wheel(me.scroll_delta_y);
-        [self setNeedsDisplay:YES];
-        return;
-    }
-
-    // Walk up from target to find nearest native scroll container.
-    // W3C wheel bubble: dispatch to every ancestor with on_pointer_event
-    // set. Each handler self-filters on me.is_wheel:
-    //   - registerPointer's lambda short-circuits when is_wheel == true
-    //     (returns early without dispatching pointerdown/up/move/cancel)
-    //   - registerWheel's lambda short-circuits when is_wheel == false
-    // So a view that registered both gets both halves; a view that
-    // registered only one ignores the other. The PRIOR "stop at first
-    // ancestor with on_pointer_event" approach (from c29fa49f) was
-    // wrong because it stopped at the canvas child that registered
-    // ONLY pointer events — the wheel event never reached the
-    // ancestor wrap-div that registered the zoom handler. ScrollView
-    // ancestor still takes precedence.
-    auto* v = target;
-    while (v) {
-        if (v->wants_wheel_scroll()) {
-            v->on_mouse_event(me);
-            v->layout_children();
-            [self setNeedsDisplay:YES];
-            return;
-        }
-        if (v->on_pointer_event) {
-            v->on_mouse_event(me);
-        }
-        v = v->parent();
-    }
-    // No ancestor handled the wheel — deliver to the deepest hit so any
-    // default behavior still runs.
-    target->on_mouse_event(me);
-    [self setNeedsDisplay:YES];
+    // Routing (popup bypass, empty-pane scroll fallback, value-widget step, W3C
+    // wheel bubble) lives in the portable pulp::view::deliver_mouse_wheel shared
+    // with the embedded plugin host — see pointer_dispatch.hpp for the
+    // precedence contract. This host repaints on demand, so it wires
+    // request_repaint to -setNeedsDisplay: (the plugin host relies on its frame
+    // pump and passes a no-op).
+    pulp::view::WheelHost host;
+    host.request_repaint = [self] { [self setNeedsDisplay:YES]; };
+    pulp::view::deliver_mouse_wheel(
+        *self.rootView, pt, static_cast<float>(event.scrollingDeltaX),
+        static_cast<float>(-event.scrollingDeltaY), host);
 }
 
 - (void)mouseDown:(NSEvent*)event {
@@ -549,7 +454,6 @@ static void install_app_menu(NSString* appName) {
                     pulp::view::ComboBox::notify_global_click(sub);
 
                     _dragTarget = sub;
-                    auto local = to_local(pt, _dragTarget, self.rootView);
 
                     if (_dragTarget->focusable()) {
                         if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
@@ -563,14 +467,17 @@ static void install_app_menu(NSString* appName) {
                         _focusedView = nullptr;
                     }
 
-                    pulp::view::MouseEvent me;
-                    me.position = local;
-                    me.window_position = pt;
-                    me.button = pulp::view::MouseButton::left;
-                    me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-                    me.is_down = true; me.phase = pulp::view::MousePhase::press;
-                    me.click_count = static_cast<int>(event.clickCount);
-                    (void)dispatch_mouse_down_if_live(self, _dragTarget, me, local);
+                    // Same portable delivery as the normal path, but with
+                    // bubble=false: the overlay-click path has historically NOT
+                    // bubbled pointerdown to ancestors (only modern press +
+                    // legacy on_mouse_down reach the overlay subtree). Preserved
+                    // exactly — unifying the bubble here is a separate, flagged
+                    // decision, not part of this behavior-preserving extraction.
+                    if (!pulp::view::deliver_mouse_down(
+                            *self.rootView, _dragTarget, pt,
+                            modifiers_from_ns_flags(event.modifierFlags),
+                            static_cast<int>(event.clickCount), /*bubble=*/false))
+                        _dragTarget = nullptr;
                     [self setNeedsDisplay:YES];
                     return;
                 }
@@ -600,8 +507,6 @@ static void install_app_menu(NSString* appName) {
         pulp::view::ComboBox::notify_global_click(_dragTarget);
 
         if (_dragTarget) {
-            auto local = to_local(pt, _dragTarget, self.rootView);
-
             if (_dragTarget->focusable()) {
                 if (auto* fv = [self liveFocusedView]; fv && fv != _dragTarget)
                     fv->on_focus_changed(false);
@@ -614,30 +519,17 @@ static void install_app_menu(NSString* appName) {
                 _focusedView = nullptr;
             }
 
-            pulp::view::MouseEvent me;
-            me.position = local;
-            me.window_position = pt;
-            me.button = pulp::view::MouseButton::left;
-            me.modifiers = modifiers_from_ns_flags(event.modifierFlags);
-            me.is_down = true; me.phase = pulp::view::MousePhase::press;
-            me.click_count = static_cast<int>(event.clickCount);
-            const bool target_alive = dispatch_mouse_down_if_live(self, _dragTarget, me, local);
-
-            // Bubble pointerdown through ancestors that subscribed via
-            // registerPointer. on_mouse_event is the W3C bubbling
-            // channel; on_mouse_down stays deepest-wins. Without this,
-            // a wrap-div around a canvas child (Spectr's FilterBank
-            // band-drawer is this exact pattern) never sees the down
-            // event because the canvas child wins hit_test. Recompute
-            // each ancestor's local-coord position by re-toLocal'ing.
-            if (target_alive) {
-                for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
-                    if (!bubble->on_pointer_event) continue;
-                    pulp::view::MouseEvent bme = me;
-                    bme.position = to_local(pt, bubble, self.rootView);
-                    bubble->on_pointer_event(bme);
-                }
-            }
+            // Delivery — modern press, legacy on_mouse_down, and the W3C
+            // pointerdown bubble to registerPointer ancestors (a wrap-div around
+            // a canvas child that wins hit_test still sees the press) — is the
+            // portable pulp::view::deliver_mouse_down, shared with the plug-in
+            // host, with per-hop liveness re-checks. Clear the captured target if
+            // a handler unmounted it mid-dispatch.
+            if (!pulp::view::deliver_mouse_down(
+                    *self.rootView, _dragTarget, pt,
+                    modifiers_from_ns_flags(event.modifierFlags),
+                    static_cast<int>(event.clickCount)))
+                _dragTarget = nullptr;
         }
             [self setNeedsDisplay:YES];
             // A click can kick off a widget animation (e.g. a Toggle's thumb
@@ -744,103 +636,50 @@ static void install_app_menu(NSString* appName) {
             }
             auto pt = [self localPoint:event];
             if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::release, false)) { _dragTarget = nullptr; [self setNeedsDisplay:YES]; return; }
-            if (_dragTarget) {
-                // _dragTarget may point at a freed View if
-                // the mouseDown handler triggered a React unmount of the
-                // clicked widget (every dropdown selection in Spectr does
-                // this — clicking a band-count item flushes the React
-                // tree and the popover Views are dropped before mouseUp
-                // ever arrives). Drop the up event silently if the
-                // captured pointer is no longer in the live tree, rather
-                // than dereference garbage memory and SIGSEGV.
-                if (!view_is_in_tree(_dragTarget, self.rootView)) {
-                    _dragTarget = nullptr;
-                    [self setNeedsDisplay:YES];
-                    return;
-                }
-                auto local = to_local(pt, _dragTarget, self.rootView);
-                auto released_target = self.rootView ? self.rootView->hit_test(pt) : nullptr;
-                // DOM-style click bubbling. `hit_test` returns
-                // the deepest hit-testable view under the cursor, but the
-                // `onClick` handler (registered via `registerClick(id)`) may
-                // live on an ancestor. The classic reproducer: @pulp/react
-                // turns `<button onClick=...>Clear</button>` into a
-                // `<View onClick=...>` parent with a `<Label>Clear</Label>`
-                // child (Spectr's dom-adapter wraps string children in
-                // synthetic Labels). Clicking the visible "Clear" text
-                // hits the Label, which has no `on_click`, so capturing only
-                // `_dragTarget` silently drops the click.
-                // Walk up the parent chain to find the nearest ancestor
-                // (including `_dragTarget` itself) with a registered
-                // handler — mirrors the browser behavior @pulp/react users
-                // expect.
-                pulp::view::View* click_target = _dragTarget;
-                while (click_target && !click_target->on_click) {
-                    click_target = click_target->parent();
-                }
-                auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
-                auto global_click = self.rootView ? self.rootView->on_global_click : std::function<void(const std::string&, uint16_t)>{};
-                // global_click reports the immediate hit (matches existing
-                // inspect-click behavior: Cmd-click on a text label tells
-                // the inspector exactly which view was hit, not the
-                // bubbled-to ancestor).
-                auto clicked_id = _dragTarget->id();
+            if (_dragTarget && self.rootView) {
+                // Routing — legacy up, modern release, the W3C pointerup bubble,
+                // and the same-target click-suppression decision (release must
+                // land on the press target) — is the portable
+                // pulp::view::deliver_mouse_up, shared with the plug-in host.
+                // The standalone-specific click firing stays here: defer the
+                // click behind the `_deferredClickAlive` liveness token AND
+                // report it to View::on_global_click (the inspect-click path the
+                // plug-in host does not have).
                 auto modifiers = modifiers_from_ns_flags(event.modifierFlags);
-                _dragTarget->on_mouse_up(local);
-
-                // Bubble pointerup through ancestors (W3C pointer event
-                // bubbling — mirrors mouseDown bubble above). Same
-                // rationale: wrap-divs with on_pointer_event subscribed
-                // never see pointerup otherwise, breaking drag-release
-                // for things like FilterBank band finalization.
-                pulp::view::MouseEvent up_me;
-                up_me.position = local;
-                up_me.window_position = pt;
-                up_me.button = pulp::view::MouseButton::left;
-                up_me.modifiers = modifiers;
-                up_me.is_down = false; up_me.phase = pulp::view::MousePhase::release;
-                up_me.click_count = static_cast<int>(event.clickCount);
-                _dragTarget->on_mouse_event(up_me);
-                for (auto* bubble = _dragTarget->parent(); bubble; bubble = bubble->parent()) {
-                    if (!bubble->on_pointer_event) continue;
-                    pulp::view::MouseEvent bme = up_me;
-                    bme.position = to_local(pt, bubble, self.rootView);
-                    bubble->on_pointer_event(bme);
-                }
-                if (released_target == _dragTarget && (click_handler || global_click)) {
-                    // `click_handler` / `global_click` are
-                    // `std::function`s whose closures reference the
-                    // WidgetBridge / ScriptEngine that built them. Deferring
-                    // their invocation via a bare `dispatch_async` block left
-                    // an unbounded lifetime hazard: if the bridge/engine were
-                    // freed (e.g. a test-scoped owner going out of scope)
-                    // before the block drained, the block ran a dangling
-                    // closure → intermittent SIGSEGV.
-                    //
-                    // Fix: the deferred block captures a COPY of the view's
-                    // `_deferredClickAlive` liveness token (a
-                    // `shared_ptr<atomic<bool>>`). The copy keeps the
-                    // `atomic<bool>` alive even after the PulpView itself is
-                    // gone. `-prepareForTeardown` flips the token to false. A
-                    // block that drains after teardown sees `false` and no-ops.
-                    // Do not capture or dereference `self` from this block:
-                    // this file is compiled MRC, and hidden test windows can be
-                    // torn down before AppKit drains every main-queue callback.
-                    // The copied handlers must keep their own WidgetBridge /
-                    // ScriptEngine liveness guards; this block intentionally
-                    // owns only the teardown token, and mouseUp already marks
-                    // the view dirty immediately after scheduling it.
-                    std::shared_ptr<std::atomic<bool>> aliveToken = _deferredClickAlive;
+                std::shared_ptr<std::atomic<bool>> aliveToken = _deferredClickAlive;
+                auto global_click = self.rootView->on_global_click;
+                pulp::view::MouseUpHost up_host;
+                up_host.fire_click = [aliveToken, global_click](
+                        const std::function<void()>& click_handler_ref,
+                        const std::string& clicked_id, uint16_t mods) {
+                    // global_click reports the immediate hit id (matches the
+                    // inspect-click behavior: Cmd-click on a text label tells
+                    // the inspector exactly which view was hit, not the
+                    // bubbled-to ancestor). Nothing to fire → bail.
+                    if (!click_handler_ref && !global_click) return;
+                    // `click_handler` / `global_click` are `std::function`s whose
+                    // closures reference the WidgetBridge / ScriptEngine that
+                    // built them. A bare `dispatch_async` left an unbounded
+                    // lifetime hazard: if the bridge/engine were freed before the
+                    // block drained, the block ran a dangling closure →
+                    // intermittent SIGSEGV. The block captures a COPY of the
+                    // view's `_deferredClickAlive` token (a
+                    // `shared_ptr<atomic<bool>>`), which keeps the `atomic<bool>`
+                    // alive even after the PulpView is gone; `-prepareForTeardown`
+                    // flips it to false and a late-draining block no-ops. Copy the
+                    // handler + id into locals first — the refs point at
+                    // deliver_mouse_up's stack, which unwinds when it returns.
+                    // Do NOT capture `self`: this file is MRC and hidden test
+                    // windows can tear down before AppKit drains the main queue.
+                    std::function<void()> click_handler = click_handler_ref;
+                    std::string id_copy = clicked_id;
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        // Defused after teardown: do not invoke handlers whose
-                        // backing WidgetBridge / ScriptEngine may already be
-                        // freed.
                         if (!aliveToken || !aliveToken->load())
                             return;
                         @try {
                             try {
                                 if (click_handler) click_handler();
-                                if (global_click) global_click(clicked_id, modifiers);
+                                if (global_click) global_click(id_copy, mods);
                             } catch (const std::exception& e) {
                                 std::cerr << "MacWindowHost deferred click error: " << e.what() << "\n";
                             } catch (...) {
@@ -852,7 +691,9 @@ static void install_app_menu(NSString* appName) {
                                       << [[exception reason] UTF8String] << "\n";
                         }
                     });
-                }
+                };
+                pulp::view::deliver_mouse_up(*self.rootView, _dragTarget, pt, modifiers,
+                                             static_cast<int>(event.clickCount), up_host);
                 _dragTarget = nullptr;
             }
             [self setNeedsDisplay:YES];
@@ -1537,6 +1378,42 @@ static void install_app_menu(NSString* appName) {
 
 namespace pulp::view {
 
+namespace {
+// Shared NSScreen-backed DPI / monitor queries used by BOTH the CPU
+// (MacWindowHost) and GPU (MacGpuWindowHost) window hosts. Before this the CPU
+// host inherited the base-class placeholders — dpi_scale() 1.0 (wrong on every
+// Retina display), max_dimensions() a fake 1920×1080, get_monitors() one fake
+// monitor — so any CPU-host coordinate conversion or monitor query was silently
+// wrong (the CLAUDE.md CPU-host degradation). Both hosts now share this real
+// implementation.
+float mac_backing_scale(NSWindow* window) {
+    if (window) return static_cast<float>([window backingScaleFactor]);
+    return static_cast<float>([[NSScreen mainScreen] backingScaleFactor]);
+}
+
+Size mac_visible_max_dimensions() {
+    NSRect frame = [[NSScreen mainScreen] visibleFrame];
+    return {static_cast<float>(frame.size.width),
+            static_cast<float>(frame.size.height)};
+}
+
+std::vector<WindowHost::MonitorInfo> mac_enumerate_monitors() {
+    std::vector<WindowHost::MonitorInfo> monitors;
+    for (NSScreen* screen in [NSScreen screens]) {
+        NSRect frame = [screen frame];
+        WindowHost::MonitorInfo info;
+        info.bounds = {static_cast<float>(frame.origin.x),
+                       static_cast<float>(frame.origin.y),
+                       static_cast<float>(frame.size.width),
+                       static_cast<float>(frame.size.height)};
+        info.dpi_scale = static_cast<float>([screen backingScaleFactor]);
+        info.name = std::string([[screen localizedName] UTF8String]);
+        monitors.push_back(info);
+    }
+    return monitors;
+}
+} // namespace
+
 class MacWindowHost : public WindowHost {
 public:
     MacWindowHost(View& root, const WindowOptions& options)
@@ -1544,17 +1421,11 @@ public:
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
-            NSWindowStyleMask style = NSWindowStyleMaskTitled
-                | NSWindowStyleMaskClosable
-                | NSWindowStyleMaskMiniaturizable;
-            if (options.resizable)
-                style |= NSWindowStyleMaskResizable;
 
-            window_ = [[NSWindow alloc] initWithContentRect:frame
-                                        styleMask:style
-                                        backing:NSBackingStoreBuffered
-                                        defer:NO];
-            [window_ setReleasedWhenClosed:NO];
+            // Shared NSWindow construction (style, released-when-closed,
+            // title, window-type config, content min-size) — see
+            // create_configured_window; identical for the GPU host.
+            window_ = create_configured_window(options);
 
             // NSWindow's default backgroundColor is
             // [NSColor windowBackgroundColor] which is white in macOS
@@ -1563,15 +1434,8 @@ public:
             // Set the window backgroundColor to match PulpView's clear color
             // so any compositing race / partial-paint window shows dark, not
             // white. Belt-and-suspenders alongside PulpView isOpaque=YES.
+            // CPU-host-specific: the GPU host clears via its Metal frame.
             [window_ setBackgroundColor:pulp::view::mac_host::ns_host_clear_color()];
-
-            [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
-
-            // Apply multi-window type configuration.
-            configure_window_type(window_, options);
-
-            if (options.min_width > 0 || options.min_height > 0)
-                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             options_initially_hidden_ = options.initially_hidden;
 
@@ -1642,9 +1506,7 @@ public:
         // windowShouldClose:/onClose during teardown; releasedWhenClosed=NO so
         // our ARC strong ref controls the final dealloc.
         delegate_.onClose = nil;
-        [window_ setDelegate:nil];
-        [window_ setReleasedWhenClosed:NO];
-        [window_ close];
+        detach_and_close_window(window_);
         root_.set_window_host(nullptr);
         root_.set_frame_clock(nullptr);
     }
@@ -1657,33 +1519,22 @@ public:
     void position_beside(WindowHost* other) override {
         if (!other) return;
         auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
-        if (!other_nswin || !window_) return;
-
-        auto other_frame = [other_nswin frame];
-        auto screen_frame = [[other_nswin screen] visibleFrame];
-        auto my_size = [window_ frame].size;
-
-        // Align top of inspector with top of other window (macOS uses bottom-left origin)
-        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
-        // Clamp vertically to screen bounds
-        CGFloat screen_bottom = screen_frame.origin.y;
-        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
-        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
-        if (target_y < screen_bottom) target_y = screen_bottom;
-
-        // Try right side first
-        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
-        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
-        } else {
-            // Fall back to left side
-            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
-        }
+        position_window_beside(window_, other_nswin);
     }
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) view_; }
+
+    // Real DPI / monitor geometry (shared with the GPU host) instead of the
+    // base-class 1.0 / fake-1080p / one-fake-monitor placeholders. Without
+    // these, coordinate conversion (convert_to_logical/native) was identity on
+    // every Retina display when running the CPU host.
+    float dpi_scale() const override { return mac_backing_scale(window_); }
+    Size max_dimensions() const override { return mac_visible_max_dimensions(); }
+    std::vector<MonitorInfo> get_monitors() const override {
+        return mac_enumerate_monitors();
+    }
+
     ContentSize get_content_size() const override {
         NSSize size = view_ ? view_.bounds.size : NSZeroSize;
         return {
@@ -1828,24 +1679,11 @@ public:
                 partial_rendering_debug_ = (env[0] == '1');
             }
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
-            NSWindowStyleMask style = NSWindowStyleMaskTitled
-                | NSWindowStyleMaskClosable
-                | NSWindowStyleMaskMiniaturizable;
-            if (options.resizable)
-                style |= NSWindowStyleMaskResizable;
 
-            window_ = [[NSWindow alloc] initWithContentRect:frame
-                                        styleMask:style
-                                        backing:NSBackingStoreBuffered
-                                        defer:NO];
-            [window_ setReleasedWhenClosed:NO];
-            [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
-
-            // Apply multi-window type configuration.
-            configure_window_type(window_, options);
-
-            if (options.min_width > 0 || options.min_height > 0)
-                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
+            // Shared NSWindow construction (style, released-when-closed,
+            // title, window-type config, content min-size) — see
+            // create_configured_window; identical for the CPU host.
+            window_ = create_configured_window(options);
 
             options_initially_hidden_ = options.initially_hidden;
 
@@ -1893,9 +1731,7 @@ public:
         // strong ref controls the final dealloc.
         delegate_.onClose = nil;
         delegate_.onResize = nil;
-        [window_ setDelegate:nil];
-        [window_ setReleasedWhenClosed:NO];
-        [window_ close];
+        detach_and_close_window(window_);
 
         skia_surface_.reset();
         gpu_surface_.reset();
@@ -1950,26 +1786,7 @@ public:
     void position_beside(WindowHost* other) override {
         if (!other) return;
         auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
-        if (!other_nswin || !window_) return;
-        auto other_frame = [other_nswin frame];
-        auto screen_frame = [[other_nswin screen] visibleFrame];
-        auto my_size = [window_ frame].size;
-
-        // Align top of inspector with top of other window (macOS uses bottom-left origin)
-        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
-        // Clamp vertically to screen bounds
-        CGFloat screen_bottom = screen_frame.origin.y;
-        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
-        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
-        if (target_y < screen_bottom) target_y = screen_bottom;
-
-        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
-        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
-        } else {
-            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
-        }
+        position_window_beside(window_, other_nswin);
     }
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
@@ -2196,16 +2013,9 @@ public:
         }
     }
 
-    float dpi_scale() const override {
-        if (window_) return static_cast<float>([window_ backingScaleFactor]);
-        return 1.0f;
-    }
+    float dpi_scale() const override { return mac_backing_scale(window_); }
 
-    Size max_dimensions() const override {
-        NSScreen* screen = [NSScreen mainScreen];
-        NSRect frame = [screen visibleFrame];
-        return {static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
-    }
+    Size max_dimensions() const override { return mac_visible_max_dimensions(); }
 
     void set_always_on_top(bool on_top) override {
         if (window_)
@@ -2295,19 +2105,7 @@ public:
     }
 
     std::vector<MonitorInfo> get_monitors() const override {
-        std::vector<MonitorInfo> monitors;
-        for (NSScreen* screen in [NSScreen screens]) {
-            NSRect frame = [screen frame];
-            MonitorInfo info;
-            info.bounds = {static_cast<float>(frame.origin.x),
-                           static_cast<float>(frame.origin.y),
-                           static_cast<float>(frame.size.width),
-                           static_cast<float>(frame.size.height)};
-            info.dpi_scale = static_cast<float>([screen backingScaleFactor]);
-            info.name = std::string([[screen localizedName] UTF8String]);
-            monitors.push_back(info);
-        }
-        return monitors;
+        return mac_enumerate_monitors();
     }
 
 private:
@@ -2536,6 +2334,16 @@ private:
         }
 
         paint_scene(*canvas);
+
+        // Env-var one-shot .skp capture: when PULP_SKP_CAPTURE_DIR is set, dump
+        // this frame's draw ops to a backend-independent .skp for offline
+        // inspection (Skia debugger / SVG). Re-runs paint_scene into the capture
+        // canvas so the artifact matches what was just presented; one-shot per
+        // env value, so a live loop writes one file, not one per frame.
+        pulp::render::maybe_capture_skp_from_env(
+            static_cast<int>(width_), static_cast<int>(height_),
+            [this](canvas::Canvas& c) { paint_scene(c); },
+            skia_surface_->graphite_context());
 
         continuous_frames_.store(
             pulp::view::needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),

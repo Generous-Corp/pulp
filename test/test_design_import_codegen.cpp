@@ -528,6 +528,48 @@ TEST_CASE("generate_pulp_cpp preserves extracted interactive-descendant wrappers
     REQUIRE(count_occurrences(result.source, "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
 }
 
+TEST_CASE("a layer rotation lowers to setRotation, not a dropped needle",
+          "[view][import][rotation]") {
+    // A knob's value needle is a thin rect the .fig lane rotates to the value
+    // angle; the decoder lowers that to `transform: rotate(<deg>deg)`. Without
+    // this emit the rotation was dropped and the needle rendered as an
+    // axis-aligned stub floating off-center instead of a radial pointer.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "root";
+
+    IRNode needle;
+    needle.type = "frame";
+    needle.name = "knob_indicator";
+    needle.style.width = 2.0f;
+    needle.style.height = 10.0f;
+    needle.style.background_color = "#f56161d9";
+    needle.style.transform = "rotate(43.40deg)";
+    ir.root.children.push_back(needle);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("setRotation('") != std::string::npos);
+    REQUIRE(js.find("43.4") != std::string::npos);
+
+    // A node with no rotation must NOT emit setRotation.
+    DesignIR plain;
+    plain.source = DesignSource::figma;
+    plain.root.type = "frame";
+    IRNode flat;
+    flat.type = "frame";
+    flat.name = "flat";
+    flat.style.width = 2.0f;
+    flat.style.height = 10.0f;
+    flat.style.background_color = "#f56161d9";
+    plain.root.children.push_back(flat);
+    REQUIRE(generate_pulp_js(plain, opts).find("setRotation('") == std::string::npos);
+}
+
 TEST_CASE("a knob emits a value-driven arc, not a parked plain ring",
           "[view][import][knob]") {
     // .fig visual-open 6.2: some big knobs looked like a plain ring instead of a
@@ -1087,6 +1129,14 @@ TEST_CASE("detect_audio_widget identifies widget types from names", "[view][impo
     REQUIRE(detect_audio_widget("analyser_view") == AudioWidgetType::spectrum);
     REQUIRE(detect_audio_widget("header_label") == AudioWidgetType::none);
     REQUIRE(detect_audio_widget("save_button") == AudioWidgetType::none);
+    // A "label" token names the TEXT that annotates a control, not the control:
+    // "knob label" is the caption, so it must not promote to a knob (which
+    // painted a stock knob disc over a "Classic" filter-mode caption). The real
+    // control keeps its recognition — only the label frame is excluded.
+    REQUIRE(detect_audio_widget("sound / knob label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("fader label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("value label") == AudioWidgetType::none);
+    REQUIRE(detect_audio_widget("sound / knob / small unipolar") == AudioWidgetType::knob);
 }
 
 TEST_CASE("detect_audio_widget matches whole words not substrings", "[view][import]") {
@@ -2273,6 +2323,34 @@ TEST_CASE("native codegen keeps one call when every corner agrees",
     const auto js = native_js(ir);
     REQUIRE(count_occurrences(js, "setCornerRadius(") == 1);
     REQUIRE(js.find("'All', 6") != std::string::npos);
+}
+
+TEST_CASE("native codegen clips a container that declares overflow and leaves the default open",
+          "[view][import][visual-overrides]") {
+    // `overflow: clip` is how a decoder says "Figma clips this container's
+    // content" — a component master whose decoration overhangs its bounds
+    // renders clipped in Figma, so dropping the key painted the overhang over
+    // whatever sat below the instance. `visible` is the View default and must
+    // NOT emit a call: an explicit setOverflow('visible') would be noise on
+    // nearly every node.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Card";
+    ir.root.style.width = 60.0f;
+    ir.root.style.height = 235.0f;
+    ir.root.style.overflow = "clip";
+    IRNode open;
+    open.type = "frame";
+    open.name = "Open";
+    open.style.width = 20.0f;
+    open.style.height = 20.0f;
+    open.style.overflow = "visible";
+    ir.root.children.push_back(open);
+
+    const auto js = native_js(ir);
+    REQUIRE(count_occurrences(js, "setOverflow(") == 1);
+    REQUIRE(js.find("setOverflow('root', 'clip')") != std::string::npos);
 }
 
 TEST_CASE("native codegen fades a text node — the branch that had no setOpacity",

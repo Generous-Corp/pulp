@@ -483,7 +483,7 @@ TEST_CASE("PulpView NSEvent click bubbles up to ancestor on_click handler",
 // destructor's `-prepareForTeardown` must cancel the queued block so the
 // pump runs it as a safe no-op instead of dereferencing a freed closure.
 TEST_CASE("PulpView deferred click is cancelled when bridge/engine are torn down first",
-          "[view][hosts][bridge][issue-2502]") {
+          "[view][hosts][bridge][issue-2502][lifecycle]") {
     @autoreleasepool {
         [NSApplication sharedApplication];
 

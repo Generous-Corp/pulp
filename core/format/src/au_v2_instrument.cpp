@@ -265,6 +265,7 @@ OSStatus PulpAUInstrument::GetProperty(AudioUnitPropertyID inID, AudioUnitScope 
         auto* ctx = static_cast<PulpEditorContext*>(outData);
         ctx->processor = processor_.get();
         ctx->store = &store_;
+        ctx->owner_alive = owner_alive_.capture();
         return noErr;
     }
     if (inID == kAudioUnitProperty_CocoaUI && g_cocoa_view_info_filler) {

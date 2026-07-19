@@ -574,6 +574,43 @@ fresh lib instead of segfaulting at first paint.
    on THAT object, not just its host. Test: `[idle-pump][crash]` in
    `test_view_bridge.cpp` builds the pump, destroys the bridge, calls the pump →
    no-op instead of use-after-free.
+9b. **A retained bridge needs the FORMAT OWNER's lifetime token, covering BOTH
+   `Processor&` and `StateStore&`.** A second Live crash (EXC_BAD_ACCESS in
+   `ViewBridge::poll_editor_reload`, AU embedded in Ableton Live 12, 2026-07-17)
+   got past the bridge's own `alive_` check: AU audio-unit and view-controller
+   lifetimes are independently ordered by the host, so Live can destroy the
+   adapter's Processor and StateStore while retaining an editor whose display-link
+   pump still fires. Guarding only `processor_` is incomplete: the same tick first
+   drains `store_.pump_listeners()`, and the installed host-parameter surface also
+   retains the store.
+
+   The contract is therefore adapter-owner scoped:
+
+   - The AUv2/AUv3/VST3/CLAP owner holds a `runtime::AliveToken` and passes a
+     captured handle into every `ViewBridge` constructed from its Processor and
+     StateStore. Retire it at the START of explicit teardown (`destroy`,
+     `terminate`, `dealloc`) before either referent can die. As a fallback for
+     implicit C++ teardown, declare the token after Processor/StateStore members
+     so reverse member destruction retires it first.
+   - Every bridge path that can reach `processor_` OR `store_` fails closed when
+     the owner handle is retired: idle store pumping, scripted-session lookup,
+     editor reload, attach/resize/close callbacks, rebuild, and the
+     `StateStoreHostParamSurface`. `supports_editor_reload_` remains cached so the
+     common non-reload tick does not need a virtual call, but caching is not the
+     lifetime fix.
+   - `AliveToken` only makes the check/no-op DECISION safe. It does not own either
+     referent and does not establish cross-thread quiescence. Adapter teardown,
+     editor teardown, and the idle pump remain serialized on the main thread;
+     use a real join/quiescence protocol before extending this pattern across
+     concurrently executing threads.
+
+   Lifecycle coverage must exercise the full teardown-order matrix, not merely
+   bridge-first destruction: retained editor after owner teardown, idle pump and
+   host-param calls after owner retirement, and format-specific churn. Canonical
+   cases carry `[owner-lifetime][lifecycle]`; run them under ASan with
+   `ctest --test-dir build-asan -L lifecycle --output-on-failure`. The separate
+   IPC self-destroy regression applies the same post-callback liveness principle:
+   re-check after user code before touching connection state again.
 10. **In a multi-plugin bundle, editor/metadata callbacks must resolve
     PER-INSTANCE state — never a process global.** A CLAP/AU/VST3 bundle exposes
     N plugins from one binary, so a single shared descriptor global would hand
@@ -692,6 +729,18 @@ the same audit: is the bridge owned by an RAII path that guarantees
 ordering (AU pattern, no explicit close), or does the lane have a
 return path that bypasses the window-close callback (standalone
 pattern, explicit close before processor teardown)?
+
+Standalone also owns the native audio-workgroup lifetime for an opt-in parallel
+Processor. After `AudioDevice::open()` and before `Processor::prepare()`, it
+discovers `format::AudioWorkgroupClient` and forwards
+`callback_workgroup()`. During stop it stops the callback first, publishes null
+to the client, waits off the render thread until every worker acknowledges the
+removal, then closes the device. Keep that order: the handle is borrowed from
+the open device, and close (or a live default-device retarget) can invalidate it
+before an asynchronously waking worker has left unless the acknowledgment
+barrier completes first. The device's close preparation must also disable future
+retarget notifications and serialize with an in-flight switch before the final
+null+ack; draining only in standalone leaves a rebind window before close.
 
 ## EditorBridge — JSON message dispatch over the editor lifecycle
 
@@ -1571,3 +1620,17 @@ NOT named `parse_css_color`, because `css_gradient.hpp` already declares a *weak
 colors, no hsl). Naming them alike makes `std::string` call sites silently bind to the weaker
 overload and regress named/hsl handling. Keep the names distinct until the two parsers are
 deliberately converged.
+
+**Per-root interaction state (multi-editor isolation):** focus, active-overlay,
+ComboBox popup, and the overlay paint queue live in a `RootInteractionState`
+owned by the tree root, reached with `View::interaction()` (walks `tree_root()`
+and lazily allocates). That is the source of truth — two editors in one host
+process (the shared-AUHostingService case) each get their own block and no
+longer share focus/popup state. The historical statics `View::focused_input_`
+and `View::active_overlay_` remain as **shim mirrors** reflecting the
+last-acted slot process-wide; read them only for back-compat, never to reason
+about which editor owns focus — use `view->interaction()`. Detached widgets
+(no parent, no children) intentionally share one `fallback_interaction()`
+block. When enqueuing overlays from host code, push onto the *painting root's*
+`interaction().overlay_queue`, not a process-global queue, or the overlay
+paints on the wrong editor (see `standalone.cpp`).

@@ -26,6 +26,14 @@ if(Python3_Interpreter_FOUND)
         "${CMAKE_SOURCE_DIR}/tools/scripts/framework_neutrality_check.py"
         --selftest)
 
+    # Lifetime guard: a newly introduced worker thread may not capture a raw
+    # owner without a stable, reasoned review entry. The selftest proves the
+    # lexical gate can detect all supported hazardous shapes.
+    add_test(NAME raw-this-async-check COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/raw_this_async_check.py")
+    add_test(NAME raw-this-async-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/raw_this_async_check.py" --selftest)
+
     # Thread-safe assertions: fail on a Catch2 assertion macro invoked inside a
     # worker-thread lambda. Catch2 3.7.1's macros aren't thread-safe; off-main
     # assertions are UB that bare metal tolerates but VM scheduler timing trips.
@@ -50,6 +58,14 @@ if(Python3_Interpreter_FOUND)
         add_test(NAME governed-build-selftest COMMAND ${Python3_EXECUTABLE}
             "${CMAKE_SOURCE_DIR}/tools/ci/test_governed_build.py")
         set_tests_properties(governed-build-selftest PROPERTIES TIMEOUT 120)
+    endif()
+
+    # Combined installer graph: fake the macOS signing/package tools and inspect
+    # the generated Distribution XML. This pins unique plugin+format package IDs
+    # and the multi-plugin nested outline without using credentials or bundles.
+    if(APPLE)
+        add_test(NAME combined-installer-selftest COMMAND ${Python3_EXECUTABLE}
+            "${CMAKE_SOURCE_DIR}/tools/scripts/test_build_combined_installer.py")
     endif()
 
     # TART_HOME resolution: the Tart VM store is a per-host value, so the VM

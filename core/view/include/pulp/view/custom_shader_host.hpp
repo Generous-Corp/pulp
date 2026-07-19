@@ -40,9 +40,19 @@ public:
     /// must not silently freeze.
     bool shader_uses_time() const { return shader_uses_time_; }
 
+    /// One-shot latch for "the body shader failed to draw and we logged it".
+    /// A shader can fail at DRAW time (not just install time) — e.g. the runtime
+    /// effect compiles but the backend can't produce a shader — and the widget
+    /// paint path must then fall back to its C++ body instead of leaving the
+    /// widget blank. The paint path logs that once per host instance (guarded by
+    /// this latch) so it does not spam a line every frame.
+    bool shader_draw_failure_logged() const { return shader_draw_failure_logged_; }
+    void mark_shader_draw_failure_logged() { shader_draw_failure_logged_ = true; }
+
 private:
     std::string custom_sksl_;
     bool shader_uses_time_ = false;
+    bool shader_draw_failure_logged_ = false;
 };
 
 } // namespace pulp::view

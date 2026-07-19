@@ -314,6 +314,43 @@ textbook phase vocoder, *and* the real Pulp stretch engine — which is why they
 to gate. (`stereo_width` operates on `(N,2)` arrays directly; the rest run through the mono
 pipeline. Full list + module map: [`README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).)
 
+## Oscillator validation (reference-free)
+
+The detectors above compare a candidate against a reference. The VA/VCO/DCO/WT
+oscillator suite ([oscillator guide](oscillators.md)) is also validated
+**reference-free** — one render, no before/after pair — by a separate set of tools,
+all opt-in and outside the default build and `ctest` like the rest of the lab:
+
+- **Render bridge** — `pulp-osc-render-wav` (a built test binary) renders any suite
+  engine to a WAV for offline analysis: `--engine vco|dco|wt`, `--shape`, `--freq`,
+  `--sr`, `--dur-ms`, `--bits`, plus `--seed <uint>` to vary the analog-noise
+  realization and `--drift-cents`/`--jitter-cents` (VCO only — DCO/WT reject them).
+  The Python lab reads the result back via `quality_lab.audio_io`.
+- **Click / edge-smear detector** (`quality_lab.detectors.click`) — flags an
+  *unexpected* discontinuity (band-switch seam, voice-steal pop, block-rate zipper)
+  by nulling each period against its predecessor, so a square's own edges do not
+  trip it. On a real BLEP oscillator at a fractional period it **refuses** rather
+  than false-fires — the per-edge approximation residual is smear, not a click, told
+  apart by a per-period template-novelty measure that is render-length independent.
+  The honest gate for that regime is a frozen-reference null (`dsp.null_residual_db`):
+  render the same patch with the offending parameter held frozen. A refusal is always
+  `low_coverage`, never a silent "clean".
+- **Drift vs jitter** (`dsp.overlapping_allan_deviation`) — separates analog DRIFT
+  (random-walk FM, Allan slope ~ +½) from clock JITTER (white FM, ~ −½) by the
+  τ-regime slope sign, reference-free over an f0(t) series.
+- **Oscillator corpus** — `quality-lab corpus seed` seeds synthetic oscillator
+  families (`synthetic_osc_static_shapes`, `_sync_sweep`, `_tzfm_grid`) that the
+  golden-render regression net gates on alias floor / null residual / determinism.
+- **Offline profile fitting (WP-4 F1)** — `quality-lab fit` recovers an OSC-VCO
+  profile's DETERMINISTIC parameters (tuning, core bow, waveshaper, level, PWM) from
+  a measurement kit via five sequential least-squares fits (no global optimizer). It
+  **refuses** to fit any parameter not identifiable from audio — drift/jitter and the
+  cut rows are pinned and labeled, never presented as measured. Developer/offline only.
+
+There is also an advisory, `PULP_BENCHMARK`-gated oscillator throughput bench
+(`pulp-test-osc-bench`, `next()` µs/sample per engine, emitted in the `bench_diff.py`
+schema) — never a hard gate.
+
 <a id="maturity"></a>
 
 ## Maturity — how a feature earns the right to gate

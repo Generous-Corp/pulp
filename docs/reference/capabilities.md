@@ -176,8 +176,14 @@ All signal processors live in the `signal` module. Each is a standalone, statele
 | FFT | usable | [signal](modules.md#signal) | |
 | Windowing functions | usable | [signal](modules.md#signal) | |
 | SmoothedValue | usable | [signal](modules.md#signal) | |
+| Modal synthesis bank + strike/pickup weighting | usable | [signal](modules.md#signal) | modal specification fixtures |
+| Versioned modal-spec JSON loading and validation | usable | [signal](modules.md#signal) | modal specification fixtures |
+| Circuit-derived bridged-T resonator | usable | [signal](modules.md#signal) | |
+| Band-limited square-oscillator bank | usable | [signal](modules.md#signal) | |
 
-Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`, `pulp/signal/osc/va.hpp`
+Key headers: all under `pulp/signal/` -- e.g., `pulp/signal/compressor.hpp`,
+`pulp/signal/modal_bank.hpp`, `pulp/signal/modal_spec.hpp`,
+`pulp/signal/bridged_t_resonator.hpp`, `pulp/signal/osc/va.hpp`
 
 Oscillators live in `pulp/signal/osc/`: a phase accumulator, the polyBLEP/BLAMP
 kernels, and the virtual-analog shapes built from them, with hard sync and
@@ -388,7 +394,7 @@ CPU implementation beats or ties the GPU at all musical settings.
 | SVG rendering | experimental | [canvas](modules.md#canvas) | |
 | Effects (shadow, blur, gradients) | usable | [canvas](modules.md#canvas) | |
 
-Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/effects.hpp`
+Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/view_effect.hpp`
 
 ---
 
@@ -399,12 +405,13 @@ Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas
 | SeqLock (coherent multi-field reads) | stable | [runtime](modules.md#runtime) | [architecture](../concepts/architecture.md) |
 | TripleBuffer (latest-value publication) | stable | [runtime](modules.md#runtime) | [architecture](../concepts/architecture.md) |
 | SPSCQueue (single-producer single-consumer FIFO) | stable | [runtime](modules.md#runtime) | |
+| ActivityChannel (realtime-to-UI occurrence feedback) | stable | [runtime](modules.md#runtime) | [runtime guide](../guides/modules/runtime.md#activitychannel) |
 | SpscRingIndex (lock-free ring index; the `<pulp/runtime/spsc_ring_index.hpp>` type behind a ring buffer) | stable | [runtime](modules.md#runtime) | |
 | ScopeGuard | stable | [runtime](modules.md#runtime) | |
 | Logging | stable | [runtime](modules.md#runtime) | |
 | Assertions | stable | [runtime](modules.md#runtime) | |
 
-Key headers: `pulp/runtime/seqlock.hpp`, `pulp/runtime/triple_buffer.hpp`, `pulp/runtime/spsc_queue.hpp`, `pulp/runtime/log.hpp`
+Key headers: `pulp/runtime/activity_channel.hpp`, `pulp/runtime/seqlock.hpp`, `pulp/runtime/triple_buffer.hpp`, `pulp/runtime/spsc_queue.hpp`, `pulp/runtime/log.hpp`
 
 ---
 

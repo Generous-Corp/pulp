@@ -5,7 +5,7 @@
 // (`tools/figma-plugin/schema/figma-plugin-export-v1.json`), so a decoded frame
 // flows through the existing `--from figma-plugin` importer unchanged.
 
-import { geometryToPath, glyphsToPath, isIconFont } from './paths.mjs';
+import { geometryToPath, geometryToClipPath, glyphsToPath, isIconFont } from './paths.mjs';
 import { isFontAvailable } from './fonts.mjs';
 
 const FRAME_LIKE = new Set(['FRAME', 'COMPONENT', 'INSTANCE', 'COMPONENT_SET']);
@@ -827,6 +827,52 @@ function localTransform(node) {
 }
 
 /**
+ * A box-model node's outline as SVG path data in its PARENT's space, for a
+ * rectangle / rounded-rectangle / ellipse / frame used as a mask — shapes whose
+ * geometry is derived from the box, so there are no geometry blobs to decode.
+ * Every point (cubic control points included — an affine maps a bezier's
+ * control polygon exactly) goes through the node transform, so a rotated mask
+ * clips where the design rotated it.
+ */
+function boxMaskOutline(node) {
+  const w = node.size && node.size.x;
+  const h = node.size && node.size.y;
+  if (!(w > 0) || !(h > 0)) return null;
+  const t = localTransform(node);
+  const pt = (x, y) =>
+    `${round2(t.m00 * x + t.m01 * y + t.m02)} ${round2(t.m10 * x + t.m11 * y + t.m12)}`;
+  // Circular-arc-from-cubic constant; the same approximation every renderer's
+  // rounded rect uses, and exact enough that no display resolves the error.
+  const k = 0.5522847498;
+  if (node.type === 'ELLIPSE') {
+    const rx = w / 2;
+    const ry = h / 2;
+    return `M${pt(rx, 0)} `
+      + `C${pt(rx + k * rx, 0)} ${pt(w, ry - k * ry)} ${pt(w, ry)} `
+      + `C${pt(w, ry + k * ry)} ${pt(rx + k * rx, h)} ${pt(rx, h)} `
+      + `C${pt(rx - k * rx, h)} ${pt(0, ry + k * ry)} ${pt(0, ry)} `
+      + `C${pt(0, ry - k * ry)} ${pt(rx - k * rx, 0)} ${pt(rx, 0)} Z`;
+  }
+  const uniform = cornerRadius(node);
+  const per = perCornerRadii(node);
+  const cap = Math.min(w, h) / 2;
+  const r = (v) => Math.min(Math.max(v || 0, 0), cap);
+  const tl = r(per ? per.tl : uniform);
+  const tr = r(per ? per.tr : uniform);
+  const br = r(per ? per.br : uniform);
+  const bl = r(per ? per.bl : uniform);
+  return `M${pt(tl, 0)} L${pt(w - tr, 0)} `
+    + (tr ? `C${pt(w - tr + k * tr, 0)} ${pt(w, tr - k * tr)} ${pt(w, tr)} ` : '')
+    + `L${pt(w, h - br)} `
+    + (br ? `C${pt(w, h - br + k * br)} ${pt(w - br + k * br, h)} ${pt(w - br, h)} ` : '')
+    + `L${pt(bl, h)} `
+    + (bl ? `C${pt(bl - k * bl, h)} ${pt(0, h - bl + k * bl)} ${pt(0, h - bl)} ` : '')
+    + `L${pt(0, tl)} `
+    + (tl ? `C${pt(0, tl - k * tl)} ${pt(tl - k * tl, 0)} ${pt(tl, 0)} ` : '')
+    + 'Z';
+}
+
+/**
  * Materialize one frame subtree into the export envelope.
  *
  * `geometry` is a second, independent product of the same walk: Figma's OWN
@@ -931,12 +977,53 @@ export function materializeFrame(scene, frame, ctx) {
       parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
     const optedOut = node.stackPositioning === 'ABSOLUTE';
     if (parent && node.transform && (!parentIsAutoLayout || optedOut)) {
-      const x = node.transform.m02;
-      const y = node.transform.m12;
+      const t = node.transform;
+      const x = t.m02;
+      const y = t.m12;
       if (typeof x === 'number' && typeof y === 'number') {
         style.position = 'absolute';
-        style.left = Math.round(x);
-        style.top = Math.round(y);
+        // The affine transform's rotation column was dropped here, keeping only
+        // the translation (m02/m12). A rotated layer — e.g. a knob's value
+        // needle, stored as a thin rect rotated to the value angle — then
+        // rendered as an axis-aligned bar at the rotated origin: a vertical stub
+        // floating off-center instead of a radial pointer. Recover the rotation.
+        const angle = Math.atan2(t.m10, t.m00);   // radians
+        const deg = angle * 180 / Math.PI;
+        // Only a NON-orthogonal rotation makes an axis-aligned box non-axis-
+        // aligned and needs the transform (a knob's value needle at 43.4deg).
+        // A multiple of 90deg keeps a rect axis-aligned, and for a solid fill a
+        // 180deg spin is a visual no-op — applying it (plus the center-pivot
+        // compensation below) only shifts the box off its intended row, which is
+        // exactly what floated a slider's 180deg-rotated fill above its track.
+        // Orthogonal rotations fall through to plain m02/m12 placement.
+        const mod90 = Math.abs(deg) % 90;
+        const nonOrthogonal = mod90 > 0.5 && mod90 < 89.5;
+        // Scope to box-model nodes (frames / rounded-rects / ellipses). A
+        // VECTOR_LIKE node is re-lowered to `path_data`, and Figma bakes the
+        // layer rotation into that path — re-applying it here would double-rotate
+        // the glyph. The reported bug is a knob's value needle, a ROUNDED_RECTANGLE.
+        if (nonOrthogonal && !VECTOR_LIKE.has(node.type)) {
+          // Figma rotates the layer around its LOCAL origin (0,0), landing that
+          // origin at (m02, m12). The renderer applies `rotate()` around the
+          // element's CENTER (default transform-origin). Compensate left/top so
+          // the center-pivot rotation reproduces Figma's origin-pivot placement:
+          // element-center = (m02,m12) + R(theta)*(w/2,h/2), and the renderer
+          // pivots on (left+w/2, top+h/2), so solve for left/top.
+          const w = typeof style.width === 'number' ? style.width : 0;
+          const h = typeof style.height === 'number' ? style.height : 0;
+          const c = Math.cos(angle), s = Math.sin(angle);
+          const cx = c * (w / 2) - s * (h / 2);   // R(theta)*(w/2,h/2)
+          const cy = s * (w / 2) + c * (h / 2);
+          style.left = Math.round(x + cx - w / 2);
+          style.top = Math.round(y + cy - h / 2);
+          // CSS-compatible rotate() the native codegen lowers to setRotation();
+          // the renderer's default center transform-origin matches the
+          // compensation above.
+          style.transform = `rotate(${deg.toFixed(2)}deg)`;
+        } else {
+          style.left = Math.round(x);
+          style.top = Math.round(y);
+        }
       }
     }
     // On a TEXT node the solid fill is the glyph color, applied as `color` in the
@@ -997,6 +1084,18 @@ export function materializeFrame(scene, frame, ctx) {
       } else {
         pushDiag('asset-missing', node, `image hash ${hash || '?'} not in bundle`);
       }
+    }
+    // Figma clips a container's content to its bounds unless the designer
+    // unchecks "Clip content" (`frameMaskDisabled: true`). A GROUP is stored as
+    // a frame with `resizeToFit`, and a group never clips regardless of the
+    // flag. Matching that matters most for expanded instances: a master whose
+    // decoration overhangs its symbol bounds (a channel strip's 238px noise
+    // card inside a 235px symbol) renders clipped in Figma, so an unclipped
+    // import paints the overhang over whatever sits below the instance — a
+    // mixer's cards buried the transport's step row.
+    if ((node.type === 'FRAME' || node.type === 'SYMBOL' || node.type === 'INSTANCE')
+        && node.frameMaskDisabled === false && node.resizeToFit !== true) {
+      style.overflow = 'clip';
     }
     const radius = cornerRadius(node);
     if (radius !== null) style.border_radius = radius;
@@ -1188,7 +1287,25 @@ export function materializeFrame(scene, frame, ctx) {
   const expandStack = [];
 
   function expandInstance(inst) {
-    const masterKey = guidKey(inst.symbolData?.symbolID);
+    // An instance swap is an override like any other: the entry carries
+    // `overriddenSymbolID`, applyOverrideEntry copies it onto the clone, and it
+    // re-points the WHOLE expansion at a different master. Files that predate
+    // component properties have no componentPropAssignments at all, so this
+    // field is the only record of the swap — reading just the authored
+    // symbolID expands every sibling from one shared master, which painted all
+    // sixteen mixer channels with the same instrument icon under sixteen
+    // correct labels. Deeper override paths keep resolving after the swap
+    // because the swapped master's children carry the matching overrideKeys.
+    const authoredKey = guidKey(inst.symbolData?.symbolID);
+    const swappedKey = guidKey(inst.overriddenSymbolID);
+    let masterKey = authoredKey;
+    if (swappedKey && swappedKey !== authoredKey) {
+      if (scene.byGuid.has(swappedKey)) masterKey = swappedKey;
+      else {
+        pushDiag('external-component', inst,
+          `swapped master ${swappedKey} not in file; expanding authored master instead`);
+      }
+    }
     const master = masterKey ? scene.byGuid.get(masterKey) : null;
     if (!master) {
       if (masterKey) {
@@ -1237,6 +1354,25 @@ export function materializeFrame(scene, frame, ctx) {
     const { style, assetRef, layout } = styleFor(node, parent);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
+
+    // Resize constraints, in Figma's own spelling (MIN/MAX/CENTER/STRETCH/
+    // SCALE) — design_ir_json.cpp normalizes, codegen lowers to flex within
+    // the parent. Only meaningful where the node is positioned by its parent's
+    // coordinate space, so the gate mirrors styleFor's absolute-placement rule:
+    // a FLOWING auto-layout child is governed by stack sizing/alignment, and
+    // emitting its (stale) constraints would fight the flex pass with margins
+    // and grow the design never asked for.
+    const parentIsStack =
+      parent && (parent.stackMode === 'HORIZONTAL' || parent.stackMode === 'VERTICAL');
+    if (parent && (!parentIsStack || node.stackPositioning === 'ABSOLUTE')) {
+      const h = node.horizontalConstraint;
+      const v = node.verticalConstraint;
+      if (typeof h === 'string' || typeof v === 'string') {
+        out.constraints = {};
+        if (typeof h === 'string') out.constraints.horizontal = h;
+        if (typeof v === 'string') out.constraints.vertical = v;
+      }
+    }
 
     // The node's identity, carried through to the IR (design_ir_json's
     // parse_ir_identity_fields reads `node_id` into source_node_id, which the
@@ -1292,6 +1428,12 @@ export function materializeFrame(scene, frame, ctx) {
     // carrying path-data to a native SvgPathWidget), so resolving the shape here
     // is the whole fix — nothing downstream needs to change.
     let vectorResolved = false;
+    // A vector whose geometry came from `strokeGeometry` IS the stroke, already
+    // expanded into a filled band and painted as a fill below. Emitting the
+    // node's stroke a second time as a CSS border strokes that band's outline —
+    // two parallel lines where the design has one, the "doubled / too thick"
+    // outline seen on a triad-pad triangle and every stroked ring.
+    let vectorStrokeBand = false;
     if (VECTOR_LIKE.has(type)) {
       let resolved = null;
       let failure = null;
@@ -1307,6 +1449,7 @@ export function materializeFrame(scene, frame, ctx) {
       if (failure) pushDiag('vector-simplified', node, `${type} ${failure}; emitted as a plain box`);
       if (resolved) {
         vectorResolved = true;
+        vectorStrokeBand = resolved.paint === 'stroke';
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
@@ -1487,7 +1630,7 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('gradient-approximated', node, gradient.type);
     }
 
-    if ((node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
+    if (!vectorStrokeBand && (node.strokePaints || []).length && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
       const s = firstSolidStroke(node);
       // Figma multiplies a paint's own `opacity` by its color's alpha — the
       // same product the fill and text paths already take. Reading only
@@ -1508,13 +1651,121 @@ export function materializeFrame(scene, frame, ctx) {
     let kids = [];
     if (!vectorResolved) {
       if (node.__masterKey) expandStack.push(node.__masterKey);
-      kids = (node.__children || scene.childrenOf.get(key) || [])
-        .map((c) => walk(c, node, abs, key))
-        .filter(Boolean);
+      kids = walkChildren(node, abs, key);
       if (node.__masterKey) expandStack.pop();
     }
     if (kids.length) out.children = kids;
     return out;
+  }
+
+  // Walk a node's children honoring Figma's `mask` flag. A mask child is
+  // painted NOWHERE — its outline CLIPS the siblings painted after it, and its
+  // own fill never reaches the canvas. Materializing the flag as a normal
+  // child painted an opaque notched panel OVER the very content the design
+  // clips a noise texture to: the selected mixer channel's red accent tab read
+  // gray because its master's `Bg PAnel` mask — invisible in Figma — landed as
+  // the topmost fill in the strip.
+  //
+  // Lowering: the siblings above the mask move into a synthetic wrapper that
+  // spans the parent and carries the mask outline as a CSS clip-path — the
+  // consumer contract the engine already has end-to-end (IRStyle::clip_path →
+  // setClipPath → SkPath::FromSVGString, the "waiting for real mask layers"
+  // note in design_ir.hpp). Siblings BELOW the mask stay outside the wrapper,
+  // unclipped — exactly Figma's scope — and a second mask opens a second
+  // wrapper inside the first, so stacked masks intersect the way nested clips
+  // do.
+  function walkChildren(node, abs, key) {
+    const kids = [];
+    const scopes = [];   // synthetic wrappers, pruned when they end up empty
+    let target = kids;
+    const parentIsAutoLayout =
+      node.stackMode === 'HORIZONTAL' || node.stackMode === 'VERTICAL';
+    for (const child of node.__children || scene.childrenOf.get(key) || []) {
+      if (child.mask === true) {
+        // A hidden mask neither paints nor clips.
+        if (child.visible === false) continue;
+        if (parentIsAutoLayout) {
+          // The wrapper is absolutely placed, which would yank flowed siblings
+          // out of the flex pass. No lowering — but never paint the mask.
+          pushDiag('mask-approximated', child,
+            'mask inside an auto-layout parent has no lowering; siblings flow unmasked');
+          continue;
+        }
+        const d = maskClipOutline(child);
+        if (!d) {
+          pushDiag('mask-approximated', child,
+            'mask outline unresolvable; siblings render unmasked');
+          continue;
+        }
+        // An outline clip is exact for an outline mask and for an alpha mask
+        // whose content is one opaque solid. Anything softer — image or
+        // gradient alpha, partial paint or node opacity — flattens to the hard
+        // outline. Say so: a mask that clips harder than the design intended
+        // looks like a cropping bug, not a dropped property.
+        const resolved = withResolvedPaints(child);
+        const paint = (resolved.fillPaints || []).find((p) => p.visible !== false);
+        const soft = !child.maskIsOutline
+          && (!paint || paint.type !== 'SOLID'
+              || (paint.opacity ?? 1) < 1
+              || ((paint.color && paint.color.a) ?? 1) < 1
+              || (typeof child.opacity === 'number' && child.opacity < 1));
+        if (soft) {
+          pushDiag('mask-approximated', child,
+            'alpha mask flattened to its outline; soft or partial alpha is not reproduced');
+        }
+        const childKey = child.__key || guidKey(child.guid);
+        const wrapper = {
+          type: 'frame',
+          name: `${child.name || 'mask'} (mask scope)`,
+          style: {
+            width: node.size ? Math.round(node.size.x) : 0,
+            height: node.size ? Math.round(node.size.y) : 0,
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            // The outline is in the parent's space, and the wrapper spans the
+            // parent from (0,0) — so the clip lands exactly where the design
+            // put the mask, and the masked siblings keep their coordinates.
+            clip_path: `path("${d}")`,
+          },
+          // Synthetic, so it must not collide with any real node in tools that
+          // join on node_id, and must never be name-guessed into a widget.
+          node_id: `${childKey}/mask-scope`,
+          audio_widget: 'none',
+          children: [],
+        };
+        target.push(wrapper);
+        scopes.push({ wrapper, holder: target });
+        target = wrapper.children;
+        continue;
+      }
+      const walked = walk(child, node, abs, key);
+      if (walked) target.push(walked);
+    }
+    // A scope with nothing above the mask paints nothing. Deepest-first, so a
+    // scope left holding only an emptied deeper scope collapses too.
+    for (let i = scopes.length - 1; i >= 0; i--) {
+      const { wrapper, holder } = scopes[i];
+      if (!wrapper.children.length) holder.splice(holder.indexOf(wrapper), 1);
+    }
+    return kids;
+  }
+
+  // The mask's clip outline in its parent's space: the baked vector geometry
+  // when the node carries one, else the box-model outline synthesized from its
+  // size, corner radii, and transform (a rectangle or ellipse used as a mask
+  // has no geometry blobs to decode).
+  function maskClipOutline(node) {
+    if (node.fillGeometry || node.strokeGeometry) {
+      try {
+        const resolved = geometryToClipPath(node, scene.blobs || []);
+        if (resolved) return resolved.d;
+      } catch {
+        // An unreadable blob falls through to the box outline: an approximate
+        // clip region beats painting the mask or dropping the clip entirely.
+      }
+    }
+    return boxMaskOutline(node);
   }
 
   const root = walk(frame);
@@ -1774,6 +2025,7 @@ export const DIAGNOSTIC_SEVERITY = {
   'effect-unsupported': 'warning',
   'fonts-required': 'warning',
   'icon-font-required': 'warning',
+  'mask-approximated': 'warning',
 };
 
 /**

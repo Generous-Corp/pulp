@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   linux-docker:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     name: Linux Docker smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -59,6 +60,7 @@ jobs:
         run: docker run --rm --platform linux/amd64 -v "$PWD:/workspace" pulp-visual-harness
 
   macos-local:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     name: macOS local smoke
     runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 15
@@ -84,6 +86,7 @@ jobs:
         run: .visual-harness-venv/bin/python -m pytest tools/harness/visual/tests/ -q
 
   layout-snapshots:
+    if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
     name: Yoga layout snapshots
     runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
     timeout-minutes: 30

@@ -35,6 +35,14 @@ namespace pulp::host {
 /// must release it with destroy_editor_container().
 void* create_editor_container(void* parent_window, uint32_t width, uint32_t height);
 
+/// Insert an already-created native child view into `container`, sized to fill
+/// it and set to track the container's size. This is for formats whose editor
+/// RETURNS a view (AU Cocoa UI) instead of consuming a parent — unlike CLAP /
+/// VST3, which the plug-in inserts itself into the container. Returns false if
+/// either argument is null or the platform has no native-window seam.
+bool editor_container_adopt_view(void* container, void* native_view,
+                                 uint32_t width, uint32_t height);
+
 /// Resize an existing container. No-op when `container` is null.
 void resize_editor_container(void* container, uint32_t width, uint32_t height);
 

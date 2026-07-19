@@ -172,31 +172,31 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     return true;
 }
 
-void WidgetBridge::register_state_binding_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // getParam(name) -> get parameter value from store (normalized)
-    register_bridge_function(api, "getParam", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "getParam", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
 
-        for (size_t i = 0; i < store_.param_count(); ++i) {
-            auto* info = &store_.all_params()[i];
+        for (size_t i = 0; i < self.store_.param_count(); ++i) {
+            auto* info = &self.store_.all_params()[i];
             if (info && info->name == name) {
-                return choc::value::createFloat64(store_.get_normalized(info->id));
+                return choc::value::createFloat64(self.store_.get_normalized(info->id));
             }
         }
         return choc::value::createFloat64(0);
     });
 
     // setParam(name, normalized_value) -> set parameter in store
-    register_bridge_function(api, "setParam", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "setParam", [&self](choc::javascript::ArgumentList args) {
         auto name = args.get<std::string>(0, "");
         auto value = args.get<double>(1, 0);
 
-        for (size_t i = 0; i < store_.param_count(); ++i) {
-            auto* info = &store_.all_params()[i];
+        for (size_t i = 0; i < self.store_.param_count(); ++i) {
+            auto* info = &self.store_.all_params()[i];
             if (info && info->name == name) {
-                store_.set_normalized(info->id, static_cast<float>(value));
+                self.store_.set_normalized(info->id, static_cast<float>(value));
                 break;
             }
         }
@@ -207,35 +207,35 @@ void WidgetBridge::register_state_binding_api() {
     // (knob / fader / slider / toggle / progress) to a param. Registered once;
     // C++ then pushes the transformed store value every frame with no per-frame
     // JS crossing. Returns true if the param exists and the binding was set.
-    register_bridge_function(api, "bindWidgetToParam", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "bindWidgetToParam", [&self](choc::javascript::ArgumentList args) {
         return choc::value::createBool(
-            add_param_binding(args.get<std::string>(0, ""),
+            self.add_param_binding(args.get<std::string>(0, ""),
                               args.get<std::string>(1, ""),
-                              ParamBinding::Target::value,
+                              WidgetBridge::ParamBinding::Target::value,
                               args.numArgs > 2 ? args[2] : nullptr));
     });
 
     // bindMeter(widgetId, source, transform?) -> bind a Meter widget to a param
     // (the source drives both the rms and peak fill). Same native-push contract.
-    register_bridge_function(api, "bindMeter", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "bindMeter", [&self](choc::javascript::ArgumentList args) {
         return choc::value::createBool(
-            add_param_binding(args.get<std::string>(0, ""),
+            self.add_param_binding(args.get<std::string>(0, ""),
                               args.get<std::string>(1, ""),
-                              ParamBinding::Target::meter,
+                              WidgetBridge::ParamBinding::Target::meter,
                               args.numArgs > 2 ? args[2] : nullptr));
     });
 
     // unbindWidget(widgetId) -> remove any binding(s) for that widget. Returns
     // the number of bindings removed.
-    register_bridge_function(api, "unbindWidget", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "unbindWidget", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        const auto before = param_bindings_.size();
-        param_bindings_.erase(
-            std::remove_if(param_bindings_.begin(), param_bindings_.end(),
-                           [&](const ParamBinding& b) { return b.widget_id == id; }),
-            param_bindings_.end());
+        const auto before = self.param_bindings_.size();
+        self.param_bindings_.erase(
+            std::remove_if(self.param_bindings_.begin(), self.param_bindings_.end(),
+                           [&](const WidgetBridge::ParamBinding& b) { return b.widget_id == id; }),
+            self.param_bindings_.end());
         return choc::value::createInt64(
-            static_cast<int64_t>(before - param_bindings_.size()));
+            static_cast<int64_t>(before - self.param_bindings_.size()));
     });
 }
 

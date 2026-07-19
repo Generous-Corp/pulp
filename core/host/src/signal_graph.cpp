@@ -31,6 +31,25 @@
 namespace pulp::host {
 namespace {
 
+std::uint64_t next_nonzero_mailbox_sequence(
+    std::atomic<std::uint64_t>& counter) noexcept {
+    auto current = counter.load(std::memory_order_relaxed);
+    for (;;) {
+        const auto next = current == std::numeric_limits<std::uint64_t>::max()
+                              ? std::uint64_t{1}
+                              : current + 1;
+        // The mailbox's single-writer contract means contention is not expected;
+        // CAS keeps the test seam and any accidental observer from losing an
+        // update. Relaxed is sufficient because this atomic carries identity
+        // only; TripleBuffer's release/acquire flag publishes the payload.
+        if (counter.compare_exchange_weak(current, next,
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed)) {
+            return next;
+        }
+    }
+}
+
 bool parameter_allows_modulation(const HostParamInfo& p,
                                  uint32_t param_id,
                                  state::ParamRate required_rate,
@@ -136,7 +155,7 @@ SignalGraph::MidiBlockSnapshot::MidiBlockSnapshot(
 }
 
 SignalGraph::MidiBlockSnapshot&
-SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) {
+SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) noexcept {
     if (this == &other) return *this;
     set_from_midi(other.events, other.sequence, other.incomplete);
     return *this;
@@ -145,7 +164,7 @@ SignalGraph::MidiBlockSnapshot::operator=(const MidiBlockSnapshot& other) {
 bool SignalGraph::MidiBlockSnapshot::set_from_midi(
     const midi::MidiBuffer& src,
     uint64_t new_sequence,
-    bool source_incomplete) {
+    bool source_incomplete) noexcept {
     clear_midi_block(events);
     sequence = new_sequence;
     const bool copied_all = copy_midi_block(src, events);
@@ -154,9 +173,44 @@ bool SignalGraph::MidiBlockSnapshot::set_from_midi(
 }
 
 bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
-    midi::MidiBuffer& dst) const {
+    midi::MidiBuffer& dst) const noexcept {
     const bool copied_all = copy_midi_block(events, dst);
     return copied_all && !incomplete;
+}
+
+bool SignalGraph::MidiBlockSnapshot::append_to_midi(
+    midi::MidiBuffer& dst,
+    std::size_t& event_index,
+    std::size_t& sysex_index,
+    std::size_t& ump_index) const noexcept {
+    while (event_index < events.size()) {
+        if (!dst.add(events[event_index])) return false;
+        ++event_index;
+    }
+    const auto& source_sysex = events.sysex();
+    while (sysex_index < source_sysex.size()) {
+        const auto& source = source_sysex[sysex_index];
+        const bool added = source.data.empty()
+            ? dst.add_sysex({}, source.sample_offset, source.timestamp)
+            : dst.add_sysex_copy(source.data.data(), source.data.size(),
+                                 source.sample_offset, source.timestamp);
+        if (!added) return false;
+        ++sysex_index;
+    }
+    auto* destination_ump = dst.ump();
+    while (ump_index < ump.size()) {
+        if (destination_ump == nullptr
+            || !destination_ump->add(ump[ump_index])) {
+            return false;
+        }
+        ++ump_index;
+    }
+    return true;
+}
+
+bool SignalGraph::MidiBlockSnapshot::has_payload() const noexcept {
+    return !events.empty() || events.sysex_size() != 0 || !ump.empty()
+        || incomplete;
 }
 
 bool SignalGraph::ParameterBlockSnapshot::set_from_queue(
@@ -640,10 +694,10 @@ bool SignalGraph::audio_rate_modulation_lane_locked_(const Connection& connectio
     return false;
 }
 
-bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
-    // Pin the live snapshot for the whole dereference: this control-thread API
-    // is not the prepare/release thread, so without the guard a concurrent
-    // prepare()/release()/invalidate could retire+free `cg` mid-use.
+bool SignalGraph::inject_midi(NodeId id,
+                              const midi::MidiBuffer& events) noexcept {
+    // Pin the live snapshot for the whole dereference. Without the guard a
+    // concurrent prepare()/release()/invalidate could retire+free `cg` mid-use.
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
@@ -657,8 +711,7 @@ bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     }
 
     auto& mailbox = *it->second.midi_input_mailbox;
-    const uint64_t sequence =
-        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint64_t sequence = next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all = mailbox.writer_scratch.set_from_midi(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
@@ -685,11 +738,41 @@ bool SignalGraph::inject_parameter_events(
 
     auto& mailbox = *runtime_it->second.parameter_input_mailbox;
     const std::uint64_t sequence =
-        mailbox.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all =
         mailbox.writer_scratch.set_from_queue(events, sequence);
     mailbox.published.write(mailbox.writer_scratch);
     return copied_all;
+}
+
+bool SignalGraph::seed_midi_input_sequence_for_test(
+    NodeId id, std::uint64_t predecessor) noexcept {
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
+    if (!cg) return false;
+    auto runtime_it = cg->runtime.find(id);
+    const auto shape_it = cg->shapes.find(id);
+    if (runtime_it == cg->runtime.end() || shape_it == cg->shapes.end()
+        || shape_it->second.type != NodeType::MidiInput
+        || !runtime_it->second.midi_input_mailbox) {
+        return false;
+    }
+    runtime_it->second.midi_input_mailbox->next_sequence.store(
+        predecessor, std::memory_order_relaxed);
+    return true;
+}
+
+std::uint64_t SignalGraph::midi_input_sequence_for_test(NodeId id) const noexcept {
+    auto read_guard = live_slot_.read();
+    auto* cg = read_guard.get();
+    if (!cg) return 0;
+    const auto runtime_it = cg->runtime.find(id);
+    if (runtime_it == cg->runtime.end()
+        || !runtime_it->second.midi_input_mailbox) {
+        return 0;
+    }
+    return runtime_it->second.midi_input_mailbox->next_sequence.load(
+        std::memory_order_relaxed);
 }
 
 std::uint64_t SignalGraph::append_parameter_mailbox_events_(
@@ -726,8 +809,40 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
         return false;
     }
 
-    const auto& snapshot = it->second.midi_output_mailbox->read();
-    return snapshot.copy_to_midi(out);
+    auto& mailbox = *it->second.midi_output_mailbox;
+    mailbox.consumer_incomplete =
+        mailbox.incomplete.exchange(false, std::memory_order_relaxed)
+        || mailbox.consumer_incomplete;
+    if (mailbox.consumer_has_retry) {
+        if (!mailbox.consumer_scratch.append_to_midi(
+                out,
+                mailbox.consumer_event_index,
+                mailbox.consumer_sysex_index,
+                mailbox.consumer_ump_index)) {
+            return false;
+        }
+        mailbox.consumer_incomplete = mailbox.consumer_scratch.incomplete
+            || mailbox.consumer_incomplete;
+        mailbox.consumer_has_retry = false;
+    }
+    while (mailbox.pending.try_pop(mailbox.consumer_scratch)) {
+        mailbox.consumer_event_index = 0;
+        mailbox.consumer_sysex_index = 0;
+        mailbox.consumer_ump_index = 0;
+        mailbox.consumer_incomplete = mailbox.consumer_scratch.incomplete
+            || mailbox.consumer_incomplete;
+        if (!mailbox.consumer_scratch.append_to_midi(
+                out,
+                mailbox.consumer_event_index,
+                mailbox.consumer_sysex_index,
+                mailbox.consumer_ump_index)) {
+            mailbox.consumer_has_retry = true;
+            return false;
+        }
+    }
+    const bool complete = !mailbox.consumer_incomplete;
+    mailbox.consumer_incomplete = false;
+    return complete;
 }
 
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
@@ -1330,12 +1445,25 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         prepare_midi_block_storage(runtime_it->second.midi_out,
                                    runtime_it->second.midi_out_ump);
         if (n.type == NodeType::MidiInput) {
-            runtime_it->second.midi_input_mailbox =
-                std::make_unique<MidiInputMailbox>();
+            // Keep mailbox identity across a live snapshot recompile so an
+            // injection published between its build and publication cannot fall
+            // between the old and new snapshots. Normal eager prepare has no live
+            // snapshot here and allocates a fresh mailbox.
+            if (const auto live = live_slot_.live()) {
+                auto old_it = live->runtime.find(n.id);
+                if (old_it != live->runtime.end()) {
+                    runtime_it->second.midi_input_mailbox =
+                        old_it->second.midi_input_mailbox;
+                }
+            }
+            if (!runtime_it->second.midi_input_mailbox) {
+                runtime_it->second.midi_input_mailbox =
+                    std::make_shared<MidiInputMailbox>();
+            }
         }
         if (n.type == NodeType::MidiOutput) {
             runtime_it->second.midi_output_mailbox =
-                std::make_unique<runtime::TripleBuffer<MidiBlockSnapshot>>();
+                std::make_unique<MidiOutputMailbox>();
         }
         if (n.type == NodeType::Plugin && n.plugin) {
             // Keep mailbox identity across a live snapshot recompile so a
@@ -2276,7 +2404,9 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         const auto& injected =
                             rt_it->second.midi_input_mailbox->published.read();
                         if (injected.sequence != 0 &&
-                            injected.sequence != rt_it->second.midi_input_sequence_seen) {
+                            injected.sequence !=
+                                rt_it->second.midi_input_mailbox->sequence_seen.load(
+                                    std::memory_order_relaxed)) {
                             cg->routed.midi.set_out_incomplete(
                                 mi.plan_index, !injected.copy_to_midi(*out_buf));
                             mi.pending_seq = injected.sequence;
@@ -2292,7 +2422,8 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         if (mi.pending_seq == 0) continue;
                         auto rt_it = cg->runtime.find(mi.id);
                         if (rt_it != cg->runtime.end()) {
-                            rt_it->second.midi_input_sequence_seen = mi.pending_seq;
+                            rt_it->second.midi_input_mailbox->sequence_seen.store(
+                                mi.pending_seq, std::memory_order_relaxed);
                         }
                     }
                     for (const auto& mo : cg->routed.midi_outputs) {
@@ -2304,7 +2435,12 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         }
                         cg->midi_publish_scratch.set_from_midi(
                             *in_buf, 0, cg->routed.midi.in_incomplete(mo.plan_index));
-                        rt_it->second.midi_output_mailbox->write(cg->midi_publish_scratch);
+                        if (cg->midi_publish_scratch.has_payload()
+                            && !rt_it->second.midi_output_mailbox->pending.try_push(
+                                cg->midi_publish_scratch)) {
+                            rt_it->second.midi_output_mailbox->incomplete.store(
+                                true, std::memory_order_relaxed);
+                        }
                     }
                 }
                 return true;

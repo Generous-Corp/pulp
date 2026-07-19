@@ -142,6 +142,10 @@ if(APPLE AND NOT PULP_IOS)
 endif()
 target_link_libraries(pulp-test-view-host-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-host-bridge)
+catch_discover_tests(pulp-test-view-host-bridge
+    TEST_SPEC "[lifecycle]"
+    TEST_PREFIX "lifecycle::"
+    PROPERTIES LABELS lifecycle)
 # Scan blacklist
 add_executable(pulp-test-scan-blacklist test_scan_blacklist.cpp)
 target_link_libraries(pulp-test-scan-blacklist PRIVATE pulp::host Catch2::Catch2WithMain)
@@ -186,6 +190,15 @@ if(APPLE)
         PRIVATE pulp::host clap Catch2::Catch2WithMain "-framework AppKit")
     target_include_directories(pulp-test-clap-hosted-editor PRIVATE ${PULP_ROOT_DIR}/core/host/src)
     catch_discover_tests(pulp-test-clap-hosted-editor)
+
+    # editor_container_adopt_view: the AU-style path where the plug-in RETURNS
+    # a view (Cocoa UI) that the host adopts into the shared container, vs the
+    # CLAP/VST3 parent-consuming path. Real NSViews.
+    add_executable(pulp-test-hosted-editor-container-adopt
+        test_hosted_editor_container_adopt.mm)
+    target_link_libraries(pulp-test-hosted-editor-container-adopt
+        PRIVATE pulp::host Catch2::Catch2WithMain "-framework AppKit")
+    catch_discover_tests(pulp-test-hosted-editor-container-adopt)
 
     # Proves the editor lifecycle is inaudible: a tone-emitting fake plugin
     # renders while the editor opens/resizes/closes, and the audio-analysis
@@ -306,6 +319,20 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
 pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
+
+# Headless characterization of the hosting/DAW input stack — mouse down/up/click
+# routing, keyboard focus protocol, and overlay/popup lifecycle — that the
+# window hosts drive. Anchors the S11 (root-owned interaction context) and S31
+# (portable mouse down/up dispatch) refactors under pulp #6223
+# (test/test_hosting_input_smoke.cpp).
+pulp_add_test_suite(pulp-test-hosting-input-smoke LIBRARIES pulp::view)
+
+# Multi-instance ISOLATION proof for S11 (pulp #6223): two independent root
+# View trees in one process must not share a focus slot, active overlay, open
+# popup, or overlay paint queue. This is the delta the root-owned interaction
+# context delivers — it cannot be expressed with the pre-S11 process-wide
+# statics (test/test_interaction_multiinstance.cpp).
+pulp_add_test_suite(pulp-test-interaction-multiinstance LIBRARIES pulp::view)
 
 # Browser (Emscripten) window host: the CSS-pixel <-> root coordinate mapping,
 # the HiDPI backing-store rule, browser-event translation, and View-tree routing

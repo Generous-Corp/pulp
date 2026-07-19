@@ -541,6 +541,36 @@ public:
         needs_repaint_.store(true, std::memory_order_relaxed);
     }
 
+    // Real backing scale for this device's screen. The base default returned a
+    // hardcoded 1.0, so convert_to_logical/native was identity on EVERY Retina
+    // iOS device (2x/3x) — a live coordinate bug. Prefer the window's own
+    // UIScreen (correct on external displays / multi-scene) and fall back to the
+    // main screen.
+    float dpi_scale() const override {
+        UIScreen* screen = window_ ? window_.screen : UIScreen.mainScreen;
+        if (!screen) screen = UIScreen.mainScreen;
+        return static_cast<float>(screen.scale);
+    }
+
+    // Fixed "design viewport": pin the root to (design_w x design_h) and letterbox
+    // it into the window at paint time, exactly like the macOS GPU host. Mirrors
+    // set_design_viewport there; the letterbox math is the shared, platform-neutral
+    // WindowHost::compute_design_viewport_transform (unit-tested x-platform in
+    // test_view_design_viewport.cpp). Pass (0,0) to disable.
+    void set_design_viewport(float design_w, float design_h) override {
+        design_viewport_w_ = design_w;
+        design_viewport_h_ = design_h;
+        needs_repaint_.store(true, std::memory_order_relaxed);
+    }
+
+    // Report the active design->window transform for embedded native children
+    // (mirrors the paint-time letterbox), matching the macOS GPU host. Returns
+    // false (identity) when no viewport is set.
+    bool design_viewport_transform(float& sx, float& sy,
+                                   float& tx, float& ty) const override {
+        return design_transform(sx, sy, tx, ty);
+    }
+
     /// Seed the pump's nominal (first-frame / wake) interval from the display's
     /// real refresh period. Called by the CADisplayLink target.
     void set_nominal_frame_dt(float dt) { frame_pump_.set_nominal_dt(dt); }
@@ -705,6 +735,20 @@ private:
     PulpIOSDisplayLinkTarget* display_link_target_ = nil;
     ResizeCallback resize_callback_;
     pulp::events::MainThreadDispatcher::Token dispatcher_token_ = 0;
+    float design_viewport_w_ = 0.0f;
+    float design_viewport_h_ = 0.0f;
+
+    // Compute the active design->window transform, delegating to the shared
+    // header-only math so the host and its unit tests agree. Returns false
+    // (identity) when no design viewport is set.
+    bool design_transform(float& sx, float& sy, float& tx, float& ty) const {
+        if (design_viewport_w_ <= 0.0f || design_viewport_h_ <= 0.0f) return false;
+        CGSize logical = window_ ? window_.bounds.size
+                                 : UIScreen.mainScreen.bounds.size;
+        return WindowHost::compute_design_viewport_transform(
+            static_cast<float>(logical.width), static_cast<float>(logical.height),
+            design_viewport_w_, design_viewport_h_, sx, sy, tx, ty);
+    }
 
     void start_display_link() {
         if (display_link_) return;
@@ -736,22 +780,40 @@ private:
 
         auto* canvas = skia_surface_->begin_frame();
         if (canvas) {
-            auto b = root_.bounds();
             // Keep bounds aligned with logical window size, not the
             // pixel-scaled GPU surface. paint_all() handles content scale.
             CGSize logical = window_.bounds.size;
-            root_.set_bounds({0, 0,
-                              static_cast<float>(logical.width),
-                              static_cast<float>(logical.height)});
+            const float win_w = static_cast<float>(logical.width);
+            const float win_h = static_cast<float>(logical.height);
+
+            // Design viewport: pin the root to design size and letterbox it into
+            // the window (aspect-correct scale + centered translate), mirroring
+            // the macOS GPU host's paint_scene. The letterbox fill covers the
+            // whole window first so the bars match the design background.
+            float sx, sy, tx, ty;
+            const bool has_viewport = design_transform(sx, sy, tx, ty);
+            if (has_viewport) {
+                root_.set_bounds({0, 0, design_viewport_w_, design_viewport_h_});
+            } else {
+                root_.set_bounds({0, 0, win_w, win_h});
+            }
             root_.layout_children();
 
             canvas->set_fill_color(canvas::Color::rgba8(30, 30, 46));
-            canvas->fill_rect(0, 0,
-                              static_cast<float>(logical.width),
-                              static_cast<float>(logical.height));
-            root_.paint_all(*canvas);
-            View::paint_overlays(*canvas, &root_);
-            (void)b;
+            canvas->fill_rect(0, 0, win_w, win_h);
+
+            if (has_viewport) {
+                const int saved = canvas->save_count();
+                canvas->save();
+                canvas->translate(tx, ty);
+                canvas->scale(sx, sy);
+                root_.paint_all(*canvas);
+                View::paint_overlays(*canvas, &root_);
+                canvas->restore_to_count(saved);
+            } else {
+                root_.paint_all(*canvas);
+                View::paint_overlays(*canvas, &root_);
+            }
         }
 
         skia_surface_->end_frame();

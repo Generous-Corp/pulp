@@ -52,6 +52,26 @@ void* create_editor_container(void* parent_window, uint32_t width, uint32_t heig
     return (__bridge void*) container;
 }
 
+bool editor_container_adopt_view(void* container, void* native_view,
+                                 uint32_t width, uint32_t height) {
+    if (!container || !native_view) return false;
+    if (![NSThread isMainThread]) {
+        runtime::log_error("hosted editor: editor_container_adopt_view off the main thread");
+        return false;
+    }
+    NSView* c = (__bridge NSView*) container;
+    NSView* v = (__bridge NSView*) native_view;
+    NSRect frame = NSMakeRect(0.0, 0.0, static_cast<CGFloat>(width), static_cast<CGFloat>(height));
+    [v setFrame:frame];
+    // Unlike the parent-consuming formats (container created with
+    // setAutoresizesSubviews:NO so the plug-in sizes itself), an adopted view is
+    // ours to size — let it fill and track the container.
+    [v setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+    [c setAutoresizesSubviews:YES];
+    [c addSubview:v];
+    return true;
+}
+
 void resize_editor_container(void* container, uint32_t width, uint32_t height) {
     if (!container) return;
     if (![NSThread isMainThread]) {

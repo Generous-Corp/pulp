@@ -1,4 +1,5 @@
 #include <pulp/format/standalone.hpp>
+#include <pulp/format/audio_workgroup_client.hpp>
 #include <pulp/format/detail/delayed_action.hpp>
 #include <pulp/format/detail/screenshot_capture.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -481,6 +482,13 @@ bool StandaloneApp::start() {
         return false;
     }
 
+    // CoreAudio exposes its IO-thread workgroup only after open(). An embedded
+    // parallel renderer (notably SequenceProcessor) receives it before prepare
+    // starts auxiliary workers, without widening Processor's node ABI.
+    if (auto* client = dynamic_cast<AudioWorkgroupClient*>(processor_.get())) {
+        bind_audio_device_workgroup(*client, audio_device_.get());
+    }
+
     // Only remember a CONCRETE device id when the user explicitly pinned one. For
     // the default-following case keep audio_device_id empty so the next launch (and
     // the live default-device listener) keep tracking the system default output —
@@ -738,7 +746,10 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
             if (scripted_ui_ptr) scripted_ui_ptr->poll();
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
-                view::View::overlay_queue().push_back({
+                // Enqueue on the window root's own queue (S11): paint_overlays
+                // drains the painting root's queue, and inspector_host IS that
+                // root, so the inspector overlay paints exactly once.
+                inspector_host->interaction().overlay_queue.push_back({
                     [inspector_ptr](canvas::Canvas& canvas) {
                         inspector_ptr->paint(canvas);
                     },
@@ -751,7 +762,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         pre_screenshot_idle = [settings_ptr, inspector_ptr, inspector_host] {
             if (settings_ptr) settings_ptr->poll();
             if (inspector_ptr->is_active()) {
-                view::View::overlay_queue().push_back({
+                inspector_host->interaction().overlay_queue.push_back({
                     [inspector_ptr](canvas::Canvas& canvas) {
                         inspector_ptr->paint(canvas);
                     },
@@ -1012,7 +1023,10 @@ void StandaloneApp::stop_audio_keep_processor() {
     }
     if (audio_device_) {
         audio_device_->stop();
-        audio_device_->close();
+        auto* client = processor_
+            ? dynamic_cast<AudioWorkgroupClient*>(processor_.get())
+            : nullptr;
+        close_audio_device_after_workgroup_release(client, *audio_device_);
         audio_device_.reset();
     }
 }

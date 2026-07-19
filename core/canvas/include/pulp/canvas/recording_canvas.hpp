@@ -149,7 +149,27 @@ struct DrawCommand {
         arc,                  ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
         arc_to,               ///< (x1, y1, x2, y2, radius) in f[0..4]
         ellipse,              ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
-        round_rect            ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
+        round_rect,           ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
+        // ── Compositing layer saves (save_layer family) ─────────────
+        // Before these existed, RecordingCanvas inherited the base
+        // save_layer* methods, which all collapse to a bare save(). A
+        // recording therefore could not distinguish an opacity / filter /
+        // blend / mask compositing layer from a plain save() — which is
+        // exactly why the effect facades (bloom/vignette/chromatic) went
+        // undetected by command-stream tests. Each of these records the
+        // layer intent, and its RecordingCanvas override still increments
+        // the save stack by exactly one so save_count() balance holds.
+        save_layer,           ///< bounds x/y/w/h in f[0..3]; opacity f[4]; blur f[5]
+        save_layer_blend,     ///< bounds f[0..3]; opacity f[4]; blur f[5]; blend mode (int) in floats[0]
+        save_layer_filters,   ///< bounds f[0..3]; effective opacity f[4]; summed blur f[5]; filter count in floats[0]
+        save_layer_mask,      ///< bounds f[0..3]; opacity f[4]; mask-image CSS value in `text` (mask-size not captured)
+        save_layer_bloom,     ///< bounds f[0..3]; intensity f[4]; threshold f[5]; blur radius in floats[0]
+        // Custom SkSL draw recorded as intent. The base draw_with_sksl
+        // fills a CPU placeholder rect and returns false; RecordingCanvas
+        // instead captures the shader source + rect and returns false
+        // (a recorder cannot compile/execute SkSL). Callers that test the
+        // base CPU fallback must invoke `rc.Canvas::draw_with_sksl(...)`.
+        draw_sksl             ///< rect x/y/w/h in f[0..3]; value f[4]; time f[5]; SkSL source in `text`
     };
 
     Type type;
@@ -253,6 +273,37 @@ public:
                       int dx, int dy) override;
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
+
+    // ── Compositing layer saves (save_layer family) ──────────────────────
+    // Record the layer intent as a distinct command (see the DrawCommand::Type
+    // comments) instead of the base-class collapse to a bare save(). Each
+    // increments the save stack by exactly one, so a save_layer / restore pair
+    // stays balanced against save_count() just like the base backends.
+    void save_layer(float x, float y, float w, float h,
+                    float opacity = 1.0f, float blur_radius = 0.0f) override;
+    void save_layer_with_blend(float x, float y, float w, float h,
+                               float opacity, float blur_radius,
+                               BlendMode mode) override;
+    void save_layer_with_filters(float x, float y, float w, float h,
+                                 float opacity,
+                                 const FilterChainEntry* chain,
+                                 int count) override;
+    void save_layer_with_mask(float x, float y, float w, float h,
+                              float opacity,
+                              const std::string& mask_image,
+                              const std::string& mask_size) override;
+    void save_layer_with_bloom(float x, float y, float w, float h,
+                               float intensity, float threshold,
+                               float radius) override;
+
+    // Record a custom SkSL draw as intent and return true — the recorder
+    // accepted and captured the draw (the success path). This lets a headless
+    // test assert that an effect / widget routed a shader draw through the
+    // canvas without a GPU, and keeps shader widgets on the shader path rather
+    // than recording their C++ fallback body (see draw_custom_shader_body).
+    bool draw_with_sksl(const std::string& sksl, float x, float y,
+                        float w, float h,
+                        const ShaderUniforms& uniforms) override;
 
     // Capture a single box-shadow command so JS-driven tests
     // can assert on inset / color / offsets without having to walk the

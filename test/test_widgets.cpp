@@ -118,6 +118,24 @@ TEST_CASE("Knob with format function shows value text", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
+TEST_CASE("Knob can hide formatted paint without hiding its accessible value",
+          "[view][widget][accessibility]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 48, 48});
+    knob.set_value(0.75f);
+    knob.set_format([](float v) {
+        return std::to_string(static_cast<int>(v * 100)) + "%";
+    });
+    knob.set_show_value(false);
+
+    RecordingCanvas canvas;
+    knob.paint(canvas);
+
+    CHECK_FALSE(knob.show_value());
+    CHECK(canvas.count(DrawCommand::Type::fill_text) == 0);
+    CHECK(knob.get_value_string() == "75%");
+}
+
 TEST_CASE("Knob silver style draws the rotating indicator notch", "[view][widget][silver]") {
     // Pins the silver path after the indicator notch was factored into the
     // shared draw_knob_indicator_notch helper: exactly the two notch strokes
@@ -1300,8 +1318,12 @@ TEST_CASE("Audio widget schemas reject malformed dimension tokens without error 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 0);
 }
 
-TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
+TEST_CASE("Audio widgets custom shader paths record a shader draw on recording canvas",
           "[view][widget][shader][issue-493]") {
+    // A custom-shader widget routes its body through Canvas::draw_with_sksl.
+    // RecordingCanvas now records that as a distinct `draw_sksl` command (rather
+    // than the base CPU placeholder fill_rect it used to inherit), so the shader
+    // draw is visible to headless tests; the label text still paints normally.
     Knob knob;
     knob.set_bounds({0, 0, 80, 80});
     knob.set_value(0.5f);
@@ -1313,7 +1335,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas knob_canvas;
     knob.paint(knob_canvas);
-    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(knob_canvas.count(DrawCommand::Type::fill_text) >= 2);
 
     Fader fader;
@@ -1325,7 +1348,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas fader_canvas;
     fader.paint(fader_canvas);
-    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(fader_canvas.count(DrawCommand::Type::fill_text) == 1);
 
     Toggle toggle;
@@ -1338,7 +1362,8 @@ TEST_CASE("Audio widgets custom shader paths fall back on recording canvas",
 
     RecordingCanvas toggle_canvas;
     toggle.paint(toggle_canvas);
-    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::draw_sksl) == 1);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_rect) == 0);
     REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_text) == 1);
 }
 
@@ -2739,3 +2764,60 @@ TEST_CASE("GroupBox::set_collapsed Notify::sync / async", "[view][notify]") {
     REQUIRE(seen.size() == 2);
     REQUIRE(seen.back() == false);
 }
+
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkSurface.h"
+
+// A body shader that fails at DRAW time (not just install time) must not blank
+// the widget: the paint path falls back to the default C++ body and logs once.
+// Before WI-10 the draw_with_sksl bool was ignored, so a failing draw-time
+// shader left an empty body with only labels on top.
+TEST_CASE("Draw-time shader failure paints the default widget body, logging once",
+          "[view][widget][shader][skia][issue-493]") {
+    SkImageInfo info = SkImageInfo::Make(80, 80, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    SkiaCanvas canvas(surface->getCanvas());
+
+    Knob knob;
+    knob.set_bounds({0, 0, 80, 80});
+    knob.set_value(0.6f);
+    // Install an uncompilable shader directly on the host, bypassing
+    // setWidgetShader's install-time compile gate — models a shader that
+    // compiles at install but fails when the backend draws it.
+    knob.set_custom_shader("this will not compile {{{");
+    REQUIRE(knob.has_custom_shader());
+    REQUIRE_FALSE(knob.shader_draw_failure_logged());
+
+    knob.paint(canvas);
+
+    // The default knob body painted (a meaningful number of non-black pixels),
+    // not a blank frame.
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    unsigned painted = 0;
+    for (int y = 0; y < 80; ++y) {
+        for (int x = 0; x < 80; ++x) {
+            SkColor c = pm.getColor(x, y);
+            if (SkColorGetR(c) + SkColorGetG(c) + SkColorGetB(c) > 0) ++painted;
+        }
+    }
+    INFO("painted pixels = " << painted);
+    REQUIRE(painted > 200u);
+    // The failure was logged, exactly once (latched).
+    REQUIRE(knob.shader_draw_failure_logged());
+
+    // A second paint keeps the latch set (no per-frame re-log).
+    knob.paint(canvas);
+    REQUIRE(knob.shader_draw_failure_logged());
+}
+#endif  // PULP_HAS_SKIA

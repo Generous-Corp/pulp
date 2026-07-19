@@ -31,6 +31,12 @@ on:
   # examples/web-demos/** touched — invisible to a path-filtered lane. Deploy stays
   # owner-gated + main-only, so a PR run builds + proves and never deploys.
   pull_request:
+  # Run this required check on queued merge groups so a merge queue on `main` can
+  # land PRs. `merge_group` does not honour a paths filter (like the pull_request
+  # lane above, on purpose), and deploy stays owner-gated + main-only, so a group
+  # run builds + proves and never deploys — exactly the gate the queue must clear.
+  # Without this, the queue would wait forever on a required check that never posts.
+  merge_group:
   # Weekly drift check — a broken build is a red run, not a dead site.
   schedule:
     - cron: "0 8 * * 1"

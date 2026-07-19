@@ -14,23 +14,23 @@
 
 namespace pulp::view {
 
-void WidgetBridge::register_dom_api() {
-    BridgeApiContext api{engine_};
+void BridgeRegistrars::register_dom_api(WidgetBridge& self) {
+    BridgeApiContext api{self.engine_};
 
     // __domAppend(parentId, childId, tag) - native appendChild.
     // Creates a native widget under parentId, purely in C++ - no re-entrant
     // JS evaluation which causes stack overflow in QuickJS.
-    register_bridge_function(api, "__domAppend", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__domAppend", [&self](choc::javascript::ArgumentList args) {
         auto parentId = args.get<std::string>(0, "");
         auto childId = args.get<std::string>(1, "");
         auto tag = args.get<std::string>(2, "div");
-        auto* existing = widget(childId);
+        auto* existing = self.widget(childId);
         if (existing) {
             if (auto* p = existing->parent()) {
                 // Move the existing subtree to the new parent - don't erase widgets.
                 auto removed = p->remove_child(existing);
-                widgets_[childId] = removed.get();
-                resolve_parent(parentId)->add_child(std::move(removed));
+                self.widgets_[childId] = removed.get();
+                self.resolve_parent(parentId)->add_child(std::move(removed));
                 return choc::value::Value();
             }
         }
@@ -51,8 +51,8 @@ void WidgetBridge::register_dom_api() {
         } else if (tag == "canvas") {
             auto canvas = std::make_unique<CanvasWidget>();
             canvas->set_id(childId);
-            canvas->set_native_gpu_texture_provider([this, childId]() {
-                return this->describe_native_canvas_frame(childId);
+            canvas->set_native_gpu_texture_provider([&self, childId]() {
+                return self.describe_native_canvas_frame(childId);
             });
             child = std::move(canvas);
         } else if (tag == "rect") {
@@ -116,7 +116,7 @@ void WidgetBridge::register_dom_api() {
                 v->set_id(childId);
                 child = std::move(v);
             }
-        } else if (auto widget_for_tag = make_widget_for_tag(tag, childId)) {
+        } else if (auto widget_for_tag = self.make_widget_for_tag(tag, childId)) {
             // Route lowercase `@pulp/react` widget intrinsics
             // (knob/fader/toggle/combo/
             // checkbox/spectrum/waveform/meter/xypad/listbox/virtuallist/icon, plus the
@@ -144,20 +144,20 @@ void WidgetBridge::register_dom_api() {
             // setAttribute() path).
             child = std::move(v);
         }
-        widgets_[childId] = child.get();
-        resolve_parent(parentId)->add_child(std::move(child));
+        self.widgets_[childId] = child.get();
+        self.resolve_parent(parentId)->add_child(std::move(child));
         return choc::value::Value();
     });
 
     // __domRemove(childId) - native removeChild implementation.
-    register_bridge_function(api, "__domRemove", [this](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "__domRemove", [&self](choc::javascript::ArgumentList args) {
         auto childId = args.get<std::string>(0, "");
         const bool preserve_js_dom_state = args.get<int>(1, 0) != 0;
-        auto* w = widget(childId);
+        auto* w = self.widget(childId);
         if (w) {
             if (auto* p = w->parent()) {
                 auto removed = p->remove_child(w);
-                forget_widget_subtree(removed.get(), preserve_js_dom_state);
+                self.forget_widget_subtree(removed.get(), preserve_js_dom_state);
             }
         }
         return choc::value::Value();
