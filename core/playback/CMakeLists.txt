@@ -1,5 +1,7 @@
 add_library(pulp-playback
     src/audio_renderer.cpp
+    src/automation_cursor.cpp
+    src/automation_program.cpp
     src/compile_executor.cpp
     src/note_renderer.cpp
     src/program.cpp
@@ -38,6 +40,8 @@ endif()
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
         src/audio_renderer.cpp
+        src/automation_cursor.cpp
+        src/automation_program.cpp
         src/compile_executor.cpp
         src/note_renderer.cpp
         src/program.cpp

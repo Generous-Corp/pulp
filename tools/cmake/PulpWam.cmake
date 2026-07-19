@@ -99,6 +99,8 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/undo.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/audio_renderer.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/automation_cursor.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/automation_program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/compile_executor.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/note_renderer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
