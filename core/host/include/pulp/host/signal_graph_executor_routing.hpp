@@ -188,6 +188,9 @@ enum class ExecutorTopologyValidationCode : std::uint8_t {
     PlanRejected,
 };
 
+/// Admission result for the exact routed-executor plan shape derived from a
+/// SignalGraph candidate. Capacity failures report `actual` and `limit`; plan
+/// failures additionally identify the rejected spec `index` and `node`.
 struct ExecutorTopologyValidation {
     ExecutorTopologyValidationCode code = ExecutorTopologyValidationCode::Accepted;
     std::uint64_t actual = 0;
@@ -199,6 +202,8 @@ struct ExecutorTopologyValidation {
     }
 };
 
+/// Validates the same node/connection projection consumed by
+/// build_executor_snapshot(), without preparing or publishing a graph.
 ExecutorTopologyValidation validate_signal_graph_executor_topology(
     std::span<const GraphNode> nodes, std::span<const Connection> connections,
     graph::GraphRuntimeLimits limits = {});
