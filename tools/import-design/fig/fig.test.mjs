@@ -2220,3 +2220,65 @@ test('minSize/maxSize land as style min/max clamps, per-axis guarded', () => {
   assert.ok(!('min_height' in clamped.style), 'unset min axis must not emit');
   assert.ok(!('max_height' in clamped.style), 'a zero max would collapse the node');
 });
+
+test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
+  // TextData carries characterStyleIDs (one id per UTF-16 code unit, 0 = base
+  // style) and styleOverrideTable (NodeChange rows keyed by styleID). The
+  // envelope contract is the shared run shape with UTF-8 BYTE offsets into
+  // `content` — "Héllo " is 7 bytes across 6 UTF-16 units, so a code-unit
+  // passthrough would land mid-word. Mirrors the plugin lane
+  // (extract.ts::extractTextRuns) and REST (extract_text_runs).
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page 1' },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 200, y: 40 } },
+    { guid: g(3), type: 'TEXT', name: 'mixed',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: 120, y: 16 },
+      fontSize: 12, fontName: { family: 'Roboto', style: 'Regular' },
+      textAlignVertical: 'CENTER', textTruncation: 'ENDING', maxLines: 3,
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }],
+      textData: {
+        characters: 'Héllo world',
+        // 11 UTF-16 units; id 5 covers "world" (units 6..10).
+        characterStyleIDs: [0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5],
+        styleOverrideTable: [{
+          styleID: 5,
+          fontSize: 14,
+          fontName: { family: 'Roboto', style: 'Bold' },
+          textDecoration: 'UNDERLINE',
+          fillPaints: [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 } }],
+        }],
+      } },
+    { guid: g(4), type: 'TEXT', name: 'plain',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 120, y: 16 },
+      fontSize: 12, fontName: { family: 'Roboto', style: 'Regular' },
+      textData: { characters: 'Just text' },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }] },
+  ]});
+  const ctx = { ...CTX_MIN, isFontAvailable: () => true };
+  const root = materializeFrame(scene, findFrame(scene, 'Root'), ctx).envelope.root;
+  const [mixed, plain] = root.children;
+
+  assert.equal(mixed.content, 'Héllo world');
+  assert.ok(Array.isArray(mixed.runs), 'range overrides become runs');
+  assert.equal(mixed.runs.length, 1);
+  assert.deepEqual(mixed.runs[0], {
+    start: 7,                       // byte offset (unit index 6 + 2-byte é)
+    end: 12,
+    fontSize: 14,
+    fontWeight: 700,                // "Bold" style name → CSS weight
+    textDecoration: 'underline',
+    color: '#00ff00',
+  });
+
+  // textAlignVertical is design authority the codegen consumes; truncation
+  // metadata is preserved, namespaced, not silently dropped.
+  assert.equal(mixed.style.vertical_align, 'middle');
+  assert.equal(mixed.attributes['figma:text_truncation'], 'ending');
+  assert.equal(mixed.attributes['figma:max_lines'], '3');
+
+  // Homogeneous text keeps the flat single-style path.
+  assert.ok(!('runs' in plain), 'no runs array for single-style text');
+  assert.ok(!('attributes' in plain), 'no preserved attrs without overrides');
+});

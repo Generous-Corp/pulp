@@ -187,6 +187,9 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
     figma_node_id: n.figma_node_id,
   };
   if (n.content !== undefined) out.content = n.content;
+  // Ordered mixed-style text runs — same key + camelCase field shape the C++
+  // consumer reads (design_ir_json.cpp::parse_ir_text_runs) and REST emits.
+  if (n.runs && n.runs.length > 0) out.runs = n.runs;
   if (n.asset_ref) out.asset_ref = n.asset_ref;
 
   // Faithful-vector: emit the render-mode + SVG asset + typed
@@ -209,18 +212,17 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   if (n.audio_min !== undefined) out.min = n.audio_min;
   if (n.audio_max !== undefined) out.max = n.audio_max;
   if (n.audio_default !== undefined) out.default = n.audio_default;
-  if (n.audio_units !== undefined ||
-      n.audio_binding !== undefined ||
-      n.audio_binding_y !== undefined) {
-    const attrs: Record<string, string> = {};
-    if (n.audio_units !== undefined) attrs.units = n.audio_units;
-    if (n.audio_binding !== undefined) attrs.binding = n.audio_binding;
-    // XYPad carries a second-axis binding alongside the primary `binding`.
-    // Lands in IRNode.attributes.binding_y; codegen consumes it when
-    // audio_widget="xy_pad" routes two parameter targets.
-    if (n.audio_binding_y !== undefined) attrs.binding_y = n.audio_binding_y;
-    out.attributes = attrs;
-  }
+  // Free-form preserved attributes (namespaced text metadata) merge with the
+  // audio-binding attributes; audio keys win on a collision (they drive
+  // codegen wiring, the figma:* keys are provenance).
+  const attrs: Record<string, string> = { ...(n.attributes ?? {}) };
+  if (n.audio_units !== undefined) attrs.units = n.audio_units;
+  if (n.audio_binding !== undefined) attrs.binding = n.audio_binding;
+  // XYPad carries a second-axis binding alongside the primary `binding`.
+  // Lands in IRNode.attributes.binding_y; codegen consumes it when
+  // audio_widget="xy_pad" routes two parameter targets.
+  if (n.audio_binding_y !== undefined) attrs.binding_y = n.audio_binding_y;
+  if (Object.keys(attrs).length > 0) out.attributes = attrs;
 
   // Style: pass through truthy fields only (envelope schema says additionalProperties:false)
   const styleEntries = Object.entries(n.style).filter(([, v]) => v !== undefined && v !== null && v !== "");

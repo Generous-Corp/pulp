@@ -112,6 +112,11 @@ struct IRStyle {
     std::optional<int> font_weight;
     std::optional<std::string> font_style;             // normal, italic
     std::optional<std::string> text_align;
+    // Vertical alignment of text within its design-reserved slot: "top",
+    // "middle", "bottom" (Figma textAlignVertical, normalized). When set it is
+    // design authority: codegen honors it instead of the tall-slot centering
+    // heuristic (which remains the fallback for sources that never say).
+    std::optional<std::string> vertical_align;
     std::optional<float> letter_spacing;
     std::optional<float> line_height;
     std::optional<std::string> text_transform;

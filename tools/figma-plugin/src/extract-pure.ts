@@ -592,3 +592,28 @@ export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamily
   for (const r of roots) visit(r);
   return Array.from(seen.values());
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Text-run offset conversion — the Figma Plugin API indexes styled text
+// segments in UTF-16 code units (a BMP char is 1 unit, an astral char like an
+// emoji is a surrogate pair = 2 units), while the IR text-run contract is
+// UTF-8 BYTE offsets into `content` (the native slicer is byte-based; see
+// design_ir.hpp::IRTextRun). Mirrors the REST port's u16_to_byte map in
+// figma_rest_export.py::extract_text_runs. No TextEncoder — the Figma plugin
+// sandbox doesn't provide one, so byte widths come from the code points.
+
+/// Map from UTF-16 code-unit index → UTF-8 byte offset, with a past-the-end
+/// sentinel at index s.length (so `map[s.length]` is the total byte count).
+export function utf16ToUtf8ByteOffsets(s: string): number[] {
+  const map: number[] = [];
+  let byte = 0;
+  for (const ch of s) {          // iterates by code point
+    const cp = ch.codePointAt(0) as number;
+    const units = cp > 0xffff ? 2 : 1;
+    const bytes = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    for (let k = 0; k < units; k++) map.push(byte);
+    byte += bytes;
+  }
+  map.push(byte);
+  return map;
+}

@@ -108,6 +108,25 @@
           "type": "string",
           "description": "Text content (when type=text). Maps to IRNode.text_content."
         },
+        "runs": {
+          "type": "array",
+          "description": "Ordered mixed-style text runs (when type=text and the node carries range overrides). Each run is the style DELTA against the node's dominant style over [start,end) UTF-8 BYTE offsets into `content` (converted from Figma's UTF-16 code-unit indices). Maps to IRNode.text_runs via design_ir_json.cpp::parse_ir_text_runs; homogeneous text omits this and keeps the flat single-style path.",
+          "items": {
+            "type": "object",
+            "required": ["start", "end"],
+            "properties": {
+              "start": { "type": "integer", "minimum": 0 },
+              "end": { "type": "integer", "minimum": 0 },
+              "fontSize": { "type": "number" },
+              "fontWeight": { "type": "integer" },
+              "fontStyle": { "type": "string", "enum": ["normal", "italic"] },
+              "color": { "type": "string" },
+              "letterSpacing": { "type": "number" },
+              "textDecoration": { "type": "string", "enum": ["underline", "line-through"] }
+            },
+            "additionalProperties": false
+          }
+        },
         "audio_widget": {
           "type": "string",
           "description": "Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.",
@@ -264,6 +283,7 @@
         "font_weight": { "type": "integer" },
         "font_style": { "type": "string", "enum": ["normal", "italic"] },
         "text_align": { "type": "string" },
+        "vertical_align": { "type": "string", "enum": ["top", "middle", "bottom"] },
         "letter_spacing": { "type": "number" },
         "line_height": { "type": "number" },
         "text_transform": { "type": "string" },

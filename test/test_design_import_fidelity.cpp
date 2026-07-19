@@ -1114,6 +1114,109 @@ TEST_CASE("single-run text keeps the plain textContent path (no regression)",
     CHECK(js.find("createTextNode(") == std::string::npos);  // no run splitting
 }
 
+TEST_CASE("mixed text runs with a multibyte char flow end to end on UTF-8 byte offsets",
+          "[view][import][codegen][text]") {
+    // The producer contract all three Figma lanes share: run offsets are UTF-8
+    // BYTE offsets into `content`. "Héllo " is 7 bytes (é = 2), so run 0 covers
+    // [0,7) and run 1 [7,12) — a code-unit or code-point producer would land
+    // mid-word. Both JS arms must emit BOTH runs' styling.
+    auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "children": [
+            { "type": "text", "name": "T", "content": "Héllo world",
+              "style": { "fontSize": 12, "height": 16 },
+              "runs": [ { "start": 0, "end": 7, "fontWeight": 700 },
+                        { "start": 7, "end": 12, "color": "#00ff00" } ] }
+        ]
+    })json");
+    REQUIRE(ir.root.children.size() == 1);
+    REQUIRE(ir.root.children[0].text_runs.size() == 2);
+
+    // Native (bridge) arm: one setTextRuns carrying both deltas.
+    CodeGenOptions native_opts;
+    const auto native_js = generate_pulp_js(ir, native_opts);
+    INFO(native_js);
+    CHECK(native_js.find("start: 0, end: 7, fontWeight: 700") != std::string::npos);
+    CHECK(native_js.find("start: 7, end: 12") != std::string::npos);
+    CHECK(native_js.find("color: '#00ff00'") != std::string::npos);
+
+    // Web-compat arm: two styled <span>s sliced on the byte boundaries.
+    CodeGenOptions web_opts;
+    web_opts.mode = CodeGenMode::web_compat;
+    const auto web_js = generate_pulp_js(ir, web_opts);
+    INFO(web_js);
+    CHECK(web_js.find(".style.fontWeight = '700'") != std::string::npos);
+    CHECK(web_js.find(".style.color = '#00ff00'") != std::string::npos);
+    CHECK(web_js.find("Héllo ") != std::string::npos);   // byte-exact slice
+    CHECK(web_js.find("'world'") != std::string::npos);
+}
+
+TEST_CASE("explicit verticalAlign is design authority in both JS arms",
+          "[view][import][codegen][text]") {
+    // The producers now emit Figma's textAlignVertical as style.verticalAlign
+    // (normalized top/middle/bottom; CENTER accepted defensively). Explicit
+    // values win over the tall-slot heuristic — including "top", which
+    // SUPPRESSES derived centering in a tall slot.
+    SECTION("parse normalizes CENTER to middle") {
+        auto ir = parse_design_ir_json(R"json({
+            "type": "text", "name": "T", "content": "Hi",
+            "style": { "verticalAlign": "CENTER" }
+        })json");
+        REQUIRE(ir.root.style.vertical_align.has_value());
+        CHECK(*ir.root.style.vertical_align == "middle");
+    }
+    SECTION("native: middle centers even without a tall slot") {
+        auto ir = parse_design_ir_json(R"json({
+            "type": "frame", "name": "Root",
+            "children": [ { "type": "text", "name": "T", "content": "Hi",
+                            "style": { "fontSize": 12, "vertical_align": "middle" } } ]
+        })json");
+        CodeGenOptions opts;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setVerticalAlign('") != std::string::npos);
+        CHECK(js.find("', 'center');") != std::string::npos);
+    }
+    SECTION("native: explicit top suppresses the tall-slot centering heuristic") {
+        auto ir = parse_design_ir_json(R"json({
+            "type": "frame", "name": "Root",
+            "children": [ { "type": "text", "name": "T", "content": "Hi",
+                            "style": { "fontSize": 12, "height": 40,
+                                       "vertical_align": "top" } } ]
+        })json");
+        CodeGenOptions opts;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setVerticalAlign(") == std::string::npos);
+    }
+    SECTION("native: heuristic still centers a tall slot when the source never says") {
+        auto ir = parse_design_ir_json(R"json({
+            "type": "frame", "name": "Root",
+            "children": [ { "type": "text", "name": "T", "content": "Hi",
+                            "style": { "fontSize": 12, "height": 40 } } ]
+        })json");
+        CodeGenOptions opts;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find("setVerticalAlign('") != std::string::npos);
+        CHECK(js.find("', 'center');") != std::string::npos);
+    }
+    SECTION("web-compat: bottom is emitted verbatim") {
+        auto ir = parse_design_ir_json(R"json({
+            "type": "frame", "name": "Root",
+            "children": [ { "type": "text", "name": "T", "content": "Hi",
+                            "style": { "fontSize": 12, "height": 40,
+                                       "vertical_align": "bottom" } } ]
+        })json");
+        CodeGenOptions opts;
+        opts.mode = CodeGenMode::web_compat;
+        const auto js = generate_pulp_js(ir, opts);
+        INFO(js);
+        CHECK(js.find(".style.verticalAlign = 'bottom'") != std::string::npos);
+        CHECK(js.find(".style.verticalAlign = 'middle'") == std::string::npos);
+    }
+}
+
 TEST_CASE("serialize_design_ir round-trips constraints, grid, and text runs",
           "[view][import][serialization]") {
     // Regression: the new IRLayout/IRNode fields must survive a
@@ -1125,6 +1228,7 @@ TEST_CASE("serialize_design_ir round-trips constraints, grid, and text runs",
     ir.root.layout.grid_auto_flow = "row";
 
     IRNode child; child.type = "text"; child.name = "T"; child.text_content = "Hi world";
+    child.style.vertical_align = "middle";
     child.layout.h_constraint = "center";
     child.layout.v_constraint = "bottom";
     child.layout.grid_column = "1 / 3";
@@ -1137,6 +1241,7 @@ TEST_CASE("serialize_design_ir round-trips constraints, grid, and text runs",
     const auto& c = rt.root.children[0];
     CHECK(rt.root.layout.grid_template_columns == "1fr 1fr");
     CHECK(rt.root.layout.grid_auto_flow == "row");
+    CHECK(c.style.vertical_align == "middle");
     CHECK(c.layout.h_constraint == "center");
     CHECK(c.layout.v_constraint == "bottom");
     CHECK(c.layout.grid_column == "1 / 3");

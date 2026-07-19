@@ -490,6 +490,29 @@ class TextRunsTest(unittest.TestCase):
             {"characters": "hi", "characterStyleOverrides": [0, 0],
              "styleOverrideTable": {}}), [])
 
+    def test_text_align_vertical_lands_as_vertical_align(self):
+        # Design authority the codegen consumes over its tall-slot heuristic.
+        for tav, expected in (("CENTER", "middle"), ("BOTTOM", "bottom"), ("TOP", "top")):
+            s = {}
+            frx.extract_text_style({"style": {"textAlignVertical": tav}}, s)
+            self.assertEqual(s.get("vertical_align"), expected, tav)
+        s = {}
+        frx.extract_text_style({"style": {}}, s)
+        self.assertNotIn("vertical_align", s)
+
+    def test_extended_text_metadata_preserved_as_namespaced_attributes(self):
+        n = {"type": "TEXT", "style": {
+            "textAutoResize": "HEIGHT", "textTruncation": "ENDING",
+            "maxLines": 2, "hyperlink": {"type": "URL", "url": "https://pulp.audio"}}}
+        attrs = frx.extract_text_attributes(n)
+        self.assertEqual(attrs["figma:text_auto_resize"], "height")
+        self.assertEqual(attrs["figma:text_truncation"], "ending")
+        self.assertEqual(attrs["figma:max_lines"], "2")
+        self.assertEqual(attrs["figma:hyperlink"], "https://pulp.audio")
+        # Defaults stay silent — no attribute noise on plain labels.
+        self.assertEqual(frx.extract_text_attributes(
+            {"style": {"textAutoResize": "NONE", "textTruncation": "DISABLED"}}), {})
+
 
 class FaithfulVectorTest(unittest.TestCase):
     """Plan B / B4a: faithful-vector lane — frame-SVG knob auto-detect + the

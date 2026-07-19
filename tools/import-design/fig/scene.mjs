@@ -1586,6 +1586,97 @@ export function materializeFrame(scene, frame, ctx) {
     return out;
   }
 
+  // Figma weight names → CSS font-weight, for style-override runs whose only
+  // record of boldness is the fontName.style string (the .fig format carries
+  // no numeric fontWeight). Unknown names return null and emit no override.
+  function weightFromFontStyleName(styleName) {
+    const s = String(styleName || '').toLowerCase().replace(/[\s_-]/g, '');
+    if (s.includes('thin')) return 100;
+    if (s.includes('extralight') || s.includes('ultralight')) return 200;
+    if (s.includes('light')) return 300;
+    if (s.includes('medium')) return 500;
+    if (s.includes('semibold') || s.includes('demibold')) return 600;
+    if (s.includes('extrabold') || s.includes('ultrabold')) return 800;
+    if (s.includes('bold')) return 700;
+    if (s.includes('black') || s.includes('heavy')) return 900;
+    if (s.includes('regular') || s.includes('normal') || s === 'italic') return 400;
+    return null;
+  }
+
+  // Mixed styled ranges. TextData carries `characterStyleIDs` (one override id
+  // per UTF-16 code unit — the same indexing REST's characterStyleOverrides
+  // uses; id 0 = the node's base style) and `styleOverrideTable` (NodeChange
+  // rows keyed by styleID holding only the overridden fields). Group
+  // consecutive equal non-zero ids into [start,end) ranges, resolve each id's
+  // row, and emit the style delta in the shared run shape
+  // (design_ir_json.cpp::parse_ir_text_runs). Offsets are converted to UTF-8
+  // BYTE offsets into `content` — the IR contract all three lanes share.
+  function extractFigTextRuns(node, characters) {
+    const td = node.textData;
+    const ids = td && td.characterStyleIDs;
+    const table = td && td.styleOverrideTable;
+    if (!Array.isArray(ids) || !ids.length || !Array.isArray(table) || !table.length) return [];
+    const byId = new Map();
+    for (const row of table) {
+      if (row && typeof row.styleID === 'number') byId.set(row.styleID, row);
+    }
+    // UTF-16 unit index → UTF-8 byte offset (with past-the-end sentinel). A
+    // run starting after an astral char (emoji = surrogate pair = 2 units)
+    // must land on the right byte, so the map is built per code point.
+    const u16ToByte = [];
+    let byte = 0;
+    for (const ch of characters) {
+      const cp = ch.codePointAt(0);
+      const units = cp > 0xffff ? 2 : 1;
+      const bytes = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+      for (let k = 0; k < units; k++) u16ToByte.push(byte);
+      byte += bytes;
+    }
+    u16ToByte.push(byte);
+    const byteOff = (i) => (i >= 0 && i < u16ToByte.length ? u16ToByte[i] : byte);
+
+    const baseWeight = weightFromFontStyleName(node.fontName && node.fontName.style) || 400;
+    const runs = [];
+    let i = 0;
+    const L = Math.min(ids.length, u16ToByte.length - 1);
+    while (i < L) {
+      const sid = ids[i];
+      if (!sid) { i += 1; continue; }        // 0 = inherits the base style
+      let j = i;
+      while (j < L && ids[j] === sid) j += 1;
+      const row = byId.get(sid);
+      if (row) {
+        const run = { start: byteOff(i), end: byteOff(j) };
+        if (typeof row.fontSize === 'number' && row.fontSize !== node.fontSize) {
+          run.fontSize = round2(row.fontSize);
+        }
+        if (row.fontName && typeof row.fontName.style === 'string') {
+          if (/italic/i.test(row.fontName.style)) run.fontStyle = 'italic';
+          const w = weightFromFontStyleName(row.fontName.style);
+          if (w !== null && w !== baseWeight) run.fontWeight = w;
+        }
+        if (row.textDecoration === 'UNDERLINE') run.textDecoration = 'underline';
+        else if (row.textDecoration === 'STRIKETHROUGH') run.textDecoration = 'line-through';
+        const solid = firstSolidFill(row);
+        if (solid && solid.color) {
+          run.color = colorToHex({ ...solid.color, a: (solid.color.a ?? 1) * (solid.opacity ?? 1) });
+        }
+        const ls = row.letterSpacing;
+        if (ls && typeof ls.value === 'number' && ls.value !== 0) {
+          const fs = typeof row.fontSize === 'number' ? row.fontSize : node.fontSize;
+          if (ls.units === 'PERCENT') {
+            if (typeof fs === 'number') run.letterSpacing = round2((ls.value / 100) * fs);
+          } else {
+            run.letterSpacing = round2(ls.value);
+          }
+        }
+        if (Object.keys(run).length > 2) runs.push(run);
+      }
+      i = j;
+    }
+    return runs;
+  }
+
   // Clone the master subtree for one instance, applying every override entry
   // whose (resolved) guidPath lands on a node, and forwarding deeper-scoped
   // entries into nested INSTANCE clones via `__overrides`. Clones carry a
@@ -1971,8 +2062,34 @@ export function materializeFrame(scene, frame, ctx) {
       out.content = characters;
       Object.assign(out.style, fontToken(node));
       if (node.textAlignHorizontal) out.style.text_align = node.textAlignHorizontal.toLowerCase();
+      // Vertical alignment within the design-reserved slot. Design authority:
+      // codegen honors it over the tall-slot centering heuristic (an explicit
+      // TOP suppresses derived centering). Kiwi omits the TOP default, so the
+      // field only appears when the designer set it.
+      if (node.textAlignVertical === 'CENTER') out.style.vertical_align = 'middle';
+      else if (node.textAlignVertical === 'BOTTOM') out.style.vertical_align = 'bottom';
+      else if (node.textAlignVertical === 'TOP') out.style.vertical_align = 'top';
       const solid = firstSolidFill(node);
       if (solid) out.style.color = colorToHex({ ...solid.color, a: (solid.color?.a ?? 1) * (solid.opacity ?? 1) });
+
+      // Mixed styled ranges → ordered per-range deltas (UTF-8 byte offsets).
+      // Homogeneous text emits no runs and keeps the flat single-style path.
+      const textRuns = extractFigTextRuns(node, characters);
+      if (textRuns.length) out.runs = textRuns;
+
+      // Preserved-not-lowered text metadata, namespaced (figma:*) so nothing
+      // downstream mistakes it for a lowered style. Mirrors the plugin lane.
+      const preserved = {};
+      if (typeof node.textAutoResize === 'string' && node.textAutoResize !== 'NONE') {
+        preserved['figma:text_auto_resize'] = node.textAutoResize.toLowerCase();
+      }
+      if (node.textTruncation === 'ENDING') preserved['figma:text_truncation'] = 'ending';
+      if (typeof node.maxLines === 'number' && node.maxLines > 0) {
+        preserved['figma:max_lines'] = String(node.maxLines);
+      }
+      if (Object.keys(preserved).length) {
+        out.attributes = { ...(out.attributes || {}), ...preserved };
+      }
 
       // An icon font's "characters" are LIGATURE NAMES, not text: the designer
       // types "lock" and Font Awesome substitutes a padlock. Emitting them as
@@ -1995,10 +2112,12 @@ export function materializeFrame(scene, frame, ctx) {
           out.path_data = glyphs.d;
           out.viewBox = `0 0 ${round2(glyphs.box.width)} ${round2(glyphs.box.height)}`;
           delete out.content;                 // a ligature name is not content
+          delete out.runs;                    // ...so ranges over it are meaningless
           delete out.style.font_family;
           delete out.style.font_size;
           delete out.style.font_style;
           delete out.style.text_align;
+          delete out.style.vertical_align;
           // The glyph paints in the text's own color.
           out.fill = out.style.color || 'none';
           delete out.style.color;

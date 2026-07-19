@@ -337,6 +337,44 @@ defs. Nothing is fabricated: legacy files (no assignments) emit identity only.
 SLOT nodes carry no component identity in the Plugin API (`SlotNode` is a
 frame defined by a component property reference), so only their name flows.
 
+**Mixed text runs are emitted by all three Figma lanes, on ONE offset unit:
+UTF-8 bytes.** A text node with per-range styling (a bold word, a colored
+span) carries an ordered `runs` array of style DELTAS against the dominant
+style — `{start, end, fontSize?, fontWeight?, fontStyle?, color?,
+letterSpacing?, textDecoration?}` (camelCase; the exact shape
+`design_ir_json.cpp::parse_ir_text_runs` reads). `start`/`end` are `[start,
+end)` **UTF-8 byte offsets into `content`** in every lane — Figma indexes text
+in UTF-16 code units (plugin `getStyledTextSegments`, REST
+`characterStyleOverrides`, `.fig` `TextData.characterStyleIDs` all do), so
+each producer converts through a per-code-point map (plugin
+`extract-pure.ts::utf16ToUtf8ByteOffsets`, REST's `u16_to_byte`, `.fig`
+`extractFigTextRuns`). A code-unit passthrough corrupts every run after the
+first non-ASCII character — the tests pin an `é`/emoji fixture in each lane.
+Homogeneous text emits NO runs array (the flat dominant style is the whole
+story; the consumer prefers that path). Lane quirks: the plugin backfills the
+dominant style from segment 0 when node-level reads return `figma.mixed` (a
+symbol — `typeof` guards silently skip it otherwise); the `.fig` format has no
+numeric fontWeight, so run weights derive from the override `fontName.style`
+NAME ("Bold" → 700, "SemiBold" → 600, …); `.fig` styleOverrideTable rows are
+NodeChange structs keyed by `styleID`. Codegen coverage (compat
+`text-per-range-styles`): web-compat nested `<span>`s, JS-native
+`setTextRuns` → AttributedString (single-line), SwiftUI concatenated `Text`
+segments; baked C++ and live-native flatten — honest partial.
+
+**`textAlignVertical` is design authority; the tall-slot heuristic is only a
+fallback.** All three producers emit `style.vertical_align`
+(top/middle/bottom; kiwi omits the `.fig` TOP default so it only appears when
+set). Codegen honors it verbatim in both JS arms — including an explicit
+`top`, which SUPPRESSES the old slot-taller-than-font centering guess (that
+heuristic now fires only when the source never says). Expect imports to MOVE
+text vs pre-emission renders where designs author TOP in a reserved slot —
+that movement is fidelity, not a regression (layout dumps stay byte-identical;
+vertical align is paint, not geometry). Auto-resize / truncation / max-lines /
+whole-node hyperlink are preserved as namespaced attributes
+(`figma:text_auto_resize`, `figma:text_truncation`, `figma:max_lines`,
+`figma:hyperlink`), not lowered; paragraph/list/OpenType metadata is not
+captured (compat `text-extended-metadata`).
+
 **Gotcha - old-style instance swap lives in `overriddenSymbolID`, not
 componentPropAssignments.** A file that predates component properties swaps a
 nested instance's component with a `symbolOverrides` entry carrying
