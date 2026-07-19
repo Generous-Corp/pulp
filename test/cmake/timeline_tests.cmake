@@ -32,7 +32,11 @@ pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-persistence LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-persistence
+    SOURCES test_timeline_persistence.cpp
+        test_timeline_persistence_limits.cpp
+        test_timeline_persistence_registry.cpp
+    LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 pulp_add_test_suite(pulp-test-timeline-replay-golden
@@ -43,6 +47,8 @@ target_compile_definitions(pulp-test-timeline-replay-golden PRIVATE
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
+        test_timeline_graph_binding_lifecycle.cpp
+        test_timeline_graph_binding_publication.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
@@ -104,6 +110,9 @@ add_executable(pulp-test-timeline-phase1-examples
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_pattern_content.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_sequencer.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_examples.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_codec.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_edits.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_standalone.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
     pulp::format pulp::host pulp::playback pulp::timeline pulp::timebase
