@@ -178,6 +178,36 @@ bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
     return copied_all && !incomplete;
 }
 
+bool SignalGraph::MidiBlockSnapshot::append_to_midi(
+    midi::MidiBuffer& dst,
+    std::size_t& event_index,
+    std::size_t& sysex_index,
+    std::size_t& ump_index) const noexcept {
+    while (event_index < events.size()) {
+        if (!dst.add(events[event_index])) return false;
+        ++event_index;
+    }
+    const auto& source_sysex = events.sysex();
+    while (sysex_index < source_sysex.size()) {
+        const auto& source = source_sysex[sysex_index];
+        const bool added = source.data.empty()
+            ? dst.add_sysex({}, source.sample_offset, source.timestamp)
+            : dst.add_sysex_copy(source.data.data(), source.data.size(),
+                                 source.sample_offset, source.timestamp);
+        if (!added) return false;
+        ++sysex_index;
+    }
+    auto* destination_ump = dst.ump();
+    while (ump_index < ump.size()) {
+        if (destination_ump == nullptr
+            || !destination_ump->add(ump[ump_index])) {
+            return false;
+        }
+        ++ump_index;
+    }
+    return true;
+}
+
 bool SignalGraph::MidiBlockSnapshot::has_payload() const noexcept {
     return !events.empty() || events.sysex_size() != 0 || !ump.empty()
         || incomplete;
@@ -780,22 +810,38 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
     }
 
     auto& mailbox = *it->second.midi_output_mailbox;
-    bool complete = !mailbox.incomplete.exchange(false,
-                                                  std::memory_order_relaxed);
+    mailbox.consumer_incomplete =
+        mailbox.incomplete.exchange(false, std::memory_order_relaxed)
+        || mailbox.consumer_incomplete;
     if (mailbox.consumer_has_retry) {
-        if (!copy_midi_block(mailbox.consumer_scratch.events, out)) {
+        if (!mailbox.consumer_scratch.append_to_midi(
+                out,
+                mailbox.consumer_event_index,
+                mailbox.consumer_sysex_index,
+                mailbox.consumer_ump_index)) {
             return false;
         }
-        complete = !mailbox.consumer_scratch.incomplete && complete;
+        mailbox.consumer_incomplete = mailbox.consumer_scratch.incomplete
+            || mailbox.consumer_incomplete;
         mailbox.consumer_has_retry = false;
     }
     while (mailbox.pending.try_pop(mailbox.consumer_scratch)) {
-        if (!copy_midi_block(mailbox.consumer_scratch.events, out)) {
+        mailbox.consumer_event_index = 0;
+        mailbox.consumer_sysex_index = 0;
+        mailbox.consumer_ump_index = 0;
+        mailbox.consumer_incomplete = mailbox.consumer_scratch.incomplete
+            || mailbox.consumer_incomplete;
+        if (!mailbox.consumer_scratch.append_to_midi(
+                out,
+                mailbox.consumer_event_index,
+                mailbox.consumer_sysex_index,
+                mailbox.consumer_ump_index)) {
             mailbox.consumer_has_retry = true;
             return false;
         }
-        complete = !mailbox.consumer_scratch.incomplete && complete;
     }
+    const bool complete = !mailbox.consumer_incomplete;
+    mailbox.consumer_incomplete = false;
     return complete;
 }
 

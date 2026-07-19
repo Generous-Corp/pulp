@@ -887,6 +887,10 @@ private:
                            uint64_t new_sequence,
                            bool source_incomplete = false) noexcept;
         bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
+        bool append_to_midi(midi::MidiBuffer& dst,
+                            std::size_t& event_index,
+                            std::size_t& sysex_index,
+                            std::size_t& ump_index) const noexcept;
         bool has_payload() const noexcept;
 
         midi::MidiBuffer events;
@@ -914,6 +918,10 @@ private:
         std::atomic<bool> incomplete{false};
         MidiBlockSnapshot consumer_scratch;
         bool consumer_has_retry = false;
+        bool consumer_incomplete = false;
+        std::size_t consumer_event_index = 0;
+        std::size_t consumer_sysex_index = 0;
+        std::size_t consumer_ump_index = 0;
     };
 
     struct ParameterBlockSnapshot {

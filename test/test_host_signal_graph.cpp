@@ -2201,13 +2201,8 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     pulp::midi::UmpBuffer arrived_ump;
     arrived.attach_ump(&arrived_ump);
     REQUIRE(graph.extract_midi(mo, arrived));
-    REQUIRE(arrived.size() == 2);
-    REQUIRE(arrived[0].sample_offset == 0);
-    REQUIRE(arrived[1].sample_offset == 16);
-    REQUIRE(arrived.sysex_size() == 1);
-    REQUIRE(arrived.sysex()[0].data
-            == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
-    REQUIRE(arrived.sysex()[0].sample_offset == 8);
+    REQUIRE(arrived.empty());
+    REQUIRE(arrived.sysex_size() == 0);
     REQUIRE(arrived_ump.size() == 1);
     REQUIRE(arrived_ump[0].sample_offset == 24);
     REQUIRE(arrived_ump[0].packet.channel() == 2);
@@ -2437,15 +2432,23 @@ TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
     REQUIRE(chain_arrived.size() == event_capacity);
     plugin_chain_overflow_graph.release();
 
-    pulp::midi::MidiBuffer one_event;
-    one_event.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
-    REQUIRE(graph.inject_midi(mi, one_event));
+    pulp::midi::MidiBuffer two_events;
+    two_events.add(pulp::midi::MidiEvent::note_on(0, 60, 100));
+    two_events.add(pulp::midi::MidiEvent::note_on(0, 61, 100));
+    REQUIRE(graph.inject_midi(mi, two_events));
     graph.process(ov, iv, 32);
     pulp::midi::MidiBuffer limited_extract;
-    limited_extract.reserve(0);
+    limited_extract.reserve(1);
     limited_extract.set_realtime_capacity_limit(true);
     REQUIRE_FALSE(graph.extract_midi(mo, limited_extract));
+    REQUIRE(limited_extract.size() == 1);
+    CHECK(limited_extract[0].note() == 60);
     REQUIRE(limited_extract.dropped_event_count() == 1);
+
+    pulp::midi::MidiBuffer resumed_extract;
+    REQUIRE(graph.extract_midi(mo, resumed_extract));
+    REQUIRE(resumed_extract.size() == 1);
+    CHECK(resumed_extract[0].note() == 61);
 
     graph.release();
 }
@@ -2701,17 +2704,25 @@ TEST_CASE("SignalGraph MIDI egress queue retains earliest blocks on overflow",
             graph.process(out, in, 32);
         }
 
-        pulp::midi::MidiBuffer arrived;
-        REQUIRE_FALSE(graph.extract_midi(midi_out, arrived));
-        REQUIRE(arrived.size() == 4);
-        for (int index = 0; index < 4; ++index) {
-            CHECK(arrived[static_cast<std::size_t>(index)].is_note_off());
-            CHECK(arrived[static_cast<std::size_t>(index)].note() == 60 + index);
+        pulp::midi::MidiBuffer limited;
+        limited.reserve(1);
+        limited.set_realtime_capacity_limit(true);
+        REQUIRE_FALSE(graph.extract_midi(midi_out, limited));
+        REQUIRE(limited.size() == 1);
+        CHECK(limited[0].is_note_off());
+        CHECK(limited[0].note() == 60);
+
+        pulp::midi::MidiBuffer resumed;
+        REQUIRE_FALSE(graph.extract_midi(midi_out, resumed));
+        REQUIRE(resumed.size() == 3);
+        for (int index = 0; index < 3; ++index) {
+            CHECK(resumed[static_cast<std::size_t>(index)].is_note_off());
+            CHECK(resumed[static_cast<std::size_t>(index)].note() == 61 + index);
         }
 
-        arrived.clear();
-        REQUIRE(graph.extract_midi(midi_out, arrived));
-        CHECK(arrived.empty());
+        resumed.clear();
+        REQUIRE(graph.extract_midi(midi_out, resumed));
+        CHECK(resumed.empty());
     }
 }
 
