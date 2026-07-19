@@ -178,6 +178,11 @@ bool SignalGraph::MidiBlockSnapshot::copy_to_midi(
     return copied_all && !incomplete;
 }
 
+bool SignalGraph::MidiBlockSnapshot::has_payload() const noexcept {
+    return !events.empty() || events.sysex_size() != 0 || !ump.empty()
+        || incomplete;
+}
+
 bool SignalGraph::ParameterBlockSnapshot::set_from_queue(
     const state::ParameterEventQueue& src,
     std::uint64_t new_sequence) noexcept {
@@ -774,8 +779,24 @@ bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
         return false;
     }
 
-    const auto& snapshot = it->second.midi_output_mailbox->read();
-    return snapshot.copy_to_midi(out);
+    auto& mailbox = *it->second.midi_output_mailbox;
+    bool complete = !mailbox.incomplete.exchange(false,
+                                                  std::memory_order_relaxed);
+    if (mailbox.consumer_has_retry) {
+        if (!copy_midi_block(mailbox.consumer_scratch.events, out)) {
+            return false;
+        }
+        complete = !mailbox.consumer_scratch.incomplete && complete;
+        mailbox.consumer_has_retry = false;
+    }
+    while (mailbox.pending.try_pop(mailbox.consumer_scratch)) {
+        if (!copy_midi_block(mailbox.consumer_scratch.events, out)) {
+            mailbox.consumer_has_retry = true;
+            return false;
+        }
+        complete = !mailbox.consumer_scratch.incomplete && complete;
+    }
+    return complete;
 }
 
 bool SignalGraph::connect_feedback(NodeId source, PortIndex source_port,
@@ -1396,7 +1417,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         }
         if (n.type == NodeType::MidiOutput) {
             runtime_it->second.midi_output_mailbox =
-                std::make_unique<runtime::TripleBuffer<MidiBlockSnapshot>>();
+                std::make_unique<MidiOutputMailbox>();
         }
         if (n.type == NodeType::Plugin && n.plugin) {
             // Keep mailbox identity across a live snapshot recompile so a
@@ -2368,7 +2389,12 @@ void SignalGraph::process_impl(audio::BufferView<float>& output,
                         }
                         cg->midi_publish_scratch.set_from_midi(
                             *in_buf, 0, cg->routed.midi.in_incomplete(mo.plan_index));
-                        rt_it->second.midi_output_mailbox->write(cg->midi_publish_scratch);
+                        if (cg->midi_publish_scratch.has_payload()
+                            && !rt_it->second.midi_output_mailbox->pending.try_push(
+                                cg->midi_publish_scratch)) {
+                            rt_it->second.midi_output_mailbox->incomplete.store(
+                                true, std::memory_order_relaxed);
+                        }
                     }
                 }
                 return true;

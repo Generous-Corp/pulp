@@ -60,8 +60,11 @@ live snapshot. **Never call them from the audio thread.**
   extraction remains a
   control-side read. If either the current authoring topology or the live
   snapshot contains `MidiOutput`, the edit uses the eager-prepare fallback;
-  that specific refusal keeps the old snapshot live so the control
-  thread can drain pending egress before calling ordinary `prepare()`.
+  that specific refusal keeps the old snapshot live so the control thread can
+  drain its ordered four-block egress queue before calling ordinary
+  `prepare()`. Empty blocks do not overwrite pending output. If the bounded
+  queue fills, it retains the earliest blocks and `extract_midi()` reports
+  false while draining them.
 - `inject_parameter_events` — publishes one block of sample-offset parameter
   events through a snapshot-owned lock-free mailbox. It is safe to call
   concurrently with `process()` from one control-side writer. The latest

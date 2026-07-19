@@ -514,7 +514,12 @@ void SignalGraph::run_reference_walk_(
                         rt.midi_in,
                         0,
                         rt.midi_in_incomplete);
-                    rt.midi_output_mailbox->write(cg->midi_publish_scratch);
+                    if (cg->midi_publish_scratch.has_payload()
+                        && !rt.midi_output_mailbox->pending.try_push(
+                            cg->midi_publish_scratch)) {
+                        rt.midi_output_mailbox->incomplete.store(
+                            true, std::memory_order_relaxed);
+                    }
                 }
                 break;
             case NodeType::Custom:

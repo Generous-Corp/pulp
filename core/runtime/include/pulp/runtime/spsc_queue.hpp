@@ -40,10 +40,15 @@ public:
         return pushed;
     }
 
+    // Consumer: pop an item into reusable storage.
+    bool try_pop(T& item) {
+        return fifo_.pop(item);
+    }
+
     // Consumer: pop an item. Returns nullopt if empty.
     std::optional<T> try_pop() {
         T item{};
-        if (fifo_.pop(item)) {
+        if (try_pop(item)) {
             return item;
         }
         return std::nullopt;

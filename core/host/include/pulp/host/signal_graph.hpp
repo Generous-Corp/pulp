@@ -27,6 +27,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/runtime/budget_policy.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <atomic>
@@ -495,8 +496,9 @@ public:
     bool inject_parameter_events(NodeId plugin_node,
                                  const state::ParameterEventQueue& events);
 
-    // Drain the MIDI events that arrived at a MidiOutput sink node during
-    // the last process() call. Appends to `out`.
+    // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
+    // order. Appends to `out`; returns false if bounded egress overflowed or a
+    // queued block was already incomplete.
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
 
     // Disconnect
@@ -885,6 +887,7 @@ private:
                            uint64_t new_sequence,
                            bool source_incomplete = false) noexcept;
         bool copy_to_midi(midi::MidiBuffer& dst) const noexcept;
+        bool has_payload() const noexcept;
 
         midi::MidiBuffer events;
         midi::UmpBuffer ump;
@@ -900,6 +903,17 @@ private:
         MidiBlockSnapshot writer_scratch;
         std::atomic<uint64_t> next_sequence{0};
         std::atomic<uint64_t> sequence_seen{0};
+    };
+
+    struct MidiOutputMailbox {
+        static constexpr std::size_t kBlockCapacity = 4;
+        static_assert(std::atomic<bool>::is_always_lock_free,
+                      "MIDI egress overflow state must be lock-free");
+
+        runtime::SpscQueue<MidiBlockSnapshot, kBlockCapacity> pending;
+        std::atomic<bool> incomplete{false};
+        MidiBlockSnapshot consumer_scratch;
+        bool consumer_has_retry = false;
     };
 
     struct ParameterBlockSnapshot {
@@ -979,7 +993,9 @@ private:
         // control-thread egress use the mailboxes below so inject_midi()/
         // extract_midi() do not race process() scratch mutation. The shared
         // ingress mailbox preserves an unconsumed publication when a stable
-        // MidiInput node crosses a gap-free snapshot swap.
+        // MidiInput node crosses a gap-free snapshot swap. Egress is an ordered
+        // bounded drain queue so later blocks cannot overwrite a pending
+        // note-off before the control thread extracts it.
         midi::MidiBuffer midi_in;
         midi::MidiBuffer midi_out;
         midi::UmpBuffer midi_in_ump;
@@ -987,7 +1003,7 @@ private:
         bool midi_in_incomplete = false;
         bool midi_out_incomplete = false;
         std::shared_ptr<MidiInputMailbox> midi_input_mailbox;
-        std::unique_ptr<runtime::TripleBuffer<MidiBlockSnapshot>> midi_output_mailbox;
+        std::unique_ptr<MidiOutputMailbox> midi_output_mailbox;
 
         // Control/audio-thread parameter-event ingress for Plugin nodes. The
         // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
