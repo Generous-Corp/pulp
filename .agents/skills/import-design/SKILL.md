@@ -4253,7 +4253,7 @@ Each entry: *symptom → diagnostic step → root cause → fix*. Use this list 
 - **Symptom**: thin separator lines and chart grid lines vanish.
 - **Diagnostic**: any IR node with `type: "image"` and `width ≈ 0` (e.g. 5e-06) or `height ≈ 0`, plus a non-trivial `border_width`.
 - **Root cause**: Figma stores 1px strokes as VECTOR nodes with one degenerate axis + a stroke. The captured PNG is a 1-pixel-wide image; downstream renderer paints essentially nothing.
-- **Fix**: `parse_ir_node` "stroke promotion" pass — when an axis is < 0.5 and `border_width >= 0.5`, snap the axis to `max(stroke_weight, 1)` and demote `type: image` → `frame` with `background_color = border_color` (commits `f4ea1d067`, `496b738b8`).
+- **Fix**: the "stroke promotion" (separator promotion) rule in `normalize_design_ir` (`design_ir_normalize.cpp`, called from `parse_ir_node`) — when an axis is < 0.5 and `border_width >= 0.5`, snap the axis to `max(stroke_weight, 1)` and demote `type: image` → `frame` with `background_color = border_color` (commits `f4ea1d067`, `496b738b8`).
 - **Lesson**: don't trust Figma's bounding-box width/height for stroke geometry. Always re-derive from the stroke weight.
 - **Threshold detail**: Figma "1px" strokes often land as 0.97px due to fractional raster alignment. Use 0.5 as the floor, not 1.0.
 
@@ -4262,7 +4262,7 @@ Each entry: *symptom → diagnostic step → root cause → fix*. Use this list 
 - **Symptom**: a gradient panel that sits inside a rounded-corner parent paints with SHARP corners (the gradient rect is rectangular even though its container is rounded).
 - **Diagnostic**: pair-grep for a frame with `border-radius > 0` and a child positioned at (0,0) matching the parent's size — if the child has `border-radius: 0`, it'll paint rectangular.
 - **Root cause**: Figma relies on the parent's `overflow: clip` + radius to round the children visually. Pulp's renderer doesn't clip children to the parent's border-radius.
-- **Fix**: in `parse_ir_node`, after parsing children, propagate the parent's `border_radius` to any child that fills the parent at origin (commit `bf5e2d621`).
+- **Fix**: in `normalize_design_ir` (`design_ir_normalize.cpp`, run by `parse_ir_node` after parsing children), propagate the parent's `border_radius` to any child that fills the parent at origin (commit `bf5e2d621`).
 - **Lesson**: any time Figma uses a CSS spec that relies on PARENT geometry (overflow:clip, position:sticky, background-attachment:fixed), our IR has to either reproduce the clip or pre-bake it onto the child.
 
 #### 7. Shadow-zone sibling overlaps swallow the shadow
@@ -4270,7 +4270,7 @@ Each entry: *symptom → diagnostic step → root cause → fix*. Use this list 
 - **Symptom**: a panel with a downward drop shadow looks like a hard-edge transition into the sibling below — no visible fade.
 - **Diagnostic**: sample a vertical pixel strip from panel-bottom past the next sibling's top; if there's no transitional gradient, the shadow is being painted then covered.
 - **Root cause**: Pulp draws box-shadow in the same z-layer as the View. A later sibling positioned at `panel.bottom + small_gap` paints over the shadow.
-- **Fix**: in `parse_ir_node`, post-children pass that detects `Fi` with a downward shadow + `Fi+1` sitting in the shadow zone; snaps `Fi+1` UP but leaves the shadow's `oy` worth of room so the shadow renders into the partial opening (commits `f4ea1d067`, `7d305ec2a`).
+- **Fix**: the shadow-snap rule in `normalize_design_ir` (`design_ir_normalize.cpp`, run by `parse_ir_node` after children are parsed) detects `Fi` with a downward shadow + `Fi+1` sitting in the shadow zone; snaps `Fi+1` UP but leaves the shadow's `oy` worth of room so the shadow renders into the partial opening (commits `f4ea1d067`, `7d305ec2a`).
 - **Lesson**: layout rules that "preserve visual continuity" need to model both the geometric box AND the effect extent. Box-shadow `oy + blur/2` is the canonical effect extent.
 
 #### 8. Uppercase-transformed labels overflow their min-width
@@ -4319,7 +4319,7 @@ Each entry: *symptom → diagnostic step → root cause → fix*. Use this list 
 - **Symptom**: a horizontal hairline used to communicate a DSP pipeline (`[SEND]——[1/4 DELAY]——[REVERB]——[+]`) renders as a short line on the left of the row, NOT visually connecting the boxes.
 - **Diagnostic**: a flex ROW where the first child is a hairline (height ≤ 2px or width ≤ 2px) and subsequent siblings are widget-sized boxes — total flex content would overflow the row width if all participated.
 - **Root cause**: Figma designs put the line as a FULL-ROW background BEHIND the boxes (z-order: first = behind). The dropdowns / buttons cover it, leaving visible segments BETWEEN them — which reads as "connection". Our flex layout sequenced the line as the first item, compressing it on the left.
-- **Fix**: in `parse_ir_node` post-pass, when the row matches the pattern, mutate the line to `position: absolute`, `left: 0`, `width: row_width`, `top: (row_h - line_h) / 2`, centred vertically. Stays first in flex source order so the renderer still draws it behind subsequent siblings.
+- **Fix**: the connector-line rule in `normalize_design_ir` (`design_ir_normalize.cpp`, run by `parse_ir_node` after children are parsed) — when the row matches the pattern, mutate the line to `position: absolute`, `left: 0`, `width: row_width`, `top: (row_h - line_h) / 2`, centred vertically. Stays first in flex source order so the renderer still draws it behind subsequent siblings.
 - **Lesson**: Figma's "I/O connection" / "pipeline" / "signal flow" visuals all use the same shape — a hairline as the FIRST flex child, boxes after. The importer needs to recognise it as a CONNECTOR, not as a sibling that should participate in flex sizing.
 
 #### 14. Connector line extends past trailing "add" affordance

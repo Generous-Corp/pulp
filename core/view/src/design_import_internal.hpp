@@ -130,6 +130,14 @@ bool is_asset_reference_key(std::string_view key);
 // Parse a single DesignIR node tree; defined in design_ir_json.cpp.
 IRNode parse_ir_node(const choc::value::ValueView& obj);
 
+// Heuristic geometry rewrites on a parsed node (separator promotion,
+// rounded-corner inheritance, shadow-driven sibling snap, connector-line
+// spanning); defined in design_ir_normalize.cpp. parse_ir_node calls it once
+// per node after that node's children are parsed. Reads and writes only the
+// IR tree — never the source JSON — so the rules are unit-testable in
+// isolation.
+void normalize_design_ir(IRNode& node);
+
 // True when `kw` (CSS lowercase-hyphen spelling) is in the supported-blend
 // table every lane shares; defined in design_ir_json.cpp.
 bool is_supported_blend_keyword(const std::string& kw);

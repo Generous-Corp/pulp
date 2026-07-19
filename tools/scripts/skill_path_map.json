@@ -207,6 +207,7 @@
         "tools/design/**",
         "core/view/src/design_import*",
         "core/view/src/design_ir_json.cpp",
+        "core/view/src/design_ir_normalize.cpp",
         "core/view/src/recognition_resolver.cpp",
         "core/view/include/pulp/view/recognition_resolver.hpp",
         "core/view/src/lock_to_source.cpp",
