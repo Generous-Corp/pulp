@@ -237,15 +237,17 @@ public:
     void release() noexcept {
         if (workers_) {
             for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
-                workers_[index].stopping.store(true, std::memory_order_release);
+                auto& worker = workers_[index];
+                {
+                    std::lock_guard lock(worker.mutex);
+                    worker.stopping.store(true, std::memory_order_release);
+                }
+                worker.wake.notify_all();
             }
             if (sources_) {
                 for (std::uint32_t index = 0; index < config_.source_capacity; ++index) {
                     sources_[index].active_stop_source.request_stop();
                 }
-            }
-            for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
-                workers_[index].wake.notify_all();
             }
             for (std::uint32_t index = 0; index < config_.worker_count; ++index) {
                 if (workers_[index].thread.joinable()) workers_[index].thread.join();
@@ -344,16 +346,19 @@ public:
             return SampleStreamDecodeSubmitStatus::StaleSource;
 
         auto& worker = workers_[source->worker_index];
-        if (worker.scratch_lease_exhausted.load(std::memory_order_acquire) ||
-            worker.stopping.load(std::memory_order_acquire)) {
-            return SampleStreamDecodeSubmitStatus::Stopped;
-        }
         InternalJob internal{job, static_cast<std::uint32_t>(source - sources_.get())};
-        ++source->outstanding_jobs;
-        if (!worker.jobs.try_push(internal)) {
-            --source->outstanding_jobs;
-            telemetry_.job_queue_full.fetch_add(1, std::memory_order_relaxed);
-            return SampleStreamDecodeSubmitStatus::QueueFull;
+        {
+            std::lock_guard lock(worker.mutex);
+            if (worker.scratch_lease_exhausted.load(std::memory_order_acquire) ||
+                worker.stopping.load(std::memory_order_acquire)) {
+                return SampleStreamDecodeSubmitStatus::Stopped;
+            }
+            ++source->outstanding_jobs;
+            if (!worker.jobs.try_push(internal)) {
+                --source->outstanding_jobs;
+                telemetry_.job_queue_full.fetch_add(1, std::memory_order_relaxed);
+                return SampleStreamDecodeSubmitStatus::QueueFull;
+            }
         }
         source->last_reservation_serial = job.reservation_serial;
         update_high_water(telemetry_.source_outstanding_high_water,
@@ -391,12 +396,12 @@ public:
         std::uint32_t worker_index) noexcept {
         if (!prepared_ || worker_index >= config_.worker_count) return std::nullopt;
         auto& worker = workers_[worker_index];
+        std::lock_guard lock(worker.mutex);
         if (worker.scratch_lease_exhausted.load(std::memory_order_acquire))
             return std::nullopt;
         if (worker.completion_leased) return std::nullopt;
         auto completion = worker.completions.try_pop();
         if (!completion) return std::nullopt;
-        worker.wake.notify_all();
         worker.completion_leased = true;
         worker.leased_completion = *completion;
         const auto publishable_frames =
@@ -405,16 +410,19 @@ public:
                 : std::uint64_t{0};
         if (completion->scratch_slot >= worker.scratch_slot_count) {
             worker.completion_leased = false;
+            worker.wake.notify_all();
             return std::nullopt;
         }
         auto& scratch = worker.scratch_slots[completion->scratch_slot];
-        return SampleStreamDecodeCompletionView{
+        auto result = SampleStreamDecodeCompletionView{
             .completion = *completion,
             .audio = BufferView<const float>(
                 scratch.const_channel_ptrs.data(),
                 completion->channels,
                 static_cast<std::size_t>(publishable_frames)),
         };
+        worker.wake.notify_all();
+        return result;
     }
 
     std::optional<SampleStreamDecodeCompletionView> wait_pop_completion(
@@ -440,6 +448,7 @@ public:
     bool release_completion(const SampleStreamDecodeCompletion& completion) noexcept {
         if (!prepared_ || completion.worker_index >= config_.worker_count) return false;
         auto& worker = workers_[completion.worker_index];
+        std::lock_guard lock(worker.mutex);
         if (!worker.completion_leased ||
             worker.leased_completion.source.source_id != completion.source.source_id ||
             worker.leased_completion.source.source_generation !=
@@ -640,7 +649,11 @@ private:
             }
 
             if (worker.stopping.load(std::memory_order_acquire)) {
-                scratch.in_use.store(false, std::memory_order_release);
+                {
+                    std::lock_guard lock(worker.mutex);
+                    scratch.in_use.store(false, std::memory_order_release);
+                }
+                worker.wake.notify_all();
                 telemetry_.stopped_jobs.fetch_add(1, std::memory_order_relaxed);
                 break;
             }
@@ -670,19 +683,25 @@ private:
                 .scratch_lease_generation = scratch_lease->generation,
                 .pool_prepare_epoch = active_prepare_epoch_,
             };
-            while (!worker.completions.try_push(completion)) {
-                telemetry_.completion_queue_full.fetch_add(1,
-                                                           std::memory_order_relaxed);
+            {
                 std::unique_lock lock(worker.mutex);
-                worker.wake.wait(lock, [&] {
-                    return worker.stopping.load(std::memory_order_acquire) ||
-                           worker.completions.size_approx() <
-                               CompletionMailboxCapacity;
-                });
-                if (worker.stopping.load(std::memory_order_acquire)) break;
+                while (!worker.completions.try_push(completion)) {
+                    telemetry_.completion_queue_full.fetch_add(1,
+                                                               std::memory_order_relaxed);
+                    worker.wake.wait(lock, [&] {
+                        return worker.stopping.load(std::memory_order_acquire) ||
+                               worker.completions.size_approx() <
+                                   CompletionMailboxCapacity;
+                    });
+                    if (worker.stopping.load(std::memory_order_acquire)) break;
+                }
             }
             if (worker.stopping.load(std::memory_order_acquire)) {
-                scratch.in_use.store(false, std::memory_order_release);
+                {
+                    std::lock_guard lock(worker.mutex);
+                    scratch.in_use.store(false, std::memory_order_release);
+                }
+                worker.wake.notify_all();
                 telemetry_.stopped_jobs.fetch_add(1, std::memory_order_relaxed);
                 break;
             }
@@ -755,9 +774,12 @@ private:
                     auto& scratch = worker.scratch_slots[index];
                     const auto generation = scratch.next_lease_generation;
                     if (generation == 0) {
-                        scratch.in_use.store(false, std::memory_order_release);
-                        worker.scratch_lease_exhausted.store(
-                            true, std::memory_order_release);
+                        {
+                            std::lock_guard lock(worker.mutex);
+                            scratch.in_use.store(false, std::memory_order_release);
+                            worker.scratch_lease_exhausted.store(
+                                true, std::memory_order_release);
+                        }
                         worker.wake.notify_all();
                         return std::nullopt;
                     }

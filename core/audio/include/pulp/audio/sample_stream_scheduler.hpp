@@ -123,7 +123,7 @@ public:
             for (auto candidate = std::next(least); candidate != pending_.end(); ++candidate) {
                 if (more_urgent(*least, *candidate)) least = candidate;
             }
-            if (!more_urgent(request, *least)) {
+            if (!strictly_more_urgent(request, *least)) {
                 ++stats_.rejected_full;
                 return SampleStreamScheduleStatus::Full;
             }
@@ -258,6 +258,18 @@ private:
         if (left.demand_class != right.demand_class)
             return left.demand_class < right.demand_class;
         return left.sequence < right.sequence;
+    }
+
+    static bool strictly_more_urgent(const SampleStreamPageRequest& left,
+                                     const SampleStreamPageRequest& right) noexcept {
+        const long double left_scaled =
+            static_cast<long double>(left.resident_source_frames) *
+            static_cast<long double>(right.consumption_frames_per_second);
+        const long double right_scaled =
+            static_cast<long double>(right.resident_source_frames) *
+            static_cast<long double>(left.consumption_frames_per_second);
+        if (left_scaled != right_scaled) return left_scaled < right_scaled;
+        return left.demand_class < right.demand_class;
     }
 
     void renumber_sequences() noexcept {

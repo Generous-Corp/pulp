@@ -45,22 +45,15 @@ struct FileFrameReader {
     bool valid = false;
 };
 
-/// Open and retain a mapped reader for @p path. With @p require_ranged_read,
-/// unsupported formats are rejected and a later ranged decode failure is
-/// reported rather than falling back to a whole-file decode. On failure returns
-/// a FileFrameReader with valid == false. Control thread only.
-inline FileFrameReader make_memory_mapped_frame_reader(
-    std::string_view path, bool require_ranged_read = false, bool compute_content_identity = false,
-    std::uint64_t maximum_mapped_bytes = std::numeric_limits<std::uint64_t>::max(),
-    std::shared_ptr<MemoryMappedAudioReader>* retained_reader = nullptr) {
+/// Bind an existing immutable mapped snapshot. This can tighten a capability
+/// probe to ranged-only reads without copying the source file a second time.
+inline FileFrameReader make_retained_memory_mapped_frame_reader(
+    std::shared_ptr<MemoryMappedAudioReader> mapped,
+    bool require_ranged_read = false,
+    bool compute_content_identity = false,
+    std::uint64_t maximum_mapped_bytes = std::numeric_limits<std::uint64_t>::max()) {
     FileFrameReader result;
-    if (retained_reader != nullptr)
-        retained_reader->reset();
-
-    auto mapped = std::make_shared<MemoryMappedAudioReader>();
-    const auto mapped_limit = static_cast<std::size_t>(
-        std::min<std::uint64_t>(maximum_mapped_bytes, std::numeric_limits<std::size_t>::max()));
-    if (!mapped->open(path, mapped_limit)) {
+    if (!mapped || !mapped->is_open()) {
         return result; // valid == false
     }
     if (mapped->size() > maximum_mapped_bytes) {
@@ -90,8 +83,6 @@ inline FileFrameReader make_memory_mapped_frame_reader(
         return result;
     result.binding.stop_mode = result.supports_ranged_read ? FrameReaderStopMode::Cooperative
                                                            : FrameReaderStopMode::JoinOnly;
-    if (retained_reader != nullptr)
-        *retained_reader = mapped;
     result.binding.read = [mapped = std::move(mapped), channels, total, require_ranged_read,
                            destinations = std::vector<float*>(channels)](
                               std::uint64_t start_frame, BufferView<float> dest,
@@ -137,6 +128,30 @@ inline FileFrameReader make_memory_mapped_frame_reader(
         return stoppable(start_frame, destination, frames, {});
     };
     result.valid = true;
+    return result;
+}
+
+/// Open and retain a mapped reader for @p path. With @p require_ranged_read,
+/// unsupported formats are rejected and a later ranged decode failure is
+/// reported rather than falling back to a whole-file decode. On failure returns
+/// a FileFrameReader with valid == false. Control thread only.
+inline FileFrameReader make_memory_mapped_frame_reader(
+    std::string_view path, bool require_ranged_read = false, bool compute_content_identity = false,
+    std::uint64_t maximum_mapped_bytes = std::numeric_limits<std::uint64_t>::max(),
+    std::shared_ptr<MemoryMappedAudioReader>* retained_reader = nullptr) {
+    if (retained_reader != nullptr)
+        retained_reader->reset();
+    auto mapped = std::make_shared<MemoryMappedAudioReader>();
+    const auto mapped_limit = static_cast<std::size_t>(
+        std::min<std::uint64_t>(maximum_mapped_bytes, std::numeric_limits<std::size_t>::max()));
+    if (!mapped->open(path, mapped_limit))
+        return {};
+    auto retained = mapped;
+    auto result = make_retained_memory_mapped_frame_reader(
+        std::move(mapped), require_ranged_read, compute_content_identity,
+        maximum_mapped_bytes);
+    if (result.valid && retained_reader != nullptr)
+        *retained_reader = std::move(retained);
     return result;
 }
 

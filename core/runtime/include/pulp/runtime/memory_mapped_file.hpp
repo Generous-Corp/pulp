@@ -117,6 +117,7 @@ class MemoryMappedFile {
     uint8_t* data_ = nullptr;
     size_t size_ = 0;
 #ifdef _WIN32
+    std::string path_;
     void* file_handle_ = nullptr;
     void* mapping_handle_ = nullptr;
 #else

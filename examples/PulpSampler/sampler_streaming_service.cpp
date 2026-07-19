@@ -285,11 +285,11 @@ SamplerStreamingRuntime::stage_streamed_file(std::string_view path) {
         result.status = PulpSamplerLoadStatus::UnsupportedSampleRate;
         return staged;
     }
-    // Reopen with the strict ranged-only binding after capability
-    // inspection. The permissive probe above must never leak its
-    // decode-once fallback into an admitted streaming source.
-    base = audio::make_memory_mapped_frame_reader(
-        path, true, has_sidecar, std::numeric_limits<std::uint64_t>::max(), &retained_base);
+    // Rebind the retained snapshot to strict ranged-only reads after capability
+    // inspection. The permissive probe must never leak its decode-once fallback
+    // into an admitted streaming source or copy a large source twice.
+    base = audio::make_retained_memory_mapped_frame_reader(
+        retained_base, true, has_sidecar);
     if (!base.valid || retained_base == nullptr) {
         result.status = PulpSamplerLoadStatus::OpenFailed;
         return staged;

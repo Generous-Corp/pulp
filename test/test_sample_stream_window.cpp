@@ -671,6 +671,12 @@ TEST_CASE("Sample stream scheduler displaces only for a more urgent demand",
     slower.resident_source_frames = 19200;
     REQUIRE(scheduler.submit_or_refresh(slower) == SampleStreamScheduleStatus::Full);
 
+    auto equal = release;
+    equal.requester_id = 4;
+    equal.page_index = 4;
+    REQUIRE(scheduler.submit_or_refresh(equal) == SampleStreamScheduleStatus::Full);
+    REQUIRE(scheduler.stats().displaced_less_urgent == 0);
+
     auto attack = release;
     attack.requester_id = 3;
     attack.page_index = 3;

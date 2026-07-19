@@ -571,6 +571,31 @@ TEST_CASE("make_memory_mapped_frame_reader fails gracefully on a bad path",
     REQUIRE_FALSE(retained);
 }
 
+TEST_CASE("make_memory_mapped_frame_reader tightens a retained snapshot without reopening",
+          "[audio][streaming][issue-streaming][snapshot]") {
+    const std::string path = temp_wav("_retained.wav");
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels = {{0.0f, 0.25f, -0.25f, 0.5f}};
+    REQUIRE(pulp::audio::write_wav_file(path, data));
+
+    std::shared_ptr<pulp::audio::MemoryMappedAudioReader> retained;
+    auto probe = pulp::audio::make_memory_mapped_frame_reader(
+        path, false, false, std::numeric_limits<std::uint64_t>::max(), &retained);
+    REQUIRE(probe.valid);
+    REQUIRE(retained);
+    REQUIRE(std::filesystem::remove(path));
+
+    auto strict = pulp::audio::make_retained_memory_mapped_frame_reader(
+        retained, true, true);
+    REQUIRE(strict.valid);
+    REQUIRE(strict.supports_ranged_read);
+    REQUIRE(strict.has_content_identity);
+    Buffer<float> output(1, 4);
+    REQUIRE(strict.reader(0, output.view(), 4) == 4);
+    REQUIRE(std::fabs(output.channel(0)[1] - 0.25f) < 2e-4f);
+}
+
 TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
           "[audio][streaming][issue-streaming]") {
     // Write a deterministic stereo WAV, then stream it via a retained mapped

@@ -98,7 +98,8 @@ MemoryMappedFile::MemoryMappedFile(MemoryMappedFile&& other) noexcept
     : data_(other.data_), size_(other.size_)
 #ifdef _WIN32
       ,
-      file_handle_(other.file_handle_), mapping_handle_(other.mapping_handle_)
+      path_(std::move(other.path_)), file_handle_(other.file_handle_),
+      mapping_handle_(other.mapping_handle_)
 #else
       ,
       fd_(other.fd_)
@@ -120,6 +121,7 @@ MemoryMappedFile& MemoryMappedFile::operator=(MemoryMappedFile&& other) noexcept
         data_ = other.data_;
         size_ = other.size_;
 #ifdef _WIN32
+        path_ = std::move(other.path_);
         file_handle_ = other.file_handle_;
         mapping_handle_ = other.mapping_handle_;
         other.file_handle_ = nullptr;
@@ -216,6 +218,7 @@ bool MemoryMappedFile::open_impl(std::string_view path, MapMode mode, std::size_
         return false;
     }
 
+    path_ = std::move(path_str);
     return true;
 }
 
@@ -233,6 +236,7 @@ void MemoryMappedFile::close() {
         file_handle_ = nullptr;
     }
     size_ = 0;
+    path_.clear();
 }
 
 bool MemoryMappedFile::copy_access_policy_to(std::string_view destination) const noexcept {
@@ -364,7 +368,7 @@ FileIdentity MemoryMappedFile::opened_file_identity() const noexcept {
 }
 
 bool MemoryMappedFile::copy_contents_to_new_file(std::string_view destination) const noexcept {
-    if (file_handle_ == nullptr)
+    if (file_handle_ == nullptr || path_.empty())
         return false;
     std::string destination_string;
     try {
@@ -372,27 +376,47 @@ bool MemoryMappedFile::copy_contents_to_new_file(std::string_view destination) c
     } catch (...) {
         return false;
     }
+    HANDLE stable_source = CreateFileA(path_.c_str(), GENERIC_READ,
+                                       FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (stable_source == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION opened{};
+    BY_HANDLE_FILE_INFORMATION stable{};
+    const bool same_source =
+        GetFileInformationByHandle(static_cast<HANDLE>(file_handle_), &opened) != 0 &&
+        GetFileInformationByHandle(stable_source, &stable) != 0 &&
+        opened.dwVolumeSerialNumber == stable.dwVolumeSerialNumber &&
+        opened.nFileIndexHigh == stable.nFileIndexHigh &&
+        opened.nFileIndexLow == stable.nFileIndexLow &&
+        windows_file_generation(opened) == windows_file_generation(stable);
+    if (!same_source) {
+        CloseHandle(stable_source);
+        return false;
+    }
+
     HANDLE target = CreateFileA(destination_string.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                                 FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (target == INVALID_HANDLE_VALUE)
+    if (target == INVALID_HANDLE_VALUE) {
+        CloseHandle(stable_source);
         return false;
+    }
 
     LARGE_INTEGER beginning{};
-    bool ok = SetFilePointerEx(static_cast<HANDLE>(file_handle_), beginning, nullptr, FILE_BEGIN) !=
-              0;
+    bool ok = SetFilePointerEx(stable_source, beginning, nullptr, FILE_BEGIN) != 0;
     std::array<std::uint8_t, 64 * 1024> buffer{};
     std::size_t remaining = size_;
     while (ok && remaining != 0) {
         const auto request = static_cast<DWORD>(std::min(remaining, buffer.size()));
         DWORD read = 0;
-        ok = ReadFile(static_cast<HANDLE>(file_handle_), buffer.data(), request, &read, nullptr) !=
-                 0 &&
+        ok = ReadFile(stable_source, buffer.data(), request, &read, nullptr) != 0 &&
              read == request;
         DWORD written = 0;
         if (ok)
             ok = WriteFile(target, buffer.data(), read, &written, nullptr) != 0 && written == read;
         remaining -= ok ? read : 0;
     }
+    CloseHandle(stable_source);
     CloseHandle(target);
     if (!ok)
         DeleteFileA(destination_string.c_str());
