@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07210"></a>
+## [0.721.0] - 2026-07-19
+
+- feat(import-design): preserve component/instance semantics end to end ([#6327](https://github.com/danielraffel/pulp/pull/6327))
+- fix(view): reconcile EQ curve token baseline ([#6333](https://github.com/danielraffel/pulp/pull/6333))
+- fix(build): link eq_curve_view.cpp into the WASM WebUI sources ([#6330](https://github.com/danielraffel/pulp/pull/6330))
+
 <a id="v07200"></a>
 ## [0.720.0] - 2026-07-19
 
@@ -6659,6 +6666,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.721.0]: https://github.com/danielraffel/pulp/releases/tag/v0.721.0
 [0.720.0]: https://github.com/danielraffel/pulp/releases/tag/v0.720.0
 [0.719.0]: https://github.com/danielraffel/pulp/releases/tag/v0.719.0
 [0.718.0]: https://github.com/danielraffel/pulp/releases/tag/v0.718.0
