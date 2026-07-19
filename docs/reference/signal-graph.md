@@ -51,9 +51,24 @@ Four connection variants cover the non-audio-passthrough cases:
 
 - `connect_midi(from, to)` routes `MidiBuffer` events between node-scoped
   MIDI in/out buffers (ports are ignored). Participates in cycle
-  detection the same way audio edges do. `inject_midi(node, buf)` loads
-  a `MidiInput`'s output before a block; `extract_midi(node, &out)`
-  reads the latest `MidiOutput` input snapshot after a block. MIDI edges
+  detection the same way audio edges do. `inject_midi(node, buf)` publishes
+  the latest block to a `MidiInput` before processing; one designated writer
+  may call it from a control producer or from the audio callback immediately
+  before `process()`. The publication is consumed once and follows a preserved
+  `MidiInput` node ID across a gap-free swap; its non-zero publication sequence
+  skips the zero sentinel after 64-bit wrap. A `false` return still publishes
+  the fixed-capacity prefix. `extract_midi(node, &out)` drains nonempty
+  `MidiOutput` blocks in process order from a fixed four-block SPSC queue;
+  routine empty blocks cannot overwrite pending output, and bounded overflow
+  retains the earliest blocks while making extraction return false. A false
+  return can also mean the destination lacks short-event, SysEx, or attached
+  UMP-sidecar capacity. Provide sufficient storage and call again: extraction
+  resumes at the undelivered suffix without replaying the delivered prefix.
+  Ingress-only MIDI graphs may swap gap-free; an edit whose candidate or
+  currently-live graph contains `MidiOutput` returns `NeedsEagerPrepare` while
+  keeping the old snapshot readable so pending egress can be drained before
+  ordinary `prepare()`. MIDI
+  edges
   preserve the full logical block: short MIDI events, SysEx sidecars, and an
   attached `UmpBuffer`. MPE is derived from those events rather than stored as a
   separate graph-owned sidecar, so route MIDI 1.0 MPE channel messages or MIDI
@@ -332,10 +347,12 @@ takes a risk with the live stream to push a swap through:
   an eager re-prepare only when the measured cost would actually risk an overload
   on the audio thread, not merely because the plugin is different.
 
-When any gate refuses, the transaction is abandoned, the live snapshot is
-dropped, and `prepare_swap` returns `NeedsEagerPrepare` so the host
-re-prepares with a brief silence — the safe fallback, never a partial or
-racy swap.
+When a gate refuses, the transaction is abandoned and `prepare_swap` returns
+`NeedsEagerPrepare` so the host re-prepares with a brief silence — the safe
+fallback, never a partial or racy swap. Ordinary refusals drop the live snapshot.
+The one deliberate exception is a candidate or live graph containing
+`MidiOutput`: its pending-egress refusal keeps the old snapshot readable so the
+control thread can drain `extract_midi()` before ordinary `prepare()` replaces it.
 
 The staging, policy, catalog, and swap-transaction calls all run on the
 control/UI thread, never the audio thread.

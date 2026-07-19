@@ -138,6 +138,16 @@ Patterns that are easy to get wrong:
    public surface free of CHOC types. Format with `choc::json::toString`
    on the way in and `choc::json::parse` on the way out if you need
    structured access.
+5. **Interrupt a WebSocket reader before releasing its socket.**
+   `WebSocketChannel::close()` uses `TcpStream::shutdown()` to wake blocking
+   reads. Destruction then joins the reader before closing the socket handle.
+   Preserve that order; closing the handle while the reader is inside
+   `receive()` races with descriptor invalidation.
+6. **Do not destroy a WebSocket channel from an inline callback.** With no
+   executor, callbacks run on the reader thread. They may call `close()`, but
+   must defer destruction until after the callback returns; otherwise the
+   destructor would attempt to join its own reader. Use an executor when the
+   callback needs to own channel lifetime.
 
 ## References
 

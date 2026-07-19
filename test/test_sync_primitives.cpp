@@ -303,13 +303,14 @@ TEST_CASE("SpscQueue reports capacity, empty state, and FIFO order",
     REQUIRE_FALSE(queue.empty());
     REQUIRE(queue.size_approx() == 2);
 
-    auto first = queue.try_pop();
+    int first = 0;
+    REQUIRE(queue.try_pop(first));
     auto second = queue.try_pop();
-    REQUIRE(first.has_value());
     REQUIRE(second.has_value());
-    REQUIRE(*first == 10);
+    REQUIRE(first == 10);
     REQUIRE(*second == 20);
     REQUIRE(queue.empty());
+    REQUIRE_FALSE(queue.try_pop(first));
 }
 
 TEST_CASE("SpscQueue rejects pushes when full and accepts after pop",

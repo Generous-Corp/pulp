@@ -598,6 +598,19 @@ inline constexpr std::array kCoreRuntimeRtSafetyContracts{
         "guard (deliberately not atomic<shared_ptr>), then walks ordered_runtime "
         "single-threaded; topology mutation happens off the callback."),
     detail::make_rt_safety_contract(
+        "SignalGraph",
+        "inject_midi",
+        RtSafetyClass::AudioCallbackSafeAfterPrepare,
+        true,
+        false,
+        false,
+        false,
+        true,
+        "exactly one writer per MidiInput node; audio-thread snapshot consumer",
+        "Publishes a latest-wins, one-shot fixed-capacity mailbox batch. A "
+        "preserved node ID shares the mailbox across a gap-free graph swap; "
+        "concurrent writers are unsupported."),
+    detail::make_rt_safety_contract(
         "Processor",
         "process",
         RtSafetyClass::AudioCallbackSafeAfterPrepare,

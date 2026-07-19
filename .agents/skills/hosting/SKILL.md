@@ -660,9 +660,23 @@ does not contain crashes in deeper plug-in code.
   pointer.
 - `SignalGraph::inject_midi()` and `extract_midi()` cross the
   control/audio-thread boundary through per-node mailboxes, not by mutating
-  audio-thread scratch directly. Keep mailbox snapshots and writer scratch
-  preallocated by `prepare()`; constructing a fresh MIDI snapshot in
-  `inject_midi()` reintroduces realtime-path allocation.
+  audio-thread scratch directly. After `prepare()`, injection is `noexcept`,
+  fixed-capacity, lock-free, and allocation-free, so it may run on the audio
+  callback immediately before `process()`. Each MidiInput has exactly one
+  writer — audio or control, never concurrent. A `false` return means the live
+  node is unavailable or the source was truncated; any retained prefix is
+  still published. Publications are latest-wins and one-shot, and sequence
+  wrap skips zero. A gap-free `prepare_swap()` shares the ingress mailbox and
+  consumed sequence for a stable MidiInput NodeId, preserving unconsumed MIDI
+  across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
+  fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
+  overflow retains the earliest blocks and makes extraction incomplete. When
+  the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
+  extraction returns false and retains the undelivered suffix. Provide storage
+  and call `extract_midi()` again; it resumes without replaying the delivered
+  prefix. When
+  `prepare_swap()` returns `NeedsEagerPrepare`, the old live snapshot remains
+  valid, so drain it with `extract_midi()` before eager `prepare()` replaces it.
 - `SignalGraph::inject_parameter_events()` uses a separate prepared per-node
   mailbox with one control-side writer. Publications are latest-wins and
   one-shot: the next successful serial, routed, parallel, or anticipation

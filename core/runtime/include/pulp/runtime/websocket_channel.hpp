@@ -44,6 +44,8 @@ namespace pulp::runtime {
 struct WebSocketOptions {
     /// Executor used to dispatch `on_message`, `on_closed`, `on_error`.
     /// When empty, callbacks run on the reader thread.
+    /// Do not destroy the channel from an inline callback; call `close()` and
+    /// defer destruction, or provide an executor that owns callback lifetime.
     MessageExecutor executor;
 
     /// Maximum inbound payload size (bytes). Frames larger than this
