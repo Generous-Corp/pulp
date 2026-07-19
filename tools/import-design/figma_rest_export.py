@@ -1276,6 +1276,76 @@ def _rest_transform(n):
     return None
 
 
+def _fmt_geom_num(v):
+    """Up-to-4-decimal formatting with trailing zeros trimmed — the same
+    stable-attr formatting the plugin lane's fmtGeomNum uses."""
+    r = round(v * 10000) / 10000
+    return str(int(r)) if r == int(r) else str(r)
+
+
+def _transform_matrix_attr(t):
+    """The full 2x3 affine as a stable attr string: "m00,m01,m02,m10,m11,m12"
+    (row-major, the wire order), numbers trimmed like the geometry attrs."""
+    return ",".join(_fmt_geom_num(v) for v in (*t[0], *t[1]))
+
+
+def _decode_rotation(t, node_name):
+    """A node's relativeTransform decoded into the rotation lowering — the
+    Python mirror of the plugin lane's decodeRelativeTransform
+    (extract-pure.ts), guards mirrored field-for-field from the .fig lane
+    (fig/scene.mjs::styleFor). Returns one of:
+
+      ("identity",)                    — translation-only, or an orthogonal
+        (90deg-multiple) rotation: the axis-aligned bounding-box placement
+        walk() already emitted is exact for those, and re-rotating was the
+        .fig lane's #6277 slider-fill regression. Tolerance: 0.5deg either
+        side of each 90deg multiple. A pure mirror also lands here — the
+        axis-aligned box occupies the right pixels, matching every lane's
+        shipped behavior.
+      ("rotate", deg, matrix_attr)     — a pure non-orthogonal rotation
+        (uniform unit scale, orthogonal columns, no mirroring); the caller
+        emits `rotate(<deg>deg)` — the spelling the shared codegen lowers to
+        setRotation — plus center-preserving placement.
+      ("skew", matrix_attr, message)   — skew, non-unit / non-uniform scale,
+        or mirror-plus-rotation. A single center rotate() would be WRONG:
+        the caller diagnoses (transform-skew-approximated), keeps the node
+        axis-aligned at its bounding box, and preserves the full matrix as
+        figma:transform_matrix instead of faking an angle.
+    """
+    if t is None:
+        return ("identity",)
+    (m00, m01, _m02), (m10, m11, _m12) = t
+    # Column lengths = the axis scale factors. A degenerate column renders
+    # zero-sized on that axis; there is nothing to rotate.
+    sx = math.hypot(m00, m10)
+    sy = math.hypot(m01, m11)
+    if sx < 1e-6 or sy < 1e-6:
+        return ("identity",)
+    deg = math.degrees(math.atan2(m10, m00))
+    mod90 = abs(deg) % 90
+    non_orthogonal = 0.5 < mod90 < 89.5
+    # A center rotate() is exact only for a similarity transform with unit
+    # scale and no mirror: orthogonal columns (normalized dot ~ 0), both
+    # scales ~ 1, positive determinant. Figma's matrices are unit-scale for
+    # ordinary layers (resize lands in width/height, not the matrix), so a
+    # deviation here means real skew / scale / mirror the design carries.
+    skewed = abs((m00 * m01 + m10 * m11) / (sx * sy)) > 1e-3
+    scaled = abs(sx - 1) > 1e-3 or abs(sy - 1) > 1e-3
+    mirrored = m00 * m11 - m01 * m10 < 0
+    if skewed or scaled or (mirrored and non_orthogonal):
+        parts = " + ".join(p for p, on in (("skew", skewed),
+                                           ("non-unit scale", scaled),
+                                           ("mirroring", mirrored)) if on)
+        return ("skew", _transform_matrix_attr(t),
+                f"\"{node_name}\": relativeTransform carries {parts}, which a "
+                "single center rotate() cannot represent. Rendered axis-aligned "
+                "at its bounding box; the full matrix is preserved as "
+                "figma:transform_matrix.")
+    if not non_orthogonal:
+        return ("identity",)
+    return ("rotate", deg, _transform_matrix_attr(t))
+
+
 def _mask_parent_space_transform(n, parent):
     """The transform that places a mask node's LOCAL geometry in its parent's
     border-box space — the space a CSS clip-path on a wrapper spanning the
@@ -1627,6 +1697,56 @@ def walk(n, parent, z, ctx, inside_widget=False):
     elif (ntype in ("FRAME", "GROUP") and n.get("children")
           and is_pure_vector_illustration(n)):
         out["type"] = "image"; out["asset_ref"] = n["id"]; ctx.asset_ids.append(n["id"]); captured = True
+
+    # Rotation (audit "Rotation / transform" row). The affine's rotation lowers
+    # to the CSS `rotate(<deg>deg)` the shared codegen already maps to
+    # setRotation — the same lowering the .fig lane ships
+    # (fig/scene.mjs::styleFor) and the plugin lane mirrors (extract.ts), with
+    # the guards mirrored field-for-field:
+    #   - only a node WE positioned absolutely (a flowing auto-layout child's
+    #     transform is layout output, not input — same gate as position and
+    #     constraints);
+    #   - only meaningfully non-orthogonal pure rotations (_decode_rotation);
+    #   - never an asset-captured node: the REST images render bakes the
+    #     rotation into the pixels and the emitted box is the rotated AABB, so
+    #     a second rotate() double-rotates (the .fig lane's VECTOR_LIKE
+    #     exclusion, extended to whole-frame illustration captures).
+    # A skewed / scaled / mirrored matrix is NOT a pure rotation: diagnose
+    # (transform-skew-approximated) and preserve the full matrix as
+    # figma:transform_matrix instead of faking an angle.
+    if (style.get("position") == "absolute" and "asset_ref" not in out
+            and not is_vector_like(ntype)):
+        decoded = _decode_rotation(_rest_transform(n), n.get("name", ""))
+        if decoded[0] == "rotate":
+            _, deg, matrix_attr = decoded
+            # Untransformed size: `size` rides with geometry=paths (always
+            # requested). extract_style used the rotated AABB — right for an
+            # axis-aligned box, wrong once we rotate — and without `size`
+            # there is no untransformed box to rotate, so the node keeps
+            # today's axis-aligned AABB placement.
+            sz = n.get("size")
+            cbb = n.get("absoluteBoundingBox"); pbb = parent.get("absoluteBoundingBox")
+            if (isinstance(sz, dict) and isinstance(sz.get("x"), (int, float))
+                    and isinstance(sz.get("y"), (int, float)) and cbb and pbb):
+                w, h = sz["x"], sz["y"]
+                # The rotated AABB's center IS the node's center, and the
+                # renderer pivots rotate() on the element center — so
+                # centering the unrotated box in the AABB reproduces Figma's
+                # rendering exactly.
+                style["width"] = w; style["height"] = h
+                style["left"] = cbb["x"] - pbb["x"] + (cbb["width"] - w) / 2
+                style["top"] = cbb["y"] - pbb["y"] + (cbb["height"] - h) / 2
+                style["transform"] = f"rotate({deg:.2f}deg)"
+                out["attributes"] = {**out.get("attributes", {}),
+                                     "figma:transform_matrix": matrix_attr}
+        elif decoded[0] == "skew":
+            _, matrix_attr, message = decoded
+            ctx.diagnostics.append({"severity": "warning",
+                                    "code": "transform-skew-approximated",
+                                    "kind": "unsupported_property",
+                                    "message": message, "path": n.get("id", "")})
+            out["attributes"] = {**out.get("attributes", {}),
+                                 "figma:transform_matrix": matrix_attr}
 
     style = {k: v for k, v in style.items() if v not in (None, "")}
     layout = {k: v for k, v in layout.items() if v is not None}

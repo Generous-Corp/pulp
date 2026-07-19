@@ -45,6 +45,7 @@ import {
   maskClipOutline,
   assessMaskFidelity,
   extractPrimitiveGeometryAttrs,
+  decodeRelativeTransform,
   extractBoundVariableBindings,
   utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
@@ -472,6 +473,66 @@ async function walk(
     } else {
       pushDiag(ctx, "info", "illustration-export-failed", "capture_partial",
         `Illustration frame ${node.name}: ${res.error}`);
+    }
+  }
+
+  // Rotation (audit "Rotation / transform" row). The affine's rotation lowers
+  // to the CSS `rotate(<deg>deg)` the shared codegen already maps to
+  // setRotation — the same lowering the .fig lane ships
+  // (fig/scene.mjs::styleFor), with its guards mirrored field-for-field:
+  //   - only a node WE positioned absolutely (a flowing auto-layout child's
+  //     transform is layout output, not input — same gate as position and
+  //     constraints above);
+  //   - only meaningfully non-orthogonal angles (decodeRelativeTransform):
+  //     a 90deg multiple keeps the box axis-aligned and the bounding-box
+  //     placement above is already exact for it — re-rotating was the .fig
+  //     lane's #6277 slider-fill regression;
+  //   - never a vector-like node: its exportAsync capture renders the
+  //     rotation INTO the pixels and absolute_bounds is the rotated AABB, so
+  //     a second rotate() double-rotates (the .fig lane's VECTOR_LIKE
+  //     exclusion). Widget-instance and illustration-frame exports returned
+  //     early above for the same reason. An image FILL asset is different —
+  //     the raw fill bytes are not a node render — so an image-filled box
+  //     still rotates.
+  // A skewed / scaled / mirrored matrix is NOT a pure rotation: diagnose
+  // (transform-skew-approximated) and preserve the full matrix as
+  // figma:transform_matrix instead of faking an angle.
+  if (ex.style.position === "absolute" && !isVectorLike) {
+    const decoded = decodeRelativeTransform(ex.relative_transform, node.name);
+    if (decoded.kind === "rotate" &&
+        "width" in node && typeof node.width === "number" &&
+        "height" in node && typeof node.height === "number") {
+      // Untransformed size: node.width/height. extractStyle used the rotated
+      // AABB — right for an axis-aligned box, wrong once we rotate.
+      const w = node.width;
+      const h = node.height;
+      const bb = "absoluteBoundingBox" in node ? node.absoluteBoundingBox : null;
+      ex.style.width = w;
+      ex.style.height = h;
+      if (bb) {
+        // The rotated AABB's center IS the node's center, and the renderer
+        // pivots rotate() on the element center — so centering the unrotated
+        // box in the AABB reproduces Figma's rendering exactly. style.left/
+        // top above are AABB-relative already; shift by the half-size delta.
+        ex.style.left = (ex.style.left as number) + (bb.width - w) / 2;
+        ex.style.top = (ex.style.top as number) + (bb.height - h) / 2;
+      } else {
+        // node.x/y fallback: the transform's translation column, which Figma
+        // pivots on the LOCAL origin. Solve left/top so the renderer's
+        // center pivot lands the box where the origin pivot did
+        // (fig/scene.mjs::styleFor formula): center = (x, y) + R(θ)·(w/2, h/2).
+        const rad = (decoded.deg * Math.PI) / 180;
+        const c = Math.cos(rad);
+        const s = Math.sin(rad);
+        ex.style.left = (ex.style.left as number) + c * (w / 2) - s * (h / 2) - w / 2;
+        ex.style.top = (ex.style.top as number) + s * (w / 2) + c * (h / 2) - h / 2;
+      }
+      ex.style.transform = `rotate(${decoded.deg.toFixed(2)}deg)`;
+      ex.attributes = { ...(ex.attributes ?? {}), "figma:transform_matrix": decoded.matrixAttr };
+    } else if (decoded.kind === "unrepresentable") {
+      const d = decoded.diagnostic;
+      pushDiag(ctx, d.severity, d.code, d.kind, d.message);
+      ex.attributes = { ...(ex.attributes ?? {}), "figma:transform_matrix": decoded.matrixAttr };
     }
   }
 

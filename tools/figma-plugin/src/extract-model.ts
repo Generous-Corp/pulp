@@ -178,6 +178,11 @@ export interface ExtractedStyle {
   line_height?: number;
   text_transform?: string;
   overflow?: string;
+  /// CSS transform, today always `rotate(<deg>deg)` — the spelling the shared
+  /// codegen lowers to setRotation (center pivot). Emitted by the walk when a
+  /// node's relativeTransform is a pure non-orthogonal rotation; placement is
+  /// re-anchored so the center pivot reproduces Figma's rendering.
+  transform?: string;
   position?: "absolute" | "relative" | "static";
   top?: number;
   left?: number;
