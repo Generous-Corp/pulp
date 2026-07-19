@@ -1795,6 +1795,118 @@ class PaintStackTest(unittest.TestCase):
         d = next(d for d in ctx.diagnostics if d["code"] == "image-opacity-dropped")
         self.assertEqual(d["kind"], "unsupported_property")
 
+class StrokesTest(unittest.TestCase):
+    """Strokes → Pulp's box-border contract, mirroring the plugin lane's
+    extract-pure.ts::extractStrokeStyle and the .fig lane in fig/scene.mjs:
+    per-side individualStrokeWeights, strokeDashes → dashed, multi-paint /
+    non-solid flatten diagnostics, and preserved figma:* provenance."""
+
+    RED = {"type": "SOLID", "visible": True,
+           "color": {"r": 1, "g": 0, "b": 0, "a": 1}}
+    BLUE = {"type": "SOLID", "visible": True,
+            "color": {"r": 0, "g": 0, "b": 1, "a": 1}}
+    GRAD = {"type": "GRADIENT_LINEAR", "visible": True}
+    BB = {"x": 0, "y": 0, "width": 100, "height": 100}
+
+    def test_uniform_stroke_keeps_the_shorthand(self):
+        s = frx.extract_style({"type": "RECTANGLE", "id": "0:2",
+                               "strokes": [self.RED], "strokeWeight": 2})
+        self.assertEqual(s["border"], "2px solid #ff0000")
+        self.assertEqual(s["border_width"], 2)
+        self.assertEqual(s["border_style"], "solid")
+        self.assertNotIn("border_top_width", s)
+
+    def test_individual_stroke_weights_lower_per_side(self):
+        # REST spells Figma's per-side weights as the individualStrokeWeights
+        # object; the four discrete widths — an explicit 0 side stays 0 —
+        # plus the single stroke color per painted side replace the shorthand.
+        s = frx.extract_style({"type": "RECTANGLE", "id": "0:2",
+                               "strokes": [self.RED], "strokeWeight": 4,
+                               "individualStrokeWeights":
+                                   {"top": 4, "right": 0, "bottom": 1, "left": 0}})
+        self.assertEqual(s["border_top_width"], 4)
+        self.assertEqual(s["border_right_width"], 0)
+        self.assertEqual(s["border_bottom_width"], 1)
+        self.assertEqual(s["border_left_width"], 0)
+        self.assertEqual(s["border_color"], "#ff0000")
+        self.assertEqual(s["border_style"], "solid")
+        self.assertEqual(s["border_top_color"], "#ff0000")
+        self.assertEqual(s["border_bottom_color"], "#ff0000")
+        self.assertNotIn("border_right_color", s)
+        self.assertNotIn("border", s)
+        self.assertNotIn("border_width", s)
+
+    def test_stroke_dashes_map_to_dashed_and_preserve_the_array(self):
+        s = frx.extract_style({"type": "RECTANGLE", "id": "0:2",
+                               "strokes": [self.RED], "strokeWeight": 2,
+                               "strokeDashes": [4, 2]})
+        self.assertEqual(s["border"], "2px dashed #ff0000")
+        self.assertEqual(s["border_style"], "dashed")
+        attrs = frx.extract_stroke_attributes(
+            {"strokes": [self.RED], "strokeDashes": [4, 2]})
+        self.assertEqual(attrs["figma:dash_pattern"], "4,2")
+
+    def test_multi_paint_and_non_solid_strokes_are_diagnosed(self):
+        ctx = frx.ExtractContext()
+        # Two solids: first wins; multi-paint-stroke says so.
+        s = frx.extract_style({"type": "RECTANGLE", "id": "0:2", "name": "Two",
+                               "strokes": [self.RED, self.BLUE],
+                               "strokeWeight": 1}, ctx)
+        self.assertEqual(s["border_color"], "#ff0000")
+        self.assertTrue(any(d["code"] == "multi-paint-stroke" and d["path"] == "0:2"
+                            for d in ctx.diagnostics))
+        # A gradient on top of a solid: flattened, diagnosed.
+        ctx2 = frx.ExtractContext()
+        s2 = frx.extract_style({"type": "RECTANGLE", "id": "0:3", "name": "GradTop",
+                                "strokes": [self.GRAD, self.RED],
+                                "strokeWeight": 1}, ctx2)
+        self.assertEqual(s2["border_color"], "#ff0000")
+        self.assertTrue(any(d["code"] == "complex-stroke-flattened"
+                            for d in ctx2.diagnostics))
+        # No solid anywhere: border dropped, diagnosed — never silently.
+        ctx3 = frx.ExtractContext()
+        s3 = frx.extract_style({"type": "RECTANGLE", "id": "0:4", "name": "GradOnly",
+                                "strokes": [self.GRAD], "strokeWeight": 1}, ctx3)
+        self.assertNotIn("border", s3)
+        diag = [d for d in ctx3.diagnostics if d["code"] == "complex-stroke-flattened"]
+        self.assertEqual(len(diag), 1)
+        self.assertEqual(diag[0]["kind"], "capture_partial")
+
+    def test_stroke_provenance_attrs_non_default_only(self):
+        fancy = frx.extract_stroke_attributes(
+            {"strokes": [self.RED], "strokeAlign": "OUTSIDE",
+             "strokeCap": "ROUND", "strokeJoin": "BEVEL",
+             # 22.6 degrees → miter limit 1/sin(11.3°) ≈ 5.1 (non-default).
+             "strokeMiterAngle": 22.6})
+        self.assertEqual(fancy["figma:stroke_align"], "outside")
+        self.assertEqual(fancy["figma:stroke_cap"], "round")
+        self.assertEqual(fancy["figma:stroke_join"], "bevel")
+        self.assertEqual(fancy["figma:stroke_miter_limit"], "5.1")
+        # Defaults — INSIDE / NONE / MITER / 28.96° (= limit 4.0) — and a
+        # node with no visible stroke preserve nothing.
+        dflt = frx.extract_stroke_attributes(
+            {"strokes": [self.RED], "strokeAlign": "INSIDE", "strokeCap": "NONE",
+             "strokeJoin": "MITER", "strokeMiterAngle": 28.96})
+        self.assertEqual(dflt, {})
+        self.assertEqual(frx.extract_stroke_attributes({"strokes": []}), {})
+
+    def test_walk_merges_stroke_attrs_and_diagnostics_into_the_envelope(self):
+        tree = {"type": "FRAME", "name": "Root", "id": "0:1",
+                "absoluteBoundingBox": self.BB,
+                "children": [
+                    {"type": "FRAME", "name": "Dashy", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 50, "height": 50},
+                     "strokes": [self.GRAD, self.RED], "strokeWeight": 2,
+                     "strokeDashes": [10, 5]},
+                ]}
+        ir, ctx = frx.node_tree_to_ir(tree)
+        child = ir["children"][0]
+        self.assertEqual(child["style"]["border"], "2px dashed #ff0000")
+        self.assertEqual(child["attributes"]["figma:dash_pattern"], "10,5")
+        codes = {d["code"] for d in ctx.diagnostics}
+        self.assertIn("multi-paint-stroke", codes)
+        self.assertIn("complex-stroke-flattened", codes)
+
 
 if __name__ == "__main__":
     unittest.main()

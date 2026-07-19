@@ -416,6 +416,32 @@ TEST_CASE("every per-side border color accepts non-hex CSS",
     check_color(root->border_left_color(), 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
+TEST_CASE("border_style dashed reaches View::BorderStyle in the native materializer",
+          "[view][import][native-common][strokes]") {
+    // A Figma dashPattern lowers at the producers to border_style "dashed";
+    // without the native application the JS-bridge lane dashed the border
+    // while the live-native materializer painted it solid.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.stable_anchor_id = "panel";
+    ir.root.style.width = 100.0f;
+    ir.root.style.height = 40.0f;
+    ir.root.style.border_color = "#89b4fa";
+    ir.root.style.border_width = 2.0f;
+    ir.root.style.border_style = "dashed";
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    CHECK(root->border_style() == View::BorderStyle::dashed);
+
+    // Solid (and any keyword View degrades to solid) keeps the default.
+    DesignIR solid = ir;
+    solid.root.style.border_style = "solid";
+    auto solid_root = build_native_view_tree(solid, {}, {});
+    REQUIRE(solid_root != nullptr);
+    CHECK(solid_root->border_style() == View::BorderStyle::solid);
+}
+
 TEST_CASE("an unparseable CSS color leaves the paint site untouched",
           "[view][import][native-common][css-color]") {
     // A color the helper recognizes neither as hex nor as a functional syntax

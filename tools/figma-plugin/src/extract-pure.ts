@@ -13,8 +13,8 @@
 // provider abstractions (`NodeProvider`, `AssetProvider`, etc.) have to thread
 // through.
 
-import type { ExtractedFigmaNode, ExtractedLayout } from "./extract-model";
-import type { AudioWidgetKind } from "./extract-model";
+import type { ExtractedFigmaNode, ExtractedLayout, ExtractedStyle } from "./extract-model";
+import type { AudioWidgetKind, ExtractedDiagnostic } from "./extract-model";
 import type { FontFamilyAsset } from "./extract";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -576,6 +576,132 @@ export function extractConstraints(
   if (typeof c.horizontal === "string") out.horizontal = c.horizontal;
   if (typeof c.vertical === "string") out.vertical = c.vertical;
   return out.horizontal || out.vertical ? out : undefined;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Strokes → box-border style + preserved provenance + diagnostics.
+
+/// One extracted stroke: the style fields to merge into ExtractedStyle, the
+/// namespaced figma:* attributes to merge into node attributes, and the
+/// diagnostics the caller pushes (extract-pure stays host-neutral, so it
+/// returns them instead of reaching for a WalkCtx).
+export interface ExtractedStroke {
+  style: Partial<ExtractedStyle>;
+  attributes?: Record<string, string>;
+  diagnostics: Array<Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message">>;
+}
+
+// The node's strokes lowered to Pulp's box-border contract.
+//
+//   - Uniform weight → the existing `border` shorthand + discrete fields.
+//   - Per-side weights (IndividualStrokesMixin: strokeTopWeight …, active when
+//     the four sides differ) → border_{top,right,bottom,left}_width with the
+//     single Figma stroke color repeated on each painted side; no shorthand,
+//     and an explicit 0 side stays 0 (it paints nothing).
+//   - A non-empty dashPattern → border_style "dashed" (a box border cannot
+//     express the exact array; it is preserved as figma:dash_pattern).
+//   - Multiple visible paints / a non-solid top paint flatten to the FIRST
+//     SOLID paint with a multi-paint-stroke / complex-stroke-flattened
+//     diagnostic — never silently.
+//   - strokeAlign (CENTER/OUTSIDE — INSIDE is how a box border already
+//     paints), strokeCap, strokeJoin, strokeMiterLimit are preserved as
+//     namespaced attributes for path renderers / fidelity tooling; the
+//     faithful-SVG capture path bakes them into geometry, so nothing consumes
+//     them for box borders (documented in compat/imports.json).
+//
+// Returns undefined when the node has no visible stroke to state.
+export function extractStrokeStyle(n: SceneNode): ExtractedStroke | undefined {
+  if (!("strokes" in n) || !Array.isArray(n.strokes) || n.strokes.length === 0) return undefined;
+  const visible = (n.strokes as readonly Paint[]).filter((p) => p.visible !== false);
+  if (visible.length === 0) return undefined;
+
+  const out: ExtractedStroke = { style: {}, diagnostics: [] };
+  const diag = (code: string, message: string) => {
+    out.diagnostics.push({ severity: "warning", code, kind: "capture_partial", message });
+  };
+
+  // Provenance attributes ride even when the border itself is dropped — the
+  // loss report and the preserved data belong together.
+  const attrs: Record<string, string> = {};
+  const dashes =
+    "dashPattern" in n && Array.isArray(n.dashPattern)
+      ? (n.dashPattern as readonly number[]).filter((v) => typeof v === "number" && v > 0)
+      : [];
+  if (dashes.length) attrs["figma:dash_pattern"] = dashes.join(",");
+  const align = "strokeAlign" in n ? (n as MinimalStrokesMixin).strokeAlign : undefined;
+  if (align === "CENTER" || align === "OUTSIDE") attrs["figma:stroke_align"] = align.toLowerCase();
+  const cap = "strokeCap" in n ? (n as SceneNode & { strokeCap?: unknown }).strokeCap : undefined;
+  if (typeof cap === "string" && cap !== "NONE") attrs["figma:stroke_cap"] = cap.toLowerCase();
+  const join = "strokeJoin" in n ? (n as SceneNode & { strokeJoin?: unknown }).strokeJoin : undefined;
+  if (typeof join === "string" && join !== "MITER") attrs["figma:stroke_join"] = join.toLowerCase();
+  const miter =
+    "strokeMiterLimit" in n ? (n as SceneNode & { strokeMiterLimit?: unknown }).strokeMiterLimit : undefined;
+  if (typeof miter === "number" && Math.abs(miter - 4) > 1e-6) {
+    attrs["figma:stroke_miter_limit"] = String(Math.round(miter * 100) / 100);
+  }
+  if (Object.keys(attrs).length > 0) out.attributes = attrs;
+
+  const firstSolid = visible.find((p) => p.type === "SOLID") as SolidPaint | undefined;
+  if (visible.length > 1) {
+    diag("multi-paint-stroke",
+      `"${n.name}": ${visible.length} visible stroke paints; a box border carries one — flattened to the first solid.`);
+  }
+  if (!firstSolid) {
+    diag("complex-stroke-flattened",
+      `"${n.name}": ${visible[0].type} stroke has no solid paint to flatten to; the stroke is dropped.`);
+    return out;
+  }
+  if (visible[0] !== firstSolid) {
+    diag("complex-stroke-flattened",
+      `"${n.name}": ${visible[0].type} top stroke paint is not expressible as a box border; flattened to the first solid.`);
+  }
+
+  const color = paintToColor(firstSolid);
+  const styleWord = dashes.length ? "dashed" : "solid";
+  const sides =
+    "strokeTopWeight" in n &&
+    typeof (n as IndividualStrokesMixin).strokeTopWeight === "number" &&
+    typeof (n as IndividualStrokesMixin).strokeRightWeight === "number" &&
+    typeof (n as IndividualStrokesMixin).strokeBottomWeight === "number" &&
+    typeof (n as IndividualStrokesMixin).strokeLeftWeight === "number"
+      ? {
+          top: (n as IndividualStrokesMixin).strokeTopWeight,
+          right: (n as IndividualStrokesMixin).strokeRightWeight,
+          bottom: (n as IndividualStrokesMixin).strokeBottomWeight,
+          left: (n as IndividualStrokesMixin).strokeLeftWeight,
+        }
+      : undefined;
+  const perSide =
+    sides !== undefined &&
+    !(sides.top === sides.right && sides.right === sides.bottom && sides.bottom === sides.left);
+  if (perSide) {
+    out.style.border_color = color;
+    out.style.border_style = styleWord;
+    out.style.border_top_width = sides.top;
+    out.style.border_right_width = sides.right;
+    out.style.border_bottom_width = sides.bottom;
+    out.style.border_left_width = sides.left;
+    if (sides.top > 0) out.style.border_top_color = color;
+    if (sides.right > 0) out.style.border_right_color = color;
+    if (sides.bottom > 0) out.style.border_bottom_color = color;
+    if (sides.left > 0) out.style.border_left_color = color;
+  } else {
+    // Uniform: the four equal side weights are the weight when present
+    // (strokeWeight reads figma.mixed exactly when they differ); otherwise
+    // strokeWeight itself.
+    const weight = sides
+      ? sides.top
+      : "strokeWeight" in n && typeof n.strokeWeight === "number"
+        ? n.strokeWeight
+        : 1;
+    if (weight > 0) {
+      out.style.border = `${weight}px ${styleWord} ${color}`;
+      out.style.border_color = color;
+      out.style.border_width = weight;
+      out.style.border_style = styleWord;
+    }
+  }
+  return out;
 }
 
 // Variable bindings (`node.boundVariables`) resolved to canonical token names.

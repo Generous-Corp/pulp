@@ -1603,6 +1603,73 @@ this subsystem's signature bug (see the `width_mode` comment in
   fig.test.mjs auto-layout completion block, `figma-plugin/test/layout.test.ts`,
   REST `AutoLayoutTest`.
 
+### Strokes beyond the first uniform solid (per-side, dashed, provenance, multi-paint)
+
+The audit's "Strokes" row (checklist #8). All three producers now lower the
+full box-stroke model; the earlier shorthand/stroke-band/per-corner fixes are
+untouched (the `vectorStrokeBand` gate in `fig/scene.mjs` still suppresses the
+CSS border on baked stroke-band vectors — do not regress it).
+
+- **Per-side box strokes** (Figma `individualStrokeWeights`): emitted as the
+  discrete `border_{top,right,bottom,left}_width` fields — ALL FOUR, because
+  an explicit 0 is a positive "no edge here" — plus the single Figma stroke
+  color repeated as `border_{side}_color` on each painted side; the uniform
+  `border`/`border_width` shorthand is omitted in that case. Producer
+  spellings (verified against each wire, never guess):
+  - `.fig` kiwi: `borderStrokeWeightsIndependent` (bool) +
+    `border{Top,Right,Bottom,Left}Weight` (absent side = 0). The fields are in
+    `SYMBOL_INHERITED_KEYS` so instances inherit them from masters.
+  - plugin: `strokeTopWeight`/`strokeRightWeight`/`strokeBottomWeight`/
+    `strokeLeftWeight` (`IndividualStrokesMixin`; `strokeWeight` reads
+    `figma.mixed` exactly when they differ — four EQUAL side weights stay on
+    the uniform path). Logic in `extract-pure.ts::extractStrokeStyle` (pure,
+    testable); `extract.ts` merges style + attributes + diagnostics.
+  - REST: the `individualStrokeWeights` object `{top, right, bottom, left}`
+    (`figma_rest_export.py::extract_stroke_style`).
+  Consumers: `parse_ir_style` reads all eight fields (both spellings), Yoga
+  takes per-edge insets, the native materializer applies per-side View
+  setters, and the JS codegen lowers painted sides to `setBorderSide` (0-width
+  sides emit nothing; the uniform `setBorder` never fires beside them) —
+  `design_codegen.cpp::emit_js_box_border`, shared by the container and
+  generic-frame fall-through branches.
+- **Dash pattern**: a non-empty `dashPattern` (.fig kiwi + plugin) /
+  `strokeDashes` (REST) maps to `border_style: "dashed"` — a box border
+  cannot express an arbitrary dash array, so this is the honest CSS
+  approximation (View's dashed stroke is a fixed 3w/3w SkDashPathEffect) and
+  the EXACT array is preserved as the `figma:dash_pattern` attribute.
+  Codegen emits `setBorderStyle(id, 'dashed')` beside the border (solid stays
+  silent); the native materializer maps `border_style` onto
+  `View::BorderStyle` (dashed/dotted/none/hidden — others degrade to solid).
+- **Preserved stroke provenance** (namespaced `figma:*` attributes, emitted
+  only on nodes with a visible stroke and only for NON-DEFAULT values):
+  `figma:stroke_align` (CENTER/OUTSIDE only — INSIDE is how a CSS box border
+  already paints), `figma:stroke_cap` (≠ NONE), `figma:stroke_join` (≠ MITER),
+  `figma:stroke_miter_limit` (≠ 4; REST's `strokeMiterAngle` in degrees is
+  normalized to the limit: `1/sin(angle/2)`, 28.96° = 4.0). No renderer
+  consumes these yet — Figma's own SVG/strokeGeometry export bakes caps/joins/
+  dashes into geometry, so they are provenance for a future path renderer and
+  for fidelity tooling. Do NOT emit them as lowered styles.
+- **Multi-paint / complex strokes are never silent**: >1 visible stroke paint
+  → `multi-paint-stroke` diagnostic (flattened to the FIRST SOLID); a
+  non-solid top paint, no solid paint at all (border dropped), or a `.fig`
+  variable-width brush stroke (`dynamicStrokeSettings`/`scatterStrokeSettings`/
+  `stretchStrokeSettings`) → `complex-stroke-flattened`. Both codes are
+  registered in `DIAGNOSTIC_SEVERITY` (fig lane), emitted with kind
+  `capture_partial` (plugin/REST), and mapped in the C++
+  `diagnostic_kind_from_code` fallback. Note the behavior CHANGE from the old
+  first-visible-solid gate: a gradient stroke sitting ON TOP of a solid now
+  flattens to that solid (with a diagnostic) instead of silently dropping the
+  border.
+- Real-file sanity (designers-pick frame 1:486, 1299 nodes): 0 per-side /
+  0 dashed nodes (the file's one `dashPattern` frame sits outside 1:486),
+  36 `figma:stroke_align` + 1 cap + 1 join attrs, 20 `complex-stroke-flattened`
+  on gradient-stroked ovals the old code dropped silently; envelope otherwise
+  byte-identical, `--dump-layout` byte-identical (strokes in this frame are
+  paint-only — per-side widths WOULD move Yoga insets on files that use them).
+  Tests: `[view][import]...[strokes]`, fig.test.mjs strokes block,
+  `figma-plugin/test/strokes.test.ts` (+ serialize schema round-trip), REST
+  `StrokesTest`.
+
 ### Figma variables → tokens + per-property bindings
 
 Two halves, both preserved end to end (audit item 5):

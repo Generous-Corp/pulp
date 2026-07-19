@@ -2380,3 +2380,143 @@ test('mixed text style runs lower to ordered UTF-8 byte-offset runs', () => {
   assert.ok(!('runs' in plain), 'no runs array for single-style text');
   assert.ok(!('attributes' in plain), 'no preserved attrs without overrides');
 });
+
+test('per-side stroke weights land as border_*_width; uniform strokes keep the shorthand', () => {
+  // Kiwi spells Figma's individualStrokeWeights as
+  // borderStrokeWeightsIndependent + border{Top,Right,Bottom,Left}Weight (an
+  // absent side is 0). The four discrete widths — including the explicit 0
+  // sides — plus the single stroke color per painted side replace the
+  // `border` shorthand; parse_ir_style reads all eight fields.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Sided',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 4, borderStrokeWeightsIndependent: true,
+      borderTopWeight: 4, borderBottomWeight: 1,
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0, a: 1 } }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Uniform',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      strokeWeight: 2,
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0, a: 1 } }] },
+  ]});
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const sided = findByName(envelope.root, 'Sided');
+  assert.equal(sided.style.border_top_width, 4);
+  assert.equal(sided.style.border_right_width, 0, 'absent kiwi side is an explicit 0');
+  assert.equal(sided.style.border_bottom_width, 1);
+  assert.equal(sided.style.border_left_width, 0);
+  assert.equal(sided.style.border_color, '#ff0000');
+  assert.equal(sided.style.border_style, 'solid');
+  assert.equal(sided.style.border_top_color, '#ff0000');
+  assert.equal(sided.style.border_bottom_color, '#ff0000');
+  assert.ok(!('border_right_color' in sided.style), 'no color on an unpainted side');
+  assert.ok(!('border' in sided.style), 'per-side widths replace the shorthand');
+  const uniform = findByName(envelope.root, 'Uniform');
+  assert.equal(uniform.style.border, '2px solid #ff0000');
+  assert.ok(!('border_top_width' in uniform.style), 'uniform stays on the shorthand path');
+  assert.equal(diagnostics.filter((d) => d.code === 'multi-paint-stroke').length, 0);
+});
+
+test('a dashPattern lowers to a dashed border and preserves the exact array', () => {
+  // CSS cannot express an arbitrary dash array on a box border: non-empty →
+  // border_style "dashed" (the honest approximation) with the exact array
+  // preserved as figma:dash_pattern for path renderers.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Dashy',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 2, dashPattern: [4, 2],
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 0, g: 1, b: 0, a: 1 } }] },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const dashy = findByName(envelope.root, 'Dashy');
+  assert.equal(dashy.style.border, '2px dashed #00ff00');
+  assert.equal(dashy.attributes['figma:dash_pattern'], '4,2');
+});
+
+test('multi-paint and non-solid strokes flatten to the first solid WITH a diagnostic', () => {
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    // Two visible solids: first wins, multi-paint-stroke says so.
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'TwoSolids',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 1,
+      strokePaints: [
+        { type: 'SOLID', visible: true, color: { r: 1, g: 0, b: 0, a: 1 } },
+        { type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 1, a: 1 } },
+      ] },
+    // A gradient on top of a solid: flattened to the solid, diagnosed.
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'GradTop',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      strokeWeight: 1,
+      strokePaints: [
+        { type: 'GRADIENT_LINEAR', visible: true },
+        { type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 0, a: 1 } },
+      ] },
+    // A gradient with NO solid anywhere: border dropped, diagnosed — the old
+    // code dropped it in silence.
+    { guid: { sessionID: 0, localID: 5 }, type: 'FRAME', name: 'GradOnly',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' }, size: { x: 50, y: 50 },
+      strokeWeight: 1,
+      strokePaints: [{ type: 'GRADIENT_LINEAR', visible: true }] },
+  ]});
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const two = findByName(envelope.root, 'TwoSolids');
+  assert.equal(two.style.border, '1px solid #ff0000', 'first solid wins');
+  assert.ok(diagnostics.some((d) => d.code === 'multi-paint-stroke' && d.node_id === '0:3'));
+  const gradTop = findByName(envelope.root, 'GradTop');
+  assert.equal(gradTop.style.border, '1px solid #000000');
+  assert.ok(diagnostics.some((d) => d.code === 'complex-stroke-flattened' && d.node_id === '0:4'));
+  const gradOnly = findByName(envelope.root, 'GradOnly');
+  assert.ok(!('border' in gradOnly.style), 'no solid paint, no border');
+  assert.ok(diagnostics.some((d) => d.code === 'complex-stroke-flattened' && d.node_id === '0:5'));
+});
+
+test('variable-width brush strokes are diagnosed, never silently uniform', () => {
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Brushy',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 2, dynamicStrokeSettings: { some: 'settings' },
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 0, a: 1 } }] },
+  ]});
+  const { diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  assert.ok(diagnostics.some((d) => d.code === 'complex-stroke-flattened'
+    && /variable-width/.test(d.detail)));
+});
+
+test('stroke provenance rides as figma:* attributes, non-default values only', () => {
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    // OUTSIDE alignment + round caps/joins + a raised miter limit: all four
+    // preserved. INSIDE / NONE / MITER / 4.0 defaults stay silent (Defaulty).
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Fancy',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' }, size: { x: 50, y: 50 },
+      strokeWeight: 1, strokeAlign: 'OUTSIDE', strokeCap: 'ROUND',
+      strokeJoin: 'BEVEL', miterLimit: 10,
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 0, a: 1 } }] },
+    { guid: { sessionID: 0, localID: 4 }, type: 'FRAME', name: 'Defaulty',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' }, size: { x: 50, y: 50 },
+      strokeWeight: 1, strokeAlign: 'INSIDE', strokeCap: 'NONE',
+      strokeJoin: 'MITER', miterLimit: 4,
+      strokePaints: [{ type: 'SOLID', visible: true, color: { r: 0, g: 0, b: 0, a: 1 } }] },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  const fancy = findByName(envelope.root, 'Fancy');
+  assert.equal(fancy.attributes['figma:stroke_align'], 'outside');
+  assert.equal(fancy.attributes['figma:stroke_cap'], 'round');
+  assert.equal(fancy.attributes['figma:stroke_join'], 'bevel');
+  assert.equal(fancy.attributes['figma:stroke_miter_limit'], '10');
+  const defaulty = findByName(envelope.root, 'Defaulty');
+  assert.ok(!('attributes' in defaulty), 'defaults preserve nothing');
+});

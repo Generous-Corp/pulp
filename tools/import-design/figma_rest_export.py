@@ -37,7 +37,7 @@ Usage:
   # or extract KEY/NODE from a URL:
   figma_rest_export.py --url 'https://figma.com/design/<KEY>/...?node-id=3-42' --out scene.pulp.json
 """
-import argparse, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, json, math, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 # ── Rate-limit-aware HTTP ────────────────────────────────────────────────────
 # Figma's REST API throttles with a leaky-bucket and returns HTTP 429 with a
@@ -390,6 +390,111 @@ def scale_mode_to_background_size(scale_mode):
     if scale_mode == "CROP":         return "cover", None, False
     return None, None, False
 
+def _stroke_diag(ctx, n, code, message):
+    # Style-level stroke diagnostics ride the envelope like dispatch ones do.
+    # ctx is None only on direct extract_style() unit-test calls.
+    if ctx is not None:
+        ctx.diagnostics.append({
+            "severity": "warning", "code": code, "kind": "capture_partial",
+            "message": f"\"{n.get('name', '')}\": {message}", "path": n.get("id", ""),
+        })
+
+def extract_stroke_style(n, s, ctx=None):
+    """Strokes -> Pulp's box-border contract (mirrors the plugin lane's
+    extract-pure.ts::extractStrokeStyle).
+
+    - Uniform weight -> `border` shorthand + discrete fields.
+    - `individualStrokeWeights` (REST's per-side object, present when the four
+      sides differ) -> border_{top,right,bottom,left}_width with the single
+      stroke color repeated on each painted side; no shorthand, and an
+      explicit 0 side stays 0.
+    - Non-empty `strokeDashes` -> border_style "dashed" (the exact array is
+      preserved as figma:dash_pattern in extract_stroke_attributes).
+    - Multiple visible paints / a non-solid top paint flatten to the FIRST
+      SOLID with a multi-paint-stroke / complex-stroke-flattened diagnostic,
+      never silently."""
+    strokes = n.get("strokes")
+    if not (isinstance(strokes, list) and strokes):
+        return
+    visible = [p for p in strokes if p.get("visible", True) is not False]
+    if not visible:
+        return
+    first_solid = next((p for p in visible if p.get("type") == "SOLID"), None)
+    if len(visible) > 1:
+        _stroke_diag(ctx, n, "multi-paint-stroke",
+                     f"{len(visible)} visible stroke paints; a box border carries one — "
+                     "flattened to the first solid")
+    if first_solid is None:
+        _stroke_diag(ctx, n, "complex-stroke-flattened",
+                     f"{visible[0].get('type')} stroke has no solid paint to flatten to; "
+                     "the stroke is dropped")
+        return
+    if visible[0] is not first_solid:
+        _stroke_diag(ctx, n, "complex-stroke-flattened",
+                     f"{visible[0].get('type')} top stroke paint is not expressible as a "
+                     "box border; flattened to the first solid")
+    color = paint_to_color(first_solid)
+    dashes = [d for d in (n.get("strokeDashes") or [])
+              if isinstance(d, (int, float)) and d > 0]
+    style_word = "dashed" if dashes else "solid"
+    isw = n.get("individualStrokeWeights")
+    if isinstance(isw, dict):
+        def side(name):
+            v = isw.get(name)
+            return v if isinstance(v, (int, float)) and v > 0 else 0
+        s["border_color"] = color
+        s["border_style"] = style_word
+        s["border_top_width"] = side("top")
+        s["border_right_width"] = side("right")
+        s["border_bottom_width"] = side("bottom")
+        s["border_left_width"] = side("left")
+        for name in ("top", "right", "bottom", "left"):
+            if side(name) > 0:
+                s[f"border_{name}_color"] = color
+    else:
+        weight = n.get("strokeWeight", 1)
+        s["border"] = f"{weight}px {style_word} {color}"
+        s["border_color"] = color; s["border_width"] = weight; s["border_style"] = style_word
+
+def extract_stroke_attributes(n):
+    """Namespaced figma:* stroke provenance the box-border contract cannot
+    carry: the exact dash array, non-default alignment, and the path-stroke
+    trio (cap/join/miter). No renderer consumes these yet — Figma's own SVG
+    export bakes them into geometry — so they are preserved for path renderers
+    and fidelity tooling (tracked in compat/imports.json). Non-default values
+    only; REST's strokeMiterAngle (degrees) is normalized to the miter LIMIT
+    the plugin/.fig lanes carry (limit = 1/sin(angle/2), 28.96 deg = 4.0)."""
+    strokes = n.get("strokes")
+    if not (isinstance(strokes, list)
+            and any(p.get("visible", True) is not False for p in strokes)):
+        return {}
+    attrs = {}
+    dashes = [d for d in (n.get("strokeDashes") or [])
+              if isinstance(d, (int, float)) and d > 0]
+    if dashes:
+        attrs["figma:dash_pattern"] = ",".join(_fmt_num(d) for d in dashes)
+    align = n.get("strokeAlign")
+    if align in ("CENTER", "OUTSIDE"):
+        attrs["figma:stroke_align"] = align.lower()
+    cap = n.get("strokeCap")
+    if isinstance(cap, str) and cap != "NONE":
+        attrs["figma:stroke_cap"] = cap.lower()
+    join = n.get("strokeJoin")
+    if isinstance(join, str) and join != "MITER":
+        attrs["figma:stroke_join"] = join.lower()
+    angle = n.get("strokeMiterAngle")
+    if isinstance(angle, (int, float)) and 0 < angle < 180:
+        limit = 1.0 / math.sin(math.radians(angle) / 2.0)
+        if abs(limit - 4.0) > 0.01:
+            attrs["figma:stroke_miter_limit"] = _fmt_num(round(limit, 2))
+    return attrs
+
+def _fmt_num(v):
+    """Render 4.0 as \"4\" and 2.5 as \"2.5\" — the attr strings stay stable
+    across int/float wire types."""
+    f = float(v)
+    return str(int(f)) if f == int(f) else str(f)
+
 def extract_style(n, ctx=None):
     s = {}
     bb = n.get("absoluteBoundingBox")
@@ -497,14 +602,7 @@ def extract_style(n, ctx=None):
                                         "(node has children); image renders opaque.")})
                     else:
                         image_fill_opacity = float(img_op)
-    strokes = n.get("strokes")
-    if isinstance(strokes, list) and strokes:
-        f = first_visible(strokes)
-        if f and f.get("type") == "SOLID":
-            color = paint_to_color(f)
-            weight = n.get("strokeWeight", 1)
-            s["border"] = f"{weight}px solid {color}"
-            s["border_color"] = color; s["border_width"] = weight; s["border_style"] = "solid"
+    extract_stroke_style(n, s, ctx)
     if isinstance(n.get("cornerRadius"), (int, float)):
         s["border_radius"] = n["cornerRadius"]
     # Per-corner radii: Figma's REST API returns `rectangleCornerRadii` as
@@ -1131,6 +1229,13 @@ def walk(n, parent, z, ctx, inside_widget=False):
         attrs = extract_text_attributes(n)
         if attrs:
             out["attributes"] = attrs
+
+    # Preserved figma:* stroke provenance (dash array, alignment, cap/join/
+    # miter) — any node type can carry a stroke, so this merges outside the
+    # text branch.
+    stroke_attrs = extract_stroke_attributes(n)
+    if stroke_attrs:
+        out["attributes"] = {**out.get("attributes", {}), **stroke_attrs}
 
     # A widget's own content is the designer's art — never name-guess it into a
     # built-in widget (which paints Pulp's stock silver knob over the design).

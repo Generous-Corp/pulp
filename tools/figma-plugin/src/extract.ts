@@ -41,6 +41,7 @@ import {
   isPureVectorIllustration,
   collectFontFamilyAssets,
   extractConstraints,
+  extractStrokeStyle,
   extractBoundVariableBindings,
   utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
@@ -241,6 +242,17 @@ async function walk(
     layout: extractLayout(node, parent),
     children: [],
   };
+
+  // Strokes → box border (uniform or per-side), preserved figma:* stroke
+  // provenance, and the multi-paint / complex-stroke diagnostics. Lives
+  // outside extractStyle because the result spans style + attributes +
+  // diagnostics.
+  const stroke = extractStrokeStyle(node);
+  if (stroke) {
+    Object.assign(ex.style, stroke.style);
+    if (stroke.attributes) ex.attributes = { ...(ex.attributes ?? {}), ...stroke.attributes };
+    for (const d of stroke.diagnostics) pushDiag(ctx, d.severity, d.code, d.kind, d.message);
+  }
 
   // Min/max sizing — style-level clamps parse_ir_style reads and the flex
   // engines lower to min/max width/height. Figma already honored them while
@@ -630,19 +642,9 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
     }
   }
 
-  // Strokes (border)
-  if ("strokes" in n && Array.isArray(n.strokes) && n.strokes.length > 0) {
-    const strokes = n.strokes as readonly Paint[];
-    const first = strokes.find((p) => p.visible !== false);
-    if (first && first.type === "SOLID") {
-      const color = paintToColor(first as SolidPaint);
-      const weight = "strokeWeight" in n && typeof n.strokeWeight === "number" ? n.strokeWeight : 1;
-      s.border = `${weight}px solid ${color}`;
-      s.border_color = color;
-      s.border_width = weight;
-      s.border_style = "solid";
-    }
-  }
+  // Strokes (border) are extracted by extractStrokeStyle (extract-pure.ts) at
+  // the walk level — the per-side / dashed / multi-paint handling also emits
+  // node attributes and diagnostics, which a style-only extractor cannot carry.
 
   // Corner radius
   if ("cornerRadius" in n && typeof n.cornerRadius === "number") {
