@@ -9,6 +9,9 @@ add_library(pulp-timeline
     src/transaction.cpp
     src/undo.cpp
     src/schema_json.cpp
+    src/schema_json_canonical.cpp
+    src/schema_json_parser.cpp
+    src/schema_json_preflight.cpp
     src/schema_registry.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp

@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "project_state_access.hpp"
+#include "schema_json_write_internal.hpp"
 #include "serialize_internal.hpp"
 
 #include <algorithm>
@@ -42,51 +43,8 @@ class JsonWriter {
     }
 
     bool quoted(std::string_view value) {
-        constexpr char digits[] = "0123456789abcdef";
-        if (!character('"'))
-            return false;
-        for (const auto raw : value) {
-            const auto byte = static_cast<unsigned char>(raw);
-            switch (raw) {
-            case '"':
-                if (!append("\\\""))
-                    return false;
-                break;
-            case '\\':
-                if (!append("\\\\"))
-                    return false;
-                break;
-            case '\b':
-                if (!append("\\b"))
-                    return false;
-                break;
-            case '\f':
-                if (!append("\\f"))
-                    return false;
-                break;
-            case '\n':
-                if (!append("\\n"))
-                    return false;
-                break;
-            case '\r':
-                if (!append("\\r"))
-                    return false;
-                break;
-            case '\t':
-                if (!append("\\t"))
-                    return false;
-                break;
-            default:
-                if (byte < 0x20) {
-                    char escaped[] = {'\\', 'u', '0', '0', digits[byte >> 4], digits[byte & 0x0f]};
-                    if (!append(std::string_view(escaped, sizeof(escaped))))
-                        return false;
-                } else if (!character(raw)) {
-                    return false;
-                }
-            }
-        }
-        return character('"');
+        return detail::append_quoted_json_string(
+            value, [this](std::string_view text) { return append(text); });
     }
 
     bool u64(std::uint64_t value, bool quoted_value = false) {

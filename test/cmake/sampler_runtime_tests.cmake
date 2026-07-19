@@ -58,6 +58,9 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
