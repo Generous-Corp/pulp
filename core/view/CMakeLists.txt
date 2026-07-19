@@ -450,6 +450,7 @@ target_sources(pulp-view-core PRIVATE
     src/canvas_widget.cpp
     src/native_view_host.cpp
     src/design_frame_view.cpp
+    src/design_param_binding.cpp
     src/svg_fragment.cpp
     src/callout_box.cpp
     src/reorder_list.cpp

@@ -1,5 +1,7 @@
 #include <pulp/view/design_frame_view.hpp>
 
+#include <pulp/view/design_param_binding.hpp>
+
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 #include <pulp/view/host_param_surface.hpp>
@@ -14,7 +16,6 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -30,12 +31,6 @@ std::unordered_map<std::string, DesignControlFactory>& design_control_registry()
     return registry;
 }
 
-// Where a bind-grid stand-in parks (SVG coordinates). Far outside any plausible
-// panel, so a stand-in carries no on-screen geometry even if a future painter
-// grows a fallback for a needle-less element. Not a hit-test guard on its own —
-// a stand-in is also disabled and has a zero hit radius; this is belt-and-braces
-// on the geometry axis.
-constexpr float kBindGridOffscreen = -1.0e6f;
 }  // namespace
 
 void register_design_control_factory(std::string factory_id,
@@ -275,11 +270,14 @@ bool suppress_svg_glyph_at(std::string& svg, float x, float y, float w, float h)
 }
 
 DesignFrameView::DesignFrameView(std::string svg, std::vector<DesignFrameElement> elements,
-                                 float panel_x, float panel_y, float panel_w, float panel_h) {
+                                 float panel_x, float panel_y, float panel_w, float panel_h)
+    : binding_(std::make_unique<DesignParamBinding>(*this)) {
     frames_.push_back(build_frame(std::move(svg), std::move(elements),
                                   panel_x, panel_y, panel_w, panel_h));
     activate_frame(0);
 }
+
+DesignFrameView::~DesignFrameView() = default;
 
 DesignFrameView::Frame DesignFrameView::build_frame(
     std::string svg, std::vector<DesignFrameElement> elements,
@@ -361,9 +359,9 @@ void DesignFrameView::activate_frame(int index) {
     // that control; a key it does not gets a stand-in. This also re-establishes
     // bind_grid_begin_ against the new elements_, so the tail it names is always
     // the stand-ins and never a real control.
-    apply_bind_grid();
+    binding_->apply_grid(elements_);
     build_overlays();
-    rebuild_element_scalar_slots();
+    binding_->rebuild_slots(elements_);
     invalidate_layout();
     on_active_frame_changed();
 }
@@ -372,59 +370,15 @@ void DesignFrameView::activate_frame(int index) {
 
 void DesignFrameView::set_element_scalar_source(const std::string& param_key,
                                                 std::shared_ptr<ScalarSource> source) {
-    if (param_key.empty()) return;  // never a valid element identity
-    if (!source) {
-        // Unbinding drops the binding (and its subscription), so an unbound view
-        // stops holding the editor's frames alive.
-        element_scalars_.erase(param_key);
-        rebuild_element_scalar_slots();
-        return;
-    }
-    auto& slot = element_scalars_[param_key];
-    if (!slot) slot = std::make_unique<ScalarSourceBinding>(*this);
-    slot->set_source(std::move(source));
-    rebuild_element_scalar_slots();
+    binding_->set_scalar_source(param_key, std::move(source), elements_);
 }
 
 float DesignFrameView::element_scalar(int i) const {
-    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return 0.0f;
-    const ScalarSourceBinding* b = active_element_scalars_[i];
-    return b ? b->value() : 0.0f;
+    return binding_->element_scalar(i);
 }
 
 bool DesignFrameView::element_has_scalar_source(int i) const {
-    if (i < 0 || i >= static_cast<int>(active_element_scalars_.size())) return false;
-    return active_element_scalars_[i] != nullptr;
-}
-
-void DesignFrameView::rebuild_element_scalar_slots() {
-    active_element_scalars_.assign(elements_.size(), nullptr);
-    if (element_scalars_.empty()) return;
-
-    for (size_t i = 0; i < elements_.size(); ++i) {
-        const std::string& key = elements_[i].param_key;
-        if (key.empty()) continue;
-        auto it = element_scalars_.find(key);
-        if (it == element_scalars_.end() || !it->second) continue;
-        active_element_scalars_[i] = it->second.get();
-    }
-
-    // A binding is live iff the ACTIVE frame declares its key. A key no frame
-    // carries — a typo, or a param dropped from a redesign — would otherwise
-    // hold the editor at full frame rate forever to feed a ring nothing paints,
-    // silently costing the plugin the idle-at-0-fps behavior the whole unbind
-    // path exists to protect. Decided from the rebuilt table rather than by
-    // parking everything and un-parking the matches, so a binding that stays
-    // matched is never toggled off and on — that would drop its cached value and
-    // churn its subscription on every rebuild, including the rebuild that runs
-    // when a SIBLING element is bound.
-    for (auto& [key, binding] : element_scalars_) {
-        if (!binding) continue;
-        const bool declared = std::find(active_element_scalars_.begin(),
-                                        active_element_scalars_.end(),
-                                        binding.get()) != active_element_scalars_.end();
-        binding->set_active(declared);
-    }
+    return binding_->element_has_scalar_source(i);
 }
 
 int DesignFrameView::add_frame(std::string svg, std::vector<DesignFrameElement> elements,
@@ -599,20 +553,6 @@ bool DesignFrameView::element_is_discrete(int i) const {
     }
 }
 
-void DesignFrameView::report_scale_mismatch(const std::string& key, int ui_count,
-                                            int host_count, bool host_has_param) const {
-    if (key.empty()) return;
-    const bool seen = std::any_of(param_scale_mismatches_.begin(),
-                                  param_scale_mismatches_.end(),
-                                  [&](const ParamScaleMismatch& m) {
-                                      return m.param_key == key;
-                                  });
-    if (seen) return;
-    ParamScaleMismatch m{key, ui_count, host_count, host_has_param};
-    param_scale_mismatches_.push_back(m);
-    if (on_param_scale_mismatch_) on_param_scale_mismatch_(m);
-}
-
 int DesignFrameView::resolve_value_count(int i) const {
     if (i < 0 || i >= static_cast<int>(elements_.size())) return 0;
     const int ui_count = element_option_count(i);
@@ -637,7 +577,7 @@ int DesignFrameView::resolve_value_count(int i) const {
         // idx/5). Absorbing that silently is the whole bug. The options remain
         // the only domain available, so they are still returned — but the view
         // says so.
-        report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/false);
+        binding_->report_mismatch(key, ui_count, 0, /*host_has_param=*/false);
         return ui_count;
     }
 
@@ -661,7 +601,7 @@ int DesignFrameView::resolve_value_count(int i) const {
         // rather than absorbed. A genuinely continuous parameter under a coarse
         // choice control will report once; teach the surface to answer, or
         // expect the report.
-        if (ui_count > 1) report_scale_mismatch(key, ui_count, 0, /*host_has_param=*/true);
+        if (ui_count > 1) binding_->report_mismatch(key, ui_count, 0, /*host_has_param=*/true);
         return ui_count;
     }
 
@@ -669,7 +609,7 @@ int DesignFrameView::resolve_value_count(int i) const {
     // number of positions than the parameter has values. The host's count wins
     // (it defines the automation range), but the binding is reported.
     if (ui_count > 0 && ui_count != host_count)
-        report_scale_mismatch(key, ui_count, host_count, /*host_has_param=*/true);
+        binding_->report_mismatch(key, ui_count, host_count, /*host_has_param=*/true);
 
     return host_count;
 }
@@ -803,25 +743,11 @@ void DesignFrameView::sync_from_host_params() {
 
 void DesignFrameView::set_on_param_scale_mismatch(
     std::function<void(const ParamScaleMismatch&)> cb) {
-    on_param_scale_mismatch_ = std::move(cb);
-    // Replay what was already observed, so a callback attached after the first
-    // tick still learns about it (matches set_on_unregistered_custom_control).
-    if (on_param_scale_mismatch_)
-        for (const auto& m : param_scale_mismatches_) on_param_scale_mismatch_(m);
+    binding_->set_on_mismatch(std::move(cb));
 }
 
-// Whether a live surface carries `key` at all — the field that splits "the host
-// answered 'no index domain'" from "the host has never heard of this key".
-bool DesignFrameView::host_has_param_for(const std::string& key) const {
-    HostParamSurface* hp = host_params();
-    return hp && !key.empty() && hp->has_param(key);
-}
-
-// The host's own cardinality for `key`, or 0 when no surface resolves it.
-// Used to report an unbound key honestly (the host's count, not a placeholder).
-int DesignFrameView::host_step_count_for(const std::string& key) const {
-    if (!host_has_param_for(key)) return 0;
-    return host_params()->param_step_count(key);
+const std::vector<ParamScaleMismatch>& DesignFrameView::param_scale_mismatches() const {
+    return binding_->mismatches();
 }
 
 void DesignFrameView::commit_value(const std::string& key, float normalized) {
@@ -833,8 +759,8 @@ void DesignFrameView::commit_value(const std::string& key, float normalized) {
         // bogus index — report instead of writing to nothing. ui_option_count 0
         // is what "the UI draws no control for this key" looks like; the host's
         // count is reported as-is so the report names what the key really is.
-        report_scale_mismatch(key, 0, host_step_count_for(key),
-                              host_has_param_for(key));
+        binding_->report_mismatch(key, 0, binding_->host_step_count_for(key, host_params()),
+                                  binding_->host_has_param_for(key, host_params()));
         return;
     }
     // A commit routes through the same funnel a pointer gesture does, and that
@@ -863,8 +789,8 @@ void DesignFrameView::commit_bipolar(const std::string& key, float depth) {
 void DesignFrameView::commit_discrete(const std::string& key, int index) {
     const int i = element_for_param_key(key);
     if (i < 0) {
-        report_scale_mismatch(key, 0, host_step_count_for(key),
-                              host_has_param_for(key));
+        binding_->report_mismatch(key, 0, binding_->host_step_count_for(key, host_params()),
+                                  binding_->host_has_param_for(key, host_params()));
         return;
     }
     const int count = resolve_value_count(i);
@@ -879,8 +805,9 @@ void DesignFrameView::commit_discrete(const std::string& key, int index) {
         // putting that in a field documented as "values the host's parameter
         // exposes" would make the diagnostic misstate its own provenance —
         // pointing the reader at the host for a number the view invented.
-        report_scale_mismatch(key, element_option_count(i),
-                              host_step_count_for(key), host_has_param_for(key));
+        binding_->report_mismatch(key, element_option_count(i),
+                                  binding_->host_step_count_for(key, host_params()),
+                                  binding_->host_has_param_for(key, host_params()));
         return;
     }
     commit_value(key, static_cast<float>(param_index_to_normalized(index, count)));
@@ -889,61 +816,15 @@ void DesignFrameView::commit_discrete(const std::string& key, int index) {
 // ── Bind grid ────────────────────────────────────────────────────────────────
 
 void DesignFrameView::build_bind_grid(std::vector<std::string> keys) {
-    // Drop the previous grid before rebuilding: repeated calls replace, never
-    // accumulate. bind_grid_begin_ names the tail of elements_ that apply_bind_grid
-    // appended, and it is re-established on every frame activation, so erasing
-    // that tail can only ever remove stand-ins. Rebuilding the overlays is not
-    // needed: a stand-in never builds one (a needle-less knob is skipped), so the
-    // overlay->element indices of the real controls ahead of the tail are stable.
-    if (bind_grid_begin_ >= 0 && bind_grid_begin_ <= static_cast<int>(elements_.size()))
-        elements_.erase(elements_.begin() + bind_grid_begin_, elements_.end());
-    bind_grid_begin_ = -1;
-    bind_grid_keys_ = std::move(keys);
-    apply_bind_grid();
+    binding_->build_grid(std::move(keys), elements_);
 }
 
-void DesignFrameView::apply_bind_grid() {
-    if (bind_grid_keys_.empty()) {
-        bind_grid_begin_ = -1;
-        return;
-    }
-    bind_grid_begin_ = static_cast<int>(elements_.size());
-    // The keys already spoken for, gathered once. element_for_param_key is a
-    // linear scan, so asking it per key would be O(keys x elements) — ~35k string
-    // compares for a 188-parameter plug-in, on every frame swap. A stand-in's own
-    // key joins the set as it is created, so a duplicate key in bind_grid_keys_
-    // still produces exactly one stand-in, as the per-key scan did.
-    std::unordered_set<std::string> bound;
-    bound.reserve(elements_.size() + bind_grid_keys_.size());
-    for (const auto& e : elements_)
-        if (!e.param_key.empty()) bound.insert(e.param_key);
-
-    for (const std::string& key : bind_grid_keys_) {
-        if (key.empty()) continue;
-        // A design's own control for this key always wins: it is earlier in
-        // elements_, so element_for_param_key finds it first. Skipping keeps the
-        // grid to genuine gaps rather than shadowing a real control with a
-        // stand-in that can never be reached.
-        if (!bound.insert(key).second) continue;
-        DesignFrameElement e;
-        // A knob with no needle path is skipped by paint() and builds no overlay
-        // widget, so a stand-in renders nothing at all.
-        e.kind = DesignFrameElement::Kind::knob;
-        e.needle_d.clear();
-        e.hit_radius = 0.0f;   // knob hit-testing needs distance < radius: never true
-        e.enabled = false;     // and hit_element skips a disabled element outright
-        // Parked outside the panel so the element carries no on-screen geometry
-        // even if a future painter grows a fallback for a needle-less element.
-        e.cx = e.cy = e.x = e.y = kBindGridOffscreen;
-        e.w = e.h = 0.0f;
-        e.param_key = key;
-        elements_.push_back(std::move(e));
-    }
+const std::vector<std::string>& DesignFrameView::bind_grid_keys() const {
+    return binding_->grid_keys();
 }
 
 bool DesignFrameView::element_is_bind_grid_stand_in(int i) const {
-    return bind_grid_begin_ >= 0 && i >= bind_grid_begin_ &&
-           i < static_cast<int>(elements_.size());
+    return binding_->is_stand_in(i, element_count());
 }
 
 // ── Per-element hover + enabled state ────────────────────────────────────────

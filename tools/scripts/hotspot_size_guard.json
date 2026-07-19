@@ -96,6 +96,16 @@
       "note": "Mac window host lifecycle/capture/geometry hotspot (+set_app_key_monitor app-level key routing). Raised 2752->2770 for the two set_native_child_view_clip overrides (CPU + GPU WindowHost) that forward to the shared mac_geometry clip helper (R1 NativeViewHost). Lowered after the three hand-rolled CVDisplayLink drivers collapsed onto the shared MacDisplayLinkDriver. Lowered 2690->2551 (S33) after the CPU + GPU hosts' duplicated NSWindow construction/positioning/teardown collapsed onto shared mac_geometry helpers (create_configured_window / position_window_beside / detach_and_close_window) and scrollWheel routing moved to portable pulp::view::deliver_mouse_wheel (S31). Lowered 2551->2459 (S31) after mouseDown/mouseUp delivery (modern+legacy channels, W3C pointer bubble, same-target click suppression) moved to portable pulp::view::deliver_mouse_down / deliver_mouse_up and the dispatch_mouse_down_if_live helper was deleted."
     },
     {
+      "path": "core/view/src/design_frame_view.cpp",
+      "max_loc": 1623,
+      "note": "imported-design frame view; ceiling set after the host-param binding cluster (scale-mismatch diagnostic, bind grid, element scalar sources) moved to design_param_binding.cpp. Keep further host-param binding out of this file; the value channel + emit_* funnel + pointer/paint stay here by design."
+    },
+    {
+      "path": "core/view/include/pulp/view/design_frame_view.hpp",
+      "max_loc": 1098,
+      "note": "DesignFrameView public header; ceiling set after DesignParamBinding extraction. New binding-cluster surface belongs in design_param_binding.hpp."
+    },
+    {
       "path": "core/view/src/design_import.cpp",
       "max_loc": 2189,
       "note": "design-import orchestration hotspot; lowered after comment-hygiene cleanup; PNG codec + pixel passes live in design_import_png.cpp"
