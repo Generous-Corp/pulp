@@ -2691,7 +2691,7 @@ TEST_CASE("SignalGraph MIDI ingress sequence skips zero after wrap",
     }
 }
 
-TEST_CASE("SignalGraph audio-thread MIDI ingress is race free during swaps",
+TEST_CASE("SignalGraph audio-thread MIDI ingress is Race-free during swaps",
           "[host][graph][midi][mailbox][live-swap][race][tsan]") {
     SignalGraph graph;
     const auto input = graph.add_input_node(1, "input");
