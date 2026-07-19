@@ -12,8 +12,7 @@ using namespace pulp::audio;
 
 namespace {
 
-constexpr std::string_view canonical_json =
-    R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"tempo_lock":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"cycle_samples":2048,"splice_samples":128,"quality":75,"width":50,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true}]})";
+constexpr std::string_view canonical_json = R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"tempo_lock":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"decision_hop_samples":2048,"search_radius_samples":256,"search_stride_samples":1,"crossfade_samples":128,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true}]})";
 
 std::string replace_once(std::string source, std::string_view from,
                          std::string_view to) {
@@ -53,10 +52,10 @@ TEST_CASE("Sample heritage v3 JSON round-trips every typed block canonically",
 
     REQUIRE(std::holds_alternative<SampleHeritageVoiceMachineDomainBlock>(
         first.profile.voice[0].parameters));
-    REQUIRE(std::holds_alternative<SampleHeritageVoiceClockBlock>(
-        first.profile.voice[1].parameters));
-    REQUIRE(std::holds_alternative<SampleHeritageVoicePitchBlock>(
-        first.profile.voice[2].parameters));
+    REQUIRE(
+        std::holds_alternative<SampleHeritageVoiceClockBlock>(first.profile.voice[1].parameters));
+    REQUIRE(
+        std::holds_alternative<SampleHeritageVoicePitchBlock>(first.profile.voice[2].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageVoiceConverterBlock>(
         first.profile.voice[3].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageVoiceLiveCyclicStretchBlock>(
@@ -67,17 +66,17 @@ TEST_CASE("Sample heritage v3 JSON round-trips every typed block canonically",
         first.profile.voice[6].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageVoiceAnalogColorBlock>(
         first.profile.voice[7].parameters));
-    REQUIRE(std::holds_alternative<SampleHeritageBusNoiseIdleBlock>(
-        first.profile.bus[0].parameters));
-    REQUIRE(std::holds_alternative<SampleHeritageBusOutputDriveBlock>(
-        first.profile.bus[1].parameters));
+    REQUIRE(
+        std::holds_alternative<SampleHeritageBusNoiseIdleBlock>(first.profile.bus[0].parameters));
+    REQUIRE(
+        std::holds_alternative<SampleHeritageBusOutputDriveBlock>(first.profile.bus[1].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageRecordInputDriveClipBlock>(
         first.profile.record_commit[0].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageRecordRateBlock>(
         first.profile.record_commit[1].parameters));
     REQUIRE(std::holds_alternative<SampleHeritageRecordConverterBlock>(
         first.profile.record_commit[2].parameters));
-    REQUIRE(std::holds_alternative<SampleHeritageRecordCommitStretchBlock>(
+    REQUIRE(std::holds_alternative<SampleHeritageRecordCommitAdaptiveStretchBlock>(
         first.profile.record_commit[3].parameters));
 
     const auto first_validation = validate_sample_heritage_profile(first.profile);
@@ -106,38 +105,33 @@ TEST_CASE("Sample heritage v3 digest covers every typed domain",
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageVoiceConverterBlock>(changed.voice[3].parameters)
-        .dac_nonlinearity = 0.2f;
+    std::get<SampleHeritageVoiceConverterBlock>(changed.voice[3].parameters).dac_nonlinearity = 0.2f;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageVoiceLiveCyclicStretchBlock>(
-        changed.voice[4].parameters).shuffle_divisions = 8;
+    std::get<SampleHeritageVoiceLiveCyclicStretchBlock>(changed.voice[4].parameters)
+        .shuffle_divisions = 8;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageVoiceReconstructionBlock>(
-        changed.voice[6].parameters).cutoff_value = 0.3;
+    std::get<SampleHeritageVoiceReconstructionBlock>(changed.voice[6].parameters).cutoff_value = 0.3;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageVoiceReconstructionBlock>(
-        changed.voice[6].parameters).stopband_attenuation_db = 72.0f;
+    std::get<SampleHeritageVoiceReconstructionBlock>(changed.voice[6].parameters)
+        .stopband_attenuation_db = 72.0f;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters)
-        .tilt_db_per_octave = -6.0f;
+    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters).tilt_db_per_octave = -6.0f;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters)
-        .tilt_reference_hz = 2000.0;
+    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters).tilt_reference_hz = 2000.0;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters)
-        .tilt_floor_hz = 40.0;
+    std::get<SampleHeritageBusNoiseIdleBlock>(changed.bus[0].parameters).tilt_floor_hz = 40.0;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
@@ -145,18 +139,18 @@ TEST_CASE("Sample heritage v3 digest covers every typed domain",
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageRecordRateBlock>(
-        changed.record_commit[1].parameters).stopband_attenuation_db = 72.0f;
+    std::get<SampleHeritageRecordRateBlock>(changed.record_commit[1].parameters)
+        .stopband_attenuation_db = 72.0f;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageRecordConverterBlock>(
-        changed.record_commit[2].parameters).dac_nonlinearity = 0.3f;
+    std::get<SampleHeritageRecordConverterBlock>(changed.record_commit[2].parameters)
+        .dac_nonlinearity = 0.3f;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
-    std::get<SampleHeritageRecordCommitStretchBlock>(
-        changed.record_commit[3].parameters).width = 51;
+    std::get<SampleHeritageRecordCommitAdaptiveStretchBlock>(changed.record_commit[3].parameters)
+        .search_radius_samples = 257;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 }
 
@@ -186,7 +180,8 @@ TEST_CASE("Sample heritage v3 JSON strictly audits roots and objects",
                                "\"tilt_floor_hz\":20,", ""),
                   SampleHeritageJsonStatus::MissingField,
                   "$.bus[0].tilt_floor_hz");
-    require_error(replace_once(
+    require_error(
+        replace_once(
                       std::string(canonical_json),
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":60",
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5"),
@@ -209,10 +204,12 @@ TEST_CASE("Sample heritage v3 JSON strictly audits roots and objects",
                                "\"tilt_reference_hz\":\"1000\""),
                   SampleHeritageJsonStatus::WrongType,
                   "$.bus[0].tilt_reference_hz");
-    require_error(replace_once(
+    require_error(
+        replace_once(
                       std::string(canonical_json),
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":60",
-                      "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":\"60\""),
+            "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":"
+            "\"60\""),
                   SampleHeritageJsonStatus::WrongType,
                   "$.record_commit[1].stopband_attenuation_db");
     require_error(replace_once(std::string(canonical_json),
@@ -238,7 +235,8 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                                "\"family\":\"mu_law\"",
                                "\"family\":\"future_converter\""),
                   SampleHeritageJsonStatus::InvalidEnum, "$.voice[3].family");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"family\":\"elliptic\",\"cutoff_law\":\"machine_rate_ratio\"",
                                "\"family\":\"future_filter\",\"cutoff_law\":\"machine_rate_ratio\""),
                   SampleHeritageJsonStatus::InvalidEnum, "$.voice[6].family");
@@ -251,8 +249,7 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                                "\"cutoff_law\":\"future_law\""),
                   SampleHeritageJsonStatus::InvalidEnum,
                   "$.voice[6].cutoff_law");
-    require_error(replace_once(
-                      std::string(canonical_json),
+    require_error(replace_once(std::string(canonical_json),
                       "\"sample_rate\":22050,\"cutoff_law\":\"fixed_hz\"",
                       "\"sample_rate\":22050,\"cutoff_law\":\"future_law\""),
                   SampleHeritageJsonStatus::InvalidEnum,
@@ -278,12 +275,14 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                                "\"seed_policy\":\"future_policy\""),
                   SampleHeritageJsonStatus::InvalidEnum,
                   "$.voice[3].seed_policy");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"tempo_lock\":true",
                                "\"tempo_lock\":\"true\""),
                   SampleHeritageJsonStatus::WrongType,
                   "$.voice[4].tempo_lock");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"shuffle_divisions\":4",
                                "\"shuffle\":true"),
                   SampleHeritageJsonStatus::UnknownField,
@@ -296,7 +295,8 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
 
 TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
           "[audio][sampler][heritage][json][reject]") {
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"sample_rate\":32000", "\"sample_rate\":7999"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[0].sample_rate");
@@ -319,7 +319,8 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                                "\"cycle_ms\":40", "\"cycle_ms\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[4].cycle_ms");
-    require_profile_error(replace_once(std::string(canonical_json),
+    require_profile_error(
+        replace_once(std::string(canonical_json),
                                        "\"cycle_ms\":40", "\"cycle_ms\":40000"),
                           SampleHeritageProfileStatus::InvalidStageParameter,
                           "$.voice[4]");
@@ -338,11 +339,13 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                                "\"shuffle_divisions\":4,\"seed\":\"0\""),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[4].seed");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"hold_samples\":2", "\"hold_samples\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[5].hold_samples");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"cutoff_value\":0.4", "\"cutoff_value\":0.5"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[6].cutoff_value");
@@ -378,7 +381,8 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                                "\"tilt_reference_hz\":24000"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.bus[0].tilt_reference_hz");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"tilt_floor_hz\":20",
                                "\"tilt_floor_hz\":1001"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
@@ -386,7 +390,8 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
     require_error(replace_once(std::string(canonical_json), "\"ceiling\":0.9",
                                "\"ceiling\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange, "$.bus[1].ceiling");
-    require_error(replace_once(std::string(canonical_json),
+    require_error(
+        replace_once(std::string(canonical_json),
                                "\"clip_level\":0.8", "\"clip_level\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[0].clip_level");
@@ -395,16 +400,19 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                                "\"cutoff_value\":24000"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[1].cutoff_value");
-    require_error(replace_once(
+    require_error(
+        replace_once(
                       std::string(canonical_json),
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":60",
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":0.5"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[1].stopband_attenuation_db");
-    require_error(replace_once(
+    require_error(
+        replace_once(
                       std::string(canonical_json),
                       "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":60",
-                      "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":180.01"),
+            "\"cutoff_value\":9000,\"order\":4,\"ripple_db\":0.5,\"stopband_attenuation_db\":180."
+            "01"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[1].stopband_attenuation_db");
     require_error(replace_once(std::string(canonical_json), "\"bit_depth\":10",
@@ -417,41 +425,40 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[2].dac_nonlinearity");
     require_error(replace_once(std::string(canonical_json),
-                               "\"factor\":0.75,\"cycle_samples\":2048",
-                               "\"factor\":20.01,\"cycle_samples\":2048"),
+                               "\"factor\":0.75,\"decision_hop_samples\":2048",
+                               "\"factor\":20.01,\"decision_hop_samples\":2048"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[3].factor");
 }
 
 TEST_CASE("Sample heritage v3 commit stretch cross-fields are explicit",
           "[audio][sampler][heritage][json][reject]") {
-    require_error(replace_once(std::string(canonical_json), "\"quality\":75",
-                               "\"quality\":0"),
+    require_error(replace_once(std::string(canonical_json), "\"search_stride_samples\":1",
+                               "\"search_stride_samples\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
-                  "$.record_commit[3].quality");
-    require_error(replace_once(std::string(canonical_json), "\"width\":50",
-                               "\"width\":0"),
+                  "$.record_commit[3].search_stride_samples");
+    require_error(replace_once(std::string(canonical_json), "\"decision_hop_samples\":2048",
+                               "\"decision_hop_samples\":64"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
-                  "$.record_commit[3].width");
+                  "$.record_commit[3].crossfade_samples");
     require_error(replace_once(std::string(canonical_json),
                                "\"zone_start_frame\":100,\"zone_end_frame\":10000",
                                "\"zone_start_frame\":10000,\"zone_end_frame\":100"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[3].zone_end_frame");
 
-    auto cyclic = replace_once(std::string(canonical_json),
-                               "\"family\":\"adaptive\"",
-                               "\"family\":\"cyclic\"");
-    cyclic = replace_once(std::move(cyclic), "\"quality\":75", "\"quality\":1");
-    require_error(cyclic, SampleHeritageJsonStatus::NumberOutOfRange,
-                  "$.record_commit[3].quality");
-
-    cyclic = replace_once(std::string(canonical_json),
-                          "\"family\":\"adaptive\"",
-                          "\"family\":\"cyclic\"");
-    cyclic = replace_once(std::move(cyclic), "\"quality\":75", "\"quality\":0");
-    cyclic = replace_once(std::move(cyclic), "\"width\":50", "\"width\":0");
+    auto cyclic = replace_once(
+        std::string(canonical_json),
+        "\"family\":\"adaptive\",\"factor\":0.75,\"decision_hop_samples\":2048,\"search_radius_"
+        "samples\":256,\"search_stride_samples\":1,\"crossfade_samples\":128",
+        "\"family\":\"cyclic\",\"factor\":0.75,\"cycle_samples\":2048,\"crossfade_samples\":128");
+    cyclic = replace_once(std::move(cyclic),
+                          "\"zone_end_frame\":10000,\"stereo_link\":true",
+                          "\"zone_end_frame\":10000");
     REQUIRE(parse_sample_heritage_profile_json(cyclic).valid());
+
+    require_error(
+        replace_once(std::move(cyclic), "\"crossfade_samples\":128", "\"crossfade_samples\":1025"), SampleHeritageJsonStatus::NumberOutOfRange, "$.record_commit[3].crossfade_samples");
 }
 
 TEST_CASE("Sample heritage v3 reconstruction families require complete design parameters",
@@ -485,16 +492,16 @@ TEST_CASE("Sample heritage v3 reconstruction families require complete design pa
                             "\"stopband_attenuation_db\":0");
     REQUIRE(parse_sample_heritage_profile_json(one_pole).valid());
 
-    auto invalid_butterworth = replace_once(
-        std::string(canonical_json),
+    auto invalid_butterworth =
+        replace_once(std::string(canonical_json),
         "\"family\":\"elliptic\",\"cutoff_law\"",
         "\"family\":\"butterworth\",\"cutoff_law\"");
     require_error(invalid_butterworth,
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.voice[6].ripple_db");
 
-    auto invalid_chebyshev = replace_once(
-        std::string(canonical_json),
+    auto invalid_chebyshev =
+        replace_once(std::string(canonical_json),
         "\"family\":\"elliptic\",\"cutoff_law\"",
         "\"family\":\"chebyshev\",\"cutoff_law\"");
     require_error(invalid_chebyshev,
@@ -504,8 +511,8 @@ TEST_CASE("Sample heritage v3 reconstruction families require complete design pa
     const auto parsed = parse_sample_heritage_profile_json(canonical_json);
     REQUIRE(parsed.valid());
     auto invalid_profile = parsed.profile;
-    auto& reconstruction = std::get<SampleHeritageVoiceReconstructionBlock>(
-        invalid_profile.voice[6].parameters);
+    auto& reconstruction =
+        std::get<SampleHeritageVoiceReconstructionBlock>(invalid_profile.voice[6].parameters);
     reconstruction.stopband_attenuation_db = reconstruction.ripple_db;
     const auto validation = validate_sample_heritage_profile(invalid_profile);
     REQUIRE_FALSE(validation.valid());
@@ -544,15 +551,15 @@ TEST_CASE("Sample heritage v3 record filters require complete design parameters"
         "\"cutoff_value\":9000,\"order\":1,\"ripple_db\":0,\"stopband_attenuation_db\":0");
     REQUIRE(parse_sample_heritage_profile_json(one_pole).valid());
 
-    const auto invalid_butterworth = replace_once(
-        std::string(canonical_json), "\"filter_family\":\"elliptic\"",
+    const auto invalid_butterworth =
+        replace_once(std::string(canonical_json), "\"filter_family\":\"elliptic\"",
         "\"filter_family\":\"butterworth\"");
     require_error(invalid_butterworth,
                   SampleHeritageJsonStatus::NumberOutOfRange,
                   "$.record_commit[1].ripple_db");
 
-    const auto invalid_chebyshev = replace_once(
-        std::string(canonical_json), "\"filter_family\":\"elliptic\"",
+    const auto invalid_chebyshev =
+        replace_once(std::string(canonical_json), "\"filter_family\":\"elliptic\"",
         "\"filter_family\":\"chebyshev\"");
     require_error(invalid_chebyshev,
                   SampleHeritageJsonStatus::NumberOutOfRange,
@@ -561,8 +568,8 @@ TEST_CASE("Sample heritage v3 record filters require complete design parameters"
     const auto parsed = parse_sample_heritage_profile_json(canonical_json);
     REQUIRE(parsed.valid());
     auto invalid_profile = parsed.profile;
-    auto& filter = std::get<SampleHeritageRecordRateBlock>(
-        invalid_profile.record_commit[1].parameters);
+    auto& filter =
+        std::get<SampleHeritageRecordRateBlock>(invalid_profile.record_commit[1].parameters);
     filter.stopband_attenuation_db = filter.ripple_db;
     const auto validation = validate_sample_heritage_profile(invalid_profile);
     REQUIRE_FALSE(validation.valid());
@@ -579,11 +586,9 @@ TEST_CASE("Sample heritage v3 JSON rejects duplicate and unordered typed blocks"
     constexpr std::string_view pitch =
         R"({"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"})";
 
-    require_profile_error(
-        replace_once(std::string(canonical_json), pitch, clock),
+    require_profile_error(replace_once(std::string(canonical_json), pitch, clock),
         SampleHeritageProfileStatus::DuplicateStage, "$.voice[2]");
-    require_profile_error(
-        replace_once(std::string(canonical_json),
+    require_profile_error(replace_once(std::string(canonical_json),
                      std::string(clock) + "," + std::string(pitch),
                      std::string(pitch) + "," + std::string(clock)),
         SampleHeritageProfileStatus::InvalidStageOrder, "$.voice[2]");
@@ -643,10 +648,11 @@ TEST_CASE("Sample heritage v3 boundary neighbors remain accepted",
                          "\"noise_amplitude\":0.01",
                          "\"noise_amplitude\":1");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
-    valid = replace_once(
-        std::string(canonical_json),
-        "\"tilt_db_per_octave\":-3,\"tilt_reference_hz\":1000,\"tilt_floor_hz\":20,\"gate\":\"voice_active\"",
-        "\"tilt_db_per_octave\":24,\"tilt_reference_hz\":23999.999,\"tilt_floor_hz\":1,\"gate\":\"always_on\"");
+    valid = replace_once(std::string(canonical_json),
+                         "\"tilt_db_per_octave\":-3,\"tilt_reference_hz\":1000,\"tilt_floor_hz\":"
+                         "20,\"gate\":\"voice_active\"",
+                         "\"tilt_db_per_octave\":24,\"tilt_reference_hz\":23999.999,\"tilt_floor_"
+                         "hz\":1,\"gate\":\"always_on\"");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json),
                          "\"stopband_attenuation_db\":60",
@@ -669,7 +675,7 @@ TEST_CASE("Sample heritage v3 boundary neighbors remain accepted",
                          "\"cutoff_value\":11024.999");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json),
-                         "\"factor\":0.75,\"cycle_samples\":2048",
-                         "\"factor\":20,\"cycle_samples\":2048");
+                         "\"factor\":0.75,\"decision_hop_samples\":2048",
+                         "\"factor\":20,\"decision_hop_samples\":2048");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
 }

@@ -19,7 +19,6 @@ enum class SampleHeritageRecordCommitStatus : std::uint8_t {
     InvalidSource,
     InvalidProvenance,
     InvalidRecordChain,
-    UnsupportedCommitStretch,
     SizeOverflow,
     AllocationFailed,
     InvalidMetadata,
@@ -90,8 +89,8 @@ struct SampleHeritageRecordCommitResult {
 /// must never run on the audio thread. This self-contained transaction accepts
 /// RestartFromProfileSeed converters; ContinueSerializedState requires prior
 /// converter state and is rejected by this API.
-SampleHeritageRecordCommitResult commit_sample_heritage_recording(
-    const SampleHeritageProfile& profile,
+SampleHeritageRecordCommitResult
+commit_sample_heritage_recording(const SampleHeritageProfile& profile,
     BufferView<const float> source,
     double source_sample_rate,
     const SampleHeritageRecordProvenance& provenance);

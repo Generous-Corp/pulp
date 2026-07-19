@@ -56,10 +56,6 @@ enum class SampleHeritageRecordFilterFamily : std::uint8_t {
     Chebyshev,
     Elliptic,
 };
-enum class SampleHeritageCommitStretchFamily : std::uint8_t {
-    Cyclic,
-    Adaptive,
-};
 
 struct SampleHeritageVoiceMachineDomainBlock { double sample_rate = 0.0; };
 struct SampleHeritageVoiceClockBlock { double ratio = 1.0; };
@@ -106,8 +102,8 @@ struct SampleHeritageVoiceLiveCyclicStretchBlock {
         SampleHeritageSeedPolicy::RestartFromProfileSeed;
 };
 
-using SampleHeritageVoiceBlockParameters = std::variant<
-    SampleHeritageVoiceMachineDomainBlock,
+using SampleHeritageVoiceBlockParameters =
+    std::variant<SampleHeritageVoiceMachineDomainBlock,
     SampleHeritageVoiceClockBlock,
     SampleHeritageVoicePitchBlock,
     SampleHeritageVoiceConverterBlock,
@@ -147,8 +143,8 @@ struct SampleHeritageBusOutputDriveBlock {
     float drive = 1.0f;
     float ceiling = 1.0f;
 };
-using SampleHeritageBusBlockParameters = std::variant<
-    SampleHeritageBusNoiseIdleBlock,
+using SampleHeritageBusBlockParameters =
+    std::variant<SampleHeritageBusNoiseIdleBlock,
     SampleHeritageBusOutputDriveBlock>;
 struct SampleHeritageBusBlockSpec {
     SampleHeritageBlockDomain domain = SampleHeritageBlockDomain::Bus;
@@ -179,23 +175,28 @@ struct SampleHeritageRecordConverterBlock {
     SampleHeritageSeedPolicy seed_policy =
         SampleHeritageSeedPolicy::RestartFromProfileSeed;
 };
-struct SampleHeritageRecordCommitStretchBlock {
-    SampleHeritageCommitStretchFamily family =
-        SampleHeritageCommitStretchFamily::Cyclic;
+struct SampleHeritageRecordCommitCyclicStretchBlock {
     double factor = 1.0;
     std::uint32_t cycle_samples = 1;
-    std::uint32_t splice_samples = 0;
-    std::uint8_t quality = 0;
-    std::uint8_t width = 0;
+    std::uint32_t crossfade_samples = 0;
+    std::uint64_t zone_start_frame = 0;
+    std::uint64_t zone_end_frame = 0;
+};
+struct SampleHeritageRecordCommitAdaptiveStretchBlock {
+    double factor = 1.0;
+    std::uint32_t decision_hop_samples = 1;
+    std::uint32_t search_radius_samples = 0;
+    std::uint32_t search_stride_samples = 1;
+    std::uint32_t crossfade_samples = 0;
     std::uint64_t zone_start_frame = 0;
     std::uint64_t zone_end_frame = 0;
     bool stereo_link = true;
 };
-using SampleHeritageRecordCommitBlockParameters = std::variant<
-    SampleHeritageRecordInputDriveClipBlock,
+using SampleHeritageRecordCommitBlockParameters =
+    std::variant<SampleHeritageRecordInputDriveClipBlock,
     SampleHeritageRecordRateBlock,
-    SampleHeritageRecordConverterBlock,
-    SampleHeritageRecordCommitStretchBlock>;
+    SampleHeritageRecordConverterBlock, SampleHeritageRecordCommitCyclicStretchBlock,
+                 SampleHeritageRecordCommitAdaptiveStretchBlock>;
 struct SampleHeritageRecordCommitBlockSpec {
     SampleHeritageBlockDomain domain = SampleHeritageBlockDomain::RecordCommit;
     bool bypass = true;
@@ -238,8 +239,8 @@ struct SampleHeritageOutputStage {
     float gain = 1.0f;
 };
 
-using SampleHeritageStageParameters = std::variant<
-    SampleHeritageMachineDomainStage,
+using SampleHeritageStageParameters =
+    std::variant<SampleHeritageMachineDomainStage,
     SampleHeritageQuantizationStage,
     SampleHeritageClockPitchStage,
     SampleHeritageDacHoldStage,
@@ -339,7 +340,7 @@ inline bool valid_neutral_profile_id(std::string_view id) noexcept {
     return !previous_separator;
 }
 
-template<typename Stage>
+template <typename Stage>
 inline constexpr std::size_t stage_type_index = [] {
     if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) return 0u;
     if constexpr (std::is_same_v<Stage, SampleHeritageQuantizationStage>) return 1u;
@@ -355,11 +356,10 @@ inline constexpr std::size_t stage_type_index = [] {
 /// SHA-256 over a versioned, domain-separated, little-endian canonical byte
 /// encoding of the authoring profile. This allocates and is strictly an
 /// off-audio-thread API.
-std::array<std::uint8_t, 32> sample_heritage_profile_digest(
-    const SampleHeritageProfile& profile);
+std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritageProfile& profile);
 
-inline SampleHeritageProfileValidation validate_sample_heritage_profile(
-    const SampleHeritageProfile& source) noexcept {
+inline SampleHeritageProfileValidation
+validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
     SampleHeritageProfileValidation result;
     if (source.schema_version != kSampleHeritageProfileSchemaVersion) {
         result.status = SampleHeritageProfileStatus::UnsupportedSchemaVersion;
@@ -409,8 +409,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
         double voice_machine_rate = source.host_sample_rate;
         for (const auto& spec : source.voice) {
             if (spec.bypass) continue;
-            if (const auto* machine = std::get_if<SampleHeritageVoiceMachineDomainBlock>(
-                    &spec.parameters))
+            if (const auto* machine =
+                    std::get_if<SampleHeritageVoiceMachineDomainBlock>(&spec.parameters))
                 voice_machine_rate = machine->sample_rate;
         }
         const auto validate_cutoff = [&](SampleHeritageCutoffLaw law,
@@ -425,8 +425,7 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
         const auto validate_ordered = [&](const auto& blocks,
                                           SampleHeritageBlockDomain domain,
                                           auto validate_block) {
-            std::array<bool, std::variant_size_v<
-                std::decay_t<decltype(blocks.front().parameters)>>> seen{};
+            std::array<bool, std::variant_size_v<std::decay_t<decltype(blocks.front().parameters)>>> seen{};
             std::size_t previous = 0;
             bool have_previous = false;
             for (std::size_t index = 0; index < blocks.size(); ++index) {
@@ -450,7 +449,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
         auto status = validate_ordered(
             source.voice, SampleHeritageBlockDomain::Voice,
             [&](const SampleHeritageVoiceBlockParameters& parameters) {
-                return std::visit([&](const auto& block) {
+                return std::visit(
+                    [&](const auto& block) {
                     using Block = std::decay_t<decltype(block)>;
                     if constexpr (std::is_same_v<Block,
                                                   SampleHeritageVoiceMachineDomainBlock>)
@@ -534,7 +534,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
             status = validate_ordered(
                 source.bus, SampleHeritageBlockDomain::Bus,
                 [&](const SampleHeritageBusBlockParameters& parameters) {
-                    return std::visit([&](const auto& block) {
+                    return std::visit(
+                        [&](const auto& block) {
                         using Block = std::decay_t<decltype(block)>;
                         if constexpr (std::is_same_v<Block,
                                                       SampleHeritageBusNoiseIdleBlock>)
@@ -551,7 +552,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                                    (block.gate == SampleHeritageNoiseGate::AlwaysOn ||
                                     block.gate ==
                                         SampleHeritageNoiseGate::VoiceActive) &&
-                                   validate_seed(std::max(block.noise_amplitude,
+                                       validate_seed(
+                                           std::max(block.noise_amplitude,
                                                           block.idle_amplitude),
                                                  block.seed, block.seed_policy);
                         else
@@ -564,7 +566,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
             status = validate_ordered(
                 source.record_commit, SampleHeritageBlockDomain::RecordCommit,
                 [&](const SampleHeritageRecordCommitBlockParameters& parameters) {
-                    return std::visit([&](const auto& block) {
+                    return std::visit(
+                        [&](const auto& block) {
                         using Block = std::decay_t<decltype(block)>;
                         if constexpr (std::is_same_v<Block,
                                                       SampleHeritageRecordInputDriveClipBlock>)
@@ -620,22 +623,26 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                                    finite_range(block.dither_lsb, 0.0f, 2.0f) &&
                                    validate_seed(block.dither_lsb, block.seed,
                                                  block.seed_policy);
-                        else
-                            return (block.family ==
-                                        SampleHeritageCommitStretchFamily::Cyclic ||
-                                    block.family ==
-                                        SampleHeritageCommitStretchFamily::Adaptive) &&
+                        else if constexpr (std::is_same_v<
+                                                   Block,
+                                                   SampleHeritageRecordCommitCyclicStretchBlock>)
+                            return
                                    finite_range(block.factor, 0.25, 20.0) &&
                                    block.cycle_samples >= 1 &&
                                    block.cycle_samples <= 1048576 &&
-                                   block.splice_samples <= block.cycle_samples / 2 &&
-                                   ((block.family ==
-                                         SampleHeritageCommitStretchFamily::Cyclic &&
-                                     block.quality == 0 && block.width == 0) ||
-                                    (block.family ==
-                                         SampleHeritageCommitStretchFamily::Adaptive &&
-                                     block.quality >= 1 && block.quality <= 99 &&
-                                     block.width >= 1 && block.width <= 99)) &&
+                                       block.crossfade_samples <= block.cycle_samples / 2 &&
+                                       ((block.zone_start_frame == 0 &&
+                                         block.zone_end_frame == 0) ||
+                                        block.zone_start_frame < block.zone_end_frame);
+                            else
+                                return finite_range(block.factor, 0.25, 20.0) &&
+                                       block.decision_hop_samples >= 1 &&
+                                       block.decision_hop_samples <= 1048576 &&
+                                       block.search_radius_samples <= 1048576 &&
+                                       block.search_stride_samples >= 1 &&
+                                       block.search_stride_samples <= 1048576 &&
+                                       block.crossfade_samples <= 524288 &&
+                                       block.crossfade_samples <= block.decision_hop_samples &&
                                    ((block.zone_start_frame == 0 &&
                                      block.zone_end_frame == 0) ||
                                     block.zone_start_frame < block.zone_end_frame);
@@ -786,7 +793,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
     result.profile.stage_count = source.stages.size();
     std::copy(source.stages.begin(), source.stages.end(), result.profile.stages.begin());
     for (std::size_t index = 0; index < result.profile.stage_count; ++index) {
-        std::visit([&](auto& stage) noexcept {
+        std::visit(
+            [&](auto& stage) noexcept {
             using Stage = std::decay_t<decltype(stage)>;
             if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>)
                 stage.sample_rate = canonical_zero(stage.sample_rate);

@@ -19,7 +19,7 @@ namespace {
 using namespace std::string_view_literals;
 using Value = choc::value::ValueView;
 
-template<typename Result>
+template <typename Result>
 struct JsonParserBase {
     Result result;
 
@@ -29,7 +29,7 @@ struct JsonParserBase {
         return false;
     }
 
-    template<std::size_t N>
+    template <std::size_t N>
     bool audit_object(Value object,
                       std::string_view path,
                       const std::array<std::string_view, N>& fields) {
@@ -63,7 +63,7 @@ struct JsonParserBase {
         return true;
     }
 
-    template<typename Integer>
+    template <typename Integer>
     bool integer(Value object, std::string_view field, std::string_view path,
                  std::uint64_t minimum, std::uint64_t maximum,
                  Integer& destination) {
@@ -145,7 +145,7 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
         return true;
     }
 
-    template<typename Enum, std::size_t N>
+    template <typename Enum, std::size_t N>
     bool enumeration(Value object, std::string_view field, std::string_view path,
                      const std::array<std::pair<std::string_view, Enum>, N>& values,
                      Enum& destination) {
@@ -228,8 +228,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 seed_value == 0)
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".seed");
-            destination.parameters = SampleHeritageVoiceConverterBlock{
-                family, static_cast<float>(bits), static_cast<float>(nonlinearity),
+            destination.parameters =
+                SampleHeritageVoiceConverterBlock{family, static_cast<float>(bits), static_cast<float>(nonlinearity),
                 static_cast<float>(dither), seed_value, policy};
         } else if (type == "hold_droop") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
@@ -244,8 +244,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                          hold) ||
                 !number(value, "droop", base + ".droop", 0.0, 1.0, droop))
                 return false;
-            destination.parameters = SampleHeritageVoiceHoldDroopBlock{
-                mode, hold, static_cast<float>(droop)};
+            destination.parameters =
+                SampleHeritageVoiceHoldDroopBlock{mode, hold, static_cast<float>(droop)};
         } else if (type == "reconstruction") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "family"sv, "cutoff_law"sv, "cutoff_value"sv, "order"sv,
@@ -284,12 +284,10 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 const auto& spec = result.profile.voice[earlier];
                 if (spec.bypass) continue;
                 if (const auto* machine =
-                        std::get_if<SampleHeritageVoiceMachineDomainBlock>(
-                            &spec.parameters))
+                        std::get_if<SampleHeritageVoiceMachineDomainBlock>(&spec.parameters))
                     machine_rate = machine->sample_rate;
                 else if (const auto* clock =
-                             std::get_if<SampleHeritageVoiceClockBlock>(
-                                 &spec.parameters))
+                             std::get_if<SampleHeritageVoiceClockBlock>(&spec.parameters))
                     clock_ratio = clock->ratio;
             }
             if ((cutoff_law == SampleHeritageCutoffLaw::FixedHz &&
@@ -319,8 +317,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                  stopband_attenuation <= ripple))
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".stopband_attenuation_db");
-            destination.parameters = SampleHeritageVoiceReconstructionBlock{
-                family, cutoff_law, cutoff, order, static_cast<float>(ripple),
+            destination.parameters =
+                SampleHeritageVoiceReconstructionBlock{family, cutoff_law, cutoff, order, static_cast<float>(ripple),
                 static_cast<float>(stopband_attenuation)};
         } else if (type == "analog_color") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
@@ -430,8 +428,7 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
             if (tilt_reference >= result.profile.host_sample_rate * 0.5)
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".tilt_reference_hz");
-            destination.parameters = SampleHeritageBusNoiseIdleBlock{
-                static_cast<float>(noise), static_cast<float>(idle),
+            destination.parameters = SampleHeritageBusNoiseIdleBlock{static_cast<float>(noise), static_cast<float>(idle),
                 static_cast<float>(tilt), gate, seed_value, policy,
                 tilt_reference, tilt_floor};
         } else if (type == "output_drive") {
@@ -443,8 +440,7 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 !number(value, "ceiling", base + ".ceiling", 0.001, 4.0,
                         ceiling))
                 return false;
-            destination.parameters = SampleHeritageBusOutputDriveBlock{
-                static_cast<float>(drive), static_cast<float>(ceiling)};
+            destination.parameters = SampleHeritageBusOutputDriveBlock{static_cast<float>(drive), static_cast<float>(ceiling)};
         } else {
             return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
         }
@@ -538,8 +534,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                  stopband_attenuation <= ripple))
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".stopband_attenuation_db");
-            destination.parameters = SampleHeritageRecordRateBlock{
-                family, rate, cutoff_law, cutoff, order,
+            destination.parameters =
+                SampleHeritageRecordRateBlock{family, rate, cutoff_law, cutoff, order,
                 static_cast<float>(ripple),
                 static_cast<float>(stopband_attenuation)};
             if (!destination.bypass) record_processing_rate = rate;
@@ -568,57 +564,79 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 seed_value == 0)
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".seed");
-            destination.parameters = SampleHeritageRecordConverterBlock{
-                family, static_cast<float>(bits), static_cast<float>(nonlinearity),
+            destination.parameters =
+                SampleHeritageRecordConverterBlock{family, static_cast<float>(bits), static_cast<float>(nonlinearity),
                 static_cast<float>(dither), seed_value, policy};
         } else if (type == "commit_stretch") {
-            constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
-                "family"sv, "factor"sv, "cycle_samples"sv, "splice_samples"sv,
-                "quality"sv, "width"sv, "zone_start_frame"sv,
-                "zone_end_frame"sv, "stereo_link"sv};
-            constexpr std::array families{
-                std::pair{"cyclic"sv, SampleHeritageCommitStretchFamily::Cyclic},
-                std::pair{"adaptive"sv, SampleHeritageCommitStretchFamily::Adaptive}};
-            SampleHeritageCommitStretchFamily family{};
+            constexpr std::array families{std::pair{"cyclic"sv, 0u},
+                std::pair{"adaptive"sv, 1u}};
+            std::uint32_t family{};
             double factor{};
-            std::uint32_t cycle{}, splice{};
-            std::uint8_t quality{}, width{};
             std::uint64_t zone_start{}, zone_end{};
-            bool stereo{};
-            if (!audit_object(value, base, fields) || !common() ||
+            if (!common() ||
                 !enumeration(value, "family", base + ".family", families, family) ||
                 !number(value, "factor", base + ".factor", 0.25, 20.0, factor) ||
-                !integer(value, "cycle_samples", base + ".cycle_samples", 1,
-                         1048576, cycle) ||
-                !integer(value, "splice_samples", base + ".splice_samples", 0,
-                         524288, splice) ||
-                !integer(value, "quality", base + ".quality", 0, 99, quality) ||
-                !integer(value, "width", base + ".width", 0, 99, width) ||
                 !integer(value, "zone_start_frame", base + ".zone_start_frame", 0,
                          std::numeric_limits<std::int64_t>::max(), zone_start) ||
                 !integer(value, "zone_end_frame", base + ".zone_end_frame", 0,
-                         std::numeric_limits<std::int64_t>::max(), zone_end) ||
-                !boolean(value, "stereo_link", base + ".stereo_link", stereo))
+                         std::numeric_limits<std::int64_t>::max(), zone_end))
                 return false;
-            if (splice > cycle / 2)
-                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
-                            base + ".splice_samples");
-            if (family == SampleHeritageCommitStretchFamily::Cyclic &&
-                (quality != 0 || width != 0))
-                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
-                            quality != 0 ? base + ".quality" : base + ".width");
-            if (family == SampleHeritageCommitStretchFamily::Adaptive && quality == 0)
-                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
-                            base + ".quality");
-            if (family == SampleHeritageCommitStretchFamily::Adaptive && width == 0)
-                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
-                            base + ".width");
             if (!((zone_start == 0 && zone_end == 0) || zone_start < zone_end))
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".zone_end_frame");
-            destination.parameters = SampleHeritageRecordCommitStretchBlock{
-                family, factor, cycle, splice, quality, width, zone_start, zone_end,
+            if (family == 0) {
+                constexpr std::array fields{"domain"sv,
+                                            "type"sv,
+                                            "bypass"sv,
+                                            "family"sv,
+                                            "factor"sv,
+                                            "cycle_samples"sv,
+                                            "crossfade_samples"sv,
+                                            "zone_start_frame"sv,
+                                            "zone_end_frame"sv};
+                std::uint32_t cycle{}, crossfade{};
+                if (!audit_object(value, base, fields) ||
+                    !integer(value, "cycle_samples", base + ".cycle_samples", 1, 1048576, cycle) ||
+                    !integer(value, "crossfade_samples", base + ".crossfade_samples", 0, 524288,
+                             crossfade))
+                    return false;
+                if (crossfade > cycle / 2)
+                    return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                                base + ".crossfade_samples");
+            destination.parameters = SampleHeritageRecordCommitCyclicStretchBlock{ factor, cycle, crossfade, zone_start, zone_end};
+            } else {
+                constexpr std::array fields{"domain"sv,
+                                            "type"sv,
+                                            "bypass"sv,
+                                            "family"sv,
+                                            "factor"sv,
+                                            "decision_hop_samples"sv,
+                                            "search_radius_samples"sv,
+                                            "search_stride_samples"sv,
+                                            "crossfade_samples"sv,
+                                            "zone_start_frame"sv,
+                                            "zone_end_frame"sv,
+                                            "stereo_link"sv};
+                std::uint32_t hop{}, radius{}, stride{}, crossfade{};
+                bool stereo{};
+                if (!audit_object(value, base, fields) ||
+                    !integer(value, "decision_hop_samples", base + ".decision_hop_samples", 1,
+                             1048576, hop) ||
+                    !integer(value, "search_radius_samples", base + ".search_radius_samples", 0,
+                             1048576, radius) ||
+                    !integer(value, "search_stride_samples", base + ".search_stride_samples", 1,
+                             1048576, stride) ||
+                    !integer(value, "crossfade_samples", base + ".crossfade_samples", 0, 524288,
+                             crossfade) ||
+                    !boolean(value, "stereo_link", base + ".stereo_link", stereo))
+                    return false;
+                if (crossfade > hop)
+                    return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                                base + ".crossfade_samples");
+                destination.parameters = SampleHeritageRecordCommitAdaptiveStretchBlock{
+                    factor, hop, radius, stride, crossfade, zone_start, zone_end,
                 stereo};
+            }
         } else {
             return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
         }
@@ -639,8 +657,8 @@ struct RuntimeStateParser
         if (text.empty() || text == "0" || (text.size() > 1 && text.front() == '0'))
             return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                         std::string(path));
-        const auto conversion = std::from_chars(
-            text.data(), text.data() + text.size(), destination);
+        const auto conversion =
+            std::from_chars(text.data(), text.data() + text.size(), destination);
         if (conversion.ec != std::errc{} ||
             conversion.ptr != text.data() + text.size())
             return fail(SampleHeritageJsonStatus::NumberOutOfRange,
@@ -649,8 +667,8 @@ struct RuntimeStateParser
     }
 };
 
-SampleHeritageRuntimeStateStatus validate_runtime_state_shape(
-    const SampleHeritageRuntimeState& state) noexcept {
+SampleHeritageRuntimeStateStatus
+validate_runtime_state_shape(const SampleHeritageRuntimeState& state) noexcept {
     if (state.schema_version != kSampleHeritageRuntimeStateSchemaVersion)
         return SampleHeritageRuntimeStateStatus::UnsupportedSchemaVersion;
     if (state.profile_schema_version != kSampleHeritageProfileSchemaVersion ||
@@ -701,7 +719,7 @@ void append_digest_hex(std::string& output,
     output.push_back('"');
 }
 
-template<typename Number>
+template <typename Number>
 void append_number(std::string& output, Number value) {
     if (value == Number{}) value = Number{};
     std::array<char, 64> buffer{};
@@ -730,8 +748,7 @@ std::string_view converter_family_name(SampleHeritageConverterFamily family) {
     return "linear_pcm";
 }
 
-std::string_view reconstruction_family_name(
-    SampleHeritageReconstructionFamily family) {
+std::string_view reconstruction_family_name(SampleHeritageReconstructionFamily family) {
     if (family == SampleHeritageReconstructionFamily::Butterworth)
         return "butterworth";
     if (family == SampleHeritageReconstructionFamily::Chebyshev)
@@ -865,8 +882,8 @@ SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_vie
     }
 }
 
-SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
-    const SampleHeritageProfile& profile) {
+SampleHeritageJsonWriteResult
+write_sample_heritage_profile_json(const SampleHeritageProfile& profile) {
     SampleHeritageJsonWriteResult result;
     const auto validation = validate_sample_heritage_profile(profile);
     result.profile_status = validation.status;
@@ -887,7 +904,8 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     for (std::size_t index = 0; index < profile.voice.size(); ++index) {
         if (index != 0) output.push_back(',');
         const auto& spec = profile.voice[index];
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             output += "{\"domain\":\"voice\",\"type\":\"";
             if constexpr (std::is_same_v<Block, SampleHeritageVoiceMachineDomainBlock>)
@@ -973,7 +991,8 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     for (std::size_t index = 0; index < profile.bus.size(); ++index) {
         if (index != 0) output.push_back(',');
         const auto& spec = profile.bus[index];
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             output += "{\"domain\":\"bus\",\"type\":\"";
             if constexpr (std::is_same_v<Block, SampleHeritageBusNoiseIdleBlock>)
@@ -1011,7 +1030,8 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     for (std::size_t index = 0; index < profile.record_commit.size(); ++index) {
         if (index != 0) output.push_back(',');
         const auto& spec = profile.record_commit[index];
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             output += "{\"domain\":\"record_commit\",\"type\":\"";
             if constexpr (std::is_same_v<Block,
@@ -1053,16 +1073,24 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
                 output += ",\"seed\":"; append_seed(output, block.seed);
                 output += ",\"seed_policy\":\"";
                 output += seed_policy_name(block.seed_policy); output.push_back('"');
-            } else {
-                output += ",\"family\":\"";
-                output += block.family == SampleHeritageCommitStretchFamily::Adaptive
-                              ? "adaptive"
-                              : "cyclic";
+            } else if constexpr (std::is_same_v<Block,
+                                                    SampleHeritageRecordCommitCyclicStretchBlock>) {
+                output += ",\"family\":\"cyclic";
                 output += "\",\"factor\":"; append_number(output, block.factor);
                 output += ",\"cycle_samples\":" + std::to_string(block.cycle_samples);
-                output += ",\"splice_samples\":" + std::to_string(block.splice_samples);
-                output += ",\"quality\":" + std::to_string(block.quality);
-                output += ",\"width\":" + std::to_string(block.width);
+                output += ",\"crossfade_samples\":" + std::to_string(block.crossfade_samples);
+                output += ",\"zone_start_frame\":" + std::to_string(block.zone_start_frame);
+                output += ",\"zone_end_frame\":" + std::to_string(block.zone_end_frame);
+                } else {
+                    output += ",\"family\":\"adaptive\",\"factor\":";
+                    append_number(output, block.factor);
+                    output +=
+                        ",\"decision_hop_samples\":" + std::to_string(block.decision_hop_samples);
+                    output +=
+                        ",\"search_radius_samples\":" + std::to_string(block.search_radius_samples);
+                    output +=
+                        ",\"search_stride_samples\":" + std::to_string(block.search_stride_samples);
+                    output += ",\"crossfade_samples\":" + std::to_string(block.crossfade_samples);
                 output += ",\"zone_start_frame\":" +
                           std::to_string(block.zone_start_frame);
                 output += ",\"zone_end_frame\":" +
@@ -1087,8 +1115,7 @@ parse_sample_heritage_runtime_state_json(std::string_view json) {
             parser.fail(SampleHeritageJsonStatus::RootNotObject, "$");
             return std::move(parser.result);
         }
-        constexpr std::array fields{
-            "schema_version"sv, "profile_schema_version"sv, "profile_id"sv,
+        constexpr std::array fields{"schema_version"sv, "profile_schema_version"sv, "profile_id"sv,
             "profile_digest_version"sv, "profile_digest"sv, "rng_states"sv};
         if (!parser.audit_object(root, "$", fields))
             return std::move(parser.result);
@@ -1171,8 +1198,7 @@ parse_sample_heritage_runtime_state_json(std::string_view json) {
         for (std::uint32_t index = 0; index < states.size(); ++index) {
             const auto value = states[index];
             const auto base = "$.rng_states[" + std::to_string(index) + "]";
-            constexpr std::array state_fields{
-                "stage_index"sv, "stage_type"sv, "random_state"sv};
+            constexpr std::array state_fields{"stage_index"sv, "stage_type"sv, "random_state"sv};
             if (!parser.audit_object(value, base, state_fields))
                 return std::move(parser.result);
             std::uint32_t stage_index = 0;
@@ -1226,8 +1252,7 @@ parse_sample_heritage_runtime_state_json(std::string_view json) {
 }
 
 SampleHeritageRuntimeStateJsonWriteResult
-write_sample_heritage_runtime_state_json(
-    const SampleHeritageRuntimeState& state) {
+write_sample_heritage_runtime_state_json(const SampleHeritageRuntimeState& state) {
     SampleHeritageRuntimeStateJsonWriteResult result;
     result.runtime_status = validate_runtime_state_shape(state);
     if (result.runtime_status != SampleHeritageRuntimeStateStatus::Ok)

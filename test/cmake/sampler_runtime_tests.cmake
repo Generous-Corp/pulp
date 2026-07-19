@@ -91,6 +91,9 @@ pulp_add_test_suite(pulp-test-sample-heritage-json
 pulp_add_test_suite(pulp-test-sample-heritage-pitch
     SOURCES test_sample_heritage_pitch.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-live-cyclic
+    SOURCES test_sample_heritage_live_cyclic.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-heritage-record-commit
     SOURCES test_sample_heritage_record_commit.cpp
     LIBRARIES pulp::audio pulp::audio-analysis)

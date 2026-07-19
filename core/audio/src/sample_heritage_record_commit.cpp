@@ -97,8 +97,8 @@ bool copy_audio(BufferView<const float> source, Buffer<float>& destination) {
 void append_number(std::string& json, double value) {
     if (value == 0.0) value = 0.0;
     std::array<char, 64> buffer{};
-    const auto conversion = std::to_chars(
-        buffer.data(), buffer.data() + buffer.size(), value,
+    const auto conversion =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
         std::chars_format::general, std::numeric_limits<double>::max_digits10);
     if (conversion.ec != std::errc{}) throw std::runtime_error("number encoding failed");
     json.append(buffer.data(), conversion.ptr);
@@ -139,7 +139,7 @@ std::string write_metadata(const SampleHeritageCommittedAssetMetadata& metadata)
     return json;
 }
 
-template<std::size_t Size>
+template <std::size_t Size>
 bool audit_object(JsonValue object,
                   const std::array<std::string_view, Size>& expected) {
     if (!object.isObject() || object.size() != Size) return false;
@@ -161,7 +161,7 @@ bool read_string(JsonValue object, std::string_view name, std::string& destinati
     return true;
 }
 
-template<typename Integer>
+template <typename Integer>
 bool read_integer(JsonValue object, std::string_view name, Integer& destination) {
     const auto value = object[name];
     if (!value.isInt()) return false;
@@ -256,8 +256,7 @@ std::string profile_digest_hex(const SampleHeritagePreparedProfile& profile) {
                                profile.profile_digest.size());
 }
 
-SampleHeritageVoiceReconstructionBlock map_filter(
-    const SampleHeritageRecordRateBlock& source,
+SampleHeritageVoiceReconstructionBlock map_filter(const SampleHeritageRecordRateBlock& source,
     double processing_rate) {
     SampleHeritageVoiceReconstructionBlock result;
     switch (source.filter_family) {
@@ -296,8 +295,7 @@ bool valid_filter_shape(const SampleHeritageVoiceReconstructionBlock& filter,
     return filter.ripple_db > 0.0f;
 }
 
-SampleHeritagePreparedProfile dsp_profile(
-    std::string_view id,
+SampleHeritagePreparedProfile dsp_profile(std::string_view id,
     double rate,
     SampleHeritageVoiceBlockParameters parameters) {
     SampleHeritagePreparedProfile profile;
@@ -373,8 +371,8 @@ bool resample_exact(Buffer<float>& audio,
         inputs[channel] = padded.channel(channel).data();
         outputs[channel] = rendered.channel(channel).data();
     }
-    const auto produced = resampler.process_block(
-        inputs.data(), padded.num_samples(), outputs.data(), capacity);
+    const auto produced =
+        resampler.process_block(inputs.data(), padded.num_samples(), outputs.data(), capacity);
     const auto delay = static_cast<std::size_t>(
         (static_cast<double>(resampler.taps_per_phase()) - 1.0) * 0.5 *
         output_rate / input_rate);
@@ -388,10 +386,237 @@ bool resample_exact(Buffer<float>& audio,
     return true;
 }
 
+enum class StretchResult { Ok, Invalid, Overflow };
+
+struct StretchZone {
+    std::size_t begin = 0;
+    std::size_t end = 0;
+    std::size_t input_frames = 0;
+    std::size_t output_frames = 0;
+    std::size_t total_frames = 0;
+};
+
+template <typename Block>
+StretchResult stretch_zone(const Buffer<float>& audio, const Block& block, StretchZone& zone) {
+    const auto whole_asset = block.zone_start_frame == 0 && block.zone_end_frame == 0;
+    if (!whole_asset && (block.zone_start_frame > std::numeric_limits<std::size_t>::max() ||
+                         block.zone_end_frame > std::numeric_limits<std::size_t>::max()))
+        return StretchResult::Invalid;
+    const auto end =
+        whole_asset ? audio.num_samples() : static_cast<std::size_t>(block.zone_end_frame);
+    const auto begin =
+        whole_asset ? std::size_t{0} : static_cast<std::size_t>(block.zone_start_frame);
+    if (begin >= end || end > audio.num_samples())
+        return StretchResult::Invalid;
+    const auto input_frames = end - begin;
+    const auto exact_output =
+        static_cast<long double>(input_frames) * static_cast<long double>(block.factor);
+    if (!std::isfinite(exact_output) || exact_output < 1.0L ||
+        exact_output > static_cast<long double>(std::numeric_limits<std::size_t>::max()) ||
+        exact_output > static_cast<long double>(std::numeric_limits<long long>::max()))
+        return StretchResult::Overflow;
+    const auto output_frames = static_cast<std::size_t>(std::llround(exact_output));
+    const auto suffix_frames = audio.num_samples() - end;
+    if (begin > std::numeric_limits<std::size_t>::max() - output_frames ||
+        begin + output_frames > std::numeric_limits<std::size_t>::max() - suffix_frames)
+        return StretchResult::Overflow;
+    zone = {begin, end, input_frames, output_frames, begin + output_frames + suffix_frames};
+    return StretchResult::Ok;
+}
+
+double fade_in(std::size_t offset, std::size_t length) {
+    if (length == 0)
+        return 1.0;
+    constexpr double half_pi = 1.57079632679489661923;
+    const auto phase = (static_cast<double>(offset) + 0.5) / static_cast<double>(length);
+    const auto sine = std::sin(half_pi * phase);
+    return sine * sine;
+}
+
+void add_grain(const Buffer<float>& source, const StretchZone& zone, Buffer<float>& rendered,
+               std::size_t channel, std::size_t input_anchor, std::size_t output_anchor,
+               std::size_t grain_frames, std::size_t crossfade_frames) {
+    const auto first = output_anchor == 0;
+    const auto last = output_anchor + grain_frames >= zone.output_frames;
+    const auto count = std::min(grain_frames, zone.output_frames - output_anchor);
+    for (std::size_t frame = 0; frame < count; ++frame) {
+        double weight = 1.0;
+        if (!first && frame < crossfade_frames)
+            weight = fade_in(frame, crossfade_frames);
+        if (!last && frame >= grain_frames - crossfade_frames)
+            weight = fade_in(grain_frames - frame - 1, crossfade_frames);
+        rendered.channel(channel)[output_anchor + frame] +=
+            static_cast<float>(weight) * source.channel(channel)[zone.begin + input_anchor + frame];
+    }
+}
+
+StretchResult publish_stretched_zone(Buffer<float>& audio, const StretchZone& zone,
+                                     Buffer<float>& rendered) {
+    Buffer<float> result(audio.num_channels(), zone.total_frames);
+    for (std::size_t channel = 0; channel < audio.num_channels(); ++channel) {
+        std::copy_n(audio.channel(channel).begin(), zone.begin, result.channel(channel).begin());
+        std::copy(rendered.channel(channel).begin(), rendered.channel(channel).end(),
+                  result.channel(channel).begin() + static_cast<std::ptrdiff_t>(zone.begin));
+        std::copy(audio.channel(channel).begin() + static_cast<std::ptrdiff_t>(zone.end),
+                  audio.channel(channel).end(),
+                  result.channel(channel).begin() +
+                      static_cast<std::ptrdiff_t>(zone.begin + zone.output_frames));
+    }
+    audio = std::move(result);
+    return StretchResult::Ok;
+}
+
+StretchResult apply_cyclic_stretch(Buffer<float>& audio,
+                                   const SampleHeritageRecordCommitCyclicStretchBlock& block) {
+    StretchZone zone;
+    const auto status = stretch_zone(audio, block, zone);
+    if (status != StretchResult::Ok || block.factor == 1.0)
+        return status;
+    const auto grain_frames = static_cast<std::size_t>(block.cycle_samples);
+    const auto crossfade_frames = static_cast<std::size_t>(block.crossfade_samples);
+    if (grain_frames > zone.input_frames)
+        return StretchResult::Invalid;
+    const auto output_hop = grain_frames - crossfade_frames;
+    if (output_hop == 0)
+        return StretchResult::Invalid;
+    Buffer<float> rendered(audio.num_channels(), zone.output_frames);
+    const auto maximum_anchor = zone.input_frames - grain_frames;
+    for (std::size_t output_anchor = 0; output_anchor < zone.output_frames;) {
+        const auto nominal =
+            static_cast<long double>(output_anchor) / static_cast<long double>(block.factor);
+        const auto input_anchor =
+            std::min(maximum_anchor, static_cast<std::size_t>(std::llround(nominal)));
+        for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
+            add_grain(audio, zone, rendered, channel, input_anchor, output_anchor, grain_frames,
+                      crossfade_frames);
+        if (output_anchor > std::numeric_limits<std::size_t>::max() - output_hop)
+            return StretchResult::Overflow;
+        output_anchor += output_hop;
+    }
+    return publish_stretched_zone(audio, zone, rendered);
+}
+
+double removed_dc_ncc(const Buffer<float>& audio, const StretchZone& zone,
+                      std::size_t channel_begin, std::size_t channel_end, std::size_t reference,
+                      std::size_t candidate, std::size_t frames) {
+    if (frames == 0)
+        return 0.0;
+    long double dot = 0.0L;
+    long double reference_energy = 0.0L;
+    long double candidate_energy = 0.0L;
+    for (std::size_t channel = channel_begin; channel < channel_end; ++channel) {
+        long double reference_sum = 0.0L;
+        long double candidate_sum = 0.0L;
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            reference_sum += audio.channel(channel)[zone.begin + reference + frame];
+            candidate_sum += audio.channel(channel)[zone.begin + candidate + frame];
+        }
+        const auto reference_mean = reference_sum / static_cast<long double>(frames);
+        const auto candidate_mean = candidate_sum / static_cast<long double>(frames);
+        for (std::size_t frame = 0; frame < frames; ++frame) {
+            const auto left =
+                static_cast<long double>(audio.channel(channel)[zone.begin + reference + frame]) -
+                reference_mean;
+            const auto right =
+                static_cast<long double>(audio.channel(channel)[zone.begin + candidate + frame]) -
+                candidate_mean;
+            dot += left * right;
+            reference_energy += left * left;
+            candidate_energy += right * right;
+        }
+    }
+    if (reference_energy <= std::numeric_limits<long double>::epsilon() ||
+        candidate_energy <= std::numeric_limits<long double>::epsilon())
+        return 0.0;
+    return static_cast<double>(dot / std::sqrt(reference_energy * candidate_energy));
+}
+
+std::size_t adaptive_anchor(const Buffer<float>& audio, const StretchZone& zone,
+                            std::size_t channel_begin, std::size_t channel_end,
+                            std::size_t previous_anchor, std::size_t nominal_anchor,
+                            std::size_t grain_frames,
+                            const SampleHeritageRecordCommitAdaptiveStretchBlock& block) {
+    const auto maximum_anchor = zone.input_frames - grain_frames;
+    nominal_anchor = std::min(nominal_anchor, maximum_anchor);
+    if (block.crossfade_samples == 0 || block.search_radius_samples == 0)
+        return nominal_anchor;
+    const auto reference = previous_anchor + block.decision_hop_samples;
+    double best_score = -std::numeric_limits<double>::infinity();
+    std::int64_t best_delta = 0;
+    const auto radius = static_cast<std::int64_t>(block.search_radius_samples);
+    const auto stride = static_cast<std::int64_t>(block.search_stride_samples);
+    const auto consider = [&](std::int64_t delta, double& score, std::int64_t& selected) {
+        const auto signed_candidate = static_cast<std::int64_t>(nominal_anchor) + delta;
+        if (signed_candidate < 0 || static_cast<std::uint64_t>(signed_candidate) > maximum_anchor)
+            return;
+        const auto candidate = static_cast<std::size_t>(signed_candidate);
+        const auto candidate_score = removed_dc_ncc(audio, zone, channel_begin, channel_end,
+                                                    reference, candidate, block.crossfade_samples);
+        if (candidate_score > score ||
+            (candidate_score == score &&
+             (std::abs(delta) < std::abs(selected) ||
+              (std::abs(delta) == std::abs(selected) && delta < selected)))) {
+            score = candidate_score;
+            selected = delta;
+        }
+    };
+    consider(0, best_score, best_delta);
+    for (std::int64_t magnitude = stride; magnitude <= radius; magnitude += stride) {
+        consider(-magnitude, best_score, best_delta);
+        consider(magnitude, best_score, best_delta);
+        if (magnitude > radius - stride)
+            break;
+    }
+    return static_cast<std::size_t>(static_cast<std::int64_t>(nominal_anchor) + best_delta);
+}
+
+StretchResult apply_adaptive_stretch(Buffer<float>& audio,
+                                     const SampleHeritageRecordCommitAdaptiveStretchBlock& block) {
+    StretchZone zone;
+    const auto status = stretch_zone(audio, block, zone);
+    if (status != StretchResult::Ok || block.factor == 1.0)
+        return status;
+    const auto output_hop = static_cast<std::size_t>(block.decision_hop_samples);
+    if (output_hop > std::numeric_limits<std::size_t>::max() - block.crossfade_samples)
+        return StretchResult::Overflow;
+    const auto grain_frames = output_hop + block.crossfade_samples;
+    if (grain_frames > zone.input_frames)
+        return StretchResult::Invalid;
+    Buffer<float> rendered(audio.num_channels(), zone.output_frames);
+    std::vector<std::size_t> previous_anchor(audio.num_channels(), 0);
+    for (std::size_t output_anchor = 0; output_anchor < zone.output_frames;) {
+        const auto nominal = std::min(
+            zone.input_frames - grain_frames,
+            static_cast<std::size_t>(std::llround(static_cast<long double>(output_anchor) /
+                                                  static_cast<long double>(block.factor))));
+        if (output_anchor == 0) {
+            for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
+                previous_anchor[channel] = nominal;
+        } else if (block.stereo_link) {
+            const auto selected =
+                adaptive_anchor(audio, zone, 0, audio.num_channels(), previous_anchor.front(),
+                                nominal, grain_frames, block);
+            std::fill(previous_anchor.begin(), previous_anchor.end(), selected);
+        } else {
+            for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
+                previous_anchor[channel] =
+                    adaptive_anchor(audio, zone, channel, channel + 1, previous_anchor[channel],
+                                    nominal, grain_frames, block);
+        }
+        for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
+            add_grain(audio, zone, rendered, channel, previous_anchor[channel], output_anchor,
+                      grain_frames, block.crossfade_samples);
+        if (output_anchor > std::numeric_limits<std::size_t>::max() - output_hop)
+            return StretchResult::Overflow;
+        output_anchor += output_hop;
+    }
+    return publish_stretched_zone(audio, zone, rendered);
+}
+
 }  // namespace
 
-SampleHeritageRecordCommitResult commit_sample_heritage_recording(
-    const SampleHeritageProfile& profile,
+SampleHeritageRecordCommitResult
+commit_sample_heritage_recording(const SampleHeritageProfile& profile,
     BufferView<const float> source,
     double source_sample_rate,
     const SampleHeritageRecordProvenance& provenance) {
@@ -403,8 +628,7 @@ SampleHeritageRecordCommitResult commit_sample_heritage_recording(
         source.num_channels() > std::numeric_limits<std::uint32_t>::max() ||
         source.num_samples() > std::numeric_limits<std::size_t>::max() /
                                    source.num_channels() ||
-        source.num_samples() > static_cast<std::size_t>(
-            std::numeric_limits<std::int64_t>::max()) ||
+        source.num_samples() > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
         !(source_sample_rate >= 8000.0 && source_sample_rate <= 384000.0) ||
         !std::isfinite(source_sample_rate) ||
         std::abs(source_sample_rate - profile.host_sample_rate) > 1.0e-9)
@@ -428,15 +652,13 @@ SampleHeritageRecordCommitResult commit_sample_heritage_recording(
             const auto& spec = validation.profile.record_commit[index];
             if (spec.bypass) continue;
             if (const auto* drive =
-                    std::get_if<SampleHeritageRecordInputDriveClipBlock>(
-                        &spec.parameters)) {
+                    std::get_if<SampleHeritageRecordInputDriveClipBlock>(&spec.parameters)) {
                 for (std::size_t channel = 0; channel < committed.num_channels(); ++channel)
                     for (auto& sample : committed.channel(channel))
                         sample = std::clamp(sample * drive->drive,
                                             -drive->clip_level, drive->clip_level);
             } else if (const auto* rate =
-                           std::get_if<SampleHeritageRecordRateBlock>(
-                               &spec.parameters)) {
+                           std::get_if<SampleHeritageRecordRateBlock>(&spec.parameters)) {
                 if (!apply_filter(committed, committed_rate, *rate))
                     return fail(SampleHeritageRecordCommitStatus::InvalidRecordChain,
                                 "record filter is not realizable at the source rate");
@@ -445,14 +667,30 @@ SampleHeritageRecordCommitResult commit_sample_heritage_recording(
                                 "record-rate conversion could not be bounded");
                 committed_rate = rate->sample_rate;
             } else if (const auto* converter =
-                           std::get_if<SampleHeritageRecordConverterBlock>(
-                               &spec.parameters)) {
+                           std::get_if<SampleHeritageRecordConverterBlock>(&spec.parameters)) {
                 if (!apply_converter(committed, committed_rate, *converter))
                     return fail(SampleHeritageRecordCommitStatus::InvalidRecordChain,
                                 "record converter state is not self-contained");
-            } else {
-                return fail(SampleHeritageRecordCommitStatus::UnsupportedCommitStretch,
-                            "record-commit stretch is not implemented");
+            } else if (const auto* stretch =
+                           std::get_if<SampleHeritageRecordCommitCyclicStretchBlock>(
+                               &spec.parameters)) {
+                const auto status = apply_cyclic_stretch(committed, *stretch);
+                if (status == StretchResult::Overflow)
+                return fail(SampleHeritageRecordCommitStatus::SizeOverflow,
+                                "cyclic stretch output size overflowed");
+                if (status != StretchResult::Ok)
+                    return fail(SampleHeritageRecordCommitStatus::InvalidRecordChain,
+                                "cyclic stretch cannot render the selected zone");
+            } else if (const auto* stretch =
+                           std::get_if<SampleHeritageRecordCommitAdaptiveStretchBlock>(
+                               &spec.parameters)) {
+                const auto status = apply_adaptive_stretch(committed, *stretch);
+                if (status == StretchResult::Overflow)
+                    return fail(SampleHeritageRecordCommitStatus::SizeOverflow,
+                                "adaptive stretch output size overflowed");
+                if (status != StretchResult::Ok)
+                    return fail(SampleHeritageRecordCommitStatus::InvalidRecordChain,
+                                "adaptive stretch cannot render the selected zone");
             }
         }
 
@@ -468,8 +706,8 @@ SampleHeritageRecordCommitResult commit_sample_heritage_recording(
         metadata.committed_frames = committed.num_samples();
         metadata.committed_channels =
             static_cast<std::uint32_t>(committed.num_channels());
-        metadata.committed_audio_sha256 = audio_sha256(
-            static_cast<const Buffer<float>&>(committed).view(), committed_rate);
+        metadata.committed_audio_sha256 =
+            audio_sha256(static_cast<const Buffer<float>&>(committed).view(), committed_rate);
         metadata.provenance = provenance;
         auto json = write_metadata(metadata);
 

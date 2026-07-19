@@ -19,7 +19,7 @@ class CanonicalBytes {
 public:
     void byte(std::uint8_t value) { bytes_.push_back(value); }
 
-    template<typename Integer>
+    template <typename Integer>
     void integer(Integer value) {
         using Unsigned = std::make_unsigned_t<Integer>;
         auto bits = static_cast<std::uint64_t>(static_cast<Unsigned>(value));
@@ -29,7 +29,7 @@ public:
         }
     }
 
-    template<typename Number>
+    template <typename Number>
     void floating(Number value) {
         // JSON canonicalization also maps -0 to 0. Do the same before hashing
         // so authoring, JSON round trips, and prepared profiles share identity.
@@ -54,8 +54,7 @@ private:
 
 }  // namespace
 
-std::array<std::uint8_t, 32> sample_heritage_profile_digest(
-    const SampleHeritageProfile& profile) {
+std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritageProfile& profile) {
     CanonicalBytes canonical;
     canonical.text(kProfileDigestDomain);
     canonical.integer(kSampleHeritageProfileDigestVersion);
@@ -72,7 +71,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
         canonical.byte(static_cast<std::uint8_t>(spec.domain));
         canonical.byte(spec.bypass ? 1 : 0);
         canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             if constexpr (std::is_same_v<Block, SampleHeritageVoiceMachineDomainBlock>)
                 canonical.floating(block.sample_rate);
@@ -121,7 +121,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
         canonical.byte(static_cast<std::uint8_t>(spec.domain));
         canonical.byte(spec.bypass ? 1 : 0);
         canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             if constexpr (std::is_same_v<Block, SampleHeritageBusNoiseIdleBlock>) {
                 canonical.floating(block.noise_amplitude);
@@ -143,7 +144,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
         canonical.byte(static_cast<std::uint8_t>(spec.domain));
         canonical.byte(spec.bypass ? 1 : 0);
         canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
-        std::visit([&](const auto& block) {
+        std::visit(
+            [&](const auto& block) {
             using Block = std::decay_t<decltype(block)>;
             if constexpr (std::is_same_v<Block,
                                           SampleHeritageRecordInputDriveClipBlock>) {
@@ -166,13 +168,19 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
                 canonical.floating(block.dither_lsb);
                 canonical.integer(block.seed);
                 seed_policy(block.seed_policy);
-            } else {
-                canonical.integer(static_cast<std::uint8_t>(block.family));
+            } else if constexpr (std::is_same_v<Block,
+                                                    SampleHeritageRecordCommitCyclicStretchBlock>) {
                 canonical.floating(block.factor);
                 canonical.integer(block.cycle_samples);
-                canonical.integer(block.splice_samples);
-                canonical.integer(block.quality);
-                canonical.integer(block.width);
+                    canonical.integer(block.crossfade_samples);
+                    canonical.integer(block.zone_start_frame);
+                    canonical.integer(block.zone_end_frame);
+                } else {
+                    canonical.floating(block.factor);
+                    canonical.integer(block.decision_hop_samples);
+                    canonical.integer(block.search_radius_samples);
+                    canonical.integer(block.search_stride_samples);
+                    canonical.integer(block.crossfade_samples);
                 canonical.integer(block.zone_start_frame);
                 canonical.integer(block.zone_end_frame);
                 canonical.byte(block.stereo_link ? 1 : 0);
@@ -187,7 +195,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
         for (const auto& spec : profile.stages) {
             canonical.byte(spec.bypass ? 1 : 0);
             canonical.integer(static_cast<std::uint32_t>(spec.parameters.index()));
-            std::visit([&](const auto& stage) {
+            std::visit(
+                [&](const auto& stage) {
                 using Stage = std::decay_t<decltype(stage)>;
                 if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) {
                     canonical.floating(stage.sample_rate);
@@ -203,8 +212,7 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
                 } else if constexpr (std::is_same_v<Stage,
                                                     SampleHeritageDacHoldStage>) {
                     canonical.integer(stage.hold_samples);
-                } else if constexpr (std::is_same_v<
-                                         Stage,
+                } else if constexpr (std::is_same_v<Stage,
                                          SampleHeritageReconstructionFilterStage>) {
                     canonical.floating(stage.cutoff_hz);
                 } else if constexpr (std::is_same_v<Stage,
