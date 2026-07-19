@@ -264,6 +264,16 @@ TEST_CASE("DesignFrameView hover/bypass restyle rides draw_fragment",
         REQUIRE(canvas.svg_calls.size() == 2);
         CHECK(canvas.svg_calls[1].document.find("#ffffff") != std::string::npos);
     }
+    SECTION("hovered knob fragment carries its live value rotation") {
+        SvgRecordingCanvas canvas;
+        v.set_element_value(0, 1.0f);
+        v.simulate_hover({100, 100});
+        REQUIRE(v.element_hovered() == 0);
+        v.paint(canvas);
+        REQUIRE(canvas.svg_calls.size() == 2);
+        CHECK(canvas.svg_calls[1].document.find(
+                  "rotate(135.000 100.000 100.000)") != std::string::npos);
+    }
     SECTION("disabled element adds a desaturated fragment redraw") {
         SvgRecordingCanvas canvas;
         v.set_element_enabled(0, false);
