@@ -1,6 +1,12 @@
 add_library(pulp-audio)
 add_library(pulp::audio ALIAS pulp-audio)
 
+include(${PROJECT_SOURCE_DIR}/tools/cmake/PulpPortableWav.cmake)
+pulp_resolve_portable_wav(
+    "${PROJECT_SOURCE_DIR}"
+    _PULP_AUDIO_WAV_SOURCES
+    _PULP_AUDIO_WAV_INCLUDES)
+
 target_include_directories(pulp-audio
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -10,7 +16,7 @@ target_include_directories(pulp-audio
 target_sources(pulp-audio PRIVATE
     src/analyzer_provider.cpp
     src/audio_file.cpp
-    src/wav_decoder.cpp
+    ${_PULP_AUDIO_WAV_SOURCES}
     src/audio_focus.cpp
     src/audio_probe_json.cpp
     src/audio_scope.cpp
@@ -128,7 +134,7 @@ target_include_directories(pulp-audio PRIVATE
 
 # dr_libs and stb_vorbis (vendored, public domain / MIT)
 target_include_directories(pulp-audio PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/dr_libs
+    ${_PULP_AUDIO_WAV_INCLUDES}
 )
 
 # Platform-specific sources

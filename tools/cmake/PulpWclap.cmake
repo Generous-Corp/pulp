@@ -37,6 +37,11 @@ endif()
 
 # Repo root = two levels up from tools/cmake/.
 get_filename_component(_PULP_WCLAP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+include(${CMAKE_CURRENT_LIST_DIR}/PulpPortableWav.cmake)
+pulp_resolve_portable_wav(
+    "${_PULP_WCLAP_ROOT}"
+    _PULP_WCLAP_WAV_SOURCES
+    _PULP_WCLAP_WAV_INCLUDES)
 
 # choc (header-only). Resolution order:
 #   1. -DPULP_WCLAP_CHOC_INCLUDE=<dir containing choc/> (explicit override)
@@ -90,7 +95,7 @@ set(_PULP_WCLAP_INCLUDES
     ${_PULP_WCLAP_ROOT}/core/events/include
     ${_PULP_WCLAP_ROOT}/core/format/include
     ${_PULP_WCLAP_ROOT}/core/signal/include
-    ${_PULP_WCLAP_ROOT}/external/dr_libs
+    ${_PULP_WCLAP_WAV_INCLUDES}
     ${PULP_WCLAP_CHOC_INCLUDE}
     ${PULP_WCLAP_CLAP_INCLUDE}
 )
@@ -98,7 +103,7 @@ set(_PULP_WCLAP_INCLUDES
 # Portable DSP + CLAP-adapter subset — compiled once into an OBJECT library and
 # shared across every WebCLAP plugin target.
 set(_PULP_WCLAP_CORE_SOURCES
-    ${_PULP_WCLAP_ROOT}/core/audio/src/wav_decoder.cpp
+    ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_remote_controls.cpp
     ${_PULP_WCLAP_ROOT}/core/format/src/processor_f64.cpp
