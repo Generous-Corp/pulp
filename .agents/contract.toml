@@ -1,0 +1,251 @@
+# Pulp decisions contract — machine-readable, layered, agent-neutral.
+#
+# WHAT THIS IS
+#   Settled build-system / CI / release-automation decisions that agents
+#   (Claude, Codex, humans) must read at plan time before proposing changes to
+#   fleet or CI configuration. Each decision was bought with a concrete
+#   incident. Proposing to reverse one requires first proving the motivating
+#   incident class can no longer occur — see [meta].reversal_rule.
+#
+# LAYERING (doc 21 — layered portable contract)
+#   * layer = "default": generic scars that ANY repo using Shipyard + tartci +
+#     self-hosted runners inherits for free. Repo-agnostic best practice.
+#   * layer = "pulp": this repo's overlay — native/GPU/multi-format-plugin,
+#     warm-dir ODR, the CMakeLists VERSION-line + skill-sync collision, the
+#     macOS required gate, no paid overflow runners. Extends/overrides default.
+#   A different repo inherits the same "default" rows and swaps its own overlay.
+#
+# PUBLIC-SAFE (doc 24 — public pulp never requires Shipyard/tartci/fleet)
+#   This file is opt-in context. A public user running cmake / ctest / pulp
+#   build never needs it. It carries NO account emails, NO chat topology, and
+#   NO private host names — only issue numbers, env-var names, and file paths
+#   that already appear in the public repo. The read surface + hooks that
+#   consume it are advisory and no-op for external contributors.
+#
+# READ SURFACE (agent-neutral)
+#   tools/scripts/decisions_contract.py is the one checker both agents call.
+#     validate : parse + schema-check this file            (exit 0 / 2)
+#     surface  : given changed paths, print the matching rows (advisory, exit 0)
+#     list     : dump rows, optionally filtered by --layer
+#   Each decision's `guards` are glob patterns over fleet/CI config paths ONLY;
+#   a change that touches none of them surfaces nothing (the external-contributor
+#   no-op). `tags` are the re-proposal keywords (merge-queue, namespace,
+#   depend-mode, squash, auto-rebase, bump-at-merge, static-names, …).
+
+[schema]
+version = 1
+kind = "pulp.decisions-contract"
+# Fleet/CI config path globs. A change touching none of these is a no-op for
+# the read surface (this is the external-contributor guarantee). Individual
+# decisions narrow within this set via their own `guards`.
+config_paths = [
+    ".github/workflows/**",
+    ".shipyard/config.toml",
+    ".shipyard.local/**",
+    "tools/shipyard.toml",
+    "tools/local-ci/**",
+    "tools/ci/**",
+    ".agents/contract.toml",
+]
+
+[meta]
+reversal_rule = """
+Most "obviously wrong" designs here are scar tissue. Before proposing removal,
+find the incident that installed the decision and prove that incident class can
+no longer occur (Step Zero of the friction-report loop). Two confident proposals
+were retracted in one week for skipping this.
+"""
+enforcement_boundary = """
+The authoritative block is the agent-neutral CLI + CI/server-side required
+checks. Hooks (Claude PreToolUse, Codex SessionStart/PostToolUse) are
+defense-in-depth / context / audit ONLY — Codex PreToolUse cannot hard-block, so
+no hook is the boundary. This contract is a read-at-start pointer, not a veto.
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DEFAULT LAYER — inherited by any Shipyard + tartci + self-hosted repo
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[decision]]
+id = 1
+layer = "default"
+tags = ["staged-rollout", "queue-tick", "reap-only"]
+title = "A staged-rollout gate stays in its conservative mode until graduated by a canary + scenario battery."
+why = "A proven janitor (reap) must not be blind-flipped into an unobserved merge actor on the gating path."
+do_not = "Flip all hosts to the active mode at once: it trades a proven-safe behavior for an unobserved one on the path that gates every merge."
+guards = [".github/workflows/**", "tools/ci/**", "tools/local-ci/**"]
+
+[[decision]]
+id = 2
+layer = "default"
+tags = ["auto-rebase", "behind", "dirty"]
+title = "No unattended auto-rebase of BEHIND/DIRTY PRs — surface only."
+why = "Version-line races make BEHIND routine; a scripted rebase once mis-resolved and flattened a PR's diff to zero files."
+do_not = "A 'clever' unattended rebase: mis-resolving the bump lands wrong content on main."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 3
+layer = "default"
+tags = ["adopt-head", "recovery"]
+title = "Never auto --adopt-head; recovery pins the stored SHA, and a head change is reported, not adopted."
+why = "--adopt-head can validate and merge a force-push the agent never intended."
+do_not = "Head adoption: it reintroduces merge-unintended-head by construction."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 4
+layer = "default"
+tags = ["static-names", "runner-names", "held", "retry-storm"]
+title = "Self-hosted runner names are EPHEMERAL, never static; a runnerless required lane is HELD, never a retry storm."
+why = "A static runner-name zombie (HTTP 409/422, token lacking admin) once blocked every PR ~1h; the ephemeral lane kept serving."
+do_not = "Static runner names or blind re-dispatch: a reused name collides with its own corpse."
+guards = [".github/workflows/**", "tools/local-ci/**", "tools/ci/**"]
+
+[[decision]]
+id = 5
+layer = "default"
+tags = ["branch-protection", "auto-merge"]
+title = "A repo with no branch protection cannot host required-check-based auto-merge; host-side mechanisms must cover it."
+why = "Arming GitHub-native auto-merge where no required check exists is a silent no-op."
+do_not = "Arming GitHub auto-merge on an unprotected repo: it does nothing."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 6
+layer = "default"
+tags = ["pinned-version", "fleet-version"]
+title = "One pinned CI-tool version fleet-wide."
+why = "Version drift across hosts (e.g. 0.68.0 vs 0.70.0) gives divergent gate semantics between machines validating the same PR."
+do_not = "Per-host version experiments."
+guards = ["tools/shipyard.toml", ".github/workflows/**"]
+
+[[decision]]
+id = 12
+layer = "default"
+tags = ["recovery", "auto-merge", "never-merge"]
+title = "Recovery VALIDATES, never merges; merges happen only via the platform's native auto-merge or the CI tool's fail-closed auto-merge."
+why = "A recovery path with its own merge code is a second, untested merge implementation."
+do_not = "A recovery path that merges directly."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 13
+layer = "default"
+tags = ["reap", "open-state", "fail-closed"]
+title = "Never reap an OPEN work-state record; fail closed on read errors."
+why = "The large safe reap discarded only MERGED/CLOSED records; reaping OPEN converts 'recovery pending' into 'PR forgotten'."
+do_not = "Reaping OPEN records, or failing open on a read error."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 14
+layer = "default"
+tags = ["retry", "terminal-failure"]
+title = "Terminal validation failures are NOT retried; only interruptions, bounded attempts, with persisted backoff."
+why = "Retrying a genuine failure is infinite background load on the gate."
+do_not = "Retry-until-green on real failures."
+guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
+
+[[decision]]
+id = 15
+layer = "default"
+tags = ["recovery", "cross-host", "fencing"]
+title = "Recovery is origin-host-only; no cross-host takeover without real fencing."
+why = "Host-local state stores have no fencing token; two hosts would race."
+do_not = "Cross-host takeover before an incident demands it (none has)."
+guards = ["tools/ci/**", "tools/local-ci/**"]
+
+[[decision]]
+id = 18
+layer = "default"
+tags = ["uncommitted", "worktrees", "commit-early"]
+title = "Uncommitted work is unrecoverable BY DESIGN; the mitigation is habit (commit early, work in worktrees), not a mechanism."
+why = "Session/agent relaunches kill in-flight state; no layer resurrects uncommitted bytes."
+do_not = "Any 'mechanism' to resurrect uncommitted work: it is a governing agent in disguise."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 20
+layer = "default"
+tags = ["ghapp", "depend-mode", "ccache", "3504"]
+title = "Use the app-authenticated wrapper for all GitHub reads; ccache depend-mode stays OFF (issue 3504)."
+why = "Anonymous/bare reads trip rate-limit false positives; ccache depend-mode is a known correctness scar (issue 3504)."
+do_not = "'Simplifying' auth to bare gh/anon curl, or turning ccache depend-mode ON for speed."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PULP OVERLAY — this repo only (native/GPU/plugin, warm dirs, macOS gate)
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[decision]]
+id = 7
+layer = "pulp"
+tags = ["namespace", "paid-runners", "cost"]
+title = "No paid overflow (Namespace) runners; never point PULP_NAMESPACE_*_RUNS_ON_JSON at self-hosted."
+why = "Cost, plus a hijacked var once dumped sanitizer lanes onto the required gate's hardware and broke it across PRs."
+do_not = "Repurposing PULP_NAMESPACE_*_RUNS_ON_JSON for anything, or auto-routing to paid cloud runners."
+guards = [".github/workflows/**", "tools/local-ci/**", "tools/ci/**"]
+
+[[decision]]
+id = 8
+layer = "pulp"
+tags = ["warm-dir", "odr", "clean-per-run", "ccache"]
+title = "Warm build dirs on self-hosted; ODR-prone lanes stay on GitHub-hosted UNTIL the ccache fix + clean-per-run/VM prerequisite lands."
+why = "Warm-dir ODR is a known class (SEGFAULT/exit-8 false reds AND false greens masking a real main break); fresh builds are ~25 min."
+do_not = "'Clean every run' WITHOUT first fixing shared ccache (doubles gate time), or moving heavy lanes onto warm dirs (reintroduces ODR on the gate)."
+guards = [".github/workflows/**", ".shipyard/config.toml", "tools/ci/**"]
+
+[[decision]]
+id = 9
+layer = "pulp"
+tags = ["debug-lane", "mac-lane", "release"]
+title = "The Shipyard macOS lane builds DEBUG on purpose."
+why = "-O0 caught a real ODR/UB (snap_to_zero) that a Release build masks by inlining."
+do_not = "Flipping the macOS lane to Release for speed."
+guards = [".shipyard/config.toml", ".github/workflows/**"]
+
+[[decision]]
+id = 10
+layer = "pulp"
+tags = ["bump-at-merge", "version-bump", "in-branch", "1008"]
+title = "The version bump lives IN THE BRANCH, verifiable pre-merge — never applied at merge."
+why = "A fix once merged bumpless (issue 1008) → no tag → no release, silently. Bump-at-merge was proposed 2026-07-14 and retracted the same day."
+do_not = "Bump-at-merge in any costume. A 'single writer at land' design must show on paper how it preserves the pre-merge guarantee before graduating."
+guards = [".github/workflows/**", ".shipyard/config.toml"]
+
+[[decision]]
+id = 11
+layer = "pulp"
+tags = ["merge-queue", "lane-fallback"]
+title = "The merge queue is the accepted treadmill fix, BLOCKED on lane auto-fallback landing first."
+why = "Shelved three times: a queue makes the wedge-prone required lane a hard dependency of every merge until auto-fallback exists."
+do_not = "Re-proposing the queue before lane auto-fallback is green, or alternatives that drop the in-branch bump guarantee (decision 10)."
+guards = [".github/workflows/**", ".shipyard/config.toml"]
+
+[[decision]]
+id = 16
+layer = "pulp"
+tags = ["squash", "auto-merge", "bump-marker"]
+title = "Pulp auto-merge uses --merge, never squash."
+why = "Squash folds the bump-marker commit into the squash, tripping an auto-release false alarm."
+do_not = "Switching to squash for 'clean history'."
+guards = [".github/workflows/**", "tools/ci/**"]
+
+[[decision]]
+id = 17
+layer = "pulp"
+tags = ["strict", "branch-protection", "up-to-date"]
+title = "strict up-to-date branch protection stays ON for pulp main."
+why = "It is what keeps main always-green; the stale-base silent-revert class lives in non-strict merges."
+do_not = "Disabling strict to kill the rebase treadmill (the merge queue is the cure, not disabling strict)."
+guards = [".github/workflows/**"]
+
+[[decision]]
+id = 19
+layer = "pulp"
+tags = ["skill-sync", "version-bump", "gates", "prepush"]
+title = "Skill-sync + version-bump gates are enforcing; the only bypass is per-commit trailers, never the nuclear skip."
+why = "Advisory mode burned 80+ min/PR; a nuclear PULP_SKIP_PREPUSH on a new commit burned a roundtrip anyway."
+do_not = "PULP_SKIP_PREPUSH=1 on new commits to dodge a gate; use the scoped Skill-Update / Version-Bump trailers instead."
+guards = [".github/workflows/**", ".shipyard/config.toml"]

@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Codex-native hooks for the decisions contract (docs 21/25). DEFENSE-IN-DEPTH",
+    "ONLY: Codex PreToolUse cannot hard-block (it supports systemMessage only and",
+    "continues after a failed hook), so nothing here is the enforcement boundary —",
+    "the authoritative block is the agent-neutral CLI validate gate + CI required",
+    "checks. These hooks inject the contract pointer at SessionStart and surface the",
+    "relevant rows after a fleet/CI config edit, for context/audit.",
+    "",
+    "Scripts resolve the repo root via `git rev-parse --show-toplevel` (see each",
+    "script) — no CLAUDE_PLUGIN_ROOT — so Claude and Codex invoke the SAME scripts",
+    "and the SAME neutral checker (tools/scripts/decisions_contract.py). Both hooks",
+    "are advisory, exit 0, and no-op for a checkout without the contract file, so a",
+    "public/external contributor is never blocked."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/hooks/scripts/decisions-contract-pointer.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/hooks/scripts/decisions-contract-hint.sh\"",
+            "timeout": 3000
+          }
+        ]
+      }
+    ]
+  }
+}
