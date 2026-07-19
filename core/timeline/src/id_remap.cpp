@@ -1,5 +1,6 @@
 #include <pulp/timeline/model.hpp>
 
+#include "automation_document_internal.hpp"
 #include "project_state_access.hpp"
 
 #include <algorithm>
@@ -86,6 +87,7 @@ std::optional<ModelError> preflight(const Track& track) {
     std::vector<ItemId> ids{track.id()};
     for (const auto& device : track.device_chain())
         ids.push_back(device.id);
+    detail::append_automation_owned_ids(track.automation_lanes(), ids);
     for (const auto& clip : track.clips()) {
         if (std::holds_alternative<OpaqueContent>(clip.content()))
             return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -100,6 +102,7 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
         ids.push_back(track.id());
         for (const auto& device : track.device_chain())
             ids.push_back(device.id);
+        detail::append_automation_owned_ids(track.automation_lanes(), ids);
         for (const auto& clip : track.clips()) {
             if (std::holds_alternative<OpaqueContent>(clip.content()))
                 return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -149,6 +152,18 @@ void allocate_clip_owned(const Clip& clip, IdRemapTable& table, ItemIdAllocator&
         }
 }
 
+void allocate_automation_owned(const AutomationLane& lane, IdRemapTable& table,
+                               ItemIdAllocator& allocator, std::optional<ModelError>& error) {
+    if (error)
+        return;
+    error = allocate_owned(table, allocator, lane.id());
+    for (const auto& point : lane.curve().points()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, point.id);
+    }
+}
+
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
                                                  ExternalIdFixup external) {
     std::vector<DevicePlacement> device_chain;
@@ -164,10 +179,20 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         clips.push_back(std::move(rebuilt).value());
     }
+    std::vector<AutomationLane> automation_lanes;
+    automation_lanes.reserve(track.automation_lanes().size());
+    for (const auto& lane : track.automation_lanes()) {
+        auto rebuilt = detail::remap_attached_automation_lane(lane, table);
+        if (!rebuilt)
+            return fail<Track>(rebuilt.error().code, rebuilt.error().item,
+                               rebuilt.error().related_item);
+        automation_lanes.push_back(std::move(rebuilt).value());
+    }
     return Track::create(TrackInput{.id = *table.find(track.id()),
                                     .name = track.name(),
                                     .clips = std::move(clips),
-                                    .device_chain = std::move(device_chain)});
+                                    .device_chain = std::move(device_chain),
+                                    .automation_lanes = std::move(automation_lanes)});
 }
 
 runtime::Result<Sequence, ModelError>
@@ -221,6 +246,8 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
     }
     for (const auto& clip : track.clips())
         allocate_clip_owned(clip, table, working, error);
+    for (const auto& lane : track.automation_lanes())
+        allocate_automation_owned(lane, table, working, error);
     if (error)
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
@@ -250,6 +277,8 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
         }
         for (const auto& clip : track.clips())
             allocate_clip_owned(clip, table, working, error);
+        for (const auto& lane : track.automation_lanes())
+            allocate_automation_owned(lane, table, working, error);
     }
     if (error)
         return fail<RemappedSequence>(error->code, error->item, error->related_item);
@@ -336,7 +365,7 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
         };
         const auto mapped_item = table.find(identity.item);
         if (!mapped_item || !remap_owner(location.sequence_id) || !remap_owner(location.track_id) ||
-            !remap_owner(location.clip_id))
+            !remap_owner(location.clip_id) || !remap_owner(location.automation_lane_id))
             return fail<RemappedProject>(ModelErrorCode::InvalidSchemaIdentity, identity.item);
         remapped_identities.push_back({*mapped_item, location});
     }

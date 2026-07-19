@@ -6,6 +6,7 @@
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
+#include <pulp/timeline/automation_lane.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
 
@@ -53,6 +54,8 @@ enum class ModelErrorCode : std::uint8_t {
     OpaqueContentLimitExceeded,
     OpaqueContentCannotRemap,
     InvalidClipPlaybackProperties,
+    MissingAutomationTarget,
+    DuplicateAutomationTarget,
 };
 
 struct ModelError {
@@ -282,6 +285,7 @@ struct TrackInput {
     std::string name;
     std::vector<Clip> clips;
     std::vector<DevicePlacement> device_chain;
+    std::vector<AutomationLane> automation_lanes;
 };
 
 class Track {
@@ -337,6 +341,8 @@ class Track {
     // Replaces one clip by identity with O(log n) path-copy updates. The old
     // Track remains valid and unchanged; untouched index subtrees are shared.
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
+    runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
+    runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -347,6 +353,9 @@ class Track {
     // Preserves authored processing order. Returned storage is snapshot-owned.
     std::span<const DevicePlacement> device_chain() const noexcept;
     const DevicePlacement* find_device_placement(ItemId id) const noexcept;
+    // Automation lane order is canonical by identity and carries no processing semantics.
+    std::span<const AutomationLane> automation_lanes() const noexcept;
+    const AutomationLane* find_automation_lane(ItemId id) const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -400,6 +409,8 @@ enum class ItemKind : std::uint8_t {
     Clip,
     Note,
     DevicePlacement,
+    AutomationLane,
+    AutomationPoint,
 };
 
 struct ItemLocation {
@@ -408,6 +419,7 @@ struct ItemLocation {
     ItemId track_id;
     ItemId clip_id;
     bool active = false;
+    ItemId automation_lane_id;
 };
 
 enum class IdentityMutationKind : std::uint8_t { Insert, Deactivate, Reactivate };

@@ -40,13 +40,13 @@ invariants.
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
   segments retain the left value until the next point. `value_at()` is for
   control-thread or compile-time queries, never the audio-thread scheduler.
-- `AutomationLane` is an unattached immutable value that binds one curve to a
-  format-neutral device-placement `ItemId` and opaque 32-bit parameter ID. It
-  validates the two value identities only; the placement need not exist in a
-  Project, and the lane is not registered, persisted, command-addressable, or
-  attached to a playable Project yet. Playback can compile and exercise the
-  standalone value; document ownership and host delivery remain separate later
-  contracts.
+- `AutomationLane` is an immutable value that binds one curve to a
+  format-neutral device-placement `ItemId` and opaque 32-bit parameter ID. Its
+  standalone factory validates only the value identities. Once attached, Track
+  owns lanes in canonical identity order, requires their target placements to
+  exist in its device chain, and permits only one lane per placement/parameter
+  pair. Lane and point IDs are Project identities owned by that Track; host
+  delivery remains a separate contract.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
@@ -89,7 +89,9 @@ invariants.
   Clip/Track/Sequence remaps and is translated by `ExternalIdFixup`; failure is
   atomic and does not advance the caller's allocator. Preflight the complete
   owned subtree for duplicate IDs before allocating; this includes parent IDs,
-  cross-track collisions, clips, and note events.
+  cross-track collisions, clips, note events, automation lanes, and automation
+  points. Lane and point IDs remap as owned identities, target placement IDs
+  remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
 ## Editing contracts
@@ -128,7 +130,7 @@ invariants.
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,
-publication, playback, document-attached automation lanes or delivery, launch
+publication, playback or automation delivery, launch
 slots, takes, nesting, device implementations, routing, audio, format adapters,
 or UI. Add those in their owning modules instead of widening the command and
 persistence core opportunistically.
