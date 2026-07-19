@@ -271,7 +271,8 @@ per-ABI entry point for it.** Go through the plugin's own state:
   module or the bounded WAV decoder. Even an unattached authoring-only value
   extraction that adds one engine `.cpp` must update both curated lists in the
   same commit; passing the native dependency-floor check does not prove the web
-  closure.
+  closure. The playback automation program and cursor are portable engine
+  sources; keep them threadless and independent of state, host, and format code.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP

@@ -3,7 +3,7 @@
 
 modules:
   - name: playback
-    summary: Master transport plus immutable incrementally compiled playback programs, bounded WAV-backed arrangement audio rendering, block-coherent publication, and stable renderer shells
+    summary: Master transport immutable incrementally compiled track and automation programs bounded deterministic cursors WAV-backed arrangement audio rendering block-coherent publication and stable renderer shells
     status: experimental
     dependencies: [runtime, timebase, timeline, audio, midi]
     docs: reference/modules.md#playback
@@ -15,7 +15,7 @@ modules:
     docs: reference/modules.md#timebase
 
   - name: timeline
-    summary: Immutable timeline snapshots automation curves and unattached parameter-target lane values with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
+    summary: Immutable timeline snapshots automation curves and standalone-compilable unattached parameter-target lane values with path-copy indexes typed atomic transactions bounded journal and undo durable assets schema registry and exact JSON persistence
     status: experimental
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline
