@@ -301,8 +301,8 @@ ctest --test-dir build-aql \
 ```
 
 The checked-in interpolation benchmark under
-`docs/validation/sampler-interpolation/` is a current 108-row Apple M5 Max
-Release capture. Its verifier checks the complete matrix, acceptance budgets,
+`docs/validation/sampler-interpolation/` is a current 108-row Release capture.
+Its verifier checks the complete matrix, acceptance budgets,
 source bundle, binary hash, environment, and negative controls. Later sampler
 integration commits do not make it stale when the verifier's content-addressed
 interpolation source bundle remains unchanged; the current source-only verifier
