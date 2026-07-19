@@ -1388,5 +1388,144 @@ class NodeDispatchTest(unittest.TestCase):
                 self.assertEqual(diag["kind"], "unsupported_node")
 
 
+class AutoLayoutTest(unittest.TestCase):
+    """Auto-layout completion: wrap extras, child grow/align, GRID, aspect,
+    min/max. Mirrors the plugin lane (extract-pure.ts::extractLayout +
+    test/layout.test.ts) and the .fig lane (fig/scene.mjs + fig.test.mjs).
+    The layout keys use the consumer's camelCase spelling — the exact members
+    design_ir_json.cpp::parse_ir_layout reads."""
+
+    BB = {"x": 0, "y": 0, "width": 100, "height": 100}
+
+    def test_wrap_emits_counter_axis_gap_and_align_content(self):
+        # A row's wrapped tracks stack vertically → rowGap; SPACE_BETWEEN is
+        # the only non-default distribution.
+        row = frx.extract_layout({"type": "FRAME", "layoutMode": "HORIZONTAL",
+                                  "layoutWrap": "WRAP", "counterAxisSpacing": 12,
+                                  "counterAxisAlignContent": "SPACE_BETWEEN"})
+        self.assertTrue(row["wrap"])
+        self.assertEqual(row["rowGap"], 12)
+        self.assertNotIn("columnGap", row)
+        self.assertEqual(row["alignContent"], "space-between")
+        # A column's tracks stack horizontally → columnGap; AUTO align-content
+        # is the default packing and emits nothing.
+        col = frx.extract_layout({"type": "FRAME", "layoutMode": "VERTICAL",
+                                  "layoutWrap": "WRAP", "counterAxisSpacing": 8,
+                                  "counterAxisAlignContent": "AUTO"})
+        self.assertEqual(col["columnGap"], 8)
+        self.assertNotIn("alignContent", col)
+        # Non-wrapping stacks must not leak the wrapped-track fields.
+        flat = frx.extract_layout({"type": "FRAME", "layoutMode": "HORIZONTAL",
+                                   "counterAxisSpacing": 12,
+                                   "counterAxisAlignContent": "SPACE_BETWEEN"})
+        self.assertNotIn("rowGap", flat)
+        self.assertNotIn("alignContent", flat)
+
+    def test_child_grow_and_align_gated_on_flex_parent(self):
+        flex_parent = {"type": "FRAME", "layoutMode": "HORIZONTAL"}
+        child = {"type": "RECTANGLE", "layoutGrow": 2, "layoutAlign": "STRETCH"}
+        l = frx.extract_layout(child, flex_parent)
+        self.assertEqual(l["flexGrow"], 2)
+        self.assertEqual(l["alignSelf"], "stretch")
+        # INHERIT is the flex default — omitting align-self IS inherit.
+        inherit = frx.extract_layout({"type": "TEXT", "layoutAlign": "INHERIT"}, flex_parent)
+        self.assertNotIn("alignSelf", inherit)
+        # Figma leaves the fields stale under a non-auto-layout parent.
+        plain = frx.extract_layout(child, {"type": "FRAME", "layoutMode": "NONE"})
+        self.assertNotIn("flexGrow", plain)
+        self.assertNotIn("alignSelf", plain)
+        # An ABSOLUTE stack child is out of flow: no grow/align either.
+        absolute = frx.extract_layout({**child, "layoutPositioning": "ABSOLUTE"}, flex_parent)
+        self.assertNotIn("flexGrow", absolute)
+        self.assertNotIn("alignSelf", absolute)
+
+    def test_grid_container_and_child_placement(self):
+        grid = {"type": "FRAME", "layoutMode": "GRID",
+                "gridColumnCount": 4, "gridRowCount": 3,
+                "gridColumnGap": 6, "gridRowGap": 4}
+        l = frx.extract_layout(grid)
+        self.assertEqual(l["display"], "grid")
+        self.assertEqual(l["gridTemplateColumns"], "repeat(4, 1fr)")
+        self.assertEqual(l["gridTemplateRows"], "repeat(3, 1fr)")
+        self.assertEqual(l["columnGap"], 6)
+        self.assertEqual(l["rowGap"], 4)
+        # 0-based anchors + spans → CSS 1-based lines.
+        cell = frx.extract_layout({"type": "RECTANGLE",
+                                   "gridColumnAnchorIndex": 1, "gridRowAnchorIndex": 0,
+                                   "gridRowSpan": 2}, grid)
+        self.assertEqual(cell["gridColumn"], "2")
+        self.assertEqual(cell["gridRow"], "1 / span 2")
+        # Cell anchors are grid-only: a flex parent must not read them.
+        flex_child = frx.extract_layout({"type": "RECTANGLE", "gridColumnAnchorIndex": 1},
+                                        {"type": "FRAME", "layoutMode": "HORIZONTAL"})
+        self.assertNotIn("gridColumn", flex_child)
+
+    def test_grid_children_flow_without_position_or_constraints(self):
+        # A GRID parent lays its children out (cell placement), so they must
+        # not get absolute coordinates or stale constraints — the same gate
+        # flex children go through.
+        tree = {"type": "FRAME", "name": "Grid", "id": "0:1", "layoutMode": "GRID",
+                "gridColumnCount": 2, "gridRowCount": 2,
+                "absoluteBoundingBox": self.BB,
+                "children": [
+                    {"type": "FRAME", "name": "cell", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 10, "y": 10, "width": 40, "height": 40},
+                     "gridColumnAnchorIndex": 1, "gridRowAnchorIndex": 1,
+                     "constraints": {"horizontal": "LEFT", "vertical": "TOP"}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        cell = ir["children"][0]
+        self.assertEqual(cell["layout"]["gridColumn"], "2")
+        self.assertNotIn("position", cell.get("style", {}))
+        self.assertNotIn("constraints", cell)
+
+    def test_absolute_stack_child_gets_coordinates(self):
+        # layoutPositioning ABSOLUTE puts the child back in the parent's
+        # coordinate space — before this slice it got NEITHER flex NOR
+        # position and collapsed onto the stack's origin.
+        tree = {"type": "FRAME", "name": "Stack", "id": "0:1", "layoutMode": "VERTICAL",
+                "absoluteBoundingBox": self.BB,
+                "children": [
+                    {"type": "FRAME", "name": "Badge", "id": "0:2",
+                     "layoutPositioning": "ABSOLUTE",
+                     "absoluteBoundingBox": {"x": 88, "y": 2, "width": 10, "height": 10}},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        badge = ir["children"][0]
+        self.assertEqual(badge["style"]["position"], "absolute")
+        self.assertEqual(badge["style"]["left"], 88)
+        self.assertEqual(badge["style"]["top"], 2)
+
+    def test_aspect_ratio_gated_on_flexible_axis(self):
+        flex_parent = {"type": "FRAME", "layoutMode": "HORIZONTAL"}
+        # REST documents a number; the Plugin API shape is a {x,y} Vector —
+        # both must resolve.
+        num = frx.extract_layout({"type": "RECTANGLE", "targetAspectRatio": 2.0,
+                                  "layoutGrow": 1}, flex_parent)
+        self.assertEqual(num["aspectRatio"], 2.0)
+        vec = frx.extract_layout({"type": "RECTANGLE", "targetAspectRatio": {"x": 4, "y": 2},
+                                  "layoutAlign": "STRETCH"}, flex_parent)
+        self.assertEqual(vec["aspectRatio"], 2.0)
+        # Fully fixed: the solved w/h already encode the ratio.
+        fixed = frx.extract_layout({"type": "RECTANGLE", "targetAspectRatio": 2.0}, flex_parent)
+        self.assertNotIn("aspectRatio", fixed)
+
+    def test_min_max_sizing_lands_in_style(self):
+        tree = {"type": "FRAME", "name": "Root", "id": "0:1",
+                "absoluteBoundingBox": self.BB,
+                "children": [
+                    {"type": "FRAME", "name": "clamped", "id": "0:2",
+                     "absoluteBoundingBox": {"x": 0, "y": 0, "width": 50, "height": 50},
+                     "minWidth": 120, "maxWidth": 400, "maxHeight": 0},
+                ]}
+        ir, _ctx = frx.node_tree_to_ir(tree)
+        s = ir["children"][0]["style"]
+        self.assertEqual(s["min_width"], 120)
+        self.assertEqual(s["max_width"], 400)
+        # A 0/absent axis must not emit — a zero max would collapse the node.
+        self.assertNotIn("max_height", s)
+        self.assertNotIn("min_height", s)
+
+
 if __name__ == "__main__":
     unittest.main()

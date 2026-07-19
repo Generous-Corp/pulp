@@ -261,6 +261,138 @@ export function mapAxisSize(v: FrameNode["layoutSizingHorizontal"]): ExtractedLa
   }
 }
 
+/// The parent's layout mode when (and only when) it lays its children out:
+/// "HORIZONTAL" / "VERTICAL" (flex) or "GRID" (cell placement). null for
+/// plain frames, groups, and non-container parents, whose children are
+/// positioned absolutely in the parent's coordinate space.
+export function parentLayoutMode(parent: SceneNode | null): "HORIZONTAL" | "VERTICAL" | "GRID" | null {
+  if (!parent) return null;
+  if (parent.type !== "FRAME" && parent.type !== "COMPONENT" && parent.type !== "INSTANCE" && parent.type !== "COMPONENT_SET") {
+    return null;
+  }
+  const mode = (parent as FrameNode).layoutMode;
+  return mode === "HORIZONTAL" || mode === "VERTICAL" || mode === "GRID" ? mode : null;
+}
+
+/// Auto-layout extraction — the container's own layout AND the properties
+/// this node carries as a CHILD of an auto-layout parent (layoutGrow /
+/// layoutAlign / grid cell placement), which is why the parent is a
+/// parameter: those fields are meaningless — and Figma leaves them stale —
+/// outside an auto-layout parent, so they must be gated on parent context,
+/// not just present on the node.
+export function extractLayout(n: SceneNode, parent: SceneNode | null): ExtractedLayout {
+  const l: ExtractedLayout = {};
+  const isContainer =
+    n.type === "FRAME" || n.type === "COMPONENT" || n.type === "INSTANCE" || n.type === "COMPONENT_SET";
+  if (isContainer) {
+    const f = n as FrameNode;
+    if (f.layoutMode === "HORIZONTAL" || f.layoutMode === "VERTICAL") {
+      l.display = "flex";
+      l.direction = f.layoutMode === "HORIZONTAL" ? "row" : "column";
+      l.gap = f.itemSpacing ?? 0;
+      l.padding = {
+        top: f.paddingTop ?? 0,
+        right: f.paddingRight ?? 0,
+        bottom: f.paddingBottom ?? 0,
+        left: f.paddingLeft ?? 0,
+      };
+      l.justify = mapPrimaryAxisAlign(f.primaryAxisAlignItems);
+      l.align = mapCounterAxisAlign(f.counterAxisAlignItems);
+      l.wrap = f.layoutWrap === "WRAP";
+      if (l.wrap) {
+        // counterAxisSpacing is the gap BETWEEN wrapped tracks — cross-axis,
+        // so a row's tracks stack vertically (rowGap) and a column's
+        // horizontally (columnGap). AUTO align-content is the default
+        // packing; only SPACE_BETWEEN changes distribution.
+        if (typeof f.counterAxisSpacing === "number") {
+          if (f.layoutMode === "HORIZONTAL") l.rowGap = f.counterAxisSpacing;
+          else l.columnGap = f.counterAxisSpacing;
+        }
+        if (f.counterAxisAlignContent === "SPACE_BETWEEN") l.alignContent = "space-between";
+      }
+      l.width_mode = mapAxisSize(f.layoutSizingHorizontal);
+      l.height_mode = mapAxisSize(f.layoutSizingVertical);
+    } else if (f.layoutMode === "GRID") {
+      // Figma GRID auto-layout → the IR's CSS-grid contract. The Plugin API
+      // exposes counts + gaps (uniform tracks), so the template is
+      // repeat(N, 1fr); per-child cells arrive as 0-based anchors below.
+      l.display = "grid";
+      if (typeof f.gridColumnCount === "number" && f.gridColumnCount > 0) {
+        l.gridTemplateColumns = `repeat(${f.gridColumnCount}, 1fr)`;
+      }
+      if (typeof f.gridRowCount === "number" && f.gridRowCount > 0) {
+        l.gridTemplateRows = `repeat(${f.gridRowCount}, 1fr)`;
+      }
+      if (typeof f.gridRowGap === "number") l.rowGap = f.gridRowGap;
+      if (typeof f.gridColumnGap === "number") l.columnGap = f.gridColumnGap;
+    } else if (f.layoutMode === "NONE" || f.layoutMode === undefined) {
+      // Children positioned absolutely — emit no display/direction
+      l.width_mode = "fixed";
+      l.height_mode = "fixed";
+    }
+  }
+
+  // Child-side properties — only for a FLOWING child of an auto-layout
+  // parent. layoutPositioning ABSOLUTE opts the child out of the stack; it
+  // takes the absolute-position + constraints path in walk() instead, and
+  // grow/align here would fight that placement.
+  const pMode = parentLayoutMode(parent);
+  const flowing =
+    pMode !== null &&
+    !("layoutPositioning" in n && (n as SceneNode & { layoutPositioning?: string }).layoutPositioning === "ABSOLUTE");
+  if (flowing && (pMode === "HORIZONTAL" || pMode === "VERTICAL")) {
+    const child = n as SceneNode & { layoutGrow?: number; layoutAlign?: string };
+    if (typeof child.layoutGrow === "number" && child.layoutGrow > 0) l.flexGrow = child.layoutGrow;
+    // INHERIT is the default (follow the parent's counterAxisAlignItems) —
+    // exactly what omitting align-self does, so it emits nothing.
+    switch (child.layoutAlign) {
+      case "STRETCH": l.alignSelf = "stretch"; break;
+      case "MIN": l.alignSelf = "flex-start"; break;
+      case "MAX": l.alignSelf = "flex-end"; break;
+      case "CENTER": l.alignSelf = "center"; break;
+      default: break;
+    }
+  }
+  if (flowing && pMode === "GRID") {
+    // 0-based anchors + spans → CSS 1-based grid lines.
+    const g = n as SceneNode & {
+      gridColumnAnchorIndex?: number;
+      gridRowAnchorIndex?: number;
+      gridColumnSpan?: number;
+      gridRowSpan?: number;
+    };
+    if (typeof g.gridColumnAnchorIndex === "number" && g.gridColumnAnchorIndex >= 0) {
+      const span = g.gridColumnSpan ?? 1;
+      l.gridColumn = span > 1 ? `${g.gridColumnAnchorIndex + 1} / span ${span}` : `${g.gridColumnAnchorIndex + 1}`;
+    }
+    if (typeof g.gridRowAnchorIndex === "number" && g.gridRowAnchorIndex >= 0) {
+      const span = g.gridRowSpan ?? 1;
+      l.gridRow = span > 1 ? `${g.gridRowAnchorIndex + 1} / span ${span}` : `${g.gridRowAnchorIndex + 1}`;
+    }
+  }
+
+  // targetAspectRatio only constrains an axis the layout can flex — a fully
+  // fixed node already carries Figma's solved w/h, and the ratio would fight
+  // that over rounding. Flexible = grow, stretch, or a non-FIXED sizing mode.
+  const withRatio = n as SceneNode & {
+    targetAspectRatio?: { x: number; y: number } | null;
+    layoutGrow?: number;
+    layoutAlign?: string;
+    layoutSizingHorizontal?: string;
+    layoutSizingVertical?: string;
+  };
+  const ar = "targetAspectRatio" in n ? withRatio.targetAspectRatio : null;
+  if (ar && typeof ar.x === "number" && typeof ar.y === "number" && ar.x > 0 && ar.y > 0) {
+    const flexible =
+      (typeof withRatio.layoutGrow === "number" && withRatio.layoutGrow > 0) ||
+      withRatio.layoutAlign === "STRETCH" ||
+      withRatio.layoutSizingHorizontal === "HUG" || withRatio.layoutSizingHorizontal === "FILL" ||
+      withRatio.layoutSizingVertical === "HUG" || withRatio.layoutSizingVertical === "FILL";
+    if (flexible) l.aspectRatio = ar.x / ar.y;
+  }
+  return l;
+}
+
 // Resize constraints, passed through in the Plugin API's own spelling
 // (MIN/MAX/CENTER/STRETCH/SCALE) — the C++ importer normalizes tokens, so a
 // mapping here would just be a second dialect to keep in sync. Not every

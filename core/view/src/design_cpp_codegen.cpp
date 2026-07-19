@@ -541,19 +541,34 @@ void emit_common_layout(std::ostringstream& out,
               "flex.justify_content = " + flex_justify_expr(node.layout.justify) + ";");
     emit_line(out, depth, opts.indent_spaces,
               "flex.align_items = " + flex_align_expr(node.layout.align) + ";");
-    if (node.layout.display && *node.layout.display == "grid") {
+    // Grid signal mirrors the JS codegen / native materializer: display:grid
+    // OR an explicit track template. Templates prefer the v0/TSX contract
+    // attributes, falling back to the IR layout fields the Figma producers
+    // emit (gridTemplateColumns/Rows).
+    if ((node.layout.display && *node.layout.display == "grid") ||
+        node.layout.grid_template_columns || node.layout.grid_template_rows) {
         emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_layout_mode(pulp::view::LayoutMode::grid);");
         emit_line(out, depth, opts.indent_spaces, "{");
         emit_line(out, depth + 1, opts.indent_spaces, "auto& grid = " + std::string(var) + "->grid();");
-        if (auto it = node.attributes.find("pulpGridTemplateColumns"); it != node.attributes.end()) {
-            emit_line(out, depth + 1, opts.indent_spaces,
-                      "grid.template_columns = pulp::view::GridStyle::parse_template(" +
-                          cpp_string_literal(it->second) + ");");
-        }
-        if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end()) {
+        std::optional<std::string> template_columns;
+        if (auto it = node.attributes.find("pulpGridTemplateColumns"); it != node.attributes.end())
+            template_columns = it->second;
+        else if (node.layout.grid_template_columns)
+            template_columns = *node.layout.grid_template_columns;
+        // A grid with no explicit columns gets a single implicit column
+        // rather than dropping every child (same fallback as the JS lane).
+        emit_line(out, depth + 1, opts.indent_spaces,
+                  "grid.template_columns = pulp::view::GridStyle::parse_template(" +
+                      cpp_string_literal(template_columns.value_or("1fr")) + ");");
+        std::optional<std::string> template_rows;
+        if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end())
+            template_rows = it->second;
+        else if (node.layout.grid_template_rows)
+            template_rows = *node.layout.grid_template_rows;
+        if (template_rows) {
             emit_line(out, depth + 1, opts.indent_spaces,
                       "grid.template_rows = pulp::view::GridStyle::parse_template(" +
-                          cpp_string_literal(it->second) + ");");
+                          cpp_string_literal(*template_rows) + ");");
         }
         if (node.layout.column_gap || node.layout.gap != 0.0f)
             emit_line(out, depth + 1, opts.indent_spaces,
@@ -617,6 +632,50 @@ void emit_common_layout(std::ostringstream& out,
             emit_line(out, depth, opts.indent_spaces, "flex.align_content = " + *expr + ";");
         }
     }
+
+    // Per-child grid placement: "N", "N / M", or "N / span S" line strings
+    // (CSS 1-based), resolved to start/end ints at codegen time. Named lines
+    // and span-only forms stay on auto-placement — same contract as the JS
+    // lane's emit_js_grid_placement and the native materializer.
+    auto emit_grid_track = [&](const std::optional<std::string>& value,
+                               const char* start_field, const char* end_field) {
+        if (!value || value->empty())
+            return;
+        auto trim = [](std::string s) {
+            const auto a = s.find_first_not_of(" \t");
+            const auto b = s.find_last_not_of(" \t");
+            return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+        };
+        auto as_int = [](const std::string& t, int& out_i) {
+            if (t.empty()) return false;
+            char* end = nullptr;
+            const long n = std::strtol(t.c_str(), &end, 10);
+            if (end == t.c_str()) return false;
+            out_i = static_cast<int>(n);
+            return true;
+        };
+        const auto slash = value->find('/');
+        const std::string lo = trim(slash == std::string::npos ? *value : value->substr(0, slash));
+        const std::string hi = slash == std::string::npos ? std::string() : trim(value->substr(slash + 1));
+        int lo_i = 0;
+        if (!as_int(lo, lo_i))
+            return;
+        emit_line(out, depth, opts.indent_spaces,
+                  std::string(var) + "->grid()." + start_field + " = " + std::to_string(lo_i) + ";");
+        int hi_i = 0;
+        if (as_int(hi, hi_i)) {
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->grid()." + end_field + " = " + std::to_string(hi_i) + ";");
+        } else if (hi.rfind("span", 0) == 0) {
+            int span = 0;
+            if (as_int(trim(hi.substr(4)), span) && span > 0)
+                emit_line(out, depth, opts.indent_spaces,
+                          std::string(var) + "->grid()." + end_field + " = " +
+                              std::to_string(lo_i + span) + ";");
+        }
+    };
+    emit_grid_track(node.layout.grid_column, "grid_column_start", "grid_column_end");
+    emit_grid_track(node.layout.grid_row, "grid_row_start", "grid_row_end");
 
     auto emit_dimension = [&](std::string_view preferred,
                               std::string_view dim,

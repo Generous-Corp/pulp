@@ -1044,16 +1044,69 @@ void apply_identity(View& view, const IRNode& node, const ResolvedNativeNode& re
 }
 
 void apply_layout(View& view, const IRNode& node, std::optional<LayoutDirection> parent_direction) {
-    if (node.layout.display && *node.layout.display == "grid") {
+    // Grid signal mirrors the JS codegen: display:grid OR an explicit track
+    // template. Templates come from the v0/TSX contract attributes when
+    // present, else from the IR layout fields the Figma producers emit
+    // (gridTemplateColumns/Rows) — without the fallback a Figma GRID frame
+    // switched to grid mode with an empty column list and dropped every child.
+    const bool is_grid =
+        (node.layout.display && *node.layout.display == "grid") ||
+        node.layout.grid_template_columns || node.layout.grid_template_rows;
+    if (is_grid) {
         view.set_layout_mode(LayoutMode::grid);
         auto& grid = view.grid();
         if (auto it = node.attributes.find("pulpGridTemplateColumns"); it != node.attributes.end())
             grid.template_columns = GridStyle::parse_template(it->second);
+        else if (node.layout.grid_template_columns)
+            grid.template_columns = GridStyle::parse_template(*node.layout.grid_template_columns);
         if (auto it = node.attributes.find("pulpGridTemplateRows"); it != node.attributes.end())
             grid.template_rows = GridStyle::parse_template(it->second);
+        else if (node.layout.grid_template_rows)
+            grid.template_rows = GridStyle::parse_template(*node.layout.grid_template_rows);
+        // A grid with no explicit columns gets a single implicit column
+        // rather than vanishing — same fallback the JS codegen emits.
+        if (grid.template_columns.empty())
+            grid.template_columns = GridStyle::parse_template("1fr");
         grid.column_gap = node.layout.column_gap.value_or(node.layout.gap);
         grid.row_gap = node.layout.row_gap.value_or(node.layout.gap);
     }
+
+    // Per-child grid placement: "N", "N / M", or "N / span S" line strings
+    // (CSS 1-based). Named lines / span-only forms stay on auto-placement,
+    // matching the JS codegen's emit_js_grid_placement.
+    auto apply_grid_track = [&view](const std::optional<std::string>& value,
+                                    int GridStyle::*start_field, int GridStyle::*end_field) {
+        if (!value || value->empty()) return;
+        auto trim = [](std::string s) {
+            const auto a = s.find_first_not_of(" \t");
+            const auto b = s.find_last_not_of(" \t");
+            return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+        };
+        auto as_int = [](const std::string& t, int& out) {
+            if (t.empty()) return false;
+            char* end = nullptr;
+            const long n = std::strtol(t.c_str(), &end, 10);
+            if (end == t.c_str()) return false;
+            out = static_cast<int>(n);
+            return true;
+        };
+        const auto slash = value->find('/');
+        const std::string lo = trim(slash == std::string::npos ? *value : value->substr(0, slash));
+        const std::string hi = slash == std::string::npos ? std::string() : trim(value->substr(slash + 1));
+        int lo_i = 0;
+        if (!as_int(lo, lo_i)) return;
+        view.grid().*start_field = lo_i;
+        int hi_i = 0;
+        if (as_int(hi, hi_i)) {
+            view.grid().*end_field = hi_i;
+        } else if (hi.rfind("span", 0) == 0) {
+            int span = 0;
+            if (as_int(trim(hi.substr(4)), span) && span > 0)
+                view.grid().*end_field = lo_i + span;
+        }
+    };
+    apply_grid_track(node.layout.grid_column, &GridStyle::grid_column_start, &GridStyle::grid_column_end);
+    apply_grid_track(node.layout.grid_row, &GridStyle::grid_row_start, &GridStyle::grid_row_end);
 
     auto& flex = view.flex();
     flex.direction = node.layout.direction == LayoutDirection::row

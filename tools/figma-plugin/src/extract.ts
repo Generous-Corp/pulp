@@ -9,7 +9,6 @@
 import type {
   ExtractedFigmaNode,
   ExtractedStyle,
-  ExtractedLayout,
   ExtractedDiagnostic,
 } from "./extract-model";
 import { AssetCache } from "./assets";
@@ -33,9 +32,8 @@ import {
   gradientToCss,
   gradientFallbackFlat,
   dispatchNodeType,
-  mapPrimaryAxisAlign,
-  mapCounterAxisAlign,
-  mapAxisSize,
+  extractLayout,
+  parentLayoutMode,
   audioWidgetKindFromName,
   isPureVectorIllustration,
   collectFontFamilyAssets,
@@ -175,15 +173,11 @@ interface WalkCtx {
   tokens: ExtractedTokens;
 }
 
-/// Whether the parent uses auto-layout (flex). When false, children need
+/// Whether the parent lays its children out itself — flex (HORIZONTAL /
+/// VERTICAL) or GRID cell placement. When false, children need
 /// position:absolute + top/left to reproduce the Figma layout.
 function parentIsAutoLayout(parent: SceneNode | null): boolean {
-  if (!parent) return false;
-  if (parent.type !== "FRAME" && parent.type !== "COMPONENT" && parent.type !== "INSTANCE" && parent.type !== "COMPONENT_SET") {
-    return false;
-  }
-  const mode = (parent as FrameNode).layoutMode;
-  return mode === "HORIZONTAL" || mode === "VERTICAL";
+  return parentLayoutMode(parent) !== null;
 }
 
 async function walk(
@@ -235,17 +229,37 @@ async function walk(
     opacity: "opacity" in node ? (node as BlendMixin).opacity : 1,
     blend_mode: "blendMode" in node ? ((node as BlendMixin).blendMode ?? "PASS_THROUGH") : "PASS_THROUGH",
     style: extractStyle(node, ctx),
-    layout: extractLayout(node, ctx),
+    layout: extractLayout(node, parent),
     children: [],
   };
 
-  // Position: if parent has no auto-layout, child needs absolute positioning.
+  // Min/max sizing — style-level clamps parse_ir_style reads and the flex
+  // engines lower to min/max width/height. Figma already honored them while
+  // solving, so they cannot move the design-size replay; they bind on resize.
+  const sized = node as SceneNode & {
+    minWidth?: number | null; maxWidth?: number | null;
+    minHeight?: number | null; maxHeight?: number | null;
+  };
+  if ("minWidth" in node) {
+    if (typeof sized.minWidth === "number" && sized.minWidth > 0) ex.style.min_width = sized.minWidth;
+    if (typeof sized.maxWidth === "number" && sized.maxWidth > 0) ex.style.max_width = sized.maxWidth;
+    if (typeof sized.minHeight === "number" && sized.minHeight > 0) ex.style.min_height = sized.minHeight;
+    if (typeof sized.maxHeight === "number" && sized.maxHeight > 0) ex.style.max_height = sized.maxHeight;
+  }
+
+  // Position: when the parent doesn't lay this child out — no auto-layout,
+  // or the child opted out of the stack with layoutPositioning ABSOLUTE
+  // (which Figma positions in the parent's coordinate space even inside a
+  // flex/grid parent) — the child needs absolute positioning.
   // Compute position from absoluteBoundingBox deltas rather than node.x/y
   // because node.x is in the IMMEDIATE parent's coord space — for Figma
   // GROUP parents (which don't have their own coord space) node.x is
   // actually in the group's grandparent space, which would double-count
   // the group's offset.
-  if (!parentIsAutoLayout(parent) && parent !== null) {
+  const absoluteInStack =
+    "layoutPositioning" in node &&
+    (node as SceneNode & { layoutPositioning?: string }).layoutPositioning === "ABSOLUTE";
+  if (parent !== null && (!parentIsAutoLayout(parent) || absoluteInStack)) {
     const childBB = "absoluteBoundingBox" in node ? node.absoluteBoundingBox : null;
     const parentBB =
       "absoluteBoundingBox" in parent
@@ -265,14 +279,11 @@ async function walk(
     }
   }
 
-  // Resize constraints — same gate as absolute positioning (plus the
-  // layoutPositioning opt-out): constraints govern a node placed in its
-  // parent's coordinate space. A FLOWING auto-layout child is sized by the
-  // stack (layout.width_mode/height_mode above), and its stale constraints
-  // would fight that with margins/grow the design never asked for.
-  const absoluteInStack =
-    "layoutPositioning" in node &&
-    (node as SceneNode & { layoutPositioning?: string }).layoutPositioning === "ABSOLUTE";
+  // Resize constraints — same gate as absolute positioning: constraints
+  // govern a node placed in its parent's coordinate space. A FLOWING
+  // auto-layout child is sized by the stack (layout grow/align/width_mode
+  // above), and its stale constraints would fight that with margins/grow
+  // the design never asked for.
   if (parent !== null && (!parentIsAutoLayout(parent) || absoluteInStack)) {
     const constraints = extractConstraints(node);
     if (constraints) ex.constraints = constraints;
@@ -674,38 +685,6 @@ function extractTextStyle(t: TextNode, s: ExtractedStyle, ctx: WalkCtx): void {
         "Mixed font ranges in text node flattened to dominant style.");
     }
   }
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Layout extraction (auto-layout)
-
-function extractLayout(n: SceneNode, ctx: WalkCtx): ExtractedLayout {
-  const l: ExtractedLayout = {};
-  if (n.type !== "FRAME" && n.type !== "COMPONENT" && n.type !== "INSTANCE" && n.type !== "COMPONENT_SET") {
-    return l;
-  }
-  const f = n as FrameNode;
-  if (f.layoutMode === "HORIZONTAL" || f.layoutMode === "VERTICAL") {
-    l.display = "flex";
-    l.direction = f.layoutMode === "HORIZONTAL" ? "row" : "column";
-    l.gap = f.itemSpacing ?? 0;
-    l.padding = {
-      top: f.paddingTop ?? 0,
-      right: f.paddingRight ?? 0,
-      bottom: f.paddingBottom ?? 0,
-      left: f.paddingLeft ?? 0,
-    };
-    l.justify = mapPrimaryAxisAlign(f.primaryAxisAlignItems);
-    l.align = mapCounterAxisAlign(f.counterAxisAlignItems);
-    l.wrap = f.layoutWrap === "WRAP";
-    l.width_mode = mapAxisSize(f.layoutSizingHorizontal);
-    l.height_mode = mapAxisSize(f.layoutSizingVertical);
-  } else if (f.layoutMode === "NONE" || f.layoutMode === undefined) {
-    // Children positioned absolutely — emit no display/direction
-    l.width_mode = "fixed";
-    l.height_mode = "fixed";
-  }
-  return l;
 }
 
 // ──────────────────────────────────────────────────────────────────────────

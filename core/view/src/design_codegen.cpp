@@ -533,7 +533,25 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     // layout needs shrink:0 to keep the sizes it emitted.
     if (L.flex_shrink)
         ss << ind << "setFlex('" << target_id << "', 'flex_shrink', " << *L.flex_shrink << ");\n";
+    // Explicit per-child flex properties (Figma auto-layout children:
+    // layoutGrow → flex_grow, layoutAlign → align_self, targetAspectRatio →
+    // aspect_ratio). Emitted BEFORE the constraint fallbacks below so an
+    // explicit value wins and the constraint path never writes a duplicate —
+    // grow_done/stretch_done record what has already been said.
     bool grow_done = false, stretch_done = false;
+    if (L.flex_grow && *L.flex_grow > 0.0f) {
+        ss << ind << "setFlex('" << target_id << "', 'flex_grow', " << *L.flex_grow << ");\n";
+        grow_done = true;
+    }
+    if (L.align_self && !L.align_self->empty()) {
+        // Pass the producer's CSS spelling through; the bridge accepts
+        // flex-start/flex-end/center/stretch/baseline/auto.
+        ss << ind << "setFlex('" << target_id << "', 'align_self', '"
+           << js_single_quote_escape(*L.align_self) << "');\n";
+        stretch_done = true;
+    }
+    if (L.aspect_ratio && *L.aspect_ratio > 0.0f)
+        ss << ind << "setFlex('" << target_id << "', 'aspect_ratio', " << *L.aspect_ratio << ");\n";
     auto grow = [&] {
         if (grow_done) return;
         ss << ind << "setFlex('" << target_id << "', 'flex_grow', 1);\n";
@@ -1735,6 +1753,22 @@ static void emit_js_container(const NativeEmit& e, int& var_counter,
     if (node.layout.gap > 0)
         ss << ind << (is_grid ? "setGrid('" : "setFlex('") << id
            << "', 'gap', " << node.layout.gap << ");\n";
+    // Directional gaps override the uniform gap on their axis. Grid gaps live
+    // on the grid style (setGrid); flex gaps on the flex style (setFlex) —
+    // Figma wrap emits the cross-axis track gap here (counterAxisSpacing).
+    if (node.layout.row_gap)
+        ss << ind << (is_grid ? "setGrid('" : "setFlex('") << id
+           << "', 'row_gap', " << *node.layout.row_gap << ");\n";
+    if (node.layout.column_gap)
+        ss << ind << (is_grid ? "setGrid('" : "setFlex('") << id
+           << "', 'column_gap', " << *node.layout.column_gap << ");\n";
+    // Multi-line flex: wrap plus the cross-axis line distribution. Grid owns
+    // its own track flow, so both are flex-only.
+    if (!is_grid && node.layout.wrap)
+        ss << ind << "setFlex('" << id << "', 'flex_wrap', 'wrap');\n";
+    if (!is_grid && node.layout.align_content && !node.layout.align_content->empty())
+        ss << ind << "setFlex('" << id << "', 'align_content', '"
+           << js_single_quote_escape(*node.layout.align_content) << "');\n";
 
     // Padding
     bool uniform = (node.layout.padding_top == node.layout.padding_right &&

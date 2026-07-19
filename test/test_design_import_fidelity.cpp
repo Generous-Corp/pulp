@@ -1487,3 +1487,151 @@ TEST_CASE("codegen emits an IR node's flex_shrink instead of dropping it",
     CHECK(js.find("'flex_shrink', 0") != std::string::npos);
     CHECK(js.find("setFlex('Plain1', 'flex_shrink'") == std::string::npos);
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Auto-layout completion (audit checklist #3): the producer fields all three
+// Figma lanes now emit — child grow/align, wrap counter-axis gap +
+// align-content, aspect ratio, and GRID — through the ACTUAL consumer paths
+// (parse_design_ir_json AND the plugin/.fig envelope parser) to the JS
+// codegen. Keys are the consumer's camelCase spellings, values the CSS
+// spellings the flex bridge accepts — the exact wire the producers write, so
+// a producer/consumer spelling drift fails here, not in a real import.
+
+TEST_CASE("auto-layout child grow/align/aspect flow from raw IR JSON to flex codegen",
+          "[view][import][codegen][autolayout]") {
+    const auto js = generate_pulp_js(parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "style": { "width": 400, "height": 100 },
+        "layout": { "display": "flex", "direction": "row", "gap": 8 },
+        "children": [
+            { "type": "frame", "name": "Grower",
+              "style": { "width": 100, "height": 100 },
+              "layout": { "flexGrow": 2 } },
+            { "type": "frame", "name": "Stretcher",
+              "style": { "width": 50, "height": 50 },
+              "layout": { "alignSelf": "stretch" } },
+            { "type": "frame", "name": "Ratio",
+              "style": { "height": 50 },
+              "layout": { "flexGrow": 1, "aspectRatio": 2 } }
+        ]
+    })json"), CodeGenOptions{});
+    INFO(js);
+    CHECK(js.find("'flex_grow', 2") != std::string::npos);
+    CHECK(js.find("'align_self', 'stretch'") != std::string::npos);
+    CHECK(js.find("'aspect_ratio', 2") != std::string::npos);
+    // Exactly two grow emissions (Grower 2, Ratio 1): the explicit value must
+    // not be doubled by the constraint/sizing fallback paths.
+    size_t grow_count = 0;
+    for (size_t pos = js.find("'flex_grow'"); pos != std::string::npos;
+         pos = js.find("'flex_grow'", pos + 1))
+        ++grow_count;
+    CHECK(grow_count == 2);
+}
+
+TEST_CASE("wrap containers lower counter-axis gap and align-content",
+          "[view][import][codegen][autolayout]") {
+    // The Figma wrap contract: counterAxisSpacing → rowGap (row) / columnGap
+    // (column), counterAxisAlignContent SPACE_BETWEEN → alignContent. Values
+    // as each producer writes them.
+    const auto js = generate_pulp_js(parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "style": { "width": 300, "height": 200 },
+        "layout": { "display": "flex", "direction": "row", "gap": 8,
+                    "wrap": true, "rowGap": 16, "alignContent": "space-between" },
+        "children": [
+            { "type": "frame", "name": "A", "style": { "width": 100, "height": 40 } },
+            { "type": "frame", "name": "B", "style": { "width": 100, "height": 40 } }
+        ]
+    })json"), CodeGenOptions{});
+    INFO(js);
+    CHECK(js.find("'flex_wrap', 'wrap'") != std::string::npos);
+    CHECK(js.find("'row_gap', 16") != std::string::npos);
+    CHECK(js.find("'align_content', 'space-between'") != std::string::npos);
+}
+
+TEST_CASE("Figma GRID lowers to createGrid with templates, gaps, and cell placement",
+          "[view][import][codegen][autolayout][grid]") {
+    // Producer wire: the REST/plugin lanes emit repeat(N, 1fr) templates and
+    // 0-based-anchor-derived CSS lines; the .fig lane emits explicit track
+    // lists ("60px 1fr"). Both template forms must survive to setGrid.
+    const auto js = generate_pulp_js(parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "style": { "width": 168, "height": 146 },
+        "layout": { "display": "grid",
+                    "gridTemplateColumns": "repeat(4, 1fr)",
+                    "gridTemplateRows": "1fr 1fr 1fr 1fr",
+                    "rowGap": 4, "columnGap": 6 },
+        "children": [
+            { "type": "frame", "name": "CellA",
+              "style": { "width": 38, "height": 32 },
+              "layout": { "gridColumn": "2", "gridRow": "1" } },
+            { "type": "frame", "name": "CellB",
+              "style": { "width": 38, "height": 68 },
+              "layout": { "gridColumn": "1 / span 2", "gridRow": "3 / span 2" } }
+        ]
+    })json"), CodeGenOptions{});
+    INFO(js);
+    CHECK(js.find("createGrid('root'") != std::string::npos);
+    CHECK(js.find("setGrid('root', 'template_columns', 'repeat(4, 1fr)')") != std::string::npos);
+    CHECK(js.find("setGrid('root', 'template_rows', '1fr 1fr 1fr 1fr')") != std::string::npos);
+    CHECK(js.find("setGrid('root', 'row_gap', 4)") != std::string::npos);
+    CHECK(js.find("setGrid('root', 'column_gap', 6)") != std::string::npos);
+    // Cell placement on the children (CSS 1-based lines; span → end line).
+    // Ids are name + walk counter; assert by node-name prefix + key/value,
+    // which the distinct line numbers keep unambiguous.
+    CHECK(js.find("'column_start', 2)") != std::string::npos);   // CellA at column 2
+    CHECK(js.find("'row_start', 1)") != std::string::npos);      // CellA at row 1
+    CHECK(js.find("'column_start', 1)") != std::string::npos);   // CellB from column 1
+    CHECK(js.find("'column_end', 3)") != std::string::npos);     // ... span 2 → end line 3
+    CHECK(js.find("'row_start', 3)") != std::string::npos);      // CellB from row 3
+    CHECK(js.find("'row_end', 5)") != std::string::npos);        // ... span 2 → end line 5
+    CHECK(js.find("setGrid('CellA") != std::string::npos);
+    CHECK(js.find("setGrid('CellB") != std::string::npos);
+}
+
+TEST_CASE("auto-layout fields flow through the plugin/.fig ENVELOPE parser too",
+          "[view][import][codegen][autolayout]") {
+    // Same fields through parse_figma_plugin_json — the entry point the
+    // plugin and .fig lanes actually use — so envelope-specific parsing
+    // cannot silently drop what the bare-IR path accepts.
+    const auto js = generate_pulp_js(parse_figma_plugin_json(R"json({
+        "format_version": "v1", "parser_version": "0.1.0",
+        "root": {
+            "type": "frame", "name": "Root",
+            "style": { "width": 300, "height": 100 },
+            "layout": { "display": "flex", "direction": "column", "gap": 8,
+                        "wrap": true, "columnGap": 12 },
+            "children": [
+                { "type": "frame", "name": "Child",
+                  "style": { "width": 100, "height": 40,
+                             "min_width": 80, "max_width": 400 },
+                  "layout": { "flexGrow": 1, "alignSelf": "center" } }
+            ]
+        }
+    })json"), CodeGenOptions{});
+    INFO(js);
+    // A VERTICAL wrap's counter-axis gap is columnGap (tracks stack
+    // horizontally) — the .fig/plugin producers' spelling.
+    CHECK(js.find("'column_gap', 12") != std::string::npos);
+    CHECK(js.find("'flex_wrap', 'wrap'") != std::string::npos);
+    CHECK(js.find("'flex_grow', 1") != std::string::npos);
+    CHECK(js.find("'align_self', 'center'") != std::string::npos);
+}
+
+TEST_CASE("min/max sizing survives the style path into the native flex clamps",
+          "[view][import][autolayout]") {
+    // The producers emit snake_case style min/max (the plugin schema's
+    // spelling); parse_ir_style resolves it and the native materializer
+    // lowers to FlexStyle min/max — a layout effect, not a dead key.
+    const auto ir = parse_design_ir_json(R"json({
+        "type": "frame", "name": "Root",
+        "children": [
+            { "type": "frame", "name": "Clamped",
+              "style": { "width": 100, "height": 40,
+                         "min_width": 80, "max_height": 120 } }
+        ]
+    })json");
+    REQUIRE(ir.root.children.size() == 1);
+    CHECK(ir.root.children[0].style.min_width == 80.0f);
+    CHECK(ir.root.children[0].style.max_height == 120.0f);
+}

@@ -289,13 +289,13 @@
     },
     "layout": {
       "type": "object",
-      "description": "Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left.",
+      "description": "Maps to IRLayout. Padding is nested as an object here; parser flattens to padding_top/right/bottom/left. The camelCase keys (rowGap, flexGrow, alignSelf, gridTemplate*, ...) use the consumer's spelling — the exact member names design_ir_json.cpp::parse_ir_layout reads — so the schema can never declare a key nobody consumes.",
       "properties": {
         "display": { "type": "string", "enum": ["flex", "grid", "none"] },
         "direction": { "type": "string", "enum": ["row", "column"] },
         "gap": { "type": "number" },
-        "row_gap": { "type": "number" },
-        "column_gap": { "type": "number" },
+        "rowGap": { "type": "number" },
+        "columnGap": { "type": "number" },
         "padding": {
           "type": "object",
           "properties": {
@@ -319,9 +319,14 @@
         "justify": { "type": "string", "enum": ["flex_start", "flex_end", "center", "stretch", "space_between", "space_around"] },
         "align": { "type": "string", "enum": ["flex_start", "flex_end", "center", "stretch", "space_between", "space_around"] },
         "wrap": { "type": "boolean" },
-        "flex_grow": { "type": "number" },
-        "flex_shrink": { "type": "number" },
-        "aspect_ratio": { "type": "number" },
+        "alignContent": { "type": "string", "enum": ["space-between"] },
+        "flexGrow": { "type": "number" },
+        "alignSelf": { "type": "string", "enum": ["flex-start", "flex-end", "center", "stretch"] },
+        "aspectRatio": { "type": "number" },
+        "gridTemplateColumns": { "type": "string" },
+        "gridTemplateRows": { "type": "string" },
+        "gridColumn": { "type": "string" },
+        "gridRow": { "type": "string" },
         "width_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] },
         "height_mode": { "type": "string", "enum": ["fixed", "hug", "fill"] }
       },
