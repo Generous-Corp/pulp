@@ -4,6 +4,7 @@
 
 pulp_add_test_suite(pulp-test-timeline-model
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
+        test_timeline_automation_attachment.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
@@ -89,6 +90,7 @@ endif()
 add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
@@ -103,6 +105,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp

@@ -1,6 +1,7 @@
 add_library(pulp-timeline
     src/assets.cpp
     src/automation_curve.cpp
+    src/automation_document_internal.cpp
     src/automation_lane.cpp
     src/command.cpp
     src/document_session.cpp
@@ -17,6 +18,7 @@ add_library(pulp-timeline
     src/schema_registry.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
+    src/snapshot_equivalence.cpp
     src/structural_registry_validation.cpp
     src/track.cpp
     src/track_schema_migrations.cpp
