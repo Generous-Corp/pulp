@@ -10,6 +10,7 @@ import type {
   ExtractedFigmaNode,
   ExtractedStyle,
   ExtractedDiagnostic,
+  ExtractedTextRun,
 } from "./extract-model";
 import { AssetCache } from "./assets";
 import {
@@ -39,6 +40,7 @@ import {
   collectFontFamilyAssets,
   extractConstraints,
   extractBoundVariableBindings,
+  utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -323,7 +325,7 @@ async function walk(
   // though dispatch already diagnosed the flattened on-path layout.
   if (node.type === "TEXT" || node.type === "TEXT_PATH") {
     ex.content = (node as TextNode).characters;
-    extractTextStyle(node as unknown as TextNode, ex.style, ctx);
+    extractTextStyle(node as unknown as TextNode, ex, ctx);
   }
 
   // INSTANCE: capture component metadata so Pulp library widgets can be recognized.
@@ -667,9 +669,131 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
   return s;
 }
 
-function extractTextStyle(t: TextNode, s: ExtractedStyle, ctx: WalkCtx): void {
-  // Read the "first character" style as the dominant style; range-specific
-  // emission is not wired through this envelope yet.
+// The letter-spacing shape the Plugin API returns (per node and per segment).
+// Figma encodes "tracking" either in pixels or as percent-of-font-size.
+interface FigmaLetterSpacing {
+  value: number;
+  unit: "PIXELS" | "PERCENT";
+}
+
+function letterSpacingPx(
+  ls: FigmaLetterSpacing | undefined,
+  fontSize: number | undefined,
+): number | undefined {
+  if (!ls || typeof ls.value !== "number") return undefined;
+  if (ls.unit === "PIXELS") return ls.value;
+  if (ls.unit === "PERCENT" && typeof fontSize === "number") {
+    return (ls.value / 100) * fontSize;
+  }
+  return undefined;
+}
+
+// One styled segment as returned by TextNode.getStyledTextSegments with the
+// field list requested below. `start`/`end` are UTF-16 code-unit indices.
+interface StyledSegment {
+  characters: string;
+  start: number;
+  end: number;
+  fontSize: number;
+  fontName: FontName;
+  fontWeight: number;
+  fills: readonly Paint[];
+  letterSpacing: FigmaLetterSpacing;
+  textDecoration: "NONE" | "UNDERLINE" | "STRIKETHROUGH";
+}
+
+function segmentColor(fills: readonly Paint[] | undefined): string | undefined {
+  if (!Array.isArray(fills)) return undefined;
+  const first = fills.find((p) => p.type === "SOLID" && p.visible !== false);
+  return first ? paintToColor(first as SolidPaint) : undefined;
+}
+
+/// Mixed-style capture: segment the node with getStyledTextSegments and emit
+/// the ordered per-range deltas against the dominant style, with UTF-8 byte
+/// offsets (converted from the API's UTF-16 code-unit indices). A homogeneous
+/// node returns no runs — the flat dominant style stays the whole story, which
+/// is the path the consumer prefers for single-style text.
+function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
+  const getSegments = (t as unknown as {
+    getStyledTextSegments?: (fields: string[]) => StyledSegment[];
+  }).getStyledTextSegments;
+  if (typeof getSegments !== "function") return [];
+  let segments: StyledSegment[];
+  try {
+    segments = getSegments.call(t, [
+      "fontSize", "fontName", "fontWeight", "fills",
+      "letterSpacing", "textDecoration",
+    ]);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(segments) || segments.length < 2) return [];
+
+  // Backfill the dominant style from the first segment wherever the
+  // node-level property read `figma.mixed` (a symbol) and left the base field
+  // unset — that first-character style is the dominant the flat path
+  // promises, and the run deltas below are computed against it.
+  const first = segments[0];
+  if (s.font_size === undefined && typeof first.fontSize === "number") {
+    s.font_size = first.fontSize;
+  }
+  if (s.font_weight === undefined && typeof first.fontWeight === "number") {
+    s.font_weight = first.fontWeight;
+  }
+  if (s.font_family === undefined && first.fontName &&
+      typeof first.fontName.family === "string") {
+    s.font_family = first.fontName.family;
+    s.font_style = /italic/i.test(first.fontName.style) ? "italic" : "normal";
+  }
+  if (s.color === undefined) {
+    const c = segmentColor(first.fills);
+    if (c) s.color = c;
+  }
+  if (s.letter_spacing === undefined) {
+    const ls = letterSpacingPx(first.letterSpacing, first.fontSize);
+    if (ls !== undefined && ls !== 0) s.letter_spacing = ls;
+  }
+
+  const toByte = utf16ToUtf8ByteOffsets(t.characters);
+  const byteAt = (u16: number): number =>
+    u16 >= 0 && u16 < toByte.length ? toByte[u16] : toByte[toByte.length - 1];
+
+  const runs: ExtractedTextRun[] = [];
+  for (const seg of segments) {
+    const run: ExtractedTextRun = {
+      start: byteAt(seg.start),
+      end: byteAt(seg.end),
+    };
+    if (run.end <= run.start) continue;
+    // Style delta vs the node's dominant style — only overridden fields are
+    // emitted; everything else inherits (mirrors REST's override-table runs).
+    if (typeof seg.fontSize === "number" && seg.fontSize !== s.font_size) {
+      run.fontSize = seg.fontSize;
+    }
+    if (typeof seg.fontWeight === "number" && seg.fontWeight !== s.font_weight) {
+      run.fontWeight = seg.fontWeight;
+    }
+    if (seg.fontName && typeof seg.fontName.style === "string") {
+      const italic = /italic/i.test(seg.fontName.style) ? "italic" : "normal";
+      if (italic !== (s.font_style ?? "normal")) run.fontStyle = italic;
+    }
+    const color = segmentColor(seg.fills);
+    if (color && color !== s.color) run.color = color;
+    const ls = letterSpacingPx(seg.letterSpacing, seg.fontSize);
+    if (ls !== undefined && ls !== 0 && ls !== s.letter_spacing) {
+      run.letterSpacing = ls;
+    }
+    if (seg.textDecoration === "UNDERLINE") run.textDecoration = "underline";
+    else if (seg.textDecoration === "STRIKETHROUGH") run.textDecoration = "line-through";
+    if (Object.keys(run).length > 2) runs.push(run);
+  }
+  return runs;
+}
+
+function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): void {
+  const s = ex.style;
+  // Read the "first character" style as the dominant style; mixed-style
+  // ranges are then captured as per-range deltas in `runs` below.
   const charLen = t.characters.length;
   if (charLen === 0) return;
   if (typeof t.fontSize === "number") s.font_size = t.fontSize;
@@ -706,13 +830,60 @@ function extractTextStyle(t: TextNode, s: ExtractedStyle, ctx: WalkCtx): void {
       delete s.background_color;
     }
   }
-  // Detect once range-specific font capture is wired.
-  if (charLen > 0) {
-    const hasMultiRangeFonts = false; // TODO: scan getRangeFontName
-    if (hasMultiRangeFonts) {
-      pushDiag(ctx, "info", "text-ranges-flattened", "capture_partial",
-        "Mixed font ranges in text node flattened to dominant style.");
+  // Node-level vertical alignment within the design-reserved text slot.
+  // Design authority — codegen honors it over the tall-slot heuristic
+  // (including an explicit "top", which suppresses derived centering).
+  if (t.textAlignVertical === "CENTER") s.vertical_align = "middle";
+  else if (t.textAlignVertical === "BOTTOM") s.vertical_align = "bottom";
+  else if (t.textAlignVertical === "TOP") s.vertical_align = "top";
+
+  // Mixed styled ranges → ordered per-range deltas with UTF-8 byte offsets.
+  // A homogeneous node emits no runs and keeps the flat single-style path.
+  const runs = extractTextRuns(t, s);
+  if (runs.length > 0) {
+    ex.runs = runs;
+  } else if (typeof (t as unknown as { getStyledTextSegments?: unknown })
+      .getStyledTextSegments !== "function") {
+    // Only reachable on a host without the segmentation API — say so instead
+    // of silently flattening (the pre-capture behavior).
+    pushDiag(ctx, "info", "text-ranges-flattened", "capture_partial",
+      "Mixed font ranges in text node flattened to dominant style.");
+  }
+
+  // Preserved-not-lowered text metadata, namespaced so nothing downstream
+  // mistakes it for a lowered style. Rendering support is tracked as partial
+  // in compat/imports.json; defaults are omitted to keep envelopes lean.
+  const preserved: Record<string, string> = {};
+  const autoResize = (t as unknown as { textAutoResize?: string }).textAutoResize;
+  if (typeof autoResize === "string" && autoResize !== "NONE") {
+    preserved["figma:text_auto_resize"] = autoResize.toLowerCase();
+  }
+  const truncation = (t as unknown as { textTruncation?: string }).textTruncation;
+  if (truncation === "ENDING" || autoResize === "TRUNCATE") {
+    preserved["figma:text_truncation"] = "ending";
+  }
+  const maxLines = (t as unknown as { maxLines?: number | null }).maxLines;
+  if (typeof maxLines === "number" && maxLines > 0) {
+    preserved["figma:max_lines"] = String(maxLines);
+  }
+  const getHyperlink = (t as unknown as {
+    getRangeHyperlink?: (start: number, end: number) => { type: string; value: string } | null | symbol;
+  }).getRangeHyperlink;
+  if (typeof getHyperlink === "function") {
+    try {
+      const link = getHyperlink.call(t, 0, charLen);
+      // A symbol means figma.mixed (per-range links) — preserved only when the
+      // whole node shares one URL target.
+      if (link && typeof link === "object" && link.type === "URL" &&
+          typeof link.value === "string" && link.value) {
+        preserved["figma:hyperlink"] = link.value;
+      }
+    } catch {
+      // Defensive: some node states throw on range queries; nothing to preserve.
     }
+  }
+  if (Object.keys(preserved).length > 0) {
+    ex.attributes = { ...(ex.attributes ?? {}), ...preserved };
   }
 }
 

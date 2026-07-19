@@ -8,6 +8,22 @@ import type { InteractiveElement } from "./faithful-vector";
 
 export type AudioWidgetKind = "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
 
+/// One styled character range inside a text node — the style DELTA against the
+/// node's dominant style, in the exact camelCase shape the C++ consumer reads
+/// (design_ir_json.cpp::parse_ir_text_runs) and the REST lane already emits.
+/// `start`/`end` are [start, end) UTF-8 BYTE offsets into `content` (converted
+/// from the Plugin API's UTF-16 code-unit segment indices).
+export interface ExtractedTextRun {
+  start: number;
+  end: number;
+  fontSize?: number;
+  fontWeight?: number;
+  fontStyle?: "italic" | "normal";
+  color?: string;
+  letterSpacing?: number;
+  textDecoration?: string;
+}
+
 export interface ExtractedFigmaNode {
   // Identity
   type: string;             // "frame" | "text" | "image" | "vector" | audio widget kinds
@@ -31,6 +47,14 @@ export interface ExtractedFigmaNode {
 
   // Text
   content?: string;
+  // Ordered per-range style overrides for mixed-style text (a bold word, a
+  // colored span). Absent for homogeneous text — the flat dominant style in
+  // `style` is the whole story then, and the consumer prefers the plain path.
+  runs?: ExtractedTextRun[];
+  // Free-form string attributes serialized into IRNode.attributes. Used for
+  // namespaced preserved-not-lowered text metadata (figma:text_auto_resize,
+  // figma:text_truncation, figma:max_lines, figma:hyperlink).
+  attributes?: Record<string, string>;
 
   // Image / vector assets
   exported_asset?: { content_hash: string; mime: string; bytes_size: number };
@@ -117,6 +141,10 @@ export interface ExtractedStyle {
   font_weight?: number;
   font_style?: "normal" | "italic";
   text_align?: string;
+  /// Figma textAlignVertical normalized to top/middle/bottom. Design
+  /// authority: parse_ir_style reads it and codegen honors it over the
+  /// tall-slot centering heuristic.
+  vertical_align?: "top" | "middle" | "bottom";
   letter_spacing?: number;
   line_height?: number;
   text_transform?: string;

@@ -409,6 +409,25 @@ def extract_text_runs(n):
         i = j
     return runs
 
+def extract_text_attributes(n):
+    # Preserved-not-lowered text metadata, namespaced (figma:*) so nothing
+    # downstream mistakes it for a lowered style. Mirrors the plugin lane;
+    # rendering support is tracked as partial in compat/imports.json.
+    st = n.get("style", {})
+    attrs = {}
+    tar = st.get("textAutoResize")
+    if isinstance(tar, str) and tar != "NONE":
+        attrs["figma:text_auto_resize"] = tar.lower()
+    if st.get("textTruncation") == "ENDING" or tar == "TRUNCATE":
+        attrs["figma:text_truncation"] = "ending"
+    ml = st.get("maxLines")
+    if isinstance(ml, (int, float)) and ml > 0:
+        attrs["figma:max_lines"] = str(int(ml))
+    link = st.get("hyperlink")
+    if isinstance(link, dict) and link.get("type") == "URL" and link.get("url"):
+        attrs["figma:hyperlink"] = link["url"]
+    return attrs
+
 def extract_text_style(n, s):
     st = n.get("style", {})
     if "fontSize" in st: s["font_size"] = st["fontSize"]
@@ -421,6 +440,13 @@ def extract_text_style(n, s):
     lh = st.get("lineHeightPx")
     if isinstance(lh, (int, float)): s["line_height"] = lh
     if st.get("textAlignHorizontal"): s["text_align"] = st["textAlignHorizontal"].lower()
+    # Vertical alignment within the design-reserved slot. Design authority:
+    # codegen honors it over the tall-slot centering heuristic (an explicit
+    # "top" suppresses derived centering).
+    tav = st.get("textAlignVertical")
+    if tav == "CENTER": s["vertical_align"] = "middle"
+    elif tav == "BOTTOM": s["vertical_align"] = "bottom"
+    elif tav == "TOP": s["vertical_align"] = "top"
     tc = st.get("textCase")
     if tc == "UPPER": s["text_transform"] = "uppercase"
     elif tc == "LOWER": s["text_transform"] = "lowercase"
@@ -900,6 +926,9 @@ def walk(n, parent, z, ctx, inside_widget=False):
         runs = extract_text_runs(n)
         if runs:
             out["runs"] = runs
+        attrs = extract_text_attributes(n)
+        if attrs:
+            out["attributes"] = attrs
 
     # A widget's own content is the designer's art — never name-guess it into a
     # built-in widget (which paints Pulp's stock silver knob over the design).

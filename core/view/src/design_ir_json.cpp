@@ -322,6 +322,15 @@ static IRStyle parse_ir_style(const choc::value::ValueView& obj) {
     set_opt_int("fontWeight", s.font_weight);
     set_opt_str("fontStyle", s.font_style);
     set_opt_str("textAlign", s.text_align);
+    // Vertical text alignment: producers emit normalized top/middle/bottom,
+    // but accept CSS/Figma spellings (CENTER, center) defensively.
+    set_opt_str("verticalAlign", s.vertical_align);
+    if (s.vertical_align) {
+        auto& v = *s.vertical_align;
+        for (auto& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (v == "center") v = "middle";
+        if (v != "top" && v != "middle" && v != "bottom") s.vertical_align.reset();
+    }
     set_opt_float("letterSpacing", s.letter_spacing);
     set_opt_float("lineHeight", s.line_height);
     set_opt_str("textTransform", s.text_transform);
@@ -1934,6 +1943,7 @@ static void write_ir_style_json(std::ostringstream& out, const IRStyle& s) {
     write_int_member(out, first, "fontWeight", s.font_weight);
     write_string_member(out, first, "fontStyle", s.font_style);
     write_string_member(out, first, "textAlign", s.text_align);
+    write_string_member(out, first, "verticalAlign", s.vertical_align);
     write_float_member(out, first, "letterSpacing", s.letter_spacing);
     write_float_member(out, first, "lineHeight", s.line_height);
     write_string_member(out, first, "textTransform", s.text_transform);

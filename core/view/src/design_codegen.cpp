@@ -341,12 +341,20 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     // Label::set_vertical_align(center) under the SAME rule). The shim maps
     // style.verticalAlign → setVerticalAlign → Label, so both render paths
     // converge on one mechanism and the screenshot-parity invariant holds.
-    // Figma reserves a tall text slot for centered text, but the IR drops
-    // textAlignVertical, so derive it from slot-vs-font. Without this the
-    // <span> top-aligns and parity diverges (control-strip fixture).
-    if (node.type == "text" && s.height && s.font_size &&
-        *s.height > *s.font_size * 1.15f)
-        ss << ind << var << ".style.verticalAlign = 'middle';\n";
+    // The Figma producers now emit textAlignVertical as style.vertical_align
+    // (top/middle/bottom) — design authority, honored verbatim (an explicit
+    // 'top' suppresses the heuristic below). Sources that never say fall back
+    // to the slot-vs-font derivation: Figma reserves a tall text slot for
+    // centered text, so without it the <span> top-aligns and parity diverges
+    // (control-strip fixture).
+    if (node.type == "text") {
+        if (s.vertical_align) {
+            if (*s.vertical_align == "middle" || *s.vertical_align == "bottom")
+                ss << ind << var << ".style.verticalAlign = '" << *s.vertical_align << "';\n";
+        } else if (s.height && s.font_size && *s.height > *s.font_size * 1.15f) {
+            ss << ind << var << ".style.verticalAlign = 'middle';\n";
+        }
+    }
 
     // Reference-free image-sizing fidelity self-check on the web-compat path
     // too (mirrors generate_native_node). The web-compat <img> emits the style
@@ -1571,7 +1579,19 @@ static void emit_js_text_node(const NativeEmit& e) {
     // SEARCH input's "Search" text rides above the magnifying-glass
     // icon instead of baseline-aligning with it.
     bool emitted_vcenter = false;
-    if (ir_height_is_explicit && label_h > font_h * 1.15f) {
+    // An explicit style.vertical_align (Figma textAlignVertical, emitted by
+    // all three Figma producers) is design authority and wins over the
+    // tall-slot heuristic — including 'top', which suppresses it (Label's
+    // default IS top, so 'top' emits nothing).
+    const bool has_explicit_valign = node.style.vertical_align.has_value();
+    if (has_explicit_valign) {
+        if (*node.style.vertical_align == "middle") {
+            ss << ind << "setVerticalAlign('" << id << "', 'center');\n";
+            emitted_vcenter = true;
+        } else if (*node.style.vertical_align == "bottom") {
+            ss << ind << "setVerticalAlign('" << id << "', 'bottom');\n";
+        }
+    } else if (ir_height_is_explicit && label_h > font_h * 1.15f) {
         ss << ind << "setVerticalAlign('" << id << "', 'center');\n";
         emitted_vcenter = true;
     }
@@ -1660,8 +1680,14 @@ static void emit_js_text_node(const NativeEmit& e) {
         // from the font (font_h * 1.4) — there is no design-reserved slot,
         // so stamp "n-a" and the text check self-skips. Only an explicit
         // taller-than-font slot is held to the vertical-centering invariant.
+        // An explicit design-authored vertical_align also stamps "n-a": the
+        // invariant guards against DERIVED top-alignment in a reserved slot,
+        // and a design that says top/bottom is satisfied by definition.
         fnode.attributes["_emitted_vertical_align"] =
-            !ir_height_is_explicit ? "n-a" : (emitted_vcenter ? "center" : "top");
+            !ir_height_is_explicit             ? "n-a"
+            : emitted_vcenter                  ? "center"
+            : has_explicit_valign              ? "n-a"
+                                               : "top";
         run_fidelity_checks({fnode, id, 0.0f, label_h, FidelityElement::text},
                             *opts.fidelity_report);
     }
