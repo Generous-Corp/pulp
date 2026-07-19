@@ -66,6 +66,7 @@ class ExampleSineSynthSlot final : public host::PluginSlot {
                 const auto note = event->note();
                 if (event->is_note_on() && event->velocity() != 0) {
                     voices_[note].active = true;
+                    voices_[note].phase = 0.0;
                     voices_[note].level = static_cast<float>(event->velocity()) / 127.0f;
                 } else if (event->is_note_off() ||
                            (event->is_note_on() && event->velocity() == 0)) {
@@ -164,6 +165,9 @@ struct TimelineExampleEngine::Impl {
                 return false;
         }
 
+        if (!graph.prepare(sample_rate, static_cast<int>(max_block_size)))
+            return false;
+
         const std::array routes{host::TimelineTrackGraphRoute{
             program->tracks().front()->id(), output_node, 0, synth_node}};
         host::TimelineGraphBindingConfig config;
@@ -194,7 +198,9 @@ struct TimelineExampleEngine::Impl {
             return false;
         request.tempo_map = live->tempo_map_owner();
         request.dirty.all = true;
-        return compiler.submit(std::move(request)) && !compiler.status().has_error;
+        if (!compiler.submit(std::move(request)) || compiler.status().has_error)
+            return false;
+        return static_cast<bool>(binding.adopt_latest_program());
     }
 };
 
