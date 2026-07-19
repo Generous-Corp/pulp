@@ -61,6 +61,22 @@ the renderer rejects a program compiled against another map. Overlapping
 logical notes on one MIDI key are reference-counted into one physical note-on
 and one final note-off.
 
+Compile an unattached `AutomationLane` with `AutomationProgram::compile()` on
+the control/worker thread. The immutable program owns its exact tempo map and
+retains tick-domain segment semantics. Each compile also receives a nonzero
+instance token; generation orders adoption, while the token prevents an equal-
+generation replacement from masquerading as the active immutable program.
+`AutomationCursor::process()` consumes
+the shared transport snapshot and writes plain-domain control points into a
+caller-owned span. Each point says whether it seeds a range, steps immediately,
+or ramps linearly from the preceding emitted point. Span capacity is the
+explicit per-lane budget: range seeds and unique in-range authored knots are
+mandatory, remaining capacity refines continuous spans deterministically, and
+output never overflows. Keep device-wide budgeting, lane aggregation, parameter
+metadata, normalization, and the single SignalGraph mailbox write in the future
+host binding; playback must not depend on `pulp::state` merely to mirror
+`ParameterEventQueue`.
+
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.
 
@@ -85,6 +101,10 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 - Arrangement note events are compiled against the owning program's exact
   tempo map and ordered by sample, note-off before note-on, then clip/note ID.
   A renderer uses half-open sample ranges and never latches a callback size.
+- Automation values are evaluated at the tempo map's canonical tick for each
+  selected sample. Do not interpolate by sample fraction across tempo ramps.
+  Each loop/seek/adoption range is reseeded, stopped blocks emit only when
+  reseeding, and same-lane adoption requires a strictly newer generation.
 - Audio and note renderers must consume the same `TransportSnapshot` for a
   callback. The replay golden uses a varying schedule up to the transport's
   prepared `max_buffer_size`; never cache the first callback size in either
@@ -109,7 +129,8 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 
 ## Validation
 
-Build and run `pulp-test-playback-transport`, `pulp-test-timebase`, and
+Build and run `pulp-test-playback-automation-cursor`,
+`pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
 When export/install wiring changes, also run the installed SDK consumer smoke.
