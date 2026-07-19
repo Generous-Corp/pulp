@@ -13,13 +13,14 @@ private-plan closeout, PR publication, required CI, and merge verification.
 ## Exact revisions
 
 - Branch: `resume/sampler-suite-hardening-20260718`
-- Base used for local evidence: `b7f18df967fde7891f8efab99f375ba13d8c222e`
-- Final source revision: `964a1e111df416a1ac5346ecb97beafb5825dbb6`
-- Benchmark artifact revision: `fe8baa919b6affbe9c7bcdce2deb1631e01c58e8`
+- Rebased landing base: `7f71e49f5efdea45629ac881b846f5ad7cbf6847`
+- Final source revision: `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
+- Benchmark artifact: refreshed after the final rebase in the closure evidence
+  commit.
 
-The checked benchmark names `964a1e111df416a1ac5346ecb97beafb5825dbb6`
-as `source_base_revision`. Its source bundle and benchmark binary hashes are
-unchanged by the later artifact-only commit.
+The checked benchmark names `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
+as `source_base_revision`. Its source bundle and benchmark binary hashes bind
+the refreshed post-rebase capture.
 
 ## Boundaries and commit policy
 

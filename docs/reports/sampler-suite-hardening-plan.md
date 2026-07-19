@@ -63,11 +63,10 @@ allocation, and current artifact-verification gates.
 
 ## Final local landing evidence
 
-The final source revision is `964a1e111df416a1ac5346ecb97beafb5825dbb6`.
-The benchmark-only follow-up commit is
-`fe8baa919b6affbe9c7bcdce2deb1631e01c58e8`; its checked artifact identifies
-the source revision explicitly and passes supplied-binary, source-only, and
-self-test verification.
+After the final rebase, the final source revision is
+`cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`. The checked benchmark artifact
+identifies that source revision explicitly and passes supplied-binary,
+source-only, and self-test verification.
 
 The final source revision passed:
 
