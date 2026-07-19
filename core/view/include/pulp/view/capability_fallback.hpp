@@ -24,8 +24,16 @@ namespace pulp::view {
 /// every translation unit that includes this header.
 inline void warn_capability_fallback_once(canvas::CanvasCapability cap,
                                           const char* msg) {
-    static std::atomic<uint32_t> warned{0};
-    const uint32_t bit = 1u << static_cast<uint32_t>(cap);
+    // The bitmask has one bit per capability ordinal. Guard the ceiling at
+    // compile time so adding a 65th capability is a build error here rather
+    // than silent dedup corruption (a shift past the width aliases another
+    // cap's bit, or is UB). scene_cache..count are well within 64 today.
+    static_assert(
+        static_cast<std::uint32_t>(canvas::CanvasCapability::count) <= 64,
+        "warn-once dedup uses a 64-bit bitmask keyed by capability ordinal; "
+        "widen `warned` past uint64_t if CanvasCapability exceeds 64 members.");
+    static std::atomic<std::uint64_t> warned{0};
+    const std::uint64_t bit = std::uint64_t{1} << static_cast<std::uint32_t>(cap);
     if ((warned.fetch_or(bit, std::memory_order_relaxed) & bit) != 0) return;
     pulp::runtime::log_warn("{}", msg);
 }
