@@ -175,7 +175,8 @@ class WavSession {
 };
 
 bool has_complete_frames(drwav& wav, const RiffLayout& layout) noexcept {
-    if (drwav__is_compressed_format_tag(wav.translatedFormatTag))
+    const auto format = wav.translatedFormatTag;
+    if (format == DR_WAVE_FORMAT_ADPCM || format == DR_WAVE_FORMAT_DVI_ADPCM)
         return true;
     const auto bytes_per_frame = drwav_get_bytes_per_pcm_frame(&wav);
     return bytes_per_frame != 0u && layout.data_size % bytes_per_frame == 0u;
