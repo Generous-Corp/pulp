@@ -3764,6 +3764,15 @@ pulp import-design --from claude --file design.html --classnames editor/classnam
 pulp import-design --from claude --file design.html --no-emit-classnames
 ```
 
+Every successful JS-lane import (including `--dry-run`) ends with a one-line
+per-stage timing breakdown on stdout, e.g.
+`✓ imported "A Channel FX" (1264 nodes) in 4.47s  — decode 157ms · parse 178ms · codegen 3.93s · render 177ms`.
+`decode` spans everything that produces the parseable envelope content (for
+`--from fig`, the offline Node decode subprocess included); `render` appears
+only when `--validate` actually rendered. Stages that don't run are omitted,
+not shown as zero. The line prints only on success — failing imports (parse
+error, `--strict-fidelity`, `--fail-below`) never end on the check mark.
+
 Import artifact flag vocabulary:
 - `--output <path>` is the destination for the primary artifact. JS defaults to `ui.js`; `--emit cpp` defaults to `imported_ui.cpp` and writes the sibling header; `--emit swiftui` defaults to `ImportedPulpView.swift` (with a per-view sibling `<RootView>Theme.swift` + `.bindings.json`).
 - `--emit js`, `--emit ir-json`, `--emit cpp`, and `--emit swiftui` are implemented. `cpp` and `swiftui` require `--mode baked`. Legacy `--emit classnames` remains accepted for the Claude classnames sidecar.
