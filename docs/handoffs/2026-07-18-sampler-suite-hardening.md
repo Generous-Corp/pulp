@@ -7,18 +7,19 @@ Updated: `2026-07-18` (local landing validation complete)
 Finish gates G1-G8 in the private
 [sampler hardening plan](https://github.com/danielraffel/pulp-planning/blob/main/2026-07-17-sampler-suite-hardening.md),
 then land the branch on green CI. Implementation and local executable evidence
-are complete. The remaining work is the final exact Ultra closure review,
-private-plan closeout, PR publication, required CI, and merge verification.
+are complete. The remaining work is private-plan closeout, PR publication,
+required CI, and merge verification; the exact Ultra closure review is repeated
+against the final publication commit as the last local gate.
 
 ## Exact revisions
 
 - Branch: `resume/sampler-suite-hardening-20260718`
-- Rebased landing base: `7f71e49f5efdea45629ac881b846f5ad7cbf6847`
-- Final runtime source revision: `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
+- Rebased landing base: `832f4eb85acfff94f92d1a3b143e2f57762cf204`
+- Final runtime source revision: `f08669e06aa05359efea494313b21f0ce249f5b3`
 - Benchmark artifact: refreshed after the final rebase in the closure evidence
   commit.
 
-The checked benchmark names `cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`
+The checked benchmark names `f08669e06aa05359efea494313b21f0ce249f5b3`
 as `source_base_revision`. Its source bundle and benchmark binary hashes bind
 the refreshed post-rebase capture.
 
@@ -92,14 +93,16 @@ regressions before the evidence above:
    proof;
 3. source-local accounting of a shared serial decode-worker capacity.
 
-The next action is one final exact closure review of the complete branch:
+The complete branch then passed an exact Ultra closure review with no actionable
+correctness regressions. Landing repeats the same command against the final
+post-rebase publication commit:
 
 ```bash
 codex exec -m gpt-5.6-sol -c model_reasoning_effort='"ultra"' \
   -s read-only -C . review --base origin/main
 ```
 
-If it is clean, update the private planning repository, push this branch, open
+After that gate, update the private planning repository, push this branch, open
 the PR through Shipyard, require all checks green, merge the pinned head, and
 verify that `origin/main` contains it. If `origin/main` advanced before push,
 rebase first and repeat every revision-bound gate affected by the rebase.

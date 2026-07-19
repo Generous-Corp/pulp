@@ -1,6 +1,6 @@
 # Sampler Suite Hardening Plan
 
-**Status:** implementation and local landing validation complete; closure review and PR landing pending
+**Status:** implementation and local landing validation complete; PR landing pending
 
 **Baseline:** Pulp `2fa9948ba` (v0.675.0)
 
@@ -64,7 +64,7 @@ allocation, and current artifact-verification gates.
 ## Final local landing evidence
 
 After the final rebase, the final runtime source revision is
-`cf4c5d8c9736f96ac1836a12bedc3f4b7cd7164a`. The checked benchmark artifact
+`f08669e06aa05359efea494313b21f0ce249f5b3`. The checked benchmark artifact
 identifies that source revision explicitly and passes supplied-binary,
 source-only, and self-test verification.
 
@@ -92,8 +92,10 @@ The final source revision passed:
 Three successive exact Ultra review cycles found and drove fixes for decode
 worker wakeup/cancellation, immutable mapped-source snapshots, scheduler tie
 handling, stream-registration integrity, heritage stream-domain rebinding, and
-shared-worker throughput admission. The required final exact closure review is
-the remaining local gate before PR publication.
+shared-worker throughput admission. A subsequent exact Ultra closure review of
+the complete pre-publication branch found no actionable correctness
+regressions. The same command is repeated against the final post-rebase
+publication commit before the PR is opened.
 
 ## Decision
 
