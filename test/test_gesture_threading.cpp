@@ -19,6 +19,8 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <algorithm>
+#include <vector>
 #include <deque>
 #include <functional>
 #include <mutex>
@@ -218,3 +220,92 @@ TEST_CASE("off-main gesture with a live backend is counted (release)",
     events::MainThreadDispatcher::unregister_backend(token);
 }
 #endif
+
+// ── Gesture balancing (latched-beginEdit guard) ─────────────────────────────
+// The store keeps begin/end balanced 1:1 toward the host so a format adapter's
+// beginEdit is always matched by exactly one endEdit — the failure mode that
+// leaves a VST3 host's automation record latched open.
+
+TEST_CASE("begin_gesture on an already-open parameter does not re-emit a host begin",
+          "[state][gesture][balance]") {
+    state::StateStore store;
+    store.add_parameter({.id = 1, .name = "Gain", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](state::ParamID) { ++begins; },
+                                [&](state::ParamID) { ++ends; });
+
+    store.begin_gesture(1);
+    store.begin_gesture(1);  // duplicate — must be suppressed
+    REQUIRE(begins == 1);
+    REQUIRE(store.open_gesture_count() == 1);
+
+    store.end_gesture(1);
+    REQUIRE(ends == 1);
+    REQUIRE(store.open_gesture_count() == 0);
+
+    // A fresh gesture on the same param after a clean end still reports.
+    store.begin_gesture(1);
+    store.end_gesture(1);
+    REQUIRE(begins == 2);
+    REQUIRE(ends == 2);
+}
+
+TEST_CASE("end_gesture without a matching begin is a no-op toward the host",
+          "[state][gesture][balance]") {
+    state::StateStore store;
+    store.add_parameter({.id = 7, .name = "Mix", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](state::ParamID) { ++begins; },
+                                [&](state::ParamID) { ++ends; });
+
+    store.end_gesture(7);  // never opened
+    REQUIRE(ends == 0);
+    REQUIRE(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("release_open_gestures closes every parameter still held",
+          "[state][gesture][balance]") {
+    state::StateStore store;
+    for (state::ParamID id : {state::ParamID{1}, state::ParamID{2}, state::ParamID{3}})
+        store.add_parameter({.id = id, .name = "P", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+    std::vector<state::ParamID> released;
+    store.set_gesture_callbacks([](state::ParamID) {},
+                                [&](state::ParamID id) { released.push_back(id); });
+
+    store.begin_gesture(1);
+    store.begin_gesture(2);
+    store.begin_gesture(3);
+    store.end_gesture(2);  // one lifted normally
+    REQUIRE(store.open_gesture_count() == 2);
+
+    store.release_open_gestures();  // editor torn down mid-drag on 1 and 3
+    REQUIRE(store.open_gesture_count() == 0);
+    REQUIRE(released.size() == 3);  // 2 (normal) + 1 and 3 (released)
+    std::sort(released.begin(), released.end());
+    REQUIRE(released == std::vector<state::ParamID>{1, 2, 3});
+
+    // Idempotent: nothing left to release.
+    store.release_open_gestures();
+    REQUIRE(released.size() == 3);
+}
+
+TEST_CASE("installing new gesture callbacks resets stale open-gesture tracking",
+          "[state][gesture][balance]") {
+    // An adapter that clears its callbacks on editor teardown and re-installs
+    // them on reopen (AU does this) must not leave a lingering open gesture
+    // that suppresses the first begin of the next session.
+    state::StateStore store;
+    store.add_parameter({.id = 5, .name = "Drive", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+
+    store.set_gesture_callbacks([](state::ParamID) {}, [](state::ParamID) {});
+    store.begin_gesture(5);            // open, editor torn down without an end
+    REQUIRE(store.open_gesture_count() == 1);
+
+    int begins = 0;
+    store.set_gesture_callbacks([&](state::ParamID) { ++begins; },
+                                [](state::ParamID) {});
+    REQUIRE(store.open_gesture_count() == 0);  // reinstall reset the tracking
+
+    store.begin_gesture(5);            // reopened editor, fresh drag
+    REQUIRE(begins == 1);              // not suppressed
+}
