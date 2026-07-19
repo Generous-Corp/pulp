@@ -294,10 +294,20 @@ docs:
     kind: guide
     summary: Phase 12 exploration — offline PNG-sequence rendering feasibility and honest recommendation
 
+  - slug: sample-stream-service
+    path: guides/sample-stream-service.md
+    kind: guide
+    summary: Shared sampler page cache, bounded decode workers, scheduling, starvation, and multi-voice playback contracts
+
+  - slug: streaming-sample-source
+    path: guides/streaming-sample-source.md
+    kind: guide
+    summary: Sequential preload-plus-ring sample streaming with ranged file readers, explicit codec capability, and RT-safe pull semantics
+
   - slug: example-pulp-sampler
     path: examples/pulp-sampler.md
     kind: guide
-    summary: PulpSampler - sample-buffer sampler with MIDI, ADSR, and pitch control
+    summary: PulpSampler - eight-voice sampler with bounded streaming, loops, interpolation, mips, and synthetic heritage processing
   - slug: example-pulp-pluck
     path: examples/pulp-pluck.md
     kind: guide

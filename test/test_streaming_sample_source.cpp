@@ -7,15 +7,20 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/sample_preload_contract.hpp>
 #include <pulp/audio/streaming_sample_source.hpp>
 #include <pulp/audio/streaming_sample_source_file.hpp>
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -24,6 +29,68 @@ using pulp::audio::Buffer;
 using pulp::audio::BufferView;
 using pulp::audio::StreamingSampleSource;
 using pulp::audio::StreamingSampleSourceConfig;
+
+TEST_CASE("Sampler preload contract includes service, pitch, block, and read guards",
+          "[audio][streaming][preload]") {
+    const auto result = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 4.0,
+        .certified_io_latency_seconds = 0.010,
+        .scheduler_margin_seconds = 0.002,
+        .decoder_latency_seconds = 0.003,
+        .maximum_host_block_frames = 512,
+        .interpolation_guard_frames = 32,
+        .loop_prefetch_guard_frames = 128,
+        .configured_preload_frames = 5088,
+    });
+
+    REQUIRE(result.valid());
+    REQUIRE(result.latency_guard_frames == 2880);
+    REQUIRE(result.block_guard_frames == 2048);
+    REQUIRE(result.required_preload_frames == 5088);
+    REQUIRE(result.sufficient);
+}
+
+TEST_CASE("Sampler preload contract rounds source-rate block demand upward",
+          "[audio][streaming][preload]") {
+    const auto result = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 44100.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 2.0,
+        .maximum_host_block_frames = 128,
+        .configured_preload_frames = 235,
+    });
+
+    REQUIRE(result.valid());
+    REQUIRE(result.block_guard_frames == 236);
+    REQUIRE(result.required_preload_frames == 236);
+    REQUIRE_FALSE(result.sufficient);
+}
+
+TEST_CASE("Sampler preload contract rejects invalid and overflowing inputs",
+          "[audio][streaming][preload]") {
+    using Status = pulp::audio::SamplePreloadContractStatus;
+
+    auto invalid_rate = pulp::audio::evaluate_sample_preload_contract({});
+    REQUIRE(invalid_rate.status == Status::InvalidSourceSampleRate);
+
+    auto invalid_latency = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .certified_io_latency_seconds = -0.001,
+    });
+    REQUIRE(invalid_latency.status == Status::InvalidLatency);
+
+    auto overflow = pulp::audio::evaluate_sample_preload_contract({
+        .source_sample_rate = 48000.0,
+        .host_sample_rate = 48000.0,
+        .maximum_playback_ratio = 1.0,
+        .maximum_host_block_frames = 1,
+        .interpolation_guard_frames = std::numeric_limits<std::uint64_t>::max(),
+    });
+    REQUIRE(overflow.status == Status::Overflow);
+}
 
 namespace {
 
@@ -65,7 +132,261 @@ pulp::audio::FrameReader make_synth_reader(std::uint32_t channels,
 
 bool approx(float a, float b) { return std::fabs(a - b) < 1e-5f; }
 
+struct TeardownTrace {
+    std::atomic<std::uint64_t> sequence{0};
+    std::atomic<std::uint64_t> callback_exited{0};
+    std::atomic<std::uint64_t> owner_destroyed{0};
+    std::atomic<std::uint64_t> teardown_completed{0};
+
+    std::uint64_t next() noexcept {
+        return sequence.fetch_add(1, std::memory_order_seq_cst) + 1;
+    }
+};
+
+struct BlockingReaderGate {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool block_tail_read = false;
+    bool tail_read_entered = false;
+    bool allow_tail_read_to_return = false;
+};
+
+struct CapturedReaderOwner {
+    std::shared_ptr<TeardownTrace> trace;
+
+    ~CapturedReaderOwner() {
+        trace->owner_destroyed.store(trace->next(), std::memory_order_seq_cst);
+    }
+};
+
+struct TeardownState {
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool started = false;
+    bool completed = false;
+};
+
+void verify_active_reader_teardown(bool destroy_source) {
+    auto trace = std::make_shared<TeardownTrace>();
+    auto gate = std::make_shared<BlockingReaderGate>();
+    auto owner = std::make_shared<CapturedReaderOwner>();
+    owner->trace = trace;
+    std::weak_ptr<CapturedReaderOwner> weak_owner = owner;
+
+    auto source = std::make_unique<StreamingSampleSource>();
+    StreamingSampleSourceConfig config;
+    config.channels = 1;
+    config.total_frames = 16;
+    config.preload_frames = 4;
+    config.ring_capacity_frames = 4;
+    config.read_chunk_frames = 4;
+    config.start_background_thread = true;
+
+    REQUIRE(source->prepare(
+        config,
+        [owner, gate](std::uint64_t start,
+                      BufferView<float> destination,
+                      std::uint64_t frames) -> std::uint64_t {
+            if (start >= 8) {
+                std::unique_lock lock(gate->mutex);
+                if (gate->block_tail_read) {
+                    gate->tail_read_entered = true;
+                    gate->condition.notify_all();
+                    gate->condition.wait(lock, [&gate] {
+                        return gate->allow_tail_read_to_return;
+                    });
+                }
+            }
+
+            for (std::uint64_t frame = 0; frame < frames; ++frame) {
+                destination.channel_ptr(0)[frame] = expected_sample(start + frame, 0);
+            }
+            if (start >= 8) {
+                owner->trace->callback_exited.store(
+                    owner->trace->next(), std::memory_order_seq_cst);
+            }
+            return frames;
+        }));
+    owner.reset();
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->block_tail_read = true;
+    }
+    Buffer<float> output(1, 8);
+    const auto produced = source->pull(output.view(), 8);
+    {
+        std::unique_lock lock(gate->mutex);
+        gate->condition.wait(lock, [&gate] { return gate->tail_read_entered; });
+    }
+
+    TeardownState teardown;
+    auto perform_teardown = [&teardown, &trace](auto operation) mutable {
+        {
+            std::lock_guard lock(teardown.mutex);
+            teardown.started = true;
+            teardown.condition.notify_all();
+        }
+        operation();
+        trace->teardown_completed.store(trace->next(), std::memory_order_seq_cst);
+        {
+            std::lock_guard lock(teardown.mutex);
+            teardown.completed = true;
+            teardown.condition.notify_all();
+        }
+    };
+
+    std::thread teardown_thread;
+    if (destroy_source) {
+        teardown_thread = std::thread(
+            [owned = std::move(source), perform_teardown]() mutable {
+                perform_teardown([&owned] { owned.reset(); });
+            });
+    } else {
+        auto* source_ptr = source.get();
+        teardown_thread = std::thread([source_ptr, perform_teardown]() mutable {
+            perform_teardown([source_ptr] { source_ptr->release(); });
+        });
+    }
+
+    bool completed_while_reader_blocked = false;
+    {
+        std::unique_lock lock(teardown.mutex);
+        teardown.condition.wait(lock, [&teardown] { return teardown.started; });
+        completed_while_reader_blocked = teardown.completed;
+    }
+    const bool owner_alive_while_reader_blocked = !weak_owner.expired();
+    const auto callback_exit_before_unblock =
+        trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed_before_unblock =
+        trace->owner_destroyed.load(std::memory_order_seq_cst);
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->allow_tail_read_to_return = true;
+        gate->condition.notify_all();
+    }
+    teardown_thread.join();
+
+    const auto callback_exit = trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed = trace->owner_destroyed.load(std::memory_order_seq_cst);
+    const auto teardown_completed =
+        trace->teardown_completed.load(std::memory_order_seq_cst);
+
+    REQUIRE(produced == 8);
+    REQUIRE_FALSE(completed_while_reader_blocked);
+    REQUIRE(owner_alive_while_reader_blocked);
+    REQUIRE(callback_exit_before_unblock == 0);
+    REQUIRE(owner_destroyed_before_unblock == 0);
+    REQUIRE(callback_exit != 0);
+    REQUIRE(owner_destroyed > callback_exit);
+    REQUIRE(teardown_completed > owner_destroyed);
+    REQUIRE(weak_owner.expired());
+}
+
+void verify_cooperative_reader_teardown(bool destroy_source) {
+    auto trace = std::make_shared<TeardownTrace>();
+    auto gate = std::make_shared<BlockingReaderGate>();
+    auto owner = std::make_shared<CapturedReaderOwner>();
+    owner->trace = trace;
+    std::weak_ptr<CapturedReaderOwner> weak_owner = owner;
+
+    auto source = std::make_unique<StreamingSampleSource>();
+    StreamingSampleSourceConfig config;
+    config.channels = 1;
+    config.total_frames = 16;
+    config.preload_frames = 4;
+    config.ring_capacity_frames = 4;
+    config.read_chunk_frames = 4;
+    config.start_background_thread = true;
+
+    pulp::audio::FrameReaderBinding binding;
+    binding.stop_mode = pulp::audio::FrameReaderStopMode::Cooperative;
+    binding.read = [owner, gate](std::uint64_t start,
+                                 BufferView<float> destination,
+                                 std::uint64_t frames,
+                                 std::stop_token stop_token) -> std::uint64_t {
+        if (start >= 8) {
+            std::unique_lock lock(gate->mutex);
+            if (gate->block_tail_read) {
+                gate->tail_read_entered = true;
+                gate->condition.notify_all();
+                std::stop_callback notify_stop(stop_token, [&gate] {
+                    gate->condition.notify_all();
+                });
+                gate->condition.wait(lock, [&gate, stop_token] {
+                    return gate->allow_tail_read_to_return ||
+                           stop_token.stop_requested();
+                });
+            }
+        }
+
+        for (std::uint64_t frame = 0; frame < frames; ++frame) {
+            destination.channel_ptr(0)[frame] = expected_sample(start + frame, 0);
+        }
+        if (start >= 8) {
+            owner->trace->callback_exited.store(
+                owner->trace->next(), std::memory_order_seq_cst);
+        }
+        return frames;
+    };
+    REQUIRE(source->prepare(config, std::move(binding)));
+    owner.reset();
+
+    {
+        std::lock_guard lock(gate->mutex);
+        gate->block_tail_read = true;
+    }
+    Buffer<float> output(1, 8);
+    REQUIRE(source->pull(output.view(), 8) == 8);
+    {
+        std::unique_lock lock(gate->mutex);
+        gate->condition.wait(lock, [&gate] { return gate->tail_read_entered; });
+    }
+
+    if (destroy_source) {
+        std::thread teardown([owned = std::move(source)]() mutable {
+            owned.reset();
+        });
+        teardown.join();
+    } else {
+        std::thread teardown([source_ptr = source.get()] { source_ptr->release(); });
+        teardown.join();
+    }
+
+    const auto callback_exit = trace->callback_exited.load(std::memory_order_seq_cst);
+    const auto owner_destroyed = trace->owner_destroyed.load(std::memory_order_seq_cst);
+    REQUIRE(callback_exit != 0);
+    REQUIRE(owner_destroyed > callback_exit);
+    REQUIRE(weak_owner.expired());
+}
+
 }  // namespace
+
+TEST_CASE("StreamingSampleSource teardown joins an entered FrameReader",
+          "[audio][streaming][thread][teardown]") {
+    // FrameReader has no cancellation channel, so release cannot interrupt
+    // arbitrary reader-owned I/O. Once that I/O returns, teardown must join the
+    // worker and destroy its captured state before returning to the caller.
+    SECTION("explicit release") {
+        verify_active_reader_teardown(false);
+    }
+
+    SECTION("destruction") {
+        verify_active_reader_teardown(true);
+    }
+}
+
+TEST_CASE("StreamingSampleSource teardown requests cooperative reader stop",
+          "[audio][streaming][thread][teardown][stop]") {
+    SECTION("explicit release") {
+        verify_cooperative_reader_teardown(false);
+    }
+
+    SECTION("destruction") {
+        verify_cooperative_reader_teardown(true);
+    }
+}
 
 TEST_CASE("StreamingSampleSource resident fast path reproduces the source",
           "[audio][streaming][issue-streaming]") {
@@ -241,14 +562,44 @@ TEST_CASE("StreamingSampleSource underruns are silent and counted, never a crash
 
 TEST_CASE("make_memory_mapped_frame_reader fails gracefully on a bad path",
           "[audio][streaming][issue-streaming]") {
-    auto fr = pulp::audio::make_memory_mapped_frame_reader("/no/such/file.wav");
+    auto retained = std::make_shared<pulp::audio::MemoryMappedAudioReader>();
+    REQUIRE(retained);
+    auto fr = pulp::audio::make_memory_mapped_frame_reader(
+        "/no/such/file.wav", false, false, std::numeric_limits<std::uint64_t>::max(), &retained);
     REQUIRE_FALSE(fr.valid);
+    REQUIRE_FALSE(fr.supports_ranged_read);
+    REQUIRE_FALSE(retained);
+}
+
+TEST_CASE("make_memory_mapped_frame_reader tightens a retained snapshot without reopening",
+          "[audio][streaming][issue-streaming][snapshot]") {
+    const std::string path = temp_wav("_retained.wav");
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels = {{0.0f, 0.25f, -0.25f, 0.5f}};
+    REQUIRE(pulp::audio::write_wav_file(path, data));
+
+    std::shared_ptr<pulp::audio::MemoryMappedAudioReader> retained;
+    auto probe = pulp::audio::make_memory_mapped_frame_reader(
+        path, false, false, std::numeric_limits<std::uint64_t>::max(), &retained);
+    REQUIRE(probe.valid);
+    REQUIRE(retained);
+    REQUIRE(std::filesystem::remove(path));
+
+    auto strict = pulp::audio::make_retained_memory_mapped_frame_reader(
+        retained, true, true);
+    REQUIRE(strict.valid);
+    REQUIRE(strict.supports_ranged_read);
+    REQUIRE(strict.has_content_identity);
+    Buffer<float> output(1, 4);
+    REQUIRE(strict.reader(0, output.view(), 4) == 4);
+    REQUIRE(std::fabs(output.channel(0)[1] - 0.25f) < 2e-4f);
 }
 
 TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
           "[audio][streaming][issue-streaming]") {
-    // Write a deterministic stereo WAV, then stream it via the memory-mapped
-    // FrameReader. This exercises the true zero-copy disk-streaming path.
+    // Write a deterministic stereo WAV, then stream it via a retained mapped
+    // ranged reader without materializing the complete decoded file.
     const std::uint32_t channels = 2;
     const std::uint64_t total = 12000;
     const std::string path = temp_wav(".wav");
@@ -267,6 +618,16 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
     REQUIRE(fr.valid);
     REQUIRE(fr.channels == channels);
     REQUIRE(fr.total_frames == total);
+    REQUIRE(fr.sample_rate == 48000);
+    REQUIRE(fr.supports_ranged_read);
+    REQUIRE(fr.binding.stop_mode == pulp::audio::FrameReaderStopMode::Cooperative);
+
+    Buffer<float> ranged(channels, 37);
+    REQUIRE(fr.reader(7891, ranged.view(), 37) == 37);
+    for (std::uint64_t i = 0; i < 37; ++i) {
+        REQUIRE(std::fabs(ranged.channel(0)[i] - expected_sample(7891 + i, 0)) < 2e-4f);
+        REQUIRE(std::fabs(ranged.channel(1)[i] - expected_sample(7891 + i, 1)) < 2e-4f);
+    }
 
     StreamingSampleSourceConfig cfg;
     cfg.channels = fr.channels;
@@ -295,6 +656,30 @@ TEST_CASE("StreamingSampleSource streams a real WAV file from disk",
         pos += want;
     }
     REQUIRE(src.finished());
+    std::remove(path.c_str());
+}
+
+TEST_CASE("File frame reader range-reads uncompressed AIFF",
+          "[audio][streaming][file-reader]") {
+    const std::string path = temp_wav(".aiff");
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels = {{0.125f, -0.25f, 0.5f, -0.75f}};
+    REQUIRE(pulp::audio::FormatRegistry::instance().write(path, data));
+
+    auto reader = pulp::audio::make_memory_mapped_frame_reader(path);
+    REQUIRE(reader.valid);
+    REQUIRE(reader.supports_ranged_read);
+    REQUIRE(reader.binding.stop_mode ==
+            pulp::audio::FrameReaderStopMode::Cooperative);
+    REQUIRE(reader.channels == 1);
+    REQUIRE(reader.total_frames == 4);
+
+    Buffer<float> out(1, 2);
+    REQUIRE(reader.reader(1, out.view(), 2) == 2);
+    REQUIRE(std::fabs(out.channel(0)[0] + 0.25f) < 2e-4f);
+    REQUIRE(std::fabs(out.channel(0)[1] - 0.5f) < 2e-4f);
+    REQUIRE(reader.reader(0, out.view(), 20) == 2);
     std::remove(path.c_str());
 }
 

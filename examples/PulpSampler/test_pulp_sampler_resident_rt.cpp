@@ -1,85 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include "pulp_sampler.hpp"
-#include <pulp/runtime/scoped_no_alloc.hpp>
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <limits>
-#include <thread>
-#include <vector>
-
-using namespace pulp;
-using namespace pulp::examples;
-using Catch::Matchers::WithinAbs;
-
-// Generate a 1-second sine wave at 440 Hz
-static std::vector<float> make_sine(float freq = 440.0f, float sr = 44100.0f, int samples = 44100) {
-    std::vector<float> data(static_cast<size_t>(samples));
-    for (int i = 0; i < samples; ++i) {
-        data[static_cast<size_t>(i)] = std::sin(2.0f * 3.14159f * freq * static_cast<float>(i) / sr);
-    }
-    return data;
-}
-
-struct SamplerFixture {
-    state::StateStore store;
-    std::unique_ptr<PulpSamplerProcessor> proc;
-
-    SamplerFixture() {
-        proc = std::make_unique<PulpSamplerProcessor>();
-        proc->set_state_store(&store);
-        proc->define_parameters(store);
-
-        format::PrepareContext ctx;
-        ctx.sample_rate = 44100;
-        ctx.max_buffer_size = 512;
-        ctx.input_channels = 0;
-        ctx.output_channels = 2;
-        proc->prepare(ctx);
-
-        auto sample = make_sine();
-        REQUIRE(proc->load_sample(sample.data(), static_cast<int>(sample.size()), 44100.0f));
-    }
-};
-
-template <typename Predicate>
-static bool wait_for_condition(Predicate predicate,
-                               std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
-    const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (!predicate() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::yield();
-    }
-    return predicate();
-}
-
-struct LoaderThreadGuard {
-    std::atomic<bool>& running;
-    std::thread& loader;
-
-    ~LoaderThreadGuard() {
-        running.store(false, std::memory_order_release);
-        if (loader.joinable()) {
-            loader.join();
-        }
-    }
-};
-
-TEST_CASE("PulpSampler descriptor", "[sampler]") {
-    PulpSamplerProcessor proc;
-    auto d = proc.descriptor();
-    REQUIRE(d.name == "PulpSampler");
-    REQUIRE(d.category == format::PluginCategory::Instrument);
-    REQUIRE(d.accepts_midi);
-    REQUIRE(d.input_buses.empty());
-    REQUIRE(d.output_buses.size() == 1);
-}
-
-TEST_CASE("PulpSampler has 7 parameters", "[sampler]") {
-    SamplerFixture f;
-    REQUIRE(f.store.param_count() == 7);
-}
+#include "test_pulp_sampler_support.hpp"
 
 TEST_CASE("PulpSampler loads sample", "[sampler]") {
     SamplerFixture f;
@@ -93,9 +12,8 @@ TEST_CASE("PulpSampler reports invalid sample loads", "[sampler]") {
     std::vector<float> sample(128, 0.0f);
     REQUIRE_FALSE(f.proc->load_sample(sample.data(), 0, 44100.0f));
     REQUIRE_FALSE(f.proc->load_sample(sample.data(), static_cast<int>(sample.size()), 0.0f));
-    REQUIRE_FALSE(f.proc->load_sample_stereo(sample.data(),
-                                             std::numeric_limits<int>::max(),
-                                             44100.0f));
+    REQUIRE_FALSE(
+        f.proc->load_sample_stereo(sample.data(), std::numeric_limits<int>::max(), 44100.0f));
 }
 
 TEST_CASE("PulpSampler requires prepare before sample loading", "[sampler]") {
@@ -125,7 +43,8 @@ TEST_CASE("PulpSampler silence without MIDI", "[sampler]") {
 
     // No MIDI input → silence
     float sum = 0;
-    for (int i = 0; i < 512; ++i) sum += std::abs(out_l[static_cast<size_t>(i)]);
+    for (int i = 0; i < 512; ++i)
+        sum += std::abs(out_l[static_cast<size_t>(i)]);
     REQUIRE_THAT(sum, WithinAbs(0.0, 0.001));
 }
 
@@ -153,8 +72,7 @@ TEST_CASE("PulpSampler produces audio on note-on", "[sampler]") {
     REQUIRE(peak > 0.01f);
 }
 
-TEST_CASE("PulpSampler process runs under no-allocation guard after prepare",
-          "[sampler][rt]") {
+TEST_CASE("PulpSampler process runs under no-allocation guard after prepare", "[sampler][rt]") {
     SamplerFixture f;
     f.store.set_value(kSamplerAttack, 0.0f);
 
@@ -218,8 +136,7 @@ TEST_CASE("PulpSampler handles dense MIDI and voice stealing under no-allocation
     REQUIRE(out_r[96] > 0.1f);
 }
 
-TEST_CASE("PulpSampler sorts and clamps MIDI offsets under no-allocation guard",
-          "[sampler][rt]") {
+TEST_CASE("PulpSampler sorts and clamps MIDI offsets under no-allocation guard", "[sampler][rt]") {
     SamplerFixture f;
 
     std::vector<float> sample(1024, 1.0f);
@@ -255,7 +172,8 @@ TEST_CASE("PulpSampler sorts and clamps MIDI offsets under no-allocation guard",
     }
 
     float early_sum = 0.0f;
-    for (int i = 0; i < 16; ++i) early_sum += std::abs(out_l[static_cast<size_t>(i)]);
+    for (int i = 0; i < 16; ++i)
+        early_sum += std::abs(out_l[static_cast<size_t>(i)]);
     REQUIRE(early_sum > 8.0f);
     REQUIRE(out_l[96] > 0.1f);
     REQUIRE(out_r[96] > 0.1f);
@@ -280,16 +198,15 @@ TEST_CASE("PulpSampler tolerates controller-thread sample loads during process",
     std::thread loader([&] {
         loader_ready.store(true, std::memory_order_release);
         while (!start.load(std::memory_order_acquire)) {
-            if (!running.load(std::memory_order_acquire)) return;
+            if (!running.load(std::memory_order_acquire))
+                return;
             std::this_thread::yield();
         }
 
         for (int i = 0; running.load(std::memory_order_acquire); ++i) {
             const auto& source = (i % 2 == 0) ? sample_a : sample_b;
             load_attempts.fetch_add(1, std::memory_order_relaxed);
-            if (f.proc->load_sample(source.data(),
-                                    static_cast<int>(source.size()),
-                                    44100.0f)) {
+            if (f.proc->load_sample(source.data(), static_cast<int>(source.size()), 44100.0f)) {
                 load_successes.fetch_add(1, std::memory_order_relaxed);
             }
             if ((i % 8) == 0) {
@@ -308,14 +225,10 @@ TEST_CASE("PulpSampler tolerates controller-thread sample loads during process",
     format::ProcessContext ctx{44100, 64};
     midi::MidiBuffer midi_in, midi_out;
 
-    REQUIRE(wait_for_condition([&] {
-        return loader_ready.load(std::memory_order_acquire);
-    }));
+    REQUIRE(wait_for_condition([&] { return loader_ready.load(std::memory_order_acquire); }));
 
     start.store(true, std::memory_order_release);
-    REQUIRE(wait_for_condition([&] {
-        return load_successes.load(std::memory_order_relaxed) > 0;
-    }));
+    REQUIRE(wait_for_condition([&] { return load_successes.load(std::memory_order_relaxed) > 0; }));
     REQUIRE(load_attempts.load(std::memory_order_relaxed) > 0);
     REQUIRE(load_successes.load(std::memory_order_relaxed) > 0);
 
@@ -384,7 +297,8 @@ TEST_CASE("PulpSampler tolerates controller-thread stereo loads during process",
     std::thread loader([&] {
         loader_ready.store(true, std::memory_order_release);
         while (!start.load(std::memory_order_acquire)) {
-            if (!running.load(std::memory_order_acquire)) return;
+            if (!running.load(std::memory_order_acquire))
+                return;
             std::this_thread::yield();
         }
 
@@ -410,14 +324,10 @@ TEST_CASE("PulpSampler tolerates controller-thread stereo loads during process",
     format::ProcessContext ctx{44100, 64};
     midi::MidiBuffer midi_in, midi_out;
 
-    REQUIRE(wait_for_condition([&] {
-        return loader_ready.load(std::memory_order_acquire);
-    }));
+    REQUIRE(wait_for_condition([&] { return loader_ready.load(std::memory_order_acquire); }));
 
     start.store(true, std::memory_order_release);
-    REQUIRE(wait_for_condition([&] {
-        return load_successes.load(std::memory_order_relaxed) > 0;
-    }));
+    REQUIRE(wait_for_condition([&] { return load_successes.load(std::memory_order_relaxed) > 0; }));
     REQUIRE(load_attempts.load(std::memory_order_relaxed) > 0);
     REQUIRE(load_successes.load(std::memory_order_relaxed) > 0);
 
@@ -439,9 +349,7 @@ TEST_CASE("PulpSampler tolerates controller-thread stereo loads during process",
         }
 
         for (std::size_t i = 0; i < out_l.size(); ++i) {
-            finite_output = finite_output &&
-                            std::isfinite(out_l[i]) &&
-                            std::isfinite(out_r[i]);
+            finite_output = finite_output && std::isfinite(out_l[i]) && std::isfinite(out_r[i]);
             peak_l = std::max(peak_l, std::abs(out_l[i]));
             peak_r = std::max(peak_r, std::abs(out_r[i]));
             channel_diverged = channel_diverged || std::abs(out_l[i] - out_r[i]) > 0.05f;
@@ -496,16 +404,15 @@ TEST_CASE("PulpSampler serializes multiple controller loaders during process",
     std::thread mono_loader([&] {
         mono_ready.store(true, std::memory_order_release);
         while (!start.load(std::memory_order_acquire)) {
-            if (!running.load(std::memory_order_acquire)) return;
+            if (!running.load(std::memory_order_acquire))
+                return;
             std::this_thread::yield();
         }
 
         for (int i = 0; running.load(std::memory_order_acquire); ++i) {
             const auto& source = (i % 2 == 0) ? mono_a : mono_b;
             mono_attempts.fetch_add(1, std::memory_order_relaxed);
-            if (f.proc->load_sample(source.data(),
-                                    static_cast<int>(source.size()),
-                                    44100.0f)) {
+            if (f.proc->load_sample(source.data(), static_cast<int>(source.size()), 44100.0f)) {
                 mono_successes.fetch_add(1, std::memory_order_relaxed);
                 std::this_thread::sleep_for(std::chrono::microseconds(50));
             }
@@ -517,7 +424,8 @@ TEST_CASE("PulpSampler serializes multiple controller loaders during process",
     std::thread stereo_loader([&] {
         stereo_ready.store(true, std::memory_order_release);
         while (!start.load(std::memory_order_acquire)) {
-            if (!running.load(std::memory_order_acquire)) return;
+            if (!running.load(std::memory_order_acquire))
+                return;
             std::this_thread::yield();
         }
 
@@ -573,9 +481,7 @@ TEST_CASE("PulpSampler serializes multiple controller loaders during process",
         }
 
         for (std::size_t i = 0; i < out_l.size(); ++i) {
-            finite_output = finite_output &&
-                            std::isfinite(out_l[i]) &&
-                            std::isfinite(out_r[i]);
+            finite_output = finite_output && std::isfinite(out_l[i]) && std::isfinite(out_r[i]);
             peak_l = std::max(peak_l, std::abs(out_l[i]));
             peak_r = std::max(peak_r, std::abs(out_r[i]));
         }
@@ -604,8 +510,7 @@ TEST_CASE("PulpSampler serializes multiple controller loaders during process",
     REQUIRE(peak_r > 0.05f);
 }
 
-TEST_CASE("PulpSampler handles note release under no-allocation guard",
-          "[sampler][rt]") {
+TEST_CASE("PulpSampler handles note release under no-allocation guard", "[sampler][rt]") {
     SamplerFixture f;
 
     std::vector<float> sample(2048, 1.0f);
@@ -642,14 +547,15 @@ TEST_CASE("PulpSampler handles note release under no-allocation guard",
 
     float held_sum = 0.0f;
     float release_sum = 0.0f;
-    for (int i = 0; i < 64; ++i) held_sum += std::abs(out_l[static_cast<size_t>(i)]);
-    for (int i = 64; i < 128; ++i) release_sum += std::abs(out_l[static_cast<size_t>(i)]);
+    for (int i = 0; i < 64; ++i)
+        held_sum += std::abs(out_l[static_cast<size_t>(i)]);
+    for (int i = 64; i < 128; ++i)
+        release_sum += std::abs(out_l[static_cast<size_t>(i)]);
     REQUIRE(held_sum > 40.0f);
     REQUIRE(release_sum > 40.0f);
 }
 
-TEST_CASE("PulpSampler loads interleaved stereo into separate channels",
-          "[sampler]") {
+TEST_CASE("PulpSampler loads interleaved stereo into separate channels", "[sampler]") {
     SamplerFixture f;
 
     std::vector<float> interleaved(512);
@@ -711,7 +617,8 @@ TEST_CASE("PulpSampler respects MIDI sample offsets", "[sampler]") {
     }
 
     float pre_sum = 0.0f;
-    for (int i = 0; i < 128; ++i) pre_sum += std::abs(out_l[static_cast<size_t>(i)]);
+    for (int i = 0; i < 128; ++i)
+        pre_sum += std::abs(out_l[static_cast<size_t>(i)]);
     REQUIRE_THAT(pre_sum, WithinAbs(0.0, 0.001));
     REQUIRE(std::abs(out_l[200]) > 0.01f);
 }
@@ -745,8 +652,7 @@ TEST_CASE("PulpSampler loops through the primitive loop renderer", "[sampler]") 
     REQUIRE(std::abs(out_r[128]) > 0.1f);
 }
 
-TEST_CASE("PulpSampler keeps active voices on their original sample generation",
-          "[sampler]") {
+TEST_CASE("PulpSampler keeps active voices on their original sample generation", "[sampler]") {
     SamplerFixture f;
 
     std::vector<float> first(64, 1.0f);
@@ -784,8 +690,7 @@ TEST_CASE("PulpSampler keeps active voices on their original sample generation",
     REQUIRE(out_r[16] > 0.75f);
 }
 
-TEST_CASE("PulpSampler clears per-voice scratch when short voices finish",
-          "[sampler]") {
+TEST_CASE("PulpSampler clears per-voice scratch when short voices finish", "[sampler]") {
     SamplerFixture f;
 
     std::vector<float> first(64, 1.0f);

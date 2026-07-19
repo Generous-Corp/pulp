@@ -136,6 +136,21 @@ endfunction()
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
+
+# The sampler-mip shell-out test verifies that the published sidecar is also
+# consumable by the example runtime. Keep its probe in the test graph even when
+# the release-path configuration deliberately disables example targets.
+include(${CMAKE_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake)
+add_executable(pulp-sampler-cli-sidecar-probe
+    ${PULP_SAMPLER_IMPLEMENTATION}
+    ${CMAKE_SOURCE_DIR}/examples/PulpSampler/test_sampler_cli_sidecar_probe.cpp)
+target_link_libraries(pulp-sampler-cli-sidecar-probe PRIVATE
+    pulp::format pulp::audio pulp::signal)
+target_include_directories(pulp-sampler-cli-sidecar-probe PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
+add_dependencies(pulp-test-cli-shellout pulp-sampler-cli-sidecar-probe)
+target_compile_definitions(pulp-test-cli-shellout PRIVATE
+    PULP_SAMPLER_SIDECAR_PROBE_BINARY="$<TARGET_FILE:pulp-sampler-cli-sidecar-probe>")
 # Depend on the fixture binary so the headless/screenshot
 # end-to-end test has its target ready in the build tree.
 if(TARGET pulp-test-cli-run-fixture)

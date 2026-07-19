@@ -1949,7 +1949,7 @@ commands:
 
   - name: audio
     status: experimental
-    summary: Repo-level audio analysis tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, and run live/offline Audio Scope analysis.
+    summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, and run live/offline Audio Scope analysis.
     subcommands:
       - name: model list
         summary: List registered audio models with backend and tags
@@ -1984,6 +1984,20 @@ commands:
             kind: flag
       - name: read-bundle
         summary: Pretty-print a previously emitted excerpt bundle
+      - name: sampler-mip build
+        summary: Build and atomically publish a self-verified 140 dB streamed-sampler mip sidecar with hash-addressed payloads
+        args:
+          - name: source
+            kind: positional
+            required: true
+          - name: --levels
+            kind: option
+          - name: --max-source-bytes
+            kind: option
+          - name: --max-output-bytes
+            kind: option
+          - name: --json
+            kind: flag
       - name: scope
         summary: Capture Audio Scope JSON from a live standalone target or speakerless offline WAV input; offline mode can also emit a PNG trace artifact.
         args:

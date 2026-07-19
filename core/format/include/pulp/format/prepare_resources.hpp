@@ -5,6 +5,7 @@
 // consumers keep compiling unchanged; new code should include it directly.
 
 #include <cstddef>
+#include <limits>
 
 namespace pulp::format {
 
@@ -60,7 +61,10 @@ struct PrepareResourceUsage {
     int voices = 0;
 
     std::size_t total_bytes() const noexcept {
-        return persistent_bytes + block_scratch_bytes;
+        return block_scratch_bytes >
+                std::numeric_limits<std::size_t>::max() - persistent_bytes
+            ? std::numeric_limits<std::size_t>::max()
+            : persistent_bytes + block_scratch_bytes;
     }
 };
 

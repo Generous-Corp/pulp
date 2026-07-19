@@ -62,11 +62,16 @@ actual plugin editor screenshots.
 - **UI:** Six knobs, auto-generated
 - **Formats:** CLAP only
 
-## PulpSampler — Sample-Buffer Sampler
+## PulpSampler — Streaming Sampler
 
 - **Type:** Instrument (MIDI in → stereo out)
-- **Parameters:** Gain, Attack, Decay, Sustain, Release, Pitch, Loop
-- **UI:** Gain, ADSR, Pitch controls, and Loop toggle, auto-generated
+- **Parameters:** Gain, Attack, Decay, Sustain, Release, Pitch, Loop, Reverse,
+  Interpolation
+- **UI:** Gain, ADSR, Pitch, Loop, Reverse, and Interpolation controls,
+  auto-generated
+- **Engine:** Eight voices; resident or bounded ranged-file playback; forward
+  and reverse one-shots/loops; selectable interpolation, octave mips,
+  starvation fades, and optional synthetic heritage processing
 - **Formats:** CLAP only
 
 ## GPU Demo — Modulation Matrix

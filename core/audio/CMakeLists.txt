@@ -37,6 +37,7 @@ target_sources(pulp-audio PRIVATE
     src/live_dsp_telemetry.cpp
     src/live_dsp_telemetry_json.cpp
     src/loop_point_analyzer.cpp
+    src/loop_playback_cursor.cpp
     src/loop_reader.cpp
     src/loop_renderer.cpp
     src/loop_types.cpp
@@ -48,9 +49,16 @@ target_sources(pulp-audio PRIVATE
     src/realtime_sample_recorder.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp
+    src/sample_heritage_json.cpp
+    src/sample_heritage_schema.cpp
+    src/sample_heritage_src.cpp
     src/sample_edit_document.cpp
     src/sample_key_map.cpp
+    src/sample_mip_manifest.cpp
+    src/sample_mip_sidecar.cpp
+    src/sample_mip_sidecar_staging.cpp
     src/sample_pool.cpp
+    src/sample_stream_service.cpp
     src/sample_stream_window.cpp
     src/sample_voice_renderer.cpp
     src/sample_zone_map.cpp
@@ -138,6 +146,7 @@ elseif(WIN32)
     )
     target_link_libraries(pulp-audio PRIVATE
         ole32
+        Advapi32
         winmm
     )
 elseif(UNIX AND NOT APPLE AND NOT ANDROID)

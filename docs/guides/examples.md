@@ -86,15 +86,22 @@ Features:
 **Path**: `examples/PulpSampler/`
 **Type**: Instrument
 **Formats**: CLAP
-**Purpose**: A sample-buffer sampler with MIDI triggering, ADSR envelope, and
-pitch control. Validates off-thread mono/stereo sample publication,
-multi-voice playback, and parameter state round-trips.
+**Purpose**: A production-shaped sampler with MIDI triggering, ADSR, pitch,
+loop/reverse playback, selectable interpolation, bounded file streaming, and
+an optional synthetic heritage-processing chain. Validates transactional
+off-thread mono/stereo publication, multi-voice playback, starvation handling,
+streamed mip selection, and parameter/state round-trips.
 
 Features:
-- Off-thread mono/stereo sample-buffer loading
+- Off-thread mono/stereo resident loading and strict ranged WAV/AIFF streaming
 - MIDI note triggering with velocity
-- ADSR envelope and pitch control
-- Multi-voice polyphony
+- ADSR, pitch, loop, reverse, and interpolation controls
+- Eight-voice polyphony with bounded starvation fades
+- Resident and persisted streamed octave mips with ratio-tracking sinc fallback
+- Checked streaming-memory configuration plus typed prepare/load and coherent
+  combined diagnostics
+- Optional typed synthetic heritage processing, transactional clock-domain
+  rebind, and strict profile/runtime-state persistence
 
 ## PulpPluck
 

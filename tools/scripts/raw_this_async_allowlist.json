@@ -7,6 +7,11 @@
       "reason": "BufferingReader destructor calls stop and joins the worker before member teardown"
     },
     {
+      "path": "core/audio/include/pulp/audio/sample_stream_decode_pool.hpp",
+      "needle": "std::thread([this, index]",
+      "reason": "SampleStreamDecodePool release stops and joins every worker before clearing worker, source, and configuration storage"
+    },
+    {
       "path": "core/audio/platform/linux/alsa_device.cpp",
       "needle": "std::thread([this]",
       "reason": "AlsaDevice destructor stops and joins the IO thread before closing device state"

@@ -144,8 +144,12 @@ add_executable(pulp-test-matrix-synth test_matrix_synth.cpp)
 target_link_libraries(pulp-test-matrix-synth PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-synth PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSynth)
 catch_discover_tests(pulp-test-matrix-synth)
-add_executable(pulp-test-matrix-sampler test_matrix_sampler.cpp)
-target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+include(${CMAKE_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake)
+add_executable(pulp-test-matrix-sampler
+    test_matrix_sampler.cpp
+    ${PULP_SAMPLER_IMPLEMENTATION})
+target_link_libraries(pulp-test-matrix-sampler PRIVATE
+    pulp::format pulp::audio pulp::signal Catch2::Catch2WithMain)
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 # Harness support lib: Processor-driven helpers; file-analysis lives in pulp::audio-analysis (tools/audio/analysis). See test/support/README.md.
@@ -183,7 +187,6 @@ target_link_libraries(pulp-test-wav-bridge PRIVATE pulp-audio-test-support Catch
 catch_discover_tests(pulp-test-wav-bridge)
 add_executable(pulp-osc-render-wav osc_render_wav.cpp)
 target_link_libraries(pulp-osc-render-wav PRIVATE pulp-audio-test-support)
-
 # CLI argv smoke for the tool above: shells out per --engine and for --seed,
 # asserting exit code + a non-empty WAV. See test_osc_render_wav_cli.cpp.
 add_executable(pulp-test-osc-render-wav-cli test_osc_render_wav_cli.cpp)
@@ -193,6 +196,108 @@ add_dependencies(pulp-test-osc-render-wav-cli pulp-osc-render-wav)
 target_compile_definitions(pulp-test-osc-render-wav-cli PRIVATE
     PULP_OSC_RENDER_WAV_BINARY="$<TARGET_FILE:pulp-osc-render-wav>")
 catch_discover_tests(pulp-test-osc-render-wav-cli)
+
+# Exact sampler interpolation quality gates share Audio Doctor's projection and
+# spectrum primitives. The sibling WAV tool exposes the same production
+# interpolation path to the independent Python Quality Lab reference.
+add_executable(pulp-test-sample-interpolation-quality
+    test_sample_interpolation_quality.cpp)
+target_link_libraries(pulp-test-sample-interpolation-quality PRIVATE
+    pulp::audio-analysis Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sample-interpolation-quality)
+add_executable(pulp-sampler-render-wav sample_interpolation_render_wav.cpp)
+target_link_libraries(pulp-sampler-render-wav PRIVATE pulp::audio)
+add_executable(pulp-sampler-heritage-render-wav sample_heritage_render_wav.cpp)
+target_link_libraries(pulp-sampler-heritage-render-wav PRIVATE pulp::audio)
+option(PULP_AUDIO_QUALITY_LAB_GATE
+    "Register the dependency-bearing sampler Quality Lab reference gate" OFF)
+set(PULP_AUDIO_QUALITY_LAB_PYTHON "" CACHE FILEPATH
+    "Python from an environment containing Quality Lab plus pytest dependencies")
+if(PULP_AUDIO_QUALITY_LAB_GATE)
+    if(NOT PULP_AUDIO_QUALITY_LAB_PYTHON OR
+       NOT EXISTS "${PULP_AUDIO_QUALITY_LAB_PYTHON}")
+        message(FATAL_ERROR
+            "PULP_AUDIO_QUALITY_LAB_GATE requires "
+            "-DPULP_AUDIO_QUALITY_LAB_PYTHON=/path/to/python with numpy, "
+            "soundfile, quality_lab, and pytest available")
+    endif()
+    set(_pulp_sampler_aql_test
+        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_interpolation_reference.py")
+    foreach(_pulp_sampler_aql_case IN ITEMS reference negative-control)
+        if(_pulp_sampler_aql_case STREQUAL "reference")
+            set(_pulp_sampler_aql_expression
+                "test_ratio_sinc_matches_independent_offline_reference")
+        else()
+            set(_pulp_sampler_aql_expression
+                "test_reference_comparison_has_a_working_negative_control")
+        endif()
+        add_test(NAME sampler-quality-lab-${_pulp_sampler_aql_case}
+            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+                "${_pulp_sampler_aql_test}" -q -k "${_pulp_sampler_aql_expression}")
+        set_tests_properties(sampler-quality-lab-${_pulp_sampler_aql_case}
+            PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                ENVIRONMENT
+                    "PULP_SAMPLER_RENDER_WAV=$<TARGET_FILE:pulp-sampler-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                LABELS "audio;sampler;quality-lab;dependency-gate"
+                TIMEOUT 120)
+    endforeach()
+    set(_pulp_sampler_heritage_aql_test
+        "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab/tests/test_sampler_heritage_reference.py")
+    foreach(_pulp_sampler_heritage_case IN ITEMS reference negative-control)
+        if(_pulp_sampler_heritage_case STREQUAL "reference")
+            set(_pulp_sampler_heritage_expression
+                "not negative_control")
+        else()
+            set(_pulp_sampler_heritage_expression "negative_control")
+        endif()
+        add_test(NAME sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            COMMAND "${PULP_AUDIO_QUALITY_LAB_PYTHON}" -m pytest
+                "${_pulp_sampler_heritage_aql_test}" -q -k
+                "${_pulp_sampler_heritage_expression}")
+        set_tests_properties(
+            sampler-heritage-quality-lab-${_pulp_sampler_heritage_case}
+            PROPERTIES
+                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                ENVIRONMENT
+                    "PULP_SAMPLER_HERITAGE_RENDER_WAV=$<TARGET_FILE:pulp-sampler-heritage-render-wav>;PULP_SAMPLER_AQL_REQUIRED=1;PYTHONPATH=${CMAKE_SOURCE_DIR}/tools/audio/quality-lab"
+                LABELS "audio;sampler;heritage;quality-lab;dependency-gate"
+                TIMEOUT 120)
+    endforeach()
+endif()
+if(PULP_BENCHMARK)
+    add_executable(pulp-sampler-interpolation-benchmark
+        sample_interpolation_benchmark.cpp)
+    target_link_libraries(pulp-sampler-interpolation-benchmark PRIVATE pulp::audio)
+endif()
+if(Python3_Interpreter_FOUND AND PULP_BENCHMARK)
+    add_test(NAME sampler-interpolation-benchmark-evidence
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
+            --benchmark-binary $<TARGET_FILE:pulp-sampler-interpolation-benchmark>)
+    add_test(NAME sampler-interpolation-benchmark-evidence-self-test
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
+            --self-test
+            --benchmark-binary $<TARGET_FILE:pulp-sampler-interpolation-benchmark>)
+    set_tests_properties(
+        sampler-interpolation-benchmark-evidence
+        sampler-interpolation-benchmark-evidence-self-test
+        PROPERTIES LABELS "audio;sampler;bench;evidence")
+elseif(Python3_Interpreter_FOUND)
+    add_test(NAME sampler-interpolation-benchmark-source-evidence
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
+            --source-only)
+    add_test(NAME sampler-interpolation-benchmark-source-evidence-self-test
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/verify_sampler_interpolation_benchmark.py"
+            --self-test --source-only)
+    set_tests_properties(
+        sampler-interpolation-benchmark-source-evidence
+        sampler-interpolation-benchmark-source-evidence-self-test
+        PROPERTIES LABELS "audio;sampler;bench;evidence;source-only")
+ endif()
 if(PULP_HAS_VST3)
     # The VST3 sibling of the CLAP null above: same deterministic Processor,
     # same stimulus, driven through the real PulpVst3Processor::process()

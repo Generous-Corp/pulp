@@ -173,6 +173,10 @@ unset(_pulp_ubsan_enabled)
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 target_link_libraries(pulp-runtime PRIVATE hwy)
 
+if(WIN32)
+    target_link_libraries(pulp-runtime PRIVATE Advapi32)
+endif()
+
 # Tracing (Perfetto, dev-only). pulp::tracing is an empty INTERFACE target when
 # PULP_TRACING=OFF (the default), so this adds zero cost / zero symbols to a
 # normal build; ON exposes <pulp/runtime/trace.hpp>'s Perfetto-backed macros and

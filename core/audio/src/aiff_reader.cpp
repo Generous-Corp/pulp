@@ -3,7 +3,9 @@
 // Critical for Logic Pro projects and sample libraries.
 
 #include <pulp/audio/format_registry.hpp>
+#include "aiff_parser.hpp"
 #include <fstream>
+#include <filesystem>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -45,6 +47,144 @@ static double extended_to_double(const uint8_t* p) {
     double val = std::ldexp(static_cast<double>(mantissa), exponent - 16383 - 63);
     return sign ? -val : val;
 }
+
+namespace detail {
+
+std::optional<AiffLayout> parse_aiff_layout(std::istream& stream,
+                                            uint64_t file_size,
+                                            bool require_pcm_data) {
+    if (file_size < 12 ||
+        file_size > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max())) {
+        return std::nullopt;
+    }
+
+    stream.clear();
+    stream.seekg(0, std::ios::beg);
+    uint8_t header[12];
+    stream.read(reinterpret_cast<char*>(header), sizeof(header));
+    if (stream.gcount() != static_cast<std::streamsize>(sizeof(header)) ||
+        std::memcmp(header, "FORM", 4) != 0) {
+        return std::nullopt;
+    }
+
+    const bool is_aifc = std::memcmp(header + 8, "AIFC", 4) == 0;
+    if (!is_aifc && std::memcmp(header + 8, "AIFF", 4) != 0)
+        return std::nullopt;
+
+    const uint64_t form_size = read_be32(header + 4);
+    if (form_size < 4 || form_size > file_size - 8)
+        return std::nullopt;
+    const uint64_t form_end = 8 + form_size;
+
+    AiffLayout layout;
+    layout.info.format = is_aifc ? "AIFF-C" : "AIFF";
+    bool has_comm = false;
+    bool pcm_supported = !is_aifc;
+    bool has_sound = false;
+    bool invalid_sound_offset = false;
+
+    uint64_t chunk_offset = 12;
+    while (chunk_offset <= form_end - 8) {
+        stream.clear();
+        stream.seekg(static_cast<std::streamoff>(chunk_offset), std::ios::beg);
+        uint8_t chunk_header[8];
+        stream.read(reinterpret_cast<char*>(chunk_header), sizeof(chunk_header));
+        if (stream.gcount() != static_cast<std::streamsize>(sizeof(chunk_header)))
+            return std::nullopt;
+
+        const uint64_t chunk_size = read_be32(chunk_header + 4);
+        const uint64_t data_offset = chunk_offset + 8;
+        if (chunk_size > form_end - data_offset)
+            return std::nullopt;
+        const uint64_t chunk_end = data_offset + chunk_size;
+        if ((chunk_size & 1u) != 0 && chunk_end == form_end)
+            return std::nullopt;
+        const uint64_t padded_end = chunk_end + (chunk_size & 1u);
+        if (padded_end > form_end)
+            return std::nullopt;
+
+        if (std::memcmp(chunk_header, "COMM", 4) == 0) {
+            if (chunk_size < 18) return std::nullopt;
+            uint8_t comm[22] = {};
+            const auto bytes_to_read = static_cast<std::streamsize>(
+                std::min<uint64_t>(chunk_size, sizeof(comm)));
+            stream.read(reinterpret_cast<char*>(comm), bytes_to_read);
+            if (stream.gcount() != bytes_to_read) return std::nullopt;
+
+            layout.info.num_channels = read_be16(comm);
+            layout.info.num_frames = read_be32(comm + 2);
+            layout.info.bits_per_sample = read_be16(comm + 6);
+            const double sample_rate = extended_to_double(comm + 8);
+            if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
+                sample_rate > std::numeric_limits<uint32_t>::max() ||
+                layout.info.num_channels == 0) {
+                return std::nullopt;
+            }
+            layout.info.sample_rate = static_cast<uint32_t>(sample_rate);
+            layout.info.duration_seconds = static_cast<double>(layout.info.num_frames)
+                                         / layout.info.sample_rate;
+            pcm_supported = !is_aifc ||
+                (chunk_size >= 22 && std::memcmp(comm + 18, "NONE", 4) == 0);
+            has_comm = true;
+        } else if (std::memcmp(chunk_header, "SSND", 4) == 0) {
+            if (chunk_size >= 8) {
+                uint8_t sound_header[8];
+                stream.read(reinterpret_cast<char*>(sound_header), sizeof(sound_header));
+                if (stream.gcount() != static_cast<std::streamsize>(sizeof(sound_header)))
+                    return std::nullopt;
+                const uint64_t offset = read_be32(sound_header);
+                const uint64_t payload_size = chunk_size - 8;
+                if (offset > payload_size) {
+                    invalid_sound_offset = true;
+                } else {
+                    layout.sample_data_offset = data_offset + 8 + offset;
+                    layout.sample_data_size = payload_size - offset;
+                    has_sound = true;
+                }
+            }
+        }
+
+        chunk_offset = padded_end;
+    }
+
+    if (chunk_offset != form_end || !has_comm) return std::nullopt;
+    if (!require_pcm_data) return layout;
+    if (!pcm_supported || !has_sound || invalid_sound_offset ||
+        layout.info.num_frames == 0 ||
+        (layout.info.bits_per_sample != 8 && layout.info.bits_per_sample != 16 &&
+         layout.info.bits_per_sample != 24 && layout.info.bits_per_sample != 32)) {
+        return std::nullopt;
+    }
+
+    layout.bytes_per_sample = layout.info.bits_per_sample / 8;
+    const uint64_t bytes_per_frame =
+        static_cast<uint64_t>(layout.info.num_channels) * layout.bytes_per_sample;
+    if (bytes_per_frame > std::numeric_limits<uint32_t>::max())
+        return std::nullopt;
+    layout.bytes_per_frame = static_cast<uint32_t>(bytes_per_frame);
+    if (layout.info.num_frames > layout.sample_data_size / bytes_per_frame)
+        return std::nullopt;
+    return layout;
+}
+
+float decode_aiff_pcm_sample(const uint8_t* bytes, uint32_t bits_per_sample) {
+    if (bits_per_sample == 8)
+        return static_cast<float>(static_cast<int8_t>(bytes[0])) / 128.0f;
+    if (bits_per_sample == 16) {
+        const auto value = static_cast<int16_t>(
+            (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1]);
+        return static_cast<float>(value) / 32768.0f;
+    }
+    if (bits_per_sample == 24) {
+        const uint32_t raw = (static_cast<uint32_t>(bytes[0]) << 24) |
+                             (static_cast<uint32_t>(bytes[1]) << 16) |
+                             (static_cast<uint32_t>(bytes[2]) << 8);
+        return static_cast<float>(static_cast<int32_t>(raw)) / 2147483648.0f;
+    }
+    return static_cast<float>(static_cast<int32_t>(read_be32(bytes))) / 2147483648.0f;
+}
+
+}  // namespace detail
 
 // Convert double to 80-bit IEEE 754 extended
 static void double_to_extended(double val, uint8_t* p) {
@@ -99,167 +239,42 @@ public:
     std::optional<AudioFileInfo> read_info(const std::string& path) override {
         std::ifstream file(path, std::ios::binary);
         if (!file) return std::nullopt;
-
-        uint8_t header[12];
-        file.read(reinterpret_cast<char*>(header), 12);
-        if (file.gcount() != 12) return std::nullopt;
-
-        if (std::memcmp(header, "FORM", 4) != 0) return std::nullopt;
-        bool is_aifc = (std::memcmp(header + 8, "AIFC", 4) == 0);
-        if (!is_aifc && std::memcmp(header + 8, "AIFF", 4) != 0) return std::nullopt;
-
-        AudioFileInfo info;
-        info.format = is_aifc ? "AIFF-C" : "AIFF";
-
-        while (file.good()) {
-            uint8_t chunk_header[8];
-            file.read(reinterpret_cast<char*>(chunk_header), 8);
-            if (file.gcount() != 8) break;
-
-            uint32_t chunk_size = read_be32(chunk_header + 4);
-
-            if (std::memcmp(chunk_header, "COMM", 4) == 0) {
-                if (chunk_size < 18) return std::nullopt;
-
-                uint8_t comm[18] = {};
-                file.read(reinterpret_cast<char*>(comm), 18);
-                if (file.gcount() != 18) return std::nullopt;
-
-                info.num_channels = read_be16(comm);
-                info.num_frames = read_be32(comm + 2);
-                info.bits_per_sample = read_be16(comm + 6);
-                const double sample_rate = extended_to_double(comm + 8);
-                if (!std::isfinite(sample_rate) || sample_rate <= 0.0 ||
-                    sample_rate > std::numeric_limits<uint32_t>::max() || info.num_channels == 0)
-                    return std::nullopt;
-                info.sample_rate = static_cast<uint32_t>(sample_rate);
-                info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
-                return info;
-            }
-
-            // Skip chunk (pad to even)
-            file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
-        }
-
-        return std::nullopt;
+        std::error_code error;
+        const auto file_size = std::filesystem::file_size(path, error);
+        if (error) return std::nullopt;
+        auto layout = detail::parse_aiff_layout(file, file_size, false);
+        if (!layout) return std::nullopt;
+        return layout->info;
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
         std::ifstream file(path, std::ios::binary);
         if (!file) return std::nullopt;
 
-        uint8_t header[12];
-        file.read(reinterpret_cast<char*>(header), 12);
-        if (file.gcount() != 12) return std::nullopt;
-        if (std::memcmp(header, "FORM", 4) != 0) return std::nullopt;
-        bool is_aifc = std::memcmp(header + 8, "AIFC", 4) == 0;
-        if (std::memcmp(header + 8, "AIFF", 4) != 0 && !is_aifc)
-            return std::nullopt;
-
-        uint32_t num_channels = 0, num_frames = 0, bits_per_sample = 0;
-        double sample_rate = 0;
-        bool unsupported_aifc_compression = false;
-        std::vector<uint8_t> ssnd_data;
-
-        while (file.good()) {
-            uint8_t chunk_header[8];
-            file.read(reinterpret_cast<char*>(chunk_header), 8);
-            if (file.gcount() != 8) break;
-
-            uint32_t chunk_size = read_be32(chunk_header + 4);
-
-            if (std::memcmp(chunk_header, "COMM", 4) == 0) {
-                if (chunk_size < 18) return std::nullopt;
-
-                uint32_t bytes_to_read = std::min(chunk_size, 26u);
-                uint8_t comm[26] = {};
-                file.read(reinterpret_cast<char*>(comm), bytes_to_read);
-                if (file.gcount() != static_cast<std::streamsize>(bytes_to_read))
-                    return std::nullopt;
-                num_channels = read_be16(comm);
-                num_frames = read_be32(comm + 2);
-                bits_per_sample = read_be16(comm + 6);
-                sample_rate = extended_to_double(comm + 8);
-                if (is_aifc && (chunk_size < 22 || std::memcmp(comm + 18, "NONE", 4) != 0))
-                    unsupported_aifc_compression = true;
-                // Skip remaining bytes in chunk (common in AIFC with compression type)
-                uint32_t remaining = chunk_size - bytes_to_read;
-                if (remaining > 0)
-                    file.seekg(remaining, std::ios::cur);
-                // Pad to even boundary
-                if (chunk_size & 1) file.seekg(1, std::ios::cur);
-            } else if (std::memcmp(chunk_header, "SSND", 4) == 0) {
-                if (chunk_size < 8) {
-                    file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
-                    continue;  // Malformed SSND — skip
-                }
-                uint8_t ssnd_header[8];
-                file.read(reinterpret_cast<char*>(ssnd_header), 8);
-                if (file.gcount() != 8) return std::nullopt;
-                uint32_t offset = read_be32(ssnd_header);
-                size_t data_size = chunk_size - 8;
-                ssnd_data.resize(data_size);
-                file.read(reinterpret_cast<char*>(ssnd_data.data()), static_cast<std::streamsize>(data_size));
-                if (file.gcount() != static_cast<std::streamsize>(data_size))
-                    return std::nullopt;
-                if (offset > ssnd_data.size())
-                    return std::nullopt;
-                if (offset > 0)
-                    ssnd_data.erase(ssnd_data.begin(), ssnd_data.begin() + static_cast<std::ptrdiff_t>(offset));
-                if (chunk_size & 1) file.seekg(1, std::ios::cur);
-            } else {
-                file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
-            }
-        }
-
-        if (num_channels == 0 || num_frames == 0 || !std::isfinite(sample_rate) ||
-            sample_rate <= 0.0 || sample_rate > std::numeric_limits<uint32_t>::max() ||
-            unsupported_aifc_compression || ssnd_data.empty())
-            return std::nullopt;
+        std::error_code error;
+        const auto file_size = std::filesystem::file_size(path, error);
+        if (error) return std::nullopt;
+        auto layout = detail::parse_aiff_layout(file, file_size, true);
+        if (!layout) return std::nullopt;
 
         AudioFileData data;
-        data.sample_rate = static_cast<uint32_t>(sample_rate);
-        data.channels.resize(num_channels);
+        data.sample_rate = layout->info.sample_rate;
+        data.channels.resize(layout->info.num_channels);
         for (auto& ch : data.channels)
-            ch.resize(num_frames);
+            ch.resize(layout->info.num_frames);
 
-        int bytes_per_sample = static_cast<int>(bits_per_sample) / 8;
-        int frame_size = bytes_per_sample * static_cast<int>(num_channels);
-        if ((bits_per_sample != 8 && bits_per_sample != 16 &&
-             bits_per_sample != 24 && bits_per_sample != 32) ||
-            ssnd_data.size() < static_cast<size_t>(frame_size) * num_frames) {
-            return std::nullopt;
-        }
-
-        for (uint32_t f = 0; f < num_frames; ++f) {
-            for (uint32_t c = 0; c < num_channels; ++c) {
-                size_t offset = static_cast<size_t>(f) * frame_size + static_cast<size_t>(c) * bytes_per_sample;
-                if (offset + bytes_per_sample > ssnd_data.size()) break;
-
-                const uint8_t* p = ssnd_data.data() + offset;
-                float sample = 0;
-
-                if (bits_per_sample == 16) {
-                    int16_t v = static_cast<int16_t>((p[0] << 8) | p[1]);
-                    sample = static_cast<float>(v) / 32768.0f;
-                } else if (bits_per_sample == 24) {
-                    // Build the 24-bit word with unsigned arithmetic; a signed
-                    // left-shift of a byte >= 0x80 into bit 31 is undefined.
-                    uint32_t raw = (static_cast<uint32_t>(p[0]) << 24) |
-                                   (static_cast<uint32_t>(p[1]) << 16) |
-                                   (static_cast<uint32_t>(p[2]) << 8);
-                    int32_t v = static_cast<int32_t>(raw);
-                    sample = static_cast<float>(v) / 2147483648.0f;
-                } else if (bits_per_sample == 32) {
-                    int32_t v = static_cast<int32_t>(read_be32(p));
-                    sample = static_cast<float>(v) / 2147483648.0f;
-                } else if (bits_per_sample == 8) {
-                    // AIFF 8-bit PCM is signed (-128 to 127)
-                    int8_t v = static_cast<int8_t>(p[0]);
-                    sample = static_cast<float>(v) / 128.0f;
-                }
-
-                data.channels[c][f] = sample;
+        std::vector<uint8_t> frame(layout->bytes_per_frame);
+        file.clear();
+        file.seekg(static_cast<std::streamoff>(layout->sample_data_offset), std::ios::beg);
+        for (uint32_t f = 0; f < layout->info.num_frames; ++f) {
+            file.read(reinterpret_cast<char*>(frame.data()),
+                      static_cast<std::streamsize>(frame.size()));
+            if (file.gcount() != static_cast<std::streamsize>(frame.size()))
+                return std::nullopt;
+            for (uint32_t c = 0; c < layout->info.num_channels; ++c) {
+                data.channels[c][f] = detail::decode_aiff_pcm_sample(
+                    frame.data() + static_cast<size_t>(c) * layout->bytes_per_sample,
+                    layout->info.bits_per_sample);
             }
         }
 

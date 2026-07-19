@@ -440,6 +440,16 @@ audio validate` verbs read, then exits. Pick the mode by which window you need:
 WAV writing is `pulp::audio::write_wav_file(path, data, WavBitDepth)` —
 `Int16` (default overload), `Int24`, or `Float32`.
 
+For streamed sampler assets, build the production mip sidecar with
+`pulp audio sampler-mip build <source.wav|source.aiff>`. It accepts strict
+ranged WAV and uncompressed AIFF/AIFF-C, uses the sampler's shared 140 dB
+decimator, publishes source-and-payload-hash-addressed float32 WAV levels, and
+atomically publishes the `.pulpmip` manifest last. `--levels 1|2`,
+`--max-source-bytes`, and `--max-output-bytes` bound offline production.
+`--json` emits `ok`, `source`, `manifest`, `payloads`, and on failure `error`;
+the command exits 0 on success and 1 on failure. Sidecar production does not
+waive PulpSampler's runtime limit of one or two channels and at most 192 kHz.
+
 ### In-tree render → WAV bridge (no plugin bundle)
 
 `pulp audio render` and `pulp run --audio-capture-*` both need a built plugin
@@ -849,14 +859,15 @@ by the number the plugin reports, and nothing else checks it. `RenderScenario`
 collects the report facts on **every** render (`ScenarioResult::latency`), so a
 contract can ask for the proof without re-rendering.
 
-**Do not reach for this on a processor that has no latency.** Most don't: of
-Pulp's 24 example plugins, three override `latency_samples()` and only two ever
-report nonzero. Gain, EQ, compressors without lookahead, waveshapers, delay
-*effects*, synths, and samplers all correctly report zero, and rendering them to
-prove `0 == 0` is ceremony. This is for DSP whose latency is *derived* — FFT
-size, partition scheme, lookahead window, oversampling ratio — because that is
-the number a refactor silently changes. User-facing rationale, including when
-NOT to use it: `docs/guides/latency-proof.md`.
+**Do not reach for this on a processor that has no latency.** Most don't: gain,
+EQ, compressors without lookahead, waveshapers, delay *effects*, and ordinary
+synth paths correctly report zero, and rendering them to prove `0 == 0` is
+ceremony. PulpSampler is the sampler exception: enabling its synthetic heritage
+two-leg SRC produces derived, profile-dependent latency, while an all-bypassed
+profile reports zero. That heritage path belongs in the same measured-latency
+proof category as FFT size, partition scheme, lookahead window, or oversampling
+ratio because a refactor can silently change the number. User-facing rationale,
+including when NOT to use it: `docs/guides/latency-proof.md`.
 
 ## The spectral analyzers fail closed — a refusal is the answer, not a bug
 

@@ -1530,6 +1530,7 @@ pulp audio model status [--json]                # Show configured + resolved mod
 pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
+pulp audio sampler-mip build <source.wav|source.aiff> [--levels 1|2] [--json]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
 pulp audio validate summarize <file.wav> [--json]
@@ -1566,6 +1567,7 @@ same mistake as reading it as a pass.
 | `model activate <id>` | Activate an installed audio model and persist the state file |
 | `excerpt-find` | Rank WAV windows deterministically from a text query, then emit an excerpt bundle with backend metadata |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
+| `sampler-mip build` | Build streamed-sampler octave mips with Pulp's 140 dB decimator; publish immutable source-and-payload-hash-addressed WAVs, then atomically replace and self-verify the `.pulpmip` manifest |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |
@@ -1578,6 +1580,29 @@ same mistake as reading it as a pass.
 Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. Inputs are WAV files or directories of WAV files today; unsupported files are reported as skipped. The `model`/`excerpt-find`/`read-bundle` subcommands accept `--json` for machine-readable output.
 
 The `validate` subcommands are the offline analysis CLI over captured audio. They analyze decoded WAV files and re-check `assertions.json` manifests (or directories containing one) with the reusable `pulp::audio-analysis` library — they do **not** instantiate a plugin (the generic CLI is not tied to a `Processor`; controlled-stimulus render is the test-side `RenderScenario`). The `assertions.json` schema is a `{"schema_version", "assertions": [...]}` document where each entry names a `check` (`not_silent`, `silent`, `no_nan_inf`, `peak_below`, `frequency_near`), a `file` (relative to the JSON), and the check's named tolerance.
+
+`sampler-mip build` is an offline asset-production command for strict ranged
+WAV and uncompressed AIFF/AIFF-C sources. It rejects inputs or decoded outputs
+above its explicit byte limits and fully decodes the admitted source in memory.
+It produces one or two octave levels with the same
+140 dB Kaiser-window decimator used by the resident sampler path, and writes
+float32 WAV payloads whose filenames include both the source and payload
+SHA-256 identities. Payloads are published first; the `.pulpmip` manifest is
+published last by an atomic same-directory rename and reloaded before success
+is reported. The manifest and float32 payloads live beside the source; a
+successful replacement garbage-collects payloads owned only by the prior
+manifest. Use `--max-source-bytes` and `--max-output-bytes` to lower the default
+512 MiB safety limits.
+
+With `--json`, stdout is one object containing `ok`, `source`, `manifest`, and
+the `payloads` array; failures also include `error`. Success exits 0 and any
+parse, admission, build, publication, or self-verification failure exits 1.
+Building a valid sidecar does not relax PulpSampler's runtime admission policy:
+the source must still have one or two channels and a sample rate no greater
+than 192 kHz. At playback, only Hermite/Lagrange forward one-shots at an exact
+positive-octave ratio may select an available mip. Loop, reverse, non-exact, and
+missing-level cases stay on the base source and use the normal interpolation or
+ratio-tracking-sinc policy.
 
 `plugin-inspect` and `render` load arbitrary vendor code only in disposable child processes with bounded timeouts. This is crash/hang containment, not a security sandbox for malicious software. `plugin-inspect` is the discovery step; its parameter IDs and plain-domain ranges feed `render`.
 

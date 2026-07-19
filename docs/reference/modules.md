@@ -307,24 +307,36 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| AAC | ✓ | ✓* | ExtAudioFile (macOS) / FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`) |
+| AAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional FDK AAC adds writing (`pulp add fdk-aac --accept-license FDK-AAC`) |
 | AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
-| ALAC | ✓ | ✓* | ExtAudioFile (macOS) / Apple ALAC (`pulp add alac`) |
+| ALAC | macOS | ✓* | Read through ExtAudioFile on macOS; optional Apple ALAC adds writing (`pulp add alac`) |
+| CAF | macOS | — | Read through ExtAudioFile on macOS |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
 | WAV | ✓ | ✓ | CHOC + StreamingWriter |
 
-*\*Write via optional `pulp add` packages. Permissive (libflac, ALAC) install freely. Copyleft (LAME, fdk-aac) require `--accept-license`.*
+*\*Write via optional `pulp add` packages. Those packages do not add portable
+AAC/ALAC readers. Permissive (libflac, ALAC) packages install freely; copyleft
+(LAME, fdk-aac) packages require `--accept-license`.*
 
 ### Sampler, looper, and analysis primitives
 
 Reusable low-level pieces for building samplers, generated-audio freeze/loop workflows, waveform displays, and offline/background sample analysis. These are primitives, not a full sampler UI. Callback-safe operations are documented in `rt_safety_contract.hpp`; import/export, analysis, waveform thumbnail build, publication writes, and materialization stay off the audio callback.
 
+For a runnable integration of the asset, streaming, interpolation, starvation,
+and synthetic-heritage primitives, see the
+[PulpSampler example](../examples/pulp-sampler.md).
+
 | Feature | Headers | Description |
 |---------|---------|-------------|
 | Stream handoff and rolling capture | `audio_stream_handoff.hpp`, `planar_audio_ring_buffer.hpp`, `rolling_audio_capture_buffer.hpp`, `realtime_sample_recorder.hpp` | Bridge generated/live/model audio into host-paced processing, keep bounded rolling history, freeze stable windows, and materialize captures off the audio thread |
-| Sample publication and storage | `published_sample_store.hpp`, `sample_slot_bank.hpp`, `sample_slot_materializer.hpp`, `sample_pool.hpp`, `sample_stream_window.hpp` | Publish captured/imported/rendered samples through generation-safe views, fixed slot banks, stable sample IDs, and resident streaming pages |
+| Sample publication and storage | `published_sample_store.hpp`, `sample_slot_bank.hpp`, `sample_slot_materializer.hpp`, `sample_pool.hpp`, `sample_asset.hpp`, `sample_stream_window.hpp`, `sample_stream_scheduler.hpp`, `sample_stream_service.hpp`, `sample_stream_async_service.hpp`, `sample_stream_decode_pool.hpp`, `sample_memory_governor.hpp`, `sample_preload_contract.hpp`, `sample_stream_voice_reader.hpp`, `sample_stream_loop_voice_reader.hpp` | Publish captured/imported/rendered samples through generation-safe views, fixed slot banks, immutable sampler assets, stable sample IDs, resident streaming pages, bounded urgency-ordered commands and source identities, fixed-scratch async decode, shared preload/page budgeting, checked preload contracts, and allocation-free forward/reverse one-shot and crossfade-loop streamed reads |
+| Sample interpolation | `sample_interpolation.hpp`, `sample_sinc_kernel.hpp` | Share hold, nearest, linear, Hermite, Lagrange, and prepared ratio-tracking sinc footprints across resident and paged playback; build normalized immutable cutoff tables off the callback |
+| Sampler octave mips | `sample_mip_builder.hpp`, `sample_mip_sidecar.hpp` | Build resident or persisted octave levels with the sampler decimator; authenticate source and payload identities, then publish sidecar manifests transactionally for strict runtime admission |
+| Synthetic sampler heritage | `sample_heritage.hpp`, `sample_heritage_schema.hpp`, `sample_heritage_engine.hpp`, `sample_heritage_src.hpp`, `sample_heritage_json.hpp`, `sample_heritage_runtime_state.hpp` | Define validated synthetic coloration/clock profiles, processing and rate conversion, strict JSON, and versioned runtime state without claiming emulation of named hardware |
+| Sequential streaming source | `streaming_sample_source.hpp`, `streaming_sample_source_file.hpp` | Play a preload head plus background-filled SPSC tail; WAV and uncompressed AIFF use immutable private mapped snapshots for ranged reads while fallback codec capability remains explicit |
+| Stream starvation envelope | `sample_starvation_envelope.hpp` | Supply equal-power fade gains for valid low-water and recovered frames with explicit predicted, insufficient-lead, and emergency telemetry; source-position advancement remains voice-renderer policy |
 | Looping and playback | `loop_types.hpp`, `loop_reader.hpp`, `loop_renderer.hpp`, `loop_point_analyzer.hpp`, `sample_voice_renderer.hpp`, `voice_sum_mixer.hpp` | Render one-shots, forward/reverse loops, fades/crossfades, loop-point assistance, scalar sample voices, and summed voice scratch buffers |
 | Mapping and instrument policy | `sample_zone_map.hpp`, `sample_key_map.hpp`, `instrument_runtime.hpp`, `instrument_voice_allocator.hpp`, `instrument_envelope.hpp`, `voice_modulation_buffer.hpp` | Represent key/velocity zones, chromatic/fixed-pitch/slice mappings, pool-backed trigger resolution, voice allocation, AHDSR envelopes, and per-voice modulation lanes |
 | Editing, import/export, and bounce metadata | `sample_edit_document.hpp`, `sample_asset_io.hpp`, `wav_metadata.hpp` | Track non-destructive edit intent, import/export policy, drop classification, and WAV metadata/interchange outside realtime paths |

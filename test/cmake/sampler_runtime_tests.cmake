@@ -35,6 +35,61 @@ pulp_add_test_suite(pulp-test-waveform-headless-render-backend LIBRARIES pulp::v
 
 # Machine-checkable RT-safety labels for sampler/looper hot paths and off-thread helpers.
 pulp_add_test_suite(pulp-test-sampler-rt-safety-contract LIBRARIES pulp::audio)
+
+# Resident, manually-pumped, and prepared-page transport must remain
+# bit-identical across callback partitions, preload/page boundaries, seeks,
+# direction changes, reset, and channel mapping.
+pulp_add_test_suite(pulp-test-sampler-stream-parity
+    SOURCES test_sampler_stream_parity.cpp
+            test_sampler_page_transport_parity.cpp
+            support/sampler_parity.cpp
+            support/sample_page_transport_parity.cpp
+            harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-loop-oracle
+    SOURCES test_sampler_loop_oracle.cpp
+            support/sampler_loop_parity.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-loop-cursor-parity
+    SOURCES test_sampler_loop_cursor_parity.cpp
+            support/sampler_loop_parity.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sampler-paged-loop-oracle
+    SOURCES test_sampler_paged_loop_oracle.cpp
+            support/sampler_paged_loop_parity.cpp
+            support/sampler_loop_parity.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-service
+    SOURCES test_sample_stream_service.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-async-service
+    SOURCES test_sample_stream_async_service.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio
+    TIMEOUT 30)
+pulp_add_test_suite(pulp-test-sample-stream-decode-pool
+    SOURCES test_sample_stream_decode_pool.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio
+    TIMEOUT 30)
+pulp_add_test_suite(pulp-test-sample-stream-voice-reader
+    SOURCES test_sample_stream_voice_reader.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-stream-loop-voice-reader
+    SOURCES test_sample_stream_loop_voice_reader.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-sinc-kernel
+    SOURCES test_sample_sinc_kernel.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-memory-governor LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage
+    SOURCES test_sample_heritage.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-json
+    SOURCES test_sample_heritage_json.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-starvation-envelope
+    SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
 # Sibling drift check for the core-runtime RT-safety contract registry
 # (lock-free primitives, automation queue, graph walk, Processor entry).
 pulp_add_test_suite(pulp-test-core-runtime-rt-safety-contract LIBRARIES pulp::audio)
