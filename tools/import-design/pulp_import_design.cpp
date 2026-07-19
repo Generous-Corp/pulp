@@ -16,6 +16,7 @@
 #include "envelope_merge.hpp"
 #include "figma_url.hpp"
 #include "render_artifact_path.hpp"
+#include "sprite_skins.hpp"
 #include <miniz.h>
 // getpid() is POSIX-only via <unistd.h>; MSVC ships an equivalent
 // `_getpid` declaration in <process.h>. Wrap both to keep the
@@ -58,172 +59,6 @@ using namespace pulp::view;
 using namespace pulp::state;
 
 namespace {
-
-// ── Minimal PNG → RGBA8 decoder ─────────────────────────────────────────────
-// AssetManager::decode_png only stores raw bytes + IHDR dims (the real decode
-// happens in the Skia renderer, which isn't linked in the GPU-off importer
-// build). For the fader/meter skin sampler we need actual pixels, so decode
-// here using miniz (already linked) for the common 8-bit, non-interlaced case.
-// Returns RGBA8 row-major; empty on any unsupported/failed path (caller then
-// skips skin derivation). Supports color types 2 (RGB), 6 (RGBA), and 0/4
-// (grey / grey+alpha) — covers design-tool PNG exports.
-struct DecodedPng {
-    std::vector<uint8_t> rgba;
-    int width = 0;
-    int height = 0;
-    bool valid() const { return !rgba.empty() && width > 0 && height > 0; }
-};
-
-static uint32_t png_be32(const uint8_t* p) {
-    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
-           (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
-}
-
-// Read a PNG's pixel dimensions from its IHDR header (width @ byte 16, height
-// @ byte 20) without decoding the pixel data. Returns {0,0} on any non-PNG or
-// unreadable file. Used to recover the true source aspect ratio so imported
-// images/sprites are never skewed.
-static std::pair<int, int> read_png_dimensions(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f.good()) return {0, 0};
-    uint8_t hdr[24];
-    f.read(reinterpret_cast<char*>(hdr), sizeof(hdr));
-    if (f.gcount() < static_cast<std::streamsize>(sizeof(hdr))) return {0, 0};
-    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (std::memcmp(hdr, sig, 8) != 0) return {0, 0};
-    int w = static_cast<int>(png_be32(hdr + 16));
-    int h = static_cast<int>(png_be32(hdr + 20));
-    if (w <= 0 || h <= 0) return {0, 0};
-    return {w, h};
-}
-
-static DecodedPng decode_png_rgba(const uint8_t* data, size_t size) {
-    DecodedPng out;
-    static const uint8_t sig[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (size < 33 || std::memcmp(data, sig, 8) != 0) return out;
-
-    int width = static_cast<int>(png_be32(data + 16));
-    int height = static_cast<int>(png_be32(data + 20));
-    int bit_depth = data[24];
-    int color_type = data[25];
-    int interlace = data[28];
-    if (width <= 0 || height <= 0 || bit_depth != 8 || interlace != 0) return out;
-
-    int channels;
-    switch (color_type) {
-        case 0: channels = 1; break;  // grey
-        case 2: channels = 3; break;  // RGB
-        case 4: channels = 2; break;  // grey + alpha
-        case 6: channels = 4; break;  // RGBA
-        default: return out;
-    }
-
-    // Concatenate IDAT chunk payloads.
-    std::vector<uint8_t> idat;
-    size_t pos = 8;
-    while (pos + 8 <= size) {
-        uint32_t clen = png_be32(data + pos);
-        const uint8_t* ctype = data + pos + 4;
-        size_t body = pos + 8;
-        if (body + clen + 4 > size) break;
-        if (std::memcmp(ctype, "IDAT", 4) == 0)
-            idat.insert(idat.end(), data + body, data + body + clen);
-        else if (std::memcmp(ctype, "IEND", 4) == 0)
-            break;
-        pos = body + clen + 4;  // skip CRC
-    }
-    if (idat.empty()) return out;
-
-    // Inflate. Raw filtered size = height * (1 + width*channels).
-    size_t stride = static_cast<size_t>(width) * channels;
-    mz_ulong raw_len = static_cast<mz_ulong>(height) * (stride + 1);
-    std::vector<uint8_t> raw(raw_len);
-    if (mz_uncompress(raw.data(), &raw_len, idat.data(),
-                      static_cast<mz_ulong>(idat.size())) != MZ_OK)
-        return out;
-    if (raw_len < static_cast<mz_ulong>(height) * (stride + 1)) return out;
-
-    // Un-filter (PNG filter types 0-4) into a contiguous channel buffer.
-    std::vector<uint8_t> img(static_cast<size_t>(height) * stride);
-    auto paeth = [](int a, int b, int c) {
-        int p = a + b - c;
-        int pa = std::abs(p - a), pb = std::abs(p - b), pc = std::abs(p - c);
-        if (pa <= pb && pa <= pc) return a;
-        return pb <= pc ? b : c;
-    };
-    for (int y = 0; y < height; ++y) {
-        const uint8_t* src = raw.data() + static_cast<size_t>(y) * (stride + 1);
-        uint8_t filter = src[0];
-        uint8_t* row = img.data() + static_cast<size_t>(y) * stride;
-        const uint8_t* prev = (y > 0) ? img.data() + static_cast<size_t>(y - 1) * stride : nullptr;
-        for (size_t x = 0; x < stride; ++x) {
-            int a = (x >= static_cast<size_t>(channels)) ? row[x - channels] : 0;
-            int b = prev ? prev[x] : 0;
-            int c = (prev && x >= static_cast<size_t>(channels)) ? prev[x - channels] : 0;
-            int v = src[1 + x];
-            switch (filter) {
-                case 0: break;
-                case 1: v += a; break;
-                case 2: v += b; break;
-                case 3: v += (a + b) / 2; break;
-                case 4: v += paeth(a, b, c); break;
-                default: return out;
-            }
-            row[x] = static_cast<uint8_t>(v & 0xFF);
-        }
-    }
-
-    // Expand to RGBA8.
-    out.rgba.resize(static_cast<size_t>(width) * height * 4);
-    for (int i = 0; i < width * height; ++i) {
-        const uint8_t* s = img.data() + static_cast<size_t>(i) * channels;
-        uint8_t* d = out.rgba.data() + static_cast<size_t>(i) * 4;
-        if (channels == 4) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3]; }
-        else if (channels == 3) { d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255; }
-        else if (channels == 2) { d[0] = d[1] = d[2] = s[0]; d[3] = s[1]; }
-        else { d[0] = d[1] = d[2] = s[0]; d[3] = 255; }
-    }
-    out.width = width;
-    out.height = height;
-    return out;
-}
-
-// The bbox of an image's *solid* content — pixels whose alpha is at least
-// `min_alpha` (default 0.5). For a captured sprite this isolates the drawn
-// geometry (a knob's disc, a shape's body) from the soft drop-shadow / glow
-// that bleeds far past it. Lets the importer scale a sprite so its solid core
-// fills the node's logical box while the shadow is free to extend beyond —
-// the generalizable answer to "size sprites correctly without skew", derived
-// from the pixels themselves. Returns false if no qualifying pixels.
-struct OpaqueCore { int x = 0, y = 0, w = 0, h = 0, png_w = 0, png_h = 0; };
-static bool compute_opaque_core(const std::string& path, OpaqueCore& out,
-                                float min_alpha = 0.5f) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f.good()) return false;
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)),
-                               std::istreambuf_iterator<char>());
-    auto img = decode_png_rgba(bytes.data(), bytes.size());
-    if (!img.valid()) return false;
-    const uint8_t thresh = static_cast<uint8_t>(
-        std::clamp(min_alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
-    int minx = img.width, miny = img.height, maxx = -1, maxy = -1;
-    for (int y = 0; y < img.height; ++y) {
-        const uint8_t* row = img.rgba.data() + static_cast<size_t>(y) * img.width * 4;
-        for (int x = 0; x < img.width; ++x) {
-            if (row[x * 4 + 3] >= thresh) {
-                if (x < minx) minx = x;
-                if (x > maxx) maxx = x;
-                if (y < miny) miny = y;
-                if (y > maxy) maxy = y;
-            }
-        }
-    }
-    if (maxx < minx || maxy < miny) return false;
-    out.x = minx; out.y = miny;
-    out.w = maxx - minx + 1; out.h = maxy - miny + 1;
-    out.png_w = img.width; out.png_h = img.height;
-    return true;
-}
 
 enum class ArtifactEmit {
     js,
@@ -1788,7 +1623,11 @@ static bool write_file(const std::string& path, const std::string& content) {
     return write_files_atomically({{path, content}});
 }
 
-int main(int argc, char* argv[]) {
+// ── CLI options ────────────────────────────────────────────────────────────
+// Every flag the CLI accepts, with the defaults the parse loop has always
+// applied. These were main()'s locals; the run's mutable outcome state
+// (fidelity_failed / similarity_failed) deliberately stays in main().
+struct CliOptions {
     std::string source_str;
     std::string input_file;
     // --file: repeatable. Two or more paths capture a MULTI-STATE design from
@@ -1825,8 +1664,6 @@ int main(int argc, char* argv[]) {
     bool validate = false;           // --validate: render + compare after import
     std::string dump_layout_path;    // --dump-layout <file>: write the laid-out view tree as JSON
     bool strict_fidelity = false;    // --strict-fidelity: fail on a fidelity self-check finding
-    bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
-    bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar
     std::string fidelity_report_path; // --fidelity-report <file>: write the JSON fidelity ledger
     bool use_web_compat = false;     // --web-compat: use DOM API instead of native
     bool preview_mode = false;       // --preview: minimal widget style for design comparison
@@ -1888,67 +1725,73 @@ int main(int argc, char* argv[]) {
     // Out-of-band host-param bindings: figma node id → param_key, applied to the
     // parsed IR's geometry-detected controls (a layer-name sigil still wins).
     std::string param_binding_manifest_path;
+};
 
+// Parse argv into `opt`, keeping the historical flag handling, defaults,
+// error messages, and exit codes exactly. Returns the process exit code when
+// parsing ends the run (--help, a bad flag value, or an inconsistent flag
+// combination); std::nullopt to continue with the import pipeline.
+static std::optional<int> parse_cli_args(int argc, char* argv[], CliOptions& opt) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
-            source_str = argv[++i];
+            opt.source_str = argv[++i];
         } else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
-            input_files.push_back(argv[++i]);
+            opt.input_files.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
-            input_url = argv[++i];
+            opt.input_url = argv[++i];
         } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
-            frame_names.push_back(argv[++i]);
+            opt.frame_names.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
-            screen_name = argv[++i];
+            opt.screen_name = argv[++i];
         } else if (std::strcmp(argv[i], "--page") == 0 && i + 1 < argc) {
-            page_name = argv[++i];
+            opt.page_name = argv[++i];
         } else if (std::strcmp(argv[i], "--outline") == 0) {
-            outline_mode = true;
+            opt.outline_mode = true;
         } else if (std::strcmp(argv[i], "--json") == 0) {
-            outline_json = true;
+            opt.outline_json = true;
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
-            output_file = argv[++i];
-            output_explicit = true;
+            opt.output_file = argv[++i];
+            opt.output_explicit = true;
         } else if (std::strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
-            tokens_file = argv[++i];
-            tokens_file_explicit = true;
+            opt.tokens_file = argv[++i];
+            opt.tokens_file_explicit = true;
         } else if (std::strcmp(argv[i], "--dry-run") == 0) {
-            dry_run = true;
+            opt.dry_run = true;
         } else if (std::strcmp(argv[i], "--no-tokens") == 0) {
-            include_tokens = false;
+            opt.include_tokens = false;
         } else if (std::strcmp(argv[i], "--no-comments") == 0) {
-            include_comments = false;
+            opt.include_comments = false;
         } else if (std::strcmp(argv[i], "--export-tokens") == 0) {
-            export_tokens_mode = true;
+            opt.export_tokens_mode = true;
         } else if (std::strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
-            export_format = argv[++i];
+            opt.export_format = argv[++i];
         } else if (std::strcmp(argv[i], "--web-compat") == 0) {
-            use_web_compat = true;
+            opt.use_web_compat = true;
         } else if (std::strcmp(argv[i], "--validate") == 0) {
-            validate = true;
+            opt.validate = true;
         } else if (std::strcmp(argv[i], "--strict-fidelity") == 0) {
-            strict_fidelity = true;
+            opt.strict_fidelity = true;
         } else if (std::strcmp(argv[i], "--fidelity-report") == 0 && i + 1 < argc) {
-            fidelity_report_path = argv[++i];
+            opt.fidelity_report_path = argv[++i];
         } else if (std::strcmp(argv[i], "--dump-layout") == 0 && i + 1 < argc) {
             // The dump is taken after the layout pass, which only runs under
             // --validate. Implying it (as --reference does) beats asking for
             // both and silently writing nothing when the caller forgets one.
-            dump_layout_path = argv[++i];
-            validate = true;
+            opt.dump_layout_path = argv[++i];
+            opt.validate = true;
         } else if (std::strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
-            reference_image = argv[++i];
-            validate = true;
+            opt.reference_image = argv[++i];
+            opt.validate = true;
         } else if (std::strcmp(argv[i], "--diff") == 0 && i + 1 < argc) {
-            diff_output = argv[++i];
+            opt.diff_output = argv[++i];
         } else if (std::strcmp(argv[i], "--import-report") == 0 && i + 1 < argc) {
-            import_report_path = argv[++i];
+            opt.import_report_path = argv[++i];
         } else if (std::strcmp(argv[i], "--recognition-manifest") == 0 && i + 1 < argc) {
-            recognition_manifest_path = argv[++i];
+            opt.recognition_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--param-binding-manifest") == 0 && i + 1 < argc) {
-            param_binding_manifest_path = argv[++i];
+            opt.param_binding_manifest_path = argv[++i];
         } else if (std::strcmp(argv[i], "--fail-on-unresolved") == 0) {
-            fail_on_unresolved = true;
+            opt.fail_on_unresolved = true;
         } else if (std::strcmp(argv[i], "--fail-below") == 0) {
             // Unit is PERCENT (0-100), matching the "Similarity: NN%" line this
             // gates on. A fraction like 0.85 is rejected rather than silently
@@ -1986,61 +1829,61 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: --fail-below must be between 0 and 100, got '" << raw << "'\n";
                 return 2;
             }
-            fail_below_pct = pct;
+            opt.fail_below_pct = pct;
         } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
             // Parse WxH
             std::string sz = argv[++i];
             auto x = sz.find('x');
             if (x != std::string::npos) {
-                render_width = std::stoi(sz.substr(0, x));
-                render_height = std::stoi(sz.substr(x + 1));
-                render_size_explicit = true;
+                opt.render_width = std::stoi(sz.substr(0, x));
+                opt.render_height = std::stoi(sz.substr(x + 1));
+                opt.render_size_explicit = true;
             }
         } else if (std::strcmp(argv[i], "--screenshot-backend") == 0 && i + 1 < argc) {
             std::string b = argv[++i];
             if (b == "skia") {
-                screenshot_backend = pulp::view::ScreenshotBackend::skia;
+                opt.screenshot_backend = pulp::view::ScreenshotBackend::skia;
             } else if (b == "coregraphics" || b == "cg") {
-                screenshot_backend = pulp::view::ScreenshotBackend::coregraphics;
+                opt.screenshot_backend = pulp::view::ScreenshotBackend::coregraphics;
             } else {
                 std::cerr << "Error: --screenshot-backend must be skia or coregraphics\n";
                 return 2;
             }
         } else if (std::strcmp(argv[i], "--preview") == 0) {
-            preview_mode = true;
+            opt.preview_mode = true;
         } else if (auto value = consume_value_option(i, argc, argv, "--knob-style")) {
-            if (auto parsed = parse_knob_style_pref(*value)) use_silver_knobs = *parsed;
+            if (auto parsed = parse_knob_style_pref(*value)) opt.use_silver_knobs = *parsed;
             else {
                 std::cerr << "Error: --knob-style must be silver, sprite, auto, standard, or default\n";
                 return 2;
             }
         } else if (auto value = consume_value_option(i, argc, argv, "--fader-style")) {
-            if (auto parsed = parse_skin_style_pref(*value)) skin_faders = *parsed;
+            if (auto parsed = parse_skin_style_pref(*value)) opt.skin_faders = *parsed;
             else {
                 std::cerr << "Error: --fader-style must be skin, skinned, default, or plain\n";
                 return 2;
             }
         } else if (auto value = consume_value_option(i, argc, argv, "--meter-style")) {
-            if (auto parsed = parse_skin_style_pref(*value)) skin_meters = *parsed;
+            if (auto parsed = parse_skin_style_pref(*value)) opt.skin_meters = *parsed;
             else {
                 std::cerr << "Error: --meter-style must be skin, skinned, default, or plain\n";
                 return 2;
             }
         } else if (std::strcmp(argv[i], "--debug") == 0) {
-            debug_json = true;
+            opt.debug_json = true;
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
-            debug_output = argv[++i];
-            debug_json = true;
+            opt.debug_output = argv[++i];
+            opt.debug_json = true;
         } else if (std::strcmp(argv[i], "--bridge-output") == 0 && i + 1 < argc) {
-            bridge_output = argv[++i];
-            bridge_output_explicit = true;
+            opt.bridge_output = argv[++i];
+            opt.bridge_output_explicit = true;
         } else if (std::strcmp(argv[i], "--no-bridge-scaffold") == 0) {
-            emit_bridge_scaffold = false;
+            opt.emit_bridge_scaffold = false;
         } else if (std::strcmp(argv[i], "--execute-bundle") == 0) {
-            execute_bundle = true;
+            opt.execute_bundle = true;
         } else if (std::strcmp(argv[i], "--classnames") == 0 && i + 1 < argc) {
-            classnames_output = argv[++i];
-            classnames_output_explicit = true;
+            opt.classnames_output = argv[++i];
+            opt.classnames_output_explicit = true;
         } else if (std::strcmp(argv[i], "--emit") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --emit requires a value: js, ir-json, cpp, swiftui, or classnames\n";
@@ -2048,19 +1891,19 @@ int main(int argc, char* argv[]) {
             }
             std::string what = argv[++i];
             if (what == "js") {
-                artifact_emit = ArtifactEmit::js;
-                artifact_emit_explicit = true;
+                opt.artifact_emit = ArtifactEmit::js;
+                opt.artifact_emit_explicit = true;
             } else if (what == "ir-json") {
-                artifact_emit = ArtifactEmit::ir_json;
-                artifact_emit_explicit = true;
+                opt.artifact_emit = ArtifactEmit::ir_json;
+                opt.artifact_emit_explicit = true;
             } else if (what == "cpp") {
-                artifact_emit = ArtifactEmit::cpp;
-                artifact_emit_explicit = true;
+                opt.artifact_emit = ArtifactEmit::cpp;
+                opt.artifact_emit_explicit = true;
             } else if (what == "swiftui") {
-                artifact_emit = ArtifactEmit::swiftui;
-                artifact_emit_explicit = true;
+                opt.artifact_emit = ArtifactEmit::swiftui;
+                opt.artifact_emit_explicit = true;
             } else if (what == "classnames") {
-                emit_classnames = true;
+                opt.emit_classnames = true;
             } else {
                 std::cerr << "Error: unsupported --emit value '" << what
                           << "' (expected js, ir-json, cpp, swiftui, or classnames)\n";
@@ -2073,11 +1916,11 @@ int main(int argc, char* argv[]) {
             }
             std::string mode = argv[++i];
             if (mode == "live") {
-                runtime_mode = RuntimeMode::live;
-                runtime_mode_explicit = true;
+                opt.runtime_mode = RuntimeMode::live;
+                opt.runtime_mode_explicit = true;
             } else if (mode == "baked") {
-                runtime_mode = RuntimeMode::baked;
-                runtime_mode_explicit = true;
+                opt.runtime_mode = RuntimeMode::baked;
+                opt.runtime_mode_explicit = true;
             } else {
                 std::cerr << "Error: unsupported --mode value '" << mode
                           << "' (expected live or baked)\n";
@@ -2090,52 +1933,52 @@ int main(int argc, char* argv[]) {
             }
             std::string semantics = argv[++i];
             if (semantics == "fail") {
-                snapshot_semantics = SnapshotSemantics::fail;
+                opt.snapshot_semantics = SnapshotSemantics::fail;
             } else if (semantics == "warn") {
-                snapshot_semantics = SnapshotSemantics::warn;
+                opt.snapshot_semantics = SnapshotSemantics::warn;
             } else if (semantics == "accept") {
-                snapshot_semantics = SnapshotSemantics::accept;
+                opt.snapshot_semantics = SnapshotSemantics::accept;
             } else {
                 std::cerr << "Error: unsupported --snapshot-semantics value '" << semantics
                           << "' (expected fail, warn, or accept)\n";
                 return 2;
             }
         } else if (std::strcmp(argv[i], "--allow-network-fetch") == 0) {
-            allow_network_fetch = true;
+            opt.allow_network_fetch = true;
         } else if (std::strcmp(argv[i], "--asset-cache") == 0 && i + 1 < argc) {
-            asset_cache_dir = argv[++i];
+            opt.asset_cache_dir = argv[++i];
         } else if (std::strcmp(argv[i], "--asset-timeout-ms") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --asset-timeout-ms requires a value\n";
                 return 2;
             }
-            if (!parse_positive_int_arg("--asset-timeout-ms", argv[++i], asset_timeout_ms))
+            if (!parse_positive_int_arg("--asset-timeout-ms", argv[++i], opt.asset_timeout_ms))
                 return 2;
         } else if (std::strcmp(argv[i], "--asset-hash") == 0) {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --asset-hash requires <uri=sha256-hex>\n";
                 return 2;
             }
-            if (!parse_asset_hash_arg(argv[++i], expected_asset_hashes))
+            if (!parse_asset_hash_arg(argv[++i], opt.expected_asset_hashes))
                 return 2;
         } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
-            emit_classnames = false;
+            opt.emit_classnames = false;
         } else if (std::strcmp(argv[i], "--shortcuts") == 0 && i + 1 < argc) {
-            shortcuts_output = argv[++i];
-            shortcuts_output_explicit = true;
+            opt.shortcuts_output = argv[++i];
+            opt.shortcuts_output_explicit = true;
         } else if (std::strcmp(argv[i], "--no-import-shortcuts") == 0) {
-            import_shortcuts = false;
+            opt.import_shortcuts = false;
         } else if (std::strcmp(argv[i], "--no-default-shortcuts") == 0) {
-            default_shortcuts = false;
+            opt.default_shortcuts = false;
         } else if (std::strcmp(argv[i], "--detect-only") == 0) {
-            detect_only = true;
+            opt.detect_only = true;
         } else if (std::strcmp(argv[i], "--report-new-format") == 0) {
-            report_new_format = true;
-            detect_only = true;
+            opt.report_new_format = true;
+            opt.detect_only = true;
         } else if (std::strcmp(argv[i], "--directory") == 0 && i + 1 < argc) {
-            input_directory = argv[++i];
+            opt.input_directory = argv[++i];
         } else if (std::strcmp(argv[i], "--compat") == 0 && i + 1 < argc) {
-            compat_override = argv[++i];
+            opt.compat_override = argv[++i];
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
@@ -2145,10 +1988,139 @@ int main(int argc, char* argv[]) {
     // --fail-below gates the --reference similarity, so without a reference it
     // could never fire. Rejecting that up front keeps a CI gate from reading as
     // enforced while silently passing everything.
-    if (fail_below_pct >= 0.0f && reference_image.empty()) {
+    if (opt.fail_below_pct >= 0.0f && opt.reference_image.empty()) {
         std::cerr << "Error: --fail-below requires --reference <png> (nothing to compare against)\n";
         return 2;
     }
+
+    return std::nullopt;
+}
+
+// Reference-free fidelity self-check: surface any sprite the importer could
+// not prove it sized faithfully. Always reported as warnings; with
+// --strict-fidelity a finding makes the import exit non-zero.
+// Informational findings (e.g. a below-native-minimum widget codegen clamps
+// up) are surfaced as warnings but never gate the import — only "hard"
+// findings trip --strict-fidelity (see count_strict_fidelity_failures).
+//
+// --fidelity-report: persist the run's findings as a machine-readable ledger
+// (a durable, diffable fidelity contract). An explicitly-requested diagnostic
+// artifact, so it is written regardless of --strict-fidelity or --dry-run —
+// matching the --import-report convention; --dry-run only suppresses the
+// primary generated code + token files.
+//
+// Sets `fidelity_failed` when --strict-fidelity has a hard finding. Returns
+// the process exit code when the run must stop (ledger write failure);
+// std::nullopt to continue.
+static std::optional<int> run_fidelity_selfcheck(
+    const std::vector<pulp::view::FidelityIssue>& fidelity_issues,
+    bool strict_fidelity,
+    const std::string& fidelity_report_path,
+    DesignSource source,
+    const std::string& output_file,
+    bool& fidelity_failed) {
+    for (const auto& fi : fidelity_issues) {
+        std::cerr << "fidelity: [" << fi.kind << "] " << fi.node_name
+                  << " (" << fi.node_id << "): " << fi.detail
+                  << (fi.informational ? "  [informational]" : "") << "\n";
+    }
+    const std::size_t hard_findings =
+        pulp::view::count_strict_fidelity_failures(fidelity_issues);
+    if (strict_fidelity && hard_findings > 0) {
+        std::cerr << "fidelity: " << hard_findings
+                  << " issue(s); failing due to --strict-fidelity\n";
+        fidelity_failed = true;
+    }
+
+    if (!fidelity_report_path.empty()) {
+        pulp::view::FidelityLedgerMeta meta;
+        meta.source = design_source_name(source);
+        meta.output = output_file;
+        if (!write_file(fidelity_report_path,
+                        pulp::view::fidelity_ledger_json(fidelity_issues, meta))) {
+            std::cerr << "Error: cannot write fidelity report to " << fidelity_report_path << "\n";
+            return 1;
+        }
+        std::cerr << "fidelity: wrote ledger to " << fidelity_report_path << "\n";
+    }
+    return std::nullopt;
+}
+
+int main(int argc, char* argv[]) {
+    CliOptions cli;
+    if (auto parse_exit = parse_cli_args(argc, argv, cli)) return *parse_exit;
+
+    bool fidelity_failed = false;    // set when strict_fidelity + at least one finding
+    bool similarity_failed = false;  // set when --fail-below + reference similarity under the bar
+
+    // Local references into the parsed options. The pipeline below reads and
+    // mutates these names exactly as it did when they were main()'s own locals
+    // (the emit-dependent output defaults, the multi-state input_file rewrite,
+    // and --validate's design-size render default all land in the same storage).
+    auto& source_str = cli.source_str;
+    auto& input_file = cli.input_file;
+    auto& input_files = cli.input_files;
+    auto& input_url = cli.input_url;
+    auto& frame_names = cli.frame_names;
+    auto& screen_name = cli.screen_name;
+    auto& page_name = cli.page_name;
+    auto& outline_mode = cli.outline_mode;
+    auto& outline_json = cli.outline_json;
+    auto& output_file = cli.output_file;
+    auto& tokens_file = cli.tokens_file;
+    auto& export_format = cli.export_format;
+    auto& reference_image = cli.reference_image;
+    auto& diff_output = cli.diff_output;
+    auto& import_report_path = cli.import_report_path;
+    auto& fail_on_unresolved = cli.fail_on_unresolved;
+    auto& fail_below_pct = cli.fail_below_pct;
+    auto& dry_run = cli.dry_run;
+    auto& include_tokens = cli.include_tokens;
+    auto& include_comments = cli.include_comments;
+    auto& export_tokens_mode = cli.export_tokens_mode;
+    auto& validate = cli.validate;
+    auto& dump_layout_path = cli.dump_layout_path;
+    auto& strict_fidelity = cli.strict_fidelity;
+    auto& fidelity_report_path = cli.fidelity_report_path;
+    auto& use_web_compat = cli.use_web_compat;
+    auto& preview_mode = cli.preview_mode;
+    auto& use_silver_knobs = cli.use_silver_knobs;
+    auto& skin_faders = cli.skin_faders;
+    auto& skin_meters = cli.skin_meters;
+    auto& debug_json = cli.debug_json;
+    auto& debug_output = cli.debug_output;
+    auto& render_width = cli.render_width;
+    auto& render_height = cli.render_height;
+    auto& render_size_explicit = cli.render_size_explicit;
+    auto& screenshot_backend = cli.screenshot_backend;
+    auto& bridge_output = cli.bridge_output;
+    auto& bridge_output_explicit = cli.bridge_output_explicit;
+    auto& emit_bridge_scaffold = cli.emit_bridge_scaffold;
+    auto& execute_bundle = cli.execute_bundle;
+    auto& classnames_output = cli.classnames_output;
+    auto& classnames_output_explicit = cli.classnames_output_explicit;
+    auto& emit_classnames = cli.emit_classnames;
+    auto& shortcuts_output = cli.shortcuts_output;
+    auto& shortcuts_output_explicit = cli.shortcuts_output_explicit;
+    auto& import_shortcuts = cli.import_shortcuts;
+    auto& default_shortcuts = cli.default_shortcuts;
+    auto& output_explicit = cli.output_explicit;
+    auto& tokens_file_explicit = cli.tokens_file_explicit;
+    auto& detect_only = cli.detect_only;
+    auto& report_new_format = cli.report_new_format;
+    auto& input_directory = cli.input_directory;
+    auto& compat_override = cli.compat_override;
+    auto& artifact_emit = cli.artifact_emit;
+    auto& runtime_mode = cli.runtime_mode;
+    auto& artifact_emit_explicit = cli.artifact_emit_explicit;
+    auto& runtime_mode_explicit = cli.runtime_mode_explicit;
+    auto& snapshot_semantics = cli.snapshot_semantics;
+    auto& allow_network_fetch = cli.allow_network_fetch;
+    auto& asset_timeout_ms = cli.asset_timeout_ms;
+    auto& asset_cache_dir = cli.asset_cache_dir;
+    auto& expected_asset_hashes = cli.expected_asset_hashes;
+    auto& recognition_manifest_path = cli.recognition_manifest_path;
+    auto& param_binding_manifest_path = cli.param_binding_manifest_path;
 
     DefaultSelection default_selection;
     if (!export_tokens_mode && !detect_only) {
@@ -3130,331 +3102,24 @@ int main(int argc, char* argv[]) {
         opts.shortcuts = detected_shortcuts;
     }
 
-    // Sprite knob style = pixel-exact Figma reproduction that still TURNS.
-    // When a recognized knob ships a captured graphic child (an image with an
-    // asset_ref — e.g. a silver-knob body group), HOIST that body art onto the
-    // knob node so codegen emits a single-frame sprite skin (createKnob +
-    // setKnobSpriteStrip) instead of a native vector body. The engine then
-    // draws the captured disc as the static body and overlays the native
-    // rotating indicator notch — so the imported sprite knob stays
-    // interactive (the old path DEMOTED the knob to a plain image, which was
-    // pixel-faithful but dead: it never rotated). The hoisted render_bounds
-    // triggers the importer's opaque-core recovery below, so the disc fits the
-    // knob box at the right size (shadow bleed extends beyond). Silver mode
-    // keeps the native-vector widget. Generalizable: keyed on widget kind + an
-    // asset-bearing image child, no layer-name match.
-    if (!use_silver_knobs) {
-        std::function<void(IRNode&)> convert = [&](IRNode& n) {
-            if (n.audio_widget == pulp::view::AudioWidgetType::knob) {
-                // Count the captured image layers (each an asset-backed image
-                // child). The single-frame sprite skin can carry exactly one,
-                // and the native knob codegen is a leaf that does not emit
-                // image children — so the disposition depends on the count.
-                int asset_images = 0;
-                IRNode* body = nullptr;
-                for (auto& c : n.children) {
-                    if (c.type == "image" && c.attributes.count("asset_ref")) {
-                        ++asset_images;
-                        if (!body) body = &c;
-                    }
-                }
-                if (asset_images == 1) {
-                    // The common separate-pointer knob: ONE captured disc
-                    // image + a stroked-vector pointer (which the native
-                    // rotating notch replaces). HOIST the disc onto the knob
-                    // so it stays interactive.
-                    n.attributes["asset_ref"] = body->attributes.at("asset_ref");
-                    // Carry the child's bleed extent up so opaque-core recovery
-                    // fires for the knob node (the knob frame itself usually
-                    // has no render_bounds).
-                    if (body->style.render_bounds && !n.style.render_bounds)
-                        n.style.render_bounds = body->style.render_bounds;
-                    // Single static body; a designer-supplied multi-frame strip
-                    // would set its own frame count (Approach A).
-                    if (!n.attributes.count("sprite_strip_frame_count"))
-                        n.attributes["sprite_strip_frame_count"] = "1";
-                    for (auto it = n.children.begin(); it != n.children.end(); ++it)
-                        if (&*it == body) { n.children.erase(it); break; }
-                } else if (asset_images > 1) {
-                    // Multiple captured image layers (e.g. body + highlight +
-                    // logo). A single-frame sprite skin can only hold one and
-                    // the leaf knob codegen would silently drop the rest, so
-                    // DEMOTE to a plain container (the pre-interactive-sprite
-                    // behavior): every layer renders as an image — faithful but
-                    // not turnable. Compositing the layers into one rotational
-                    // strip is Approach A (follow-up). No silent layer loss.
-                    n.audio_widget = pulp::view::AudioWidgetType::none;
-                }
-                // asset_images == 0: no captured art — leave the knob
-                // recognized; it falls through to the default knob paint.
-            }
-            for (auto& c : n.children) convert(c);
-        };
-        convert(ir.root);
-    }
-
-    // Resolve asset_ref → absolute file path. For envelopes that include an
-    // asset_manifest with local_path entries (figma-plugin lane), walk the IR
-    // tree and stamp each node's attributes["asset_path"] with the absolute
-    // resolution of asset_manifest[asset_ref].local_path against the input
-    // file's parent directory. Codegen consumes attributes["asset_path"] to
-    // emit setImageSource calls; nodes without a resolvable asset_ref are
-    // left untouched and codegen falls through to its normal frame branch.
-    if (!input_file.empty() && !ir.asset_manifest.assets.empty()) {
-        std::error_code rec;
-        auto base_dir = fs::weakly_canonical(fs::path(input_file), rec).parent_path();
-        if (rec) base_dir = fs::path(input_file).parent_path();
-        std::function<void(IRNode&)> resolve_node = [&](IRNode& n) {
-            auto it = n.attributes.find("asset_ref");
-            if (it != n.attributes.end() && !it->second.empty()) {
-                if (auto* ref = ir.asset_manifest.resolve(it->second)) {
-                    if (ref->local_path && !ref->local_path->empty()) {
-                        fs::path p(*ref->local_path);
-                        if (p.is_relative()) p = base_dir / p;
-                        // generic_string() (forward slashes) so the path baked
-                        // into the generated JS is identical on every platform.
-                        // fs::path::string() would emit native backslashes on
-                        // Windows, breaking both downstream consumers that
-                        // expect web-style separators and the import tests that
-                        // assert on "assets/...". Windows file APIs accept '/'.
-                        std::string abs = p.lexically_normal().generic_string();
-                        n.attributes["asset_path"] = abs;
-
-                        // Stamp the asset's TRUE pixel dimensions from the PNG
-                        // header (the manifest ships null dims). Codegen uses
-                        // this to preserve the source aspect ratio — sprites
-                        // must never be skewed (e.g. a knob graphic whose
-                        // render_bounds claim a 1.81 aspect while the PNG is
-                        // 0.87: naively sizing to render_bounds stretches it
-                        // ~2× wide). Generalizable: every imported image
-                        // carries its real aspect.
-                        if (auto d = read_png_dimensions(abs); d.first > 0 && d.second > 0) {
-                            n.attributes["png_natural_w"] = std::to_string(d.first);
-                            n.attributes["png_natural_h"] = std::to_string(d.second);
-                        }
-                        // For a sprite that bleeds past its layout box
-                        // (render_bounds present), also recover the solid-core
-                        // bbox so codegen can scale the art so its core fills
-                        // the box while the soft shadow extends beyond — the
-                        // correct, data-driven sprite size+placement (the knob
-                        // disc sits in the PNG's top with a long shadow below,
-                        // so render_bounds and naive centering both misplace
-                        // it). Decode is gated on render_bounds to keep the
-                        // common image path header-only cheap.
-                        if (n.style.render_bounds) {
-                            OpaqueCore core;
-                            if (compute_opaque_core(abs, core)) {
-                                n.attributes["art_core_x"] = std::to_string(core.x);
-                                n.attributes["art_core_y"] = std::to_string(core.y);
-                                n.attributes["art_core_w"] = std::to_string(core.w);
-                                n.attributes["art_core_h"] = std::to_string(core.h);
-                                n.attributes["png_natural_w"] = std::to_string(core.png_w);
-                                n.attributes["png_natural_h"] = std::to_string(core.png_h);
-                            }
-                        }
-
-                        // Derive a value-driven skin for recognized
-                        // faders/meters by SAMPLING the captured PNG (not baking
-                        // it). The widget then redraws the recovered colors /
-                        // gradient procedurally so the thumb/level still move
-                        // with their bound value. Generalizable importer rule:
-                        // reads the exported pixels, hardcodes nothing.
-                        const bool want_fader =
-                            (n.audio_widget == pulp::view::AudioWidgetType::fader) && skin_faders;
-                        const bool want_meter =
-                            (n.audio_widget == pulp::view::AudioWidgetType::meter) && skin_meters;
-                        if (want_fader || want_meter) {
-                            std::ifstream af(abs, std::ios::binary);
-                            if (af.good()) {
-                                std::vector<uint8_t> bytes(
-                                    (std::istreambuf_iterator<char>(af)),
-                                    std::istreambuf_iterator<char>());
-                                auto img = decode_png_rgba(bytes.data(), bytes.size());
-                                if (img.valid()) {
-                                    auto hex = [](pulp::canvas::Color c) {
-                                        auto b = [](float v) {
-                                            int i = static_cast<int>(v * 255.0f + 0.5f);
-                                            return i < 0 ? 0 : (i > 255 ? 255 : i);
-                                        };
-                                        char buf[8];
-                                        std::snprintf(buf, sizeof(buf), "#%02x%02x%02x",
-                                                      b(c.r), b(c.g), b(c.b));
-                                        return std::string(buf);
-                                    };
-                                    pulp::view::SkinImage si{img.rgba.data(),
-                                                             img.width, img.height};
-                                    // Asset scale = captured PNG width / the
-                                    // node's logical box width. The figma-plugin
-                                    // exports at 2× but we derive it from the
-                                    // data rather than assume, so a re-scaled
-                                    // export still maps art px → logical px.
-                                    // Derive the asset scale from the captured width.
-                                    float node_w = n.style.width.value_or(0.0f);
-                                    float asset_scale =
-                                        (node_w > 0.0f && img.width > 0)
-                                            ? static_cast<float>(img.width) / node_w
-                                            : 2.0f;
-                                    if (asset_scale <= 0.0f) asset_scale = 2.0f;
-                                    auto fmt_px = [](float v) {
-                                        std::ostringstream os;
-                                        os << v;
-                                        return os.str();
-                                    };
-                                    if (want_fader) {
-                                        auto fs_skin = pulp::view::derive_fader_skin(si);
-                                        if (fs_skin.has_track)        n.attributes["skin_track_color"]        = hex(fs_skin.track_color);
-                                        if (fs_skin.has_fill)         n.attributes["skin_fill_color"]         = hex(fs_skin.fill_color);
-                                        if (fs_skin.has_thumb)        n.attributes["skin_thumb_color"]        = hex(fs_skin.thumb_color);
-                                        if (fs_skin.has_thumb_border) n.attributes["skin_thumb_border_color"] = hex(fs_skin.thumb_border_color);
-                                        if (fs_skin.has_track_border) n.attributes["skin_track_border_color"] = hex(fs_skin.track_border_color);
-                                        // Widths: the widget/thumb box uses the
-                                        // derived thumb-slab width; the track is
-                                        // the narrow central column. Both in
-                                        // logical px (asset px / scale).
-                                        if (fs_skin.has_thumb_width)
-                                            n.attributes["shape_width"] = fmt_px(fs_skin.thumb_width_px / asset_scale);
-                                        if (fs_skin.has_track_width)
-                                            n.attributes["skin_track_width"] = fmt_px(fs_skin.track_width_px / asset_scale);
-                                        // Control housing height (logical px) —
-                                        // the captured PNG bakes the value-stack
-                                        // text below the control, so the node's
-                                        // declared height spans control+labels;
-                                        // use the real control extent so the
-                                        // fader isn't stretched ~2× tall.
-                                        if (fs_skin.has_housing_height)
-                                            n.attributes["shape_height"] = fmt_px(fs_skin.housing_height_px / asset_scale);
-                                        // Captured thumb position (0..1) → initial
-                                        // value-position, so the imported fader
-                                        // matches where the design drew the thumb.
-                                        if (fs_skin.has_thumb_position)
-                                            n.attributes["skin_thumb_position"] = fmt_px(fs_skin.thumb_position);
-                                    } else {
-                                        auto ms = pulp::view::derive_meter_skin(si);
-                                        if (ms.valid()) {
-                                            std::string stops;
-                                            for (size_t k = 0; k < ms.gradient.size(); ++k) {
-                                                if (k) stops += ',';
-                                                stops += hex(ms.gradient[k]);
-                                            }
-                                            n.attributes["skin_meter_gradient"] = stops;
-                                            if (ms.has_background)
-                                                n.attributes["skin_meter_background"] = hex(ms.background);
-                                        }
-                                        // Bar width → the meter's widget width
-                                        // (logical px); the column min_width keeps
-                                        // the box spacing so the narrow bar centers.
-                                        if (ms.has_bar_width)
-                                            n.attributes["shape_width"] = fmt_px(ms.bar_width_px / asset_scale);
-                                        // Control housing height (logical px) —
-                                        // exclude the baked value-stack text so
-                                        // the meter isn't stretched ~2× tall
-                                        // (which also doubles the absolute fill).
-                                        if (ms.has_housing_height)
-                                            n.attributes["shape_height"] = fmt_px(ms.housing_height_px / asset_scale);
-                                        // Colored-bar / housing width ratio →
-                                        // the meter insets its gradient bar so a
-                                        // narrow colored fill reads recessed in
-                                        // the wider dark housing (the capture's
-                                        // structure). Scale-invariant ratio.
-                                        if (ms.has_bar_fill_ratio)
-                                            n.attributes["skin_meter_bar_ratio"] = fmt_px(ms.bar_fill_ratio);
-                                        // Captured fill level (0..1) → initial
-                                        // meter level matching the design.
-                                        if (ms.has_fill_level)
-                                            n.attributes["skin_fill_level"] = fmt_px(ms.fill_level);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Asset-bleed detection (generalization of the Knob
-                    // sprite-strip natural-size fix). The Figma plugin
-                    // exports PNGs at 2× scale; with the bounding-box
-                    // origin point as both bounds, layout_size = PNG_px / 2.
-                    // When the PNG pixel dims exceed twice the layout dims
-                    // by ≥1.5×, the asset has drop-shadow or stroke bleed
-                    // that would visibly squish if fit-to-layout-box. We
-                    // stamp asset_bleed=1 so the codegen emits an explicit
-                    // object-fit:none for ImageView, which honours the
-                    // native pixel size centered.
-                    constexpr float kExportScale = 2.0f;
-                    float layout_w = n.style.width.value_or(0.0f);
-                    float layout_h = n.style.height.value_or(0.0f);
-                    int rw_px = ref->width.value_or(0);
-                    int rh_px = ref->height.value_or(0);
-                    if (rw_px > 0 && rh_px > 0 &&
-                        layout_w > 0.0f && layout_h > 0.0f) {
-                        float natural_w = static_cast<float>(rw_px) / kExportScale;
-                        float natural_h = static_cast<float>(rh_px) / kExportScale;
-                        float rw = natural_w / layout_w;
-                        float rh = natural_h / layout_h;
-                        if (std::max(rw, rh) >= 1.5f) {
-                            n.attributes["asset_bleed"] = "1";
-                        }
-                    }
-                }
-            }
-            for (auto& c : n.children) resolve_node(c);
-        };
-        resolve_node(ir.root);
-
-        // Resolve bundled-font asset_ids to absolute paths so codegen can
-        // emit registerFont(family, path). Same base_dir + manifest resolution
-        // as the node asset-path pass above.
-        for (auto& fa : ir.font_family_assets) {
-            if (fa.asset_id.empty()) continue;
-            if (auto* ref = ir.asset_manifest.resolve(fa.asset_id)) {
-                if (ref->local_path && !ref->local_path->empty()) {
-                    fs::path p(*ref->local_path);
-                    if (p.is_relative()) p = base_dir / p;
-                    // generic_string() for the same cross-platform reason as the
-                    // node asset-path pass above: the resolved font path is baked
-                    // into the generated JS (registerFont) and must use '/'.
-                    fa.resolved_path = p.lexically_normal().generic_string();
-                }
-            }
-        }
-    }
+    // Sprite/knob/fader/meter skin + asset-path resolution (sprite_skins.cpp):
+    // hoists captured knob body art onto recognized knobs, resolves asset_ref →
+    // absolute asset_path, stamps true PNG dims / opaque-core / asset-bleed
+    // metadata, derives sampled fader+meter skins, and resolves bundled fonts.
+    pulp::import_design::resolve_sprite_skins(
+        ir, input_file, use_silver_knobs, skin_faders, skin_meters);
 
     std::vector<pulp::view::FidelityIssue> fidelity_issues;
     opts.fidelity_report = &fidelity_issues;
     auto js = generate_pulp_js(ir, opts);
 
-    // Reference-free fidelity self-check: surface any sprite the importer could
-    // not prove it sized faithfully. Always reported as warnings; with
-    // --strict-fidelity a finding makes the import exit non-zero.
-    // Informational findings (e.g. a below-native-minimum widget codegen clamps
-    // up) are surfaced as warnings but never gate the import — only "hard"
-    // findings trip --strict-fidelity (see count_strict_fidelity_failures).
-    for (const auto& fi : fidelity_issues) {
-        std::cerr << "fidelity: [" << fi.kind << "] " << fi.node_name
-                  << " (" << fi.node_id << "): " << fi.detail
-                  << (fi.informational ? "  [informational]" : "") << "\n";
-    }
-    const std::size_t hard_findings =
-        pulp::view::count_strict_fidelity_failures(fidelity_issues);
-    if (strict_fidelity && hard_findings > 0) {
-        std::cerr << "fidelity: " << hard_findings
-                  << " issue(s); failing due to --strict-fidelity\n";
-        fidelity_failed = true;
-    }
-
-    // --fidelity-report: persist the run's findings as a machine-readable ledger
-    // (a durable, diffable fidelity contract). An explicitly-requested diagnostic
-    // artifact, so it is written regardless of --strict-fidelity or --dry-run —
-    // matching the --import-report convention above; --dry-run only suppresses the
-    // primary generated code + token files.
-    if (!fidelity_report_path.empty()) {
-        pulp::view::FidelityLedgerMeta meta;
-        meta.source = design_source_name(*source);
-        meta.output = output_file;
-        if (!write_file(fidelity_report_path,
-                        pulp::view::fidelity_ledger_json(fidelity_issues, meta))) {
-            std::cerr << "Error: cannot write fidelity report to " << fidelity_report_path << "\n";
-            return 1;
-        }
-        std::cerr << "fidelity: wrote ledger to " << fidelity_report_path << "\n";
-    }
+    if (auto fidelity_exit = run_fidelity_selfcheck(fidelity_issues,
+                                                    strict_fidelity,
+                                                    fidelity_report_path,
+                                                    *source,
+                                                    output_file,
+                                                    fidelity_failed))
+        return *fidelity_exit;
 
     if (dry_run) {
         std::cout << "=== Generated Pulp JS (" << design_source_name(*source) << " → " << output_file << ") ===\n\n";
