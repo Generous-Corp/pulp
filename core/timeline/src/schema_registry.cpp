@@ -1,6 +1,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 
 #include "track_schema_migrations.hpp"
+#include "track_schema_policy.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -285,12 +286,12 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"musical_duration", SchemaValueKind::I64String},
                                {"name", SchemaValueKind::String},
                                {"tracks", SchemaValueKind::Array}}));
-    auto track = builtin("pulp.timeline.track", SchemaDomain::Document,
+    auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
                          {{"clips", SchemaValueKind::Array},
                           {"device_chain", SchemaValueKind::Array},
                           {"id", SchemaValueKind::U64String},
                           {"name", SchemaValueKind::String}},
-                         2);
+                         detail::track_schema_policy.current_version);
     track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
     track.downgrades.push_back({2, 1, {}, detail::migrate_track_v2_to_v1});
     schemas.push_back(std::move(track));

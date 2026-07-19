@@ -2,6 +2,7 @@
 
 #include "project_state_access.hpp"
 #include "serialize_internal.hpp"
+#include "track_schema_policy.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -538,7 +539,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     if (++counts.tracks > limits.max_tracks)
         return fail<Track>(PersistenceErrorCode::LimitExceeded, path, value.begin, counts.tracks,
                            limits.max_tracks);
-    auto envelope = data_for_versions(value, "pulp.timeline.track", 1, 2, path);
+    auto envelope = data_for_versions(value, detail::track_schema_policy.type_name,
+                                      detail::track_schema_policy.oldest_readable_version,
+                                      detail::track_schema_policy.current_version, path);
     if (!envelope)
         return fail<Track>(envelope.error().code, envelope.error().path,
                            envelope.error().byte_offset);

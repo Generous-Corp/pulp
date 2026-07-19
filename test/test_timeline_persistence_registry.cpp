@@ -51,3 +51,19 @@ TEST_CASE("Timeline persistence requires the complete compatible structural regi
         REQUIRE(decode.error().code == PersistenceErrorCode::InvalidSchema);
     }
 }
+
+TEST_CASE("Timeline persistence requires contiguous Track migration paths") {
+    const auto project = project_with();
+    const auto snapshot = take(serialize_project(project, builtins())).json;
+    for (const auto mutation :
+         {MigrationMutation::RemoveUpgrade, MigrationMutation::RemoveDowngrade}) {
+        const auto registry = structurally_modified_registry({}, {}, {}, FieldMutation::Required,
+                                                             mutation);
+        auto encoded = serialize_project(project, registry);
+        REQUIRE_FALSE(encoded.has_value());
+        REQUIRE(encoded.error().code == PersistenceErrorCode::MigrationPathMissing);
+        auto decoded = deserialize_project(snapshot, registry);
+        REQUIRE_FALSE(decoded.has_value());
+        REQUIRE(decoded.error().code == PersistenceErrorCode::MigrationPathMissing);
+    }
+}
