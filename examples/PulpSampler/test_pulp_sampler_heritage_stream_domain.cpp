@@ -269,6 +269,129 @@ TEST_CASE("PulpSampler rejects streamed pitch times heritage clock above four",
                 slow.processor) == 192000.0);
 }
 
+TEST_CASE("PulpSampler exempts resident voices from stream consumption admission",
+          "[audio][sampler][heritage][stream][admission]") {
+    const auto profile = clock_profile(2.0);
+    constexpr std::array block{std::size_t{64}};
+
+    HeritageTempWav streamed_source("resident_exemption_stream", 2000000);
+    HeritageFixture streamed(64, &profile);
+    REQUIRE(streamed.processor.load_sample_file(streamed_source.path));
+    (void)render(streamed, block, 0, 73);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                streamed.processor) == 0);
+    REQUIRE(streamed.processor.heritage_diagnostics()
+                .rate_admission_rejections == 1);
+
+    HeritageFixture resident(64, &profile);
+    const std::vector<float> sample(4096, 0.25f);
+    resident.load(sample);
+    (void)render(resident, block, 0, 73);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_voices(
+                resident.processor) == 1);
+    REQUIRE(resident.processor.heritage_diagnostics()
+                .rate_admission_rejections == 0);
+}
+
+TEST_CASE("PulpSampler declares typed pitch clock stream consumption",
+          "[audio][sampler][heritage][stream][demand]") {
+    HeritageTempWav source("typed_pitch_demand", 2000000);
+    constexpr std::array block{std::size_t{64}};
+
+    const auto fast_profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 2.0);
+    HeritageFixture fast(64, &fast_profile);
+    fast.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fast.processor.load_sample_file(source.path));
+    (void)render(fast, block, 0, 72);
+    for (int callback = 0; callback < 16; ++callback)
+        (void)render(fast, block, 65, 72);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(
+                fast.processor) == 192000.0);
+
+    HeritageFixture slow(64, &fast_profile);
+    slow.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(slow.processor.load_sample_file(source.path));
+    (void)render(slow, block, 0, 48);
+    for (int callback = 0; callback < 16; ++callback)
+        (void)render(slow, block, 65, 48);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(
+                slow.processor) == 48000.0);
+
+    HeritageFixture reverse(64, &fast_profile);
+    reverse.store.set_value(kSamplerReverse, 1.0f);
+    REQUIRE(reverse.processor.load_sample_file(source.path));
+    REQUIRE(PulpSamplerHeritageTestAccess::retire_reverse_tail_page(
+        reverse.processor));
+    (void)render(reverse, block, 0, 72);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_stream_demand_fps(
+                reverse.processor) == 192000.0);
+}
+
+TEST_CASE("PulpSampler admits a low typed pitch in a high clock domain",
+          "[audio][sampler][heritage][stream][admission][contract]") {
+    HeritageTempWav source("typed_low_pitch_high_clock", 2000000);
+    const auto maximum_factor =
+        SamplerHeritageRuntime::maximum_variable_clock_factor(
+            48000.0, 8.0, 48000.0);
+    REQUIRE(maximum_factor == 16.0);
+    REQUIRE(8.0 * maximum_factor <=
+            audio::kMaximumDenseSampleSincConsumption);
+    const auto profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 8.0);
+    HeritageFixture fixture(64, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    const auto loaded = fixture.processor.load_sample_file_result(source.path);
+    const auto prepared = fixture.processor.prepare_result();
+    INFO("prepare status=" << pulp_sampler_prepare_status_name(prepared.status));
+    INFO("load status=" << pulp_sampler_load_status_name(loaded.status)
+                        << " required_preload_frames="
+                        << loaded.required_preload_frames
+                        << " configured_preload_frames="
+                        << loaded.configured_preload_frames);
+    REQUIRE(loaded.loaded());
+    constexpr std::array block{std::size_t{64}};
+    (void)render(fixture, block, 0, 48);
+    for (int callback = 0; callback < 8; ++callback)
+        (void)render(fixture, block, 65, 48);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+    REQUIRE(fixture.processor.stream_stats()
+                .invalid_preload_contract_events == 0);
+    REQUIRE(fixture.processor.heritage_diagnostics()
+                .rate_admission_rejections == 0);
+}
+
+TEST_CASE("PulpSampler counts frozen typed pitch during admission fade",
+          "[audio][sampler][heritage][stream][automation][admission]") {
+    HeritageTempWav source("typed_pitch_fade_admission", 2000000);
+    const auto profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 2.0);
+    HeritageFixture fixture(64, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.processor.load_sample_file(source.path));
+    PulpSamplerHeritageTestAccess::force_stream_rate_capacity(
+        fixture.processor, 210000.0);
+    constexpr std::array attack{std::size_t{64}};
+    (void)render(fixture, attack, 0, 72);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+
+    fixture.store.set_value(kSamplerPitch, 2.0f);
+    constexpr std::array fade_head{std::size_t{16}};
+    (void)render(fixture, fade_head, 17, 72, false);
+    REQUIRE(fixture.processor.heritage_diagnostics()
+                .rate_automation_rejections == 1);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+
+    (void)render(fixture, fade_head, 0, 48);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+    REQUIRE(fixture.processor.heritage_diagnostics()
+                .rate_admission_rejections == 1);
+}
+
 TEST_CASE("PulpSampler prepared state recall rebinds without dropping its source",
           "[audio][sampler][heritage][state][stream][configuration]") {
     HeritageTempWav source("state_domain_rebind");

@@ -3,6 +3,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/sample_asset.hpp>
 #include <pulp/audio/sample_starvation_envelope.hpp>
+#include <pulp/audio/sample_stream_consumption.hpp>
 
 #include <algorithm>
 #include <array>
@@ -163,6 +164,18 @@ public:
                                           std::uint32_t output_frames,
                                           double source_frames_per_output,
                                           double output_sample_rate) const noexcept {
+        return plan_block(
+            asset, output_frames, source_frames_per_output, output_sample_rate,
+            {.source_frames_per_second =
+                 source_frames_per_output * output_sample_rate});
+    }
+
+    SampleStreamVoiceBlockPlan plan_block(
+        const SampleAssetView& asset,
+        std::uint32_t output_frames,
+        double source_frames_per_output,
+        double output_sample_rate,
+        SampleStreamConsumptionDeclaration consumption) const noexcept {
         SampleStreamVoiceBlockPlan plan;
         plan.asset = asset.asset;
         plan.source = asset.source;
@@ -177,13 +190,15 @@ public:
         }
         if (!asset.fully_resident()) {
             const auto& contract = asset.preload_contract;
-            const auto maximum_source_frames_per_output =
-                static_cast<double>(asset.sample_rate) /
-                output_sample_rate * contract.maximum_playback_ratio;
+            const auto maximum_source_frames_per_second =
+                static_cast<double>(asset.sample_rate) *
+                contract.maximum_playback_ratio;
             if (!asset.has_preload_contract ||
                 output_frames > contract.maximum_host_block_frames ||
                 output_sample_rate != contract.host_sample_rate ||
-                source_frames_per_output > maximum_source_frames_per_output) {
+                !positive_finite(consumption.source_frames_per_second) ||
+                consumption.source_frames_per_second >
+                    maximum_source_frames_per_second) {
                 return plan;
             }
         }
@@ -203,7 +218,7 @@ public:
         }
 
         const auto consumption_frames_per_second =
-            source_frames_per_output * output_sample_rate;
+            consumption.source_frames_per_second;
         if (!positive_finite(consumption_frames_per_second)) return plan;
 
         for (std::uint32_t output = 0; output < output_frames; ++output) {

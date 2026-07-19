@@ -157,6 +157,7 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(
                 canonical.floating(block.cutoff_value);
                 canonical.integer(block.order);
                 canonical.floating(block.ripple_db);
+                canonical.floating(block.stopband_attenuation_db);
             } else if constexpr (std::is_same_v<Block,
                                                  SampleHeritageRecordConverterBlock>) {
                 canonical.integer(static_cast<std::uint8_t>(block.family));

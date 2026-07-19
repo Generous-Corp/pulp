@@ -59,6 +59,7 @@ target_sources(pulp-audio PRIVATE
     src/sample_heritage_json.cpp
     src/sample_heritage_runtime_state_json.cpp
     src/sample_heritage_pitch.cpp
+    src/sample_heritage_record_commit.cpp
     src/sample_heritage_schema.cpp
     src/sample_heritage_src.cpp
     src/sample_edit_document.cpp

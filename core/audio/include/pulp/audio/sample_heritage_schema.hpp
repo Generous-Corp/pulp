@@ -17,6 +17,7 @@ namespace pulp::audio {
 
 inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 3;
 inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 3;
+inline constexpr std::uint32_t kSampleHeritageSpectralTiltLawVersion = 1;
 inline constexpr std::size_t kSampleHeritageMaximumStages = 7;
 inline constexpr std::size_t kSampleHeritageMaximumVoiceBlocks = 8;
 inline constexpr std::size_t kSampleHeritageMaximumBusBlocks = 2;
@@ -130,9 +131,15 @@ struct SampleHeritageBusNoiseIdleBlock {
     std::uint64_t seed = 0;
     SampleHeritageSeedPolicy seed_policy =
         SampleHeritageSeedPolicy::RestartFromProfileSeed;
-    // The tilt gain at frequency f is
-    // 10^(tilt_db_per_octave * log2(max(f, tilt_floor_hz) /
-    // tilt_reference_hz) / 20), with Nyquist as the upper frequency bound.
+    // Tilt law version 1 is a deterministic cascade of unit-slope RBJ high
+    // shelves. The lowest shelf starts at tilt_floor_hz. Successive shelves
+    // span one octave, or the last partial octave through Nyquist, with a
+    // geometric-mean center and tilt_db_per_octave times the octave width.
+    // The cascade is normalized to 0 dB at tilt_reference_hz. The requested
+    // slope is a target, not an exact power law. Below the floor, response
+    // approaches the low-frequency asymptote rather than being hard-clamped.
+    // Compatibility compares the prepared response; the ideal slope has no
+    // normative error tolerance.
     double tilt_reference_hz = 1000.0;
     double tilt_floor_hz = 20.0;
 };
@@ -161,6 +168,7 @@ struct SampleHeritageRecordRateBlock {
     double cutoff_value = 0.0;
     std::uint8_t order = 1;
     float ripple_db = 0.0f;
+    float stopband_attenuation_db = 0.0f;
 };
 struct SampleHeritageRecordConverterBlock {
     SampleHeritageConverterFamily family = SampleHeritageConverterFamily::LinearPcm;
@@ -551,6 +559,7 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                                    finite_range(block.ceiling, 0.001f, 4.0f);
                     }, parameters);
                 });
+        double record_processing_rate = source.host_sample_rate;
         if (status == SampleHeritageProfileStatus::Ok)
             status = validate_ordered(
                 source.record_commit, SampleHeritageBlockDomain::RecordCommit,
@@ -562,21 +571,45 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
                             return finite_range(block.drive, 0.0f, 16.0f) &&
                                    finite_range(block.clip_level, 0.001f, 4.0f);
                         else if constexpr (std::is_same_v<Block,
-                                                           SampleHeritageRecordRateBlock>)
-                            return (block.filter_family ==
-                                        SampleHeritageRecordFilterFamily::OnePole ||
-                                    block.filter_family ==
-                                        SampleHeritageRecordFilterFamily::Butterworth ||
-                                    block.filter_family ==
-                                        SampleHeritageRecordFilterFamily::Chebyshev ||
-                                    block.filter_family ==
-                                        SampleHeritageRecordFilterFamily::Elliptic) &&
-                                   finite_range(block.sample_rate, 8000.0, 384000.0) &&
+                                                           SampleHeritageRecordRateBlock>) {
+                            const auto valid =
+                                   finite_range(block.sample_rate, 8000.0,
+                                                384000.0) &&
                                    validate_cutoff(block.cutoff_law,
                                                    block.cutoff_value,
-                                                   block.sample_rate) &&
-                                   block.order >= 1 && block.order <= 16 &&
-                                   finite_range(block.ripple_db, 0.0f, 12.0f);
+                                                   record_processing_rate) &&
+                                   ((block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::OnePole &&
+                                     block.order == 1 && block.ripple_db == 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Butterworth &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     block.ripple_db == 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Chebyshev &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                     block.ripple_db > 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Elliptic &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                     block.ripple_db > 0.0f &&
+                                     finite_range(block.stopband_attenuation_db,
+                                                  block.ripple_db, 180.0f) &&
+                                     block.stopband_attenuation_db >
+                                         block.ripple_db));
+                            if (valid &&
+                                !source.record_commit[result.stage_index].bypass)
+                                record_processing_rate = block.sample_rate;
+                            return valid;
+                        }
                         else if constexpr (std::is_same_v<Block,
                                                            SampleHeritageRecordConverterBlock>)
                             return (block.family == SampleHeritageConverterFamily::LinearPcm ||

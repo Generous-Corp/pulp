@@ -3,6 +3,7 @@
 #include "sampler_api.hpp"
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/sample_heritage_bus_dsp.hpp>
 #include <pulp/audio/sample_heritage_engine.hpp>
 #include <pulp/audio/sample_heritage_pitch.hpp>
 
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -27,6 +29,30 @@ namespace pulp::examples {
 class SamplerHeritageRuntime {
 public:
     static constexpr std::size_t kVoiceSlots = 8;
+    static constexpr double maximum_live_source_consumption_ratio() noexcept {
+        return 1.0;
+    }
+
+    static double maximum_variable_clock_factor(
+        double machine_sample_rate,
+        double clock_ratio,
+        double host_sample_rate) noexcept {
+        const auto return_ratio =
+            machine_sample_rate * clock_ratio / host_sample_rate;
+        if (!(return_ratio > 0.0) || !std::isfinite(return_ratio)) return 0.0;
+        auto factor = std::min(
+            audio::SampleHeritagePitchProcessor::kMaximumFactor,
+            audio::kMaximumDenseSampleSincConsumption / return_ratio);
+        if (!(factor >= 1.0) || !std::isfinite(factor)) return 0.0;
+        if (return_ratio * factor >
+            audio::kMaximumDenseSampleSincConsumption) {
+            factor = std::nextafter(factor, 0.0);
+        }
+        const auto maximum_consumption = return_ratio * factor;
+        return maximum_consumption <= audio::kMaximumDenseSampleSincConsumption
+            ? factor
+            : 0.0;
+    }
 
 private:
     struct VoiceState {
@@ -49,7 +75,8 @@ public:
 
     static constexpr std::size_t prepared_object_bytes() noexcept {
         return sizeof(VoiceState) * kVoiceSlots +
-               2u * sizeof(audio::SampleHeritageEngine) +
+               sizeof(audio::SampleHeritageEngine) +
+               sizeof(audio::SampleHeritageBusDsp) +
                sizeof(audio::SampleSincKernelBank);
     }
 
@@ -66,7 +93,7 @@ public:
         audio::SampleHeritagePreparedProfile profile{};
         std::unique_ptr<audio::SampleSincKernelBank> sinc_bank;
         std::unique_ptr<VoiceState[]> voices;
-        std::unique_ptr<audio::SampleHeritageEngine> bus_engine;
+        std::unique_ptr<audio::SampleHeritageBusDsp> bus_dsp;
         std::unique_ptr<audio::SampleHeritageEngine> legacy_engine;
         std::vector<float> dry_storage;
         std::vector<float> pitch_storage;
@@ -97,7 +124,7 @@ public:
 
     SamplerHeritageRuntime()
         : voices_(std::make_unique<VoiceState[]>(kVoiceSlots)),
-          bus_engine_(std::make_unique<audio::SampleHeritageEngine>()),
+          bus_dsp_(std::make_unique<audio::SampleHeritageBusDsp>()),
           legacy_engine_(std::make_unique<audio::SampleHeritageEngine>()) {}
 
     PulpSamplerHeritageStatus configure(
@@ -198,7 +225,7 @@ public:
                 voices_[slot].pitch.release();
             }
         }
-        if (bus_engine_ != nullptr) bus_engine_->release();
+        if (bus_dsp_ != nullptr) bus_dsp_->release();
         if (legacy_engine_ != nullptr) legacy_engine_->release();
         if (sinc_bank_ != nullptr) sinc_bank_->release();
         std::vector<float>().swap(dry_storage_);
@@ -254,6 +281,20 @@ public:
     bool pitch_active() const noexcept {
         return prepared_ && pitch_active_ && !failed_closed_;
     }
+    bool runtime_pitch_factor_supported(double factor) const noexcept {
+        if (!pitch_active()) return true;
+        if (!std::isfinite(factor) ||
+            factor < audio::SampleHeritagePitchProcessor::kMinimumFactor ||
+            factor > audio::SampleHeritagePitchProcessor::kMaximumFactor) {
+            return false;
+        }
+        if (pitch_family_ != audio::SampleHeritagePitchFamily::VariableClock)
+            return true;
+        const auto maximum = maximum_variable_clock_factor(
+            machine_sample_rate_, clock_ratio_, host_sample_rate_);
+        return maximum >= 1.0 && factor >= 1.0 / maximum &&
+               factor <= maximum;
+    }
     audio::SampleHeritagePitchFamily pitch_family() const noexcept {
         return pitch_family_;
     }
@@ -283,6 +324,9 @@ public:
 
     double active_clock_ratio() const noexcept {
         return prepared_ && !all_stages_bypassed_ ? clock_ratio_ : 1.0;
+    }
+    double active_live_source_consumption_ratio() const noexcept {
+        return maximum_live_source_consumption_ratio();
     }
     std::size_t maximum_input_frames() const noexcept {
         return prepared_ && !all_stages_bypassed_ ? maximum_input_frames_ : 0;
@@ -476,22 +520,16 @@ public:
         }
     }
 
-    bool process_bus(audio::BufferView<float> output) noexcept {
+    bool process_bus(audio::BufferView<float> output,
+                     std::span<const std::uint8_t> voice_activity) noexcept {
         if (!bus_processing_required() || output.num_channels() != channel_count_ ||
-            output.num_samples() > maximum_input_frames_) {
+            output.num_samples() > maximum_input_frames_ ||
+            voice_activity.size() != output.num_samples()) {
             fail_process();
             return false;
         }
-        const auto plan = bus_engine_->plan_exact(output.num_samples());
-        if (!plan.valid() || plan.input_frames != output.num_samples()) {
-            fail_plan();
-            return false;
-        }
-        for (std::size_t channel = 0; channel < channel_count_; ++channel)
-            std::copy(output.channel(channel).begin(), output.channel(channel).end(),
-                      dry_ptrs_[channel]);
-        if (bus_engine_->process_exact(plan, dry_input(plan.input_frames), output) ==
-            audio::SampleHeritageProcessStatus::Ok) {
+        if (bus_dsp_->process(output, voice_activity) ==
+            audio::SampleHeritageBusDspStatus::Ok) {
             return true;
         }
         fail_process();
@@ -519,9 +557,9 @@ public:
             }
         }
         if (bus_processing_required_) {
-            const auto captured = bus_engine_->capture_runtime_state();
-            if (!captured.valid()) return {};
-            copy_engine_state(captured.state, result.state.bus_state);
+            if (bus_dsp_->capture_runtime_state(result.state.bus_state) !=
+                audio::SampleHeritageRuntimeStateStatus::Ok)
+                return {};
         }
         result.status = audio::SampleHeritageRuntimeStateStatus::Ok;
         return result;
@@ -582,8 +620,6 @@ private:
             result = result && profile.voice[index].bypass;
         for (std::size_t index = 0; index < profile.bus_count; ++index)
             result = result && profile.bus[index].bypass;
-        for (std::size_t index = 0; index < profile.record_commit_count; ++index)
-            result = result && profile.record_commit[index].bypass;
         return result;
     }
 
@@ -653,18 +689,6 @@ private:
         return result;
     }
 
-    static audio::SampleHeritageProfile flat_profile(
-        const audio::SampleHeritagePreparedProfile& source,
-        double host_sample_rate,
-        std::vector<audio::SampleHeritageStageSpec> stages) {
-        audio::SampleHeritageProfile result;
-        result.schema_version = source.schema_version;
-        result.profile_id.assign(source.id());
-        result.host_sample_rate = host_sample_rate;
-        result.stages = std::move(stages);
-        return result;
-    }
-
     static bool inspect_voice_block(
         const audio::SampleHeritageVoiceBlockSpec& spec,
         bool& artifact_path_active,
@@ -694,56 +718,19 @@ private:
             spec.parameters);
     }
 
-    static bool append_bus_stage(
-        const audio::SampleHeritageBusBlockSpec& spec,
-        std::vector<audio::SampleHeritageStageSpec>& stages) {
-        if (spec.bypass) return true;
-        return std::visit(
-            [&](const auto& block) {
-                using Block = std::decay_t<decltype(block)>;
-                if constexpr (std::is_same_v<
-                                  Block,
-                                  audio::SampleHeritageBusNoiseIdleBlock>) {
-                    if (block.tilt_db_per_octave != 0.0f ||
-                        block.gate != audio::SampleHeritageNoiseGate::AlwaysOn ||
-                        (block.noise_amplitude != 0.0f &&
-                         block.idle_amplitude != 0.0f))
-                        return false;
-                    stages.push_back(
-                        {false,
-                         audio::SampleHeritageNoiseStage{
-                             std::max(block.noise_amplitude, block.idle_amplitude),
-                             block.seed, block.seed_policy}});
-                    return true;
-                } else {
-                    return false;
-                }
-            },
-            spec.parameters);
-    }
-
     static bool build_typed_runtime_profiles(
         const audio::SampleHeritagePreparedProfile& profile,
         double host_sample_rate,
         audio::SampleHeritagePreparedProfile& voice_profile,
-        audio::SampleHeritagePreparedProfile& bus_profile,
         bool& voice_artifact_path_active,
         bool& pitch_active,
         audio::SampleHeritagePitchFamily& pitch_family) {
-        std::vector<audio::SampleHeritageStageSpec> bus_stages;
         try {
-            bus_stages.reserve(profile.bus_count);
             for (std::size_t index = 0; index < profile.voice_count; ++index) {
                 if (!inspect_voice_block(profile.voice[index],
                                          voice_artifact_path_active,
                                          pitch_active, pitch_family))
                     return false;
-            }
-            for (std::size_t index = 0; index < profile.bus_count; ++index) {
-                if (!append_bus_stage(profile.bus[index], bus_stages)) return false;
-            }
-            for (std::size_t index = 0; index < profile.record_commit_count; ++index) {
-                if (!profile.record_commit[index].bypass) return false;
             }
             audio::SampleHeritageProfile native_voice;
             native_voice.schema_version = profile.schema_version;
@@ -753,11 +740,8 @@ private:
                 profile.voice.begin(), profile.voice.begin() + profile.voice_count);
             const auto voice_validation =
                 audio::validate_sample_heritage_profile(native_voice);
-            const auto bus_validation = audio::validate_sample_heritage_profile(
-                flat_profile(profile, host_sample_rate, std::move(bus_stages)));
-            if (!voice_validation.valid() || !bus_validation.valid()) return false;
+            if (!voice_validation.valid()) return false;
             voice_profile = voice_validation.profile;
-            bus_profile = bus_validation.profile;
             return true;
         } catch (...) {
             return false;
@@ -841,8 +825,8 @@ private:
             candidate.sinc_bank =
                 std::make_unique<audio::SampleSincKernelBank>();
             candidate.voices = std::make_unique<VoiceState[]>(kVoiceSlots);
-            candidate.bus_engine =
-                std::make_unique<audio::SampleHeritageEngine>();
+            candidate.bus_dsp =
+                std::make_unique<audio::SampleHeritageBusDsp>();
             candidate.legacy_engine =
                 std::make_unique<audio::SampleHeritageEngine>();
         } catch (...) {
@@ -851,9 +835,8 @@ private:
 
         if (candidate.typed) {
             audio::SampleHeritagePreparedProfile voice_profile;
-            audio::SampleHeritagePreparedProfile bus_profile;
             if (!build_typed_runtime_profiles(
-                    profile, host_sample_rate, voice_profile, bus_profile,
+                    profile, host_sample_rate, voice_profile,
                     candidate.voice_artifact_path_active,
                     candidate.pitch_active, candidate.pitch_family)) {
                 return PulpSamplerHeritageStatus::PrepareFailed;
@@ -864,10 +847,10 @@ private:
                     candidate.voice_processing_required ||
                     !voice_profile.voice[index].bypass;
             candidate.bus_processing_required = false;
-            for (std::size_t index = 0; index < bus_profile.stage_count; ++index)
+            for (std::size_t index = 0; index < profile.bus_count; ++index)
                 candidate.bus_processing_required =
                     candidate.bus_processing_required ||
-                    !bus_profile.stages[index].bypass;
+                    !profile.bus[index].bypass;
 
             if (candidate.voice_processing_required) {
                 double machine_rate = host_sample_rate;
@@ -888,8 +871,11 @@ private:
                     candidate.pitch_active &&
                             candidate.pitch_family ==
                                 audio::SampleHeritagePitchFamily::VariableClock
-                        ? audio::SampleHeritagePitchProcessor::kMaximumFactor
+                        ? maximum_variable_clock_factor(
+                              machine_rate, clock_ratio, host_sample_rate)
                         : 1.0;
+                if (!(maximum_runtime_clock_factor >= 1.0))
+                    return PulpSamplerHeritageStatus::PrepareFailed;
                 const auto maximum_consumption = std::max(
                     host_sample_rate / machine_rate,
                     machine_rate * clock_ratio / host_sample_rate *
@@ -943,7 +929,9 @@ private:
                     candidate.maximum_engine_input_frames;
                 const auto admitted_stream_pitch_factor = std::min(
                     maximum_stream_pitch_factor,
-                    maximum_stream_pitch_factor / clock_ratio);
+                    maximum_stream_pitch_factor /
+                        (clock_ratio *
+                         maximum_live_source_consumption_ratio()));
                 if (candidate.pitch_active &&
                     candidate.pitch_family !=
                         audio::SampleHeritagePitchFamily::VariableClock) {
@@ -995,22 +983,20 @@ private:
             }
 
             if (candidate.bus_processing_required) {
-                if (candidate.bus_engine->prepare(
-                        {bus_profile, channel_count, maximum_output_frames}) !=
-                    audio::SampleHeritagePrepareStatus::Ok)
+                if (candidate.bus_dsp->prepare(profile, host_sample_rate,
+                                               channel_count) !=
+                    audio::SampleHeritageBusDspStatus::Ok)
                     return PulpSamplerHeritageStatus::PrepareFailed;
                 if (runtime_state != nullptr && !host_rate_changed) {
                     candidate.runtime_state_status =
-                        candidate.bus_engine->restore_runtime_state(
-                            engine_restore_state(bus_profile,
-                                                 runtime_state->bus_state));
+                        candidate.bus_dsp->restore_runtime_state(
+                            runtime_state->bus_state);
                     if (candidate.runtime_state_status !=
                         audio::SampleHeritageRuntimeStateStatus::Ok)
                         return PulpSamplerHeritageStatus::RuntimeStateRejected;
                 }
                 candidate.maximum_input_frames = std::max(
-                    candidate.maximum_input_frames,
-                    candidate.bus_engine->maximum_input_frames());
+                    candidate.maximum_input_frames, maximum_output_frames);
             } else if (runtime_state != nullptr && !host_rate_changed &&
                        runtime_state->bus_state.rng_state_count != 0) {
                 return PulpSamplerHeritageStatus::RuntimeStateRejected;
@@ -1021,10 +1007,7 @@ private:
             const auto voice_latency = candidate.voice_processing_required
                 ? candidate.voices[0].engine.latency_output_frames()
                 : 0.0;
-            const auto bus_latency = candidate.bus_processing_required
-                ? candidate.bus_engine->latency_output_frames()
-                : 0.0;
-            candidate.nominal_latency_frames = voice_latency + bus_latency;
+            candidate.nominal_latency_frames = voice_latency;
         } else {
             auto runtime_profile = profile;
             runtime_profile.host_sample_rate = host_sample_rate;
@@ -1090,7 +1073,7 @@ private:
         legacy_processing_required_ = candidate.legacy_processing_required;
         sinc_bank_.swap(candidate.sinc_bank);
         voices_.swap(candidate.voices);
-        bus_engine_.swap(candidate.bus_engine);
+        bus_dsp_.swap(candidate.bus_dsp);
         legacy_engine_.swap(candidate.legacy_engine);
         dry_storage_ = std::move(candidate.dry_storage);
         pitch_storage_ = std::move(candidate.pitch_storage);
@@ -1139,7 +1122,7 @@ private:
     audio::SampleHeritagePreparedProfile configured_{};
     std::unique_ptr<audio::SampleSincKernelBank> sinc_bank_;
     std::unique_ptr<VoiceState[]> voices_;
-    std::unique_ptr<audio::SampleHeritageEngine> bus_engine_;
+    std::unique_ptr<audio::SampleHeritageBusDsp> bus_dsp_;
     std::unique_ptr<audio::SampleHeritageEngine> legacy_engine_;
     std::vector<float> dry_storage_;
     std::vector<float> pitch_storage_;

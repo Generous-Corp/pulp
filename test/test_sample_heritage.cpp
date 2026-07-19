@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -1171,6 +1172,252 @@ TEST_CASE("Prepared exact heritage SRC allocates nothing in process calls",
         processed = plan.valid() &&
             engine.process_exact(plan, input_view, output_view) ==
                 SampleHeritageProcessStatus::Ok && processed;
+    }
+    REQUIRE(processed);
+    REQUIRE_FALSE(probe.saw_allocation());
+}
+
+namespace {
+
+SampleHeritagePreparedProfile prepared_bus_profile(
+    SampleHeritageBusNoiseIdleBlock noise,
+    std::optional<SampleHeritageBusOutputDriveBlock> output = std::nullopt) {
+    SampleHeritageProfile profile{
+        .schema_version = kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.bus-dsp-v3",
+        .host_sample_rate = 48000.0,
+        .bus = {{SampleHeritageBlockDomain::Bus, false, noise}},
+    };
+    if (output.has_value())
+        profile.bus.push_back(
+            {SampleHeritageBlockDomain::Bus, false, *output});
+    const auto validated = validate_sample_heritage_profile(profile);
+    REQUIRE(validated.valid());
+    return validated.profile;
+}
+
+std::vector<float> render_bus(SampleHeritageBusDsp& dsp,
+                              std::size_t frames,
+                              bool any_voice_active,
+                              float input = 0.0f) {
+    std::vector<float> output(frames, input);
+    float* pointer = output.data();
+    BufferView<float> view(&pointer, 1, output.size());
+    REQUIRE(dsp.process(view, any_voice_active) ==
+            SampleHeritageBusDspStatus::Ok);
+    return output;
+}
+
+}  // namespace
+
+TEST_CASE("Typed heritage bus noise and idle obey the voice-active gate",
+          "[audio][sampler][heritage][bus][gate]") {
+    const auto make = [](float noise, float idle,
+                         SampleHeritageNoiseGate gate) {
+        return prepared_bus_profile({
+            .noise_amplitude = noise,
+            .idle_amplitude = idle,
+            .tilt_db_per_octave = 0.0f,
+            .gate = gate,
+            .seed = 0x12345678u,
+            .seed_policy = SampleHeritageSeedPolicy::RestartFromProfileSeed,
+            .tilt_reference_hz = 1000.0,
+            .tilt_floor_hz = 20.0,
+        });
+    };
+
+    SampleHeritageBusDsp gated_noise;
+    REQUIRE(gated_noise.prepare(
+                make(0.1f, 0.0f, SampleHeritageNoiseGate::VoiceActive),
+                48000.0, 1) == SampleHeritageBusDspStatus::Ok);
+    REQUIRE(render_bus(gated_noise, 128, false) ==
+            std::vector<float>(128, 0.0f));
+    REQUIRE(render_bus(gated_noise, 128, true) !=
+            std::vector<float>(128, 0.0f));
+
+    SampleHeritageBusDsp idle;
+    REQUIRE(idle.prepare(
+                make(0.0f, 0.1f, SampleHeritageNoiseGate::VoiceActive),
+                48000.0, 1) == SampleHeritageBusDspStatus::Ok);
+    REQUIRE(render_bus(idle, 128, false) != std::vector<float>(128, 0.0f));
+
+    SampleHeritageBusDsp simultaneous;
+    REQUIRE(simultaneous.prepare(
+                make(0.1f, 0.1f, SampleHeritageNoiseGate::VoiceActive),
+                48000.0, 1) == SampleHeritageBusDspStatus::Ok);
+    const auto active = render_bus(simultaneous, 128, true);
+    simultaneous.reset();
+    const auto inactive = render_bus(simultaneous, 128, false);
+    REQUIRE(active != inactive);
+
+    SampleHeritageBusDsp always;
+    REQUIRE(always.prepare(
+                make(0.1f, 0.0f, SampleHeritageNoiseGate::AlwaysOn),
+                48000.0, 1) == SampleHeritageBusDspStatus::Ok);
+    REQUIRE(render_bus(always, 128, false) != std::vector<float>(128, 0.0f));
+}
+
+TEST_CASE("Typed heritage bus tilt follows its versioned shelf cascade",
+          "[audio][sampler][heritage][bus][response]") {
+    REQUIRE(kSampleHeritageSpectralTiltLawVersion == 1);
+    const auto profile = prepared_bus_profile({
+        .noise_amplitude = 0.1f,
+        .idle_amplitude = 0.0f,
+        .tilt_db_per_octave = -3.0f,
+        .gate = SampleHeritageNoiseGate::AlwaysOn,
+        .seed = 0x1234u,
+        .seed_policy = SampleHeritageSeedPolicy::RestartFromProfileSeed,
+        .tilt_reference_hz = 1000.0,
+        .tilt_floor_hz = 20.0,
+    });
+    SampleHeritageBusDsp dsp;
+    REQUIRE(dsp.prepare(profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    REQUIRE(std::abs(dsp.tilt_response_db(0, 1000.0)) < 1.0e-9);
+    for (const auto frequency : {125.0, 250.0, 500.0, 2000.0, 4000.0,
+                                 8000.0}) {
+        const auto expected = -3.0 * std::log2(frequency / 1000.0);
+        INFO("frequency: " << frequency);
+        INFO("measured dB: " << dsp.tilt_response_db(0, frequency));
+        INFO("expected dB: " << expected);
+        REQUIRE(std::abs(dsp.tilt_response_db(0, frequency) - expected) < 1.5);
+    }
+    const auto below_floor = dsp.tilt_response_db(0, 1.0);
+    const auto near_asymptote = dsp.tilt_response_db(0, 5.0);
+    const auto at_floor = dsp.tilt_response_db(0, 20.0);
+    REQUIRE(std::abs(below_floor - near_asymptote) < 0.01);
+    REQUIRE(std::abs(below_floor - at_floor) > 0.5);
+}
+
+TEST_CASE("Typed heritage bus RNG is partition invariant and restorable",
+          "[audio][sampler][heritage][bus][state][partition]") {
+    const auto profile = prepared_bus_profile({
+        .noise_amplitude = 0.03f,
+        .idle_amplitude = 0.01f,
+        .tilt_db_per_octave = -3.0f,
+        .gate = SampleHeritageNoiseGate::VoiceActive,
+        .seed = 0xabcdefu,
+        .seed_policy = SampleHeritageSeedPolicy::ContinueSerializedState,
+        .tilt_reference_hz = 1000.0,
+        .tilt_floor_hz = 20.0,
+    });
+    SampleHeritageBusDsp whole;
+    SampleHeritageBusDsp split;
+    REQUIRE(whole.prepare(profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    REQUIRE(split.prepare(profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    const auto contiguous = render_bus(whole, 512, true);
+    std::vector<float> partitioned;
+    for (const auto frames : {std::size_t{17}, std::size_t{63},
+                              std::size_t{128}, std::size_t{304}}) {
+        const auto block = render_bus(split, frames, true);
+        partitioned.insert(partitioned.end(), block.begin(), block.end());
+    }
+    REQUIRE(contiguous == partitioned);
+
+    whole.reset();
+    REQUIRE(render_bus(whole, 512, true) == contiguous);
+
+    const auto state_profile = prepared_bus_profile({
+        .noise_amplitude = 0.03f,
+        .idle_amplitude = 0.01f,
+        .tilt_db_per_octave = 0.0f,
+        .gate = SampleHeritageNoiseGate::VoiceActive,
+        .seed = 0xabcdefu,
+        .seed_policy = SampleHeritageSeedPolicy::ContinueSerializedState,
+        .tilt_reference_hz = 1000.0,
+        .tilt_floor_hz = 20.0,
+    });
+    SampleHeritageBusDsp state_source;
+    REQUIRE(state_source.prepare(state_profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    (void)render_bus(state_source, 512, true);
+    SampleHeritageRuntimeEngineState state;
+    REQUIRE(state_source.capture_runtime_state(state) ==
+            SampleHeritageRuntimeStateStatus::Ok);
+    const auto continuation = render_bus(state_source, 257, false);
+    SampleHeritageBusDsp restored;
+    REQUIRE(restored.prepare(state_profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    REQUIRE(restored.restore_runtime_state(state) ==
+            SampleHeritageRuntimeStateStatus::Ok);
+    REQUIRE(render_bus(restored, 257, false) == continuation);
+
+}
+
+TEST_CASE("Typed heritage bus output drive is exact below its ceiling and clips",
+          "[audio][sampler][heritage][bus][drive][thd]") {
+    const SampleHeritageBusNoiseIdleBlock bypassed_noise{};
+    const auto unity_profile = prepared_bus_profile(
+        bypassed_noise, SampleHeritageBusOutputDriveBlock{1.0f, 0.8f});
+    SampleHeritageBusDsp unity;
+    REQUIRE(unity.prepare(unity_profile, 48000.0, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    std::array<float, 7> values{-1.0f, -0.8f, -0.25f, 0.0f,
+                                0.25f, 0.8f, 1.0f};
+    float* values_pointer = values.data();
+    BufferView<float> values_view(&values_pointer, 1, values.size());
+    REQUIRE(unity.process(values_view, false) ==
+            SampleHeritageBusDspStatus::Ok);
+    constexpr std::array<float, 7> expected{
+        -0.8f, -0.8f, -0.25f, 0.0f, 0.25f, 0.8f, 0.8f};
+    REQUIRE(values == expected);
+
+    constexpr std::size_t frames = 16384;
+    constexpr double sample_rate = 48000.0;
+    constexpr double frequency = sample_rate * 127.0 / frames;
+    Buffer<float> dry(1, frames);
+    Buffer<float> driven(1, frames);
+    for (std::size_t frame = 0; frame < frames; ++frame) {
+        const auto sample = static_cast<float>(
+            0.65 * std::sin(2.0 * std::numbers::pi * frequency * frame /
+                            sample_rate));
+        dry.channel(0)[frame] = sample;
+        driven.channel(0)[frame] = sample;
+    }
+    const auto driven_profile = prepared_bus_profile(
+        bypassed_noise, SampleHeritageBusOutputDriveBlock{2.0f, 0.8f});
+    SampleHeritageBusDsp drive;
+    REQUIRE(drive.prepare(driven_profile, sample_rate, 1) ==
+            SampleHeritageBusDspStatus::Ok);
+    REQUIRE(drive.process(driven.view(), true) ==
+            SampleHeritageBusDspStatus::Ok);
+    REQUIRE(std::all_of(driven.channel(0).begin(), driven.channel(0).end(),
+                        [](float sample) { return std::abs(sample) <= 0.8f; }));
+    pulp::test::audio::ThdOptions options;
+    options.fft_length = static_cast<int>(frames);
+    const auto dry_thd = pulp::test::audio::measure_thd(
+        std::as_const(dry).view(), frequency, sample_rate, options);
+    const auto driven_thd = pulp::test::audio::measure_thd(
+        std::as_const(driven).view(), frequency, sample_rate, options);
+    REQUIRE(driven_thd.thd_percent() > 1.0);
+    REQUIRE(driven_thd.thd_db() > dry_thd.thd_db() + 30.0);
+}
+
+TEST_CASE("Prepared typed heritage bus processing allocates nothing",
+          "[audio][sampler][heritage][bus][rt]") {
+    const auto profile = prepared_bus_profile(
+        {.noise_amplitude = 0.03f,
+         .idle_amplitude = 0.01f,
+         .tilt_db_per_octave = 4.0f,
+         .gate = SampleHeritageNoiseGate::VoiceActive,
+         .seed = 0x1234u,
+         .seed_policy = SampleHeritageSeedPolicy::ContinueSerializedState,
+         .tilt_reference_hz = 1000.0,
+         .tilt_floor_hz = 20.0},
+        SampleHeritageBusOutputDriveBlock{2.0f, 0.9f});
+    SampleHeritageBusDsp dsp;
+    REQUIRE(dsp.prepare(profile, 48000.0, 2) ==
+            SampleHeritageBusDspStatus::Ok);
+    Buffer<float> buffer(2, 128);
+    bool processed = true;
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 10000; ++callback) {
+        buffer.clear();
+        processed = dsp.process(buffer.view(), (callback & 1) != 0) ==
+                        SampleHeritageBusDspStatus::Ok &&
+                    processed;
     }
     REQUIRE(processed);
     REQUIRE_FALSE(probe.saw_allocation());

@@ -352,6 +352,34 @@ audio::SampleHeritageProfile clock_profile(double ratio,
     };
 }
 
+[[maybe_unused]] audio::SampleHeritageProfile typed_bus_profile(
+    float noise_amplitude,
+    float idle_amplitude,
+    audio::SampleHeritageNoiseGate gate,
+    float drive = 1.0f,
+    float ceiling = 1.0f) {
+    return {
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.typed-bus-v3",
+        .host_sample_rate = 48000.0,
+        .bus = {
+            {audio::SampleHeritageBlockDomain::Bus, false,
+             audio::SampleHeritageBusNoiseIdleBlock{
+                 .noise_amplitude = noise_amplitude,
+                 .idle_amplitude = idle_amplitude,
+                 .tilt_db_per_octave = 0.0f,
+                 .gate = gate,
+                 .seed = 0xabcdefu,
+                 .seed_policy =
+                     audio::SampleHeritageSeedPolicy::RestartFromProfileSeed,
+                 .tilt_reference_hz = 1000.0,
+                 .tilt_floor_hz = 20.0}},
+            {audio::SampleHeritageBlockDomain::Bus, false,
+             audio::SampleHeritageBusOutputDriveBlock{drive, ceiling}},
+        },
+    };
+}
+
 [[maybe_unused]] audio::SampleHeritageProfile continued_noise_profile() {
     return {
         .schema_version = audio::kSampleHeritageProfileSchemaVersion,

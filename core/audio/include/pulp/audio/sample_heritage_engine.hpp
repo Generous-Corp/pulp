@@ -621,8 +621,10 @@ private:
         return_ratio_ = clocked_sample_rate_ / profile_.host_sample_rate;
         input_identity_ = machine_sample_rate_ == profile_.host_sample_rate;
         return_identity_ = clocked_sample_rate_ == profile_.host_sample_rate;
-        if ((!input_identity_ && input_ratio_ > 128.0) ||
-            (!return_identity_ && return_ratio_ > 128.0) ||
+        if ((!input_identity_ && input_ratio_ >
+                                  kMaximumDenseSampleSincConsumption) ||
+            (!return_identity_ && return_ratio_ >
+                                   kMaximumDenseSampleSincConsumption) ||
             !std::isfinite(input_ratio_) || !std::isfinite(return_ratio_)) {
             release();
             return SampleHeritagePrepareStatus::UnsupportedRateConversion;

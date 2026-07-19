@@ -35,6 +35,7 @@ struct SamplerVoice {
     std::uint32_t streamed_mip_octave = 0;
     double stream_playback_rate = 0.0;
     double heritage_pitch_factor = 1.0;
+    double heritage_live_consumption_factor = 1.0;
     double lookahead_lead_source_frames = 0.0;
     bool streamed = false;
     bool stream_attack_pending = false;
@@ -64,6 +65,7 @@ struct SamplerVoice {
         streamed_mip_octave = 0;
         stream_playback_rate = 0.0;
         heritage_pitch_factor = 1.0;
+        heritage_live_consumption_factor = 1.0;
         lookahead_lead_source_frames = 0.0;
         streamed = false;
         stream_attack_pending = false;

@@ -143,6 +143,29 @@ void require_matches_resident(
 
 }  // namespace
 
+TEST_CASE("Loop stream demand declaration is independent of cursor geometry",
+          "[audio][sampler][stream-loop][contract][demand]") {
+    LoopStreamFixture fixture;
+    const auto asset = fixture.asset.view();
+    auto streamed_region = region(LoopPlaybackMode::OneShot);
+    streamed_region.start_frame = 48;
+    SampleStreamLoopVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {8, 1}, streamed_region, 1.0));
+
+    const auto declared = reader.plan_block(
+        asset, 8, 48000.0,
+        {.source_frames_per_second = 96000.0});
+    REQUIRE(declared.supply == SampleStreamVoiceSupply::Ready);
+    REQUIRE(declared.demand_count != 0);
+    REQUIRE(declared.demands[0].consumption_frames_per_second == 96000.0);
+
+    const auto over_cap = reader.plan_block(
+        asset, 8, 48000.0,
+        {.source_frames_per_second = 192001.0});
+    REQUIRE(over_cap.supply == SampleStreamVoiceSupply::InvalidContract);
+    REQUIRE(over_cap.demand_count == 0);
+}
+
 TEST_CASE("Paged loop reader matches resident forward crossfade traversal",
           "[audio][sampler][stream-loop]") {
     require_matches_resident(LoopPlaybackMode::Forward, false);

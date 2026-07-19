@@ -171,6 +171,20 @@ public:
         std::uint32_t output_frames,
         double output_sample_rate,
         SampleStreamDemandClass demand_class = SampleStreamDemandClass::Sustain) const noexcept {
+        return plan_block(
+            asset, output_frames, output_sample_rate,
+            {.source_frames_per_second =
+                 std::abs(cursor_.step()) * output_sample_rate},
+            demand_class);
+    }
+
+    SampleStreamLoopBlockPlan plan_block(
+        const SampleAssetView& asset,
+        std::uint32_t output_frames,
+        double output_sample_rate,
+        SampleStreamConsumptionDeclaration consumption,
+        SampleStreamDemandClass demand_class =
+            SampleStreamDemandClass::Sustain) const noexcept {
         SampleStreamLoopBlockPlan plan;
         plan.asset = asset.asset;
         plan.source = asset.source;
@@ -191,7 +205,8 @@ public:
         const auto step = std::abs(cursor_.step());
         if (!positive_finite(step) ||
             !contract_accepts(asset, interpolation_, output_frames, step,
-                              output_sample_rate)) {
+                              output_sample_rate,
+                              consumption.source_frames_per_second)) {
             return plan;
         }
         if (!cursor_.active()) {
@@ -200,7 +215,8 @@ public:
         }
 
         auto scan = cursor_;
-        const auto consumption_frames_per_second = step * output_sample_rate;
+        const auto consumption_frames_per_second =
+            consumption.source_frames_per_second;
         for (std::uint32_t output = 0; output < output_frames && scan.active(); ++output) {
             const auto frame_plan = scan.frame_read_plan();
             if (!append_position(plan, asset, scan.region(), interpolation_,
@@ -398,15 +414,19 @@ private:
                                  const PreparedSampleInterpolation& interpolation,
                                  std::uint32_t output_frames,
                                  double step,
-                                 double output_sample_rate) noexcept {
+                                 double output_sample_rate,
+                                 double consumption_frames_per_second) noexcept {
+        if (!positive_finite(consumption_frames_per_second)) return false;
         if (asset.fully_resident()) return true;
         if (!asset.has_preload_contract) return false;
         const auto& contract = asset.preload_contract;
-        const auto maximum_step = static_cast<double>(asset.sample_rate) /
-                                  output_sample_rate * contract.maximum_playback_ratio;
+        const auto maximum_consumption =
+            static_cast<double>(asset.sample_rate) *
+            contract.maximum_playback_ratio;
         return output_frames <= contract.maximum_host_block_frames &&
                output_sample_rate == contract.host_sample_rate &&
-               step <= maximum_step &&
+               positive_finite(step) &&
+               consumption_frames_per_second <= maximum_consumption &&
                interpolation.guard_frames() <=
                    contract.interpolation_guard_frames;
     }

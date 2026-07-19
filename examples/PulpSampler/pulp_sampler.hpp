@@ -13,6 +13,7 @@
 #include <pulp/audio/loop_types.hpp>
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
+#include <pulp/audio/sample_stream_consumption.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/signal/adsr.hpp>
@@ -223,6 +224,7 @@ class PulpSamplerProcessor : public format::Processor {
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
     std::array<std::vector<float>, kMaxSampleChannels> stream_source_scratch_{};
     std::array<float*, kMaxSampleChannels> stream_source_scratch_ptrs_{};
+    std::vector<std::uint8_t> bus_voice_activity_{};
     float host_sample_rate_ = 44100.0f;
     double stream_output_sample_rate_ = 44100.0;
     std::uint32_t max_block_frames_ = 512;
@@ -307,6 +309,9 @@ class PulpSamplerProcessor : public format::Processor {
 
     StreamRateContract pitch_rate_contract(double pitch_ratio) const noexcept;
 
+    audio::SampleStreamConsumptionDeclaration
+    stream_consumption_declaration(const SamplerVoice& voice) const noexcept;
+
     void render_output_segment(audio::BufferView<float>& output, std::uint32_t start_frame,
                                std::uint32_t frames, const RenderParams& params) noexcept;
 
@@ -319,7 +324,7 @@ class PulpSamplerProcessor : public format::Processor {
                                const RenderParams& params) noexcept;
 
     bool prepare_reverse_attack_horizon(SamplerVoice& voice,
-                                        double source_frames_per_output) noexcept;
+                                        double) noexcept;
 
     static bool stream_plan_pages_ready(const audio::SampleStreamLoopBlockPlan& plan) noexcept;
 
@@ -333,7 +338,7 @@ class PulpSamplerProcessor : public format::Processor {
     static std::uint64_t stream_lead_source_frames(double lead) noexcept;
 
     void enqueue_forward_stream_boundary(SamplerVoice& voice,
-                                         double source_frames_per_output) noexcept;
+                                         double) noexcept;
 
     void trigger_note(int note, float velocity, const SamplerPublishedSource& source,
                       const RenderParams& params);

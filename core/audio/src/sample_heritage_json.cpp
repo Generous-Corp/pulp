@@ -81,6 +81,7 @@ struct JsonParserBase {
 };
 
 struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
+    double record_processing_rate = 0.0;
 
     bool boolean(Value object, std::string_view field, std::string_view path,
                  bool& destination) {
@@ -477,7 +478,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
         } else if (type == "anti_alias_record_rate") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "filter_family"sv, "sample_rate"sv, "cutoff_law"sv,
-                "cutoff_value"sv, "order"sv, "ripple_db"sv};
+                "cutoff_value"sv, "order"sv, "ripple_db"sv,
+                "stopband_attenuation_db"sv};
             constexpr std::array families{
                 std::pair{"one_pole"sv, SampleHeritageRecordFilterFamily::OnePole},
                 std::pair{"butterworth"sv,
@@ -492,7 +494,8 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                           SampleHeritageCutoffLaw::MachineRateRatio}};
             SampleHeritageRecordFilterFamily family{};
             SampleHeritageCutoffLaw cutoff_law{};
-            double rate{}, cutoff{}, ripple{}; std::uint8_t order{};
+            double rate{}, cutoff{}, ripple{}, stopband_attenuation{};
+            std::uint8_t order{};
             if (!audit_object(value, base, fields) || !common() ||
                 !enumeration(value, "filter_family", base + ".filter_family",
                              families, family) ||
@@ -504,16 +507,42 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                         192000.0, cutoff) ||
                 !integer(value, "order", base + ".order", 1, 16, order) ||
                 !number(value, "ripple_db", base + ".ripple_db", 0.0, 12.0,
-                        ripple)) return false;
+                        ripple) ||
+                !number(value, "stopband_attenuation_db",
+                        base + ".stopband_attenuation_db", 0.0, 180.0,
+                        stopband_attenuation)) return false;
             if ((cutoff_law == SampleHeritageCutoffLaw::FixedHz &&
-                 (cutoff < 1.0 || cutoff >= rate * 0.5)) ||
+                 (cutoff < 1.0 || cutoff >= record_processing_rate * 0.5)) ||
                 (cutoff_law == SampleHeritageCutoffLaw::MachineRateRatio &&
                  (cutoff <= 0.0 || cutoff >= 0.5)))
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                             base + ".cutoff_value");
+            const auto even_order = order >= 2 && (order & 1u) == 0;
+            if ((family == SampleHeritageRecordFilterFamily::OnePole &&
+                 order != 1) ||
+                (family != SampleHeritageRecordFilterFamily::OnePole &&
+                 !even_order))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".order");
+            if (((family == SampleHeritageRecordFilterFamily::OnePole ||
+                  family == SampleHeritageRecordFilterFamily::Butterworth) &&
+                 ripple != 0.0) ||
+                ((family == SampleHeritageRecordFilterFamily::Chebyshev ||
+                  family == SampleHeritageRecordFilterFamily::Elliptic) &&
+                 ripple <= 0.0))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".ripple_db");
+            if ((family != SampleHeritageRecordFilterFamily::Elliptic &&
+                 stopband_attenuation != 0.0) ||
+                (family == SampleHeritageRecordFilterFamily::Elliptic &&
+                 stopband_attenuation <= ripple))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".stopband_attenuation_db");
             destination.parameters = SampleHeritageRecordRateBlock{
                 family, rate, cutoff_law, cutoff, order,
-                static_cast<float>(ripple)};
+                static_cast<float>(ripple),
+                static_cast<float>(stopband_attenuation)};
+            if (!destination.bypass) record_processing_rate = rate;
         } else if (type == "converter") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "family"sv, "bit_depth"sv, "dac_nonlinearity"sv,
@@ -763,6 +792,7 @@ SampleHeritageJsonParseResult parse_sample_heritage_profile_json(std::string_vie
         if (!parser.number(root, "host_sample_rate", "$.host_sample_rate", 8000.0,
                            384000.0, parser.result.profile.host_sample_rate))
             return std::move(parser.result);
+        parser.record_processing_rate = parser.result.profile.host_sample_rate;
         const auto parse_blocks = [&](std::string_view name, std::size_t maximum,
                                       auto& destination, auto parse_block) {
             const auto values = root[name];
@@ -1011,6 +1041,8 @@ SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
                 append_number(output, block.cutoff_value);
                 output += ",\"order\":" + std::to_string(block.order);
                 output += ",\"ripple_db\":"; append_number(output, block.ripple_db);
+                output += ",\"stopband_attenuation_db\":";
+                append_number(output, block.stopband_attenuation_db);
             } else if constexpr (std::is_same_v<Block,
                                                  SampleHeritageRecordConverterBlock>) {
                 output += ",\"family\":\""; output += converter_family_name(block.family);

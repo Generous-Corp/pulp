@@ -301,7 +301,7 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     };
     auto sinc_bytes = [&](double maximum_consumption) noexcept {
         if (!(maximum_consumption > 0.0) || !std::isfinite(maximum_consumption) ||
-            maximum_consumption > 128.0)
+            maximum_consumption > audio::kMaximumDenseSampleSincConsumption)
             return std::numeric_limits<std::size_t>::max();
         const auto intervals =
             maximum_consumption <= 1.0 ? 0.0 : std::ceil(std::log2(maximum_consumption) * 4.0);
@@ -376,8 +376,10 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     const auto maximum_runtime_clock_factor =
         pitch_active &&
                 pitch_family == audio::SampleHeritagePitchFamily::VariableClock
-            ? audio::SampleHeritagePitchProcessor::kMaximumFactor
+            ? SamplerHeritageRuntime::maximum_variable_clock_factor(
+                  machine_rate, clock_ratio, ctx.sample_rate)
             : 1.0;
+    if (!(maximum_runtime_clock_factor >= 1.0)) return usage;
     auto frame_bound = [](std::size_t frames, double ratio,
                           bool identity) noexcept {
         if (identity) return frames;
@@ -418,7 +420,9 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     }
     const auto admitted_stream_pitch_factor = pitch_active
         ? std::min(SamplerStreamingRuntime::maximum_pitch_ratio(),
-                   SamplerStreamingRuntime::maximum_pitch_ratio() / clock_ratio)
+                   SamplerStreamingRuntime::maximum_pitch_ratio() /
+                       (clock_ratio * SamplerHeritageRuntime::
+                                          maximum_live_source_consumption_ratio()))
         : 1.0;
     auto maximum_stream_input_frames = maximum_engine_input_frames;
     if (pitch_active &&
@@ -466,9 +470,6 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
             typed_profile && voice_processing
                 ? SamplerHeritageRuntime::kVoiceSlots
                 : std::size_t{0};
-        const auto bus_engine_count = typed_profile && bus_processing
-            ? std::size_t{1}
-            : std::size_t{0};
         const auto legacy_engine_count = typed_profile ? std::size_t{0}
                                                        : std::size_t{1};
         const auto maximum_consumption = std::max(
@@ -520,10 +521,6 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
         persistent = add(
             persistent,
             multiply(voice_engine_count, voice_engine_bytes));
-        if (bus_engine_count != 0)
-            persistent = add(
-                persistent,
-                engine_dynamic_bytes(block_frames, 1.0, 1.0, 1.0, false));
         if (legacy_engine_count != 0)
             persistent = add(
                 persistent,
@@ -558,6 +555,8 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
         usage.block_scratch_bytes = add(
             scratch_frames * kMaxOutputChannels * sizeof(float),
             source_scratch_frames * kMaxSampleChannels * sizeof(float));
+        usage.block_scratch_bytes = add(usage.block_scratch_bytes,
+                                        scratch_frames * sizeof(std::uint8_t));
     } else {
         usage.block_scratch_bytes = std::numeric_limits<std::size_t>::max();
     }
@@ -605,6 +604,7 @@ void PulpSamplerProcessor::prepare_transaction(const format::PrepareContext& ctx
     try {
         for (std::uint32_t ch = 0; ch < kMaxOutputChannels; ++ch)
             voice_scratch_[ch].assign(max_block_frames_, 0.0f);
+        bus_voice_activity_.assign(max_block_frames_, 0);
     } catch (...) {
         fail_prepare({.status = PulpSamplerPrepareStatus::AllocationFailure});
         return;
@@ -692,6 +692,7 @@ void PulpSamplerProcessor::release() {
     for (auto& scratch : stream_source_scratch_)
         std::vector<float>().swap(scratch);
     stream_source_scratch_ptrs_.fill(nullptr);
+    std::vector<std::uint8_t>().swap(bus_voice_activity_);
     prepared_ = false;
     prepare_result_.write({});
     last_load_result_.write({});

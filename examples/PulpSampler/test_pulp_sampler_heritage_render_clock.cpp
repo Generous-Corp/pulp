@@ -141,6 +141,67 @@ TEST_CASE("PulpSampler typed bus runs once after each segment mix",
     REQUIRE(whole_output == render(split, many));
 }
 
+TEST_CASE("PulpSampler passes exact voice activity to typed bus gating",
+          "[audio][sampler][heritage][typed][bus][gate]") {
+    const auto gated_profile = typed_bus_profile(
+        0.05f, 0.01f, audio::SampleHeritageNoiseGate::VoiceActive);
+    const auto idle_profile = typed_bus_profile(
+        0.0f, 0.01f, audio::SampleHeritageNoiseGate::VoiceActive);
+    HeritageFixture gated_silent(256, &gated_profile);
+    HeritageFixture idle_silent(256, &idle_profile);
+    constexpr std::array block{std::size_t{256}};
+    REQUIRE(render(gated_silent, block, 0, 60, false) ==
+            render(idle_silent, block, 0, 60, false));
+
+    std::vector<float> silent_sample(4096, 0.0f);
+    HeritageFixture gated_active(256, &gated_profile);
+    HeritageFixture idle_active(256, &idle_profile);
+    gated_active.load(silent_sample);
+    idle_active.load(silent_sample);
+    REQUIRE(render(gated_active, block) != render(idle_active, block));
+}
+
+TEST_CASE("PulpSampler closes typed bus gating when a voice ends mid-segment",
+          "[audio][sampler][heritage][typed][bus][gate][boundary]") {
+    const auto profile = typed_bus_profile(
+        0.05f, 0.0f, audio::SampleHeritageNoiseGate::VoiceActive);
+    HeritageFixture fixture(64, &profile);
+    fixture.load(std::vector<float>(13, 0.0f));
+    constexpr std::array block{std::size_t{64}};
+    const auto output = render(fixture, block);
+    REQUIRE(std::any_of(output.begin(), output.begin() + 13,
+                        [](float sample) { return sample != 0.0f; }));
+    REQUIRE(std::all_of(output.begin() + 13, output.end(),
+                        [](float sample) { return sample == 0.0f; }));
+}
+
+TEST_CASE("PulpSampler applies typed output drive once after voice summing",
+          "[audio][sampler][heritage][typed][bus][mix]") {
+    const auto profile = typed_bus_profile(
+        0.0f, 0.0f, audio::SampleHeritageNoiseGate::AlwaysOn, 2.0f, 0.7f);
+    std::vector<float> sample(4096, 0.3f);
+    HeritageFixture fixture(512, &profile);
+    fixture.load(sample);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    float* output_ptrs[]{left.data(), right.data()};
+    const float* input_ptrs[]{nullptr, nullptr};
+    audio::BufferView<float> output(output_ptrs, 2, left.size());
+    audio::BufferView<const float> input(input_ptrs, 0, left.size());
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    format::ProcessContext context{fixture.sample_rate,
+                                   static_cast<int>(left.size())};
+    fixture.processor.process(output, input, midi_in, midi_out, context);
+    REQUIRE(*std::max_element(left.begin(), left.end()) == 0.7f);
+    REQUIRE(std::all_of(left.begin(), left.end(), [](float value) {
+        return value >= -0.7f && value <= 0.7f;
+    }));
+}
+
 TEST_CASE("PulpSampler all-bypassed typed heritage is the exact clean path",
           "[audio][sampler][heritage][typed][bypass]") {
     const auto profile = typed_voice_profile(2.0, true);
@@ -153,6 +214,71 @@ TEST_CASE("PulpSampler all-bypassed typed heritage is the exact clean path",
                                 std::size_t{128}, std::size_t{304}};
     REQUIRE(render(clean, blocks) == render(bypassed, blocks));
     REQUIRE(bypassed.processor.latency_samples() == 0);
+}
+
+TEST_CASE("PulpSampler keeps active record-commit blocks out of playback",
+          "[audio][sampler][heritage][typed][record-commit]") {
+    auto playback = typed_bus_profile(
+        0.0f, 0.0f, audio::SampleHeritageNoiseGate::AlwaysOn, 1.25f, 0.9f);
+    playback.profile_id = "neutral.full-playback-control-v3";
+    playback.voice = typed_rich_voice_profile().voice;
+
+    auto full = playback;
+    full.profile_id = "neutral.full-playback-record-v3";
+    full.record_commit = {
+        {audio::SampleHeritageBlockDomain::RecordCommit, false,
+         audio::SampleHeritageRecordInputDriveClipBlock{1.5f, 0.8f}},
+        {audio::SampleHeritageBlockDomain::RecordCommit, false,
+         audio::SampleHeritageRecordRateBlock{
+             audio::SampleHeritageRecordFilterFamily::OnePole,
+             24000.0,
+             audio::SampleHeritageCutoffLaw::FixedHz,
+             9000.0,
+             1,
+             0.0f,
+             0.0f}},
+        {audio::SampleHeritageBlockDomain::RecordCommit, false,
+         audio::SampleHeritageRecordConverterBlock{
+             audio::SampleHeritageConverterFamily::MuLaw,
+             8.0f,
+             0.1f,
+             0.0f,
+             0x4321u,
+             audio::SampleHeritageSeedPolicy::RestartFromProfileSeed}},
+    };
+
+    auto sample = make_sine(4096);
+    HeritageFixture control(512, &playback);
+    HeritageFixture with_record_commit(512, &full);
+    control.load(sample);
+    with_record_commit.load(sample);
+    constexpr std::array partitions{std::size_t{17}, std::size_t{63},
+                                    std::size_t{128}, std::size_t{304}};
+    REQUIRE(render(control, partitions) ==
+            render(with_record_commit, partitions));
+    REQUIRE(with_record_commit.processor.heritage_diagnostics().status ==
+            PulpSamplerHeritageStatus::Ready);
+}
+
+TEST_CASE("PulpSampler treats a record-only profile as the exact clean path",
+          "[audio][sampler][heritage][typed][record-commit][bypass]") {
+    audio::SampleHeritageProfile profile;
+    profile.profile_id = "neutral.record-only-v3";
+    profile.host_sample_rate = 48000.0;
+    profile.record_commit = {
+        {audio::SampleHeritageBlockDomain::RecordCommit, false,
+         audio::SampleHeritageRecordInputDriveClipBlock{2.0f, 0.5f}},
+    };
+
+    auto sample = make_sine(4096);
+    HeritageFixture clean(512);
+    HeritageFixture record_only(512, &profile);
+    clean.load(sample);
+    record_only.load(sample);
+    constexpr std::array partitions{std::size_t{17}, std::size_t{63},
+                                    std::size_t{128}, std::size_t{304}};
+    REQUIRE(render(clean, partitions) == render(record_only, partitions));
+    REQUIRE(record_only.processor.latency_samples() == 0);
 }
 
 TEST_CASE("PulpSampler resets typed voice state before slot retrigger",
