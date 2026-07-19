@@ -1254,6 +1254,7 @@ TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
             "border": "1px solid #333333",
             "boxShadow": "0 4px 12px #00000040",
             "filter": "blur(2px)",
+            "backdropFilter": "blur(6px)",
             "fontFamily": "Inter",
             "fontStyle": "italic",
             "textAlign": "center",
@@ -1328,6 +1329,8 @@ TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
     REQUIRE(ir.root.style.background_gradient == "linear-gradient(#111,#222)");
     REQUIRE(ir.root.style.opacity == 0.75f);
     REQUIRE(box_shadow_to_css(ir.root.style.box_shadow) == "0 4px 12px #00000040");
+    REQUIRE(ir.root.style.filter == "blur(2px)");
+    REQUIRE(ir.root.style.backdrop_filter == "blur(6px)");
     REQUIRE(ir.root.style.z_index == 9);
     REQUIRE(ir.tokens.strings["copy.title"] == "Drive");
 
@@ -2127,6 +2130,7 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
     ir.root.style.border = "1px solid #444";
     ir.root.style.box_shadow = parse_css_box_shadow("0 1px 2px #000");
     ir.root.style.filter = "blur(1px)";
+    ir.root.style.backdrop_filter = "blur(7px)";
     ir.root.style.font_family = "Inter";
     ir.root.style.font_size = 15.0f;
     ir.root.style.font_weight = 500;
@@ -2189,6 +2193,8 @@ TEST_CASE("generate_pulp_js web compat emits extended style and layout propertie
     REQUIRE(js.find("panelRoot.style.opacity = '0.5'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.borderRadius = '3.5px'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.boxShadow = '0 1px 2px #000'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.filter = 'blur(1px)'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.backdropFilter = 'blur(7px)'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.zIndex = '12'") != std::string::npos);
     REQUIRE(js.find("panelRoot.style.maxHeight = '160px'") != std::string::npos);
     REQUIRE(js.find("document.createElement('button')") != std::string::npos);
@@ -2222,6 +2228,8 @@ DesignIR ir_with_faded_node_of_every_kind() {
         n.style.opacity = 0.5f;
         n.style.box_shadow = parse_css_box_shadow("0 2px 8px #00000080");
         n.style.mix_blend_mode = "multiply";
+        n.style.filter = "blur(3px)";
+        n.style.backdrop_filter = "blur(9px)";
         // Asymmetric on purpose: a uniform radius lowers through the single
         // 'All' call and would hide a missing per-corner emit.
         n.style.border_top_left_radius = 8.0f;
@@ -2299,6 +2307,8 @@ TEST_CASE("native codegen fades text, image, widget and container alike",
     REQUIRE(count_occurrences(js, "setOpacity(") == 4);
     REQUIRE(count_occurrences(js, "setBoxShadow(") == 4);
     REQUIRE(count_occurrences(js, "setMixBlendMode(") == 4);
+    REQUIRE(count_occurrences(js, "setFilter(") == 4);
+    REQUIRE(count_occurrences(js, "setBackdropFilter(") == 4);
 
     // Four nodes with four distinct corners each. Codegen carried one
     // setCornerRadius(id, 'All', r) and dropped asymmetric corners on the
@@ -2308,6 +2318,40 @@ TEST_CASE("native codegen fades text, image, widget and container alike",
     REQUIRE(count_occurrences(js, "'BottomRight', 0") == 4);
     // The uniform path must not also fire, or 'All' squares the rounded pair.
     REQUIRE(js.find("'All'") == std::string::npos);
+}
+
+TEST_CASE("native codegen lowers a layer blur to setFilter and a background blur to setBackdropFilter",
+          "[view][import][visual-overrides]") {
+    // A Figma LAYER_BLUR reaches the IR as `filter: blur(Npx)` and a
+    // BACKGROUND_BLUR as `backdrop_filter: blur(Npx)` (all three producers).
+    // The bridge's setFilter takes the CSS string (it walks the function
+    // sequence into a View::FilterOp chain); setBackdropFilter is numeric, so
+    // codegen parses the radius out of the CSS value.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 100.0f;
+    ir.root.style.filter = "blur(4px)";
+
+    IRNode frosted;
+    frosted.type = "frame";
+    frosted.name = "Frosted";
+    frosted.style.width = 80.0f;
+    frosted.style.height = 40.0f;
+    frosted.style.backdrop_filter = "blur(12px)";
+    ir.root.children.push_back(frosted);
+
+    const auto js = native_js(ir);
+    REQUIRE(js.find("setFilter('root', 'blur(4px)')") != std::string::npos);
+    REQUIRE(count_occurrences(js, "setFilter(") == 1);
+    // The numeric bridge form: the radius, parsed out of blur(12px).
+    const auto bdf = js.find("setBackdropFilter('");
+    REQUIRE(bdf != std::string::npos);
+    const auto bdf_line = js.substr(bdf, js.find('\n', bdf) - bdf);
+    REQUIRE(bdf_line.find(", 12)") != std::string::npos);
+    REQUIRE(count_occurrences(js, "setBackdropFilter(") == 1);
 }
 
 TEST_CASE("native codegen keeps one call when every corner agrees",

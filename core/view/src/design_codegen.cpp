@@ -310,6 +310,10 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     if (!s.box_shadow.empty())
         ss << ind << var << ".style.boxShadow = '" << box_shadow_to_css(s.box_shadow) << "';\n";
     emit_str("filter", s.filter);
+    // backdrop-filter rides the same web-compat style path as filter: the
+    // style-decl bridge (web-compat-style-decl-paint.js) parses the blur(Npx)
+    // out and routes it to setBackdropFilter -> View::set_backdrop_blur.
+    emit_str("backdropFilter", s.backdrop_filter);
     emit_str("fontFamily", s.font_family);
     emit_px("fontSize", s.font_size);
     if (s.font_weight)
@@ -741,6 +745,24 @@ static void emit_js_visual_overrides(const NativeEmit& e, const std::string& tar
            << sh.offset_x << ", " << sh.offset_y << ", " << sh.blur << ", " << sh.spread
            << ", '" << js_single_quote_escape(color) << "'"
            << (sh.inset ? ", true" : "") << ");\n";
+    }
+    // A CSS filter chain (a Figma layer blur lowers to `blur(Npx)`) is a
+    // View compositing property like the shadow above: the bridge's setFilter
+    // parses the function sequence into View::FilterOp entries and the paint
+    // path composes them via save_layer_with_filters. backdrop-filter's bridge
+    // setter is numeric (setBackdropFilter(id, blur_px) -> set_backdrop_blur),
+    // so the blur radius is parsed out of the CSS string here, mirroring what
+    // the web-compat style bridge does for `.style.backdropFilter`.
+    if (st.filter && !st.filter->empty())
+        ss << ind << "setFilter('" << target_id << "', '"
+           << js_single_quote_escape(*st.filter) << "');\n";
+    if (st.backdrop_filter && !st.backdrop_filter->empty()) {
+        const auto bp = st.backdrop_filter->find("blur(");
+        if (bp != std::string::npos) {
+            const float px = std::strtof(st.backdrop_filter->c_str() + bp + 5, nullptr);
+            if (px > 0.0f)
+                ss << ind << "setBackdropFilter('" << target_id << "', " << px << ");\n";
+        }
     }
     // Opacity, same story as the shadow just above. It was emitted from the
     // image branch and the container branch only, so a faded TEXT node

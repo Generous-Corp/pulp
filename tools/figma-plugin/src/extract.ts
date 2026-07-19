@@ -29,7 +29,6 @@ import {
 } from "./library-registry";
 import {
   paintToColor,
-  rgbaToCss,
   gradientToCss,
   gradientFallbackFlat,
   lowerFillPaints,
@@ -42,6 +41,7 @@ import {
   collectFontFamilyAssets,
   extractConstraints,
   extractStrokeStyle,
+  lowerEffects,
   maskClipOutline,
   assessMaskFidelity,
   extractPrimitiveGeometryAttrs,
@@ -791,27 +791,18 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
     s.opacity = (n as BlendMixin).opacity;
   }
 
-  // Effects — drop/inner shadow → box_shadow; blur → filter
+  // Effects — the ordered stack lowers in extract-pure (shadows → box_shadow,
+  // layer blur → filter, background blur → backdrop_filter); anything with no
+  // lowering (NOISE, TEXTURE, GLASS, newer families) comes back as a
+  // diagnostic so the drop is never silent.
   if ("effects" in n && Array.isArray(n.effects)) {
-    const effects = n.effects as readonly Effect[];
-    const shadows: string[] = [];
-    let filter: string | undefined;
-    for (const eff of effects) {
-      if (eff.visible === false) continue;
-      if (eff.type === "DROP_SHADOW" || eff.type === "INNER_SHADOW") {
-        const ds = eff as DropShadowEffect | InnerShadowEffect;
-        const inner = eff.type === "INNER_SHADOW" ? "inset " : "";
-        shadows.push(
-          `${inner}${ds.offset.x}px ${ds.offset.y}px ${ds.radius}px ${ds.spread ?? 0}px ${rgbaToCss(ds.color)}`,
-        );
-      } else if (eff.type === "LAYER_BLUR") {
-        filter = `blur(${(eff as BlurEffect).radius}px)`;
-      } else if (eff.type === "BACKGROUND_BLUR") {
-        s.backdrop_filter = `blur(${(eff as BlurEffect).radius}px)`;
-      }
+    const lowered = lowerEffects(n.effects as readonly Effect[]);
+    if (lowered.box_shadow) s.box_shadow = lowered.box_shadow;
+    if (lowered.filter) s.filter = lowered.filter;
+    if (lowered.backdrop_filter) s.backdrop_filter = lowered.backdrop_filter;
+    for (const d of lowered.diagnostics) {
+      pushDiag(ctx, d.severity, d.code, d.kind, `${n.name}: ${d.message}`);
     }
-    if (shadows.length > 0) s.box_shadow = shadows.join(", ");
-    if (filter) s.filter = filter;
   }
 
   // Overflow — Figma's clipsContent maps loosely to overflow: clip

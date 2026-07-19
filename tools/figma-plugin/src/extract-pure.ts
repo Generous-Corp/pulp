@@ -774,6 +774,76 @@ export function extractPrimitiveGeometryAttrs(n: SceneNode): Record<string, stri
   return Object.keys(attrs).length > 0 ? attrs : undefined;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Effects → ordered box-shadow / filter / backdrop-filter + diagnostics.
+
+/// The node's effect stack lowered to CSS, plus the diagnostics the caller
+/// pushes (extract-pure stays host-neutral, so it returns them instead of
+/// reaching for a WalkCtx — same contract as ExtractedStroke).
+export interface LoweredEffects {
+  box_shadow?: string;
+  filter?: string;
+  backdrop_filter?: string;
+  diagnostics: Array<Pick<ExtractedDiagnostic, "severity" | "code" | "kind" | "message">>;
+}
+
+// Figma's `effects` is an ordered stack; each family lowers to the CSS
+// property the render stack actually consumes:
+//
+//   - DROP_SHADOW / INNER_SHADOW → comma-joined `box_shadow` layers in array
+//     order (parse_css_box_shadow keeps the order; codegen emits every layer).
+//   - LAYER_BLUR → `filter: blur(Npx)` — the bridge's setFilter builds a
+//     View::FilterOp chain composed via SkImageFilters at paint time.
+//   - BACKGROUND_BLUR → `backdrop_filter: blur(Npx)` — routed to
+//     View::set_backdrop_blur (frosted-glass compositing layer).
+//   - A PROGRESSIVE blur keeps its end radius as a uniform blur, with a
+//     capture_partial diagnostic naming the approximation.
+//   - Anything else (NOISE, TEXTURE, GLASS, families newer than the pinned
+//     typings) has no lowering: an unsupported_property diagnostic, never a
+//     silent drop.
+//
+// Invisible effects (visible === false) are the designer's own off switch and
+// are skipped without comment. Multiple blurs of one kind keep array order as
+// a space-joined function sequence (setFilter sums blur amounts).
+export function lowerEffects(effects: readonly Effect[]): LoweredEffects {
+  const out: LoweredEffects = { diagnostics: [] };
+  const shadows: string[] = [];
+  const filters: string[] = [];
+  const backdrops: string[] = [];
+  for (const eff of effects) {
+    if (eff.visible === false) continue;
+    if (eff.type === "DROP_SHADOW" || eff.type === "INNER_SHADOW") {
+      const ds = eff as DropShadowEffect | InnerShadowEffect;
+      const inner = eff.type === "INNER_SHADOW" ? "inset " : "";
+      shadows.push(
+        `${inner}${ds.offset.x}px ${ds.offset.y}px ${ds.radius}px ${ds.spread ?? 0}px ${rgbaToCss(ds.color)}`,
+      );
+    } else if (eff.type === "LAYER_BLUR" || eff.type === "BACKGROUND_BLUR") {
+      const blur = eff as BlurEffect;
+      (eff.type === "LAYER_BLUR" ? filters : backdrops).push(`blur(${blur.radius}px)`);
+      if (blur.blurType === "PROGRESSIVE") {
+        out.diagnostics.push({
+          severity: "warning",
+          code: "progressive-blur-approximated",
+          kind: "capture_partial",
+          message: `${eff.type} is PROGRESSIVE; approximated as a uniform blur(${blur.radius}px) (its end radius).`,
+        });
+      }
+    } else {
+      out.diagnostics.push({
+        severity: "warning",
+        code: "effect-unsupported",
+        kind: "unsupported_property",
+        message: `${(eff as Effect).type} effect has no lowering in the render stack; the node composites without it.`,
+      });
+    }
+  }
+  if (shadows.length > 0) out.box_shadow = shadows.join(", ");
+  if (filters.length > 0) out.filter = filters.join(" ");
+  if (backdrops.length > 0) out.backdrop_filter = backdrops.join(" ");
+  return out;
+}
+
 // Variable bindings (`node.boundVariables`) resolved to canonical token names.
 // The Plugin API shape is `{ [property]: VariableAlias | VariableAlias[] |
 // { [key]: VariableAlias } }` where a VariableAlias is `{ type:

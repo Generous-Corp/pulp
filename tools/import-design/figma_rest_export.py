@@ -669,9 +669,24 @@ def extract_style(n, ctx=None):
     # nodes above, where the two composite identically).
     op = op * image_fill_opacity
     if op < 1: s["opacity"] = op
+    # Effects — the ordered stack, mirroring the plugin lane's
+    # extract-pure.ts::lowerEffects: shadows -> box_shadow (comma-joined in
+    # array order), LAYER_BLUR -> filter, BACKGROUND_BLUR -> backdrop_filter
+    # (multiple blurs of one kind keep array order as a space-joined function
+    # sequence; the bridge's setFilter sums blur amounts). A PROGRESSIVE blur
+    # keeps its end radius as a uniform blur with a capture_partial
+    # diagnostic; anything else (NOISE, TEXTURE, GLASS, newer families) has
+    # no lowering and raises unsupported_property instead of vanishing.
+    def _effect_diag(code, kind, message):
+        # ctx is None only on direct extract_style() unit-test calls.
+        if ctx is not None:
+            ctx.diagnostics.append({
+                "severity": "warning", "code": code, "kind": kind,
+                "message": f"{n.get('name', '')}: {message}", "path": n.get("id", ""),
+            })
     effects = n.get("effects")
     if isinstance(effects, list):
-        shadows = []; filt = None
+        shadows = []; filters = []; backdrops = []
         for e in effects:
             if e.get("visible", True) is False: continue
             et = e.get("type")
@@ -680,10 +695,20 @@ def extract_style(n, ctx=None):
                 off = e.get("offset", {"x": 0, "y": 0})
                 shadows.append(f"{inner}{off['x']}px {off['y']}px {e.get('radius',0)}px "
                                f"{e.get('spread',0)}px {rgba_to_css(e['color'])}")
-            elif et == "LAYER_BLUR": filt = f"blur({e.get('radius',0)}px)"
-            elif et == "BACKGROUND_BLUR": s["backdrop_filter"] = f"blur({e.get('radius',0)}px)"
+            elif et in ("LAYER_BLUR", "BACKGROUND_BLUR"):
+                (filters if et == "LAYER_BLUR" else backdrops).append(
+                    f"blur({e.get('radius',0)}px)")
+                if e.get("blurType") == "PROGRESSIVE":
+                    _effect_diag("progressive-blur-approximated", "capture_partial",
+                                 f"{et} is PROGRESSIVE; approximated as a uniform "
+                                 f"blur({e.get('radius',0)}px) (its end radius).")
+            else:
+                _effect_diag("effect-unsupported", "unsupported_property",
+                             f"{et} effect has no lowering in the render stack; "
+                             f"the node composites without it.")
         if shadows: s["box_shadow"] = ", ".join(shadows)
-        if filt: s["filter"] = filt
+        if filters: s["filter"] = " ".join(filters)
+        if backdrops: s["backdrop_filter"] = " ".join(backdrops)
     if n.get("clipsContent") is True: s["overflow"] = "clip"
     return s
 

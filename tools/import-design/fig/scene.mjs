@@ -234,9 +234,9 @@ function channel(v) {
  *
  * The IR reads standard CSS syntax via parse_css_box_shadow (design_ir_json),
  * layers comma-separated and `inset` for an inner shadow, so the mapping is
- * direct: offset x/y, radius → blur, spread, color. Figma's blur/inner-glow
- * effects have no box-shadow equivalent and are skipped rather than
- * approximated into something the design never asked for.
+ * direct: offset x/y, radius → blur, spread, color. Blur effects are not
+ * shadows — they lower separately (effectsToFilters) to the style's filter /
+ * backdrop_filter slots, and this function walks past them.
  */
 function effectsToBoxShadow(effects) {
   const layers = [];
@@ -252,6 +252,42 @@ function effectsToBoxShadow(effects) {
     layers.push(`${inset}${x}px ${y}px ${blur}px ${spread}px ${col}`);
   }
   return layers.length ? layers.join(', ') : null;
+}
+
+// The kiwi schema's own name for a layer blur. The Plugin/REST APIs spell it
+// LAYER_BLUR; accepting both keeps synthetic fixtures and any future schema
+// rename honest without a second dispatch site.
+const LAYER_BLUR_TYPES = new Set(['FOREGROUND_BLUR', 'LAYER_BLUR']);
+
+/**
+ * Figma blur effects → the style's `filter` / `backdrop_filter` slots.
+ *
+ * A layer blur lowers to CSS `filter: blur(Npx)` — codegen emits it for the
+ * web-compat lane and as setFilter for the bridge-native lane, where the
+ * View paint path composes the chain via SkImageFilters. A background blur
+ * lowers to `backdrop-filter: blur(Npx)` → setBackdropFilter →
+ * View::set_backdrop_blur. Both used to be diagnosed-and-dropped here; a blur
+ * that renders sharp is a design decision the importer made on the user's
+ * behalf, and now it doesn't have to.
+ *
+ * Multiple blurs of one kind keep array order as a space-joined function
+ * sequence (the bridge's setFilter sums blur amounts). Invisible effects are
+ * the designer's own off switch and are skipped without comment. Everything
+ * that is neither a shadow nor a blur (NOISE, GRAIN, GLASS, …) stays on the
+ * caller's diagnostic path.
+ */
+function effectsToFilters(effects) {
+  const filters = [];
+  const backdrops = [];
+  for (const e of effects || []) {
+    if (e.visible === false) continue;
+    if (LAYER_BLUR_TYPES.has(e.type)) filters.push(`blur(${e.radius || 0}px)`);
+    else if (e.type === 'BACKGROUND_BLUR') backdrops.push(`blur(${e.radius || 0}px)`);
+  }
+  return {
+    filter: filters.length ? filters.join(' ') : null,
+    backdropFilter: backdrops.length ? backdrops.join(' ') : null,
+  };
 }
 
 // Blend modes that mean "just composite it" — never emitted.
@@ -1520,14 +1556,20 @@ export function materializeFrame(scene, frame, ctx) {
     // resolves boxShadow -> box_shadow), and it takes CSS syntax directly.
     const shadow = effectsToBoxShadow(node.effects);
     if (shadow) style.box_shadow = shadow;
-    // Everything effectsToBoxShadow walked past. It `continue`s on any type that
-    // is not a shadow, so a LAYER_BLUR or BACKGROUND_BLUR — a real, visible
-    // instruction — left no shadow, no style, and no word about either. A blur
-    // that renders sharp is a design decision the importer made on the user's
-    // behalf; the least it can do is admit to it.
+    // Blur effects lower for real (effectsToFilters): a FOREGROUND_BLUR to
+    // `filter: blur(Npx)`, a BACKGROUND_BLUR to `backdrop-filter: blur(Npx)`.
+    const { filter, backdropFilter } = effectsToFilters(node.effects);
+    if (filter) style.filter = filter;
+    if (backdropFilter) style.backdrop_filter = backdropFilter;
+    // Everything the shadow and blur lowerings walked past — NOISE, GRAIN,
+    // GLASS, REPEAT, and whatever the schema grows next — is a real, visible
+    // instruction with no lowering in the render stack. Compositing without it
+    // is a design decision the importer made on the user's behalf; the least
+    // it can do is admit to it.
     for (const e of node.effects || []) {
       if (e.visible === false) continue;
       if (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') continue;
+      if (LAYER_BLUR_TYPES.has(e.type) || e.type === 'BACKGROUND_BLUR') continue;
       pushDiag('effect-unsupported', node,
         `${e.type} has no lowering in the render stack; the node composites without it`);
     }
