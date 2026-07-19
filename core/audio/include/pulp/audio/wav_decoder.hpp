@@ -17,11 +17,11 @@ struct WavDecodeLimits {
     std::uint64_t max_output_bytes = 512u * 1024u * 1024u;
 };
 
-/// Inspect a complete in-memory WAV without decoding its samples.
+/// Inspect a complete in-memory RIFF/WAVE file without decoding its samples.
 [[nodiscard]] std::optional<AudioFileInfo> inspect_wav(
     std::span<const std::uint8_t> bytes);
 
-/// Decode a complete in-memory WAV into deinterleaved float channels.
+/// Decode a complete in-memory RIFF/WAVE file into deinterleaved float channels.
 ///
 /// This surface performs no file I/O and compiles with exceptions disabled.
 /// It rejects truncated streams and checks frame, channel, and decoded-byte

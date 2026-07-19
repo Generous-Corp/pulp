@@ -135,7 +135,7 @@ it — which is what `Processor::on_non_realtime_tick()` /
 `non_realtime_tick_pending()` exist for.
 
 `pulp::audio::decode_wav(span, limits)` is linked into both WAM and WebCLAP so
-code that already owns raw WAV bytes can share the native decoder. That is an
+code that already owns raw RIFF/WAVE bytes can share the native decoder. That is an
 **off-render import API**: never call it from `process()` or the worklet render
 turn. For browser file/drop imports, prefer the page's `AudioContext.decodeAudioData`
 when session-rate resampling is wanted, then transfer the resulting PCM through

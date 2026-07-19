@@ -267,10 +267,10 @@ auto info = FormatRegistry::instance().read_info("song.mp3");
 // info->duration_seconds, info->num_channels, info->sample_rate
 ```
 
-For an already-resident WAV byte span, `inspect_wav()` and `decode_wav()` in
-`wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
-frame, channel, and decoded-byte ceilings. Keep parsing and allocation off the
-audio callback.
+For an already-resident RIFF/WAVE byte span, `inspect_wav()` and `decode_wav()`
+in `wav_decoder.hpp` provide a no-file-I/O, no-exceptions path with caller-set
+frame, channel, and decoded-byte ceilings. RF64, W64, and RIFX containers are
+outside this byte-span API. Keep parsing and allocation off the audio callback.
 
 ### Streaming write — large files without loading into memory
 
