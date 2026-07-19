@@ -497,8 +497,11 @@ public:
                                  const state::ParameterEventQueue& events);
 
     // Drain queued nonempty MIDI blocks from a MidiOutput sink node in process
-    // order. Appends to `out`; returns false if bounded egress overflowed or a
-    // queued block was already incomplete.
+    // order. Appends to `out`; returns false if bounded egress overflowed, a
+    // queued block was already incomplete, or `out` lacks capacity/UMP sidecar
+    // storage. A destination-copy failure retains the undelivered suffix;
+    // provide more storage and call again to resume without replaying the
+    // delivered prefix.
     bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
 
     // Disconnect

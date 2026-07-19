@@ -60,7 +60,10 @@ Four connection variants cover the non-audio-passthrough cases:
   the fixed-capacity prefix. `extract_midi(node, &out)` drains nonempty
   `MidiOutput` blocks in process order from a fixed four-block SPSC queue;
   routine empty blocks cannot overwrite pending output, and bounded overflow
-  retains the earliest blocks while making extraction return false.
+  retains the earliest blocks while making extraction return false. A false
+  return can also mean the destination lacks short-event, SysEx, or attached
+  UMP-sidecar capacity. Provide sufficient storage and call again: extraction
+  resumes at the undelivered suffix without replaying the delivered prefix.
   Ingress-only MIDI graphs may swap gap-free; an edit whose candidate or
   currently-live graph contains `MidiOutput` returns `NeedsEagerPrepare` while
   keeping the old snapshot readable so pending egress can be drained before

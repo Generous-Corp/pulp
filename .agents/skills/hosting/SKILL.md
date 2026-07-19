@@ -671,6 +671,10 @@ does not contain crashes in deeper plug-in code.
   across the swap. MidiOutput egress remains snapshot-local but uses an ordered,
   fixed four-block SPSC queue: empty blocks cannot overwrite pending output;
   overflow retains the earliest blocks and makes extraction incomplete. When
+  the destination lacks short-event, SysEx, or attached UMP-sidecar capacity,
+  extraction returns false and retains the undelivered suffix. Provide storage
+  and call `extract_midi()` again; it resumes without replaying the delivered
+  prefix. When
   `prepare_swap()` returns `NeedsEagerPrepare`, the old live snapshot remains
   valid, so drain it with `extract_midi()` before eager `prepare()` replaces it.
 - `SignalGraph::inject_parameter_events()` uses a separate prepared per-node

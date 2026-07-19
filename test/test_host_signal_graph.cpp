@@ -2453,6 +2453,71 @@ TEST_CASE("SignalGraph MIDI sidecar drops are caller-visible",
     graph.release();
 }
 
+TEST_CASE("SignalGraph MIDI egress resumes partial sidecar copies",
+          "[host][graph][midi][mailbox][egress]") {
+    SignalGraph graph;
+    const auto midi_in = graph.add_midi_input_node("keys");
+    const auto midi_out = graph.add_midi_output_node("thru");
+    REQUIRE(graph.connect_midi(midi_in, midi_out));
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    float sample = 0.0f;
+    const float* input_ptrs[] = {&sample};
+    float* output_ptrs[] = {&sample};
+    pulp::audio::BufferView<const float> in(input_ptrs, 0, 32);
+    pulp::audio::BufferView<float> out(output_ptrs, 0, 32);
+
+    pulp::midi::MidiBuffer sysex_source;
+    sysex_source.add_sysex({0xF0, 0x7D, 0x01, 0xF7});
+    sysex_source.add_sysex({0xF0, 0x7D, 0x02, 0xF7});
+    REQUIRE(graph.inject_midi(midi_in, sysex_source));
+    graph.process(out, in, 32);
+
+    pulp::midi::MidiBuffer limited_sysex;
+    limited_sysex.reserve(0, 1, 4);
+    limited_sysex.set_realtime_capacity_limit(true);
+    REQUIRE_FALSE(graph.extract_midi(midi_out, limited_sysex));
+    REQUIRE(limited_sysex.sysex_size() == 1);
+    CHECK(limited_sysex.sysex()[0].data
+          == std::vector<uint8_t>{0xF0, 0x7D, 0x01, 0xF7});
+
+    pulp::midi::MidiBuffer resumed_sysex;
+    REQUIRE(graph.extract_midi(midi_out, resumed_sysex));
+    REQUIRE(resumed_sysex.sysex_size() == 1);
+    CHECK(resumed_sysex.sysex()[0].data
+          == std::vector<uint8_t>{0xF0, 0x7D, 0x02, 0xF7});
+
+    pulp::midi::MidiBuffer ump_source;
+    pulp::midi::UmpBuffer source_ump;
+    source_ump.add(pulp::midi::UmpPacket::note_on_2(0, 2, 67, 0x8000));
+    source_ump.add(pulp::midi::UmpPacket::note_on_2(0, 2, 68, 0x8000));
+    ump_source.attach_ump(&source_ump);
+    REQUIRE(graph.inject_midi(midi_in, ump_source));
+    graph.process(out, in, 32);
+
+    pulp::midi::MidiBuffer limited_ump_extract;
+    pulp::midi::UmpBuffer limited_ump;
+    const auto ump_capacity = limited_ump.capacity();
+    for (std::size_t i = 0; i + 1 < ump_capacity; ++i) {
+        REQUIRE(limited_ump.add(
+            pulp::midi::UmpPacket::note_on_2(0, 1, 1, 0x4000)));
+    }
+    limited_ump.set_realtime_capacity_limit(true);
+    limited_ump_extract.attach_ump(&limited_ump);
+    REQUIRE_FALSE(graph.extract_midi(midi_out, limited_ump_extract));
+    REQUIRE(limited_ump.size() == ump_capacity);
+    CHECK(limited_ump[ump_capacity - 1].packet.note_number() == 67);
+
+    pulp::midi::MidiBuffer resumed_ump_extract;
+    pulp::midi::UmpBuffer resumed_ump;
+    resumed_ump_extract.attach_ump(&resumed_ump);
+    REQUIRE(graph.extract_midi(midi_out, resumed_ump_extract));
+    REQUIRE(resumed_ump.size() == 1);
+    CHECK(resumed_ump[0].packet.note_number() == 68);
+
+    graph.release();
+}
+
 TEST_CASE("SignalGraph MIDI injection and extraction require a live node runtime",
           "[host][graph][midi]") {
     SignalGraph graph;

@@ -64,7 +64,10 @@ live snapshot. **Never call them from the audio thread.**
   drain its ordered four-block egress queue before calling ordinary
   `prepare()`. Empty blocks do not overwrite pending output. If the bounded
   queue fills, it retains the earliest blocks and `extract_midi()` reports
-  false while draining them.
+  false while draining them. Extraction also returns false if the destination
+  lacks short-event, SysEx, or UMP-sidecar capacity. In that case the mailbox
+  retains the undelivered suffix; attach/provide sufficient storage and call
+  `extract_midi()` again to resume without replaying the delivered prefix.
 - `inject_parameter_events` — publishes one block of sample-offset parameter
   events through a snapshot-owned lock-free mailbox. It is safe to call
   concurrently with `process()` from one control-side writer. The latest
