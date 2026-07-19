@@ -2,6 +2,12 @@
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
 
 modules:
+  - name: timebase
+    summary: Strong musical tick and sample positions, rational sample rates, immutable constant/ramped tempo maps, and shared transport quantization arithmetic
+    status: experimental
+    dependencies: []
+    docs: reference/modules.md#timebase
+
   - name: runtime
     summary: Core utilities — SIMD (Highway), XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing
     status: stable
@@ -41,7 +47,7 @@ modules:
   - name: format
     summary: Plugin format adapters (VST3, AU, CLAP, standalone, headless), validation harness, diagnostic reporter
     status: usable
-    dependencies: [state, audio, midi]
+    dependencies: [state, audio, midi, timebase]
     docs: reference/modules.md#format
 
   - name: platform

@@ -261,6 +261,10 @@ flags:
     paths:
       - core/state/
     carryforward: true
+  timebase:
+    paths:
+      - core/timebase/
+    carryforward: true
   view:
     paths:
       - core/view/
@@ -452,6 +456,9 @@ component_management:
     - component_id: state
       name: state
       paths: ["core/state/**"]
+    - component_id: timebase
+      name: timebase
+      paths: ["core/timebase/**"]
     - component_id: view
       name: view
       paths:

@@ -504,6 +504,16 @@
         "examples/view-bridge-demo/**"
       ]
     },
+    "timebase": {
+      "paths": [
+        "core/timebase/**",
+        "core/format/src/transport_quantizer.cpp",
+        "core/format/include/pulp/format/transport_quantizer.hpp",
+        "test/test_timebase.cpp",
+        "test/test_transport_quantizer.cpp",
+        ".agents/skills/timebase/**"
+      ]
+    },
     "vst3": {
       "paths": [
         "core/format/src/vst3_adapter.cpp",
