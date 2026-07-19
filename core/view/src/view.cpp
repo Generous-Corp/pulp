@@ -313,29 +313,7 @@ void set_tracing_badge_visible(bool visible) {
     tracing_badge_visible_flag().store(visible, std::memory_order_relaxed);
 }
 
-void View::paint_all(canvas::Canvas& canvas) {
-    if (!visible_) return;
-
-    // Treat paint like the audio thread. Any allocation inside this scope is a
-    // real-time-safety bug. The guard is a thread-local counter in debug builds
-    // and compiles away under NDEBUG; sanitizer / debug-allocator hooks read
-    // pulp::runtime::is_in_no_alloc_scope() to detect violations.
-    pulp::runtime::ScopedNoAlloc no_alloc_guard;
-
-    // Time the whole paint_all body: background, border, gradients, clipping,
-    // shadows, layer setup, the paint() override, inset shadows, outlines, and
-    // layer restores. With the outer-scope timer,
-    // self_ns = (outer total) - (children total), which correctly attributes
-    // framework drawing to the view.
-    auto outer_t0 = std::chrono::steady_clock::now();
-    std::chrono::nanoseconds children_dt{0};
-
-    canvas.save();
-    canvas.translate(bounds_.x, bounds_.y);
-
-    // Disabled state: reduce opacity (CSS :disabled equivalent)
-    if (!enabled_) canvas.set_opacity(0.4f);
-
+void View::apply_canvas_transforms(canvas::Canvas& canvas) {
     // CSS transforms: translate, rotate, scale, skew — around transform-origin
     bool has_transform = (scale_ != 1.0f || rotation_deg_ != 0 ||
                           translate_x_ != 0 || translate_y_ != 0 ||
@@ -385,12 +363,16 @@ void View::paint_all(canvas::Canvas& canvas) {
                                 transform_matrix_e_, transform_matrix_f_);
         if (apply_origin) canvas.translate(-ox, -oy);
     }
+}
+
+View::EffectLayerState View::push_effect_layers(canvas::Canvas& canvas) {
+    EffectLayerState state;
 
     // CSS `backdrop-filter: blur(N)`. A separate compositing layer
     // whose initial content is the parent surface blurred — sits BELOW the
     // widget's own opacity/filter layer so background, border, and children
     // composite over the frosted backdrop. Paired with the matching restore()
-    // at the end of paint_all.
+    // in pop_effect_layers.
     bool needs_backdrop_layer = (backdrop_blur() > 0.0f);
     if (needs_backdrop_layer) {
         if (!canvas.supports(canvas::CanvasCapability::backdrop_filter)) {
@@ -402,6 +384,7 @@ void View::paint_all(canvas::Canvas& canvas) {
         canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
                                     backdrop_blur());
     }
+    state.backdrop_pushed = needs_backdrop_layer;
 
     // Compositing layer for opacity, blur, or post-effects.
     // Both the outset box-shadow and the overflow clip must be pushed after
@@ -507,7 +490,26 @@ void View::paint_all(canvas::Canvas& canvas) {
         // Every non-effect branch above pushes exactly one layer.
         if (layers_pushed == 0) layers_pushed = 1;
     }
+    state.layers_pushed = layers_pushed;
+    return state;
+}
 
+void View::pop_effect_layers(canvas::Canvas& canvas,
+                             const EffectLayerState& layers) {
+    // End compositing layer(s) — each restore pops one saveLayer, compositing
+    // the subtree back through that layer's filter / opacity. An EffectChain
+    // pushes one layer per effect, so pop what we actually pushed rather than
+    // assuming one.
+    for (int i = 0; i < layers.layers_pushed; ++i)
+        canvas.restore();
+
+    // End backdrop-filter layer. Composites the widget's own
+    // opacity layer over the blurred parent backdrop.
+    if (layers.backdrop_pushed)
+        canvas.restore();
+}
+
+void View::paint_outset_shadows(canvas::Canvas& canvas) {
     // Outset drop shadows paint inside the compositing layer so the view's
     // opacity / filter / backdrop applies to them (CSS spec — shadows are
     // part of the element's stacking context). The shadow blur halo can
@@ -531,7 +533,9 @@ void View::paint_all(canvas::Canvas& canvas) {
                                    it->color, /*inset=*/false, eff_r);
         }
     }
+}
 
+void View::apply_overflow_and_clip_path(canvas::Canvas& canvas) {
     // Clip only when overflow:hidden / overflow:scroll is explicitly
     // opted into. Default is overflow:visible (CSS default)
     // so absolutely-positioned popover/dropdown children that extend
@@ -642,7 +646,9 @@ void View::paint_all(canvas::Canvas& canvas) {
         }
         canvas.clip_path_svg(clip_path());
     }
+}
 
+void View::paint_background_and_border(canvas::Canvas& canvas) {
     // Per-corner border-radius: when any of the
     // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
     // has been called we paint backgrounds and the border via a path
@@ -766,12 +772,9 @@ void View::paint_all(canvas::Canvas& canvas) {
             canvas.set_line_dash(nullptr, 0, 0.0f);
         }
     }
+}
 
-    // Widget-specific painting. The outer timer wraps the whole paint_all body,
-    // so `paint(canvas)` no-op overrides on styled containers still get
-    // accurate self-time attribution.
-    paint(canvas);
-
+void View::paint_children_in_order(canvas::Canvas& canvas) {
     // Paint children. CSS z-index ordering: stable-sort
     // ascending by z_index() so siblings with equal z keep insertion
     // order (CSS painting-order rule). Higher z paints later, ending
@@ -785,7 +788,6 @@ void View::paint_all(canvas::Canvas& canvas) {
     // ScopedNoAlloc region, so that per-frame allocation is a real-time-safety
     // violation. Only fall back to the allocating sorted copy when z-index
     // actually reorders siblings.
-    auto children_t0 = std::chrono::steady_clock::now();
     if (children_in_z_order()) {
         for (const auto& child : children_) {
             child->paint_all(canvas);
@@ -796,7 +798,15 @@ void View::paint_all(canvas::Canvas& canvas) {
             child->paint_all(canvas);
         }
     }
-    children_dt = std::chrono::steady_clock::now() - children_t0;
+}
+
+void View::paint_post_decorations(canvas::Canvas& canvas,
+                                  const EffectLayerState& layers) {
+    // eff_r is a pure function of bounds_ + corner state (paint does not mutate
+    // either), so it is identical to the value paint_background_and_border
+    // computes; recomputed here so the inset shadows and outline read the same
+    // radius they read in the monolithic paint_all.
+    const float eff_r = effective_corner_radius(bounds_.width, bounds_.height);
 
     // Inset box shadows paint over the content so the inner darkening
     // shows through children (CSS spec: inset shadows are above the
@@ -879,20 +889,69 @@ void View::paint_all(canvas::Canvas& canvas) {
     // overlay would draw into the blur layer and get blurred. Wiring an overlay
     // to composite into a SPECIFIC effect's layer (pop-interleaved with the
     // overlay draws) is the fix if/when that combination is needed.
-    if (effect_ && layers_pushed > 0)
+    if (effect_ && layers.layers_pushed > 0)
         effect_->paint_overlay(canvas, 0, 0, bounds_.width, bounds_.height);
+}
 
-    // End compositing layer(s) — each restore pops one saveLayer, compositing
-    // the subtree back through that layer's filter / opacity. An EffectChain
-    // pushes one layer per effect, so pop what we actually pushed rather than
-    // assuming one.
-    for (int i = 0; i < layers_pushed; ++i)
-        canvas.restore();
+void View::paint_content(canvas::Canvas& canvas, const EffectLayerState& layers,
+                         std::int64_t& children_ns) {
+    // The subtree's own content, painted INSIDE the effect/opacity layers that
+    // push_effect_layers opened. Kept as one unit so FU-3's subtree cache can
+    // wrap exactly this (background/border/paint()/children/decorations) while
+    // the animatable layer wrappers stay outside the cache.
+    paint_outset_shadows(canvas);
+    apply_overflow_and_clip_path(canvas);
+    paint_background_and_border(canvas);
 
-    // End backdrop-filter layer. Composites the widget's own
-    // opacity layer over the blurred parent backdrop.
-    if (needs_backdrop_layer)
-        canvas.restore();
+    // Widget-specific painting. The outer timer wraps the whole paint_all body,
+    // so `paint(canvas)` no-op overrides on styled containers still get
+    // accurate self-time attribution.
+    paint(canvas);
+
+    // Time only the recursive child paint so self_ns = outer - children in
+    // paint_all correctly attributes framework drawing to this view.
+    auto children_t0 = std::chrono::steady_clock::now();
+    paint_children_in_order(canvas);
+    children_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                      std::chrono::steady_clock::now() - children_t0).count();
+
+    paint_post_decorations(canvas, layers);
+}
+
+void View::paint_all(canvas::Canvas& canvas) {
+    if (!visible_) return;
+
+    // Treat paint like the audio thread. Any allocation inside this scope is a
+    // real-time-safety bug. The guard is a thread-local counter in debug builds
+    // and compiles away under NDEBUG; sanitizer / debug-allocator hooks read
+    // pulp::runtime::is_in_no_alloc_scope() to detect violations.
+    pulp::runtime::ScopedNoAlloc no_alloc_guard;
+
+    // Time the whole paint_all body: background, border, gradients, clipping,
+    // shadows, layer setup, the paint() override, inset shadows, outlines, and
+    // layer restores. With the outer-scope timer,
+    // self_ns = (outer total) - (children total), which correctly attributes
+    // framework drawing to the view.
+    auto outer_t0 = std::chrono::steady_clock::now();
+    std::int64_t children_ns = 0;
+
+    canvas.save();
+    canvas.translate(bounds_.x, bounds_.y);
+
+    // Disabled state: reduce opacity (CSS :disabled equivalent)
+    if (!enabled_) canvas.set_opacity(0.4f);
+
+    apply_canvas_transforms(canvas);
+
+    // Open the backdrop + effect/opacity/filter/mask/blend compositing layers.
+    // The returned state is the EXACT imbalance pop_effect_layers must unwind —
+    // the one deliberate save-depth asymmetry, owned by this greppable pair.
+    const EffectLayerState layers = push_effect_layers(canvas);
+
+    // Everything painted INSIDE those layers (the FU-3 subtree-cache unit).
+    paint_content(canvas, layers, children_ns);
+
+    pop_effect_layers(canvas, layers);
 
     // Always-visible tracing reminder. In a PULP_TRACING=ON build the root View
     // stamps a small "◉ TRACING" corner pill on every frame so a developer can
@@ -939,7 +998,7 @@ void View::paint_all(canvas::Canvas& canvas) {
     // max (~4.29s) so a pathological frame doesn't wrap.
     auto outer_dt = std::chrono::steady_clock::now() - outer_t0;
     auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(outer_dt).count();
-    auto children_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(children_dt).count();
+    // children_ns was filled by paint_content (the recursive child-paint time).
     auto self_ns = total_ns - children_ns;
     if (self_ns < 0) self_ns = 0;  // defensive against clock skew on a single core
     last_paint_self_ns_ = static_cast<std::uint32_t>(
