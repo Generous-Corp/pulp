@@ -77,6 +77,15 @@ metadata, normalization, and the single SignalGraph mailbox write in the future
 host binding; playback must not depend on `pulp::state` merely to mirror
 `ParameterEventQueue`.
 
+Group already-compiled lane owners with `TrackAutomationProgram::create()` on
+the compiler thread. The aggregate validates a compiler-supplied track ID,
+requires exact tempo-map owner identity, rejects duplicate lane IDs and
+device-parameter targets, and stores programs in lane-ItemId order. Preserve
+unchanged program owners when rebuilding it: mixed child generations are
+intentional because each cursor adopts by its lane program's generation and
+instance token. This grouping is not proof of Timeline document attachment;
+authored-lane dirty tracking belongs to the future track compiler.
+
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.
 
@@ -130,6 +139,7 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 ## Validation
 
 Build and run `pulp-test-playback-automation-cursor`,
+`pulp-test-playback-track-automation-program`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.

@@ -34,6 +34,9 @@ pulp_add_test_suite(pulp-test-playback-automation-cursor
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-track-automation-program
+    SOURCES test_playback_track_automation_program.cpp
+    LIBRARIES pulp::playback)
 
 pulp_add_test_suite(pulp-test-timeline-commands LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)

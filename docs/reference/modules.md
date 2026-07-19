@@ -912,6 +912,12 @@ work and output are bounded by that explicit capacity. Range seeds and unique
 in-range authored knots are mandatory; remaining capacity deterministically
 refines continuous spans without erasing authored topology. The cursor reseeds
 on loop/seek/adoption and rejects tempo-map or monotonic-generation mismatches.
+`TrackAutomationProgram` validates one compiler-supplied track grouping and
+retains its exact tempo-map and lane-program owners in lane-ItemId order. The
+grouping rejects duplicate lane identities and duplicate device-parameter
+targets while allowing unchanged lanes to retain older generations and instance
+tokens. It is compiled playback data, not proof of Timeline document attachment;
+the future track compiler owns authored-lane dirty tracking and reuse decisions.
 This layer deliberately does not know graph nodes or `ParameterEventQueue`; a
 host binding must aggregate all lanes for a device, apply one global queue
 budget, and inject one batch.

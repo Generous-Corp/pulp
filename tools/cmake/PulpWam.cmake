@@ -106,6 +106,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program_compiler.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/stable_renderer_shell.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/track_automation_program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/transport.cpp
     ${_PULP_WAM_WAV_SOURCES}
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp

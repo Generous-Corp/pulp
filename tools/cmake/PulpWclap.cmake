@@ -136,6 +136,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/playback/src/program.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/program_compiler.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/stable_renderer_shell.cpp
+    ${_PULP_WCLAP_ROOT}/core/playback/src/track_automation_program.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/transport.cpp
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp

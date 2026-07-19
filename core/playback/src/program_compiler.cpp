@@ -1,78 +1,12 @@
 #include <pulp/playback/program_compiler.hpp>
 
+#include "budgeted_stable_merge.hpp"
+
 #include <algorithm>
 #include <limits>
 #include <utility>
 
 namespace pulp::playback {
-
-namespace {
-
-struct BudgetedStableMergeState {
-    struct Step {
-        bool complete = false;
-        std::size_t work_units = 0;
-    };
-
-    void reset() noexcept {
-        width = 1;
-        left = 0;
-        mid = 0;
-        right = 0;
-        i = 0;
-        j = 0;
-        pair_active = false;
-        clearing_source = false;
-    }
-
-    template <typename T, typename Less>
-    Step step(std::vector<T>& values, std::vector<T>& scratch, Less less) {
-        if (values.size() <= 1 || width >= values.size())
-            return {.complete = true};
-        if (clearing_source) {
-            scratch.pop_back();
-            if (scratch.empty()) {
-                clearing_source = false;
-                width *= 2;
-                left = 0;
-            }
-            return {.work_units = 1};
-        }
-        if (left >= values.size()) {
-            values.swap(scratch);
-            clearing_source = true;
-            return {};
-        }
-        if (!pair_active) {
-            mid = std::min(left + width, values.size());
-            right = std::min(left + 2 * width, values.size());
-            i = left;
-            j = mid;
-            pair_active = true;
-            return {};
-        }
-        if (i < mid && (j >= right || !less(values[j], values[i])))
-            scratch.push_back(std::move(values[i++]));
-        else
-            scratch.push_back(std::move(values[j++]));
-        if (i == mid && j == right) {
-            left = right;
-            pair_active = false;
-        }
-        return {.work_units = 1};
-    }
-
-    std::size_t width = 1;
-    std::size_t left = 0;
-    std::size_t mid = 0;
-    std::size_t right = 0;
-    std::size_t i = 0;
-    std::size_t j = 0;
-    bool pair_active = false;
-    bool clearing_source = false;
-};
-
-} // namespace
 
 struct PlaybackProgramCompilerCore;
 
@@ -110,18 +44,18 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<timeline::ItemId> current_clip_ids_;
     std::vector<NoteProgramEvent> current_note_events_;
     std::vector<NoteProgramEvent> note_merge_buffer_;
-    BudgetedStableMergeState note_merge_;
+    detail::BudgetedStableMergeState note_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
     std::vector<timeline::ItemId> current_audio_ids_;
     std::vector<timeline::ItemId> audio_id_merge_buffer_;
-    BudgetedStableMergeState audio_id_merge_;
+    detail::BudgetedStableMergeState audio_id_merge_;
     std::size_t audio_id_validation_index_ = 1;
     std::vector<AudioClipRendererProgram> audio_merge_buffer_;
-    BudgetedStableMergeState audio_merge_;
+    detail::BudgetedStableMergeState audio_merge_;
     std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
-    BudgetedStableMergeState track_merge_;
+    detail::BudgetedStableMergeState track_merge_;
     std::size_t validation_track_ = 0;
     std::size_t validation_clip_ = 0;
     std::size_t validation_note_ = 0;
@@ -252,7 +186,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
     while (std::chrono::steady_clock::now() < budget.deadline && work < budget.max_work_units) {
         if (stage_ == Stage::CompileTracks) {
             if (track_index_ == sequence_->tracks().size()) {
-                track_merge_.reset();
+                track_merge_.reset(merge_buffer_);
                 stage_ = Stage::Link;
                 continue;
             }
@@ -292,10 +226,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             if (clip_index_ == track.clips().size()) {
                 if (current_note_events_.size() > 1) {
                     note_merge_buffer_.reserve(current_note_events_.size());
-                    note_merge_.reset();
+                    note_merge_.reset(note_merge_buffer_);
                     stage_ = Stage::SortTrackNotes;
                 } else if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_.reset();
+                    audio_id_merge_.reset(audio_id_merge_buffer_);
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
                     stage_ = Stage::FinalizeTrack;
@@ -364,7 +298,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             work += step.work_units;
             if (step.complete) {
                 if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_.reset();
+                    audio_id_merge_.reset(audio_id_merge_buffer_);
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
                     stage_ = Stage::FinalizeTrack;
@@ -395,7 +329,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                  AudioRendererErrorCode::InvalidIdentity});
                 continue;
             }
-            audio_merge_.reset();
+            audio_merge_.reset(audio_merge_buffer_);
             stage_ = Stage::SortTrackAudio;
             continue;
         }
@@ -444,11 +378,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
-            note_merge_buffer_.clear();
             current_audio_clips_.clear();
             current_audio_ids_.clear();
-            audio_id_merge_buffer_.clear();
-            audio_merge_buffer_.clear();
             clip_index_ = 0;
             note_index_ = 0;
             clip_started_ = false;
