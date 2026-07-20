@@ -168,7 +168,7 @@ Or download the binary for your platform below." \
             "$DIST_DIR"/*
 
         info "Release $VERSION created"
-        echo "  https://github.com/danielraffel/pulp/releases/tag/$VERSION"
+        echo "  https://github.com/Generous-Corp/pulp/releases/tag/$VERSION"
     else
         echo "Skipped. Create manually with:"
         echo "  gh release create $VERSION dist/*"

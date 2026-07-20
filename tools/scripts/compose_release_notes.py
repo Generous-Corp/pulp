@@ -14,7 +14,7 @@ from collections import OrderedDict
 from version_bump_heuristics import classify_conventional
 
 
-DEFAULT_REPO_URL = "https://github.com/danielraffel/pulp"
+DEFAULT_REPO_URL = "https://github.com/Generous-Corp/pulp"
 
 SKIP_SUBJECT_PATTERNS = (
     re.compile(r"^chore: bump .*version", re.IGNORECASE),

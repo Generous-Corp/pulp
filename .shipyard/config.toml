@@ -248,7 +248,7 @@ timeout_secs = 3600
 [cloud]
 provider   = "namespace"
 workflow   = "build"
-repository = "danielraffel/pulp"
+repository = "Generous-Corp/pulp"
 
 # ── Merge gating ───────────────────────────────────────────────────────────
 # Shipyard's can_merge() requires evidence (passing validation) for
@@ -289,7 +289,7 @@ base_branch = "main"
 
 [release.changelog]
 enabled    = true
-repo_url   = "https://github.com/danielraffel/pulp"
+repo_url   = "https://github.com/Generous-Corp/pulp"
 path       = "CHANGELOG.md"
 tag_filter = "v*"
 product    = "Pulp"
