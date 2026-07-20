@@ -277,6 +277,12 @@ per-ABI entry point for it.** Go through the plugin's own state:
   and keep `web-timeline-source-closure` green. Keep these modules threadless and
   independent of state, host, and format code; compiling them into wasm does not
   by itself create a JavaScript-facing timeline API or Host delivery path.
+  Track-owned automation lanes, their commands, schema migrations, and identity
+  helpers follow this same portable-document rule: every new internal `.cpp`
+  belongs in the native timeline target, the no-exceptions target, and both web
+  ABI lists. This proves that snapshots containing automation can compile into
+  the browser runtimes; it does not prove scheduling or parameter delivery until
+  the playback/host binding consumes those lanes.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
