@@ -89,6 +89,38 @@ against the AAX parameter manager (the value authority). Do not "fix" that into
 a shared instance by analogy with AU v2 — there, a second `Processor` was a real
 bug; here it is the format's structure. See the `aax` skill.
 
+### Host keyboard routing can bypass the NSView key path entirely — the DAW-spacebar trap
+
+**Searchable keywords**: spacebar dropped in plugin, space not typed in text field,
+REAPER eats spacebar, transport key stolen, letters type but spaces don't,
+IPlugView::onKeyDown, performKeyEquivalent, chat box drops spaces.
+
+A focused `TextEditor` in a plugin editor can silently drop the **spacebar** (and
+only the spacebar) in some hosts. Symptom: letters type, spaces don't. Root cause
+is the format-level key pipeline, NOT the NSView layer:
+
+- **REAPER** with *"send all keyboard input to plug-in"* OFF (its default) offers
+  keys to the VST3 view through `IPlugView::onKeyDown` **before** its own transport
+  accelerator. If the view returns `kResultFalse`, REAPER claims Space for
+  play/stop and the event **never reaches the NSView** (`keyDown:` /
+  `performKeyEquivalent:`) — so no view-host-side routing can save the field.
+  Letters aren't host-bound, so they fall through to the NSView path and type
+  normally, which is exactly the "letters work, spaces don't" signature.
+  `PulpPlugView::onKeyDown` (core/format/src/vst3_plug_view.cpp) handles this:
+  consume Space **only** when a `TextEditor` in this editor's tree holds focus,
+  excluding Cmd/Ctrl chords; every other key returns `kResultFalse` so transport,
+  Musical Typing, and host shortcuts stay with the host. Scoped to Space because
+  it is the only key REAPER delivers well-formed here (`host_quirks:
+  reaper_keyboard_only_space`).
+- The **NSView `performKeyEquivalent:`** fix (plugin_view_host_mac.mm) is a
+  *different* layer, for hosts that DO route plain keys through the responder
+  chain (plausibly Logic's AU hosting). Both layers exist because different hosts
+  deliver keys differently — a fix at one layer does not cover the other.
+
+Debugging rule: if a plugin's text field drops a key, first determine **whether
+the key even reaches the NSView** (log in `keyDown:`). If it never arrives, the
+fix belongs at the format layer (`onKeyDown`), not the view host.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.
