@@ -2,6 +2,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
 #include "identity_directory.hpp"
+#include "identity_transition.hpp"
 #include "project_state_access.hpp"
 
 #include <algorithm>
@@ -710,11 +711,10 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
             break;
         }
         case IdentityMutationKind::Reactivate: {
-            if (!existing || existing->active || !existing->has_same_owner(change.location))
+            auto location = detail::reactivated_location(existing, change.location);
+            if (!location)
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
-            auto location = change.location;
-            location.active = true;
-            identities.replace(change.item, location);
+            identities.replace(change.item, *location);
             break;
         }
         }

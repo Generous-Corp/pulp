@@ -1,12 +1,12 @@
 #include "../core/timeline/src/identity_directory.hpp"
-#include "../core/timeline/src/project_edit_access.hpp"
-#include "../core/timeline/src/project_state_access.hpp"
+#include "../core/timeline/src/identity_transition.hpp"
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::timeline;
@@ -29,12 +29,11 @@ TEST_CASE("Timeline private identity equality is semantic across insertion histo
 }
 
 TEST_CASE("Timeline item ownership is kind plus immediate parent") {
-    const ItemLocation first{.kind = ItemKind::Note,
-                             .parent_id = {50},
-                             .sequence_id = {10},
-                             .track_id = {20},
-                             .clip_id = {50},
-                             .active = true};
+    STATIC_REQUIRE_FALSE(std::is_aggregate_v<ItemLocation>);
+    STATIC_REQUIRE_FALSE(
+        std::is_constructible_v<ItemLocation, ItemKind, ItemId, ItemId, ItemId, bool>);
+
+    const ItemLocation first{ItemKind::Note, {50}, {10}, {20}, {50}, true};
     const ItemLocation same_owner{ItemKind::Note, {50}, {11}, {21}, {50}, false};
     const ItemLocation other_parent{ItemKind::Note, {51}, {10}, {20}, {50}, true};
     const ItemLocation other_kind{ItemKind::Clip, {50}, {10}, {20}, {50}, true};
@@ -135,34 +134,17 @@ Project make_project() {
 
 } // namespace
 
-TEST_CASE("Timeline reactivation refreshes ancestor navigation caches") {
-    const auto source_clip = clip({5}, 0, 100);
-    const auto source_track = take_value(Track::create({3}, "source", {source_clip}));
-    const auto destination_track = take_value(Track::create({4}, "destination", {}));
-    const auto source_sequence = take_value(
-        Sequence::create({2}, "sequence", TickDuration{100}, {source_track, destination_track}));
-    auto project = take_value(
-        Project::create(ProjectInput{{1}, "project", 7, {2}, {}, {source_sequence}}));
+TEST_CASE("Timeline reactivation policy refreshes ancestor navigation caches") {
+    const ItemLocation tombstone{ItemKind::Note, {5}, {2}, {3}, {5}, false};
+    const ItemLocation requested{ItemKind::Note, {5}, {2}, {4}, {5}, false};
 
-    auto identities = pulp::timeline::detail::ProjectStateAccess::identity_entries(project);
-    identities.push_back({{6}, {ItemKind::Note, {5}, {2}, {3}, {5}, false}});
-    project = take_value(pulp::timeline::detail::ProjectStateAccess::restore_identities(
-        std::move(project), std::move(identities)));
+    const auto reactivated = pulp::timeline::detail::reactivated_location(tombstone, requested);
+    REQUIRE(reactivated == ItemLocation{ItemKind::Note, {5}, {2}, {4}, {5}, true});
 
-    const auto moved_clip = clip({5}, 0, 100, notes({{{6}, {0}, {10}}}));
-    const auto emptied_source = take_value(Track::create({3}, "source", {}));
-    const auto populated_destination =
-        take_value(Track::create({4}, "destination", {moved_clip}));
-    const auto replacement = take_value(Sequence::create(
-        {2}, "sequence", TickDuration{100}, {emptied_source, populated_destination}));
-    const std::array mutations{IdentityMutation{IdentityMutationKind::Reactivate,
-                                                {6},
-                                                {ItemKind::Note, {5}, {2}, {4}, {5}, true}}};
-
-    const auto reactivated = take_value(
-        ProjectEditAccess::replace_sequence(project, replacement, mutations));
-    REQUIRE(reactivated.locate({6}) ==
-            ItemLocation{ItemKind::Note, {5}, {2}, {4}, {5}, true});
+    REQUIRE_FALSE(pulp::timeline::detail::reactivated_location(
+        ItemLocation{ItemKind::Note, {6}, {2}, {3}, {6}, false}, requested));
+    REQUIRE_FALSE(pulp::timeline::detail::reactivated_location(
+        ItemLocation{ItemKind::Note, {5}, {2}, {3}, {5}, true}, requested));
 }
 
 TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content") {
