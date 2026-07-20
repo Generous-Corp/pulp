@@ -794,6 +794,11 @@ auto track = Track::create({2}, "Notes", {std::move(empty).value()});
 Every owned object uses a nonzero monotonic `ItemId`; a `Project` stores the
 next never-used value; `UINT64_MAX` is the explicit exhausted allocator state
 and is valid project state after ownership reaches `UINT64_MAX - 1`.
+`Project::locate()` returns an `ItemLocation` whose `kind` and immediate
+`parent_id` are the canonical ownership key. Its sequence, track, and clip IDs
+are ancestor-navigation caches, not additional ownership axes. Snapshot decode
+derives `parent_id` for older identity records that predate the field, while
+canonical output writes it explicitly.
 `ClipTimeAnchor` distinguishes tempo-following musical tick ranges from fixed
 absolute ranges expressed as `SamplePosition`, integer sample count, and a
 normalized `RationalRate`. `ClipPlaybackProperties` carries nonnegative linear

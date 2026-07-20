@@ -404,12 +404,17 @@ detail::ProjectStateAccess::restore_identities(Project project,
             return !id.valid() || id.value < next;
         };
         if (!entry.item.valid() || entry.item.value >= project.next_item_id() ||
+            !valid_owner(location.parent_id, project.next_item_id()) ||
             !valid_owner(location.sequence_id, project.next_item_id()) ||
             !valid_owner(location.track_id, project.next_item_id()) ||
             !valid_owner(location.clip_id, project.next_item_id()))
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         const auto invalid = ItemId{};
         const auto valid_shape = [&] {
+            if (location.parent_id != immediate_parent_id(location.kind, project.id(),
+                                                          location.sequence_id, location.track_id,
+                                                          location.clip_id))
+                return false;
             switch (location.kind) {
             case ItemKind::Project:
                 return entry.item == project.id() && location.sequence_id == invalid &&
@@ -430,7 +435,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.clip_id == entry.item;
             case ItemKind::Note:
                 return location.sequence_id.valid() && location.track_id.valid() &&
-                       location.clip_id.valid() && location.sequence_id != location.track_id &&
+                       location.clip_id.valid() &&
+                       location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
@@ -452,32 +458,31 @@ detail::ProjectStateAccess::restore_identities(Project project,
         const auto valid_owners = [&] {
             switch (location.kind) {
             case ItemKind::Project:
+                return true;
             case ItemKind::Asset:
             case ItemKind::Sequence:
-                return true;
+                return owner_is(location.parent_id, ItemKind::Project);
             case ItemKind::Track:
-                return owner_is(location.sequence_id, ItemKind::Sequence);
+                return owner_is(location.parent_id, ItemKind::Sequence);
             case ItemKind::Clip: {
-                const auto* track = find_entry(location.track_id);
-                return owner_is(location.sequence_id, ItemKind::Sequence) && track &&
-                       track->location.kind == ItemKind::Track &&
-                       track->location.sequence_id == location.sequence_id;
+                const auto* track = find_entry(location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
             }
             case ItemKind::Note: {
-                const auto* track = find_entry(location.track_id);
-                const auto* clip = find_entry(location.clip_id);
-                return owner_is(location.sequence_id, ItemKind::Sequence) && track && clip &&
-                       track->location.kind == ItemKind::Track &&
-                       track->location.sequence_id == location.sequence_id &&
-                       clip->location.kind == ItemKind::Clip &&
-                       clip->location.sequence_id == location.sequence_id &&
-                       clip->location.track_id == location.track_id;
+                const auto* clip = find_entry(location.parent_id);
+                if (!clip || clip->location.kind != ItemKind::Clip ||
+                    clip->location.parent_id != location.track_id ||
+                    clip->location.sequence_id != location.sequence_id)
+                    return false;
+                const auto* track = find_entry(clip->location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
             }
             case ItemKind::DevicePlacement: {
-                const auto* track = find_entry(location.track_id);
-                return owner_is(location.sequence_id, ItemKind::Sequence) && track &&
-                       track->location.kind == ItemKind::Track &&
-                       track->location.sequence_id == location.sequence_id;
+                const auto* track = find_entry(location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
             }
             }
             return false;
@@ -487,10 +492,7 @@ detail::ProjectStateAccess::restore_identities(Project project,
         if (location.active) {
             if (active_index >= active_entries.size() ||
                 active_entries[active_index].item != entry.item ||
-                active_entries[active_index].location.kind != location.kind ||
-                active_entries[active_index].location.sequence_id != location.sequence_id ||
-                active_entries[active_index].location.track_id != location.track_id ||
-                active_entries[active_index].location.clip_id != location.clip_id)
+                active_entries[active_index].location != location)
                 return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
             ++active_index;
         } else if (project.data_->identities.locate(entry.item)) {
@@ -603,23 +605,28 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     }
     detail::IdentityDirectory identities;
     auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
-    add_identity(input.id, {ItemKind::Project, {}, {}, {}, true});
+    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
+                              ItemId clip = {}) {
+        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip),
+                            sequence, track, clip, true};
+    };
+    add_identity(input.id, location(ItemKind::Project));
     for (const auto& asset : input.assets)
-        add_identity(asset.id, {ItemKind::Asset, {}, {}, {}, true});
+        add_identity(asset.id, location(ItemKind::Asset));
     for (const auto& sequence : input.sequences) {
-        add_identity(sequence.id(), {ItemKind::Sequence, sequence.id(), {}, {}, true});
+        add_identity(sequence.id(), location(ItemKind::Sequence, sequence.id()));
         for (const auto& track : sequence.tracks()) {
-            add_identity(track.id(), {ItemKind::Track, sequence.id(), track.id(), {}, true});
+            add_identity(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
             for (const auto& device : track.device_chain())
                 add_identity(device.id,
-                             {ItemKind::DevicePlacement, sequence.id(), track.id(), {}, true});
+                             location(ItemKind::DevicePlacement, sequence.id(), track.id()));
             for (const auto& clip : track.clips()) {
                 add_identity(clip.id(),
-                             {ItemKind::Clip, sequence.id(), track.id(), clip.id(), true});
+                             location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
                 if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
                     for (const auto& note : notes->notes())
                         add_identity(note.id,
-                                     {ItemKind::Note, sequence.id(), track.id(), clip.id(), true});
+                                     location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
                 }
             }
         }
@@ -694,10 +701,8 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
             break;
         }
         case IdentityMutationKind::Deactivate: {
-            if (!existing || !existing->active || existing->kind != change.location.kind ||
-                existing->sequence_id != change.location.sequence_id ||
-                existing->track_id != change.location.track_id ||
-                existing->clip_id != change.location.clip_id)
+            if (!existing || !existing->active ||
+                !existing->has_same_owner(change.location))
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
             auto location = *existing;
             location.active = false;
@@ -705,10 +710,7 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
             break;
         }
         case IdentityMutationKind::Reactivate: {
-            if (!existing || existing->active || existing->kind != change.location.kind ||
-                existing->sequence_id != change.location.sequence_id ||
-                existing->track_id != change.location.track_id ||
-                existing->clip_id != change.location.clip_id)
+            if (!existing || existing->active || !existing->has_same_owner(change.location))
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
             auto location = *existing;
             location.active = true;

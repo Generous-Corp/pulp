@@ -42,6 +42,9 @@ std::optional<ConflictCode> target_error(const Project& project, ItemId id, Item
         return ConflictCode::InactiveTarget;
     if (location->kind != kind)
         return ConflictCode::WrongTargetKind;
+    const auto parent = immediate_parent_id(kind, project.id(), sequence, track, clip);
+    if (location->parent_id != parent)
+        return ConflictCode::ParentMismatch;
     if (location->sequence_id != sequence || location->track_id != track ||
         location->clip_id != clip)
         return ConflictCode::ParentMismatch;
@@ -152,14 +155,13 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             std::vector<IdentityMutation> identity_changes;
             std::uint64_t next = project.next_item_id();
             for (const auto [id, kind] : owned_identities(insert->clip)) {
-                ItemLocation wanted{kind, insert->sequence_id, insert->track_id, insert->clip.id(),
-                                    true};
+                const auto parent = immediate_parent_id(kind, project.id(), insert->sequence_id,
+                                                        insert->track_id, insert->clip.id());
+                ItemLocation wanted{kind, parent, insert->sequence_id, insert->track_id,
+                                    insert->clip.id(), true};
                 const auto existing = project.locate(id);
                 if (allow_tombstone_restore && existing) {
-                    if (!existing || existing->active || existing->kind != wanted.kind ||
-                        existing->sequence_id != wanted.sequence_id ||
-                        existing->track_id != wanted.track_id ||
-                        existing->clip_id != wanted.clip_id)
+                    if (existing->active || !existing->has_same_owner(wanted))
                         return fail_target(ConflictCode::IdentityNotAvailable, id);
                     identity_changes.push_back({IdentityMutationKind::Reactivate, id, wanted});
                 } else {
@@ -207,7 +209,10 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 identity_changes.push_back(
                     {IdentityMutationKind::Deactivate,
                      id,
-                     {kind, remove->sequence_id, remove->track_id, remove->clip_id, false}});
+                     {kind,
+                      immediate_parent_id(kind, project.id(), remove->sequence_id,
+                                          remove->track_id, remove->clip_id),
+                      remove->sequence_id, remove->track_id, remove->clip_id, false}});
             auto next_track = track->erase_clip(remove->clip_id);
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(
