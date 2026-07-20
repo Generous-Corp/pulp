@@ -44,12 +44,11 @@ using pulp::format::boundary::zero_f64;
 
 // Decode CLAP's host transport into the format-neutral boundary struct. The
 // shared adapter-boundary core then writes the ProcessContext transport fields,
-// derives the bar when the host supplies none, and diffs the change flags —
-// identically for every format. The CLAP-specific work is the flag /
-// fixed-point decode here.
+// derives the bar when the host supplies none, and diffs the change flags. The
+// CLAP-specific work is the flag / fixed-point decode here.
 //
-// A null @p tr (the host supplied no transport) yields a default `valid=false`
-// transport, which leaves every ProcessContext transport field at its default.
+// A null @p tr yields an empty validity mask, which leaves every ProcessContext
+// transport field at its compatibility default.
 // @p sample_rate converts CLAP's seconds timeline to a sample position.
 boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
                                               double sample_rate) {
@@ -58,37 +57,40 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
 
     const uint32_t flags = tr->flags;
 
-    transport.valid = true;
     transport.is_playing = (flags & CLAP_TRANSPORT_IS_PLAYING) != 0;
     transport.is_recording = (flags & CLAP_TRANSPORT_IS_RECORDING) != 0;
+    transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+    transport.validity.set(TransportField::Playing);
+    transport.validity.set(TransportField::Recording);
+    transport.validity.set(TransportField::Looping);
     if (flags & CLAP_TRANSPORT_HAS_TEMPO) {
-        transport.has_tempo = true;
+        transport.validity.set(TransportField::Tempo);
         transport.tempo_bpm = tr->tempo;
     }
     if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-        transport.has_beats = true;
+        transport.validity.set(TransportField::BeatPosition);
         transport.position_beats =
             static_cast<double>(tr->song_pos_beats) / CLAP_BEATTIME_FACTOR;
     }
     if (flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) {
         const double seconds =
             static_cast<double>(tr->song_pos_seconds) / CLAP_SECTIME_FACTOR;
-        transport.has_samples = true;
+        transport.validity.set(TransportField::SamplePosition);
         transport.position_samples = static_cast<int64_t>(
             std::llround(seconds * sample_rate));
     }
     if (flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE) {
-        transport.has_time_sig = true;
+        transport.validity.set(TransportField::TimeSignature);
         transport.time_sig_numerator = static_cast<int>(tr->tsig_num);
         transport.time_sig_denominator = static_cast<int>(tr->tsig_denom);
     }
 
     // Cycle / loop range. CLAP gates this on CLAP_TRANSPORT_IS_LOOP_ACTIVE;
     // loop_start_beats / loop_end_beats are CLAP fixed-point `clap_beattime` so
-    // they convert through the same factor as song_pos_beats. The mapper only
-    // writes them when is_looping.
-    transport.is_looping = (flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) != 0;
+    // they convert through the same factor as song_pos_beats. Mark the range
+    // available only while the loop is active.
     if (transport.is_looping) {
+        transport.validity.set(TransportField::LoopRange);
         transport.loop_start_beats =
             static_cast<double>(tr->loop_start_beats) / CLAP_BEATTIME_FACTOR;
         transport.loop_end_beats =
@@ -99,7 +101,7 @@ boundary::HostTransport decode_clap_transport(const clap_event_transport_t* tr,
     // 0) whenever it supplies a beats timeline, so prefer that over deriving
     // from beats; otherwise the mapper derives it.
     if (flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-        transport.has_host_bar = true;
+        transport.validity.set(TransportField::Bar);
         transport.host_bar = static_cast<int64_t>(tr->bar_number);
     }
 
