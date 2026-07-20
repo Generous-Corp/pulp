@@ -69,8 +69,14 @@ CLI
       [--json <report.json>] [--tolerance 0.15]
 
 Exit code is ``0`` when every measured heuristic is within tolerance, ``1``
-when at least one fails. Heuristics that could not run (skipped) do not fail
-the suite.
+when at least one fails, ``2`` on bad usage / missing inputs, and ``3`` when
+NOTHING was measured. Heuristics that could not run (skipped) do not fail the
+suite — but a run where *every* heuristic skipped is reported as ``SKIPPED``,
+not ``OK``: a suite that measured nothing has no opinion, and printing a pass
+over zero measurements is how a dead lens hides in a green pipeline. (The
+``.fig`` lane hits this shape today: it stamps ``audio_widget: "none"`` on
+every node and carries no ``type == "text"`` nodes, so the widget/text
+heuristics have nothing to parse.)
 """
 
 from __future__ import annotations
@@ -2163,6 +2169,7 @@ def build_report(
     passes = sum(1 for r in results if r.status == "pass")
     fails = sum(1 for r in results if r.status == "fail")
     skips = sum(1 for r in results if r.status == "skip")
+    measured = passes + fails
     return {
         "render": render_path,
         "scene": scene_path,
@@ -2175,7 +2182,11 @@ def build_report(
             "fail": fails,
             "skip": skips,
             "total": len(results),
-            "ok": fails == 0,
+            # How many heuristics actually produced a comparison. Zero means
+            # every heuristic skipped (or produced only info rows) — the tool
+            # measured NOTHING and must not be read as a pass.
+            "measured": measured,
+            "ok": fails == 0 and measured > 0,
         },
         "results": [r.to_dict() for r in results],
     }
@@ -2223,10 +2234,33 @@ def format_table(report: dict) -> str:
         )
     s = report["summary"]
     rows.append("-" * 92)
+    measured = s.get("measured", s["pass"] + s["fail"])
+    if s["fail"]:
+        verdict = "FIDELITY REGRESSION"
+    elif measured:
+        verdict = "OK"
+    else:
+        # Nothing produced a comparison: every heuristic skipped. Say so
+        # loudly — an "OK" here would be a lens that lies green while
+        # contributing nothing (the fig lane's widget-less/text-less scene
+        # shape is exactly this).
+        verdict = "SKIPPED — no applicable heuristics for this scene shape"
     rows.append(
         f"Summary: {s['pass']} pass / {s['fail']} fail / {s['skip']} skip "
-        f"({s['total']} checks)  ->  {'OK' if s['ok'] else 'FIDELITY REGRESSION'}"
+        f"({s['total']} checks)  ->  {verdict}"
     )
+    if not s["fail"] and not measured:
+        rows.append("Nothing was measured; every heuristic skipped:")
+        seen: set[str] = set()
+        for r in report["results"]:
+            if r["status"] == "skip" and r.get("note") and r["note"] not in seen:
+                seen.add(r["note"])
+                rows.append(f"  - {r['heuristic']}: {r['note']}")
+        rows.append(
+            "Needs a scene with audio_widget/text nodes (the widget, geometry, "
+            "color, and text heuristics), a declared root layout.padding, or "
+            "--frame-reference/--out-dir for the whole-frame heuristics."
+        )
     return "\n".join(rows)
 
 
@@ -2283,7 +2317,15 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump(report, fh, indent=2)
         print(f"\nJSON report -> {args.json}")
-    return 0 if report["summary"]["ok"] else 1
+    summary = report["summary"]
+    if summary["fail"]:
+        return 1
+    if not summary.get("measured", summary["pass"]):
+        # Distinct from both pass (0) and fail (1) and usage error (2): the
+        # tool ran but measured nothing, so it has no verdict to offer. A
+        # caller must never mistake this for a green result.
+        return 3
+    return 0
 
 
 if __name__ == "__main__":

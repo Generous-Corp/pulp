@@ -74,6 +74,15 @@ their correct boxes made `fg-icon` findings disappear and layout_parity went
 greener while the render got worse. **Never read a clean layout_parity as "the
 render is right."** It means the boxes are right.
 
+EXTRA means "the render invented a node" — and only that. The synthetic
+`<key>/mask-scope` clip wrappers the mask lowering adds (scene.mjs) have no
+design counterpart *by construction*, so they are tallied separately
+(`synthetic_extra` in the JSON, an "ignored N synthetic mask-scope node(s)"
+line in the text) instead of polluting EXTRA with ~16 fixed false positives per
+FX file. The whitelist is a narrow suffix match (`/mask-scope`, `" (mask
+scope)"`), never a substring grep — a real node containing the marker mid-id
+still counts as EXTRA.
+
 The other half is TWO tools, not one, because they fail differently.
 `material_audit.mjs` counts what the `.fig` DECLARES against what the import
 emits, so it answers "was this dropped?" — deterministically, with no reference
@@ -82,7 +91,11 @@ answers "is the colour roughly right?" — and it is blind to anything that
 preserves a region's mean. Reach for the audit first: a property that never
 survived cannot be diagnosed by looking at pixels, and it is the cheaper
 question. Neither proves the render is CORRECT; a human looking at a montage is
-still the final say.
+still the final say. (The audit's checks iterate declared *occurrences*, so a
+node declaring the same property twice — knob bases carry doubled DROP_SHADOWs
+in the reference files — would print the same finding line twice;
+`dedupFindings` collapses byte-identical findings at the report boundary while
+the count tables keep tallying occurrences.)
 
 The one thing this design's fg-icon bug proves about all of them: **every checker
 here went green while the icons were visibly broken.** layout_parity said the
@@ -2930,7 +2943,7 @@ Heuristics live in a registry (`HEURISTICS`) so new ones are cheap to add; each 
 
 **Trustworthiness gate**: feed the original `--frame-reference` back in as `--render` — it must score 0 fails. That ground-truth pass is what makes the fails on a real import trustworthy. A faithful importer should converge to that baseline.
 
-Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *different* canvas scales, so absolute pixels are info-only — pass/fail is on aspect ratio. (2) Widget detection has two layers: the per-kind *signature* mask (the colored blob — fill-only for fader/meter) for a stable aspect anchor, and `detect_full_widget` which flood-fills from that anchor through connected foreground (absorbing the dark housing slot + thumb) so the *compared crop* matches the full reference widget — never compare a fill-only render blob against a housing+fill reference. The full-widget flood-fill is clipped to the declared box so it can't bleed into a neighbour. (3) Whole-frame alignment needs the real panel, not the canvas: `detect_panel` finds the rounded panel as a dark blob on a light page margin OR (flush dark render) as the border-ring + content box; `interior_background` samples the modal interior (rounded corners leak the page color, so the corner sampler is wrong for a panel crop). (4) Text detection is bg-relative glyph brightness on the *panel crop* (not absolute luma over the whole image, which lights up a light page margin); the row-cluster snap takes a `prefer_y` so a tall search window locks onto the predicted line, not the neighbouring one. (5) `indicator_angle` is coarse (±~15°) and detects either a dark or light notch; `track_stroke` is presence-only, not thickness. (6) Large renders are down-scaled to `MAX_SCAN_DIM` before the pure-Python pixel scans — without this a 1520² render takes minutes. (7) The render PNG is written to the CLI's CWD as `<name>-figma plugin export-render.png`; `--render-size WxH` is honored even though the meta JSON keeps the declared canvas. Regression coverage: `test/test_import_fidelity_diff.py` (CTest `import-fidelity-diff`, skips 77 without PIL) with tiny checked-in fixtures under `test/fixtures/import-fidelity/`, plus synthetic per-heuristic unit tests (panel detection, full-widget vs blob, text overflow/missing, padding hug, indicator angle).
+Gotchas baked into the tool: (1) the render and the captured asset PNGs are at *different* canvas scales, so absolute pixels are info-only — pass/fail is on aspect ratio. (2) Widget detection has two layers: the per-kind *signature* mask (the colored blob — fill-only for fader/meter) for a stable aspect anchor, and `detect_full_widget` which flood-fills from that anchor through connected foreground (absorbing the dark housing slot + thumb) so the *compared crop* matches the full reference widget — never compare a fill-only render blob against a housing+fill reference. The full-widget flood-fill is clipped to the declared box so it can't bleed into a neighbour. (3) Whole-frame alignment needs the real panel, not the canvas: `detect_panel` finds the rounded panel as a dark blob on a light page margin OR (flush dark render) as the border-ring + content box; `interior_background` samples the modal interior (rounded corners leak the page color, so the corner sampler is wrong for a panel crop). (4) Text detection is bg-relative glyph brightness on the *panel crop* (not absolute luma over the whole image, which lights up a light page margin); the row-cluster snap takes a `prefer_y` so a tall search window locks onto the predicted line, not the neighbouring one. (5) `indicator_angle` is coarse (±~15°) and detects either a dark or light notch; `track_stroke` is presence-only, not thickness. (6) Large renders are down-scaled to `MAX_SCAN_DIM` before the pure-Python pixel scans — without this a 1520² render takes minutes. (7) The render PNG is written to the CLI's CWD as `<name>-figma plugin export-render.png`; `--render-size WxH` is honored even though the meta JSON keeps the declared canvas. (8) A run where NOTHING measured is `SKIPPED`, exit **3** — never "OK". Fig-lane scenes hit this shape today (every node is `audio_widget: "none"`, no `type == "text"` nodes, no root padding), so on that lane the tool has no verdict; do not list it as a passing lens there. `summary.ok` is false and `summary.measured` is 0 in the JSON. Regression coverage: `test/test_import_fidelity_diff.py` (CTest `import-fidelity-diff`, skips 77 without PIL) with tiny checked-in fixtures under `test/fixtures/import-fidelity/`, plus synthetic per-heuristic unit tests (panel detection, full-widget vs blob, text overflow/missing, padding hug, indicator angle).
 
 **Figma (MCP available)**:
 - Use `com.figma.mcp` to read the current file or selection
