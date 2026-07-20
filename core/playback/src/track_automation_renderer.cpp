@@ -42,11 +42,16 @@ std::uint64_t selected_rank(std::uint32_t selection, std::uint32_t selected_coun
 } // namespace
 
 runtime::Result<TrackAutomationRenderer, TrackAutomationRendererError>
-TrackAutomationRenderer::create(std::shared_ptr<const TrackAutomationProgram> program) {
+TrackAutomationRenderer::create(std::shared_ptr<const TrackAutomationProgram> program,
+                                AutomationPlaybackLimits limits) {
     if (!program)
         return runtime::Err(
             TrackAutomationRendererError{TrackAutomationRendererCode::MissingProgram, {}, {}});
+    if (!limits.valid())
+        return runtime::Err(
+            TrackAutomationRendererError{TrackAutomationRendererCode::InvalidLimits, {}, {}});
     TrackAutomationRenderer renderer;
+    renderer.limits_ = limits;
     auto adopted = renderer.adopt(std::move(program));
     if (!adopted)
         return runtime::Err(adopted.error());
@@ -61,6 +66,9 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
         return adoption_error(TrackAutomationRendererCode::TrackMismatch, program->track_id());
     if (program == program_)
         return runtime::Ok(TrackAutomationRendererAdoption::Unchanged);
+    if (program->programs().size() > limits_.max_lanes_per_track)
+        return adoption_error(TrackAutomationRendererCode::LaneCapacityExceeded,
+                              program->track_id());
 
     std::vector<LaneState> next_lanes;
     next_lanes.reserve(program->programs().size());
@@ -91,6 +99,9 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
         device_ids.push_back(next_program->target().device_placement_id());
     std::sort(device_ids.begin(), device_ids.end());
     device_ids.erase(std::unique(device_ids.begin(), device_ids.end()), device_ids.end());
+    if (device_ids.size() > limits_.max_device_placements_per_track)
+        return adoption_error(TrackAutomationRendererCode::DeviceCapacityExceeded,
+                              program->track_id());
 
     std::vector<DeviceState> next_devices;
     next_devices.reserve(device_ids.size());
@@ -139,6 +150,8 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
     }
 
     bool lane_coalesced = false;
+    std::uint64_t original_candidate_count = 0;
+    std::uint64_t merge_candidate_count = 0;
     for (auto& lane : lanes_) {
         lane.next_cursor = lane.cursor;
         const auto rendered = lane.next_cursor.process(*lane.program, transport, lane.scratch);
@@ -149,9 +162,21 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
             return result;
         }
         lane.event_count = rendered.emitted_events;
+        original_candidate_count += rendered.candidate_points;
+        merge_candidate_count += rendered.emitted_events;
+        if (merge_candidate_count > limits_.max_render_candidates_per_block) {
+            result.code = TrackAutomationRendererCode::WorkCapacityExceeded;
+            result.failed_lane_id = lane.program->lane_id();
+            result.candidate_events = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                original_candidate_count, std::numeric_limits<std::uint32_t>::max()));
+            return result;
+        }
         lane.coalesced = rendered.code == AutomationCursorCode::Coalesced;
         lane_coalesced = lane_coalesced || lane.coalesced;
     }
+    result.candidate_events = static_cast<std::uint32_t>(
+        std::min<std::uint64_t>(original_candidate_count,
+                                std::numeric_limits<std::uint32_t>::max()));
 
     std::uint64_t total_candidates = 0;
     std::uint64_t total_emitted = 0;
@@ -171,7 +196,8 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
                 }
             }
         }
-        if (mandatory_count > kEventsPerDevice) {
+        const auto device_event_limit = limits_.max_events_per_device_per_block;
+        if (mandatory_count > device_event_limit) {
             result.code = TrackAutomationRendererCode::DeviceCapacityExceeded;
             result.failed_device_placement_id = device.device_placement_id;
             return result;
@@ -179,11 +205,11 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
 
         const auto optional_count = candidate_count - mandatory_count;
         const auto selected_optional_count = static_cast<std::uint32_t>(
-            std::min<std::uint64_t>(optional_count, kEventsPerDevice - mandatory_count));
+            std::min<std::uint64_t>(optional_count, device_event_limit - mandatory_count));
         const auto selected_count =
             static_cast<std::uint32_t>(mandatory_count) + selected_optional_count;
         device.event_count = selected_count;
-        device.coalesced = device_lane_coalesced || candidate_count > kEventsPerDevice;
+        device.coalesced = device_lane_coalesced || candidate_count > device_event_limit;
         std::size_t heap_size = 0;
         for (const auto lane_index : device.lane_indices) {
             auto& lane = lanes_[lane_index];
@@ -284,11 +310,6 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
             device.events[index] = device.queued_events[index].event;
         device.event_count = queued_count;
 
-        batch_views_[device_index] = {
-            device.device_placement_id,
-            std::span<const TrackAutomationEvent>(device.events.data(), device.event_count),
-            device.coalesced,
-        };
         total_candidates += candidate_count;
         total_emitted += queued_count;
     }
@@ -296,8 +317,15 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
     for (auto& lane : lanes_)
         lane.cursor = lane.next_cursor;
 
-    result.candidate_events = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(total_candidates, std::numeric_limits<std::uint32_t>::max()));
+    for (std::size_t index = 0; index < devices_.size(); ++index) {
+        const auto& device = devices_[index];
+        batch_views_[index] = {
+            device.device_placement_id,
+            std::span<const TrackAutomationEvent>(device.events.data(), device.event_count),
+            device.coalesced,
+        };
+    }
+
     result.emitted_events = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(total_emitted, std::numeric_limits<std::uint32_t>::max()));
     result.code = lane_coalesced || total_candidates > total_emitted

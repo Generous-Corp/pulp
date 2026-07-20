@@ -291,6 +291,93 @@ TEST_CASE("program compiler budgets track automation across executor slices") {
     REQUIRE(automation->find_lane({42})->segments().size() == 2);
 }
 
+TEST_CASE("program compiler enforces automation limits before compiling dense lanes") {
+    const auto project = make_automation_project();
+    const auto map = tempo_map();
+
+    PlaybackProgramStore exact_store;
+    DeferredCompileExecutor exact_executor;
+    PlaybackProgramCompiler exact_compiler(exact_store, exact_executor,
+                                            std::chrono::microseconds(0));
+    auto exact = request(project, map, 1, {.all = true});
+    exact.automation_limits.max_device_placements_per_track = 2;
+    exact.automation_limits.max_lanes_per_track = 2;
+    exact.automation_limits.max_points_per_lane = 2;
+    exact.automation_limits.max_points_per_track = 4;
+    REQUIRE(exact_compiler.submit(std::move(exact)));
+    drain(exact_executor, exact_compiler);
+    REQUIRE(exact_store.has_value());
+    REQUIRE(exact_store.read()->automation_limits().max_points_per_track == 4);
+
+    PlaybackProgramStore over_store;
+    DeferredCompileExecutor over_executor;
+    PlaybackProgramCompiler over_compiler(over_store, over_executor,
+                                           std::chrono::microseconds(0));
+    auto over = request(project, map, 1, {.all = true});
+    over.automation_limits.max_points_per_lane = 1;
+    over.automation_limits.max_points_per_track = 4;
+    REQUIRE(over_compiler.submit(std::move(over)));
+    drain(over_executor, over_compiler);
+    REQUIRE_FALSE(over_store.has_value());
+    REQUIRE(over_compiler.status().last_error.code ==
+            CompileErrorCode::AutomationProgramInvalid);
+    REQUIRE(over_compiler.status().last_error.item == ItemId{41});
+}
+
+TEST_CASE("program compiler rejects invalid automation limit configurations") {
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    auto invalid = request(make_automation_project(), tempo_map(), 1, {.all = true});
+    invalid.automation_limits.max_lanes_per_track = 0;
+
+    const auto submitted = compiler.submit(std::move(invalid));
+    REQUIRE_FALSE(submitted);
+    REQUIRE(submitted.error().code == CompileErrorCode::InvalidRequest);
+
+    constexpr auto platform = AutomationPlaybackLimits::platform_defaults();
+#if defined(__EMSCRIPTEN__) || defined(__wasi__)
+    static_assert(platform == AutomationPlaybackLimits::web_defaults());
+#else
+    static_assert(platform == AutomationPlaybackLimits{});
+#endif
+    static_assert(AutomationPlaybackLimits::web_defaults().max_lanes_per_track <
+                  AutomationPlaybackLimits{}.max_lanes_per_track);
+}
+
+TEST_CASE("program compiler rejects track automation topology over each configured ceiling") {
+    struct LimitCase {
+        AutomationPlaybackLimits limits;
+        ItemId failed_item;
+    };
+    auto lane_limit = AutomationPlaybackLimits{};
+    lane_limit.max_lanes_per_track = 1;
+    auto device_limit = AutomationPlaybackLimits{};
+    device_limit.max_device_placements_per_track = 1;
+    auto total_point_limit = AutomationPlaybackLimits{};
+    total_point_limit.max_points_per_lane = 2;
+    total_point_limit.max_points_per_track = 3;
+    const std::array cases{
+        LimitCase{lane_limit, {10}},
+        LimitCase{device_limit, {10}},
+        LimitCase{total_point_limit, {42}},
+    };
+
+    for (const auto& limit_case : cases) {
+        PlaybackProgramStore store;
+        DeferredCompileExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        auto compile = request(make_automation_project(), tempo_map(), 1, {.all = true});
+        compile.automation_limits = limit_case.limits;
+        REQUIRE(compiler.submit(std::move(compile)));
+        drain(executor, compiler);
+        REQUIRE_FALSE(store.has_value());
+        REQUIRE(compiler.status().last_error.code ==
+                CompileErrorCode::AutomationProgramInvalid);
+        REQUIRE(compiler.status().last_error.item == limit_case.failed_item);
+    }
+}
+
 TEST_CASE("compiler rejects stale malformed and unknown-dirty requests") {
     PlaybackProgramStore store;
     DeferredCompileExecutor executor;

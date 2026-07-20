@@ -10,27 +10,54 @@ namespace pulp::playback::detail {
 void TrackAutomationCompiler::reset(
     const timeline::Track& track,
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
-    ProgramGeneration generation) {
+    ProgramGeneration generation, AutomationPlaybackLimits limits) {
     track_ = &track;
     tempo_map_ = std::move(tempo_map);
     generation_ = generation;
-    stage_ = Stage::Placements;
+    limits_ = limits;
+    stage_ = Stage::ValidateLimits;
     index_ = 0;
+    point_count_ = 0;
     compiled_ = {};
-    compiled_.ordered_device_placement_ids.reserve(track.device_chain().size());
     lane_programs_.clear();
-    lane_programs_.reserve(track.automation_lanes().size());
     lane_compiler_active_ = false;
     lane_merge_buffer_.clear();
-    lane_merge_buffer_.reserve(track.automation_lanes().size());
     programs_by_target_.clear();
-    programs_by_target_.reserve(track.automation_lanes().size());
     target_merge_buffer_.clear();
-    target_merge_buffer_.reserve(track.automation_lanes().size());
 }
 
 runtime::Result<TrackAutomationCompileStatus, TrackAutomationCompileError>
 TrackAutomationCompiler::step() {
+    if (stage_ == Stage::ValidateLimits) {
+        if (track_->device_chain().size() > limits_.max_device_placements_per_track ||
+            track_->automation_lanes().size() > limits_.max_lanes_per_track)
+            return runtime::Err(TrackAutomationCompileError{track_->id()});
+        stage_ = Stage::PreflightLanes;
+        return runtime::Ok(TrackAutomationCompileStatus::Pending);
+    }
+    if (stage_ == Stage::PreflightLanes) {
+        if (index_ < track_->automation_lanes().size()) {
+            const auto& lane = track_->automation_lanes()[index_++];
+            const auto points = lane.curve().points().size();
+            if (points > limits_.max_points_per_lane ||
+                points > limits_.max_points_per_track - point_count_)
+                return runtime::Err(TrackAutomationCompileError{lane.id()});
+            point_count_ += points;
+            return runtime::Ok(TrackAutomationCompileStatus::Pending);
+        }
+        index_ = 0;
+        stage_ = Stage::PrepareStorage;
+        return runtime::Ok(TrackAutomationCompileStatus::Pending);
+    }
+    if (stage_ == Stage::PrepareStorage) {
+        compiled_.ordered_device_placement_ids.reserve(track_->device_chain().size());
+        lane_programs_.reserve(track_->automation_lanes().size());
+        lane_merge_buffer_.reserve(track_->automation_lanes().size());
+        programs_by_target_.reserve(track_->automation_lanes().size());
+        target_merge_buffer_.reserve(track_->automation_lanes().size());
+        stage_ = Stage::Placements;
+        return runtime::Ok(TrackAutomationCompileStatus::Pending);
+    }
     if (stage_ == Stage::Placements) {
         if (index_ < track_->device_chain().size()) {
             compiled_.ordered_device_placement_ids.push_back(track_->device_chain()[index_++].id);
