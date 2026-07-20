@@ -21,7 +21,12 @@ struct LatencyScheduleEdge {
     std::int64_t delay_samples = 0;
 };
 
-std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
+struct LatencyBoundarySchedules {
+    std::unordered_map<NodeId, LatencyToOutputResult> input;
+    std::unordered_map<NodeId, LatencyToOutputResult> output;
+};
+
+LatencyBoundarySchedules build_latency_schedule(
     std::span<const NodeId> processing_order,
     std::span<const LatencyScheduleNode> nodes,
     std::span<const LatencyScheduleEdge> edges);

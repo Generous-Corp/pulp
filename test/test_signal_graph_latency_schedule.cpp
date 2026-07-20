@@ -242,6 +242,8 @@ TEST_CASE("latency-to-output reports unreachable and divergent output paths",
 
 TEST_CASE("latency-to-output distinguishes custom nodes without a latency contract",
           "[host][signal-graph][latency-schedule]") {
+    using Boundary = NodeLatencyBoundary;
+    using EditResult = SignalGraph::PreparedTopologyEdit::Result;
     using Status = LatencyToOutputResult::Status;
     SignalGraph graph;
     CustomNodeType type;
@@ -257,12 +259,32 @@ TEST_CASE("latency-to-output distinguishes custom nodes without a latency contra
     REQUIRE(graph.register_custom_node_type(std::move(type)));
     const auto input = graph.add_input_node(1);
     const auto custom = graph.add_custom_node("test.custom-latency-unknown");
+    const auto latent = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(11, PluginSlot::LatencyQuery::Available), 1, 1);
     const auto output = graph.add_output_node(1);
     REQUIRE(graph.connect(input, 0, custom, 0));
     REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, latent, 0));
+    REQUIRE(graph.connect(latent, 0, output, 0));
     REQUIRE(graph.prepare(48000.0, 64));
 
     require_result(graph.latency_to_output(input), Status::Unsupported, 0, custom);
+    require_result(graph.latency_to_output(custom, Boundary::Input),
+                   Status::Unsupported, 0, custom);
+    require_result(graph.latency_to_output(custom, Boundary::Output),
+                   Status::Available, 11);
+
+    auto edit = graph.begin_prepared_topology_edit();
+    require_result(edit->prepared_latency_to_output(custom, Boundary::Output),
+                   Status::NoCompiledSnapshot);
+    REQUIRE(edit->prepare(48000.0, 64) == EditResult::Prepared);
+    require_result(edit->prepared_latency_to_output(custom, Boundary::Input),
+                   Status::Unsupported, 0, custom);
+    require_result(edit->prepared_latency_to_output(custom, Boundary::Output),
+                   Status::Available, 11);
+    REQUIRE(edit->commit() == EditResult::Committed);
+    require_result(edit->prepared_latency_to_output(custom, Boundary::Output),
+                   Status::NoCompiledSnapshot);
 }
 
 TEST_CASE("latency-to-output distinguishes absent snapshots from graph paths",

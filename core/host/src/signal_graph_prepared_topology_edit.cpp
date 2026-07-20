@@ -456,6 +456,14 @@ bool SignalGraph::PreparedTopologyEdit::routed_execution_ready(int block_size) c
     return false;
 }
 
+LatencyToOutputResult SignalGraph::PreparedTopologyEdit::prepared_latency_to_output(
+    NodeId id, NodeLatencyBoundary boundary) const noexcept {
+    if (committed_ || last_result_ != Result::Prepared || !prepared_snapshot_) {
+        return {LatencyToOutputResult::Status::NoCompiledSnapshot, 0, 0};
+    }
+    return SignalGraph::latency_to_output_for_(*prepared_snapshot_, id, boundary);
+}
+
 SignalGraph::PreparedTopologyEdit::Result
 SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_size) {
     if (committed_)

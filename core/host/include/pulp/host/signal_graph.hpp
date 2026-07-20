@@ -66,6 +66,11 @@ enum class NodeType {
 
 enum class LiveSwapCurve { Smoothstep, EqualPower };
 
+enum class NodeLatencyBoundary : std::uint8_t {
+    Input,
+    Output,
+};
+
 struct LatencyToOutputResult {
     enum class Status : std::uint8_t {
         Available,
@@ -949,9 +954,11 @@ public:
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
 
-    // Exact latency from a node's input to a reachable AudioOutput in the
-    // current compiled generation. Includes the queried node's own latency and
-    // compiled PDC connection delays. Feedback edges are excluded because they
+    // Exact latency from a node boundary to a reachable AudioOutput in the
+    // current compiled generation. The one-argument form queries the input
+    // boundary. Input includes the queried node's own latency/status; Output
+    // starts after that node and includes its outgoing compiled PDC delays.
+    // Feedback edges are excluded because they
     // represent prior-block history, not a schedulable feed-forward path.
     // Across reachable paths, QueryFailed takes precedence over Unsupported;
     // ties select the lowest offending NodeId. Differing known totals report
@@ -959,6 +966,8 @@ public:
     // NoCompiledSnapshot; an id absent from a prepared snapshot reports
     // UnknownNode with that requested id as offending_node.
     LatencyToOutputResult latency_to_output(NodeId id) const noexcept;
+    LatencyToOutputResult latency_to_output(
+        NodeId id, NodeLatencyBoundary boundary) const noexcept;
 
     // Set a single parameter value on a Plugin node at the graph level. The
     // call is forwarded to PluginSlot::set_parameter(). Returns false if the
@@ -1217,7 +1226,8 @@ private:
         };
         std::unordered_map<NodeId, NodeShape> shapes;
         std::unordered_map<NodeId, PluginSlot::LatencyQuery> plugin_latency_queries;
-        std::unordered_map<NodeId, LatencyToOutputResult> latency_schedule;
+        std::unordered_map<NodeId, LatencyToOutputResult> input_latency_schedule;
+        std::unordered_map<NodeId, LatencyToOutputResult> output_latency_schedule;
         std::vector<OrderedRuntime> ordered_runtime;
         // Per-node live-DSP timing, prepared at compile in ordered_runtime order
         // (slot i == ordered_runtime[i]). Non-movable (holds atomics); CompiledGraph
@@ -1757,7 +1767,8 @@ private:
     static PreparedLatencyMetadata capture_latency_metadata_(PluginSlot& slot);
     static void build_latency_schedule_for_(CompiledGraph& cg);
     static LatencyToOutputResult latency_to_output_for_(const CompiledGraph& cg,
-                                                        NodeId id) noexcept;
+                                                        NodeId id,
+                                                        NodeLatencyBoundary boundary) noexcept;
 };
 
 // Drag-add helper.

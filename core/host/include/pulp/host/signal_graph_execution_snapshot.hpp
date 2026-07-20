@@ -19,6 +19,8 @@ class SignalGraph::ExecutionSnapshot {
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;
     LatencyToOutputResult latency_to_output(NodeId id) const noexcept;
+    LatencyToOutputResult latency_to_output(
+        NodeId id, NodeLatencyBoundary boundary) const noexcept;
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples) const noexcept;

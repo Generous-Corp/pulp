@@ -68,6 +68,10 @@ class SignalGraph::PreparedTopologyEdit {
     const std::vector<GraphNode>& nodes() const;
     const std::vector<Connection>& connections() const;
     bool routed_execution_ready(int block_size) const noexcept;
+    /// Read-only query of the sealed candidate prepared by this transaction.
+    /// Valid only between successful prepare() and commit().
+    LatencyToOutputResult prepared_latency_to_output(
+        NodeId id, NodeLatencyBoundary boundary = NodeLatencyBoundary::Input) const noexcept;
 
     Result prepare(double sample_rate, int max_block_size);
     /// Requires process, MIDI injection, and anticipation to be stopped.

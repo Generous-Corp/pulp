@@ -39,7 +39,7 @@ Result unknown_result(PluginSlot::LatencyQuery query, NodeId node) {
 
 } // namespace
 
-std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
+LatencyBoundarySchedules build_latency_schedule(
     std::span<const NodeId> processing_order,
     std::span<const LatencyScheduleNode> nodes,
     std::span<const LatencyScheduleEdge> edges) {
@@ -47,8 +47,9 @@ std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
     node_by_id.reserve(nodes.size());
     for (const auto& node : nodes) node_by_id.emplace(node.id, &node);
 
-    std::unordered_map<NodeId, Result> schedule;
-    schedule.reserve(nodes.size());
+    LatencyBoundarySchedules schedules;
+    schedules.input.reserve(nodes.size());
+    schedules.output.reserve(nodes.size());
     std::unordered_map<NodeId, std::vector<const LatencyScheduleEdge*>> outgoing;
     outgoing.reserve(nodes.size());
     for (const auto& edge : edges) outgoing[edge.source].push_back(&edge);
@@ -59,7 +60,8 @@ std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
         if (node_it == node_by_id.end()) continue;
         const auto& node = *node_it->second;
         if (node.type == NodeType::AudioOutput) {
-            schedule[id] = {Status::Available, 0, 0};
+            schedules.input[id] = {Status::Available, 0, 0};
+            schedules.output[id] = {Status::Available, 0, 0};
             continue;
         }
 
@@ -70,8 +72,8 @@ std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
         const auto outgoing_it = outgoing.find(id);
         if (outgoing_it != outgoing.end()) {
             for (const auto* edge : outgoing_it->second) {
-                const auto downstream_it = schedule.find(edge->destination);
-                if (downstream_it == schedule.end() ||
+                const auto downstream_it = schedules.input.find(edge->destination);
+                if (downstream_it == schedules.input.end() ||
                     downstream_it->second.status == Status::NoOutputPath) {
                     continue;
                 }
@@ -86,8 +88,7 @@ std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
                     ambiguous = true;
                     continue;
                 }
-                const std::int64_t samples = node.intrinsic_samples +
-                                             edge->delay_samples +
+                const std::int64_t samples = edge->delay_samples +
                                              downstream.samples;
                 if (known_samples && *known_samples != samples) ambiguous = true;
                 if (!known_samples) known_samples = samples;
@@ -95,20 +96,26 @@ std::unordered_map<NodeId, LatencyToOutputResult> build_latency_schedule(
         }
 
         if (!reaches_output) {
-            schedule[id] = {Status::NoOutputPath, 0, 0};
+            schedules.output[id] = {Status::NoOutputPath, 0, 0};
+            schedules.input[id] = schedules.output[id];
             continue;
         }
-        select_unknown(selected_unknown, unknown_result(node.query, id));
         if (selected_unknown.status == Status::QueryFailed ||
             selected_unknown.status == Status::Unsupported) {
-            schedule[id] = selected_unknown;
+            schedules.output[id] = selected_unknown;
         } else if (ambiguous) {
-            schedule[id] = {Status::AmbiguousOutputLatency, 0, 0};
+            schedules.output[id] = {Status::AmbiguousOutputLatency, 0, 0};
         } else {
-            schedule[id] = {Status::Available, known_samples.value_or(0), 0};
+            schedules.output[id] = {Status::Available, known_samples.value_or(0), 0};
         }
+
+        auto input = schedules.output[id];
+        if (input.status == Status::Available)
+            input.samples += node.intrinsic_samples;
+        select_unknown(input, unknown_result(node.query, id));
+        schedules.input[id] = input;
     }
-    return schedule;
+    return schedules;
 }
 
 } // namespace pulp::host::detail
@@ -163,28 +170,43 @@ void SignalGraph::build_latency_schedule_for_(CompiledGraph& cg) {
             : 0;
         edges.push_back({connection.source_node, connection.dest_node, delay});
     }
-    cg.latency_schedule = detail::build_latency_schedule(cg.order, nodes, edges);
+    auto schedules = detail::build_latency_schedule(cg.order, nodes, edges);
+    cg.input_latency_schedule = std::move(schedules.input);
+    cg.output_latency_schedule = std::move(schedules.output);
 }
 
 LatencyToOutputResult SignalGraph::latency_to_output_for_(
-    const CompiledGraph& cg, NodeId id) noexcept {
-    const auto result = cg.latency_schedule.find(id);
-    return result == cg.latency_schedule.end()
+    const CompiledGraph& cg, NodeId id, NodeLatencyBoundary boundary) noexcept {
+    const auto& schedule = boundary == NodeLatencyBoundary::Input
+        ? cg.input_latency_schedule
+        : cg.output_latency_schedule;
+    const auto result = schedule.find(id);
+    return result == schedule.end()
         ? LatencyToOutputResult{LatencyToOutputResult::Status::UnknownNode, 0, id}
         : result->second;
 }
 
 LatencyToOutputResult SignalGraph::latency_to_output(NodeId id) const noexcept {
+    return latency_to_output(id, NodeLatencyBoundary::Input);
+}
+
+LatencyToOutputResult SignalGraph::latency_to_output(
+    NodeId id, NodeLatencyBoundary boundary) const noexcept {
     auto read_guard = live_slot_.read();
     const auto* snapshot = read_guard.get();
-    return snapshot ? latency_to_output_for_(*snapshot, id)
+    return snapshot ? latency_to_output_for_(*snapshot, id, boundary)
                     : LatencyToOutputResult{
                           LatencyToOutputResult::Status::NoCompiledSnapshot, 0, 0};
 }
 
 LatencyToOutputResult SignalGraph::ExecutionSnapshot::latency_to_output(
     NodeId id) const noexcept {
-    return snapshot_ ? SignalGraph::latency_to_output_for_(*snapshot_, id)
+    return latency_to_output(id, NodeLatencyBoundary::Input);
+}
+
+LatencyToOutputResult SignalGraph::ExecutionSnapshot::latency_to_output(
+    NodeId id, NodeLatencyBoundary boundary) const noexcept {
+    return snapshot_ ? SignalGraph::latency_to_output_for_(*snapshot_, id, boundary)
                      : LatencyToOutputResult{
                            LatencyToOutputResult::Status::NoCompiledSnapshot, 0, 0};
 }
