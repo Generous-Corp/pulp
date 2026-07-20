@@ -986,7 +986,8 @@ rules:
   in the type (`Slot<const T>`).
 - **Pin the exact committed generation when publications are coupled.**
   `ExecutionSnapshot` is a strong handle to one specific compiled graph, and its
-  MIDI injection and `process()` methods never redirect to a newer live graph.
+  MIDI/parameter-event injection and `process()` methods never redirect to a
+  newer live graph.
   `TimelineGraphBinding` publishes that handle together with its immutable
   playback program and bound track renderers as one `runtime::Slot` generation.
   Topology and content adoption must replace that one generation; independently
