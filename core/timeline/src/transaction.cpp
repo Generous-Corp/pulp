@@ -1,7 +1,7 @@
 #include <pulp/timeline/transaction.hpp>
 
 #include "transaction_automation_internal.hpp"
-#include "transaction_annotation_internal.hpp"
+#include "transaction_sequence_annotations_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_reduction_support.hpp"
 

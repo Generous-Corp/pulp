@@ -26,6 +26,18 @@ Project annotation_project() {
     return take(Project::create({{1}, "project", 6, {2}, {}, {std::move(sequence)}}));
 }
 
+Project absolute_annotation_project() {
+    const RationalRate rate{48'000, 1};
+    auto sequence = take(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "absolute",
+        .absolute_duration = AbsoluteTimelineDuration{1000, rate},
+        .markers = {{{3}, MarkerTypeId::cue(), "cue", AbsoluteSequencePoint{{100}, rate}}},
+        .regions = {{{4}, "verse", AbsoluteSequenceRange{{200}, 300, rate}}},
+    }));
+    return take(Project::create({{1}, "project", 5, {2}, {}, {std::move(sequence)}}));
+}
+
 constexpr std::string_view kSequenceV1 =
     R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"root","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})";
 
@@ -59,6 +71,26 @@ TEST_CASE("Sequence annotations persist canonically with identity ownership",
     CHECK(second->json == serialized->json);
 }
 
+TEST_CASE("Absolute sequence markers and regions round trip",
+          "[timeline][persistence][annotation]") {
+    const auto registry = builtins();
+    auto serialized = serialize_project(absolute_annotation_project(), registry);
+    REQUIRE(serialized);
+    auto decoded = deserialize_project(serialized->json, registry);
+    REQUIRE(decoded);
+    const auto* sequence = decoded->find_sequence({2});
+    REQUIRE(sequence);
+    REQUIRE(sequence->markers().size() == 1);
+    REQUIRE(sequence->regions().size() == 1);
+    const auto& point = std::get<AbsoluteSequencePoint>(sequence->markers()[0].point);
+    CHECK(point.position == SamplePosition{100});
+    CHECK(point.sample_rate == (RationalRate{48'000, 1}));
+    const auto& range = std::get<AbsoluteSequenceRange>(sequence->regions()[0].range);
+    CHECK(range.start == SamplePosition{200});
+    CHECK(range.sample_count == 300);
+    CHECK(range.sample_rate == (RationalRate{48'000, 1}));
+}
+
 TEST_CASE("Sequence schema migration adds annotations and only drops empty arrays",
           "[timeline][persistence][annotation]") {
     const auto registry = builtins();
@@ -80,6 +112,17 @@ TEST_CASE("Sequence schema migration adds annotations and only drops empty array
         registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1, nonempty);
     REQUIRE_FALSE(rejected);
     CHECK(rejected.error().code == PersistenceErrorCode::MigrationFailed);
+
+    auto nonempty_region = std::string(kSequenceV2Empty);
+    const auto region =
+        R"({"data":{"id":"3","name":"verse","range":{"duration_ticks":"10","kind":"musical","start_ticks":"0"}},"type_name":"pulp.timeline.sequence_region","version":1})";
+    nonempty_region.replace(nonempty_region.find("\"regions\":[]"),
+                            std::string_view("\"regions\":[]").size(),
+                            "\"regions\":[" + std::string(region) + "]");
+    auto region_rejected = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2,
+                                            1, nonempty_region);
+    REQUIRE_FALSE(region_rejected);
+    CHECK(region_rejected.error().code == PersistenceErrorCode::MigrationFailed);
 }
 
 TEST_CASE("Sequence annotation decode limits reject before document construction",
@@ -95,6 +138,15 @@ TEST_CASE("Sequence annotation decode limits reject before document construction
     CHECK(rejected.error().actual == 2);
     CHECK(rejected.error().limit == 1);
     CHECK(rejected.error().path == "/data/sequences/0/data/markers");
+
+    limits = DecodeLimits{};
+    limits.max_sequence_regions = 0;
+    auto region_rejected = deserialize_project(serialized->json, registry, limits);
+    REQUIRE_FALSE(region_rejected);
+    CHECK(region_rejected.error().code == PersistenceErrorCode::LimitExceeded);
+    CHECK(region_rejected.error().actual == 1);
+    CHECK(region_rejected.error().limit == 0);
+    CHECK(region_rejected.error().path == "/data/sequences/0/data/regions");
 
     auto web = DecodeLimits::web_defaults();
     CHECK(web.max_sequence_markers < DecodeLimits{}.max_sequence_markers);

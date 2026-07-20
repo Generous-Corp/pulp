@@ -121,7 +121,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_annotation_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_sequence_annotations_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)

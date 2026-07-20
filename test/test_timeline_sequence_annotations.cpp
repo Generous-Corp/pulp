@@ -92,6 +92,19 @@ TEST_CASE("Sequence annotations validate typed time against their sequence", "[t
     });
     REQUIRE_FALSE(mixed_rates);
     CHECK(mixed_rates.error().code == ModelErrorCode::IncompatibleSampleRate);
+
+    auto mixed_annotation_rates = Sequence::create(SequenceInput{
+        .id = {1},
+        .name = "root",
+        .markers = {
+            {{2}, type, "cue", AbsoluteSequencePoint{{48'000}, RationalRate{48'000, 1}}},
+        },
+        .regions = {
+            {{3}, "verse", AbsoluteSequenceRange{{44'100}, 100, RationalRate{44'100, 1}}},
+        },
+    });
+    REQUIRE_FALSE(mixed_annotation_rates);
+    CHECK(mixed_annotation_rates.error().code == ModelErrorCode::IncompatibleSampleRate);
 }
 
 TEST_CASE("Sequence annotation edits preserve identity and participate in remap",

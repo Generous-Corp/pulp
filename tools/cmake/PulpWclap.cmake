@@ -136,7 +136,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/track.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/track_schema_migrations.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_annotation_internal.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_sequence_annotations_internal.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_automation_internal.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_reduction_support.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp

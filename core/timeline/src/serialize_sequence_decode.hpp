@@ -1,21 +1,10 @@
 #pragma once
 
+#include "serialize_decode_support.hpp"
+
 #include <pulp/timeline/serialize.hpp>
 
 namespace pulp::timeline::detail {
-
-struct DecodeCounts {
-    std::size_t assets = 0;
-    std::size_t sequences = 0;
-    std::size_t tracks = 0;
-    std::size_t clips = 0;
-    std::size_t notes = 0;
-    std::size_t device_placements = 0;
-    std::size_t automation_lanes = 0;
-    std::size_t automation_points = 0;
-    std::size_t sequence_markers = 0;
-    std::size_t sequence_regions = 0;
-};
 
 using TrackDecodeFn = runtime::Result<Track, PersistenceError> (*)(
     const std::shared_ptr<const ParsedJson>&, const JsonValue&, const SchemaRegistry&,
