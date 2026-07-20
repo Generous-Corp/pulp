@@ -137,6 +137,7 @@ TEST_CASE("CrossfadePluginSlot delegates non-process calls to the new instance",
     CHECK(xf.info().name == "new");
     CHECK(xf.latency_samples() == 64);              // the new instance's latency, not old's
     CHECK(xf.latency_query() == PluginSlot::LatencyQuery::Unsupported);
+    CHECK(xf.latency_report().query == PluginSlot::LatencyQuery::Unsupported);
     CHECK(xf.save_state() == new_slot->save_state());
     CHECK(xf.new_slot().get() == new_slot.get());
 }

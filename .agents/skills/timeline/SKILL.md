@@ -150,6 +150,10 @@ publication, playback or automation delivery, launch
 slots, takes, nesting, device implementations, routing, audio, format adapters,
 or UI. Add those in their owning modules instead of widening the command and
 persistence core opportunistically.
+Plugin delay compensation and latency-to-output queries are likewise
+`core/host` responsibilities. Timeline may retain durable device placement
+identity, but it must not query live plugin latency or duplicate the prepared
+graph's generation-local timing metadata.
 
 ## Validation
 

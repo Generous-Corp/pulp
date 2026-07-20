@@ -465,6 +465,18 @@ public:
                    ? LatencyQuery::Available
                    : LatencyQuery::QueryFailed;
     }
+    LatencyReport latency_report() const override {
+        if (!au_) return {LatencyQuery::QueryFailed, 0};
+        Float64 secs = 0.0;
+        UInt32 size = sizeof(secs);
+        if (AudioUnitGetProperty(
+                au_, kAudioUnitProperty_Latency,
+                kAudioUnitScope_Global, 0, &secs, &size) != noErr) {
+            return {LatencyQuery::QueryFailed, 0};
+        }
+        return {LatencyQuery::Available,
+                static_cast<int>(secs * sample_rate_)};
+    }
     int tail_samples() const override {
         if (!au_) return 0;
         Float64 secs = 0.0;

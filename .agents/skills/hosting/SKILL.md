@@ -1352,7 +1352,7 @@ zero-fill on channel-count mismatch). Don't assume a Plugin node
 always has a live slot — always null-check `plugins[id]` before
 dereferencing.
 
-## `latency_samples()` alone is not a fact — ask `latency_query()`
+## `latency_samples()` alone is not a fact — capture `latency_report()`
 
 `PluginSlot::latency_samples()` returns an `int` whether or not the backend can
 actually ask the plugin. On its own it cannot distinguish **"this plugin reports
@@ -1360,7 +1360,15 @@ zero latency"** from **"this backend has no way to ask"** — and collapsing tho
 turns an unanswered question into a confident zero, which anything downstream
 will happily treat as verified.
 
-`PluginSlot::latency_query()` is the fact:
+`PluginSlot::latency_report()` is the prepared-graph fact: one typed status and
+sample count from one backend operation. The built-in CLAP, VST3, AU, LV2, and
+crossfade slots override it atomically. Its compatibility default calls the
+legacy `latency_query()` once and calls `latency_samples()` only for Available;
+that preserves PDC for external subclasses whose split methods are prepare-stable.
+New backends should override the one-shot report rather than relying on that
+compatibility path.
+
+The report status uses `PluginSlot::LatencyQuery`:
 
 | | |
 |---|---|
@@ -1374,7 +1382,7 @@ an absent latency extension is `Unsupported`, while an unusable plugin handle is
 **The LV2 slot overrides it to `Unsupported`**: it does not read the plugin's
 `lv2:reportsLatency` control port, so its `latency_samples() == 0` is a
 placeholder, not a claim. Wiring that port is the fix; until then, anything that
-reports or gates on hosted latency must branch on `latency_query()` first.
+reports or gates on hosted latency must consume `latency_report()` first.
 
 `SignalGraph::latency_to_output(node)` reads the current compiled snapshot, and
 `ExecutionSnapshot::latency_to_output(node)` reads one pinned generation. The
@@ -1384,6 +1392,9 @@ latencies. The schedule is prepared by reverse traversal and includes both node
 latency and compiled PDC edge delays; it never polls live slots after prepare.
 An unresolved Plugin node is `QueryFailed`: the expected plugin is absent, rather
 than present through a backend that lacks latency-reporting support.
+Custom nodes are `Unsupported` until CustomNodeType grows an explicit latency
+contract. A missing compiled generation reports `NoCompiledSnapshot`; an id not
+present in a valid generation reports `UnknownNode` with that id as the offender.
 When unknown reports compete, `QueryFailed` outranks `Unsupported`, then the
 lowest offending `NodeId` wins. Feedback edges are prior-block history and do
 not participate in the feed-forward schedule.

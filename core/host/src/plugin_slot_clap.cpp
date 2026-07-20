@@ -595,6 +595,13 @@ public:
         return ext && ext->get ? LatencyQuery::Available
                                : LatencyQuery::Unsupported;
     }
+    LatencyReport latency_report() const override {
+        if (!plugin_) return {LatencyQuery::QueryFailed, 0};
+        auto* ext = static_cast<const clap_plugin_latency_t*>(
+            plugin_->get_extension(plugin_, CLAP_EXT_LATENCY));
+        if (!ext || !ext->get) return {LatencyQuery::Unsupported, 0};
+        return {LatencyQuery::Available, static_cast<int>(ext->get(plugin_))};
+    }
     int tail_samples() const override {
         if (!plugin_) return 0;
         auto* ext = (const clap_plugin_tail_t*)plugin_->get_extension(plugin_, CLAP_EXT_TAIL);

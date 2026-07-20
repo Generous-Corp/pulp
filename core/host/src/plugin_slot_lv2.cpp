@@ -335,6 +335,9 @@ public:
     // that care must ask.
     int latency_samples() const override { return 0; }
     LatencyQuery latency_query() const override { return LatencyQuery::Unsupported; }
+    LatencyReport latency_report() const override {
+        return {LatencyQuery::Unsupported, 0};
+    }
     int tail_samples() const override { return 0; }
 
     // Typed plugin introspection surfaces the LV2 instance handle and URI so

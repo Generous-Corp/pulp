@@ -46,12 +46,16 @@ public:
     bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
     int latency_samples() const override {
         latency_calls.fetch_add(1, std::memory_order_relaxed);
-        return latency_;
+        return legacy_latency_;
     }
     int tail_samples() const override { return 0; }
     LatencyQuery latency_query() const override {
         query_calls.fetch_add(1, std::memory_order_relaxed);
-        return query_;
+        return legacy_query_;
+    }
+    LatencyReport latency_report() const override {
+        report_calls.fetch_add(1, std::memory_order_relaxed);
+        return {query_, latency_};
     }
     bool has_editor() const override { return false; }
     void* create_editor_view() override { return nullptr; }
@@ -59,11 +63,53 @@ public:
 
     mutable std::atomic<int> query_calls{0};
     mutable std::atomic<int> latency_calls{0};
+    mutable std::atomic<int> report_calls{0};
+
+    void set_legacy_split(int samples, LatencyQuery query) {
+        legacy_latency_ = samples;
+        legacy_query_ = query;
+    }
 
 private:
     PluginInfo info_;
     int latency_ = 0;
     LatencyQuery query_ = LatencyQuery::Available;
+    int legacy_latency_ = latency_;
+    LatencyQuery legacy_query_ = query_;
+};
+
+class LegacyLatencySlot final : public PluginSlot {
+public:
+    LegacyLatencySlot() {
+        info_.name = "Legacy latency fixture";
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int samples) override {
+        std::copy_n(input.channel_ptr(0), samples, output.channel_ptr(0));
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return 17; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+private:
+    PluginInfo info_;
 };
 
 void require_result(const LatencyToOutputResult& result,
@@ -103,9 +149,46 @@ TEST_CASE("latency-to-output distinguishes known zero from unavailable reports",
             require_result(graph.latency_to_output(input), Status::QueryFailed,
                            0, plugin);
         }
-        REQUIRE(observed->latency_calls.load(std::memory_order_relaxed) ==
-                (query == PluginSlot::LatencyQuery::Available ? 1 : 0));
+        REQUIRE(observed->latency_calls.load(std::memory_order_relaxed) == 0);
+        REQUIRE(observed->query_calls.load(std::memory_order_relaxed) == 0);
+        REQUIRE(observed->report_calls.load(std::memory_order_relaxed) == 1);
     }
+}
+
+TEST_CASE("latency capture uses the coherent one-shot report",
+          "[host][signal-graph][latency-schedule][metadata-cache]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    auto slot = std::make_unique<LatencySlot>(42, PluginSlot::LatencyQuery::Available);
+    auto* observed = slot.get();
+    observed->set_legacy_split(0, PluginSlot::LatencyQuery::Available);
+    const auto input = graph.add_input_node(1);
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::Available, 42);
+    REQUIRE(observed->latency_calls.load(std::memory_order_relaxed) == 0);
+    REQUIRE(observed->query_calls.load(std::memory_order_relaxed) == 0);
+    REQUIRE(observed->report_calls.load(std::memory_order_relaxed) == 1);
+}
+
+TEST_CASE("legacy split latency methods retain prepared graph PDC",
+          "[host][signal-graph][latency-schedule][compatibility]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<LegacyLatencySlot>(), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    REQUIRE(graph.latency_samples() == 17);
+    require_result(graph.latency_to_output(input), Status::Available, 17);
 }
 
 TEST_CASE("latency-to-output includes serial latency and compiled fan-in PDC",
@@ -154,7 +237,43 @@ TEST_CASE("latency-to-output reports unreachable and divergent output paths",
 
     require_result(graph.latency_to_output(input), Status::AmbiguousOutputLatency);
     require_result(graph.latency_to_output(orphan), Status::NoOutputPath);
-    require_result(graph.latency_to_output(999999), Status::NoOutputPath);
+    require_result(graph.latency_to_output(999999), Status::UnknownNode, 0, 999999);
+}
+
+TEST_CASE("latency-to-output distinguishes custom nodes without a latency contract",
+          "[host][signal-graph][latency-schedule]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    CustomNodeType type;
+    type.type_id = "test.custom-latency-unknown";
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.process = [](pulp::audio::BufferView<float>& output,
+                      const pulp::audio::BufferView<const float>& input,
+                      int samples) {
+        std::copy_n(input.channel_ptr(0), samples, output.channel_ptr(0));
+    };
+    REQUIRE(graph.register_custom_node_type(std::move(type)));
+    const auto input = graph.add_input_node(1);
+    const auto custom = graph.add_custom_node("test.custom-latency-unknown");
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::Unsupported, 0, custom);
+}
+
+TEST_CASE("latency-to-output distinguishes absent snapshots from graph paths",
+          "[host][signal-graph][latency-schedule][snapshot]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    require_result(graph.latency_to_output(input), Status::NoCompiledSnapshot);
+
+    SignalGraph::ExecutionSnapshot empty;
+    require_result(empty.latency_to_output(input), Status::NoCompiledSnapshot);
 }
 
 TEST_CASE("latency-to-output does not certify unresolved plugins as zero latency",
@@ -225,6 +344,7 @@ TEST_CASE("execution snapshot keeps its latency schedule across a prepared edit"
     REQUIRE(pin_edit->commit() == EditResult::Committed);
     const auto pinned = pin_edit->committed_execution_snapshot();
     require_result(pinned.latency_to_output(input), Status::Available, 12);
+    require_result(pinned.latency_to_output(999999), Status::UnknownNode, 0, 999999);
 
     auto disconnect_edit = graph.begin_prepared_topology_edit();
     REQUIRE(disconnect_edit->disconnect(plugin, 0, output, 0));
@@ -247,9 +367,13 @@ TEST_CASE("latency schedule queries never poll a prepared plugin again",
     REQUIRE(graph.connect(plugin, 0, output, 0));
     REQUIRE(graph.prepare(48000.0, 64));
     observed->query_calls.store(0, std::memory_order_relaxed);
+    observed->latency_calls.store(0, std::memory_order_relaxed);
+    observed->report_calls.store(0, std::memory_order_relaxed);
 
     for (int iteration = 0; iteration < 32; ++iteration) {
         REQUIRE(graph.latency_to_output(input).samples == 7);
     }
     REQUIRE(observed->query_calls.load(std::memory_order_relaxed) == 0);
+    REQUIRE(observed->latency_calls.load(std::memory_order_relaxed) == 0);
+    REQUIRE(observed->report_calls.load(std::memory_order_relaxed) == 0);
 }

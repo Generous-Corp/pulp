@@ -34,7 +34,7 @@ Result unknown_result(PluginSlot::LatencyQuery query, NodeId node) {
     if (query == PluginSlot::LatencyQuery::Unsupported) {
         return {Status::Unsupported, 0, node};
     }
-    return {};
+    return {Status::Available, 0, 0};
 }
 
 } // namespace
@@ -117,12 +117,12 @@ namespace pulp::host {
 
 SignalGraph::PreparedLatencyMetadata SignalGraph::capture_latency_metadata_(
     PluginSlot& slot) {
-    const auto query = slot.latency_query();
+    const auto report = slot.latency_report();
     return {
-        query == PluginSlot::LatencyQuery::Available
-            ? std::max(0, slot.latency_samples())
+        report.query == PluginSlot::LatencyQuery::Available
+            ? std::max(0, report.samples)
             : 0,
-        query,
+        report.query,
     };
 }
 
@@ -137,13 +137,19 @@ void SignalGraph::build_latency_schedule_for_(CompiledGraph& cg) {
                   0, runtime_it->second.output_latency -
                          runtime_it->second.input_latency);
         const auto query_it = cg.plugin_latency_queries.find(id);
+        PluginSlot::LatencyQuery query = PluginSlot::LatencyQuery::Available;
+        if (shape.type == NodeType::Custom) {
+            query = PluginSlot::LatencyQuery::Unsupported;
+        } else if (shape.type == NodeType::Plugin) {
+            query = query_it == cg.plugin_latency_queries.end()
+                ? PluginSlot::LatencyQuery::QueryFailed
+                : query_it->second;
+        }
         nodes.push_back({
             id,
             shape.type,
             intrinsic,
-            query_it == cg.plugin_latency_queries.end()
-                ? PluginSlot::LatencyQuery::Available
-                : query_it->second,
+            query,
         });
     }
 
@@ -164,7 +170,7 @@ LatencyToOutputResult SignalGraph::latency_to_output_for_(
     const CompiledGraph& cg, NodeId id) noexcept {
     const auto result = cg.latency_schedule.find(id);
     return result == cg.latency_schedule.end()
-        ? LatencyToOutputResult{}
+        ? LatencyToOutputResult{LatencyToOutputResult::Status::UnknownNode, 0, id}
         : result->second;
 }
 
@@ -172,13 +178,15 @@ LatencyToOutputResult SignalGraph::latency_to_output(NodeId id) const noexcept {
     auto read_guard = live_slot_.read();
     const auto* snapshot = read_guard.get();
     return snapshot ? latency_to_output_for_(*snapshot, id)
-                    : LatencyToOutputResult{};
+                    : LatencyToOutputResult{
+                          LatencyToOutputResult::Status::NoCompiledSnapshot, 0, 0};
 }
 
 LatencyToOutputResult SignalGraph::ExecutionSnapshot::latency_to_output(
     NodeId id) const noexcept {
     return snapshot_ ? SignalGraph::latency_to_output_for_(*snapshot_, id)
-                     : LatencyToOutputResult{};
+                     : LatencyToOutputResult{
+                           LatencyToOutputResult::Status::NoCompiledSnapshot, 0, 0};
 }
 
 } // namespace pulp::host

@@ -521,6 +521,11 @@ public:
         if (!processor_) return 0;
         return (int)processor_->getLatencySamples();
     }
+    LatencyReport latency_report() const override {
+        if (!processor_) return {LatencyQuery::QueryFailed, 0};
+        return {LatencyQuery::Available,
+                static_cast<int>(processor_->getLatencySamples())};
+    }
     int tail_samples() const override {
         if (!processor_) return 0;
         return (int)processor_->getTailSamples();

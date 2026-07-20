@@ -743,4 +743,7 @@ TEST_CASE("CLAP slot marks an absent latency extension unsupported",
     REQUIRE(slot != nullptr);
     REQUIRE(slot->latency_samples() == 0);
     REQUIRE(slot->latency_query() == PluginSlot::LatencyQuery::Unsupported);
+    const auto report = slot->latency_report();
+    REQUIRE(report.query == PluginSlot::LatencyQuery::Unsupported);
+    REQUIRE(report.samples == 0);
 }

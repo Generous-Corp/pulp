@@ -195,6 +195,11 @@ public:
         QueryFailed,  ///< The backend asked and the plugin errored.
     };
 
+    struct LatencyReport {
+        LatencyQuery query = LatencyQuery::Unsupported;
+        int samples = 0;
+    };
+
     // Native-handle visitor.
     //
     // Typed plugin introspection: subclass NativeHandleVisitor, override
@@ -301,6 +306,16 @@ public:
     /// editor, the format cannot resize, or the plugin refused.
     virtual bool set_hosted_editor_size(uint32_t& /*width*/, uint32_t& /*height*/) {
         return false;
+    }
+
+    /// One-shot latency fact used by prepared graph metadata. Format backends
+    /// override this when status and value come from one native query. Built-in
+    /// backends do so atomically. The compatibility default assumes the legacy
+    /// split methods are prepare-stable and calls the numeric method only when
+    /// the status says it is meaningful. Appended at the vtable tail.
+    virtual LatencyReport latency_report() const {
+        const auto query = latency_query();
+        return {query, query == LatencyQuery::Available ? latency_samples() : 0};
     }
 };
 

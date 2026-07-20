@@ -73,9 +73,11 @@ struct LatencyToOutputResult {
         QueryFailed,
         NoOutputPath,
         AmbiguousOutputLatency,
+        UnknownNode,
+        NoCompiledSnapshot,
     };
 
-    Status status = Status::NoOutputPath;
+    Status status = Status::NoCompiledSnapshot;
     std::int64_t samples = 0;
     NodeId offending_node = 0;
 };
@@ -953,7 +955,9 @@ public:
     // represent prior-block history, not a schedulable feed-forward path.
     // Across reachable paths, QueryFailed takes precedence over Unsupported;
     // ties select the lowest offending NodeId. Differing known totals report
-    // AmbiguousOutputLatency.
+    // AmbiguousOutputLatency. An absent compiled snapshot reports
+    // NoCompiledSnapshot; an id absent from a prepared snapshot reports
+    // UnknownNode with that requested id as offending_node.
     LatencyToOutputResult latency_to_output(NodeId id) const noexcept;
 
     // Set a single parameter value on a Plugin node at the graph level. The

@@ -45,6 +45,10 @@ and renderer set. It constructs a non-owning `PlaybackProgramBlock` only while
 that generation is pinned, so program destruction/refcount traffic still never
 runs on the audio thread. Content adoption republishes the whole binding
 generation; do not reintroduce a separate store latch there.
+When timeline code needs graph timing, query latency through that same pinned
+`SignalGraph::ExecutionSnapshot`. Its `latency_to_output()` result belongs to
+the prepared graph generation; do not reconstruct PDC from live plugin slots or
+collapse unavailable, failed, missing-snapshot, and unknown-node outcomes.
 
 For arrangement note playback, construct one `ArrangementNoteRenderer` per
 track, call `prepare(maximum_events_per_block)` off the audio thread, then pass
