@@ -1017,6 +1017,12 @@ jobs:
             exclude="${exclude}|DesignFrameView xy_pad puck renders"
             exclude="${exclude}|DesignFrameView slides"
             exclude="${exclude}|DesignFrameView rotates"
+            # Flaky on the ephemeral macOS CI VMs (offscreen GPU replay is
+            # environment-sensitive: passes locally + on most runs, but
+            # intermittently fails, evicting whole merge-queue batches and
+            # disabling auto-merge on every PR in them). Quarantined until the
+            # offscreen GPU-replay path is stabilized. Tracking: flaky-gpu-3327.
+            exclude="${exclude}|Subtree cache composites a GPU image on the replay frame"
           fi
           # --repeat until-pass:2 retries a failed test once before failing the
           # leg, so a single timing-flake (e.g. a ReDoS-guard test slowed by
