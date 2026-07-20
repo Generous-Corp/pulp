@@ -16,12 +16,14 @@ add_library(pulp-timeline
     src/schema_json_parser.cpp
     src/schema_json_preflight.cpp
     src/schema_registry.cpp
+    src/serialize_automation_decode.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
     src/snapshot_equivalence.cpp
     src/structural_registry_validation.cpp
     src/track.cpp
     src/track_schema_migrations.cpp
+    src/transaction_automation_internal.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 
