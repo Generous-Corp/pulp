@@ -123,6 +123,20 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveAutomationLane>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.lane_id == right.lane_id;
+            } else if constexpr (std::is_same_v<T, InsertSequenceMarker>) {
+                return left.sequence_id == right.sequence_id && left.marker == right.marker;
+            } else if constexpr (std::is_same_v<T, RemoveSequenceMarker>) {
+                return left.sequence_id == right.sequence_id && left.marker_id == right.marker_id;
+            } else if constexpr (std::is_same_v<T, SetSequenceMarker>) {
+                return left.sequence_id == right.sequence_id && left.marker_id == right.marker_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertSequenceRegion>) {
+                return left.sequence_id == right.sequence_id && left.region == right.region;
+            } else if constexpr (std::is_same_v<T, RemoveSequenceRegion>) {
+                return left.sequence_id == right.sequence_id && left.region_id == right.region_id;
+            } else if constexpr (std::is_same_v<T, SetSequenceRegion>) {
+                return left.sequence_id == right.sequence_id && left.region_id == right.region_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, MoveClip>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id &&
@@ -170,6 +184,20 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), clip_retained_size(value.clip));
             if constexpr (std::is_same_v<T, InsertAutomationLane>)
                 return saturated_add(sizeof(T), automation_lane_retained_size(value.lane));
+            if constexpr (std::is_same_v<T, InsertSequenceMarker>)
+                return saturated_add(sizeof(T), saturated_add(value.marker.name.size(),
+                                                              value.marker.type.value().size()));
+            if constexpr (std::is_same_v<T, SetSequenceMarker>)
+                return saturated_add(sizeof(T),
+                                     saturated_add(value.expected.name.size() +
+                                                       value.expected.type.value().size(),
+                                                   value.replacement.name.size() +
+                                                       value.replacement.type.value().size()));
+            if constexpr (std::is_same_v<T, InsertSequenceRegion>)
+                return saturated_add(sizeof(T), value.region.name.size());
+            if constexpr (std::is_same_v<T, SetSequenceRegion>)
+                return saturated_add(sizeof(T), value.expected.name.size() +
+                                                    value.replacement.name.size());
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(sizeof(T),
                                      saturated_multiply(

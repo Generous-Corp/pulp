@@ -1,6 +1,7 @@
 #include <pulp/timeline/transaction.hpp>
 
 #include "transaction_automation_internal.hpp"
+#include "transaction_annotation_internal.hpp"
 #include "transaction_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
@@ -194,6 +195,16 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         } else if (detail::is_automation_command(envelope.command)) {
             auto reduced = detail::reduce_automation_command(project, envelope.command, transaction,
                                                              envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_annotation_command(envelope.command)) {
+            auto reduced = detail::reduce_annotation_command(project, envelope.command,
+                                                             transaction, envelope.id,
+                                                             allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

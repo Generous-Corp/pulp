@@ -53,7 +53,11 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             left_sequence.duration() != right_sequence.duration() ||
             !same_absolute_duration(left_sequence.absolute_duration(),
                                     right_sequence.absolute_duration()) ||
-            left_sequence.tracks().size() != right_sequence.tracks().size())
+            left_sequence.tracks().size() != right_sequence.tracks().size() ||
+            !std::equal(left_sequence.markers().begin(), left_sequence.markers().end(),
+                        right_sequence.markers().begin(), right_sequence.markers().end()) ||
+            !std::equal(left_sequence.regions().begin(), left_sequence.regions().end(),
+                        right_sequence.regions().begin(), right_sequence.regions().end()))
             return false;
         for (std::size_t t = 0; t < left_sequence.tracks().size(); ++t) {
             const auto& left_track = left_sequence.tracks()[t];

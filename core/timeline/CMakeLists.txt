@@ -10,6 +10,7 @@ add_library(pulp-timeline
     src/journal.cpp
     src/model.cpp
     src/transaction.cpp
+    src/transaction_annotation_internal.cpp
     src/undo.cpp
     src/schema_json.cpp
     src/schema_json_canonical.cpp
@@ -17,6 +18,7 @@ add_library(pulp-timeline
     src/schema_json_preflight.cpp
     src/schema_registry.cpp
     src/sequence.cpp
+    src/sequence_annotations.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp

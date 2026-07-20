@@ -9,6 +9,7 @@
 #include <pulp/timeline/automation_lane.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/sequence_annotations.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -366,6 +367,8 @@ class Track {
     std::shared_ptr<const Data> data_;
 };
 
+struct SequenceInput;
+
 class Sequence {
   public:
     static runtime::Result<Sequence, ModelError>
@@ -374,6 +377,7 @@ class Sequence {
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks);
+    static runtime::Result<Sequence, ModelError> create(SequenceInput input);
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -381,13 +385,33 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
+    std::span<const SequenceMarker> markers() const noexcept;
+    std::span<const SequenceRegion> regions() const noexcept;
+    const SequenceMarker* find_marker(ItemId id) const noexcept;
+    const SequenceRegion* find_region(ItemId id) const noexcept;
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
+    runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
+    runtime::Result<Sequence, ModelError> replace_marker(SequenceMarker marker) const;
+    runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
+    runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
+    runtime::Result<Sequence, ModelError> replace_region(SequenceRegion region) const;
     bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:
     struct Data;
     explicit Sequence(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
+};
+
+struct SequenceInput {
+    ItemId id;
+    std::string name;
+    std::optional<timebase::TickDuration> musical_duration;
+    std::optional<AbsoluteTimelineDuration> absolute_duration;
+    std::vector<Track> tracks;
+    std::vector<SequenceMarker> markers;
+    std::vector<SequenceRegion> regions;
 };
 
 struct ProjectInput {
@@ -411,6 +435,8 @@ enum class ItemKind : std::uint8_t {
     DevicePlacement,
     AutomationLane,
     AutomationPoint,
+    SequenceMarker,
+    SequenceRegion,
 };
 
 struct ItemLocation {

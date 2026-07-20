@@ -317,6 +317,11 @@ detail::ProjectStateAccess::restore_identities(Project project,
             case ItemKind::Sequence:
                 return location.sequence_id == entry.item && location.track_id == invalid &&
                        location.clip_id == invalid && location.automation_lane_id == invalid;
+            case ItemKind::SequenceMarker:
+            case ItemKind::SequenceRegion:
+                return location.sequence_id.valid() && location.sequence_id != entry.item &&
+                       location.track_id == invalid && location.clip_id == invalid &&
+                       location.automation_lane_id == invalid;
             case ItemKind::Track:
                 return location.sequence_id.valid() && location.sequence_id != entry.item &&
                        location.track_id == entry.item && location.clip_id == invalid &&
@@ -364,6 +369,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
             case ItemKind::Sequence:
                 return true;
             case ItemKind::Track:
+            case ItemKind::SequenceMarker:
+            case ItemKind::SequenceRegion:
                 return owner_is(location.sequence_id, ItemKind::Sequence);
             case ItemKind::Clip: {
                 const auto* track = find_entry(location.track_id);
@@ -473,6 +480,14 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     for (const auto& sequence : input.sequences) {
         all_ids.push_back(sequence.id());
         maximum_id = std::max(maximum_id, sequence.id().value);
+        for (const auto& marker : sequence.markers()) {
+            all_ids.push_back(marker.id);
+            maximum_id = std::max(maximum_id, marker.id.value);
+        }
+        for (const auto& region : sequence.regions()) {
+            all_ids.push_back(region.id);
+            maximum_id = std::max(maximum_id, region.id.value);
+        }
         for (const auto& track : sequence.tracks()) {
             all_ids.push_back(track.id());
             maximum_id = std::max(maximum_id, track.id().value);
@@ -543,6 +558,14 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     for (const auto& sequence : input.sequences) {
         add_identity(sequence.id(),
                      {.kind = ItemKind::Sequence, .sequence_id = sequence.id(), .active = true});
+        for (const auto& marker : sequence.markers())
+            add_identity(marker.id, {.kind = ItemKind::SequenceMarker,
+                                     .sequence_id = sequence.id(),
+                                     .active = true});
+        for (const auto& region : sequence.regions())
+            add_identity(region.id, {.kind = ItemKind::SequenceRegion,
+                                     .sequence_id = sequence.id(),
+                                     .active = true});
         for (const auto& track : sequence.tracks()) {
             add_identity(track.id(), {.kind = ItemKind::Track,
                                       .sequence_id = sequence.id(),

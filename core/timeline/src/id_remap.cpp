@@ -98,6 +98,10 @@ std::optional<ModelError> preflight(const Track& track) {
 
 std::optional<ModelError> preflight(const Sequence& sequence) {
     std::vector<ItemId> ids{sequence.id()};
+    for (const auto& marker : sequence.markers())
+        ids.push_back(marker.id);
+    for (const auto& region : sequence.regions())
+        ids.push_back(region.id);
     for (const auto& track : sequence.tracks()) {
         ids.push_back(track.id());
         for (const auto& device : track.device_chain())
@@ -206,8 +210,16 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
                                   rebuilt.error().related_item);
         tracks.push_back(std::move(rebuilt).value());
     }
-    return Sequence::create(*table.find(sequence.id()), sequence.name(), sequence.duration(),
-                            sequence.absolute_duration(), std::move(tracks));
+    std::vector<SequenceMarker> markers(sequence.markers().begin(), sequence.markers().end());
+    for (auto& marker : markers)
+        marker.id = *table.find(marker.id);
+    std::vector<SequenceRegion> regions(sequence.regions().begin(), sequence.regions().end());
+    for (auto& region : regions)
+        region.id = *table.find(region.id);
+    return Sequence::create(SequenceInput{*table.find(sequence.id()), sequence.name(),
+                                          sequence.duration(), sequence.absolute_duration(),
+                                          std::move(tracks), std::move(markers),
+                                          std::move(regions)});
 }
 
 } // namespace
@@ -268,6 +280,14 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
     auto working = allocator;
     IdRemapTable table;
     std::optional<ModelError> error = allocate_owned(table, working, sequence.id());
+    for (const auto& marker : sequence.markers()) {
+        if (!error)
+            error = allocate_owned(table, working, marker.id);
+    }
+    for (const auto& region : sequence.regions()) {
+        if (!error)
+            error = allocate_owned(table, working, region.id);
+    }
     for (const auto& track : sequence.tracks()) {
         if (!error)
             error = allocate_owned(table, working, track.id());

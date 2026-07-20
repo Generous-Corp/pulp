@@ -76,6 +76,40 @@ struct RemoveAutomationLane {
     ItemId lane_id;
 };
 
+struct InsertSequenceMarker {
+    ItemId sequence_id;
+    SequenceMarker marker;
+};
+
+struct RemoveSequenceMarker {
+    ItemId sequence_id;
+    ItemId marker_id;
+};
+
+struct SetSequenceMarker {
+    ItemId sequence_id;
+    ItemId marker_id;
+    SequenceMarker expected;
+    SequenceMarker replacement;
+};
+
+struct InsertSequenceRegion {
+    ItemId sequence_id;
+    SequenceRegion region;
+};
+
+struct RemoveSequenceRegion {
+    ItemId sequence_id;
+    ItemId region_id;
+};
+
+struct SetSequenceRegion {
+    ItemId sequence_id;
+    ItemId region_id;
+    SequenceRegion expected;
+    SequenceRegion replacement;
+};
+
 struct MoveClip {
     ItemId sequence_id;
     ItemId track_id;
@@ -113,7 +147,9 @@ struct SetMeterMap {
 
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
-                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap>;
+                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap,
+                 InsertSequenceMarker, RemoveSequenceMarker, SetSequenceMarker,
+                 InsertSequenceRegion, RemoveSequenceRegion, SetSequenceRegion>;
 
 struct CommandEnvelope {
     CommandId id;

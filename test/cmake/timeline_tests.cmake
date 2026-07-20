@@ -4,7 +4,7 @@
 
 pulp_add_test_suite(pulp-test-timeline-model
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
-        test_timeline_automation_attachment.cpp
+        test_timeline_automation_attachment.cpp test_timeline_sequence_annotations.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
@@ -43,6 +43,7 @@ pulp_add_test_suite(pulp-test-playback-track-automation-program
 
 pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
+        test_timeline_annotation_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
@@ -106,6 +107,8 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_annotations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
@@ -114,6 +117,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_annotation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
