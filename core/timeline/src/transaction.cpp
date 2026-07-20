@@ -138,8 +138,11 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             std::vector<IdentityMutation> identity_changes;
             std::uint64_t next = project.next_item_id();
             for (const auto [id, kind] : owned_identities(insert->clip)) {
-                ItemLocation wanted{kind, insert->sequence_id, insert->track_id, insert->clip.id(),
-                                    true};
+                ItemLocation wanted{.kind = kind,
+                                    .sequence_id = insert->sequence_id,
+                                    .track_id = insert->track_id,
+                                    .clip_id = insert->clip.id(),
+                                    .active = true};
                 const auto existing = project.locate(id);
                 if (allow_tombstone_restore && existing) {
                     if (!existing || existing->active || existing->kind != wanted.kind ||
@@ -190,10 +193,13 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             const Clip removed = *clip;
             std::vector<IdentityMutation> identity_changes;
             for (const auto [id, kind] : owned_identities(removed))
-                identity_changes.push_back(
-                    {IdentityMutationKind::Deactivate,
-                     id,
-                     {kind, remove->sequence_id, remove->track_id, remove->clip_id, false}});
+                identity_changes.push_back({IdentityMutationKind::Deactivate,
+                                            id,
+                                            {.kind = kind,
+                                             .sequence_id = remove->sequence_id,
+                                             .track_id = remove->track_id,
+                                             .clip_id = remove->clip_id,
+                                             .active = false}});
             auto next_track = track->erase_clip(remove->clip_id);
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(
@@ -212,8 +218,8 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             dirty.push_back({remove->clip_id, remove->track_id, remove->sequence_id,
                              DirtyFlags::Structure | DirtyFlags::Removed});
         } else if (detail::is_automation_command(envelope.command)) {
-            auto reduced = detail::reduce_automation_command(
-                project, envelope.command, transaction, envelope.id, allow_tombstone_restore);
+            auto reduced = detail::reduce_automation_command(project, envelope.command, transaction,
+                                                             envelope.id, allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

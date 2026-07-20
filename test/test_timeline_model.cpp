@@ -14,14 +14,22 @@ TEST_CASE("Timeline private identity equality is semantic across insertion histo
     pulp::timeline::detail::IdentityDirectory ascending;
     pulp::timeline::detail::IdentityDirectory interleaved;
     const auto location = [](std::uint64_t id) {
-        return ItemLocation{ItemKind::Clip, {10}, {11}, {id}, true};
+        return ItemLocation{.kind = ItemKind::Clip,
+                            .sequence_id = {10},
+                            .track_id = {11},
+                            .clip_id = {id},
+                            .active = true};
     };
     for (std::uint64_t id = 1; id <= 7; ++id)
         REQUIRE(ascending.insert({id}, location(id)));
     for (const std::uint64_t id : {4, 2, 6, 1, 3, 5, 7})
         REQUIRE(interleaved.insert({id}, location(id)));
     REQUIRE(ascending.equivalent(interleaved));
-    REQUIRE(interleaved.replace({7}, {ItemKind::Clip, {10}, {11}, {7}, false}));
+    REQUIRE(interleaved.replace({7}, {.kind = ItemKind::Clip,
+                                      .sequence_id = {10},
+                                      .track_id = {11},
+                                      .clip_id = {7},
+                                      .active = false}));
     REQUIRE_FALSE(ascending.equivalent(interleaved));
 }
 using namespace pulp::timebase;

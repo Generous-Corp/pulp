@@ -642,16 +642,22 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     }
     detail::IdentityDirectory identities;
     auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
-    add_identity(input.id, {ItemKind::Project, {}, {}, {}, true});
+    add_identity(input.id, {.kind = ItemKind::Project, .active = true});
     for (const auto& asset : input.assets)
-        add_identity(asset.id, {ItemKind::Asset, {}, {}, {}, true});
+        add_identity(asset.id, {.kind = ItemKind::Asset, .active = true});
     for (const auto& sequence : input.sequences) {
-        add_identity(sequence.id(), {ItemKind::Sequence, sequence.id(), {}, {}, true});
+        add_identity(sequence.id(),
+                     {.kind = ItemKind::Sequence, .sequence_id = sequence.id(), .active = true});
         for (const auto& track : sequence.tracks()) {
-            add_identity(track.id(), {ItemKind::Track, sequence.id(), track.id(), {}, true});
+            add_identity(track.id(), {.kind = ItemKind::Track,
+                                      .sequence_id = sequence.id(),
+                                      .track_id = track.id(),
+                                      .active = true});
             for (const auto& device : track.device_chain())
-                add_identity(device.id,
-                             {ItemKind::DevicePlacement, sequence.id(), track.id(), {}, true});
+                add_identity(device.id, {.kind = ItemKind::DevicePlacement,
+                                         .sequence_id = sequence.id(),
+                                         .track_id = track.id(),
+                                         .active = true});
             for (const auto& lane : track.automation_lanes()) {
                 add_identity(
                     lane.id(),
@@ -665,12 +671,18 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                                             lane.id()});
             }
             for (const auto& clip : track.clips()) {
-                add_identity(clip.id(),
-                             {ItemKind::Clip, sequence.id(), track.id(), clip.id(), true});
+                add_identity(clip.id(), {.kind = ItemKind::Clip,
+                                         .sequence_id = sequence.id(),
+                                         .track_id = track.id(),
+                                         .clip_id = clip.id(),
+                                         .active = true});
                 if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
                     for (const auto& note : notes->notes())
-                        add_identity(note.id,
-                                     {ItemKind::Note, sequence.id(), track.id(), clip.id(), true});
+                        add_identity(note.id, {.kind = ItemKind::Note,
+                                               .sequence_id = sequence.id(),
+                                               .track_id = track.id(),
+                                               .clip_id = clip.id(),
+                                               .active = true});
                 }
             }
         }
