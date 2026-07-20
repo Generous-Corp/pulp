@@ -215,7 +215,11 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
         identities_end,
         R"(,{"active":false,"clip_id":"0","id":"6","kind":"device_placement","parent_id":"3","sequence_id":"2","track_id":"3"})");
 
-    const auto restored = take(deserialize_project(snapshot, builtins()));
+    const auto legacy_snapshot = replace_once(
+        snapshot,
+        R"({"active":false,"clip_id":"0","id":"6","kind":"device_placement","parent_id":"3","sequence_id":"2","track_id":"3"})",
+        R"({"active":false,"clip_id":"0","id":"6","kind":"device_placement","sequence_id":"2","track_id":"3"})");
+    const auto restored = take(deserialize_project(legacy_snapshot, builtins()));
     const auto tombstone = restored.locate({6});
     REQUIRE(tombstone.has_value());
     REQUIRE(tombstone->kind == ItemKind::DevicePlacement);

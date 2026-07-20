@@ -712,7 +712,7 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
         case IdentityMutationKind::Reactivate: {
             if (!existing || existing->active || !existing->has_same_owner(change.location))
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
-            auto location = *existing;
+            auto location = change.location;
             location.active = true;
             identities.replace(change.item, location);
             break;
