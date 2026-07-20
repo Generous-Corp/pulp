@@ -74,6 +74,12 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     DeviceNodeAutomationConflict,
     AutomationRendererRejected,
     CleanupRecoveryRequired,
+    LatencyUnsupported,
+    LatencyQueryFailed,
+    LatencyNoOutputPath,
+    LatencyAmbiguousOutput,
+    LatencyUnknownNode,
+    LatencyNoCompiledSnapshot,
 };
 
 /// Structured admission result. Capacity failures always report the exact
@@ -103,6 +109,7 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     AutomationDeliveryFailed,
     RoutedDispatchFailed,
     CleanupFailed,
+    ScheduleProjectionFailed,
 };
 
 struct TimelineGraphProcessResult {

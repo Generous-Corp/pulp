@@ -1399,5 +1399,17 @@ When unknown reports compete, `QueryFailed` outranks `Unsupported`, then the
 lowest offending `NodeId` wins. Feedback edges are prior-block history and do
 not participate in the feed-forward schedule.
 
+Timeline graph binding turns that pinned latency data into an immutable PDC
+schedule after the candidate graph is prepared and before it is committed. Audio
+sources query their custom-node output boundary; MIDI destinations and device
+automation query plugin input boundaries. Every non-`Available` status rejects
+the candidate explicitly. The plan retains schedules for every routed device,
+while automation views are filtered through `TrackAutomationRenderer`'s
+canonical device-placement IDs so adoption cannot retain a stale lane subset.
+Per-sink projections use state-owned scratch snapshots only for queries and
+rendering; the graph's `ProcessContext` remains the base transport snapshot, and
+events are not shifted after rendering. Validate the private schedule adapter
+with `pulp-test-timeline-pdc-schedule` before paying for hosted plugin builds.
+
 `pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
 comes back `unsupported` rather than being falsely certified as zero-latency.

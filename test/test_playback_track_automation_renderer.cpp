@@ -107,6 +107,9 @@ TEST_CASE("track automation renderer batches by canonical device placement ident
     const auto rendered = renderer.process(block(transport, 9));
     REQUIRE(rendered.code == TrackAutomationRendererCode::Ok);
     REQUIRE(renderer.batches().size() == 2);
+    REQUIRE(renderer.device_placement_ids().size() == 2);
+    REQUIRE(renderer.device_placement_ids()[0] == ItemId{100});
+    REQUIRE(renderer.device_placement_ids()[1] == ItemId{200});
     REQUIRE(renderer.batches()[0].device_placement_id == ItemId{100});
     REQUIRE(renderer.batches()[1].device_placement_id == ItemId{200});
     REQUIRE(renderer.batches()[0].events[0].lane_id == ItemId{10});

@@ -115,6 +115,9 @@ class TrackAutomationRenderer {
     std::span<const DeviceAutomationBatch> batches() const noexcept {
         return batch_views_;
     }
+    std::span<const timeline::ItemId> device_placement_ids() const noexcept {
+        return device_ids_;
+    }
 
   private:
     TrackAutomationRenderer() = default;
@@ -155,6 +158,7 @@ class TrackAutomationRenderer {
     AutomationPlaybackLimits limits_;
     std::vector<LaneState> lanes_;
     std::vector<DeviceState> devices_;
+    std::vector<timeline::ItemId> device_ids_;
     std::vector<DeviceAutomationBatch> batch_views_;
 };
 

@@ -224,6 +224,11 @@ pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
 pulp_add_test_suite(pulp-test-signal-graph-latency-schedule
     SOURCES test_signal_graph_latency_schedule.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+pulp_add_test_suite(pulp-test-timeline-pdc-schedule
+    SOURCES test_timeline_pdc_schedule.cpp test_timeline_pdc_binding.cpp
+    LIBRARIES pulp::host pulp::playback)
+target_include_directories(pulp-test-timeline-pdc-schedule PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/host/src)
 # Per-node live-DSP telemetry wired through SignalGraph: default-off, per-node
 # recording on the reference walk, live toggle without recompile, no audio-path alloc.
 pulp_add_test_suite(pulp-test-live-dsp-telemetry-graph

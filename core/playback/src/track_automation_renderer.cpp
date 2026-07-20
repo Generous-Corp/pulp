@@ -155,6 +155,7 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
     program_ = std::move(program);
     lanes_ = std::move(next_lanes);
     devices_ = std::move(next_devices);
+    device_ids_ = std::move(device_ids);
     batch_views_ = std::move(next_views);
     return runtime::Ok(TrackAutomationRendererAdoption::Adopted);
 }

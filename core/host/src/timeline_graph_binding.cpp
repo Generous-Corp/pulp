@@ -5,6 +5,8 @@
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include "timeline_automation_delivery.hpp"
+#include "timeline_graph_audio_node.hpp"
+#include "timeline_pdc_schedule.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -46,47 +48,27 @@ void saturating_add(std::uint32_t& destination, std::uint32_t value) noexcept {
         : destination + value;
 }
 
-} // namespace
+std::vector<timeline::ItemId> automation_device_ids(
+    const detail::TimelineGraphAutomationTrack& track) {
+    if (!track.renderer) return {};
+    const auto ids = track.renderer->device_placement_ids();
+    return {ids.begin(), ids.end()};
+}
 
-struct detail::TimelineGraphSharedBlockState {
-    std::atomic<const playback::PlaybackProgramBlock*> block{nullptr};
-    std::atomic<const playback::TransportSnapshot*> transport{nullptr};
-    std::atomic<TimelineGraphProcessCode> audio_code{TimelineGraphProcessCode::Ok};
-};
+} // namespace
 
 struct detail::ExactParameterIngressOwner {};
 
 namespace {
 
-struct AudioNodeInstance {
-    AudioNodeInstance(std::shared_ptr<detail::TimelineGraphSharedBlockState> shared,
-                      std::shared_ptr<playback::ArrangementAudioTrackRenderer> renderer,
-                      playback::AudioRendererLimits limits) noexcept
-        : shared(std::move(shared)), renderer(std::move(renderer)), limits(limits) {}
-
-    void process(audio::BufferView<float>& output) noexcept {
-        // Every track node owns its renderer/shell, so nodes dispatched in one
-        // parallel level never touch shared mutable renderer state. The only
-        // shared write is the atomic block-wide failure code below.
-        const auto* block = shared->block.load(std::memory_order_acquire);
-        const auto* transport = shared->transport.load(std::memory_order_acquire);
-        if (block == nullptr || transport == nullptr) {
-            output.clear();
-            shared->audio_code.store(TimelineGraphProcessCode::MissingProgram,
-                                     std::memory_order_relaxed);
-            return;
-        }
-        const auto status = renderer->process(*block, *transport, output, limits);
-        if (status != playback::AudioRenderStatus::Rendered &&
-            status != playback::AudioRenderStatus::Silent) {
-            shared->audio_code.store(TimelineGraphProcessCode::AudioRenderFailed,
-                                     std::memory_order_relaxed);
-        }
+struct TimelinePdcAudioSlotGuard {
+    explicit TimelinePdcAudioSlotGuard(
+        detail::TimelinePdcSchedulePlan& plan) noexcept
+        : plan(&plan) {}
+    ~TimelinePdcAudioSlotGuard() {
+        detail::clear_timeline_pdc_audio_slots(*plan);
     }
-
-    std::shared_ptr<detail::TimelineGraphSharedBlockState> shared;
-    std::shared_ptr<playback::ArrangementAudioTrackRenderer> renderer;
-    playback::AudioRendererLimits limits;
+    detail::TimelinePdcSchedulePlan* plan;
 };
 
 } // namespace
@@ -97,6 +79,7 @@ struct detail::TimelineGraphBoundTrack {
     NodeId midi_node = 0;
     std::shared_ptr<playback::ArrangementAudioTrackRenderer> audio_renderer;
     std::unique_ptr<playback::ArrangementNoteRenderer> note_renderer;
+    std::shared_ptr<TimelinePdcAudioTransportSlot> audio_transport_slot;
 };
 
 struct detail::TimelineGraphBindingState {
@@ -106,6 +89,7 @@ struct detail::TimelineGraphBindingState {
     std::vector<timeline::ItemId> prepared_track_ids;
     std::shared_ptr<const playback::PlaybackProgram> program;
     SignalGraph::ExecutionSnapshot graph_snapshot;
+    mutable TimelinePdcSchedulePlan pdc_schedule;
     std::shared_ptr<ExactParameterIngressOwner> automation_claim_owner;
     mutable std::atomic<bool> delivery_poisoned{false};
     double prepared_sample_rate = 0.0;
@@ -120,6 +104,7 @@ struct detail::TimelineGraphPreparedCandidate {
     runtime::Slot<const TimelineGraphBindingState>::ReadGuard previous;
     std::shared_ptr<TimelineGraphBindingState> next;
     std::unique_ptr<SignalGraph::PreparedTopologyEdit> edit;
+    std::vector<TimelinePdcTrackRequirement> pdc_requirements;
 };
 
 namespace {
@@ -292,6 +277,16 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::prepare_impl(
             state_.publish_prepared({});
         return reject(TimelineGraphAdmissionCode::RoutedPlanRejected);
     }
+    auto pdc_schedule = detail::build_timeline_pdc_schedule(
+        *edit, candidate.pdc_requirements);
+    if (!pdc_schedule) {
+        const auto failure = pdc_schedule.error();
+        edit.reset();
+        if (!graph_.is_prepared())
+            state_.publish_prepared({});
+        return failure;
+    }
+    next->pdc_schedule = std::move(pdc_schedule).value();
     if (before_graph_commit_hook_for_test_ != nullptr)
         before_graph_commit_hook_for_test_(before_graph_commit_context_for_test_);
     SignalGraph::PreparedTopologyEdit::Result committed;
@@ -450,38 +445,21 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
         }
         if (!track) {
             const auto type_id = custom_type_id(binding_instance_id_, route.track_id);
-            std::weak_ptr<detail::TimelineGraphSharedBlockState> shared = shared_;
+            auto audio_transport_slot =
+                std::make_shared<detail::TimelinePdcAudioTransportSlot>();
             const auto track_id = route.track_id;
             const auto audio_limits = config.audio_limits;
             auto audio_renderer =
                 std::make_shared<playback::ArrangementAudioTrackRenderer>(track_id);
-            CustomNodeType type;
-            type.type_id = type_id;
-            type.version = 1;
-            type.num_output_ports = static_cast<int>(config.audio_channels);
-            type.default_name = "Timeline audio track " + std::to_string(track_id.value);
-            std::weak_ptr<playback::ArrangementAudioTrackRenderer> weak_renderer = audio_renderer;
-            type.create = [shared, weak_renderer, audio_limits]() -> void* {
-                auto locked_shared = shared.lock();
-                auto locked_renderer = weak_renderer.lock();
-                if (!locked_shared || !locked_renderer)
-                    return nullptr;
-                return new AudioNodeInstance(std::move(locked_shared), std::move(locked_renderer),
-                                             audio_limits);
-            };
-            type.destroy = [](void* value) { delete static_cast<AudioNodeInstance*>(value); };
-            type.process_instance = [](void* value, audio::BufferView<float>& output,
-                                       const audio::BufferView<const float>&, int) {
-                static_cast<AudioNodeInstance*>(value)->process(output);
-            };
-            type.process_instance_transport = [](void* value, audio::BufferView<float>& output,
-                                                 const audio::BufferView<const float>&, int,
-                                                 const format::ProcessContext&) {
-                static_cast<AudioNodeInstance*>(value)->process(output);
-            };
+            auto type = detail::make_timeline_graph_audio_node_type(
+                type_id,
+                "Timeline audio track " + std::to_string(track_id.value),
+                static_cast<int>(config.audio_channels), shared_,
+                audio_transport_slot, audio_renderer, audio_limits);
             track = std::make_shared<detail::TimelineGraphBoundTrack>();
             track->id = route.track_id;
             track->audio_renderer = std::move(audio_renderer);
+            track->audio_transport_slot = std::move(audio_transport_slot);
             track->note_renderer =
                 std::make_unique<playback::ArrangementNoteRenderer>(route.track_id);
             if (!track->note_renderer->prepare(
@@ -576,6 +554,21 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
         next->tracks.push_back(std::move(track));
         next->automation_tracks.push_back(std::move(automation).value());
         next->prepared_track_ids.push_back(route.track_id);
+        detail::TimelinePdcTrackRequirement pdc_requirement;
+        pdc_requirement.track_id = route.track_id;
+        pdc_requirement.audio_source = next->tracks.back()->audio_node;
+        pdc_requirement.midi_destination = route.midi_destination;
+        pdc_requirement.audio_slot = next->tracks.back()->audio_transport_slot;
+        const auto canonical_devices =
+            next->automation_tracks.back()->delivery->mappings();
+        pdc_requirement.devices.reserve(canonical_devices.size());
+        for (const auto& device : canonical_devices) {
+            pdc_requirement.devices.push_back(
+                {device.device_placement_id, device.plugin_node});
+        }
+        pdc_requirement.automation_device_ids =
+            automation_device_ids(*next->automation_tracks.back());
+        candidate.pdc_requirements.push_back(std::move(pdc_requirement));
     }
 
     for (const auto& connection : edit->connections()) {
@@ -652,6 +645,19 @@ TimelineGraphPlaybackBinding::adopt_program(const playback::PlaybackProgram& pro
     next->prepared_track_ids = previous->prepared_track_ids;
     next->program = std::make_shared<const playback::PlaybackProgram>(program);
     next->graph_snapshot = previous->graph_snapshot;
+    next->pdc_schedule =
+        detail::clone_timeline_pdc_schedule(previous->pdc_schedule);
+    for (std::size_t index = 0; index < next->pdc_schedule.tracks.size();
+         ++index) {
+        const auto device_ids =
+            automation_device_ids(*next->automation_tracks[index]);
+        const auto missing = detail::retarget_timeline_pdc_automation_devices(
+            next->pdc_schedule.tracks[index], device_ids);
+        if (missing.valid()) {
+            return reject(TimelineGraphAdmissionCode::MissingDevicePlacement,
+                          0, 1, missing);
+        }
+    }
     next->prepared_sample_rate = previous->prepared_sample_rate;
     next->prepared_max_block_size = previous->prepared_max_block_size;
     next->automation_claim_owner = previous->automation_claim_owner;
@@ -732,6 +738,30 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
             return result;
         }
     }
+    if (state->pdc_schedule.tracks.size() != state->tracks.size() ||
+        state->pdc_schedule.tracks.size() != state->automation_tracks.size()) {
+        result.code = TimelineGraphProcessCode::TopologyChanged;
+        output.clear();
+        return result;
+    }
+    for (std::size_t index = 0; index < state->pdc_schedule.tracks.size();
+         ++index) {
+        if (state->pdc_schedule.tracks[index].track_id !=
+                state->tracks[index]->id ||
+            state->pdc_schedule.tracks[index].track_id !=
+                state->automation_tracks[index]->id) {
+            result.code = TimelineGraphProcessCode::TopologyChanged;
+            output.clear();
+            return result;
+        }
+    }
+    result.code = detail::project_timeline_pdc_schedule(
+        state->pdc_schedule, transport);
+    if (result.code != TimelineGraphProcessCode::Ok) {
+        output.clear();
+        return result;
+    }
+    TimelinePdcAudioSlotGuard pdc_audio_slots(state->pdc_schedule);
     const auto clear_automation = [&](std::size_t delivered_count) noexcept {
         bool cleared = true;
         for (std::size_t index = 0; index < delivered_count; ++index) {
@@ -742,12 +772,15 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         return cleared;
     };
     std::size_t delivered_automation_tracks = 0;
-    for (const auto& track : state->automation_tracks) {
+    for (std::size_t track_index = 0;
+         track_index < state->automation_tracks.size(); ++track_index) {
+        const auto& track = state->automation_tracks[track_index];
         if (!track->renderer) {
             ++delivered_automation_tracks;
             continue;
         }
-        const auto rendered = track->renderer->process(transport);
+        const auto rendered = track->renderer->process(
+            state->pdc_schedule.tracks[track_index].device_views);
         saturating_add(result.candidate_automation_events,
                        rendered.candidate_events);
         saturating_add(result.emitted_automation_events,
@@ -795,8 +828,11 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
         }
         return cleared;
     };
-    for (const auto& track : state->tracks) {
-        const auto note_result = track->note_renderer->process(block, transport);
+    for (std::size_t track_index = 0; track_index < state->tracks.size();
+         ++track_index) {
+        const auto& track = state->tracks[track_index];
+        const auto note_result = track->note_renderer->process(
+            block, state->pdc_schedule.tracks[track_index].midi_projection);
         saturating_add(result.emitted_note_events, note_result.emitted_events);
         saturating_add(result.dropped_note_events, note_result.dropped_events);
         if (note_result.code != playback::NoteRenderCode::Ok) {
@@ -833,7 +869,6 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     }
 
     shared_->audio_code.store(TimelineGraphProcessCode::Ok, std::memory_order_relaxed);
-    shared_->transport.store(&transport, std::memory_order_release);
     shared_->block.store(&block, std::memory_order_release);
     // Timeline nodes consume the exact multi-range snapshot above. The graph-wide
     // callback context describes the whole callback, including a discontinuity
@@ -853,7 +888,6 @@ TimelineGraphPlaybackBinding::process(audio::BufferView<float>& output,
     const bool routed_dispatch_failed =
         graph_.routed_only_execution_failures() != routed_failures_before;
     shared_->block.store(nullptr, std::memory_order_release);
-    shared_->transport.store(nullptr, std::memory_order_release);
     if (routed_dispatch_failed) {
         const bool notes_cleared = clear_notes();
         const bool automation_cleared =
