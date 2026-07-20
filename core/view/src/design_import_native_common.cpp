@@ -2102,6 +2102,12 @@ std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                      materialize_diagnostics);
         if (options.apply_token_theme)
             root->set_theme(ir_tokens_to_theme(ir.tokens));
+        // Imported geometry is already solved at fractional coordinates;
+        // Yoga's whole-pixel grid rounding would move concentric siblings
+        // relative to each other (see View::set_subpixel_layout). The flag
+        // is discovered pass-wide, so setting it on the imported root also
+        // covers a host that embeds this tree under its own layout root.
+        root->set_subpixel_layout(true);
         if (options.diagnostics_out != nullptr) {
             options.diagnostics_out->insert(options.diagnostics_out->end(),
                                             materialize_diagnostics.begin(),

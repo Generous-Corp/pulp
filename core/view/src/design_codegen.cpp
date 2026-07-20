@@ -2271,6 +2271,15 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
 
     ss << "setTheme('dark');\n\n";
 
+    // Imported designs replay geometry the design tool already solved at
+    // fractional coordinates. Yoga's default whole-pixel grid rounding moves
+    // siblings relative to each other by up to ~0.7px per axis, visibly
+    // de-centering concentric shapes (knob value-ring vs body). Opt the
+    // host's layout pass out; typeof-guarded so the bundle still loads on
+    // runtimes that predate the function and on web-compat DOM hosts
+    // (browsers lay out subpixel already).
+    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n\n";
+
     // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face
     // instead of silently falling back to a same-named system font (or a

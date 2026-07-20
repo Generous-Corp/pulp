@@ -3172,3 +3172,20 @@ TEST_CASE("generated C++ carries rgba() colors like the materializer does",
     const auto hex_gen = pulp::view::generate_pulp_cpp(hex_ir, manifest);
     CHECK(hex_gen.source.find("rgba8(26, 26, 46, 255)") != std::string::npos);
 }
+
+TEST_CASE("generated JS opts its layout pass into sub-pixel geometry",
+          "[view][import][subpixel]") {
+    // Imported designs replay geometry the design tool solved at fractional
+    // coordinates; Yoga's whole-pixel rounding visibly de-centered every
+    // knob ring in "A Channel FX" relative to its body ellipse. The bundle
+    // must opt out — typeof-guarded so it still loads on runtimes that
+    // predate setSubpixelLayout and on web-compat DOM hosts.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
+                    "setSubpixelLayout('', true);") != std::string::npos);
+}

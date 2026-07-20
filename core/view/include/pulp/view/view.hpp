@@ -61,6 +61,19 @@ public:
     void set_layout_mode(LayoutMode m) { layout_mode_ = m; }
     LayoutMode layout_mode() const { return layout_mode_; }
 
+    /// Opt this view's layout pass out of Yoga's whole-pixel grid rounding.
+    /// Yoga's default pointScaleFactor of 1.0 rounds every solved box to the
+    /// nearest whole pixel. For flowed UI that keeps box edges seam-free, but
+    /// a replayed design (Figma import) arrives with SOLVED fractional
+    /// geometry, and per-node rounding moves siblings RELATIVE to each other
+    /// by up to ~0.7px per axis — enough to visibly de-center a knob's
+    /// value-ring arc from its body ellipse. The flag is honored when ANY
+    /// view inside a layout pass sets it (one Yoga pass has one config, so
+    /// sub-pixel is pass-wide); imported-design roots set it, everything
+    /// else keeps the pixel-grid default.
+    void set_subpixel_layout(bool v) { subpixel_layout_ = v; }
+    bool subpixel_layout() const { return subpixel_layout_; }
+
     // ── Child management ─────────────────────────────────────────────────
 
     void add_child(std::unique_ptr<View> child);
@@ -1933,6 +1946,7 @@ private:
     FlexStyle flex_{};
     GridStyle grid_{};
     LayoutMode layout_mode_ = LayoutMode::flex;
+    bool subpixel_layout_ = false;
     Theme theme_;
     std::shared_ptr<WidgetPainter> painter_;
     std::shared_ptr<WidgetMetrics> metrics_;
