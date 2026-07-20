@@ -986,8 +986,11 @@ rules:
   in the type (`Slot<const T>`).
 - **Pin the exact committed generation when publications are coupled.**
   `ExecutionSnapshot` is a strong handle to one specific compiled graph, and its
-  MIDI/parameter-event injection and `process()` methods never redirect to a
-  newer live graph.
+  MIDI injection and `process()` methods never redirect to a newer live graph.
+  Timeline device automation uses a private, owner-claimed exact-generation
+  parameter mailbox; ordinary hosts continue to use the live graph API. The
+  current host boundary is point/step delivery: portable ramp events are lowered
+  to an in-block endpoint step until hosted adapters expose a ramp capability.
   `TimelineGraphBinding` publishes that handle together with its immutable
   playback program and bound track renderers as one `runtime::Slot` generation.
   Topology and content adoption must replace that one generation; independently
@@ -1044,7 +1047,9 @@ rules:
   Sample offsets are block-relative. A `false` return reports an invalid or
   unavailable node, or a source queue that already overflowed; a retained
   source prefix can still be published and consumed. Destination overflow is
-  observed later when the audio-thread merge fills the fixed queue.
+  observed later when the audio-thread merge fills the fixed queue. The live
+  API rejects a node while a timeline binding owns its exact-generation writer
+  claim; claims are exclusive per node and expire with their binding state.
 - **Node ABI surface.** `PluginSlot` includes
   `pulp/runtime/node_abi.hpp` and participates in the node ABI
   virtual-order gate. Existing virtual methods may not be inserted,

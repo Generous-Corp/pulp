@@ -80,6 +80,10 @@ class SignalGraph::PreparedTopologyEdit {
 
   private:
     friend class SignalGraph;
+    friend class TimelineGraphPlaybackBinding;
+    bool set_exact_parameter_event_nodes(
+        const std::shared_ptr<detail::ExactParameterIngressOwner>& owner,
+        std::span<const NodeId> nodes);
     explicit PreparedTopologyEdit(SignalGraph& owner);
     bool base_is_current_locked_() const;
     bool is_new_node_(NodeId id) const;

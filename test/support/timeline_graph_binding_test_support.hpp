@@ -48,7 +48,8 @@ std::shared_ptr<const audio::AudioFileData> audio_data(std::vector<float> mono) 
     return result;
 }
 
-std::shared_ptr<const DecodedAudioAssetPool> asset_pool(std::vector<float> mono) {
+[[maybe_unused]] std::shared_ptr<const DecodedAudioAssetPool>
+asset_pool(std::vector<float> mono) {
     return take(DecodedAudioAssetPool::create({{{3}, audio_data(std::move(mono))}}));
 }
 
@@ -59,7 +60,8 @@ Clip audio_clip(float gain = 1.0f, std::uint64_t frames = 512) {
                                       properties));
 }
 
-std::shared_ptr<const Project> audio_project(float gain = 1.0f, std::uint64_t frames = 512) {
+[[maybe_unused]] std::shared_ptr<const Project>
+audio_project(float gain = 1.0f, std::uint64_t frames = 512) {
     auto track = take(Track::create({10}, "audio", {audio_clip(gain, frames)}));
     auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
                                           std::vector<Track>{std::move(track)}));
@@ -81,8 +83,9 @@ std::shared_ptr<const Project> audio_project(float gain = 1.0f, std::uint64_t fr
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
-std::shared_ptr<const Project> parallel_audio_project(std::uint64_t frames = 512,
-                                                      bool reverse_tracks = false) {
+[[maybe_unused]] std::shared_ptr<const Project>
+parallel_audio_project(std::uint64_t frames = 512,
+                       bool reverse_tracks = false) {
     ClipPlaybackProperties properties;
     auto first_clip = take(Clip::create_absolute({100}, {0}, frames, {48'000, 1},
                                                  MediaRef{{3}, {0}, frames}, properties));
@@ -114,6 +117,66 @@ std::shared_ptr<const Project> parallel_audio_project(std::uint64_t frames = 512
     input.assets = {asset};
     input.sequences = {std::move(sequence)};
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+[[maybe_unused]] std::shared_ptr<const Project> automation_project(
+    const CompiledTempoMap& map, float first_value = 0.25f,
+    float second_value = 0.75f, std::uint32_t parameter = 7) {
+    auto curve = take(AutomationCurve::create({
+        {{41}, map.samples_to_ticks({0}), first_value},
+        {{42}, map.samples_to_ticks({16}), second_value},
+    }));
+    auto lane = take(AutomationLane::create(
+        {31}, DeviceParameterTarget{{20}, parameter}, std::move(curve)));
+    auto track = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "automation",
+        .device_chain = {{{20}}},
+        .automation_lanes = {std::move(lane)},
+    }));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, std::nullopt,
+        std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1}, "automation", 1'000, {2}, {}, {std::move(sequence)}})));
+}
+
+[[maybe_unused]] std::shared_ptr<const Project> device_project() {
+    auto track = take(Track::create(TrackInput{
+        .id = {10}, .name = "device", .device_chain = {{{20}}},
+    }));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, std::nullopt,
+        std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1}, "device", 1'000, {2}, {}, {std::move(sequence)}})));
+}
+
+[[maybe_unused]] std::shared_ptr<const Project> two_device_automation_project(
+    const CompiledTempoMap& map) {
+    const auto make_lane = [&](ItemId lane_id, ItemId point_id,
+                               ItemId placement, std::uint32_t parameter) {
+        auto curve = take(AutomationCurve::create(
+            {AutomationPoint{point_id, map.samples_to_ticks({0}), 0.5f}}));
+        return take(AutomationLane::create(
+            lane_id, DeviceParameterTarget{placement, parameter},
+            std::move(curve)));
+    };
+    auto track = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "two devices",
+        .device_chain = {{{20}}, {{21}}},
+        .automation_lanes = {
+            make_lane({31}, {41}, {20}, 7),
+            make_lane({32}, {42}, {21}, 7),
+        },
+    }));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, std::nullopt,
+        std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1}, "two devices", 1'000, {2}, {},
+                     {std::move(sequence)}})));
 }
 
 NoteEvent note(const CompiledTempoMap& map, std::uint64_t id, std::int64_t start_sample,
@@ -271,6 +334,67 @@ class MidiCountingSlot final : public PluginSlot {
     PluginInfo info_;
 };
 
+class AutomationRecordingSlot final : public PluginSlot {
+  public:
+    explicit AutomationRecordingSlot(std::uint32_t parameter = 7,
+                                     ParamFlags flags = {}) {
+        info_.name = "timeline automation recorder";
+        info_.unique_id = "pulp.test.timeline-automation-recorder";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = true;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+        param_.id = parameter;
+        param_.name = "gain";
+        param_.flags = flags;
+    }
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return loaded; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>&,
+                 const midi::MidiBuffer&, midi::MidiBuffer&,
+                 const ParameterEventQueue& events, int) override {
+        const auto call = process_count.fetch_add(1, std::memory_order_relaxed);
+        if (call < call_event_counts.size()) {
+            call_event_counts[call].store(events.size(), std::memory_order_relaxed);
+        }
+        event_count = std::min(events.size(), received.size());
+        std::copy_n(events.begin(), event_count, received.begin());
+        if (call == 0 && block_first.load(std::memory_order_acquire)) {
+            first_entered.store(true, std::memory_order_release);
+            while (!release_first.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+        }
+        output.clear();
+    }
+    std::vector<HostParamInfo> parameters() const override { return {param_}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    PluginInfo info_;
+    HostParamInfo param_;
+    std::array<state::ParameterEvent, ParameterEventQueue::kCapacity> received{};
+    std::size_t event_count = 0;
+    std::atomic<std::size_t> process_count{0};
+    std::array<std::atomic<std::size_t>, 2> call_event_counts{};
+    std::atomic<bool> block_first{false};
+    std::atomic<bool> first_entered{false};
+    std::atomic<bool> release_first{false};
+    bool loaded = true;
+};
+
 class DimensionTrackingSlot final : public PluginSlot {
   public:
     DimensionTrackingSlot() {
@@ -379,3 +503,11 @@ static_assert(TimelineGraphPlaybackBinding::process_rt_safety_class ==
               audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
 static_assert(ArrangementAudioTrackRenderer::process_rt_safety_class ==
               audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
+
+template <typename T>
+concept HasPublicExactParameterInjection = requires(
+    const T& snapshot_handle, const ParameterEventQueue& events) {
+    snapshot_handle.inject_parameter_events(NodeId{1}, events);
+};
+
+static_assert(!HasPublicExactParameterInjection<SignalGraph::ExecutionSnapshot>);

@@ -1,5 +1,68 @@
 #include "support/timeline_graph_binding_test_support.hpp"
 
+TEST_CASE("timeline automation exact ingress stays pinned across stable plugin nodes") {
+    const auto map = tempo_map();
+    auto empty_assets = take(DecodedAudioAssetPool::create({}));
+    ProgramHarness automated_programs;
+    automated_programs.publish(automation_project(*map), map, empty_assets, 1);
+    auto automated = automated_programs.store.read();
+    ProgramHarness next_programs;
+    next_programs.publish(
+        automation_project(*map, 0.5f, 0.9f), map, empty_assets, 2);
+    auto next = next_programs.store.read();
+    REQUIRE(automated);
+    REQUIRE(next);
+
+    SignalGraph graph;
+    const auto output = graph.add_output_node(1);
+    auto recorder = std::make_unique<AutomationRecordingSlot>();
+    auto* observed = recorder.get();
+    const auto plugin = graph.add_plugin_node(std::move(recorder), 1, 1);
+    REQUIRE(graph.prepare(48'000.0, 64));
+    const std::array devices{TimelineDeviceGraphRoute{{20}, plugin}};
+    const std::array routes{TimelineTrackGraphRoute{
+        {10}, output, 0, 0, devices}};
+    TimelineGraphPlaybackBinding binding(graph, automated_programs.store);
+    const auto admission = binding.prepare(*automated, routes, config(1), 48'000.0, 64);
+    INFO("admission code " << static_cast<int>(admission.code)
+         << " actual " << admission.actual);
+    REQUIRE(admission);
+
+    BindingPublishPause pause;
+    binding.set_before_binding_publish_hook_for_test(
+        &BindingPublishPause::hook, &pause);
+    std::atomic<TimelineGraphAdmissionCode> code{
+        TimelineGraphAdmissionCode::GraphPrepareFailed};
+    std::thread preparer([&] {
+        code.store(binding.prepare(*next, routes, config(1), 48'000.0, 64).code,
+                   std::memory_order_release);
+    });
+    REQUIRE(pause.wait_until_entered());
+    Buffer input(1, 32);
+    Buffer output_buffer(1, 32);
+    auto output_view = output_buffer.view();
+    REQUIRE(binding.process(
+        output_view, input.const_view(), snapshot(*automated, 32)));
+    REQUIRE(std::any_of(
+        observed->received.begin(),
+        observed->received.begin() + observed->event_count,
+        [](const auto& event) { return event.value == 0.75f; }));
+    REQUIRE(std::none_of(
+        observed->received.begin(),
+        observed->received.begin() + observed->event_count,
+        [](const auto& event) { return event.value == 0.9f; }));
+    pause.released.store(true, std::memory_order_release);
+    preparer.join();
+    REQUIRE(code.load(std::memory_order_acquire) ==
+            TimelineGraphAdmissionCode::Accepted);
+    REQUIRE(binding.process(
+        output_view, input.const_view(), snapshot(*next, 32)));
+    REQUIRE(std::any_of(
+        observed->received.begin(),
+        observed->received.begin() + observed->event_count,
+        [](const auto& event) { return event.value == 0.9f; }));
+}
+
 TEST_CASE("timeline graph binding publishes coherent state during live reprepare") {
     const auto map = tempo_map();
     constexpr std::size_t kFrames = 128;

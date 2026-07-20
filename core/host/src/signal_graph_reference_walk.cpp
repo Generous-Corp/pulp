@@ -430,7 +430,7 @@ void SignalGraph::run_reference_walk_(
                             }
                         }
                     }
-                    const std::uint64_t pending_parameter_sequence =
+                    const auto pending_parameter_sequences =
                         append_parameter_mailbox_events_(&rt, param_events);
                     param_events.sort();
 
@@ -472,9 +472,15 @@ void SignalGraph::run_reference_walk_(
 
                     pit->second->process(process_buffers, rt.midi_in, rt.midi_out,
                                          param_events, num_samples);
-                    if (pending_parameter_sequence != 0) {
+                    if (pending_parameter_sequences.live != 0) {
                         rt.parameter_input_mailbox->sequence_seen.store(
-                            pending_parameter_sequence, std::memory_order_relaxed);
+                            pending_parameter_sequences.live,
+                            std::memory_order_relaxed);
+                    }
+                    if (pending_parameter_sequences.exact != 0) {
+                        rt.exact_parameter_input_mailbox->sequence_seen.store(
+                            pending_parameter_sequences.exact,
+                            std::memory_order_relaxed);
                     }
                     rt.midi_out_incomplete =
                         rt.midi_in_incomplete || midi_block_has_drops(rt.midi_out);

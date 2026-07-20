@@ -51,6 +51,7 @@ SignalGraph::PreparedTopologyEdit::PreparedTopologyEdit(SignalGraph& owner)
     candidate_->next_id_ = owner.next_id_;
     candidate_->limits_ = owner.limits_;
     candidate_->prepared_plugin_meta_ = owner.prepared_plugin_meta_;
+    candidate_->exact_parameter_event_claims_ = owner.exact_parameter_event_claims_;
     candidate_->canonical_executor_routing_enabled_.store(
         owner.canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
@@ -381,6 +382,38 @@ void SignalGraph::PreparedTopologyEdit::set_anticipation_enabled(bool enabled) n
     candidate_->set_anticipation_enabled(enabled);
 }
 
+bool SignalGraph::PreparedTopologyEdit::set_exact_parameter_event_nodes(
+    const std::shared_ptr<detail::ExactParameterIngressOwner>& owner,
+    std::span<const NodeId> nodes) {
+    return mutate_([&] {
+        if (!owner) return false;
+        std::unordered_set<NodeId> claimed;
+        claimed.reserve(nodes.size());
+        for (const auto id : nodes) {
+            const auto* candidate = candidate_->node(id);
+            if (candidate == nullptr || candidate->type != NodeType::Plugin
+                || !candidate->plugin || !claimed.insert(id).second) {
+                return false;
+            }
+        }
+        auto& claims = candidate_->exact_parameter_event_claims_;
+        for (auto it = claims.begin(); it != claims.end();) {
+            const auto existing = it->second.lock();
+            if (!existing || existing == owner) {
+                it = claims.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (const auto id : claimed) {
+            const auto found = claims.find(id);
+            if (found != claims.end() && !found->second.expired()) return false;
+        }
+        for (const auto id : claimed) claims[id] = owner;
+        return true;
+    });
+}
+
 const GraphNode* SignalGraph::PreparedTopologyEdit::node(NodeId id) const {
     return candidate_->node(id);
 }
@@ -563,7 +596,10 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
                 live_shape->second.type != next_shape->second.type) {
                 continue;
             }
-            if (rt.parameter_input_mailbox && live_rt->second.parameter_input_mailbox) {
+            if (rt.parameter_input_mailbox
+                && live_rt->second.parameter_input_mailbox
+                && rt.exact_parameter_event_owner.lock()
+                    == live_rt->second.exact_parameter_event_owner.lock()) {
                 rt.parameter_input_mailbox = live_rt->second.parameter_input_mailbox;
             }
             if (rt.midi_input_mailbox && live_rt->second.midi_input_mailbox) {
@@ -573,9 +609,14 @@ SignalGraph::PreparedTopologyEdit::prepare(double sample_rate, int max_block_siz
         const auto rebind_parameter_sequence = [&](CompiledGraph::RoutedPath& path) {
             for (auto& ctx : path.plugin_ctx) {
                 const auto rt = next->runtime.find(ctx.node_id);
-                ctx.parameter_events_sequence_seen =
+                ctx.parameter_events_live_sequence_seen =
                     rt != next->runtime.end() && rt->second.parameter_input_mailbox
                         ? &rt->second.parameter_input_mailbox->sequence_seen
+                        : nullptr;
+                ctx.parameter_events_exact_sequence_seen =
+                    rt != next->runtime.end()
+                            && rt->second.exact_parameter_input_mailbox
+                        ? &rt->second.exact_parameter_input_mailbox->sequence_seen
                         : nullptr;
             }
         };
@@ -865,6 +906,8 @@ SignalGraph::PreparedTopologyEdit::Result SignalGraph::PreparedTopologyEdit::com
     owner_->next_id_ = candidate_->next_id_;
     owner_->limits_ = candidate_->limits_;
     owner_->prepared_plugin_meta_ = std::move(candidate_->prepared_plugin_meta_);
+    owner_->exact_parameter_event_claims_ =
+        std::move(candidate_->exact_parameter_event_claims_);
     owner_->canonical_executor_routing_enabled_.store(
         candidate_->canonical_executor_routing_enabled_.load(std::memory_order_relaxed),
         std::memory_order_relaxed);
