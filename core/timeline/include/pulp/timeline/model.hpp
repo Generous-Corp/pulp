@@ -430,6 +430,12 @@ struct ItemLocation {
     ItemId clip_id;
     bool active = false;
 
+    constexpr ItemLocation() noexcept = default;
+    constexpr ItemLocation(ItemKind item_kind, ItemId parent, ItemId sequence, ItemId track,
+                           ItemId clip, bool is_active) noexcept
+        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track),
+          clip_id(clip), active(is_active) {}
+
     constexpr bool has_same_owner(const ItemLocation& other) const noexcept {
         return kind == other.kind && parent_id == other.parent_id;
     }
