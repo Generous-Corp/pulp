@@ -51,6 +51,19 @@ invariants.
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
   `core/host`.
+- Hosted playback resolves each attached automation target through its
+  `DevicePlacement` route and claims exact parameter ingress only for plugin
+  nodes targeted by lanes. A plugin node cannot represent two automated
+  placements or be claimed by competing bindings, and graph automation,
+  audio-rate modulation, and live parameter injection cannot share that ingress
+  while the claim is active. Delivery is generation-local through the binding's
+  pinned `SignalGraph::ExecutionSnapshot`; route metadata is cached at prepare
+  so later program adoption never queries a live plugin. Portable playback keeps
+  ramp duration intact, but the current hosted `PluginSlot` boundary is
+  point/step-only, so a ramp is lowered to an endpoint step within the current
+  block. If exact-delivery cleanup or rollback fails, the binding is poisoned
+  and fails closed until a fresh prepare establishes a new claim and snapshot.
+  These are `core/host` ownership rules, not Timeline document invariants.
 - `MediaRef` ranges are checked locally for overflow and against their asset at
   project construction.
 - A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
