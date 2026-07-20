@@ -148,19 +148,35 @@ export function toPathData(commands) {
  * or the outline would itself be outlined. `paint` names which color applies —
  * and that color may be a GRADIENT, which is how the knob rim highlights render.
  *
+ * `mirror` ({x, y} booleans) flips the normalized path in place, about its own
+ * box — the box and its placement are untouched. The caller needs this when an
+ * ANCESTOR container carries a mirror the emitted tree drops: Figma composes
+ * every ancestor's flip into what it draws, so a vector under a net-mirrored
+ * chain must bake that flip into its own ink or it renders pointing the wrong
+ * way (the Env chip's reverse arrow: the icon frame's flip cancels the Union's
+ * own baked flip in Figma, and dropping the container half of that pair left
+ * the arrow mirrored).
+ *
  * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean }|null}
  */
-export function geometryToPath(node, blobs) {
+export function geometryToPath(node, blobs, mirror = null) {
   const r = placedGeometry(node, blobs, /* preferFill */ false);
   if (!r) return null;
   const { placed, box, useFill, hasStroke } = r;
 
+  // Normalize to a (0,0)-origin viewBox: codegen's setSvgViewBox consumes only
+  // the width/height pair and ignores minX/minY, so a path carrying negative
+  // coordinates would otherwise be silently shifted. The caller places the
+  // shape by moving the node to box.minX/minY instead.
+  let normalized = translate(placed, -box.minX, -box.minY);
+  if (mirror && (mirror.x || mirror.y)) {
+    normalized = applyTransform(normalized, {
+      m00: mirror.x ? -1 : 1, m01: 0, m02: mirror.x ? box.width : 0,
+      m10: 0, m11: mirror.y ? -1 : 1, m12: mirror.y ? box.height : 0,
+    });
+  }
   return {
-    // Normalize to a (0,0)-origin viewBox: codegen's setSvgViewBox consumes only
-    // the width/height pair and ignores minX/minY, so a path carrying negative
-    // coordinates would otherwise be silently shifted. The caller places the
-    // shape by moving the node to box.minX/minY instead.
-    d: toPathData(translate(placed, -box.minX, -box.minY)),
+    d: toPathData(normalized),
     box,
     paint: useFill ? 'fill' : 'stroke',
     droppedStroke: Boolean(useFill && hasStroke),

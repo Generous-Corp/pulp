@@ -564,6 +564,20 @@ static void emit_js_layout_constraints(const NativeEmit& e, const std::string& t
     }
     if (L.aspect_ratio && *L.aspect_ratio > 0.0f)
         ss << ind << "setFlex('" << target_id << "', 'aspect_ratio', " << *L.aspect_ratio << ");\n";
+    // Explicit per-child margins. The fig lane reconciles a flowing vector's
+    // stroke-inflated ink box back to Figma's node layout box with (usually
+    // negative) margins; dropping them here let the inflated ink ride the flex
+    // row and shove every later sibling. No conflict with the constraint
+    // fallbacks below: a flowing auto-layout child never carries constraints,
+    // and a constrained child never carries these margins.
+    if (L.margin_top)
+        ss << ind << "setFlex('" << target_id << "', 'margin_top', " << *L.margin_top << ");\n";
+    if (L.margin_right)
+        ss << ind << "setFlex('" << target_id << "', 'margin_right', " << *L.margin_right << ");\n";
+    if (L.margin_bottom)
+        ss << ind << "setFlex('" << target_id << "', 'margin_bottom', " << *L.margin_bottom << ");\n";
+    if (L.margin_left)
+        ss << ind << "setFlex('" << target_id << "', 'margin_left', " << *L.margin_left << ");\n";
     auto grow = [&] {
         if (grow_done) return;
         ss << ind << "setFlex('" << target_id << "', 'flex_grow', 1);\n";
