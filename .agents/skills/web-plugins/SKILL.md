@@ -282,7 +282,12 @@ per-ABI entry point for it.** Go through the plugin's own state:
   belongs in the native timeline target, the no-exceptions target, and both web
   ABI lists. This proves that snapshots containing automation can compile into
   the browser runtimes; it does not prove scheduling or parameter delivery until
-  the playback/host binding consumes those lanes.
+  the playback/host binding consumes those lanes. Sequence-owned markers and
+  regions follow the same rule. Their schema, migration, remap, journal, and
+  bounded decode code compile into both wasm ABIs, and web decode defaults carry
+  lower annotation-count limits than native. That makes annotated documents
+  portable to WAM and WebCLAP; it does not create marker playback, rendering,
+  editor controls, or a JavaScript-facing annotation API.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
