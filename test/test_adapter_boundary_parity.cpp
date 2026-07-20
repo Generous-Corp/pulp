@@ -1,25 +1,8 @@
-// Adapter-boundary parity matrix (SF-1).
+// Shared adapter-boundary normalization tests.
 //
-// The per-format plugin adapters (CLAP, VST3, AU v2/v3, AAX, LV2, standalone)
-// used to each re-implement the same boundary logic — parameter decode +
-// dual-write, f64 marshalling, latency-compensated bypass, and transport →
-// ProcessContext mapping — at different fidelity, with no test that noticed
-// when a copy drifted. `core/format/include/pulp/format/adapter_boundary.hpp`
-// unified that logic; this test is its proof-of-correctness.
-//
-// It drives ONE processor's boundary through EVERY format as a matrix column
-// and asserts identical observable behavior: each format encodes the SAME
-// stimulus in its OWN native representation (CLAP fixed-point beattime, VST3
-// host-supplied bar, AU seconds → samples, block-rate LV2 control ports, …),
-// runs it through the shared boundary core, and must land on identical decoded
-// results. A future adapter that hand-rolls a divergent copy of any of these
-// four concerns fails here instead of shipping as an audit finding.
-//
-// The CLAP column is additionally anchored to the REAL adapter: the same
-// stimulus is pushed through clap_process() and the values a RecordingProcessor
-// observes are compared against the neutral reference, proving the CLAP adapter
-// actually routes through the shared core (not just that the core is
-// self-consistent).
+// Format-shaped fixtures below exercise the format-neutral helpers only; they
+// do not invoke VST3, AU, AAX, LV2, or standalone production adapters. CLAP has
+// separate tests in this file that drive the real adapter entry points.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -50,7 +33,7 @@ using Catch::Matchers::WithinRel;
 namespace {
 
 // ---------------------------------------------------------------------------
-// Canonical stimulus shared by every column.
+// Canonical stimulus shared by every fixture.
 // ---------------------------------------------------------------------------
 
 constexpr double kSampleRate = 48000.0;
@@ -58,8 +41,7 @@ constexpr uint32_t kFrames = 64;
 constexpr int kLatencySamples = 32;
 constexpr state::ParamID kGainParam = 1;
 
-// One musical transport, expressed in canonical units. Every format encodes
-// THIS and must decode back to it.
+// One musical transport, expressed in canonical units.
 struct CanonicalTransport {
     bool is_playing = true;
     bool is_recording = false;
@@ -122,7 +104,7 @@ void require_transport_matches_reference(const std::string& column,
     CHECK_THAT(v.loop_start_beats, WithinAbs(kTransport.loop_start_beats, 1e-6));
     CHECK_THAT(v.loop_end_beats, WithinAbs(kTransport.loop_end_beats, 1e-6));
     // A fresh (no-previous-block) snapshot rolling into a playing transport
-    // reports a run start and no change flags — identical for every format.
+    // reports a run start and no change flags.
     CHECK(v.transport_started == true);
     CHECK(v.tempo_changed == false);
     CHECK(v.transport_changed == false);
@@ -139,32 +121,40 @@ ProcessContext base_context() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-format transport encoders: each mirrors how its adapter decodes the host
-// playhead into the neutral boundary::HostTransport. The point is that the
-// encodings genuinely differ (fixed-point vs float vs samples, host-bar vs
-// derived-bar) yet the shared mapper lands them all on the same context.
+// Representative format-shaped inputs for the neutral mapper. These fixtures
+// model unit conversions and field combinations without claiming that a
+// production adapter currently routes through this helper.
 // ---------------------------------------------------------------------------
 
+void mark_complete_transport(boundary::HostTransport& transport,
+                             bool has_host_bar) {
+    transport.validity.set(TransportField::Playing);
+    transport.validity.set(TransportField::Recording);
+    transport.validity.set(TransportField::Looping);
+    transport.validity.set(TransportField::Tempo);
+    transport.validity.set(TransportField::BeatPosition);
+    transport.validity.set(TransportField::SamplePosition);
+    transport.validity.set(TransportField::TimeSignature);
+    transport.validity.set(TransportField::LoopRange);
+    transport.validity.set(TransportField::Bar, has_host_bar);
+}
+
 // CLAP: fixed-point clap_beattime / clap_sectime, host-supplied bar_number.
-boundary::HostTransport encode_clap() {
+boundary::HostTransport make_clap_shaped_transport() {
     boundary::HostTransport t;
-    t.valid = true;
+    mark_complete_transport(t, true);
     t.is_playing = kTransport.is_playing;
     t.is_recording = kTransport.is_recording;
     t.is_looping = kTransport.is_looping;
-    t.has_tempo = true;
     t.tempo_bpm = kTransport.tempo_bpm;
-    t.has_beats = true;
     // Round-trip through CLAP's fixed-point beattime, exactly like the adapter.
     const std::int64_t fx =
         static_cast<std::int64_t>(std::llround(kTransport.position_beats * CLAP_BEATTIME_FACTOR));
     t.position_beats = static_cast<double>(fx) / CLAP_BEATTIME_FACTOR;
-    t.has_samples = true;
     const std::int64_t sx = static_cast<std::int64_t>(
         std::llround(kTransport.position_seconds() * CLAP_SECTIME_FACTOR));
     const double seconds = static_cast<double>(sx) / CLAP_SECTIME_FACTOR;
     t.position_samples = static_cast<std::int64_t>(std::llround(seconds * kSampleRate));
-    t.has_time_sig = true;
     t.time_sig_numerator = kTransport.time_sig_numerator;
     t.time_sig_denominator = kTransport.time_sig_denominator;
     t.loop_start_beats =
@@ -173,123 +163,107 @@ boundary::HostTransport encode_clap() {
     t.loop_end_beats =
         static_cast<double>(std::llround(kTransport.loop_end_beats * CLAP_BEATTIME_FACTOR)) /
         CLAP_BEATTIME_FACTOR;
-    t.has_host_bar = true;  // CLAP exposes bar_number directly
     t.host_bar = kTransport.expected_bar();
     return t;
 }
 
 // VST3: float project-time beats, sampleRate-scaled sample position, and a
 // host-supplied barPositionMusic (converted from bars to the bar index).
-boundary::HostTransport encode_vst3() {
+boundary::HostTransport make_vst3_shaped_transport() {
     boundary::HostTransport t;
-    t.valid = true;
+    mark_complete_transport(t, true);
     t.is_playing = kTransport.is_playing;
     t.is_recording = kTransport.is_recording;
     t.is_looping = kTransport.is_looping;
-    t.has_tempo = true;
     t.tempo_bpm = kTransport.tempo_bpm;
-    t.has_beats = true;
     t.position_beats = kTransport.position_beats;  // projectTimeMusic (quarter notes)
-    t.has_samples = true;
     t.position_samples = kTransport.position_samples();  // projectTimeSamples
-    t.has_time_sig = true;
     t.time_sig_numerator = kTransport.time_sig_numerator;
     t.time_sig_denominator = kTransport.time_sig_denominator;
     t.loop_start_beats = kTransport.loop_start_beats;  // cycleStartMusic
     t.loop_end_beats = kTransport.loop_end_beats;      // cycleEndMusic
-    t.has_host_bar = true;  // barPositionMusic
     t.host_bar = kTransport.expected_bar();
     return t;
 }
 
 // AU v3 / AU v2: beats + seconds → samples, no host-supplied bar (derived).
-boundary::HostTransport encode_au() {
+boundary::HostTransport make_au_shaped_transport() {
     boundary::HostTransport t;
-    t.valid = true;
+    mark_complete_transport(t, false);
     t.is_playing = kTransport.is_playing;
     t.is_recording = kTransport.is_recording;
     t.is_looping = kTransport.is_looping;
-    t.has_tempo = true;
     t.tempo_bpm = kTransport.tempo_bpm;
-    t.has_beats = true;
     t.position_beats = kTransport.position_beats;  // outCurrentBeat
-    t.has_samples = true;
     t.position_samples =
         static_cast<std::int64_t>(std::llround(kTransport.position_seconds() * kSampleRate));
-    t.has_time_sig = true;
     t.time_sig_numerator = kTransport.time_sig_numerator;
     t.time_sig_denominator = kTransport.time_sig_denominator;
     t.loop_start_beats = kTransport.loop_start_beats;  // outCycleStartBeat
     t.loop_end_beats = kTransport.loop_end_beats;
-    t.has_host_bar = false;  // AU has no precomputed bar -> derive from beats
     return t;
 }
 
 // AAX: sample position + tempo + time signature; beats reconstructed from the
 // sample position, bar derived. (No native beats timeline field.)
-boundary::HostTransport encode_aax() {
+boundary::HostTransport make_aax_shaped_transport() {
     boundary::HostTransport t;
-    t.valid = true;
+    mark_complete_transport(t, false);
     t.is_playing = kTransport.is_playing;
     t.is_recording = kTransport.is_recording;
     t.is_looping = kTransport.is_looping;
-    t.has_tempo = true;
     t.tempo_bpm = kTransport.tempo_bpm;
-    t.has_samples = true;
     t.position_samples = kTransport.position_samples();
     // AAX reconstructs beats from samples: beats = samples / sr * bpm / 60.
-    t.has_beats = true;
     t.position_beats =
         static_cast<double>(t.position_samples) / kSampleRate * kTransport.tempo_bpm / 60.0;
-    t.has_time_sig = true;
     t.time_sig_numerator = kTransport.time_sig_numerator;
     t.time_sig_denominator = kTransport.time_sig_denominator;
     t.loop_start_beats = kTransport.loop_start_beats;
     t.loop_end_beats = kTransport.loop_end_beats;
-    t.has_host_bar = false;
     return t;
 }
 
 // LV2: block-rate control ports; beats + tempo + time sig read once/block,
 // bar derived.
-boundary::HostTransport encode_lv2() {
+boundary::HostTransport make_lv2_shaped_transport() {
     boundary::HostTransport t;
-    t.valid = true;
+    mark_complete_transport(t, false);
     t.is_playing = kTransport.is_playing;
     t.is_recording = kTransport.is_recording;
     t.is_looping = kTransport.is_looping;
-    t.has_tempo = true;
     t.tempo_bpm = kTransport.tempo_bpm;
-    t.has_beats = true;
     t.position_beats = kTransport.position_beats;  // Position.beat (bars+beats folded)
-    t.has_samples = true;
     t.position_samples = kTransport.position_samples();  // Position.frame
-    t.has_time_sig = true;
     t.time_sig_numerator = kTransport.time_sig_numerator;
     t.time_sig_denominator = kTransport.time_sig_denominator;
     t.loop_start_beats = kTransport.loop_start_beats;
     t.loop_end_beats = kTransport.loop_end_beats;
-    t.has_host_bar = false;
     return t;
 }
 
 // Standalone / headless: exposes the same canonical transport directly, no host
 // bar, derived like the DAW-less host does.
-boundary::HostTransport encode_standalone() { return encode_au(); }
+boundary::HostTransport make_standalone_shaped_transport() {
+    return make_au_shaped_transport();
+}
 
-struct FormatTransportColumn {
+struct TransportFixture {
     const char* name;
-    boundary::HostTransport (*encode)();
+    boundary::HostTransport (*make)();
 };
 
-const std::vector<FormatTransportColumn>& transport_columns() {
-    static const std::vector<FormatTransportColumn> cols = {
-        {"CLAP", encode_clap},   {"VST3", encode_vst3},
-        {"AU v3", encode_au},    {"AU v2", encode_au},
-        {"AAX", encode_aax},     {"LV2", encode_lv2},
-        {"standalone", encode_standalone},
+const std::vector<TransportFixture>& transport_fixtures() {
+    static const std::vector<TransportFixture> fixtures = {
+        {"CLAP-shaped", make_clap_shaped_transport},
+        {"VST3-shaped", make_vst3_shaped_transport},
+        {"AU v3-shaped", make_au_shaped_transport},
+        {"AU v2-shaped", make_au_shaped_transport},
+        {"AAX-shaped", make_aax_shaped_transport},
+        {"LV2-shaped", make_lv2_shaped_transport},
+        {"standalone-shaped", make_standalone_shaped_transport},
     };
-    return cols;
+    return fixtures;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,21 +384,21 @@ clap_event_transport_t make_clap_transport() {
 }  // namespace
 
 // ===========================================================================
-// (D) Transport parity.
+// Transport normalization.
 // ===========================================================================
 
-TEST_CASE("boundary parity: every format decodes the same transport identically",
-          "[format][sf1][parity][transport]") {
+TEST_CASE("host transport mapper normalizes representative inputs",
+          "[format][boundary][normalization][transport]") {
     TransportView reference{};
     bool have_reference = false;
 
-    for (const auto& col : transport_columns()) {
+    for (const auto& fixture : transport_fixtures()) {
         ProcessContext ctx = base_context();
         detail::PlayheadSnapshot snapshot;  // fresh: no previous block
-        boundary::apply_host_transport(ctx, col.encode(), snapshot);
+        boundary::apply_host_transport(ctx, fixture.make(), snapshot);
 
         const auto view = TransportView::of(ctx);
-        require_transport_matches_reference(col.name, view);
+        require_transport_matches_reference(fixture.name, view);
 
         // Cross-column identity: not just "matches the reference constants" but
         // "byte-for-byte identical to the first column decoded".
@@ -432,7 +406,8 @@ TEST_CASE("boundary parity: every format decodes the same transport identically"
             reference = view;
             have_reference = true;
         } else {
-            INFO("format column: " << col.name << " vs " << transport_columns()[0].name);
+            INFO("transport fixture: " << fixture.name << " vs "
+                                        << transport_fixtures()[0].name);
             CHECK(view.is_playing == reference.is_playing);
             CHECK(view.position_samples == reference.position_samples);
             CHECK(view.bar == reference.bar);
@@ -442,24 +417,24 @@ TEST_CASE("boundary parity: every format decodes the same transport identically"
     }
 }
 
-TEST_CASE("boundary parity: derived bar equals host-supplied bar",
-          "[format][sf1][parity][transport]") {
-    // CLAP/VST3 supply bar_number/barPositionMusic; AU/AAX/LV2 derive it. The
-    // whole point of the shared mapper is that both routes agree.
+TEST_CASE("host transport mapper derives the same bar as an explicit value",
+          "[format][boundary][normalization][transport]") {
     ProcessContext host_bar_ctx = base_context();
     detail::PlayheadSnapshot s1;
-    boundary::apply_host_transport(host_bar_ctx, encode_clap(), s1);  // has_host_bar
+    boundary::apply_host_transport(host_bar_ctx,
+                                   make_clap_shaped_transport(), s1);
 
     ProcessContext derived_ctx = base_context();
     detail::PlayheadSnapshot s2;
-    boundary::apply_host_transport(derived_ctx, encode_au(), s2);  // derived
+    boundary::apply_host_transport(derived_ctx,
+                                   make_au_shaped_transport(), s2);
 
     CHECK(host_bar_ctx.bar == derived_ctx.bar);
     CHECK(host_bar_ctx.bar == kTransport.expected_bar());
 }
 
-TEST_CASE("boundary parity: the real CLAP adapter routes transport through the core",
-          "[format][sf1][parity][transport][clap]") {
+TEST_CASE("CLAP adapter routes transport through the shared mapper",
+          "[format][boundary][transport][clap]") {
     ClapInstance inst;
 
     std::vector<float> in_l(kFrames, 0.0f), in_r(kFrames, 0.0f);

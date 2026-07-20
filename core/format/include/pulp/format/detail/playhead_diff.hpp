@@ -1,15 +1,12 @@
 #pragma once
 
-// Shared helpers for AudioPlayHead transport-extension adapter wiring.
+// Shared helpers for per-block host transport state.
 //
 // Each format adapter (VST3, AU v2, AU v3, CLAP, AAX) populates the
 // transport fields on `ProcessContext` from its host's playhead API. The
-// derived fields — bar index from beats + time signature, the three
-// change-flags (tempo / time-sig / transport), and transport-jump metadata
-// computed against the
-// previous block — are identical across adapters. This header factors
-// them out so each adapter just snapshots the previous block's
-// transport state and calls these helpers.
+// Derived bar and change metadata are format-neutral. Adapters can supply
+// explicit field validity as they migrate; callers that still leave the mask
+// empty retain the value-based behavior used before validity was exposed.
 //
 // Pure functions, header-only, no platform dependencies. Tests live in
 // `test/test_playhead_diff.cpp`.
@@ -32,6 +29,7 @@ namespace pulp::format::detail {
 /// state.
 struct PlayheadSnapshot {
     bool has_previous = false;
+    TransportValidity transport_validity{};
     double tempo_bpm = 0.0;
     int time_sig_numerator = 0;
     int time_sig_denominator = 0;
@@ -42,6 +40,11 @@ struct PlayheadSnapshot {
     double position_beats = 0.0;
     double sample_rate = 0.0;
     int num_samples = 0;
+};
+
+enum class TransportDiffMode : std::uint8_t {
+    LegacyValues,
+    FieldValidity,
 };
 
 /// Derive `ctx.bar` from `ctx.position_beats` + the active time
@@ -74,13 +77,18 @@ inline void derive_bar_from_beats(ProcessContext& ctx) noexcept {
 /// adapter's previous-block `snapshot`, then update the snapshot in
 /// place so the next block's diff is against the values just written.
 ///
-/// First call after a default-constructed snapshot raises no change
-/// flags (the "no previous block" contract) — matches the documented
-/// default that the very first block does not falsely signal a
-/// transition. Subsequent calls flip the flags whenever any field
-/// differs from the previous block.
+/// First call after a default-constructed snapshot raises no change flags. A
+/// validity acquisition or loss counts as a change to that field, while a
+/// transport jump requires a position source valid in both snapshots.
+///
+/// `LegacyValues` preserves change tracking for adapters that have not migrated
+/// to field validity. Migrated adapters select `FieldValidity` on every block.
 inline void compute_playhead_changes(ProcessContext& ctx,
-                                     PlayheadSnapshot& snapshot) noexcept {
+                                     PlayheadSnapshot& snapshot,
+                                     TransportDiffMode mode =
+                                         TransportDiffMode::LegacyValues) noexcept {
+    const bool explicit_validity = mode == TransportDiffMode::FieldValidity;
+
     if (!snapshot.has_previous) {
         ctx.tempo_changed = false;
         ctx.time_sig_changed = false;
@@ -91,7 +99,84 @@ inline void compute_playhead_changes(ProcessContext& ctx,
         // from its point of view. Reporting no start here would leave a clock
         // or tempo-synced generator with no origin until the user happened to
         // stop and restart the transport.
-        ctx.transport_started = ctx.is_playing;
+        ctx.transport_started = explicit_validity
+            ? ctx.has_transport(TransportField::Playing) && ctx.is_playing
+            : ctx.is_playing;
+    } else if (explicit_validity) {
+        const auto field_changed = [&](TransportField field,
+                                       bool value_changed) noexcept {
+            const bool current_valid = ctx.has_transport(field);
+            const bool previous_valid = snapshot.transport_validity.has(field);
+            return current_valid != previous_valid ||
+                   (current_valid && value_changed);
+        };
+
+        const bool current_playing_valid =
+            ctx.has_transport(TransportField::Playing);
+        const bool previous_playing_valid =
+            snapshot.transport_validity.has(TransportField::Playing);
+        ctx.transport_started = current_playing_valid && ctx.is_playing &&
+            (!previous_playing_valid || !snapshot.is_playing);
+        ctx.tempo_changed = field_changed(
+            TransportField::Tempo, ctx.tempo_bpm != snapshot.tempo_bpm);
+        ctx.time_sig_changed = field_changed(
+            TransportField::TimeSignature,
+            ctx.time_sig_numerator != snapshot.time_sig_numerator ||
+                ctx.time_sig_denominator != snapshot.time_sig_denominator);
+        ctx.transport_changed =
+            field_changed(TransportField::Playing,
+                          ctx.is_playing != snapshot.is_playing) ||
+            field_changed(TransportField::Recording,
+                          ctx.is_recording != snapshot.is_recording) ||
+            field_changed(TransportField::Looping,
+                          ctx.is_looping != snapshot.is_looping);
+
+        ctx.transport_jump = false;
+        const bool samples_valid =
+            ctx.has_transport(TransportField::SamplePosition) &&
+            snapshot.transport_validity.has(TransportField::SamplePosition);
+        const bool playing_valid = current_playing_valid && previous_playing_valid;
+        if (samples_valid) {
+            const int64_t held = snapshot.position_samples;
+            const int64_t advanced =
+                snapshot.position_samples + static_cast<int64_t>(snapshot.num_samples);
+            if (playing_valid && ctx.is_playing && snapshot.is_playing) {
+                ctx.transport_jump = ctx.position_samples != advanced;
+            } else {
+                // Without authoritative play state, both a parked and a rolling
+                // playhead are continuous possibilities.
+                ctx.transport_jump = ctx.position_samples != held &&
+                                     ctx.position_samples != advanced;
+            }
+        } else {
+            const bool beats_valid =
+                ctx.has_transport(TransportField::BeatPosition) &&
+                snapshot.transport_validity.has(TransportField::BeatPosition);
+            const bool tempo_valid =
+                snapshot.transport_validity.has(TransportField::Tempo) &&
+                snapshot.tempo_bpm > 0.0 && std::isfinite(snapshot.tempo_bpm);
+            const bool can_predict = beats_valid && tempo_valid &&
+                snapshot.sample_rate > 0.0 && snapshot.num_samples > 0;
+            if (can_predict) {
+                const double expected_delta =
+                    (static_cast<double>(snapshot.num_samples) /
+                     snapshot.sample_rate) * (snapshot.tempo_bpm / 60.0);
+                const double expected = snapshot.position_beats + expected_delta;
+                const bool continuous =
+                    std::abs(ctx.position_beats - expected) <= 1.0e-9;
+                const bool held =
+                    std::abs(ctx.position_beats - snapshot.position_beats) <= 1.0e-9;
+                if (playing_valid && ctx.is_playing && snapshot.is_playing) {
+                    ctx.transport_jump = !continuous;
+                } else {
+                    ctx.transport_jump = !(continuous || held);
+                }
+            } else if (beats_valid && playing_valid &&
+                       !ctx.is_playing && !snapshot.is_playing) {
+                ctx.transport_jump =
+                    ctx.position_beats != snapshot.position_beats;
+            }
+        }
     } else {
         // false -> true on is_playing. Note this is independent of
         // transport_jump: pressing play at a parked position leaves the
@@ -145,6 +230,7 @@ inline void compute_playhead_changes(ProcessContext& ctx,
     }
 
     snapshot.has_previous = true;
+    snapshot.transport_validity = ctx.transport_validity;
     snapshot.tempo_bpm = ctx.tempo_bpm;
     snapshot.time_sig_numerator = ctx.time_sig_numerator;
     snapshot.time_sig_denominator = ctx.time_sig_denominator;
