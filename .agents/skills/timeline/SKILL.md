@@ -20,6 +20,12 @@ invariants.
   allocator's explicit exhausted sentinel. A project may store that sentinel
   after owning `UINT64_MAX - 1`; otherwise `next_item_id` is strictly larger
   than every owned ID. Allocation is monotonic and IDs are never reused.
+- `ItemLocation` ownership is exactly `(kind, parent_id)`, where `parent_id` is
+  the immediate owner. `sequence_id`, `track_id`, and `clip_id` are retained
+  ancestor-navigation caches and must not become additional ownership keys.
+  Add new item kinds by extending `immediate_parent_id()` rather than adding a
+  new owner-specific field. Legacy identity records without `parent_id` derive
+  it from their validated navigation fields during decode.
 - Tracks are sparse non-overlapping lanes. Their canonical clip order is
   `(anchor, start, ItemId)`. Timeline and ID indexes are persistent AVL trees;
   `replace_clip()` path-copies only search paths and shares untouched subtrees.

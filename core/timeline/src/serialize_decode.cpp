@@ -724,6 +724,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             auto sequence_value = required(value, "sequence_id", path);
             auto track_value = required(value, "track_id", path);
             auto clip_value = required(value, "clip_id", path);
+            const auto* parent_value = value.find("parent_id");
             auto active_value = required(value, "active", path);
             if (!id_value || !kind_value || !sequence_value || !track_value || !clip_value ||
                 !active_value || active_value.value()->kind != JsonValue::Kind::Boolean)
@@ -736,8 +737,21 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             auto clip_id = parse_canonical_u64_string(*clip_value.value(), path + "/clip_id");
             if (!item || !kind || !sequence_id || !track_id || !clip_id)
                 return fail<Project>(PersistenceErrorCode::InvalidNumber, path);
+            ItemId parent_id;
+            if (parent_value) {
+                auto parent = parse_canonical_u64_string(*parent_value, path + "/parent_id");
+                if (!parent)
+                    return fail<Project>(PersistenceErrorCode::InvalidNumber,
+                                         path + "/parent_id");
+                parent_id = {parent.value()};
+            } else {
+                parent_id = immediate_parent_id(kind.value(), {decoded_id.value()},
+                                                {sequence_id.value()}, {track_id.value()},
+                                                {clip_id.value()});
+            }
             decoded_identities.push_back({{item.value()},
                                           {kind.value(),
+                                           parent_id,
                                            {sequence_id.value()},
                                            {track_id.value()},
                                            {clip_id.value()},

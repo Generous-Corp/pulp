@@ -213,12 +213,13 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
     REQUIRE(identities_end != std::string::npos);
     snapshot.insert(
         identities_end,
-        R"(,{"active":false,"clip_id":"0","id":"6","kind":"device_placement","sequence_id":"2","track_id":"3"})");
+        R"(,{"active":false,"clip_id":"0","id":"6","kind":"device_placement","parent_id":"3","sequence_id":"2","track_id":"3"})");
 
     const auto restored = take(deserialize_project(snapshot, builtins()));
     const auto tombstone = restored.locate({6});
     REQUIRE(tombstone.has_value());
     REQUIRE(tombstone->kind == ItemKind::DevicePlacement);
+    REQUIRE(tombstone->parent_id == ItemId{3});
     REQUIRE(tombstone->sequence_id == ItemId{2});
     REQUIRE(tombstone->track_id == ItemId{3});
     REQUIRE_FALSE(tombstone->active);
@@ -230,6 +231,7 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
     const auto remapped_tombstone = remapped.project.locate(*remapped_tombstone_id);
     REQUIRE(remapped_tombstone.has_value());
     REQUIRE(remapped_tombstone->kind == ItemKind::DevicePlacement);
+    REQUIRE(remapped_tombstone->parent_id == *remapped.ids.find({3}));
     REQUIRE(remapped_tombstone->sequence_id == *remapped.ids.find({2}));
     REQUIRE(remapped_tombstone->track_id == *remapped.ids.find({3}));
     REQUIRE_FALSE(remapped_tombstone->active);
@@ -239,8 +241,10 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
         replace_once(snapshot, "\"clip_id\":\"0\",\"id\":\"6\"", "\"clip_id\":\"4\",\"id\":\"6\""));
     require_invalid_identity(replace_once(
         snapshot,
-        "\"id\":\"6\",\"kind\":\"device_placement\",\"sequence_id\":\"2\",\"track_id\":\"3\"",
-        "\"id\":\"6\",\"kind\":\"device_placement\",\"sequence_id\":\"2\",\"track_id\":\"99\""));
+        "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"3\"",
+        "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"99\""));
+    require_invalid_identity(replace_once(snapshot, "\"parent_id\":\"3\",\"sequence_id\":\"2\"",
+                                          "\"parent_id\":\"4\",\"sequence_id\":\"2\""));
 
     const auto base = project_with_devices();
     const auto second_track = take(Track::create({7}, "second", {}));
@@ -253,6 +257,6 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
     REQUIRE(cross_identities_end != std::string::npos);
     cross_sequence.insert(
         cross_identities_end,
-        R"(,{"active":false,"clip_id":"0","id":"8","kind":"device_placement","sequence_id":"6","track_id":"3"})");
+        R"(,{"active":false,"clip_id":"0","id":"8","kind":"device_placement","parent_id":"3","sequence_id":"6","track_id":"3"})");
     require_invalid_identity(cross_sequence);
 }

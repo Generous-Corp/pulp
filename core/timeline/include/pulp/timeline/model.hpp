@@ -402,12 +402,44 @@ enum class ItemKind : std::uint8_t {
     DevicePlacement,
 };
 
+constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
+                                     ItemId track_id, ItemId clip_id) noexcept {
+    switch (kind) {
+    case ItemKind::Project:
+        return {};
+    case ItemKind::Asset:
+    case ItemKind::Sequence:
+        return project_id;
+    case ItemKind::Track:
+        return sequence_id;
+    case ItemKind::Clip:
+    case ItemKind::DevicePlacement:
+        return track_id;
+    case ItemKind::Note:
+        return clip_id;
+    }
+    return {};
+}
+
 struct ItemLocation {
     ItemKind kind = ItemKind::Project;
+    // Immediate ownership is canonical; the remaining IDs cache ancestor navigation.
+    ItemId parent_id;
     ItemId sequence_id;
     ItemId track_id;
     ItemId clip_id;
     bool active = false;
+
+    constexpr ItemLocation() noexcept = default;
+    constexpr ItemLocation(ItemKind item_kind, ItemId parent, ItemId sequence, ItemId track,
+                           ItemId clip, bool is_active) noexcept
+        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track),
+          clip_id(clip), active(is_active) {}
+
+    constexpr bool has_same_owner(const ItemLocation& other) const noexcept {
+        return kind == other.kind && parent_id == other.parent_id;
+    }
+    constexpr auto operator<=>(const ItemLocation&) const = default;
 };
 
 enum class IdentityMutationKind : std::uint8_t { Insert, Deactivate, Reactivate };

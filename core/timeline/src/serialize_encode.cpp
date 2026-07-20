@@ -436,6 +436,8 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                 !context.writer.u64(identity.item.value, true) ||
                 !context.writer.append(",\"kind\":") ||
                 !context.writer.quoted(item_kind_name(location.kind)) ||
+                !context.writer.append(",\"parent_id\":") ||
+                !context.writer.u64(location.parent_id.value, true) ||
                 !context.writer.append(",\"sequence_id\":") ||
                 !context.writer.u64(location.sequence_id.value, true) ||
                 !context.writer.append(",\"track_id\":") ||
