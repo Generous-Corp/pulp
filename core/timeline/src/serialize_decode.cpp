@@ -2,6 +2,7 @@
 
 #include "project_state_access.hpp"
 #include "serialize_automation_decode.hpp"
+#include "serialize_decode_support.hpp"
 #include "serialize_internal.hpp"
 #include "serialize_sequence_decode.hpp"
 #include "track_schema_policy.hpp"
@@ -14,7 +15,13 @@
 namespace pulp::timeline {
 namespace {
 
+using detail::data_for;
+using detail::data_for_versions;
+using detail::decode_rate;
 using detail::DecodeCounts;
+using detail::required;
+using detail::string_field;
+using detail::StructuralData;
 
 template <typename T>
 runtime::Result<T, PersistenceError> fail(PersistenceErrorCode code, std::string path = {},
@@ -58,93 +65,6 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
     if (value == "sequence_region")
         return runtime::Ok(ItemKind::SequenceRegion);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
-}
-
-runtime::Result<const JsonValue*, PersistenceError>
-required(const JsonValue& object_value, std::string_view name, std::string path) {
-    if (object_value.kind != JsonValue::Kind::Object)
-        return fail<const JsonValue*>(PersistenceErrorCode::UnexpectedType, std::move(path),
-                                      object_value.begin);
-    const auto* value = object_value.find(name);
-    if (!value)
-        return fail<const JsonValue*>(PersistenceErrorCode::MissingField,
-                                      path + "/" + std::string(name), object_value.begin);
-    return runtime::Result<const JsonValue*, PersistenceError>(runtime::Ok(value));
-}
-
-runtime::Result<std::string, PersistenceError>
-string_field(const JsonValue& object_value, std::string_view name, std::string path) {
-    auto value = required(object_value, name, path);
-    if (!value)
-        return fail<std::string>(value.error().code, value.error().path, value.error().byte_offset);
-    if (value.value()->kind != JsonValue::Kind::String)
-        return fail<std::string>(PersistenceErrorCode::UnexpectedType,
-                                 path + "/" + std::string(name), value.value()->begin);
-    return runtime::Result<std::string, PersistenceError>(runtime::Ok(value.value()->scalar));
-}
-
-struct StructuralData {
-    const JsonValue* data = nullptr;
-    std::uint32_t version = 0;
-};
-
-runtime::Result<StructuralData, PersistenceError>
-data_for_versions(const JsonValue& value, std::string_view expected_type,
-                  std::uint32_t minimum_version, std::uint32_t maximum_version, std::string path) {
-    auto type = string_field(value, "type_name", path);
-    auto version = required(value, "version", path);
-    auto data = required(value, "data", path);
-    if (!type)
-        return fail<StructuralData>(type.error().code, type.error().path, type.error().byte_offset);
-    if (!version)
-        return fail<StructuralData>(version.error().code, version.error().path,
-                                    version.error().byte_offset);
-    if (!data)
-        return fail<StructuralData>(data.error().code, data.error().path, data.error().byte_offset);
-    auto decoded_version = parse_u32_number(*version.value(), path + "/version");
-    if (type.value() != expected_type)
-        return fail<StructuralData>(PersistenceErrorCode::UnsupportedStructuralType,
-                                    std::move(path), value.begin);
-    if (!decoded_version || decoded_version.value() < minimum_version ||
-        decoded_version.value() > maximum_version)
-        return fail<StructuralData>(PersistenceErrorCode::UnsupportedSchemaVersion, std::move(path),
-                                    value.begin);
-    if (data.value()->kind != JsonValue::Kind::Object)
-        return fail<StructuralData>(PersistenceErrorCode::UnexpectedType, path + "/data",
-                                    data.value()->begin);
-    return runtime::Ok(StructuralData{data.value(), decoded_version.value()});
-}
-
-runtime::Result<const JsonValue*, PersistenceError>
-data_for(const JsonValue& value, std::string_view expected_type, std::string path) {
-    auto decoded = data_for_versions(value, expected_type, 1, 1, std::move(path));
-    if (!decoded)
-        return fail<const JsonValue*>(decoded.error().code, decoded.error().path,
-                                      decoded.error().byte_offset);
-    return runtime::Ok(decoded.value().data);
-}
-
-runtime::Result<timebase::RationalRate, PersistenceError> decode_rate(const JsonValue& value,
-                                                                      std::string path) {
-    auto numerator = required(value, "numerator", path);
-    auto denominator = required(value, "denominator", path);
-    if (!numerator)
-        return fail<timebase::RationalRate>(numerator.error().code, numerator.error().path,
-                                            numerator.error().byte_offset);
-    if (!denominator)
-        return fail<timebase::RationalRate>(denominator.error().code, denominator.error().path,
-                                            denominator.error().byte_offset);
-    auto n = parse_canonical_u64_string(*numerator.value(), path + "/numerator");
-    auto d = parse_canonical_u64_string(*denominator.value(), path + "/denominator");
-    if (!n)
-        return fail<timebase::RationalRate>(n.error().code, n.error().path, n.error().byte_offset);
-    if (!d)
-        return fail<timebase::RationalRate>(d.error().code, d.error().path, d.error().byte_offset);
-    const timebase::RationalRate rate{n.value(), d.value()};
-    if (!rate.valid() || rate.normalized() != rate)
-        return fail<timebase::RationalRate>(PersistenceErrorCode::InvalidNumber, std::move(path),
-                                            value.begin);
-    return runtime::Result<timebase::RationalRate, PersistenceError>(runtime::Ok(rate));
 }
 
 runtime::Result<timebase::TempoMap, PersistenceError> decode_tempo_map(const JsonValue& value,

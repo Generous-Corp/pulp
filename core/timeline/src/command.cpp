@@ -15,8 +15,7 @@ bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
 
 bool equal_automation_point(const AutomationPoint& lhs, const AutomationPoint& rhs) noexcept {
     return lhs.id == rhs.id && lhs.position == rhs.position &&
-           std::bit_cast<std::uint32_t>(lhs.value) ==
-               std::bit_cast<std::uint32_t>(rhs.value) &&
+           std::bit_cast<std::uint32_t>(lhs.value) == std::bit_cast<std::uint32_t>(rhs.value) &&
            lhs.interpolation == rhs.interpolation &&
            std::bit_cast<std::uint32_t>(lhs.curvature) ==
                std::bit_cast<std::uint32_t>(rhs.curvature);
@@ -71,9 +70,8 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
-    return saturated_add(
-        sizeof(AutomationLane),
-        saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
+    return saturated_add(sizeof(AutomationLane),
+                         saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
 }
 
 } // namespace
@@ -151,8 +149,7 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
-            } else if constexpr (std::is_same_v<T, SetTempoMap> ||
-                                 std::is_same_v<T, SetMeterMap>) {
+            } else if constexpr (std::is_same_v<T, SetTempoMap> || std::is_same_v<T, SetMeterMap>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
@@ -188,28 +185,26 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), saturated_add(value.marker.name.size(),
                                                               value.marker.type.value().size()));
             if constexpr (std::is_same_v<T, SetSequenceMarker>)
-                return saturated_add(sizeof(T),
-                                     saturated_add(value.expected.name.size() +
-                                                       value.expected.type.value().size(),
-                                                   value.replacement.name.size() +
-                                                       value.replacement.type.value().size()));
+                return saturated_add(
+                    sizeof(T), saturated_add(saturated_add(value.expected.name.size(),
+                                                           value.expected.type.value().size()),
+                                             saturated_add(value.replacement.name.size(),
+                                                           value.replacement.type.value().size())));
             if constexpr (std::is_same_v<T, InsertSequenceRegion>)
                 return saturated_add(sizeof(T), value.region.name.size());
             if constexpr (std::is_same_v<T, SetSequenceRegion>)
-                return saturated_add(sizeof(T), value.expected.name.size() +
-                                                    value.replacement.name.size());
+                return saturated_add(sizeof(T), saturated_add(value.expected.name.size(),
+                                                              value.replacement.name.size()));
             if constexpr (std::is_same_v<T, SetTempoMap>)
-                return saturated_add(sizeof(T),
-                                     saturated_multiply(
-                                         saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::TempoPoint)));
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::TempoPoint)));
             if constexpr (std::is_same_v<T, SetMeterMap>)
-                return saturated_add(sizeof(T),
-                                     saturated_multiply(
-                                         saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::MeterPoint)));
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::MeterPoint)));
             return sizeof(T);
         },
         command);

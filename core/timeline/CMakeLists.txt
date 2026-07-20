@@ -22,6 +22,7 @@ add_library(pulp-timeline
     src/sequence_schema_migrations.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode.cpp
+    src/serialize_decode_support.cpp
     src/serialize_encode.cpp
     src/serialize_sequence_decode.cpp
     src/snapshot_equivalence.cpp

@@ -128,6 +128,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/sequence_schema_migrations.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_automation_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode_support.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_encode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_sequence_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/snapshot_equivalence.cpp

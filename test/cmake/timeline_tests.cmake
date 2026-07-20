@@ -113,6 +113,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_sequence_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp

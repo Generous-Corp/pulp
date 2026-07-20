@@ -16,10 +16,11 @@ Project annotation_project() {
         .id = {2},
         .name = "root",
         .musical_duration = TickDuration{1000},
-        .markers = {
-            musical_marker(3, 100, "cue"),
-            {{4}, std::move(type), "chord", MusicalSequencePoint{{200}}},
-        },
+        .markers =
+            {
+                musical_marker(3, 100, "cue"),
+                {{4}, std::move(type), "chord", MusicalSequencePoint{{200}}},
+            },
         .regions = {{{5}, "verse", MusicalSequenceRange{{100}, {400}}}},
     }));
     return take(Project::create({{1}, "project", 6, {2}, {}, {std::move(sequence)}}));
@@ -61,12 +62,12 @@ TEST_CASE("Sequence annotations persist canonically with identity ownership",
 TEST_CASE("Sequence schema migration adds annotations and only drops empty arrays",
           "[timeline][persistence][annotation]") {
     const auto registry = builtins();
-    auto upgraded = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 2,
-                                     kSequenceV1);
+    auto upgraded =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 2, kSequenceV1);
     REQUIRE(upgraded);
     CHECK(upgraded.value() == kSequenceV2Empty);
-    auto downgraded = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
-                                       upgraded.value());
+    auto downgraded =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1, upgraded.value());
     REQUIRE(downgraded);
     CHECK(downgraded.value() == kSequenceV1);
 
@@ -75,8 +76,8 @@ TEST_CASE("Sequence schema migration adds annotations and only drops empty array
         R"({"data":{"id":"3","name":"cue","point":{"kind":"musical","position_ticks":"0"},"type":"pulp.marker.cue"},"type_name":"pulp.timeline.sequence_marker","version":1})";
     nonempty.replace(nonempty.find("\"markers\":[]"), std::string_view("\"markers\":[]").size(),
                      "\"markers\":[" + std::string(marker) + "]");
-    auto rejected = registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
-                                     nonempty);
+    auto rejected =
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1, nonempty);
     REQUIRE_FALSE(rejected);
     CHECK(rejected.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -100,14 +101,28 @@ TEST_CASE("Sequence annotation decode limits reject before document construction
     CHECK(web.max_sequence_regions < DecodeLimits{}.max_sequence_regions);
 }
 
+TEST_CASE("Sequence annotation decode preserves the failing field path",
+          "[timeline][persistence][annotation]") {
+    const auto registry = builtins();
+    auto serialized = serialize_project(annotation_project(), registry);
+    REQUIRE(serialized);
+    const auto offset = serialized->json.find("vendor.marker.chord");
+    REQUIRE(offset != std::string::npos);
+    serialized->json.replace(offset, std::string_view("vendor.marker.chord").size(), "Invalid");
+
+    auto rejected = deserialize_project(serialized->json, registry);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == PersistenceErrorCode::InvalidSchema);
+    CHECK(rejected.error().path == "/data/sequences/0/data/markers/1/data/type");
+}
+
 TEST_CASE("Sequence annotation tombstones survive checkpoint serialization",
           "[timeline][persistence][annotation]") {
     auto session = std::move(DocumentSession::create(annotation_project())).value();
     auto writer = std::move(session->register_writer()).value();
     Transaction remove;
     remove.id = writer.allocate_transaction_id();
-    remove.commands.push_back(
-        {writer.allocate_command_id(), RemoveSequenceMarker{{2}, {3}}});
+    remove.commands.push_back({writer.allocate_command_id(), RemoveSequenceMarker{{2}, {3}}});
     REQUIRE(session->submit(writer, std::move(remove)));
     const auto registry = builtins();
     auto encoded = serialize_project(*session->snapshot(), registry);
