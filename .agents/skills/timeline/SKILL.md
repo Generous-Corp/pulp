@@ -47,6 +47,13 @@ invariants.
   exist in its device chain, and permits only one lane per placement/parameter
   pair. Lane and point IDs are Project identities owned by that Track; host
   delivery remains a separate contract.
+- A Sequence owns markers and regions. Markers are named typed points; their
+  validated `MarkerTypeId` is an opaque namespaced identifier so applications
+  can add semantics without widening the core enum or persistence schema.
+  Regions are named ranges. Both accept musical ticks or absolute sample time,
+  are canonicalized by `(anchor, position, ItemId)`, and own project identities.
+  Absolute annotations within one sequence use one normalized rational rate;
+  this keeps ordering exact without floating-point time comparisons.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
@@ -68,6 +75,10 @@ invariants.
   being removed is empty, so neither placement nor automation identity can be
   discarded. Placements, lanes, and lane targets remain separately versioned
   structural envelopes.
+- Sequence schema v2 adds required marker and region arrays. V1 snapshots read
+  as empty annotations; downgrade to v1 succeeds only when both arrays are
+  empty. Annotation counts have dedicated native and web decode limits enforced
+  during structural preflight before the JSON DOM grows.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
@@ -98,6 +109,8 @@ invariants.
 ## Editing contracts
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
+  `InsertSequenceMarker`, `RemoveSequenceMarker`, `SetSequenceMarker`,
+  `InsertSequenceRegion`, `RemoveSequenceRegion`, `SetSequenceRegion`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`, and
   `SetMeterMap` are the bounded mutation vocabulary. Automation commands attach
   or tombstone complete Track-owned lanes; map commands carry exact

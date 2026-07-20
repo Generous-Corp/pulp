@@ -93,14 +93,19 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_parser.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_preflight.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_registry.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/sequence.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/sequence_annotations.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/sequence_schema_migrations.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_automation_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_encode.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/serialize_sequence_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/snapshot_equivalence.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/structural_registry_validation.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/track.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/track_schema_migrations.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/transaction_annotation_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_automation_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_reduction_support.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/undo.cpp
