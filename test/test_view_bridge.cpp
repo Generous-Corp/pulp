@@ -6,6 +6,7 @@
 #include <pulp/runtime/message_channel.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/state/listener_token.hpp>
+#include <pulp/view/auto_ui.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
@@ -123,7 +124,99 @@ public:
     std::unique_ptr<view::ScriptedUiSession> scripted_session;
 };
 
+// Uses the AutoUi default editor with NO processor-declared size (unlike
+// StubProcessor, which overrides view_size()). Exercises the seam where the
+// bridge adopts AutoUi's fitting size and makes the editor proportionally
+// resizable.
+class DefaultAutoUiProcessor : public StubProcessor {
+public:
+    int param_count = 7;
+    void define_parameters(state::StateStore& s) override {
+        for (int i = 1; i <= param_count; ++i) {
+            s.add_parameter({static_cast<uint32_t>(i), "P" + std::to_string(i),
+                             "", {0.0f, 1.0f, 0.5f}});
+        }
+    }
+    // Fall through to the SDK default (no explicit size) so AutoUi fills it in.
+    format::ViewSize view_size() const override {
+        return format::Processor::view_size();
+    }
+};
+
+// Uses AutoUi but declares a custom editor_size(). The SDK default view_size()
+// surfaces that as a non-default preferred with no min/aspect — the bridge must
+// treat it as an explicit choice and NOT substitute the AutoUi fit.
+class CustomEditorSizeProcessor : public DefaultAutoUiProcessor {
+public:
+    std::pair<uint32_t, uint32_t> editor_size() const override { return {520, 360}; }
+};
+
 } // namespace
+
+TEST_CASE("ViewBridge sizes the AutoUi default editor to fit its parameters",
+          "[view_bridge][auto_ui]") {
+    DefaultAutoUiProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    const auto fit = view::AutoUi::preferred_size(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+
+    const auto& hints = bridge.size_hints();
+    // Preferred adopts the AutoUi fit — opens large enough to show all 7 knobs.
+    CHECK(hints.preferred_width == fit.width);
+    CHECK(hints.preferred_height == fit.height);
+    CHECK(bridge.width() == fit.width);
+    CHECK(bridge.height() == fit.height);
+    // Derived bounds make it resizable + aspect-locked, so the adapters pin the
+    // design viewport and the grid scales uniformly (min-clamped, no truncation).
+    CHECK(hints.min_width > 0);
+    CHECK(hints.min_height > 0);
+    CHECK(hints.aspect_ratio > 0.0);
+    CHECK(format::should_pin_design_viewport(hints));
+
+    bridge.close();
+}
+
+TEST_CASE("ViewBridge keeps a processor-declared size over the AutoUi fit",
+          "[view_bridge][auto_ui]") {
+    // StubProcessor uses AutoUi (create_view returns null) but declares an
+    // explicit view_size() with min/max bounds. That declaration must win — the
+    // AutoUi fit only fills the otherwise-unset default.
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    const auto& hints = bridge.size_hints();
+    CHECK(hints.preferred_width == 480);
+    CHECK(hints.preferred_height == 320);
+    CHECK(hints.min_width == 320);
+    CHECK(hints.max_width == 1024);
+    bridge.close();
+}
+
+TEST_CASE("ViewBridge keeps a custom editor_size() over the AutoUi fit",
+          "[view_bridge][auto_ui]") {
+    CustomEditorSizeProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    const auto& hints = bridge.size_hints();
+    // The explicit 520x360 wins; AutoUi does not override it.
+    CHECK(hints.preferred_width == 520);
+    CHECK(hints.preferred_height == 360);
+    bridge.close();
+}
 
 TEST_CASE("ViewBridge falls back to AutoUi when create_view returns nullptr", "[view_bridge]") {
     StubProcessor p;
