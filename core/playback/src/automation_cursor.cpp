@@ -241,7 +241,8 @@ void AutomationCursor::reset() noexcept {
 
 AutomationCursorResult AutomationCursor::process(const AutomationProgram& program,
                                                  const TransportSnapshot& transport,
-                                                 std::span<AutomationBlockEvent> output) noexcept {
+                                                 std::span<AutomationBlockEvent> output,
+                                                 std::uint32_t max_intersecting_segments) noexcept {
     runtime::ScopedNoAlloc no_alloc;
     AutomationCursorResult result;
     if (!valid_transport_ranges(transport)) {
@@ -282,6 +283,18 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
         last_block_index_ = transport.block_index;
         result.adoption = adoption;
         return result;
+    }
+    std::uint64_t intersecting_segments = 0;
+    for (std::uint8_t index = 0; index < active_ranges; ++index) {
+        const auto frames = transport.is_playing ? transport.ranges[index].frame_count : 1u;
+        intersecting_segments +=
+            segments_intersecting(program, transport.ranges[index], frames).size();
+        result.intersecting_segments = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+            intersecting_segments, std::numeric_limits<std::uint32_t>::max()));
+        if (intersecting_segments > max_intersecting_segments) {
+            result.code = AutomationCursorCode::WorkCapacityExceeded;
+            return result;
+        }
     }
     std::array<RangeTopology, 2> topologies{};
     std::array<std::uint32_t, 2> selected_refinements{};

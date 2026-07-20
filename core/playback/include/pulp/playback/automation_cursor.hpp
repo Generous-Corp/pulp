@@ -5,6 +5,7 @@
 #include <pulp/playback/transport.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace pulp::playback {
@@ -29,6 +30,7 @@ enum class AutomationCursorCode : std::uint8_t {
     InvalidTransport,
     TempoMapMismatch,
     InsufficientCapacity,
+    WorkCapacityExceeded,
 };
 
 enum class AutomationProgramAdoption : std::uint8_t {
@@ -44,6 +46,8 @@ struct AutomationCursorResult {
     /// Distinct mandatory topology and continuous-refinement positions before
     /// applying the caller's output budget.
     std::uint32_t candidate_points = 0;
+    /// Compiled segments intersecting the active transport ranges.
+    std::uint32_t intersecting_segments = 0;
 };
 
 /// Allocation-free renderer for one immutable AutomationProgram. The caller
@@ -58,7 +62,9 @@ class AutomationCursor {
 
     AutomationCursorResult process(const AutomationProgram& program,
                                    const TransportSnapshot& transport,
-                                   std::span<AutomationBlockEvent> output) noexcept;
+                                   std::span<AutomationBlockEvent> output,
+                                   std::uint32_t max_intersecting_segments =
+                                       std::numeric_limits<std::uint32_t>::max()) noexcept;
     void reset() noexcept;
 
     timeline::ItemId active_lane_id() const noexcept {
