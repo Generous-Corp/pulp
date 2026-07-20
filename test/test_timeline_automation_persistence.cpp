@@ -58,6 +58,34 @@ TEST_CASE("Timeline identity decoding accepts snapshots predating automation own
     REQUIRE_FALSE(decoded.locate(decoded.id())->automation_lane_id.valid());
 }
 
+TEST_CASE("Timeline automation decode reports exact fields and preserves model failures") {
+    auto missing_points = take(serialize_project(automation_project(), builtins())).json;
+    const auto points_begin = missing_points.find("\"points\":[");
+    const auto points_end = missing_points.find("],\"target\":", points_begin);
+    REQUIRE(points_begin != std::string::npos);
+    REQUIRE(points_end != std::string::npos);
+    missing_points.erase(points_begin, points_end + 2 - points_begin);
+    auto missing = deserialize_project(missing_points, builtins());
+    REQUIRE_FALSE(missing.has_value());
+    REQUIRE(missing.error().code == PersistenceErrorCode::MissingField);
+    REQUIRE(missing.error().path ==
+            "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/points");
+
+    auto duplicate_point = take(serialize_project(automation_project(), builtins())).json;
+    const auto points = duplicate_point.find("\"points\":[");
+    const auto second_id = duplicate_point.find("\"id\":\"7\"", points);
+    REQUIRE(points != std::string::npos);
+    REQUIRE(second_id != std::string::npos);
+    duplicate_point.replace(second_id, std::string_view("\"id\":\"7\"").size(),
+                            "\"id\":\"6\"");
+    auto rejected = deserialize_project(duplicate_point, builtins());
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().code == PersistenceErrorCode::ModelRejected);
+    REQUIRE(rejected.error().model_error.has_value());
+    REQUIRE(rejected.error().model_error->code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(rejected.error().model_error->item == ItemId{6});
+}
+
 TEST_CASE("Timeline permanent Track v3 automation fixture remains readable") {
     auto decoded_result = deserialize_project(fixture("v3/automation-lane.json"), builtins());
     const auto decoded_code = decoded_result ? -1 : static_cast<int>(decoded_result.error().code);
@@ -96,6 +124,33 @@ TEST_CASE("Timeline Track v2 and v3 migrations fail closed on lossy downgrade") 
         REQUIRE_FALSE(malformed_result.has_value());
         REQUIRE(malformed_result.error().code == PersistenceErrorCode::MigrationFailed);
     }
+}
+
+TEST_CASE("Timeline Track migrations validate each source version's field shape") {
+    const auto registry = builtins();
+    const auto reject = [&](std::uint32_t from, std::uint32_t to, std::string_view source) {
+        auto result = registry.migrate(SchemaDomain::Document, "pulp.timeline.track", from, to,
+                                       source);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code == PersistenceErrorCode::MigrationFailed);
+    };
+
+    reject(1, 2,
+           R"({"data":{"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":1})");
+    reject(2, 3,
+           R"({"data":{"clips":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
+    reject(2, 3,
+           R"({"data":{"automation_lanes":[],"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
+    reject(2, 1,
+           R"({"data":{"automation_lanes":[],"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
+    reject(3, 2,
+           R"({"data":{"automation_lanes":[],"clips":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
+    reject(3, 2,
+           R"({"data":{"automation_lanes":[],"clips":[],"device_chain":null,"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
+    reject(3, 2,
+           R"({"data":{"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
+    reject(3, 2,
+           R"({"data":{"automation_lanes":null,"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
 }
 
 TEST_CASE("Timeline automation quotas reject lanes and points during preflight") {

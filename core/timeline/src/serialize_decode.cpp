@@ -316,8 +316,7 @@ runtime::Result<MediaAsset, PersistenceError> decode_asset(const JsonValue& valu
             decode_representation(representations.value()->array[index],
                                   path + "/data/representations/" + std::to_string(index));
         if (!decoded)
-            return fail<MediaAsset>(decoded.error().code, decoded.error().path,
-                                    decoded.error().byte_offset);
+            return runtime::Err(decoded.error());
         decoded_representations.push_back(std::move(decoded).value());
     }
     return runtime::Result<MediaAsset, PersistenceError>(runtime::Ok(
@@ -559,10 +558,11 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
-        (envelope.value().version == 1 && devices) ||
-        (envelope.value().version >= 2 && (!devices || devices->kind != JsonValue::Kind::Array)) ||
-        (envelope.value().version < 3 && automation) ||
-        (envelope.value().version == 3 && !automation))
+        (!detail::track_has_device_chain(envelope.value().version) && devices) ||
+        (detail::track_has_device_chain(envelope.value().version) &&
+         (!devices || devices->kind != JsonValue::Kind::Array)) ||
+        (!detail::track_has_automation_lanes(envelope.value().version) && automation) ||
+        (detail::track_has_automation_lanes(envelope.value().version) && !automation))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -573,8 +573,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         auto decoded = decode_clip(document, clips.value()->array[index], registry, limits, counts,
                                    path + "/data/clips/" + std::to_string(index));
         if (!decoded)
-            return fail<Track>(decoded.error().code, decoded.error().path,
-                               decoded.error().byte_offset);
+            return runtime::Err(decoded.error());
         decoded_clips.push_back(std::move(decoded).value());
     }
     std::vector<DevicePlacement> decoded_devices;
@@ -607,9 +606,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                                        counts.automation_points,
                                                        path + "/data/automation_lanes");
         if (!decoded)
-            return fail<Track>(decoded.error().code, decoded.error().path,
-                               decoded.error().byte_offset, decoded.error().actual,
-                               decoded.error().limit);
+            return runtime::Err(decoded.error());
         decoded_automation = std::move(decoded).value();
     }
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
@@ -671,8 +668,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         auto decoded = decode_track(document, tracks.value()->array[index], registry, limits,
                                     counts, path + "/data/tracks/" + std::to_string(index));
         if (!decoded)
-            return fail<Sequence>(decoded.error().code, decoded.error().path,
-                                  decoded.error().byte_offset);
+            return runtime::Err(decoded.error());
         decoded_tracks.push_back(std::move(decoded).value());
     }
     auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
@@ -723,8 +719,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
         auto decoded = decode_asset(assets.value()->array[index],
                                     "/data/assets/" + std::to_string(index), counts, limits);
         if (!decoded)
-            return fail<Project>(decoded.error().code, decoded.error().path,
-                                 decoded.error().byte_offset);
+            return runtime::Err(decoded.error());
         decoded_assets.push_back(std::move(decoded).value());
     }
     std::vector<Sequence> decoded_sequences;
@@ -732,8 +727,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
         auto decoded = decode_sequence(parsed.value(), sequences.value()->array[index], registry,
                                        limits, counts, "/data/sequences/" + std::to_string(index));
         if (!decoded)
-            return fail<Project>(decoded.error().code, decoded.error().path,
-                                 decoded.error().byte_offset);
+            return runtime::Err(decoded.error());
         decoded_sequences.push_back(std::move(decoded).value());
     }
     std::vector<detail::IdentityRecord> decoded_identities;

@@ -43,6 +43,13 @@ class StructuralScanner {
         std::size_t end = 0;
     };
 
+    struct EnvelopeView {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data{};
+        bool valid_shape = false;
+    };
+
     std::string_view source_;
     const DecodeLimits& limits_;
     PersistenceError error_;
@@ -406,12 +413,13 @@ class StructuralScanner {
     }
 
     bool require_member(Span object, std::string_view name, std::uint8_t allowed,
-                        const std::string& path) {
+                        const std::string& path,
+                        PersistenceErrorCode missing_code = PersistenceErrorCode::InvalidSchema) {
         Span value;
         bool found = false;
         if (!member(object, name, value, found)) return false;
         if (found && has_shape(value, allowed)) return true;
-        set_error(PersistenceErrorCode::InvalidSchema,
+        set_error(found ? PersistenceErrorCode::InvalidSchema : missing_code,
                   found ? value.begin : object.begin, 0, 0,
                   path + "/" + std::string(name));
         return false;
@@ -612,12 +620,14 @@ class StructuralScanner {
             !member(data, "device_chain", devices, has_devices) ||
             !member(data, "automation_lanes", automation, has_automation)) return false;
         if (!has_clips ||
-            (version == detail::track_schema_policy.oldest_readable_version && has_devices) ||
-            (version > detail::track_schema_policy.oldest_readable_version && !has_devices) ||
-            (version < 3 && has_automation) || (version == 3 && !has_automation)) {
+            (!detail::track_has_device_chain(version) && has_devices) ||
+            (detail::track_has_device_chain(version) && !has_devices) ||
+            (!detail::track_has_automation_lanes(version) && has_automation) ||
+            (detail::track_has_automation_lanes(version) && !has_automation)) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
-                      path + (has_clips ? (version == 3 ? "/data/automation_lanes"
-                                                       : "/data/device_chain")
+                      path + (has_clips ? (detail::track_has_automation_lanes(version)
+                                               ? "/data/automation_lanes"
+                                               : "/data/device_chain")
                                         : "/data/clips"));
             return false;
         }
@@ -655,6 +665,8 @@ class StructuralScanner {
         }
         const auto data_path = path + "/data";
         if (!require_member(data, "id", StringShape, data_path) ||
+            !require_member(data, "points", ArrayShape, data_path,
+                            PersistenceErrorCode::MissingField) ||
             !require_member(data, "target", ObjectShape, data_path)) return false;
         Span points;
         Span target;
@@ -677,18 +689,20 @@ class StructuralScanner {
                                        require_member(point, "value_bits", StringShape,
                                                       point_path);
                             })) return false;
-        if (!envelope(target, type, version, data, valid_shape)) return false;
-        if (type != "pulp.timeline.automation_target.device_parameter" ||
-            !require_structural_shape(valid_shape, version, data_path + "/target",
-                                      target.begin)) {
+        EnvelopeView target_envelope;
+        if (!envelope(target, target_envelope.type, target_envelope.version,
+                      target_envelope.data, target_envelope.valid_shape)) return false;
+        if (target_envelope.type != "pulp.timeline.automation_target.device_parameter" ||
+            !require_structural_shape(target_envelope.valid_shape, target_envelope.version,
+                                      data_path + "/target", target.begin)) {
             if (!has_error_)
                 set_error(PersistenceErrorCode::InvalidSchema, target.begin, 0, 0,
                           data_path + "/target");
             return false;
         }
-        return require_member(data, "device_placement_id", StringShape,
+        return require_member(target_envelope.data, "device_placement_id", StringShape,
                               data_path + "/target/data") &&
-               require_member(data, "parameter_id", NumberShape,
+               require_member(target_envelope.data, "parameter_id", NumberShape,
                               data_path + "/target/data");
     }
 

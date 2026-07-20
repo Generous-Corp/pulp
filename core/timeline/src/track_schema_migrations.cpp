@@ -1,7 +1,10 @@
 #include "track_schema_migrations.hpp"
 
+#include "track_schema_policy.hpp"
+
 #include <algorithm>
 #include <array>
+#include <charconv>
 
 namespace pulp::timeline::detail {
 namespace {
@@ -19,12 +22,29 @@ JsonValue* mutable_member(JsonValue& object, std::string_view name) noexcept {
     return found == object.object.end() ? nullptr : &found->second;
 }
 
-bool valid_track_data_shape(JsonValue& data) noexcept {
+bool valid_version(const JsonValue& value, std::uint32_t expected) noexcept {
+    if (value.kind != JsonValue::Kind::Number)
+        return false;
+    std::uint32_t actual = 0;
+    const auto parsed = std::from_chars(value.scalar.data(),
+                                        value.scalar.data() + value.scalar.size(), actual);
+    return parsed.ec == std::errc{} && parsed.ptr == value.scalar.data() + value.scalar.size() &&
+           actual == expected;
+}
+
+bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
     const auto* id = mutable_member(data, "id");
     const auto* name = mutable_member(data, "name");
     const auto* clips = mutable_member(data, "clips");
+    const auto* devices = mutable_member(data, "device_chain");
+    const auto* automation = mutable_member(data, "automation_lanes");
     return id && id->kind == JsonValue::Kind::String && name &&
-           name->kind == JsonValue::Kind::String && clips && clips->kind == JsonValue::Kind::Array;
+           name->kind == JsonValue::Kind::String && clips && clips->kind == JsonValue::Kind::Array &&
+           (track_has_device_chain(version) ? devices && devices->kind == JsonValue::Kind::Array
+                                            : !devices) &&
+           (track_has_automation_lanes(version)
+                ? automation && automation->kind == JsonValue::Kind::Array
+                : !automation);
 }
 
 struct RawEdit {
@@ -67,8 +87,9 @@ migrate_track_v1_to_v2(std::string_view source, BoundedJsonSink& output, const v
     auto* data = mutable_member(root, "data");
     auto* version = mutable_member(root, "version");
     if (!data || !version || data->kind != JsonValue::Kind::Object ||
-        !valid_track_data_shape(*data) || mutable_member(*data, "device_chain") || data->end == 0 ||
-        version->begin >= version->end)
+        !valid_version(*version, track_schema_policy.oldest_readable_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.oldest_readable_version) ||
+        data->end == 0 || version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{data->end - 1, data->end - 1, ",\"device_chain\":[]"},
                      RawEdit{version->begin, version->end, "2"}};
@@ -87,7 +108,8 @@ migrate_track_v2_to_v1(std::string_view source, BoundedJsonSink& output, const v
     auto* data = mutable_member(root, "data");
     auto* version = mutable_member(root, "version");
     auto* chain = data ? mutable_member(*data, "device_chain") : nullptr;
-    if (!data || !version || !valid_track_data_shape(*data) || !chain ||
+    if (!data || !version || !valid_version(*version, track_device_chain_version) ||
+        !valid_track_data_shape(*data, track_device_chain_version) || !chain ||
         chain->kind != JsonValue::Kind::Array || !chain->array.empty())
         return migration_fail<SchemaWriteSuccess>();
     const auto found =
@@ -134,8 +156,9 @@ migrate_track_v2_to_v3(std::string_view source, BoundedJsonSink& output, const v
     auto* version = mutable_member(root, "version");
     auto* chain = data ? mutable_member(*data, "device_chain") : nullptr;
     if (!data || !version || data->kind != JsonValue::Kind::Object ||
-        !valid_track_data_shape(*data) || !chain || chain->kind != JsonValue::Kind::Array ||
-        mutable_member(*data, "automation_lanes") || data->end == 0 ||
+        !valid_version(*version, track_device_chain_version) ||
+        !valid_track_data_shape(*data, track_device_chain_version) || !chain ||
+        chain->kind != JsonValue::Kind::Array || data->end == 0 ||
         version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{data->end - 1, data->end - 1, ",\"automation_lanes\":[]"},
@@ -155,7 +178,10 @@ migrate_track_v3_to_v2(std::string_view source, BoundedJsonSink& output, const v
     auto* data = mutable_member(root, "data");
     auto* version = mutable_member(root, "version");
     auto* lanes = data ? mutable_member(*data, "automation_lanes") : nullptr;
-    if (!data || !version || !valid_track_data_shape(*data) || !lanes ||
+    auto* chain = data ? mutable_member(*data, "device_chain") : nullptr;
+    if (!data || !version || !valid_version(*version, track_automation_lanes_version) ||
+        !valid_track_data_shape(*data, track_automation_lanes_version) || !chain ||
+        chain->kind != JsonValue::Kind::Array || !lanes ||
         lanes->kind != JsonValue::Kind::Array || !lanes->array.empty())
         return migration_fail<SchemaWriteSuccess>();
     const auto found =

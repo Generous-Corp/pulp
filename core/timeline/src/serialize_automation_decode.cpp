@@ -17,6 +17,41 @@ const JsonValue* member(const JsonValue& value, std::string_view name) noexcept 
     return value.kind == JsonValue::Kind::Object ? value.find(name) : nullptr;
 }
 
+runtime::Result<const JsonValue*, PersistenceError>
+require_member(const JsonValue& value, std::string_view name, JsonValue::Kind kind,
+               const std::string& path) {
+    const auto* found = member(value, name);
+    if (!found)
+        return fail<const JsonValue*>(PersistenceErrorCode::MissingField,
+                                      path + "/" + std::string(name), value.begin);
+    if (found->kind != kind)
+        return fail<const JsonValue*>(PersistenceErrorCode::UnexpectedType,
+                                      path + "/" + std::string(name), found->begin);
+    return runtime::Ok(found);
+}
+
+ModelError model_error(AutomationCurveError error) noexcept {
+    const auto code = error.code == AutomationCurveErrorCode::InvalidPointId
+                          ? ModelErrorCode::InvalidItemId
+                      : error.code == AutomationCurveErrorCode::DuplicatePointId
+                          ? ModelErrorCode::DuplicateItemId
+                          : ModelErrorCode::InvalidSchemaIdentity;
+    return {code, error.point, error.related_point};
+}
+
+ModelError model_error(AutomationLaneError error) noexcept {
+    return {error.code == AutomationLaneErrorCode::InvalidLaneId
+                ? ModelErrorCode::InvalidItemId
+                : ModelErrorCode::MissingAutomationTarget,
+            error.lane, error.related_item};
+}
+
+template <typename T>
+runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string path) {
+    return runtime::Err(PersistenceError{PersistenceErrorCode::ModelRejected, 0, 0, 0,
+                                         std::move(path), error});
+}
+
 } // namespace
 
 runtime::Result<std::vector<AutomationLane>, PersistenceError>
@@ -38,15 +73,22 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
             validate_exact_envelope(lane_value, "pulp.timeline.automation_lane", 1, lane_path);
         if (!lane_data)
             return runtime::Err(lane_data.error());
-        const auto* id = member(*lane_data.value(), "id");
-        const auto* points = member(*lane_data.value(), "points");
-        const auto* target = member(*lane_data.value(), "target");
-        if (!id || !points || points->kind != JsonValue::Kind::Array || !target)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::MissingField,
-                                                     lane_path + "/data", lane_value.begin);
-        auto decoded_id = parse_canonical_u64_string(*id, lane_path + "/data/id");
+        auto id = require_member(*lane_data.value(), "id", JsonValue::Kind::String,
+                                 lane_path + "/data");
+        auto points = require_member(*lane_data.value(), "points", JsonValue::Kind::Array,
+                                     lane_path + "/data");
+        auto target = require_member(*lane_data.value(), "target", JsonValue::Kind::Object,
+                                     lane_path + "/data");
+        if (!id)
+            return runtime::Err(id.error());
+        if (!points)
+            return runtime::Err(points.error());
+        if (!target)
+            return runtime::Err(target.error());
+        auto decoded_id = parse_canonical_u64_string(*id.value(), lane_path + "/data/id");
         auto target_data =
-            validate_exact_envelope(*target, "pulp.timeline.automation_target.device_parameter", 1,
+            validate_exact_envelope(*target.value(),
+                                    "pulp.timeline.automation_target.device_parameter", 1,
                                     lane_path + "/data/target");
         if (!decoded_id || !target_data)
             return fail<std::vector<AutomationLane>>(PersistenceErrorCode::InvalidSchema,
@@ -65,10 +107,11 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
                                                      lane_path + "/data/target/data");
 
         std::vector<AutomationPoint> decoded_points;
-        decoded_points.reserve(points->array.size());
-        for (std::size_t point_index = 0; point_index < points->array.size(); ++point_index) {
+        decoded_points.reserve(points.value()->array.size());
+        for (std::size_t point_index = 0; point_index < points.value()->array.size();
+             ++point_index) {
             const auto point_path = lane_path + "/data/points/" + std::to_string(point_index);
-            const auto& point = points->array[point_index];
+            const auto& point = points.value()->array[point_index];
             if (++point_count > limits.max_automation_points)
                 return fail<std::vector<AutomationLane>>(PersistenceErrorCode::LimitExceeded,
                                                          point_path, point.begin, point_count,
@@ -110,15 +153,14 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
         }
         auto curve = AutomationCurve::create(std::move(decoded_points));
         if (!curve)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::ModelRejected,
-                                                     lane_path + "/data/points");
+            return model_fail<std::vector<AutomationLane>>(model_error(curve.error()),
+                                                           lane_path + "/data/points");
         auto lane = AutomationLane::create(
             {decoded_id.value()},
             DeviceParameterTarget{{placement_id.value()}, parameter_id.value()},
             std::move(curve).value());
         if (!lane)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::ModelRejected,
-                                                     lane_path);
+            return model_fail<std::vector<AutomationLane>>(model_error(lane.error()), lane_path);
         lanes.push_back(std::move(lane).value());
     }
     return runtime::Ok(std::move(lanes));
