@@ -1571,7 +1571,13 @@ today's viewport pin (and VST3 `canResize()` now returns false there, aligning w
 resizable+aspect>0 is unchanged (viewport+lock+snap); free ⇒ no viewport/lock, clamp
 min/max only, no aspect snap. Tests live in `test/test_vst3_plugin_state.cpp` and
 `test/test_clap_entry.cpp` (`[resize]`), plus fake-host viewport-transform cases in
-`test/test_native_view_host.cpp` (`[viewport]`).
+`test/test_native_view_host.cpp` (`[viewport]`). The pin decision itself is the shared
+`should_pin_design_viewport(ViewSize)` predicate in `plugin_descriptor.hpp` — used by
+VST3 (`vst3_plug_view.cpp`) AND the AU v2 Cocoa view (`au_v2_cocoa_view.mm`), so the
+formats cannot drift. AU v2 historically skipped the pin entirely and a resized editor
+CLIPPED in Logic; any new editor host must route through the predicate, not re-derive
+the three-way rule inline (contract test:
+`test/test_au_v2_cocoa_ui.mm` `[resize]`).
 
 ## Two ways to reach the host's parameters — wiring both DOUBLE-WRITES
 
