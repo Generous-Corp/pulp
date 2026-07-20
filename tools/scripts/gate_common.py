@@ -62,6 +62,28 @@ def git_diff_names(base: str, head: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+# git interpret-trailers --parse only returns a message's FINAL trailer block.
+# GitHub's merge-queue `SQUASH + COMMIT_MESSAGES` concatenates every branch commit
+# body into one squash body and appends a `--------- / Co-authored-by:` block, so
+# any bypass trailer (Skill-Update / Version-Bump / Compat-Update / Config-Doc /
+# Reference-Lineage / Release / Custom-Bump / Docs-Update / …) that lands mid-body
+# is silently dropped in `merge_group` context — green at PR level (intact
+# trailers), failing on the queue candidate, so the PR is added then evicted in a
+# loop and never merges.
+#
+# Rescue is deliberately KEY-AGNOSTIC: match every trailer-shaped line in the
+# whole body rather than an allowlist. Every gate reads
+# `trailers.get("<specific-key>")` and none enumerates the dict, so surfacing
+# extra keys is harmless — and, crucially, no bypass trailer (present OR future)
+# can ever be silently voided by the squash again. The `^`-anchor + a mandatory
+# space after the colon means only genuine trailer lines match: not `http://…`
+# URLs, not `## Heading`, not mid-sentence prose.
+_TRAILER_LINE_RE = re.compile(
+    r"^(?P<key>[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*):[ \t]+(?P<val>\S.*?)[ \t]*$",
+    re.MULTILINE,
+)
+
+
 def _parse_trailer_block(body: str) -> dict[str, list[str]]:
     trailers = subprocess.run(
         ["git", "interpret-trailers", "--parse"],
@@ -73,6 +95,15 @@ def _parse_trailer_block(body: str) -> dict[str, list[str]]:
             continue
         key, _, value = line.partition(":")
         result.setdefault(key.strip().lower(), []).append(value.strip())
+    # Rescue trailer-shaped lines a merge-queue squash buried mid-body (see
+    # _TRAILER_LINE_RE). Only add values interpret-trailers didn't already
+    # capture, so a trailer in the final block isn't double-counted.
+    for match in _TRAILER_LINE_RE.finditer(body):
+        key = match.group("key").strip().lower()
+        value = match.group("val").strip()
+        values = result.setdefault(key, [])
+        if value not in values:
+            values.append(value)
     return result
 
 

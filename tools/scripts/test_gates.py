@@ -44,6 +44,7 @@ from test_gate_common import GlobToRegexTests  # noqa: E402,F401
 from test_gate_common import GitHelperTests  # noqa: E402,F401
 from test_gate_common import StripMetaTests  # noqa: E402,F401
 from test_gate_common import TrailerParseTests  # noqa: E402,F401
+from test_gate_common import SquashBuriedBypassTrailerTests  # noqa: E402,F401
 from test_version_bump_surfaces import VersionBumpSurfacesTests  # noqa: E402,F401
 from test_version_bump_heuristics import VersionBumpHeuristicsTests  # noqa: E402,F401
 from test_version_bump_apply import VersionBumpApplyTests  # noqa: E402,F401

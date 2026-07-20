@@ -271,6 +271,79 @@ class TrailerParseTests(unittest.TestCase):
             self.assertEqual(gc.git_range_trailers("main", "HEAD"), {})
 
 
+class SquashBuriedBypassTrailerTests(unittest.TestCase):
+    """Regression for the merge-queue SQUASH + COMMIT_MESSAGES trailer void:
+    GitHub concatenates commit bodies and appends a `--------- / Co-authored-by`
+    block, so `git interpret-trailers --parse` (final-block only) drops bypass
+    trailers that land mid-body. gate_common must still see them, or every
+    skip-trailer PR is added→evicted on the queue in a loop."""
+
+    def test_final_block_bypass_still_parsed(self) -> None:
+        body = (
+            "docs: sweep coordinate\n\n"
+            "Skill-Update: skip skill=ci reason=\"coordinate-only\"\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertIn("skill-update", got)
+        self.assertEqual(got["skill-update"], ['skip skill=ci reason="coordinate-only"'])
+
+    def test_squash_buried_bypass_is_rescued(self) -> None:
+        # The exact shape GitHub's squash produces: trailers mid-body, then a
+        # separator + Co-authored-by final block that interpret-trailers latches.
+        body = (
+            "docs: sweep coordinate (#6395)\n\n"
+            "* docs: point coordinate at org\n\n"
+            "Skill-Update: skip skill=ci reason=\"coordinate-only\"\n"
+            "Config-Doc: skip reason=\"rename only\"\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertIn("skill-update", got, "buried Skill-Update must be rescued")
+        self.assertIn("config-doc", got, "buried Config-Doc must be rescued")
+        self.assertEqual(got["skill-update"], ['skip skill=ci reason="coordinate-only"'])
+
+    def test_rescue_is_key_agnostic(self) -> None:
+        # KEY-AGNOSTIC: every bypass trailer a gate might read must survive the
+        # squash, not just a hand-maintained allowlist — including the ones the
+        # 5-key first cut missed (Compat-Update, Custom-Bump, Docs-Update) and
+        # any future key. Gates only ever `trailers.get("<specific>")`, so
+        # rescuing every trailer-shaped line is safe and drift-proof.
+        body = (
+            "feat: thing (#1)\n\n"
+            "Compat-Update: skip reason=\"parts identical\"\n"
+            "Custom-Bump: sdk=minor\n"
+            "Docs-Update: skip reason=\"no doc surface\"\n"
+            "Planning-Bump: skip reason=\"hypothetical future gate\"\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        for key in ("compat-update", "custom-bump", "docs-update", "planning-bump"):
+            self.assertIn(key, got, f"buried {key} must be rescued (key-agnostic)")
+
+    def test_non_trailer_shapes_ignored(self) -> None:
+        # The `^`-anchor + mandatory space after the colon means only real
+        # trailer lines match — URLs, markdown headings, and space-bearing keys
+        # (which git never treats as trailer tokens) must NOT be surfaced.
+        body = (
+            "feat: thing\n\n"
+            "See https://example.com/x for details\n"
+            "## Notes: heading, not a trailer\n"
+            "BREAKING CHANGE: space in the key\n"
+            "http://raw.example.com/a:b\n\n"
+            "---------\n\n"
+            "Co-authored-by: Someone <s@example.com>\n"
+        )
+        got = gc._parse_trailer_block(body)
+        self.assertNotIn("breaking change", got)
+        self.assertNotIn("http", got)
+        self.assertNotIn("https", got)
+        # A gate only reads specific keys, so even if some benign token slipped
+        # in it would be inert — but confirm the URL/heading noise stays out.
+        self.assertNotIn("## notes", got)
+
 
 if __name__ == "__main__":
     unittest.main()
