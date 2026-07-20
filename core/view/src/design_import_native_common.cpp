@@ -1375,6 +1375,18 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
         if (*fill == "none") path.clear_fill();
         else if (auto color = parse_any_css_color(*fill)) path.set_fill_color(*color);
     }
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes — a subtracted icon baked as same-direction contours fills solid
+    // without it. `svg_fill_rule` is the IR-canonical key (design_ir_json);
+    // `fill-rule` / `fillRule` are the raw SVG/JSX spellings this lane's
+    // other paint attributes already use.
+    for (const char* key : {"svg_fill_rule", "fill-rule", "fillRule"}) {
+        if (auto rule = attr(node, key)) {
+            if (*rule == "evenodd") path.set_fill_rule(canvas::FillRule::evenodd);
+            else if (*rule == "nonzero") path.set_fill_rule(canvas::FillRule::nonzero);
+            break;
+        }
+    }
     if (auto stroke = attr(node, "stroke")) {
         if (*stroke == "none") path.clear_stroke();
         else if (auto color = parse_any_css_color(*stroke)) path.set_stroke_color(*color);

@@ -1380,6 +1380,12 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
     if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
         ss << ind << "setSvgFill('" << id << "', '"
            << js_single_quote_escape(f->second) << "');\n";
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes — a subtracted icon baked as same-direction contours fills SOLID
+    // without it. Emitted only for evenodd; nonzero is the widget default.
+    if (auto fr = node.attributes.find("svg_fill_rule");
+        fr != node.attributes.end() && fr->second == "evenodd")
+        ss << ind << "setSvgFillRule('" << id << "', 'evenodd');\n";
     // Emission order is irrelevant — SvgPathWidget resolves the two at
     // paint time, preferring the gradient and using the solid only as
     // the parse-failure fallback — but the solid is emitted first so
