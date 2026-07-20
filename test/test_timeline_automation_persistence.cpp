@@ -85,6 +85,17 @@ TEST_CASE("Timeline Track v2 and v3 migrations fail closed on lossy downgrade") 
         registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 3, 2, populated);
     REQUIRE_FALSE(rejected.has_value());
     REQUIRE(rejected.error().code == PersistenceErrorCode::MigrationFailed);
+
+    for (const std::string_view malformed_chain : {"null", "{}"}) {
+        const auto malformed =
+            std::string(R"({"data":{"clips":[],"device_chain":)") +
+            std::string(malformed_chain) +
+            R"(,"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})";
+        auto malformed_result =
+            registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 2, 3, malformed);
+        REQUIRE_FALSE(malformed_result.has_value());
+        REQUIRE(malformed_result.error().code == PersistenceErrorCode::MigrationFailed);
+    }
 }
 
 TEST_CASE("Timeline automation quotas reject lanes and points during preflight") {

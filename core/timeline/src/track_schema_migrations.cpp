@@ -132,8 +132,9 @@ migrate_track_v2_to_v3(std::string_view source, BoundedJsonSink& output, const v
     auto root = parsed.value()->root();
     auto* data = mutable_member(root, "data");
     auto* version = mutable_member(root, "version");
+    auto* chain = data ? mutable_member(*data, "device_chain") : nullptr;
     if (!data || !version || data->kind != JsonValue::Kind::Object ||
-        !valid_track_data_shape(*data) || !mutable_member(*data, "device_chain") ||
+        !valid_track_data_shape(*data) || !chain || chain->kind != JsonValue::Kind::Array ||
         mutable_member(*data, "automation_lanes") || data->end == 0 ||
         version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
