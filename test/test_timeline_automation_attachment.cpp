@@ -119,6 +119,33 @@ TEST_CASE("Clip edits check only changed identities against attached automation"
     REQUIRE(replacement.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(replacement.error().item == ItemId{32});
 
+    auto duplicate_with_colliding_note = inserted.insert_clip(take(Clip::create(
+        {50}, pulp::timebase::TickPosition{20}, pulp::timebase::TickDuration{10}, notes)));
+    REQUIRE_FALSE(duplicate_with_colliding_note.has_value());
+    REQUIRE(duplicate_with_colliding_note.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(duplicate_with_colliding_note.error().item == ItemId{50});
+
+    auto mixed_with_colliding_note = inserted.replace_clip(take(Clip::create_absolute(
+        {50}, pulp::timebase::SamplePosition{0}, 10, {48'000, 1}, notes)));
+    REQUIRE_FALSE(mixed_with_colliding_note.has_value());
+    REQUIRE(mixed_with_colliding_note.error().code == ModelErrorCode::MixedTimeAnchors);
+    REQUIRE(mixed_with_colliding_note.error().item == ItemId{10});
+
+    const auto absolute = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "absolute",
+        .clips = {take(Clip::create_absolute(
+            {50}, pulp::timebase::SamplePosition{0}, 10, {48'000, 1}, EmptyContent{}))},
+        .device_chain = {{{20}}},
+        .automation_lanes = {lane({32}, {20}, 8, {})},
+    }));
+    auto incompatible_with_colliding_note = absolute.replace_clip(take(Clip::create_absolute(
+        {50}, pulp::timebase::SamplePosition{0}, 10, {44'100, 1}, notes)));
+    REQUIRE_FALSE(incompatible_with_colliding_note.has_value());
+    REQUIRE(incompatible_with_colliding_note.error().code ==
+            ModelErrorCode::IncompatibleSampleRate);
+    REQUIRE(incompatible_with_colliding_note.error().item == ItemId{10});
+
     const auto erased = take(original.erase_automation_lane({31}));
     REQUIRE(erased.insert_clip(take(Clip::create(
         {41}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, EmptyContent{}))));

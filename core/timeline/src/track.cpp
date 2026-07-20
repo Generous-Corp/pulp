@@ -111,8 +111,14 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
-    if (!find_clip(replacement.id()))
+    const auto* old = find_clip(replacement.id());
+    if (!old)
         return fail<Track>(ModelErrorCode::InvalidItemId, replacement.id());
+    if (replacement.time_anchor() != old->time_anchor())
+        return fail<Track>(ModelErrorCode::MixedTimeAnchors, data_->id, replacement.id());
+    if (replacement.time_anchor() == ClipTimeAnchor::Absolute &&
+        replacement.absolute_sample_rate() != old->absolute_sample_rate())
+        return fail<Track>(ModelErrorCode::IncompatibleSampleRate, data_->id, replacement.id());
     if (const auto collision =
             automation_identity_collision(replacement, *data_->automation_owned_ids))
         return fail<Track>(ModelErrorCode::DuplicateItemId, *collision);
@@ -126,6 +132,10 @@ runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
 }
 
 runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
+    if (!clip.id().valid())
+        return fail<Track>(ModelErrorCode::InvalidItemId, clip.id());
+    if (find_clip(clip.id()))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, clip.id());
     if (const auto collision = automation_identity_collision(clip, *data_->automation_owned_ids))
         return fail<Track>(ModelErrorCode::DuplicateItemId, *collision);
     auto lane = track_lane_result(data_->arrangement_lane.insert_clip(std::move(clip)), data_->id);
