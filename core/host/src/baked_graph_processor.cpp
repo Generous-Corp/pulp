@@ -40,6 +40,13 @@ struct BakedParamMailbox {
     runtime::TripleBuffer<BakedParamBlockSnapshot> published;
     BakedParamBlockSnapshot writer_scratch;   // control-thread-owned
     std::atomic<std::uint64_t> next_sequence{0};
+    // Last publish the audio side has APPLIED (stored by the drain closure).
+    // Lets inject(single) accumulate: while the last published batch is still
+    // unconsumed, a new single event MERGES into it instead of replacing it, so
+    // N single injects to different params between blocks all land (the raw
+    // latest-snapshot-wins TripleBuffer would otherwise collapse them to the
+    // last one and silently drop the rest — the F2-review footgun).
+    std::atomic<std::uint64_t> consumed_sequence{0};
     std::atomic<bool> claimed{false};
 };
 
@@ -751,6 +758,11 @@ void BakedGraphProcessor::prepare_param_injection() {
                         rt->scratch.push(snap.events[i]);
                     }
                     rt->sequence_seen = snap.sequence;
+                    // Tell the control side this batch is applied so the next
+                    // inject(single) starts a FRESH pending batch instead of
+                    // merging with (and re-publishing) already-applied events.
+                    rt->mailbox->consumed_sequence.store(snap.sequence,
+                                                         std::memory_order_release);
                 }
                 rt->scratch.sort();
 
@@ -839,11 +851,37 @@ InjectStatus ParamInjector::inject(const state::ParameterEvent& event) noexcept 
     if (!mailbox_) return InjectStatus::InvalidHandle;
     auto& mb = *mailbox_;
     auto& scratch = mb.writer_scratch;
-    scratch.events[0] = event;
-    scratch.size = 1;
+    // ACCUMULATE, don't replace. A raw publish-per-event would let the
+    // TripleBuffer's latest-snapshot-wins collapse two single injects to the
+    // SAME node with no intervening process() into only the last one — a
+    // multi-param node would silently drop a param. Instead: while the last
+    // published batch is still unconsumed, merge the new event into it (the
+    // new event supersedes only THIS param's pending entries; other params'
+    // pending events are preserved) and re-publish the merged batch. Once the
+    // audio side has applied the pending batch, start fresh — never re-publish
+    // already-applied events (a re-applied ramp would re-glide).
+    if (mb.consumed_sequence.load(std::memory_order_acquire) >= scratch.sequence) {
+        scratch.size = 0;  // previous batch consumed — nothing left to merge with
+    }
+    std::size_t w = 0;
+    for (std::size_t r = 0; r < scratch.size; ++r) {
+        if (scratch.events[r].param_id != event.param_id) {
+            scratch.events[w++] = scratch.events[r];
+        }
+    }
+    scratch.size = w;
+    if (scratch.size >= scratch.events.size()) {
+        // Pathological: the pending batch is FULL of other params' events (a
+        // full-capacity queue publish, none for this param, not yet consumed).
+        // Refuse to silently evict someone else's pending event; the pending
+        // batch stays published unchanged and THIS event is dropped — reported
+        // loudly, mirroring the queue path's overflow contract.
+        return InjectStatus::PartialOverflow;
+    }
+    scratch.events[scratch.size++] = event;
     scratch.sequence = mb.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
     mb.published.write(scratch);
-    return InjectStatus::Ok;  // a single event never overflows
+    return InjectStatus::Ok;
 }
 
 } // namespace pulp::host

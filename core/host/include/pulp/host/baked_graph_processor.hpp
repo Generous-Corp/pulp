@@ -134,7 +134,9 @@ struct CustomNodeLifecycle {
 // us (the retained prefix is still published — a real, usable partial success).
 enum class InjectStatus {
     Ok,               // published in full
-    PartialOverflow,  // the source queue overflowed; its retained prefix is published
+    PartialOverflow,  // queue path: the source queue overflowed; its retained
+                      // prefix is published. Single path: the pending batch was
+                      // full of other params' events; this event was dropped.
     InvalidHandle,    // this injector holds no live claim (valid() == false); nothing published
 };
 
@@ -142,9 +144,13 @@ enum class InjectStatus {
 // node. Obtain from BakedGraphProcessor::claim_param_injection(); move-only;
 // releases the node's exclusive claim on destruction. inject() is RT-safe and
 // allocation-free — it publishes into the node's single-writer mailbox, which
-// the baked process() drains on its next block. Precedence mirrors the live
-// mailbox: latest-published-queue wins; WITHIN a queue events are sample-
-// accurate and may ramp (ParamCursor over sample_offset +
+// the baked process() drains on its next block. Publication semantics:
+// inject(queue) REPLACES the pending batch (latest-published-queue wins, like
+// the live mailbox); inject(single) ACCUMULATES — the new event merges into
+// the still-unconsumed pending batch, superseding only that param's pending
+// entries, so N single injects to different params on one node between blocks
+// ALL land (they do not collapse to the last one). WITHIN a batch events are
+// sample-accurate and may ramp (ParamCursor over sample_offset +
 // ramp_duration_sample_frames), and a ramp longer than one block continues to
 // completion across subsequent blocks. Exactly one injector may hold a node at
 // a time (two owners injecting into one node is the hazard this claim prevents).
@@ -168,8 +174,13 @@ public:
     // Ok. RT-safe / allocation-free.
     InjectStatus inject(const state::ParameterEventQueue& events) noexcept;
     // Convenience: publish a single immediate (ramp_duration==0) or ramped
-    // event. A single event never overflows, so this returns only Ok or
-    // InvalidHandle.
+    // event. Accumulates: merges into the pending (not-yet-consumed) batch,
+    // superseding only THIS param's pending entries — consecutive single
+    // injects to different params between blocks all apply. Returns
+    // PartialOverflow only in the pathological case where the pending batch is
+    // already full of OTHER params' events (a full-capacity queue publish, not
+    // yet consumed): the pending batch stays published unchanged and this
+    // event is dropped. Otherwise Ok / InvalidHandle.
     InjectStatus inject(const state::ParameterEvent& event) noexcept;
 
 private:

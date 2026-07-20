@@ -291,6 +291,76 @@ TEST_CASE("Baked param injection: a ramp interpolates smoothly, sample-by-sample
     }
 }
 
+// ── Footgun regression: inject(single) must ACCUMULATE, not replace. Pre-fix,
+// each single inject published a fresh one-event snapshot, so two single
+// injects to the SAME node with no intervening process() collapsed (latest-
+// snapshot-wins) to only the LAST one — a multi-param node silently dropped a
+// param. Post-fix they merge into the pending batch and BOTH land.
+TEST_CASE("Baked param injection: two single injects to different params both land",
+          "[host][baked][param-injection][forge]") {
+    BakedFixture fx(make_delay_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    // Between blocks: time_ms=50 THEN feedback=0.8, as two SINGLE injects.
+    // Pre-fix only feedback survived — time_ms silently stayed at its 10 ms
+    // default, putting the first echo at 480 samples instead of 2400.
+    REQUIRE(inj.inject(immediate(kTimeMsId, 50.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(kFeedbackId, 0.8f)) == InjectStatus::Ok);
+
+    // Render past the SECOND echo (2 * 2400 = 4800 samples) and concatenate.
+    std::vector<float> all;
+    for (int b = 0; b < 40; ++b) {  // 40 * 128 = 5120 > 4800
+        auto out = run_block(*fx.result.processor,
+                             b == 0 ? impulse(kFrames)
+                                    : std::vector<float>(kFrames, 0.0f));
+        all.insert(all.end(), out.begin(), out.end());
+    }
+    // time_ms landed: the first echo sits at ~50 ms (DelayLine reads d+1 pushes
+    // back, so sample 2401), and NOTHING sits near the 10 ms default position.
+    for (int k = 470; k <= 490; ++k) CHECK(std::fabs(all[static_cast<std::size_t>(k)]) < 1e-6f);
+    const auto peak_in = [&](int lo, int hi) {
+        int idx = lo;
+        for (int k = lo; k < hi; ++k) {
+            if (std::fabs(all[static_cast<std::size_t>(k)]) >
+                std::fabs(all[static_cast<std::size_t>(idx)])) idx = k;
+        }
+        return idx;
+    };
+    const int e1 = peak_in(1000, 3600);
+    CHECK(e1 >= 2400);
+    CHECK(e1 <= 2402);
+    CHECK(all[static_cast<std::size_t>(e1)] == Catch::Approx(1.0f).margin(1e-4));
+    // feedback landed: the echo recirculates — a second echo one delay later at
+    // 0.8x the first.
+    const int e2 = peak_in(3600, 5120);
+    CHECK(e2 == 2 * e1);
+    CHECK(all[static_cast<std::size_t>(e2)] == Catch::Approx(0.8f).margin(1e-3));
+}
+
+TEST_CASE("Baked param injection: a single inject into a full unconsumed batch is refused loudly",
+          "[host][baked][param-injection][forge]") {
+    BakedFixture fx(make_delay_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    // Publish a FULL-capacity queue of time_ms events, none for feedback, and
+    // do not process — the pending batch has no room for another param.
+    pulp::state::ParameterEventQueue q;
+    for (std::size_t i = 0; i < pulp::state::ParameterEventQueue::kCapacity; ++i) {
+        REQUIRE(q.push(immediate(kTimeMsId, 20.0f)));
+    }
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    // The single inject cannot fit; it must be REFUSED (PartialOverflow), not
+    // silently evict someone else's pending event.
+    CHECK(inj.inject(immediate(kFeedbackId, 0.5f)) == InjectStatus::PartialOverflow);
+
+    // Once a block consumes the pending batch, the same single inject fits.
+    run_block(*fx.result.processor, std::vector<float>(kFrames, 0.0f));
+    CHECK(inj.inject(immediate(kFeedbackId, 0.5f)) == InjectStatus::Ok);
+}
+
 TEST_CASE("Baked param injection: latest published queue wins",
           "[host][baked][param-injection][forge]") {
     BakedFixture fx(make_probe_node());

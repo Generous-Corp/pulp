@@ -879,6 +879,36 @@ Gotchas:
   Note the instance is SHARED with the source graph — the baked path does not clone
   it — so a baked re-prepare also resets that node in a still-live source graph.
 
+### Bake-layer parameter injection (control-thread writes into a baked node)
+
+A baked custom node's parameters can be changed at runtime — sample-accurately,
+RT-safely, without re-baking — via the bake-layer injection primitive:
+
+- **Declaring:** a `CustomNodeType` opts in by filling `baked_params` (id + range +
+  default per param) and providing `process_instance_baked_param`, a param-aware
+  process callback that reads values through a `BakedParamView`
+  (`value_at(id, sample_offset)` — offsets must be non-decreasing within a block).
+  That baked-param DSP runs ONLY in the baked Processor, never on the live graph.
+- **Injecting:** `BakedGraphProcessor::claim_param_injection(node)` hands back a
+  move-only `ParamInjector` — an EXCLUSIVE per-node claim (a second claim fails until
+  the first is released; the handle survives re-prepare). `inject()` publishes into a
+  single-writer per-node mailbox the baked `process()` drains next block; events are
+  `pulp::state::ParameterEvent`s (immediate or ramped), and a ramp longer than one
+  block carries across blocks to completion.
+- **One-param-per-block-or-batch contract:** `inject(ParameterEventQueue)` is the
+  batch path — the whole queue lands as ONE sample-accurate batch, and the latest
+  published queue REPLACES a still-pending one. `inject(ParameterEvent)` (single)
+  ACCUMULATES: it merges into the still-unconsumed pending batch, superseding only
+  that param's pending entries, so N single injects to different params between
+  blocks all land. (Pre-fix this was latest-snapshot-wins — two single injects with
+  no intervening `process()` collapsed to the last one, silently dropping a param.
+  If you need many events for one param in one block, use the queue path; single
+  `inject` returns `PartialOverflow` only when the pending batch is already full of
+  other params' events.)
+
+`test/test_baked_graph_param_injection.cpp` is the executable spec (claims, ramps,
+sample accuracy, RT-allocation-free drain, the accumulate regression).
+
 ## Common tripwires
 
 - **Instruments have no input bus — never address input element 0 blind.**
