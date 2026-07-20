@@ -19,8 +19,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { resolveFixtureAsset } from "./fixture-assets.mjs";
 
 const HERE = new URL(".", import.meta.url).pathname;
+const SOURCE_DIR = resolve(HERE, "..");
 const PORT = 8734;
 const PAGE = `http://localhost:${PORT}/`;
 
@@ -104,7 +106,7 @@ const MIME = {
 };
 
 const server = http.createServer(async (req, res) => {
-  const path = decodeURIComponent(req.url.split("?")[0]);
+  const path = req.url.split("?")[0];
   const head = {
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-embedder-policy": "require-corp",
@@ -113,9 +115,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { ...head, "content-type": "text/html" });
     return res.end(INDEX_HTML);
   }
-  const name = path.replace(/^\//, "");
-  if (/[/\\]/.test(name)) { res.writeHead(403); return res.end(); }
-  const file = name === "pulp-ui.js" ? resolve(HERE, "..", name) : resolve(buildDir, name);
+  const file = resolveFixtureAsset(req.url, { sourceDir: SOURCE_DIR, buildDir });
+  if (!file) { res.writeHead(403); return res.end(); }
   try {
     const data = await readFile(file);
     res.writeHead(200, { ...head, "content-type": MIME[extname(file)] || "application/octet-stream" });
