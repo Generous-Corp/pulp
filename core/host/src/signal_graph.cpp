@@ -741,12 +741,18 @@ bool SignalGraph::inject_parameter_events(
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
-    auto runtime_it = cg->runtime.find(id);
-    if (runtime_it == cg->runtime.end()) return false;
-    const auto shape_it = cg->shapes.find(id);
-    if (shape_it == cg->shapes.end()
+    return inject_parameter_events_into_snapshot_(*cg, id, events);
+}
+
+bool SignalGraph::inject_parameter_events_into_snapshot_(
+    CompiledGraph& snapshot, NodeId id,
+    const state::ParameterEventQueue& events) noexcept {
+    auto runtime_it = snapshot.runtime.find(id);
+    if (runtime_it == snapshot.runtime.end()) return false;
+    const auto shape_it = snapshot.shapes.find(id);
+    if (shape_it == snapshot.shapes.end()
         || shape_it->second.type != NodeType::Plugin
-        || cg->plugins.find(id) == cg->plugins.end()
+        || snapshot.plugins.find(id) == snapshot.plugins.end()
         || !runtime_it->second.parameter_input_mailbox) {
         return false;
     }
@@ -2694,6 +2700,14 @@ bool SignalGraph::ExecutionSnapshot::inject_midi(
     NodeId midi_input_node, const midi::MidiBuffer& events) const noexcept {
     return snapshot_ != nullptr &&
            SignalGraph::inject_midi_into_snapshot_(*snapshot_, midi_input_node, events);
+}
+
+bool SignalGraph::ExecutionSnapshot::inject_parameter_events(
+    NodeId plugin_node,
+    const state::ParameterEventQueue& events) const noexcept {
+    return snapshot_ != nullptr &&
+           SignalGraph::inject_parameter_events_into_snapshot_(
+               *snapshot_, plugin_node, events);
 }
 
 void SignalGraph::ExecutionSnapshot::process(
