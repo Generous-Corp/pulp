@@ -86,21 +86,14 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         return result;
     }
 
-    // Resize contract (ViewSize):
-    //   - not resizable (min==0): pin the design viewport at preferred so an
-    //     off-size DAW pane letterbox-scales the content (today's behavior).
-    //   - resizable + aspect_ratio>0: pin viewport + lock aspect (design-import
-    //     path). checkSizeConstraint snaps to the design aspect.
-    //   - resizable + aspect_ratio==0: honor "free drag within [min,max]" —
-    //     NO design viewport, NO aspect lock; the root reflows via Yoga at the
-    //     host size and checkSizeConstraint only clamps min/max.
-    // `resizable` follows CLAP's shipped convention (min_width>0 && min_height>0).
+    // Resize contract: the shared should_pin_design_viewport() predicate
+    // (plugin_descriptor.hpp) — pin+lock unless the plugin opted into free
+    // drag (resizable + aspect_ratio==0), where checkSizeConstraint only
+    // clamps min/max and the root reflows via Yoga at the host size.
     //
     // Set AFTER attach succeeds so a failed attach doesn't install the
     // pointTransform block on a host that's about to be destroyed.
-    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
-    const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
-    if (hints.preferred_width > 0 && hints.preferred_height > 0 && !free_resize) {
+    if (should_pin_design_viewport(hints)) {
         editor_host_->set_design_viewport(
             static_cast<float>(hints.preferred_width),
             static_cast<float>(hints.preferred_height));
