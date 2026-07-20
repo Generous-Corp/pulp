@@ -30,6 +30,7 @@ enum class AnticipationExclusion : std::uint8_t {
                          // host transport (GraphNode::transport_sensitive). Such
                          // a node must run live to observe the real playhead, so
                          // it (and its downstream cone) cannot be rendered ahead.
+    ExactParameterInput, // owns block-specific exact-generation host automation
 };
 
 struct AnticipationEligibility {
@@ -76,6 +77,7 @@ struct AnticipationEligibility {
 // TransportSensitive here keeps such a node — and its downstream cone — out of
 // the ahead-rendered interior, letting it run live and observe the real playhead.
 AnticipationEligibility analyze_anticipation_eligibility(
-    std::span<const GraphNode> nodes, std::span<const Connection> connections);
+    std::span<const GraphNode> nodes, std::span<const Connection> connections,
+    std::span<const NodeId> exact_parameter_input_nodes = {});
 
 } // namespace pulp::host

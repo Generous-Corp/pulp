@@ -7,7 +7,8 @@
 namespace pulp::host {
 
 AnticipationEligibility analyze_anticipation_eligibility(
-    std::span<const GraphNode> nodes, std::span<const Connection> connections) {
+    std::span<const GraphNode> nodes, std::span<const Connection> connections,
+    std::span<const NodeId> exact_parameter_input_nodes) {
     AnticipationEligibility result;
     result.node_exclusion.assign(nodes.size(), AnticipationExclusion::None);
 
@@ -54,6 +55,11 @@ AnticipationEligibility analyze_anticipation_eligibility(
         if (nodes[i].transport_sensitive) {
             seed(i, AnticipationExclusion::TransportSensitive);
         }
+    }
+    for (const auto id : exact_parameter_input_nodes) {
+        std::size_t index = 0;
+        if (!find(id, index)) return result;
+        seed(index, AnticipationExclusion::ExactParameterInput);
     }
 
     // Seed the endpoints of every feedback edge and any sidechain consumer.

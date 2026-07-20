@@ -32,7 +32,10 @@ bool AnticipationLane::prepare(
             const auto injection = parameter_events_for(context.node_id);
             context.parameter_events_user_data = injection.user_data;
             context.append_parameter_events = injection.append;
-            context.parameter_events_sequence_seen = injection.sequence_seen;
+            context.parameter_events_live_sequence_seen =
+                injection.live_sequence_seen;
+            context.parameter_events_exact_sequence_seen =
+                injection.exact_sequence_seen;
         }
     }
     if (!pool_.reset(snapshot_.buffer_slot_count(),

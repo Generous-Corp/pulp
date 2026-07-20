@@ -4,6 +4,10 @@
 
 namespace pulp::host {
 
+namespace detail {
+class TimelineAutomationDelivery;
+}
+
 /// Strong, typed handle to one exact compiled SignalGraph generation. The
 /// owning SignalGraph and its worker pool must outlive the handle. Copying is
 /// control-thread-only.
@@ -14,9 +18,6 @@ class SignalGraph::ExecutionSnapshot {
 
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;
-    bool inject_parameter_events(
-        NodeId plugin_node,
-        const state::ParameterEventQueue& events) const noexcept;
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples) const noexcept;
@@ -27,6 +28,10 @@ class SignalGraph::ExecutionSnapshot {
 
   private:
     friend class PreparedTopologyEdit;
+    friend class detail::TimelineAutomationDelivery;
+    bool inject_parameter_events(
+        NodeId plugin_node,
+        const state::ParameterEventQueue& events) const noexcept;
     ExecutionSnapshot(SignalGraph& owner,
                       std::shared_ptr<SignalGraph::CompiledGraph> snapshot) noexcept
         : owner_(&owner), snapshot_(std::move(snapshot)) {}
