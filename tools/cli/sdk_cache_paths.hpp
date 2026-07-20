@@ -21,7 +21,7 @@ namespace pulp::cli {
 /// stale-cache bug: a cached tarball from a prior release cannot
 /// silently shadow a fresh download because the filename lookup misses,
 /// not a version field that has to be checked separately. See
-/// https://github.com/danielraffel/pulp/issues/1814.
+/// https://github.com/Generous-Corp/pulp/issues/1814.
 std::string sdk_tarball_filename(const std::string& version,
                                   const std::string& platform);
 

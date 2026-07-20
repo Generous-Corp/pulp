@@ -61,7 +61,7 @@ TEST_CASE("find_pin_site detects FetchContent_Declare GIT_TAG",
         "project(App LANGUAGES CXX)\n"
         "include(FetchContent)\n"
         "FetchContent_Declare(pulp\n"
-        "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+        "    GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git\n"
         "    GIT_TAG v0.23.0)\n"
         "FetchContent_MakeAvailable(pulp)\n";
     auto site = pb::find_pin_site(src);
@@ -235,7 +235,7 @@ TEST_CASE("rewrite_pin preserves leading 'v' prefix",
           "[project-bump][issue-564]") {
     std::string src =
         "FetchContent_Declare(pulp\n"
-        "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+        "    GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git\n"
         "    GIT_TAG v0.23.0)\n";
     auto site = pb::find_pin_site(src);
     REQUIRE(site.kind == pb::PinKind::FetchContentGitTag);
@@ -244,7 +244,7 @@ TEST_CASE("rewrite_pin preserves leading 'v' prefix",
     REQUIRE(rewritten->find("GIT_TAG v0.32.0)") != std::string::npos);
     // Everything else should be byte-identical — spot-check the
     // surrounding tokens.
-    REQUIRE(rewritten->find("GIT_REPOSITORY https://github.com/danielraffel/pulp.git")
+    REQUIRE(rewritten->find("GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git")
             != std::string::npos);
     REQUIRE(rewritten->find("v0.23.0") == std::string::npos);
 }

@@ -4,7 +4,7 @@
     "source": "fixtures/clean",
     "exporter": "scene3d-test",
     "exported_at": "2026-06-03T00:00:00Z",
-    "runtime_evidence": "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927"
+    "runtime_evidence": "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927"
   },
   "diagnostics": [],
   "unsupported_features": [],

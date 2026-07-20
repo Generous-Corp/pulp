@@ -18,7 +18,7 @@
 // The bump pin rewrite supports three shapes found in the wild:
 //
 //   1. FetchContent_Declare(pulp
-//          GIT_REPOSITORY https://github.com/danielraffel/pulp.git
+//          GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git
 //          GIT_TAG v0.23.0)            # ← patched here
 //
 //   2. pulp_add_project(PulpSynth VERSION 0.23.0 ...)   # helper-style

@@ -5,11 +5,11 @@
         COMMAND $<TARGET_FILE:pulp-scene3d-sidecar>
             --source "khronos-boxtextured"
             --exported-at "2026-06-03T00:00:00Z"
-            --runtime-evidence "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927"
+            --runtime-evidence "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927"
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scene3d/BoxTextured/BoxTextured.glb")
     set_tests_properties(scene3d-sidecar-boxtextured-json PROPERTIES
         PASS_REGULAR_EXPRESSION
-            "\"schema_version\".*\"source\": \"khronos-boxtextured\".*\"exporter\": \"pulp-scene3d-sidecar\".*\"exported_at\": \"2026-06-03T00:00:00Z\".*\"runtime_evidence\": \"https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927\".*\"diagnostics\": \\[\\].*\"unsupported_features\": \\[\\].*\"runtime_hints\": \\[\\]")
+            "\"schema_version\".*\"source\": \"khronos-boxtextured\".*\"exporter\": \"pulp-scene3d-sidecar\".*\"exported_at\": \"2026-06-03T00:00:00Z\".*\"runtime_evidence\": \"https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927\".*\"diagnostics\": \\[\\].*\"unsupported_features\": \\[\\].*\"runtime_hints\": \\[\\]")
 
     if(Python3_Interpreter_FOUND)
         add_test(NAME scene3d-sidecar-preflight-boxtextured-clean
@@ -17,7 +17,7 @@
                 "${CMAKE_SOURCE_DIR}/tools/scene3d/sidecar_preflight_smoke.py"
                 --sidecar-tool $<TARGET_FILE:pulp-scene3d-sidecar>
                 --preflight-tool $<TARGET_FILE:pulp-scene3d-bake-preflight>
-                --runtime-evidence "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927"
+                --runtime-evidence "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927"
                 "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scene3d/BoxTextured/BoxTextured.glb")
         set_tests_properties(scene3d-sidecar-preflight-boxtextured-clean PROPERTIES
             PASS_REGULAR_EXPRESSION "BoxTextured sidecar preflight clean")
@@ -29,7 +29,7 @@
                 --fixture "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scene3d/BoxTextured/BoxTextured.glb"
                 --source "khronos-boxtextured"
                 --exported-at "2026-06-03T00:00:00Z"
-                --runtime-evidence "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927")
+                --runtime-evidence "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927")
         set_tests_properties(scene3d-sidecar-boxtextured-contract PROPERTIES
             PASS_REGULAR_EXPRESSION
                 "scene3d_sidecar_verified=boxtextured")

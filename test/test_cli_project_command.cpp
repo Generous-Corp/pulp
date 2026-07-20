@@ -226,7 +226,7 @@ void make_fetchcontent_project(const fs::path& root, const std::string& sdk_vers
                "cmake_minimum_required(VERSION 3.20)\n"
                "include(FetchContent)\n"
                "FetchContent_Declare(pulp\n"
-               "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+               "    GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git\n"
                "    GIT_TAG v" + sdk_version + ")\n"
                "FetchContent_MakeAvailable(pulp)\n"
                "pulp_add_project(Clock VERSION 1.0.0)\n");
@@ -1146,7 +1146,7 @@ TEST_CASE("bump_one reports malformed standalone and dynamic CMake pins",
                "cmake_minimum_required(VERSION 3.20)\n"
                "include(FetchContent)\n"
                "FetchContent_Declare(pulp\n"
-               "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+               "    GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git\n"
                "    GIT_TAG main)\n"
                "FetchContent_MakeAvailable(pulp)\n");
 

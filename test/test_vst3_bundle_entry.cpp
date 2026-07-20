@@ -79,7 +79,7 @@ PULP_VST3_BUNDLE_PLUGIN(BundleA, create_vst3_a,
 PULP_VST3_BUNDLE_PLUGIN(BundleB, create_vst3_b,
     {.id = "com.pulp.test.vst3bundle.b"})
 
-PULP_VST3_FACTORY_BEGIN("PulpTest", "https://github.com/danielraffel/pulp",
+PULP_VST3_FACTORY_BEGIN("PulpTest", "https://github.com/Generous-Corp/pulp",
                         "mailto:info@example.com")
     PULP_VST3_BUNDLE_CLASS(BundleA, kVst3BundleAUID, "Vst3BundleA",
                            Steinberg::Vst::PlugType::kFx, "1.0.0")

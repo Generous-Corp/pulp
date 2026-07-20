@@ -822,7 +822,7 @@ TEST_CASE("SidecarData carries provenance, unsupported features, and diagnostics
     sidecar.provenance.exporter = "GLTFExporter";
     sidecar.provenance.exported_at = "2026-06-03T00:00:00Z";
     sidecar.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/3369";
+        "https://github.com/Generous-Corp/pulp/issues/3369";
 
     sidecar.unsupported_features.push_back(UnsupportedFeature{
         "ShaderMaterial",
@@ -955,7 +955,7 @@ TEST_CASE("SidecarData analyzer reports native bake/runtime gaps from SceneData"
     options.provenance.exporter = "GLTFExporter";
     options.provenance.exported_at = "2026-06-03T18:00:00Z";
     options.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/3369";
+        "https://github.com/Generous-Corp/pulp/issues/3369";
     options.source_path = "fixture.glb";
 
     const auto sidecar = build_sidecar_from_scene(scene, options);
@@ -964,7 +964,7 @@ TEST_CASE("SidecarData analyzer reports native bake/runtime gaps from SceneData"
     REQUIRE(sidecar.provenance.exporter == "GLTFExporter");
     REQUIRE(sidecar.provenance.exported_at == "2026-06-03T18:00:00Z");
     REQUIRE(sidecar.provenance.runtime_evidence ==
-            "https://github.com/danielraffel/pulp/issues/3369");
+            "https://github.com/Generous-Corp/pulp/issues/3369");
     REQUIRE(has_code(sidecar.diagnostics, "gltf.animation_path_unsupported"));
     REQUIRE_FALSE(has_error_diagnostics(sidecar.diagnostics));
 
@@ -1279,7 +1279,7 @@ TEST_CASE("Bake diagnostics record known non-bakeable Three.js features",
     sidecar.provenance.exporter = "GLTFExporter";
     sidecar.provenance.exported_at = "2026-06-03T00:00:00Z";
     sidecar.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927";
+        "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927";
 
     append_bake_unsupported_feature(sidecar,
                                     BakeUnsupportedFeature::shader_material,
@@ -1479,7 +1479,7 @@ TEST_CASE("Bake preflight classifies export blockers and native runtime gaps",
     sidecar.provenance.source = "live-threejs";
     sidecar.provenance.exporter = "GLTFExporter";
     sidecar.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610177927";
+        "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610177927";
 
     append_bake_unsupported_feature(sidecar,
                                     BakeUnsupportedFeature::shader_material,
@@ -1659,7 +1659,7 @@ TEST_CASE("Bake preflight keeps native renderer gaps separate from export readin
             "blocked");
 
     clean_sidecar.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/2738#issuecomment-4618508064";
+        "https://github.com/Generous-Corp/pulp/issues/2738#issuecomment-4618508064";
     const auto valid_url_report =
         analyze_bake_preflight(clean_sidecar, require_runtime_evidence_url);
     REQUIRE_FALSE(valid_url_report.export_blocked);
@@ -1685,7 +1685,7 @@ TEST_CASE("SidecarData serializes diagnostics, unsupported features, and hints",
     sidecar.provenance.exporter = "GLTFExporter";
     sidecar.provenance.exported_at = "2026-06-03T12:34:56Z";
     sidecar.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/3369#issuecomment-4610232717";
+        "https://github.com/Generous-Corp/pulp/issues/3369#issuecomment-4610232717";
 
     sidecar.unsupported_features.push_back(UnsupportedFeature{
         "ShaderMaterial",
@@ -1832,12 +1832,12 @@ TEST_CASE("load_gltf_scene maps official BoxTextured fixture into SceneData",
     options.provenance.source = "Khronos glTF Sample Assets BoxTextured";
     options.provenance.exporter = "upstream glTF-Sample-Assets";
     options.provenance.runtime_evidence =
-        "https://github.com/danielraffel/pulp/issues/2738";
+        "https://github.com/Generous-Corp/pulp/issues/2738";
     options.source_path = path.string();
 
     const auto sidecar = build_sidecar_from_scene(result.scene, options);
     REQUIRE(sidecar.provenance.runtime_evidence ==
-            "https://github.com/danielraffel/pulp/issues/2738");
+            "https://github.com/Generous-Corp/pulp/issues/2738");
     REQUIRE_FALSE(has_error_diagnostics(sidecar.diagnostics));
 }
 

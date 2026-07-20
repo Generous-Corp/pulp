@@ -65,7 +65,7 @@ TEST_CASE("update-cache JSON round-trips through parse/serialize",
     uc::CacheEntry e;
     e.last_check_epoch_sec = 1'713'638'400;
     e.latest_version = "0.28.0";
-    e.release_notes_url = "https://github.com/danielraffel/pulp/releases/tag/v0.28.0";
+    e.release_notes_url = "https://github.com/Generous-Corp/pulp/releases/tag/v0.28.0";
     e.banner_shown_for_version = "0.27.0";
 
     auto s = uc::serialize_cache_json(e);

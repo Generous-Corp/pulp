@@ -77,7 +77,7 @@ void make_pulp_project(const fs::path& root, const std::string& pin) {
         "cmake_minimum_required(VERSION 3.20)\n"
         "include(FetchContent)\n"
         "FetchContent_Declare(pulp\n"
-        "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+        "    GIT_REPOSITORY https://github.com/Generous-Corp/pulp.git\n"
         "    GIT_TAG v" + pin + ")\n"
         "FetchContent_MakeAvailable(pulp)\n"
         "pulp_add_plugin(app FORMATS CLAP)\n";

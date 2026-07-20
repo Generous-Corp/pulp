@@ -100,7 +100,7 @@ TEST_CASE("pulp ship swap-pack --backup-github refuses the core Pulp repo",
     const std::string out = run_cli({"ship", "swap-pack", "--bundle", bundle.string(),
                                      "--plugin-id", "com.pulp.clitest",
                                      "--sign-key", key.string(), "--backup-github",
-                                     "--repo", "danielraffel/pulp", "--yes"}, code);
+                                     "--repo", "Generous-Corp/pulp", "--yes"}, code);
     // The pack signs, but publishing the key to the core repo is refused (no gh call).
     REQUIRE(code != 0);
     REQUIRE(out.find("refusing to back up") != std::string::npos);
