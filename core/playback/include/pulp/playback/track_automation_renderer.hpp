@@ -98,6 +98,9 @@ class TrackAutomationRenderer {
     adopt(std::shared_ptr<const TrackAutomationProgram> program);
 
     TrackAutomationRenderResult process(const TransportSnapshot& transport) noexcept;
+    /// The span must cover every canonical device placement exactly once, in
+    /// canonical order. Every pointer must remain valid through the call and
+    /// identify a projected window from the same callback controls.
     TrackAutomationRenderResult
     process(std::span<const DeviceAutomationTransportView> transports) noexcept;
     void reset() noexcept;

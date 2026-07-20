@@ -414,11 +414,15 @@ TEST_CASE("change metadata matches first block and playhead diff semantics") {
                                       {3 * kTicksPerQuarter}}) ==
             TransportError::None);
     const auto moved_loop = block(transport, 64);
-    REQUIRE_FALSE(moved_loop.transport_changed);
+    REQUIRE(moved_loop.transport_changed);
+    REQUIRE(moved_loop.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
 
     REQUIRE(transport.set_loop({false, {}, {}}) == TransportError::None);
     const auto disabled_loop = block(transport, 64);
     REQUIRE(disabled_loop.transport_changed);
+    REQUIRE(disabled_loop.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
 
     REQUIRE(transport.set_playing(false) == TransportError::None);
     const auto stopped = block(transport, 64);

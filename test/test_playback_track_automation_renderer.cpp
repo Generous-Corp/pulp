@@ -65,7 +65,8 @@ hold_program(ItemId lane_id, DeviceParameterTarget target,
 std::shared_ptr<const AutomationProgram>
 dense_continuous_program(ItemId lane_id, DeviceParameterTarget target,
                          const std::shared_ptr<const CompiledTempoMap>& map,
-                         std::uint32_t point_count) {
+                         std::uint32_t point_count,
+                         ProgramGeneration generation = 1) {
     std::vector<AutomationPoint> points;
     points.reserve(point_count);
     for (std::uint32_t index = 0; index < point_count; ++index) {
@@ -74,7 +75,7 @@ dense_continuous_program(ItemId lane_id, DeviceParameterTarget target,
     }
     auto lane = take(AutomationLane::create(
         lane_id, target, take(AutomationCurve::create(std::move(points)))));
-    return take(AutomationProgram::compile(lane, map, 1));
+    return take(AutomationProgram::compile(lane, map, generation));
 }
 
 void prepare(MasterTransport& transport, const CompiledTempoMap& map,
@@ -207,6 +208,47 @@ TEST_CASE("track automation renderer evaluates each device in its projected wind
     REQUIRE(renderer.batches()[0].events[1].value == 1.0f);
     REQUIRE(renderer.batches()[1].events[1].sample_offset == 1);
     REQUIRE(renderer.batches()[1].events[1].value == 9.0f);
+}
+
+TEST_CASE("track automation renderer accepts distinct loop windows across variable blocks") {
+    const auto map = tempo_map();
+    const auto first = hold_program({10}, {{100}, 1}, map, 64);
+    const auto second = hold_program({20}, {{200}, 2}, map, 64);
+    auto renderer =
+        take(TrackAutomationRenderer::create(track(map, {first, second})));
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = 16;
+    config.initially_playing = true;
+    config.initial_position = map->samples_to_ticks({60});
+    config.loop = {true, {0}, map->samples_to_ticks({64})};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+
+    const auto first_base = block(transport, 8);
+    TransportSnapshot first_device;
+    TransportSnapshot second_device;
+    REQUIRE(project_schedule_ahead(first_base, 0, first_device) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(project_schedule_ahead(first_base, 8, second_device) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(first_device.range_count == 2);
+    REQUIRE(first_device.ranges[1].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopWrap);
+    REQUIRE(second_device.range_count == 1);
+    const std::array first_views{
+        DeviceAutomationTransportView{{100}, &first_device},
+        DeviceAutomationTransportView{{200}, &second_device},
+    };
+    REQUIRE(renderer.process(first_views).code == TrackAutomationRendererCode::Ok);
+
+    const auto second_base = block(transport, 5);
+    REQUIRE(project_schedule_ahead(second_base, 0, first_device) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(project_schedule_ahead(second_base, 8, second_device) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(first_device.frame_count == 5);
+    REQUIRE(second_device.frame_count == 5);
+    REQUIRE(renderer.process(first_views).code == TrackAutomationRendererCode::Ok);
 }
 
 TEST_CASE("track automation renderer rejects incomplete device schedules atomically") {
@@ -404,6 +446,30 @@ TEST_CASE("track automation renderer bounds intersecting segment work") {
     const auto rendered = coalesced.process(block(second_transport, 2'000));
     REQUIRE(rendered.code == TrackAutomationRendererCode::Coalesced);
     REQUIRE(rendered.candidate_events > rendered.emitted_events);
+}
+
+TEST_CASE("track automation renderer can retry a block after a later lane fails") {
+    const auto map = tempo_map();
+    const auto first = dense_continuous_program({10}, {{100}, 1}, map, 3);
+    const auto second = dense_continuous_program({20}, {{200}, 2}, map, 3);
+    auto limits = AutomationPlaybackLimits{};
+    limits.max_intersecting_segments_per_block = 4;
+    auto renderer = take(
+        TrackAutomationRenderer::create(track(map, {first, second}), limits));
+    MasterTransport transport;
+    prepare(transport, *map, 3);
+    const auto snapshot = block(transport, 3);
+
+    const auto failed = renderer.process(snapshot);
+    REQUIRE(failed.code == TrackAutomationRendererCode::WorkCapacityExceeded);
+    REQUIRE(failed.failed_lane_id == ItemId{20});
+    const auto sparse_first = program({10}, {{100}, 1}, map, 2, 2);
+    const auto sparse_second = program({20}, {{200}, 2}, map, 2, 2);
+    REQUIRE(renderer.adopt(track(map, {sparse_first, sparse_second})));
+    const auto retried = renderer.process(snapshot);
+    REQUIRE(retried.code == TrackAutomationRendererCode::Ok);
+    REQUIRE_FALSE(renderer.batches()[0].events.empty());
+    REQUIRE_FALSE(renderer.batches()[1].events.empty());
 }
 
 TEST_CASE("track automation renderer rejects direct programs beyond point limits") {

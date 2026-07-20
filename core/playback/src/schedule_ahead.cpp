@@ -1,4 +1,5 @@
 #include <pulp/playback/schedule_ahead.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #include "transport_math.hpp"
 
@@ -46,6 +47,7 @@ std::int64_t saturating_add(std::int64_t lhs, std::int64_t rhs) noexcept {
 ScheduleAheadCode project_schedule_ahead(
     const TransportSnapshot& base, std::int64_t lead_samples,
     TransportSnapshot& projected) noexcept {
+    runtime::ScopedNoAlloc no_alloc;
     if (!valid_transport_ranges(base) ||
         !same_rate(base.sample_rate, base.tempo_map->sample_rate())) {
         return ScheduleAheadCode::InvalidTransport;
@@ -88,18 +90,19 @@ ScheduleAheadCode project_schedule_ahead(
         loop_end = base.tempo_map->ticks_to_samples(base.loop.end);
         loop_length = distance(loop_start, loop_end);
         if (loop_length == 0 || loop_length < base.frame_count ||
-            base_start < loop_start || base_start >= loop_end) {
+            base_start >= loop_end) {
             return ScheduleAheadCode::InvalidLoop;
         }
-        const auto offset = distance(loop_start, base_start);
-        const auto until_wrap = loop_length - offset;
+        const auto until_wrap = distance(base_start, loop_end);
         const bool crosses_wrap = lead >= until_wrap;
         const auto after_first_wrap = crosses_wrap ? lead - until_wrap : 0;
         const auto advanced_offset = crosses_wrap
             ? after_first_wrap % loop_length
-            : offset + lead;
-        projected_start = add_unsigned(loop_start, advanced_offset);
-        projected_tick = advanced_offset == 0
+            : 0;
+        projected_start = crosses_wrap
+            ? add_unsigned(loop_start, advanced_offset)
+            : add_unsigned(base_start, lead);
+        projected_tick = crosses_wrap && advanced_offset == 0
             ? base.loop.start
             : base.tempo_map->resolve_sample(projected_start).tick;
         wrap_at_projected_start = crosses_wrap && advanced_offset == 0;
@@ -148,7 +151,8 @@ ScheduleAheadCode project_schedule_ahead(
             projected.meter_anchor_bar, projected.meter);
         range.tempo_bpm = base.tempo_map->tempo_at_tick(range.timeline_tick_start);
         range.tempo_changed = index == 0
-            ? base.ranges[0].tempo_changed
+            ? base.ranges[0].tempo_changed ||
+                  range.tempo_bpm != base.ranges[0].tempo_bpm
             : range.tempo_bpm != projected.ranges[index - 1].tempo_bpm;
         range.discontinuity_reason = discontinuity;
         range.discontinuity = discontinuity != TransportDiscontinuityReason::None;

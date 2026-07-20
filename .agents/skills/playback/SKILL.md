@@ -115,8 +115,10 @@ cycles, and preserves callback-local event offsets; consumers must never render
 the base window and post-shift its events. Use the per-device
 `TrackAutomationRenderer::process()` view overload when device placements have
 different leads. Its views must cover canonical device order exactly and all
-projected snapshots must retain the same callback controls. Graph
-`ProcessContext` still receives the unprojected master transport.
+projected snapshots must retain the same callback controls; each view pointer
+must remain alive through `process()`. Projected snapshots are renderer-query
+windows only. Graph `ProcessContext` still receives the unprojected master
+transport and must never inherit projected control flags.
 
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.

@@ -184,6 +184,12 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         meter_anchor_signature_ = desired.meter;
     }
 
+    const bool loop_changed = !first_block_ && desired.loop != previous_loop_;
+    if (loop_changed &&
+        pending_discontinuity_ != TransportDiscontinuityReason::Seek) {
+        pending_discontinuity_ = TransportDiscontinuityReason::LoopConfiguration;
+    }
+
     snapshot = {};
     snapshot.tempo_map = tempo_map_;
     snapshot.sample_rate = tempo_map_->sample_rate();
@@ -196,7 +202,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     snapshot.is_playing = desired.playing;
     snapshot.transport_changed = !first_block_ &&
                                   (desired.playing != previous_playing_ ||
-                                   desired.loop.enabled != previous_loop_.enabled);
+                                   loop_changed);
     snapshot.transport_started = desired.playing &&
                                  (first_block_ || !previous_playing_);
     snapshot.reset_requested = seeked;

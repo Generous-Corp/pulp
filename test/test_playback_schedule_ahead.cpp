@@ -1,6 +1,7 @@
 #include <pulp/playback/schedule_ahead.hpp>
 
 #include "timebase_test_helpers.hpp"
+#include "harness/scoped_rt_process_probe.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -85,6 +86,74 @@ TEST_CASE("schedule ahead advances monotonic time across complete loop cycles") 
     const TickDuration expected{2 * kTicksPerQuarter + partial.value};
     REQUIRE(projected.ranges[0].monotonic_start ==
             base.ranges[0].monotonic_start + expected);
+}
+
+TEST_CASE("schedule ahead preserves the first traversal before a later loop") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = 1024;
+    config.initially_playing = true;
+    config.loop = {true, {16 * kTicksPerQuarter}, {32 * kTicksPerQuarter}};
+    REQUIRE(transport.prepare(map, config) == TransportError::None);
+    const auto base = block(transport, 64);
+    const auto loop_start = map.ticks_to_samples(config.loop.start);
+    const auto loop_end = map.ticks_to_samples(config.loop.end);
+
+    TransportSnapshot before_end;
+    REQUIRE(project_schedule_ahead(base, loop_end.value - 100, before_end) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(before_end.ranges[0].timeline_sample_start ==
+            SamplePosition{loop_end.value - 100});
+    REQUIRE_FALSE(before_end.ranges[0].discontinuity);
+
+    TransportSnapshot after_end;
+    REQUIRE(project_schedule_ahead(base, loop_end.value + 100, after_end) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(after_end.ranges[0].timeline_sample_start ==
+            SamplePosition{loop_start.value + 100});
+    const auto before_wrap =
+        config.loop.end - base.ranges[0].timeline_tick_start;
+    const auto after_wrap =
+        map.resolve_sample({loop_start.value + 100}).tick - config.loop.start;
+    const TickDuration expected_ticks{before_wrap.value + after_wrap.value};
+    REQUIRE(after_end.ranges[0].monotonic_start ==
+            base.ranges[0].monotonic_start + expected_ticks);
+}
+
+TEST_CASE("schedule ahead flushes projected windows when loops enable and disable") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = 1024;
+    config.initially_playing = true;
+    REQUIRE(transport.prepare(map, config) == TransportError::None);
+    (void)block(transport, 64);
+
+    REQUIRE(transport.set_loop({true, {0}, {kTicksPerQuarter}}) ==
+            TransportError::None);
+    const auto enabled = block(transport, 64);
+    REQUIRE(enabled.transport_changed);
+    REQUIRE(enabled.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
+    TransportSnapshot wrapped;
+    REQUIRE(project_schedule_ahead(enabled, 24'000, wrapped) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(wrapped.ranges[0].timeline_sample_start == SamplePosition{64});
+    REQUIRE(wrapped.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
+
+    REQUIRE(transport.set_loop({false, {}, {}}) == TransportError::None);
+    const auto disabled = block(transport, 64);
+    REQUIRE(disabled.transport_changed);
+    REQUIRE(disabled.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
+    TransportSnapshot linear;
+    REQUIRE(project_schedule_ahead(disabled, 24'000, linear) ==
+            ScheduleAheadCode::Ok);
+    REQUIRE(linear.ranges[0].timeline_sample_start == SamplePosition{24'128});
+    REQUIRE(linear.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopConfiguration);
 }
 
 TEST_CASE("schedule ahead preserves external seek reset at projected offset zero") {
@@ -208,6 +277,33 @@ TEST_CASE("schedule ahead recomputes bars from the transport meter anchor") {
     REQUIRE(projected.meter_anchor_tick == TickPosition{0});
     REQUIRE(projected.meter_anchor_bar == BarPosition{0});
     REQUIRE(projected.ranges[0].bar_start.value == 1);
+}
+
+TEST_CASE("schedule ahead reports projected tempo changes and remains RT-safe") {
+    const std::array points{
+        TempoPoint{{0}, 120.0},
+        TempoPoint{{kTicksPerQuarter}, 90.0},
+    };
+    const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = 1024;
+    config.initially_playing = true;
+    REQUIRE(transport.prepare(map, config) == TransportError::None);
+    const auto base = block(transport, 64);
+    REQUIRE_FALSE(base.ranges[0].tempo_changed);
+
+    STATIC_REQUIRE(project_schedule_ahead_rt_safety_class ==
+                   pulp::audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs);
+    TransportSnapshot projected;
+    {
+        pulp::test::ScopedRtProcessProbe probe;
+        REQUIRE(project_schedule_ahead(base, 30'000, projected) ==
+                ScheduleAheadCode::Ok);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(projected.ranges[0].tempo_bpm != base.ranges[0].tempo_bpm);
+    REQUIRE(projected.ranges[0].tempo_changed);
 }
 
 TEST_CASE("schedule ahead rejects invalid leads and unrepresentable linear windows") {
