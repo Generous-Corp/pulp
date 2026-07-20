@@ -335,11 +335,13 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
                                       "replacement port shape differs from the live node");
     }
 
-    const int new_latency = std::max(0, loaded->latency_samples());
-    if (new_latency != old_meta_it->second.latency_samples) {
+    const auto new_latency = capture_latency_metadata_(*loaded);
+    if (old_meta_it->second.latency_query != PluginSlot::LatencyQuery::Available ||
+        new_latency.query != PluginSlot::LatencyQuery::Available ||
+        new_latency.samples != old_meta_it->second.latency_samples) {
         return fail_swap_edit_locked_(LiveSwapFallbackReason::LatencyChanged,
                                       id,
-                                      "replacement latency differs from the live node");
+                                      "replacement latency is unavailable or differs from the live node");
     }
     const bool wants_transport = loaded->wants_transport();
 
@@ -373,9 +375,10 @@ SignalGraph::stage_plugin_replacement(NodeId id, PluginCatalogToken token) {
     staged.id = id;
     staged.info = loaded_info;
     staged.metadata = PreparedPluginMetadata{
-        std::move(new_params),
-        new_latency,
-        wants_transport,
+        .parameters = std::move(new_params),
+        .latency_samples = new_latency.samples,
+        .latency_query = new_latency.query,
+        .wants_transport = wants_transport,
     };
     staged.warmed_load = warmed_load;
     staged.same_identity = same_identity;

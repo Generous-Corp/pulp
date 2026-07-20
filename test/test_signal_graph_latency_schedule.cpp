@@ -1,0 +1,255 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <pulp/host/signal_graph.hpp>
+#include <pulp/host/signal_graph_prepared_topology_edit.hpp>
+
+#include <algorithm>
+#include <atomic>
+#include <memory>
+#include <vector>
+
+using namespace pulp::host;
+
+namespace {
+
+class LatencySlot final : public PluginSlot {
+public:
+    LatencySlot(int latency, LatencyQuery query)
+        : latency_(latency), query_(query) {
+        info_.name = "Latency fixture";
+        info_.format = PluginFormat::CLAP;
+        info_.num_inputs = 1;
+        info_.num_outputs = 1;
+        info_.category = "Effect";
+    }
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+    void process(pulp::audio::BufferView<float>& output,
+                 const pulp::audio::BufferView<const float>& input,
+                 const pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&, int samples) override {
+        const std::size_t channels = std::min(output.num_channels(), input.num_channels());
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            std::copy_n(input.channel_ptr(channel), samples,
+                        output.channel_ptr(channel));
+        }
+    }
+    std::vector<HostParamInfo> parameters() const override { return {}; }
+    float get_parameter(std::uint32_t) const override { return 0.0f; }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<std::uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<std::uint8_t>&) override { return true; }
+    int latency_samples() const override {
+        latency_calls.fetch_add(1, std::memory_order_relaxed);
+        return latency_;
+    }
+    int tail_samples() const override { return 0; }
+    LatencyQuery latency_query() const override {
+        query_calls.fetch_add(1, std::memory_order_relaxed);
+        return query_;
+    }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+
+    mutable std::atomic<int> query_calls{0};
+    mutable std::atomic<int> latency_calls{0};
+
+private:
+    PluginInfo info_;
+    int latency_ = 0;
+    LatencyQuery query_ = LatencyQuery::Available;
+};
+
+void require_result(const LatencyToOutputResult& result,
+                    LatencyToOutputResult::Status status,
+                    std::int64_t samples = 0,
+                    NodeId offending = 0) {
+    REQUIRE(result.status == status);
+    REQUIRE(result.samples == samples);
+    REQUIRE(result.offending_node == offending);
+}
+
+} // namespace
+
+TEST_CASE("latency-to-output distinguishes known zero from unavailable reports",
+          "[host][signal-graph][latency-schedule]") {
+    using Status = LatencyToOutputResult::Status;
+
+    for (const auto query : {PluginSlot::LatencyQuery::Available,
+                             PluginSlot::LatencyQuery::Unsupported,
+                             PluginSlot::LatencyQuery::QueryFailed}) {
+        SignalGraph graph;
+        const auto input = graph.add_input_node(1);
+        auto slot = std::make_unique<LatencySlot>(0, query);
+        auto* observed = slot.get();
+        const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1);
+        const auto output = graph.add_output_node(1);
+        REQUIRE(graph.connect(input, 0, plugin, 0));
+        REQUIRE(graph.connect(plugin, 0, output, 0));
+        REQUIRE(graph.prepare(48000.0, 64));
+
+        if (query == PluginSlot::LatencyQuery::Available) {
+            require_result(graph.latency_to_output(input), Status::Available, 0);
+        } else if (query == PluginSlot::LatencyQuery::Unsupported) {
+            require_result(graph.latency_to_output(input), Status::Unsupported,
+                           0, plugin);
+        } else {
+            require_result(graph.latency_to_output(input), Status::QueryFailed,
+                           0, plugin);
+        }
+        REQUIRE(observed->latency_calls.load(std::memory_order_relaxed) ==
+                (query == PluginSlot::LatencyQuery::Available ? 1 : 0));
+    }
+}
+
+TEST_CASE("latency-to-output includes serial latency and compiled fan-in PDC",
+          "[host][signal-graph][latency-schedule][pdc]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto short_path = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(10, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto serial = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(5, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto long_path = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(20, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, short_path, 0));
+    REQUIRE(graph.connect(short_path, 0, serial, 0));
+    REQUIRE(graph.connect(serial, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, long_path, 0));
+    REQUIRE(graph.connect(long_path, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::Available, 20);
+    require_result(graph.latency_to_output(short_path), Status::Available, 20);
+    require_result(graph.latency_to_output(serial), Status::Available, 10);
+    require_result(graph.latency_to_output(long_path), Status::Available, 20);
+    require_result(graph.latency_to_output(output), Status::Available, 0);
+}
+
+TEST_CASE("latency-to-output reports unreachable and divergent output paths",
+          "[host][signal-graph][latency-schedule]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto ten = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(10, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto twenty = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(20, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto orphan = graph.add_gain_node("Orphan");
+    const auto output_a = graph.add_output_node(1);
+    const auto output_b = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, ten, 0));
+    REQUIRE(graph.connect(ten, 0, output_a, 0));
+    REQUIRE(graph.connect(input, 0, twenty, 0));
+    REQUIRE(graph.connect(twenty, 0, output_b, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::AmbiguousOutputLatency);
+    require_result(graph.latency_to_output(orphan), Status::NoOutputPath);
+    require_result(graph.latency_to_output(999999), Status::NoOutputPath);
+}
+
+TEST_CASE("latency-to-output does not certify unresolved plugins as zero latency",
+          "[host][signal-graph][latency-schedule]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto plugin = graph.add_unresolved_plugin_node({}, 1, 1, "Missing");
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::QueryFailed, 0, plugin);
+}
+
+TEST_CASE("latency-to-output excludes feedback from the schedulable path",
+          "[host][signal-graph][latency-schedule][feedback]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(9, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect_feedback(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(plugin), Status::NoOutputPath);
+}
+
+TEST_CASE("latency-to-output status precedence is deterministic",
+          "[host][signal-graph][latency-schedule]") {
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto unsupported_high = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(0, PluginSlot::LatencyQuery::Unsupported), 1, 1);
+    const auto failed = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(0, PluginSlot::LatencyQuery::QueryFailed), 1, 1);
+    const auto unsupported_low = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(0, PluginSlot::LatencyQuery::Unsupported), 1, 1);
+    const auto failed_high = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(0, PluginSlot::LatencyQuery::QueryFailed), 1, 1);
+    const auto output = graph.add_output_node(1);
+    for (const auto plugin : {unsupported_high, failed, unsupported_low, failed_high}) {
+        REQUIRE(graph.connect(input, 0, plugin, 0));
+        REQUIRE(graph.connect(plugin, 0, output, 0));
+    }
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    require_result(graph.latency_to_output(input), Status::QueryFailed, 0, failed);
+}
+
+TEST_CASE("execution snapshot keeps its latency schedule across a prepared edit",
+          "[host][signal-graph][latency-schedule][snapshot]") {
+    using EditResult = SignalGraph::PreparedTopologyEdit::Result;
+    using Status = LatencyToOutputResult::Status;
+    SignalGraph graph;
+    const auto input = graph.add_input_node(1);
+    const auto plugin = graph.add_plugin_node(
+        std::make_unique<LatencySlot>(12, PluginSlot::LatencyQuery::Available), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    auto pin_edit = graph.begin_prepared_topology_edit();
+    REQUIRE(pin_edit->prepare(48000.0, 64) == EditResult::Prepared);
+    REQUIRE(pin_edit->commit() == EditResult::Committed);
+    const auto pinned = pin_edit->committed_execution_snapshot();
+    require_result(pinned.latency_to_output(input), Status::Available, 12);
+
+    auto disconnect_edit = graph.begin_prepared_topology_edit();
+    REQUIRE(disconnect_edit->disconnect(plugin, 0, output, 0));
+    REQUIRE(disconnect_edit->prepare(48000.0, 64) == EditResult::Prepared);
+    REQUIRE(disconnect_edit->commit() == EditResult::Committed);
+
+    require_result(graph.latency_to_output(input), Status::NoOutputPath);
+    require_result(pinned.latency_to_output(input), Status::Available, 12);
+}
+
+TEST_CASE("latency schedule queries never poll a prepared plugin again",
+          "[host][signal-graph][latency-schedule][metadata-cache]") {
+    SignalGraph graph;
+    auto slot = std::make_unique<LatencySlot>(7, PluginSlot::LatencyQuery::Available);
+    auto* observed = slot.get();
+    const auto input = graph.add_input_node(1);
+    const auto plugin = graph.add_plugin_node(std::move(slot), 1, 1);
+    const auto output = graph.add_output_node(1);
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.prepare(48000.0, 64));
+    observed->query_calls.store(0, std::memory_order_relaxed);
+
+    for (int iteration = 0; iteration < 32; ++iteration) {
+        REQUIRE(graph.latency_to_output(input).samples == 7);
+    }
+    REQUIRE(observed->query_calls.load(std::memory_order_relaxed) == 0);
+}

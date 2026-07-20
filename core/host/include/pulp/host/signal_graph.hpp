@@ -66,6 +66,20 @@ enum class NodeType {
 
 enum class LiveSwapCurve { Smoothstep, EqualPower };
 
+struct LatencyToOutputResult {
+    enum class Status : std::uint8_t {
+        Available,
+        Unsupported,
+        QueryFailed,
+        NoOutputPath,
+        AmbiguousOutputLatency,
+    };
+
+    Status status = Status::NoOutputPath;
+    std::int64_t samples = 0;
+    NodeId offending_node = 0;
+};
+
 struct NodeLiveSwapPolicy {
     bool allow_live_instance_swap = false;
     // The crossfade shape for a live instance swap: the committed swap renders both the
@@ -933,6 +947,15 @@ public:
     // the node is unknown or the graph is not prepared.
     int node_latency_samples(NodeId id) const;
 
+    // Exact latency from a node's input to a reachable AudioOutput in the
+    // current compiled generation. Includes the queried node's own latency and
+    // compiled PDC connection delays. Feedback edges are excluded because they
+    // represent prior-block history, not a schedulable feed-forward path.
+    // Across reachable paths, QueryFailed takes precedence over Unsupported;
+    // ties select the lowest offending NodeId. Differing known totals report
+    // AmbiguousOutputLatency.
+    LatencyToOutputResult latency_to_output(NodeId id) const noexcept;
+
     // Set a single parameter value on a Plugin node at the graph level. The
     // call is forwarded to PluginSlot::set_parameter(). Returns false if the
     // node is not a Plugin node or has no loaded slot. For block-rate routing
@@ -1189,6 +1212,8 @@ private:
             NodeRuntime* runtime = nullptr;
         };
         std::unordered_map<NodeId, NodeShape> shapes;
+        std::unordered_map<NodeId, PluginSlot::LatencyQuery> plugin_latency_queries;
+        std::unordered_map<NodeId, LatencyToOutputResult> latency_schedule;
         std::vector<OrderedRuntime> ordered_runtime;
         // Per-node live-DSP timing, prepared at compile in ordered_runtime order
         // (slot i == ordered_runtime[i]). Non-movable (holds atomics); CompiledGraph
@@ -1348,7 +1373,12 @@ private:
     struct PreparedPluginMetadata {
         std::vector<HostParamInfo> parameters;
         int latency_samples = 0;
+        PluginSlot::LatencyQuery latency_query = PluginSlot::LatencyQuery::Available;
         bool wants_transport = false;
+    };
+    struct PreparedLatencyMetadata {
+        int samples = 0;
+        PluginSlot::LatencyQuery query = PluginSlot::LatencyQuery::Available;
     };
     // Captured once per prepare() (cleared + rebuilt); read by compile_ / the
     // routing build / edit-time param validation instead of the live PluginSlot.
@@ -1720,6 +1750,10 @@ private:
                                        const std::vector<Connection>& connections,
                                        const std::unordered_map<NodeId, PreparedPluginMetadata>&
                                            plugin_meta);
+    static PreparedLatencyMetadata capture_latency_metadata_(PluginSlot& slot);
+    static void build_latency_schedule_for_(CompiledGraph& cg);
+    static LatencyToOutputResult latency_to_output_for_(const CompiledGraph& cg,
+                                                        NodeId id) noexcept;
 };
 
 // Drag-add helper.

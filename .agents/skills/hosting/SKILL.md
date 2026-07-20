@@ -1368,11 +1368,25 @@ will happily treat as verified.
 | `Unsupported` | This backend cannot ask. The value is meaningless. |
 | `QueryFailed` | The backend asked and the plugin errored. |
 
-It defaults to `Available` (CLAP, VST3, and AU all read a real value). **The LV2
-slot overrides it to `Unsupported`**: it does not read the plugin's
+It defaults to `Available`. VST3 reads a real value. CLAP overrides the default:
+an absent latency extension is `Unsupported`, while an unusable plugin handle is
+`QueryFailed`. AU reports `QueryFailed` when its latency property query fails.
+**The LV2 slot overrides it to `Unsupported`**: it does not read the plugin's
 `lv2:reportsLatency` control port, so its `latency_samples() == 0` is a
 placeholder, not a claim. Wiring that port is the fix; until then, anything that
 reports or gates on hosted latency must branch on `latency_query()` first.
+
+`SignalGraph::latency_to_output(node)` reads the current compiled snapshot, and
+`ExecutionSnapshot::latency_to_output(node)` reads one pinned generation. The
+typed result distinguishes an available sample count, an unsupported or failed
+plugin query (with the offending `NodeId`), no output path, and divergent output
+latencies. The schedule is prepared by reverse traversal and includes both node
+latency and compiled PDC edge delays; it never polls live slots after prepare.
+An unresolved Plugin node is `QueryFailed`: the expected plugin is absent, rather
+than present through a backend that lacks latency-reporting support.
+When unknown reports compete, `QueryFailed` outranks `Unsupported`, then the
+lowest offending `NodeId` wins. Feedback edges are prior-block history and do
+not participate in the feed-forward schedule.
 
 `pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
 comes back `unsupported` rather than being falsely certified as zero-latency.

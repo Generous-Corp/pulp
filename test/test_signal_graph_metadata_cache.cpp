@@ -83,6 +83,10 @@ public:
         return 128;
     }
     int tail_samples() const override { return 0; }
+    LatencyQuery latency_query() const override {
+        latency_query_calls.fetch_add(1, std::memory_order_relaxed);
+        return LatencyQuery::Available;
+    }
     bool wants_transport() const override {
         transport_calls.fetch_add(1, std::memory_order_relaxed);
         return false;
@@ -94,6 +98,7 @@ public:
     mutable std::atomic<int> params_calls{0};
     mutable std::atomic<int> latency_calls{0};
     mutable std::atomic<int> transport_calls{0};
+    mutable std::atomic<int> latency_query_calls{0};
 
 private:
     PluginInfo info_;
@@ -136,6 +141,7 @@ TEST_CASE("compile_() after prepare() reads cached plugin metadata, not the live
     raw->params_calls.store(0, std::memory_order_relaxed);
     raw->latency_calls.store(0, std::memory_order_relaxed);
     raw->transport_calls.store(0, std::memory_order_relaxed);
+    raw->latency_query_calls.store(0, std::memory_order_relaxed);
 
     for (int i = 0; i < 8; ++i) {
         g.compile_snapshot_for_test(kSr, kFrames);
@@ -144,6 +150,7 @@ TEST_CASE("compile_() after prepare() reads cached plugin metadata, not the live
     CHECK(raw->params_calls.load(std::memory_order_relaxed) == 0);
     CHECK(raw->latency_calls.load(std::memory_order_relaxed) == 0);
     CHECK(raw->transport_calls.load(std::memory_order_relaxed) == 0);
+    CHECK(raw->latency_query_calls.load(std::memory_order_relaxed) == 0);
 
     // Cached latency propagated into the prepared graph (128 from CountingSlot).
     CHECK(g.latency_samples() == 128);

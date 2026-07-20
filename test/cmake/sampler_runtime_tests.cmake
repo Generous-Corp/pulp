@@ -221,6 +221,9 @@ pulp_add_test_suite(pulp-test-signal-graph-prepared-swap
 pulp_add_test_suite(pulp-test-signal-graph-metadata-cache
     SOURCES test_signal_graph_metadata_cache.cpp
     LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
+pulp_add_test_suite(pulp-test-signal-graph-latency-schedule
+    SOURCES test_signal_graph_latency_schedule.cpp
+    LIBRARIES pulp::host pulp::format pulp::graph pulp::audio)
 # Per-node live-DSP telemetry wired through SignalGraph: default-off, per-node
 # recording on the reference walk, live toggle without recompile, no audio-path alloc.
 pulp_add_test_suite(pulp-test-live-dsp-telemetry-graph

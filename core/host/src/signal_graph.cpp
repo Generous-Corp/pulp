@@ -1600,7 +1600,15 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
         CompiledGraph::NodeShape shape{n.type, n.num_input_ports, n.num_output_ports};
         cg->shapes[n.id] = shape;
 
-        if (n.plugin) cg->plugins[n.id] = n.plugin;
+        if (n.plugin) {
+            cg->plugins[n.id] = n.plugin;
+            const auto metadata = prepared_plugin_meta_.find(n.id);
+            if (metadata != prepared_plugin_meta_.end()) {
+                cg->plugin_latency_queries[n.id] = metadata->second.latency_query;
+            }
+        } else if (n.type == NodeType::Plugin) {
+            cg->plugin_latency_queries[n.id] = PluginSlot::LatencyQuery::QueryFailed;
+        }
         // Resolve the node's transport-sensitivity ONCE here (before the
         // anticipation eligibility analysis and the routed-snapshot build, both
         // later in compile_). The SAME GraphNode::transport_sensitive value feeds
@@ -1757,6 +1765,7 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
     }
 
     compute_latencies_for_(*cg, connections_, prepared_plugin_meta_);
+    build_latency_schedule_for_(*cg);
 
     // Build the canonical-executor routing for this snapshot when the topology
     // is eligible. The Gain bindings resolve to THIS snapshot's own gain atomics
@@ -2185,10 +2194,13 @@ bool SignalGraph::prepare_impl_(
                 runtime::log_error("SignalGraph: failed to prepare plugin '{}'", n.name);
                 return false;
             }
+            const auto latency = capture_latency_metadata_(*n.plugin);
             prepared_plugin_meta_[n.id] = PreparedPluginMetadata{
-                n.plugin->parameters(),
-                std::max(0, n.plugin->latency_samples()),
-                n.plugin->wants_transport()};
+                .parameters = n.plugin->parameters(),
+                .latency_samples = latency.samples,
+                .latency_query = latency.query,
+                .wants_transport = n.plugin->wants_transport(),
+            };
         }
     }
 
