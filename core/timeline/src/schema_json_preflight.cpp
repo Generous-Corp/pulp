@@ -605,9 +605,8 @@ class StructuralScanner {
         bool has_devices = false;
         if (!member(data, "clips", clips, has_clips) ||
             !member(data, "device_chain", devices, has_devices)) return false;
-        if (!has_clips ||
-            (version == detail::track_schema_policy.oldest_readable_version && has_devices) ||
-            (version > detail::track_schema_policy.oldest_readable_version && !has_devices)) {
+        const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
+        if (!has_clips || requires_devices != has_devices) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + (has_clips ? "/data/device_chain" : "/data/clips"));
             return false;

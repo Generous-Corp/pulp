@@ -550,9 +550,11 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto name = string_field(data, "name", path + "/data");
     auto clips = required(data, "clips", path + "/data");
     const auto* devices = data.find("device_chain");
+    const auto requires_devices =
+        detail::track_schema_policy.requires_device_chain(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
-        (envelope.value().version == 1 && devices) ||
-        (envelope.value().version == 2 && (!devices || devices->kind != JsonValue::Kind::Array)))
+        (!requires_devices && devices) ||
+        (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
