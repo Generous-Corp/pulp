@@ -154,3 +154,8 @@ stream with both the committed snapshot and the pinned fixture.
 `web-timeline-source-closure` compares the native timebase, timeline, and
 playback source lists with both curated production web ABI lists. Add a portable
 engine translation unit to native, WAM, and WebCLAP ownership together.
+
+`test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
+runtime tests. Those tests exercise `pulp::audio` profile/runtime behavior and
+do not make Heritage profiles part of the immutable playback-program model;
+keep that ownership boundary when extending the shared test inventory.
