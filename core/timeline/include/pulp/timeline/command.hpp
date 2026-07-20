@@ -64,6 +64,18 @@ struct RemoveClip {
     ItemId clip_id;
 };
 
+struct InsertAutomationLane {
+    ItemId sequence_id;
+    ItemId track_id;
+    AutomationLane lane;
+};
+
+struct RemoveAutomationLane {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+};
+
 struct MoveClip {
     ItemId sequence_id;
     ItemId track_id;
@@ -100,8 +112,8 @@ struct SetMeterMap {
 };
 
 using Command =
-    std::variant<InsertClip, RemoveClip, MoveClip, SetNoteVelocity, SetClipPlaybackProperties,
-                 SetTempoMap, SetMeterMap>;
+    std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
+                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap>;
 
 struct CommandEnvelope {
     CommandId id;
@@ -118,6 +130,7 @@ struct Transaction {
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept;
 bool equivalent(const Clip& lhs, const Clip& rhs) noexcept;
+bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept;
 bool equivalent(const Command& lhs, const Command& rhs) noexcept;
 bool equivalent(const Transaction& lhs, const Transaction& rhs) noexcept;
 std::size_t retained_size(const Command& command) noexcept;

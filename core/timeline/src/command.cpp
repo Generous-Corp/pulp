@@ -59,6 +59,12 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
     return size;
 }
 
+std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
+    return saturated_add(
+        sizeof(AutomationLane),
+        saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
+}
+
 } // namespace
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
@@ -80,6 +86,13 @@ bool equivalent(const Clip& lhs, const Clip& rhs) noexcept {
            lhs.playback_properties() == rhs.playback_properties();
 }
 
+bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept {
+    const auto left = lhs.curve().points();
+    const auto right = rhs.curve().points();
+    return lhs.id() == rhs.id() && lhs.target() == rhs.target() && left.size() == right.size() &&
+           std::equal(left.begin(), left.end(), right.begin());
+}
+
 bool equivalent(const Command& lhs, const Command& rhs) noexcept {
     if (lhs.index() != rhs.index())
         return false;
@@ -93,6 +106,12 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveClip>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id;
+            } else if constexpr (std::is_same_v<T, InsertAutomationLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       equivalent(left.lane, right.lane);
+            } else if constexpr (std::is_same_v<T, RemoveAutomationLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id;
             } else if constexpr (std::is_same_v<T, MoveClip>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id &&
@@ -107,8 +126,13 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
-            } else {
+            } else if constexpr (std::is_same_v<T, SetTempoMap> ||
+                                 std::is_same_v<T, SetMeterMap>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
+            } else {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             }
         },
         lhs);
@@ -133,6 +157,8 @@ std::size_t retained_size(const Command& command) noexcept {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, InsertClip>)
                 return saturated_add(sizeof(T), clip_retained_size(value.clip));
+            if constexpr (std::is_same_v<T, InsertAutomationLane>)
+                return saturated_add(sizeof(T), automation_lane_retained_size(value.lane));
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(sizeof(T),
                                      saturated_multiply(

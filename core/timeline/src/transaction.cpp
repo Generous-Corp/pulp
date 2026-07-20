@@ -1,5 +1,6 @@
 #include <pulp/timeline/transaction.hpp>
 
+#include "transaction_automation_internal.hpp"
 #include "transaction_internal.hpp"
 
 #include <algorithm>
@@ -7,21 +8,6 @@
 #include <tuple>
 
 namespace pulp::timeline {
-
-struct ProjectEditAccess {
-    static runtime::Result<Project, ModelError>
-    replace_sequence(const Project& project, Sequence sequence,
-                     std::span<const IdentityMutation> identities = {},
-                     std::optional<std::uint64_t> next_item_id = std::nullopt) {
-        return project.replace_sequence(std::move(sequence), identities, next_item_id);
-    }
-    static Project replace_tempo_map(const Project& project, timebase::TempoMap tempo_map) {
-        return project.replace_tempo_map(std::move(tempo_map));
-    }
-    static Project replace_meter_map(const Project& project, timebase::MeterMap meter_map) {
-        return project.replace_meter_map(std::move(meter_map));
-    }
-};
 
 namespace {
 
@@ -225,6 +211,15 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             inverses.emplace_back(InsertClip{remove->sequence_id, remove->track_id, removed});
             dirty.push_back({remove->clip_id, remove->track_id, remove->sequence_id,
                              DirtyFlags::Structure | DirtyFlags::Removed});
+        } else if (detail::is_automation_command(envelope.command)) {
+            auto reduced = detail::reduce_automation_command(
+                project, envelope.command, transaction, envelope.id, allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
         } else if (const auto* move = std::get_if<MoveClip>(&envelope.command)) {
             if (const auto code = target_error(project, move->clip_id, ItemKind::Clip,
                                                move->sequence_id, move->track_id, move->clip_id))
