@@ -12,7 +12,7 @@ using namespace pulp::audio;
 
 namespace {
 
-constexpr std::string_view canonical_json = R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"decision_hop_samples":2048,"search_radius_samples":256,"search_stride_samples":1,"crossfade_samples":128,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true}]})";
+constexpr std::string_view canonical_json = R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat","max_transpose_semitones":24},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed","pitch_mode":"preserve","tempo_lock":true},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75,"filter_family":"ladder_4pole","cutoff_law":"machine_rate_ratio","cutoff_value":0.3,"resonance":0.2}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"decision_hop_samples":2048,"search_radius_samples":256,"search_stride_samples":1,"crossfade_samples":128,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true,"quality":99,"width":99}]})";
 
 std::string replace_once(std::string source, std::string_view from,
                          std::string_view to) {
@@ -114,12 +114,27 @@ TEST_CASE("Sample heritage v3 digest covers every typed domain",
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
+    std::get<SampleHeritageVoiceLiveCyclicStretchBlock>(changed.voice[4].parameters)
+        .pitch_mode = SampleHeritageLivePitchMode::RateLinked;
+    REQUIRE(sample_heritage_profile_digest(changed) != original);
+
+    changed = parsed.profile;
+    std::get<SampleHeritageVoiceLiveCyclicStretchBlock>(changed.voice[4].parameters)
+        .tempo_lock = false;
+    REQUIRE(sample_heritage_profile_digest(changed) != original);
+
+    changed = parsed.profile;
     std::get<SampleHeritageVoiceReconstructionBlock>(changed.voice[6].parameters).cutoff_value = 0.3;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
     std::get<SampleHeritageVoiceReconstructionBlock>(changed.voice[6].parameters)
         .stopband_attenuation_db = 72.0f;
+    REQUIRE(sample_heritage_profile_digest(changed) != original);
+
+    changed = parsed.profile;
+    std::get<SampleHeritageVoiceAnalogColorBlock>(changed.voice[7].parameters)
+        .cutoff_value = 0.25;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
 
     changed = parsed.profile;
@@ -152,6 +167,16 @@ TEST_CASE("Sample heritage v3 digest covers every typed domain",
     std::get<SampleHeritageRecordCommitAdaptiveStretchBlock>(changed.record_commit[3].parameters)
         .search_radius_samples = 257;
     REQUIRE(sample_heritage_profile_digest(changed) != original);
+
+    changed = parsed.profile;
+    std::get<SampleHeritageRecordCommitAdaptiveStretchBlock>(changed.record_commit[3].parameters)
+        .quality = 50;
+    REQUIRE(sample_heritage_profile_digest(changed) != original);
+
+    changed = parsed.profile;
+    std::get<SampleHeritageRecordCommitAdaptiveStretchBlock>(changed.record_commit[3].parameters)
+        .width = 50;
+    REQUIRE(sample_heritage_profile_digest(changed) != original);
 }
 
 TEST_CASE("Sample heritage v3 JSON strictly audits roots and objects",
@@ -169,9 +194,17 @@ TEST_CASE("Sample heritage v3 JSON strictly audits roots and objects",
                                "\"host_sample_rate\":48000,", ""),
                   SampleHeritageJsonStatus::MissingField, "$.host_sample_rate");
     require_error(replace_once(std::string(canonical_json),
+                               ",\"max_transpose_semitones\":24", ""),
+                  SampleHeritageJsonStatus::MissingField,
+                  "$.voice[2].max_transpose_semitones");
+    require_error(replace_once(std::string(canonical_json),
                                ",\"stopband_attenuation_db\":60", ""),
                   SampleHeritageJsonStatus::MissingField,
                   "$.voice[6].stopband_attenuation_db");
+    require_error(replace_once(std::string(canonical_json),
+                               ",\"filter_family\":\"ladder_4pole\"", ""),
+                  SampleHeritageJsonStatus::MissingField,
+                  "$.voice[7].filter_family");
     require_error(replace_once(std::string(canonical_json),
                                "\"tilt_reference_hz\":1000,", ""),
                   SampleHeritageJsonStatus::MissingField,
@@ -250,6 +283,11 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                   SampleHeritageJsonStatus::InvalidEnum,
                   "$.voice[6].cutoff_law");
     require_error(replace_once(std::string(canonical_json),
+                               "\"filter_family\":\"ladder_4pole\"",
+                               "\"filter_family\":\"future_filter\""),
+                  SampleHeritageJsonStatus::InvalidEnum,
+                  "$.voice[7].filter_family");
+    require_error(replace_once(std::string(canonical_json),
                       "\"sample_rate\":22050,\"cutoff_law\":\"fixed_hz\"",
                       "\"sample_rate\":22050,\"cutoff_law\":\"future_law\""),
                   SampleHeritageJsonStatus::InvalidEnum,
@@ -277,10 +315,10 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                   "$.voice[3].seed_policy");
     require_error(
         replace_once(std::string(canonical_json),
-                               "\"stereo_link\":true",
-                               "\"stereo_link\":true,\"tempo_lock\":true"),
-                  SampleHeritageJsonStatus::UnknownField,
-                  "$.voice[4].tempo_lock");
+                               "\"pitch_mode\":\"preserve\"",
+                               "\"pitch_mode\":\"future_mode\""),
+                  SampleHeritageJsonStatus::InvalidEnum,
+                  "$.voice[4].pitch_mode");
     require_error(
         replace_once(std::string(canonical_json),
                                "\"shuffle_divisions\":4",
@@ -367,6 +405,15 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
                                "\"mix\":1.01"),
                   SampleHeritageJsonStatus::NumberOutOfRange, "$.voice[7].mix");
     require_error(replace_once(std::string(canonical_json),
+                               "\"cutoff_value\":0.3,\"resonance\":0.2",
+                               "\"cutoff_value\":0.490001,\"resonance\":0.2"),
+                  SampleHeritageJsonStatus::NumberOutOfRange,
+                  "$.voice[7].cutoff_value");
+    require_error(replace_once(std::string(canonical_json),
+                               "\"resonance\":0.2", "\"resonance\":0.300001"),
+                  SampleHeritageJsonStatus::NumberOutOfRange,
+                  "$.voice[7].resonance");
+    require_error(replace_once(std::string(canonical_json),
                                "\"noise_amplitude\":0.01",
                                "\"noise_amplitude\":1.01"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
@@ -433,6 +480,14 @@ TEST_CASE("Sample heritage v3 JSON reports typed block range failures exactly",
 
 TEST_CASE("Sample heritage v3 commit stretch cross-fields are explicit",
           "[audio][sampler][heritage][json][reject]") {
+    require_error(replace_once(std::string(canonical_json), "\"quality\":99",
+                               "\"quality\":100"),
+                  SampleHeritageJsonStatus::NumberOutOfRange,
+                  "$.record_commit[3].quality");
+    require_error(replace_once(std::string(canonical_json), "\"width\":99",
+                               "\"width\":100"),
+                  SampleHeritageJsonStatus::NumberOutOfRange,
+                  "$.record_commit[3].width");
     require_error(replace_once(std::string(canonical_json), "\"search_stride_samples\":1",
                                "\"search_stride_samples\":0"),
                   SampleHeritageJsonStatus::NumberOutOfRange,
@@ -453,7 +508,7 @@ TEST_CASE("Sample heritage v3 commit stretch cross-fields are explicit",
         "samples\":256,\"search_stride_samples\":1,\"crossfade_samples\":128",
         "\"family\":\"cyclic\",\"factor\":0.75,\"cycle_samples\":2048,\"crossfade_samples\":128");
     cyclic = replace_once(std::move(cyclic),
-                          "\"zone_end_frame\":10000,\"stereo_link\":true",
+                          "\"zone_end_frame\":10000,\"stereo_link\":true,\"quality\":99,\"width\":99",
                           "\"zone_end_frame\":10000");
     REQUIRE(parse_sample_heritage_profile_json(cyclic).valid());
 
@@ -584,7 +639,7 @@ TEST_CASE("Sample heritage v3 JSON rejects duplicate and unordered typed blocks"
     constexpr std::string_view clock =
         R"({"domain":"voice","type":"clock","bypass":false,"ratio":0.75})";
     constexpr std::string_view pitch =
-        R"({"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"})";
+        R"({"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat","max_transpose_semitones":24})";
 
     require_profile_error(replace_once(std::string(canonical_json), pitch, clock),
         SampleHeritageProfileStatus::DuplicateStage, "$.voice[2]");
@@ -665,6 +720,10 @@ TEST_CASE("Sample heritage v3 boundary neighbors remain accepted",
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json), "\"ceiling\":0.9",
                          "\"ceiling\":0.001");
+    REQUIRE(parse_sample_heritage_profile_json(valid).valid());
+    valid = replace_once(std::string(canonical_json),
+                         "\"cutoff_value\":0.3,\"resonance\":0.2",
+                         "\"cutoff_value\":0.49,\"resonance\":0.3");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json),
                          "\"cutoff_value\":0.4",

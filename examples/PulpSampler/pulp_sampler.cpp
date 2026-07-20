@@ -46,6 +46,10 @@ void PulpSamplerProcessor::define_parameters(state::StateStore& store) {
         {.id = kSamplerReverse, .name = "Reverse", .unit = "", .range = {0, 1, 0, 1}});
     store.add_parameter(
         {.id = kSamplerInterpolation, .name = "Interpolation", .unit = "", .range = {0, 5, 2, 1}});
+    store.add_parameter({.id = kSamplerHeritageClockRatio,
+                         .name = "Heritage Clock Ratio",
+                         .unit = "x",
+                         .range = {0.25f, 4.0f, 1.0f, 0.01f}});
 }
 
 std::vector<std::uint8_t> PulpSamplerProcessor::serialize_plugin_state() const {
@@ -303,6 +307,10 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
         if (!(maximum_consumption > 0.0) || !std::isfinite(maximum_consumption) ||
             maximum_consumption > audio::kMaximumDenseSampleSincConsumption)
             return std::numeric_limits<std::size_t>::max();
+        if (maximum_consumption < audio::kMaximumDenseSampleSincConsumption)
+            maximum_consumption = std::nextafter(
+                maximum_consumption,
+                std::numeric_limits<double>::infinity());
         const auto intervals =
             maximum_consumption <= 1.0 ? 0.0 : std::ceil(std::log2(maximum_consumption) * 4.0);
         if (intervals >= 32.0)
@@ -319,6 +327,8 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     bool voice_processing = false;
     bool bus_processing = false;
     bool pitch_active = false;
+    bool clock_automation_active = false;
+    double max_transpose_semitones = 24.0;
     bool live_cyclic_active = false;
     double live_factor = 1.0;
     double live_cycle_ms = 0.0;
@@ -356,6 +366,7 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
                     std::get_if<audio::SampleHeritageVoiceClockBlock>(
                         &block.parameters)) {
                 clock_ratio = clock->ratio;
+                clock_automation_active = true;
                 dynamic_identity_voice = dynamic_identity_voice &&
                     clock->ratio == 1.0;
             } else if (const auto* pitch =
@@ -363,6 +374,7 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
                         &block.parameters)) {
                 pitch_active = true;
                 pitch_family = pitch->family;
+                max_transpose_semitones = pitch->max_transpose_semitones;
                 dynamic_identity_voice = dynamic_identity_voice &&
                     pitch->family ==
                         audio::SampleHeritagePitchFamily::VariableClock;
@@ -386,16 +398,36 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
             [](const auto& block) { return !block.bypass; });
         heritage_processing = heritage_processing || bus_processing;
     }
-    const auto stream_rate = ctx.sample_rate * clock_ratio;
-    const auto input_ratio = ctx.sample_rate / machine_rate;
+    const auto stream_rate = ctx.sample_rate;
+    const auto input_ratio = ctx.sample_rate / (machine_rate * clock_ratio);
     const auto return_ratio = machine_rate * clock_ratio / ctx.sample_rate;
+    const auto maximum_profile_pitch_factor = std::min(
+        audio::SampleHeritagePitchProcessor::kMaximumFactor,
+        std::exp2(max_transpose_semitones / 12.0));
+    const auto requested_runtime_clock_factor =
+        (pitch_active &&
+                 pitch_family == audio::SampleHeritagePitchFamily::VariableClock
+             ? maximum_profile_pitch_factor
+             : 1.0) *
+        (clock_automation_active
+             ? SamplerHeritageRuntime::kMaximumClockMultiplier
+             : 1.0);
     const auto maximum_runtime_clock_factor =
+        SamplerHeritageRuntime::bounded_runtime_clock_factor(
+            machine_rate, clock_ratio, ctx.sample_rate,
+            requested_runtime_clock_factor);
+    if (!(maximum_runtime_clock_factor >= 1.0)) return usage;
+    const auto maximum_note_pitch_factor =
         pitch_active &&
                 pitch_family == audio::SampleHeritagePitchFamily::VariableClock
-            ? SamplerHeritageRuntime::maximum_variable_clock_factor(
-                  machine_rate, clock_ratio, ctx.sample_rate)
+            ? std::min(maximum_profile_pitch_factor,
+                       maximum_runtime_clock_factor)
             : 1.0;
-    if (!(maximum_runtime_clock_factor >= 1.0)) return usage;
+    const auto maximum_artifact_clock_factor = std::min(
+        clock_automation_active
+            ? SamplerHeritageRuntime::kMaximumClockMultiplier
+            : 1.0,
+        maximum_runtime_clock_factor / maximum_note_pitch_factor);
     auto frame_bound = [](std::size_t frames, double ratio,
                           bool identity) noexcept {
         if (identity) return frames;
@@ -459,30 +491,31 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
         if (!live_resources.valid()) return usage;
         maximum_pre_live_machine_frames = live_resources.maximum_input_frames;
     }
+    const auto maximum_input_ratio =
+        input_ratio / maximum_artifact_clock_factor;
     const auto maximum_engine_input_frames = heritage_processing
-        ? frame_bound(maximum_pre_live_machine_frames, input_ratio,
-                      input_ratio == 1.0)
+        ? frame_bound(maximum_pre_live_machine_frames, maximum_input_ratio,
+                      maximum_input_ratio == 1.0)
         : block_frames;
     auto maximum_heritage_input_frames = maximum_engine_input_frames;
     if (pitch_active &&
         pitch_family != audio::SampleHeritagePitchFamily::VariableClock) {
         maximum_heritage_input_frames = fixed_pitch_bound(
             maximum_engine_input_frames,
-            audio::SampleHeritagePitchProcessor::kMaximumFactor,
+            maximum_profile_pitch_factor,
             pitch_family == audio::SampleHeritagePitchFamily::EarlyLinear);
     }
-    const auto admitted_stream_pitch_factor = pitch_active
-        ? std::min(SamplerStreamingRuntime::maximum_pitch_ratio(),
-                   SamplerStreamingRuntime::maximum_pitch_ratio() /
-                       (clock_ratio * (live_cyclic_active
-                                           ? 1.0 / live_factor
-                                           : 1.0)))
-        : 1.0;
+    const auto admitted_stream_runtime_clock_factor = std::min(
+        maximum_runtime_clock_factor,
+        SamplerStreamingRuntime::maximum_pitch_ratio() /
+            (live_cyclic_active ? 1.0 / live_factor : 1.0));
     auto maximum_stream_input_frames = maximum_engine_input_frames;
-    if (pitch_active &&
-        pitch_family == audio::SampleHeritagePitchFamily::VariableClock) {
+    if ((pitch_active &&
+         pitch_family == audio::SampleHeritagePitchFamily::VariableClock) ||
+        (!pitch_active && clock_automation_active)) {
         const auto stream_machine_frames = frame_bound(
-            block_frames, return_ratio * admitted_stream_pitch_factor, false);
+            block_frames,
+            return_ratio * admitted_stream_runtime_clock_factor, false);
         auto stream_pre_live_frames = stream_machine_frames;
         if (live_cyclic_active) {
             const audio::SampleHeritageLiveCyclicConfig stream_live_config{
@@ -505,11 +538,14 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
                 stream_live_resources.maximum_input_frames;
         }
         maximum_stream_input_frames = frame_bound(
-            stream_pre_live_frames, input_ratio, input_ratio == 1.0);
+            stream_pre_live_frames, maximum_input_ratio,
+            maximum_input_ratio == 1.0);
     } else if (pitch_active) {
-        maximum_stream_input_frames = fixed_pitch_bound(
-            maximum_engine_input_frames, admitted_stream_pitch_factor,
-            pitch_family == audio::SampleHeritagePitchFamily::EarlyLinear);
+        maximum_stream_input_frames = clock_automation_active
+            ? maximum_heritage_input_frames
+            : fixed_pitch_bound(
+                  maximum_engine_input_frames, maximum_profile_pitch_factor,
+                  pitch_family == audio::SampleHeritagePitchFamily::EarlyLinear);
     }
     const auto stream_frames_double =
         static_cast<double>(maximum_stream_input_frames);
@@ -803,8 +839,7 @@ PulpSamplerProcessor::StreamDomain PulpSamplerProcessor::current_stream_domain()
 PulpSamplerProcessor::StreamDomain PulpSamplerProcessor::replacement_stream_domain(
     const SamplerHeritageRuntime::PreparedReplacement& candidate) const noexcept {
     return {
-        static_cast<float>(static_cast<double>(host_sample_rate_) *
-                           SamplerHeritageRuntime::replacement_clock_ratio(candidate)),
+        static_cast<float>(host_sample_rate_),
         static_cast<std::uint32_t>(
             SamplerHeritageRuntime::replacement_maximum_input_frames(candidate, max_block_frames_)),
     };

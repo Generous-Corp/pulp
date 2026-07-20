@@ -476,9 +476,6 @@ StretchResult apply_cyclic_stretch(Buffer<float>& audio,
     const auto crossfade_frames = static_cast<std::size_t>(block.crossfade_samples);
     if (grain_frames > zone.input_frames)
         return StretchResult::Invalid;
-    const auto output_hop = grain_frames - crossfade_frames;
-    if (output_hop == 0)
-        return StretchResult::Invalid;
     Buffer<float> rendered(audio.num_channels(), zone.output_frames);
     const auto maximum_anchor = zone.input_frames - grain_frames;
     for (std::size_t output_anchor = 0; output_anchor < zone.output_frames;) {
@@ -486,12 +483,32 @@ StretchResult apply_cyclic_stretch(Buffer<float>& audio,
             static_cast<long double>(output_anchor) / static_cast<long double>(block.factor);
         const auto input_anchor =
             std::min(maximum_anchor, static_cast<std::size_t>(std::llround(nominal)));
-        for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
-            add_grain(audio, zone, rendered, channel, input_anchor, output_anchor, grain_frames,
-                      crossfade_frames);
-        if (output_anchor > std::numeric_limits<std::size_t>::max() - output_hop)
+        const auto count = std::min(grain_frames, zone.output_frames - output_anchor);
+        std::size_t previous_anchor = 0;
+        if (output_anchor != 0) {
+            const auto previous_nominal = static_cast<long double>(output_anchor - grain_frames) /
+                                          static_cast<long double>(block.factor);
+            previous_anchor = std::min(
+                maximum_anchor, static_cast<std::size_t>(std::llround(previous_nominal)));
+        }
+        for (std::size_t channel = 0; channel < audio.num_channels(); ++channel) {
+            for (std::size_t frame = 0; frame < count; ++frame) {
+                const auto current = audio.channel(channel)[zone.begin + input_anchor + frame];
+                auto value = current;
+                if (output_anchor != 0 && frame < crossfade_frames) {
+                    const auto previous_index = previous_anchor + grain_frames + frame;
+                    const auto previous = previous_index < zone.input_frames
+                                              ? audio.channel(channel)[zone.begin + previous_index]
+                                              : 0.0f;
+                    const auto weight = fade_in(frame, crossfade_frames);
+                    value = static_cast<float>((1.0 - weight) * previous + weight * current);
+                }
+                rendered.channel(channel)[output_anchor + frame] = value;
+            }
+        }
+        if (output_anchor > std::numeric_limits<std::size_t>::max() - grain_frames)
             return StretchResult::Overflow;
-        output_anchor += output_hop;
+        output_anchor += grain_frames;
     }
     return publish_stretched_zone(audio, zone, rendered);
 }
@@ -534,16 +551,17 @@ double removed_dc_ncc(const Buffer<float>& audio, const StretchZone& zone,
 std::size_t adaptive_anchor(const Buffer<float>& audio, const StretchZone& zone,
                             std::size_t channel_begin, std::size_t channel_end,
                             std::size_t previous_anchor, std::size_t nominal_anchor,
-                            std::size_t grain_frames,
+                            std::size_t grain_frames, std::size_t search_radius,
+                            std::size_t crossfade_samples,
                             const SampleHeritageRecordCommitAdaptiveStretchBlock& block) {
     const auto maximum_anchor = zone.input_frames - grain_frames;
     nominal_anchor = std::min(nominal_anchor, maximum_anchor);
-    if (block.crossfade_samples == 0 || block.search_radius_samples == 0)
+    if (crossfade_samples == 0 || search_radius == 0)
         return nominal_anchor;
     const auto reference = previous_anchor + block.decision_hop_samples;
     double best_score = -std::numeric_limits<double>::infinity();
     std::int64_t best_delta = 0;
-    const auto radius = static_cast<std::int64_t>(block.search_radius_samples);
+    const auto radius = static_cast<std::int64_t>(search_radius);
     const auto stride = static_cast<std::int64_t>(block.search_stride_samples);
     const auto consider = [&](std::int64_t delta, double& score, std::int64_t& selected) {
         const auto signed_candidate = static_cast<std::int64_t>(nominal_anchor) + delta;
@@ -551,7 +569,7 @@ std::size_t adaptive_anchor(const Buffer<float>& audio, const StretchZone& zone,
             return;
         const auto candidate = static_cast<std::size_t>(signed_candidate);
         const auto candidate_score = removed_dc_ncc(audio, zone, channel_begin, channel_end,
-                                                    reference, candidate, block.crossfade_samples);
+                                                    reference, candidate, crossfade_samples);
         if (candidate_score > score ||
             (candidate_score == score &&
              (std::abs(delta) < std::abs(selected) ||
@@ -577,9 +595,13 @@ StretchResult apply_adaptive_stretch(Buffer<float>& audio,
     if (status != StretchResult::Ok || block.factor == 1.0)
         return status;
     const auto output_hop = static_cast<std::size_t>(block.decision_hop_samples);
-    if (output_hop > std::numeric_limits<std::size_t>::max() - block.crossfade_samples)
+    const auto search_radius = static_cast<std::size_t>(
+        sample_heritage_adaptive_effective_search_radius(block));
+    const auto crossfade_samples = static_cast<std::size_t>(
+        sample_heritage_adaptive_effective_crossfade_samples(block));
+    if (output_hop > std::numeric_limits<std::size_t>::max() - crossfade_samples)
         return StretchResult::Overflow;
-    const auto grain_frames = output_hop + block.crossfade_samples;
+    const auto grain_frames = output_hop + crossfade_samples;
     if (grain_frames > zone.input_frames)
         return StretchResult::Invalid;
     Buffer<float> rendered(audio.num_channels(), zone.output_frames);
@@ -595,17 +617,17 @@ StretchResult apply_adaptive_stretch(Buffer<float>& audio,
         } else if (block.stereo_link) {
             const auto selected =
                 adaptive_anchor(audio, zone, 0, audio.num_channels(), previous_anchor.front(),
-                                nominal, grain_frames, block);
+                                nominal, grain_frames, search_radius, crossfade_samples, block);
             std::fill(previous_anchor.begin(), previous_anchor.end(), selected);
         } else {
             for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
                 previous_anchor[channel] =
                     adaptive_anchor(audio, zone, channel, channel + 1, previous_anchor[channel],
-                                    nominal, grain_frames, block);
+                                    nominal, grain_frames, search_radius, crossfade_samples, block);
         }
         for (std::size_t channel = 0; channel < audio.num_channels(); ++channel)
             add_grain(audio, zone, rendered, channel, previous_anchor[channel], output_anchor,
-                      grain_frames, block.crossfade_samples);
+                      grain_frames, crossfade_samples);
         if (output_anchor > std::numeric_limits<std::size_t>::max() - output_hop)
             return StretchResult::Overflow;
         output_anchor += output_hop;
@@ -614,6 +636,96 @@ StretchResult apply_adaptive_stretch(Buffer<float>& audio,
 }
 
 }  // namespace
+
+SampleHeritageAutoCycleResult estimate_sample_heritage_auto_cycle(
+    BufferView<const float> source, const SampleHeritageAutoCycleOptions& options) {
+    SampleHeritageAutoCycleResult result;
+    if (source.num_channels() == 0 || source.num_samples() == 0) {
+        result.status = SampleHeritageAutoCycleStatus::InvalidSource;
+        return result;
+    }
+    const auto begin = options.analysis_start_frame;
+    const auto end = options.analysis_end_frame == 0
+                         ? static_cast<std::uint64_t>(source.num_samples())
+                         : options.analysis_end_frame;
+    if (begin >= end || end > source.num_samples() ||
+        options.minimum_cycle_samples == 0 ||
+        options.minimum_cycle_samples > options.maximum_cycle_samples ||
+        !std::isfinite(options.minimum_correlation) ||
+        options.minimum_correlation < 0.0 || options.minimum_correlation > 1.0) {
+        result.status = SampleHeritageAutoCycleStatus::InvalidRange;
+        return result;
+    }
+    const auto region_frames = static_cast<std::size_t>(end - begin);
+    if (options.maximum_cycle_samples >= region_frames ||
+        region_frames - options.maximum_cycle_samples < 2) {
+        result.status = SampleHeritageAutoCycleStatus::InvalidRange;
+        return result;
+    }
+    for (std::size_t channel = 0; channel < source.num_channels(); ++channel) {
+        for (std::uint64_t frame = begin; frame < end; ++frame) {
+            if (!std::isfinite(source.channel(channel)[frame])) {
+                result.status = SampleHeritageAutoCycleStatus::InvalidSource;
+                return result;
+            }
+        }
+    }
+
+    const auto comparison_frames = region_frames - options.maximum_cycle_samples;
+    auto best_score = -std::numeric_limits<double>::infinity();
+    std::uint32_t best_cycle = 0;
+    bool saw_signal = false;
+    constexpr long double energy_floor = 1.0e-24L;
+    constexpr double tie_tolerance = 1.0e-12;
+    for (std::uint32_t cycle = options.minimum_cycle_samples;
+         cycle <= options.maximum_cycle_samples; ++cycle) {
+        long double dot = 0.0L;
+        long double left_energy = 0.0L;
+        long double right_energy = 0.0L;
+        for (std::size_t channel = 0; channel < source.num_channels(); ++channel) {
+            long double left_sum = 0.0L;
+            long double right_sum = 0.0L;
+            for (std::size_t frame = 0; frame < comparison_frames; ++frame) {
+                left_sum += source.channel(channel)[begin + frame];
+                right_sum += source.channel(channel)[begin + cycle + frame];
+            }
+            const auto left_mean = left_sum / comparison_frames;
+            const auto right_mean = right_sum / comparison_frames;
+            for (std::size_t frame = 0; frame < comparison_frames; ++frame) {
+                const auto left = static_cast<long double>(
+                                      source.channel(channel)[begin + frame]) -
+                                  left_mean;
+                const auto right = static_cast<long double>(
+                                       source.channel(channel)[begin + cycle + frame]) -
+                                   right_mean;
+                dot += left * right;
+                left_energy += left * left;
+                right_energy += right * right;
+            }
+        }
+        if (left_energy <= energy_floor || right_energy <= energy_floor)
+            continue;
+        saw_signal = true;
+        const auto score = static_cast<double>(
+            dot / std::sqrt(left_energy * right_energy));
+        if (score > best_score + tie_tolerance) {
+            best_score = score;
+            best_cycle = cycle;
+        }
+        if (cycle == options.maximum_cycle_samples)
+            break;
+    }
+    if (!saw_signal) {
+        result.status = SampleHeritageAutoCycleStatus::InsufficientSignal;
+        return result;
+    }
+    result.cycle_samples = best_cycle;
+    result.correlation = std::clamp(best_score, -1.0, 1.0);
+    result.status = result.correlation >= options.minimum_correlation
+                        ? SampleHeritageAutoCycleStatus::Ok
+                        : SampleHeritageAutoCycleStatus::NoReliableCycle;
+    return result;
+}
 
 SampleHeritageRecordCommitResult
 commit_sample_heritage_recording(const SampleHeritageProfile& profile,
@@ -654,9 +766,13 @@ commit_sample_heritage_recording(const SampleHeritageProfile& profile,
             if (const auto* drive =
                     std::get_if<SampleHeritageRecordInputDriveClipBlock>(&spec.parameters)) {
                 for (std::size_t channel = 0; channel < committed.num_channels(); ++channel)
-                    for (auto& sample : committed.channel(channel))
-                        sample = std::clamp(sample * drive->drive,
-                                            -drive->clip_level, drive->clip_level);
+                    for (auto& sample : committed.channel(channel)) {
+                        const auto driven = sample * drive->drive;
+                        sample = std::isinf(driven)
+                            ? std::copysign(drive->clip_level, driven)
+                            : drive->clip_level * driven /
+                                  (drive->clip_level + std::abs(driven));
+                    }
             } else if (const auto* rate =
                            std::get_if<SampleHeritageRecordRateBlock>(&spec.parameters)) {
                 if (!apply_filter(committed, committed_rate, *rate))

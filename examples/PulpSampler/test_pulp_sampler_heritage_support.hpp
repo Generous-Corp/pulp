@@ -66,6 +66,20 @@ struct PulpSamplerHeritageTestAccess {
         return -1.0;
     }
 
+    static double active_clock_multiplier(
+        const PulpSamplerProcessor& processor) noexcept {
+        for (const auto& voice : processor.voices_)
+            if (voice.active) return voice.heritage_clock_multiplier;
+        return 0.0;
+    }
+
+    static double active_pitch_factor(
+        const PulpSamplerProcessor& processor) noexcept {
+        for (const auto& voice : processor.voices_)
+            if (voice.active) return voice.heritage_pitch_factor;
+        return 0.0;
+    }
+
     static void force_stream_rate_capacity(PulpSamplerProcessor& processor,
                                            double frames_per_second) noexcept {
         processor.stream_rate_capacity_override_for_test_ = frames_per_second;
@@ -286,18 +300,20 @@ audio::SampleHeritageProfile clock_profile(double ratio, bool bypass = false) {
 [[maybe_unused]] audio::SampleHeritageProfile typed_pitch_artifact_profile(
     audio::SampleHeritagePitchFamily family = audio::SampleHeritagePitchFamily::VariableClock,
     bool bypass = false, double clock_ratio = 1.0) {
-    return {
+    audio::SampleHeritageProfile profile{
         .schema_version = audio::kSampleHeritageProfileSchemaVersion,
         .profile_id = bypass ? "neutral.typed-pitch-bypass-v3" : "neutral.typed-pitch-artifact-v3",
         .host_sample_rate = 48000.0,
         .voice =
             {
-                {audio::SampleHeritageBlockDomain::Voice, bypass,
+                {audio::SampleHeritageBlockDomain::Voice,
+                 bypass || clock_ratio == 1.0,
                  audio::SampleHeritageVoiceClockBlock{clock_ratio}},
                 {audio::SampleHeritageBlockDomain::Voice, bypass,
                  audio::SampleHeritageVoicePitchBlock{family}},
             },
     };
+    return profile;
 }
 
 [[maybe_unused]] audio::SampleHeritageProfile typed_bus_noise_profile() {
@@ -428,7 +444,11 @@ struct HeritageFixture {
     }
 
     void load(std::span<const float> sample) {
-        REQUIRE(processor.load_sample(sample.data(), static_cast<int>(sample.size()), 48000.0f));
+        const auto loaded = processor.load_sample(
+            sample.data(), static_cast<int>(sample.size()), 48000.0f);
+        INFO("prepare status=" << pulp_sampler_prepare_status_name(
+                 processor.prepare_result().status));
+        REQUIRE(loaded);
     }
 };
 

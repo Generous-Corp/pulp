@@ -17,6 +17,36 @@
   equipment noise and signal-dependent quantization effects; see
   [*Dither in Digital Audio*](https://aes.org/publications/elibrary-page/?id=5173).
 
+## Five-machine evidence
+
+- **Confirmed — SP-1200.** The [owner's manual](https://www.autistici.org/2000-maniax/texts/sp1200_manual.pdf),
+  page 12, warns that the unfiltered individual-output path can sound gritty and
+  noisy, while the mix path has channel-dependent filtering. That is qualitative
+  active-signal evidence, not an idle-noise specification. **Test** — capture
+  digital silence and low-level tones from every individual output and the mix
+  output with gain, load, bandwidth, and weighting recorded.
+- **Test — S950.** The [operator's manual](https://manuals.fdiskc.com/flat/Akai%20S-950%20Owners%20Manual.pdf)
+  describes 12-bit sampling and warns that low-transposed material can become
+  noisy, but supplies no conditioned idle-spectrum dataset. Capture record
+  monitor, silent playback, active voices, and the mix/individual outputs
+  separately at representative bandwidth settings.
+- **Test — S1100.** The [service manual](https://manualzz.com/doc/6408169/akai-s1100-digital-sampler-service-manual)
+  provides linear format, input levels, frequency response, and converter-trim
+  procedures, but not the residual spectra needed by Pulp's noise block. Capture
+  left/right covariance as well as idle and active residuals because this is a
+  stereo signal path.
+- **Confirmed — S612.** The [service manual, part 1](https://www.florian-anwander.de/akai_s612/Akai_S-612_Service_Manual_Part_1.pdf)
+  warns that surrounding microphone noise can trigger sampling and specifies
+  -63 dB microphone and -27 dB line input sensitivities. This describes the
+  record trigger/input condition, not playback idle. **Test** — characterize
+  record-path noise at each sampling clock and all six playback outputs.
+- **Test — S-550.** The [service notes](https://archive.org/details/roland_S-550_SERVICE_NOTES)
+  document the successive-approximation record path, shared 16-bit D/A path,
+  eight output assignments, and converter trims, but do not provide an idle
+  residual suitable for direct profile authoring. Capture the mix and assigned
+  outputs with no voice, silent voices, and low-level tones at both 30 and 15 kHz
+  modes.
+
 ## Mapping to the neutral mechanism
 
 - **Confirmed** — [`SampleHeritageBusNoiseIdleBlock`](../../../core/audio/include/pulp/audio/sample_heritage_schema.hpp)

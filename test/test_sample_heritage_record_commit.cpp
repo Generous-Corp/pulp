@@ -83,6 +83,55 @@ void require_exact_audio(const Buffer<float>& first, const Buffer<float>& second
 
 }  // namespace
 
+TEST_CASE("record input drive approaches its clip level without a hard plateau",
+          "[sample][heritage][record-commit][soft-clip]") {
+    SampleHeritageProfile profile;
+    profile.profile_id = "neutral.record-soft-clip";
+    profile.host_sample_rate = 48000.0;
+    profile.record_commit.push_back({
+        SampleHeritageBlockDomain::RecordCommit,
+        false,
+        SampleHeritageRecordInputDriveClipBlock{.drive = 1.5f,
+                                                .clip_level = 0.8f}});
+    Buffer<float> source(1, 5);
+    constexpr std::array<float, 5> input{-2.0f, -0.5f, 0.0f, 0.5f, 2.0f};
+    std::copy(input.begin(), input.end(), source.channel(0).begin());
+
+    const auto committed = commit_sample_heritage_recording(
+        profile, read_view(source), 48000.0, provenance());
+    REQUIRE(committed.valid());
+    const auto& output = committed.asset->audio().channel(0);
+    for (std::size_t frame = 0; frame < input.size(); ++frame) {
+        const auto driven = input[frame] * 1.5f;
+        REQUIRE(output[frame] == Catch::Approx(
+            0.8f * driven / (0.8f + std::abs(driven))));
+        REQUIRE(std::abs(output[frame]) < 0.8f);
+    }
+    REQUIRE(output[0] < output[1]);
+    REQUIRE(output[3] < output[4]);
+}
+
+TEST_CASE("record input drive bounds finite overflow",
+          "[sample][heritage][record-commit][soft-clip]") {
+    SampleHeritageProfile profile;
+    profile.profile_id = "neutral.record-soft-clip-overflow";
+    profile.host_sample_rate = 48000.0;
+    profile.record_commit.push_back({
+        SampleHeritageBlockDomain::RecordCommit,
+        false,
+        SampleHeritageRecordInputDriveClipBlock{.drive = 16.0f,
+                                                .clip_level = 0.8f}});
+    Buffer<float> source(1, 2);
+    source.channel(0)[0] = -std::numeric_limits<float>::max();
+    source.channel(0)[1] = std::numeric_limits<float>::max();
+
+    const auto committed = commit_sample_heritage_recording(
+        profile, read_view(source), 48000.0, provenance());
+    REQUIRE(committed.valid());
+    REQUIRE(committed.asset->audio().channel(0)[0] == -0.8f);
+    REQUIRE(committed.asset->audio().channel(0)[1] == 0.8f);
+}
+
 TEST_CASE("record commit reloads to an exact synthetic null",
           "[sample][heritage][record-commit]") {
     const auto profile = profile_with_record_chain();
@@ -283,8 +332,84 @@ TEST_CASE("cyclic record stretch preserves zones and uses unit-speed grains",
 
     const auto fade_in = std::pow(std::sin(3.14159265358979323846 / 8.0), 2.0);
     const auto expected_splice =
-        source.channel(0)[16] * (1.0 - fade_in) + source.channel(0)[13] * fade_in;
-    REQUIRE(result.asset->audio().channel(0)[16] == Catch::Approx(expected_splice).margin(1.0e-5));
+        source.channel(0)[18] * (1.0 - fade_in) + source.channel(0)[14] * fade_in;
+    REQUIRE(result.asset->audio().channel(0)[18] == Catch::Approx(expected_splice).margin(1.0e-5));
+}
+
+TEST_CASE("cyclic record stretch keeps splice boundaries on declared output cycles",
+          "[sample][heritage][record-commit][stretch]") {
+    Buffer<float> source(1, 128);
+    for (std::size_t frame = 0; frame < source.num_samples(); ++frame)
+        source.channel(0)[frame] = static_cast<float>(frame);
+    SampleHeritageProfile profile;
+    profile.profile_id = "neutral.cyclic-period";
+    profile.host_sample_rate = 48000.0;
+    profile.record_commit.push_back({
+        SampleHeritageBlockDomain::RecordCommit, false,
+        SampleHeritageRecordCommitCyclicStretchBlock{
+            .factor = 2.0, .cycle_samples = 8, .crossfade_samples = 2}});
+
+    const auto result = commit_sample_heritage_recording(
+        profile, read_view(source), 48000.0, provenance());
+    REQUIRE(result.valid());
+    const auto& output = result.asset->audio().channel(0);
+    const auto first_weight = std::pow(std::sin(3.14159265358979323846 / 8.0), 2.0);
+    REQUIRE(output[7] == 7.0f);
+    REQUIRE(output[8] == Catch::Approx(8.0 * (1.0 - first_weight) +
+                                       4.0 * first_weight));
+    REQUIRE(output[15] == 11.0f);
+    REQUIRE(output[16] == Catch::Approx(12.0 * (1.0 - first_weight) +
+                                        8.0 * first_weight));
+}
+
+TEST_CASE("neutral auto cycle selects the shortest reliable periodic lag",
+          "[sample][heritage][record-commit][stretch][auto-cycle]") {
+    Buffer<float> source(2, 512);
+    constexpr std::array<float, 16> period{
+        0.2f, -0.7f, 0.1f, 0.9f, -0.3f, 0.4f, -0.8f, 0.6f,
+        0.5f, -0.2f, 0.8f, -0.6f, 0.3f, -0.9f, 0.7f, -0.1f};
+    for (std::size_t frame = 0; frame < source.num_samples(); ++frame) {
+        source.channel(0)[frame] = period[frame % period.size()];
+        source.channel(1)[frame] = 3.0f + period[frame % period.size()] * 0.5f;
+    }
+    const auto estimate = estimate_sample_heritage_auto_cycle(
+        read_view(source), {.minimum_cycle_samples = 8,
+                            .maximum_cycle_samples = 64,
+                            .analysis_start_frame = 32,
+                            .analysis_end_frame = 480,
+                            .minimum_correlation = 0.99});
+    REQUIRE(estimate.valid());
+    REQUIRE(estimate.cycle_samples == period.size());
+    REQUIRE(estimate.correlation == Catch::Approx(1.0));
+}
+
+TEST_CASE("neutral auto cycle rejects invalid silent and unreliable inputs",
+          "[sample][heritage][record-commit][stretch][auto-cycle]") {
+    Buffer<float> silence(1, 128);
+    REQUIRE(estimate_sample_heritage_auto_cycle(
+                read_view(silence), {.minimum_cycle_samples = 8,
+                                     .maximum_cycle_samples = 32}).status ==
+            SampleHeritageAutoCycleStatus::InsufficientSignal);
+
+    Buffer<float> aperiodic(1, 128);
+    for (std::size_t frame = 0; frame < aperiodic.num_samples(); ++frame)
+        aperiodic.channel(0)[frame] =
+            static_cast<float>((frame * 37 + frame * frame * 11) % 101) / 101.0f;
+    REQUIRE(estimate_sample_heritage_auto_cycle(
+                read_view(aperiodic), {.minimum_cycle_samples = 8,
+                                       .maximum_cycle_samples = 32,
+                                       .minimum_correlation = 1.0}).status ==
+            SampleHeritageAutoCycleStatus::NoReliableCycle);
+    REQUIRE(estimate_sample_heritage_auto_cycle(
+                read_view(aperiodic), {.minimum_cycle_samples = 32,
+                                       .maximum_cycle_samples = 8}).status ==
+            SampleHeritageAutoCycleStatus::InvalidRange);
+
+    aperiodic.channel(0)[64] = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE(estimate_sample_heritage_auto_cycle(
+                read_view(aperiodic), {.minimum_cycle_samples = 8,
+                                       .maximum_cycle_samples = 32}).status ==
+            SampleHeritageAutoCycleStatus::InvalidSource);
 }
 
 TEST_CASE("adaptive record stretch has stable ties and a silent nominal offset",
@@ -323,6 +448,29 @@ TEST_CASE("adaptive record stretch has stable ties and a silent nominal offset",
     REQUIRE(silent_result.asset->audio().channel(0)[14] == Catch::Approx(1.0f));
 }
 
+TEST_CASE("adaptive quality and width derive bounded search and splice parameters",
+          "[sample][heritage][record-commit][stretch][adaptive][controls]") {
+    SampleHeritageRecordCommitAdaptiveStretchBlock block{
+        .search_radius_samples = 990,
+        .crossfade_samples = 198,
+        .quality = 0,
+        .width = 0};
+    CHECK(sample_heritage_adaptive_effective_search_radius(block) == 0);
+    CHECK(sample_heritage_adaptive_effective_crossfade_samples(block) == 0);
+
+    block.quality = 50;
+    block.width = 50;
+    CHECK(sample_heritage_adaptive_effective_search_radius(block) == 500);
+    CHECK(sample_heritage_adaptive_effective_crossfade_samples(block) == 100);
+
+    block.quality = 99;
+    block.width = 99;
+    CHECK(sample_heritage_adaptive_effective_search_radius(block) ==
+          block.search_radius_samples);
+    CHECK(sample_heritage_adaptive_effective_crossfade_samples(block) ==
+          block.crossfade_samples);
+}
+
 TEST_CASE("cyclic grains preserve pitch and have predictable impulse gains",
           "[sample][heritage][record-commit][stretch]") {
     const auto render = [](const Buffer<float>& source) {
@@ -347,13 +495,14 @@ TEST_CASE("cyclic grains preserve pitch and have predictable impulse gains",
                        sine_result.asset->audio().channel(0).begin()));
 
     Buffer<float> impulse(1, 32);
-    impulse.channel(0)[3] = 1.0f;
+    impulse.channel(0)[5] = 1.0f;
     const auto impulse_result = render(impulse);
     REQUIRE(impulse_result.valid());
-    REQUIRE(impulse_result.asset->audio().channel(0)[3] == 1.0f);
-    const auto first_crossfade_gain = std::pow(std::sin(3.14159265358979323846 / 8.0), 2.0);
-    REQUIRE(impulse_result.asset->audio().channel(0)[6] ==
-            Catch::Approx(first_crossfade_gain).margin(1.0e-6));
+    REQUIRE(impulse_result.asset->audio().channel(0)[5] == 1.0f);
+    const auto second_crossfade_gain =
+        std::pow(std::sin(3.0 * 3.14159265358979323846 / 8.0), 2.0);
+    REQUIRE(impulse_result.asset->audio().channel(0)[9] ==
+            Catch::Approx(second_crossfade_gain).margin(1.0e-6));
 }
 
 TEST_CASE("adaptive record stretch is deterministic and preserves linked stereo",

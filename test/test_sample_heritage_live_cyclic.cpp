@@ -119,7 +119,7 @@ TEST_CASE("live cyclic planning follows rounded cycle anchors and sustained sour
     SampleHeritageLiveCyclicStretch processor;
     REQUIRE(processor.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
     CHECK(processor.source_frames_per_output_frame() == 0.625);
-    CHECK(processor.cold_lookahead_frames() == 74);
+    CHECK(processor.startup_prebuffer_frames() == 74);
     auto plan = processor.plan(64);
     REQUIRE(plan.valid());
     CHECK(plan.input_frames == 74);
@@ -131,6 +131,37 @@ TEST_CASE("live cyclic planning follows rounded cycle anchors and sustained sour
     plan = processor.plan(1);
     REQUIRE(plan.valid());
     CHECK(plan.input_frames == 32);
+}
+
+TEST_CASE("live cyclic pitch mode and tempo lock change rendered and planned behavior",
+          "[sample][heritage][live-cyclic][controls]") {
+    SampleHeritageLiveCyclicConfig config;
+    config.factor = 2.0;
+    config.cycle_samples = 16;
+    config.crossfade_samples = 0;
+    config.max_block_samples = 32;
+    config.channel_count = 1;
+
+    const std::array<std::size_t, 1> partition{32};
+    const auto preserved = render(config, partition);
+    config.pitch_mode = SampleHeritageLivePitchMode::RateLinked;
+    const auto rate_linked = render(config, partition);
+    REQUIRE_FALSE(std::equal(preserved.begin(), preserved.end(), rate_linked.begin()));
+
+    SampleHeritageLiveCyclicStretch locked;
+    REQUIRE(locked.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
+    const auto locked_plan = locked.plan(32);
+    REQUIRE(locked_plan.valid());
+    CHECK(locked.source_frames_per_output_frame() == 0.5);
+
+    config.tempo_lock = false;
+    SampleHeritageLiveCyclicStretch unlocked;
+    REQUIRE(unlocked.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
+    const auto unlocked_plan = unlocked.plan(32);
+    REQUIRE(unlocked_plan.valid());
+    CHECK(unlocked.source_frames_per_output_frame() == 1.0);
+    CHECK(unlocked_plan.input_frames == 32);
+    CHECK(locked_plan.input_frames != unlocked_plan.input_frames);
 }
 
 TEST_CASE("live cyclic validates bounds and reports exact prepared storage",

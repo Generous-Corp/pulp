@@ -371,9 +371,13 @@ private:
     static void process_output(const SampleHeritageBusOutputDriveBlock& block,
                                BufferView<float> buffer) noexcept {
         for (std::size_t channel = 0; channel < buffer.num_channels(); ++channel)
-            for (auto& sample : buffer.channel(channel))
-                sample = std::clamp(sample * block.drive,
-                                    -block.ceiling, block.ceiling);
+            for (auto& sample : buffer.channel(channel)) {
+                const auto driven = sample * block.drive;
+                sample = std::isinf(driven)
+                    ? std::copysign(block.ceiling, driven)
+                    : block.ceiling * driven /
+                          (block.ceiling + std::abs(driven));
+            }
     }
 
     SampleHeritagePreparedProfile profile_{};

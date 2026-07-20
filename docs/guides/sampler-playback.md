@@ -62,7 +62,8 @@ after choosing a storage and traversal model. It prepares one character engine
 per voice and an optional post-mix bus. The existing reader still owns source
 order, reverse, loops, crossfades, interpolation, mips, and starvation; Heritage
 then applies its machine-domain clock, pitch family, converter, live cyclic
-stretch, hold/filter/color, and bus stages.
+stretch, and hold, returns each voice through its fixed reconstruction/color
+frame, and finally applies bus stages.
 
 Heritage live cyclic stretch is not a replacement for `LoopRenderer`:
 `LoopRenderer` repeats or crossfades a declared source region, while cyclic

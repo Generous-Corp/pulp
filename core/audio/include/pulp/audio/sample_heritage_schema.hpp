@@ -16,8 +16,10 @@
 namespace pulp::audio {
 
 inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 3;
-inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 3;
+inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 5;
 inline constexpr std::uint32_t kSampleHeritageSpectralTiltLawVersion = 1;
+inline constexpr double kSampleHeritageMaximumLadderCutoffRatio = 0.49;
+inline constexpr float kSampleHeritageMaximumLadderResonance = 0.3f;
 inline constexpr std::size_t kSampleHeritageMaximumStages = 7;
 inline constexpr std::size_t kSampleHeritageMaximumVoiceBlocks = 8;
 inline constexpr std::size_t kSampleHeritageMaximumBusBlocks = 2;
@@ -56,11 +58,14 @@ enum class SampleHeritageRecordFilterFamily : std::uint8_t {
     Chebyshev,
     Elliptic,
 };
+enum class SampleHeritageAnalogFilterFamily : std::uint8_t { None, Ladder4Pole };
+enum class SampleHeritageLivePitchMode : std::uint8_t { Preserve, RateLinked };
 
 struct SampleHeritageVoiceMachineDomainBlock { double sample_rate = 0.0; };
 struct SampleHeritageVoiceClockBlock { double ratio = 1.0; };
 struct SampleHeritageVoicePitchBlock {
     SampleHeritagePitchFamily family = SampleHeritagePitchFamily::VariableClock;
+    double max_transpose_semitones = 24.0;
 };
 struct SampleHeritageVoiceConverterBlock {
     SampleHeritageConverterFamily family = SampleHeritageConverterFamily::LinearPcm;
@@ -89,6 +94,11 @@ struct SampleHeritageVoiceAnalogColorBlock {
     float drive = 1.0f;
     float asymmetry = 0.0f;
     float mix = 1.0f;
+    SampleHeritageAnalogFilterFamily filter_family =
+        SampleHeritageAnalogFilterFamily::None;
+    SampleHeritageCutoffLaw cutoff_law = SampleHeritageCutoffLaw::FixedHz;
+    double cutoff_value = 0.0;
+    float resonance = 0.0f;
 };
 struct SampleHeritageVoiceLiveCyclicStretchBlock {
     double factor = 1.0;
@@ -99,6 +109,8 @@ struct SampleHeritageVoiceLiveCyclicStretchBlock {
     std::uint64_t seed = 0;
     SampleHeritageSeedPolicy seed_policy =
         SampleHeritageSeedPolicy::RestartFromProfileSeed;
+    SampleHeritageLivePitchMode pitch_mode = SampleHeritageLivePitchMode::Preserve;
+    bool tempo_lock = true;
 };
 
 using SampleHeritageVoiceBlockParameters =
@@ -190,7 +202,21 @@ struct SampleHeritageRecordCommitAdaptiveStretchBlock {
     std::uint64_t zone_start_frame = 0;
     std::uint64_t zone_end_frame = 0;
     bool stereo_link = true;
+    std::uint8_t quality = 99;
+    std::uint8_t width = 99;
 };
+
+inline constexpr std::uint32_t sample_heritage_adaptive_effective_search_radius(
+    const SampleHeritageRecordCommitAdaptiveStretchBlock& block) noexcept {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(block.search_radius_samples) * block.quality + 49u) / 99u);
+}
+
+inline constexpr std::uint32_t sample_heritage_adaptive_effective_crossfade_samples(
+    const SampleHeritageRecordCommitAdaptiveStretchBlock& block) noexcept {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(block.crossfade_samples) * block.width + 49u) / 99u);
+}
 using SampleHeritageRecordCommitBlockParameters =
     std::variant<SampleHeritageRecordInputDriveClipBlock,
     SampleHeritageRecordRateBlock,
@@ -421,6 +447,12 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                    std::isfinite(value) && value >= 1.0 &&
                    std::isfinite(sample_rate) && value < sample_rate * 0.5;
         };
+        const auto resolved_voice_cutoff = [&](SampleHeritageCutoffLaw law,
+                                               double value) {
+            return law == SampleHeritageCutoffLaw::MachineRateRatio
+                ? value * voice_machine_rate
+                : value;
+        };
         const auto validate_ordered = [&](const auto& blocks,
                                           SampleHeritageBlockDomain domain,
                                           auto validate_block) {
@@ -459,9 +491,10 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                         return finite_range(block.ratio, 0.015625, 64.0);
                     else if constexpr (std::is_same_v<Block,
                                                        SampleHeritageVoicePitchBlock>)
-                        return block.family == SampleHeritagePitchFamily::VariableClock ||
-                               block.family == SampleHeritagePitchFamily::DropRepeat ||
-                               block.family == SampleHeritagePitchFamily::EarlyLinear;
+                        return (block.family == SampleHeritagePitchFamily::VariableClock ||
+                                block.family == SampleHeritagePitchFamily::DropRepeat ||
+                                block.family == SampleHeritagePitchFamily::EarlyLinear) &&
+                               finite_range(block.max_transpose_semitones, 0.0, 96.0);
                     else if constexpr (std::is_same_v<Block,
                                                        SampleHeritageVoiceConverterBlock>)
                         return (block.family == SampleHeritageConverterFamily::LinearPcm ||
@@ -481,6 +514,9 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                                                        SampleHeritageVoiceReconstructionBlock>)
                         return validate_cutoff(block.cutoff_law, block.cutoff_value,
                                                voice_machine_rate) &&
+                               resolved_voice_cutoff(block.cutoff_law,
+                                                     block.cutoff_value) <
+                                   source.host_sample_rate * 0.5 &&
                                ((block.family ==
                                      SampleHeritageReconstructionFamily::OnePole &&
                                  block.order == 1 && block.ripple_db == 0.0f &&
@@ -511,7 +547,35 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                                                        SampleHeritageVoiceAnalogColorBlock>)
                         return finite_range(block.drive, 0.0f, 16.0f) &&
                                finite_range(block.asymmetry, -1.0f, 1.0f) &&
-                               finite_range(block.mix, 0.0f, 1.0f);
+                               finite_range(block.mix, 0.0f, 1.0f) &&
+                               ((block.filter_family ==
+                                     SampleHeritageAnalogFilterFamily::None &&
+                                 block.cutoff_law ==
+                                     SampleHeritageCutoffLaw::FixedHz &&
+                                 block.cutoff_value == 0.0 &&
+                                 block.resonance == 0.0f) ||
+                                (block.filter_family ==
+                                     SampleHeritageAnalogFilterFamily::Ladder4Pole &&
+                                 ((block.cutoff_law ==
+                                       SampleHeritageCutoffLaw::MachineRateRatio &&
+                                   std::isfinite(block.cutoff_value) &&
+                                   block.cutoff_value * voice_machine_rate >= 1.0 &&
+                                   block.cutoff_value <=
+                                       kSampleHeritageMaximumLadderCutoffRatio) ||
+                                  (block.cutoff_law ==
+                                       SampleHeritageCutoffLaw::FixedHz &&
+                                   std::isfinite(block.cutoff_value) &&
+                                   block.cutoff_value >= 1.0 &&
+                                   block.cutoff_value <=
+                                       voice_machine_rate *
+                                           kSampleHeritageMaximumLadderCutoffRatio)) &&
+                                 resolved_voice_cutoff(block.cutoff_law,
+                                                       block.cutoff_value) <=
+                                     source.host_sample_rate *
+                                         kSampleHeritageMaximumLadderCutoffRatio &&
+                                 finite_range(
+                                     block.resonance, 0.0f,
+                                     kSampleHeritageMaximumLadderResonance)));
                     else
                         return finite_range(block.factor, 0.25, 20.0) &&
                                std::isfinite(block.cycle_ms) && block.cycle_ms > 0.0 &&
@@ -522,6 +586,8 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                                (block.shuffle_divisions == 0 ||
                                 (block.shuffle_divisions >= 2 &&
                                  block.shuffle_divisions <= 64)) &&
+                               (block.pitch_mode == SampleHeritageLivePitchMode::Preserve ||
+                                block.pitch_mode == SampleHeritageLivePitchMode::RateLinked) &&
                                valid_seed_policy(block.seed_policy) &&
                                !((block.shuffle_divisions != 0 ||
                                   block.seed_policy ==
@@ -642,6 +708,7 @@ validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
                                        block.search_stride_samples <= 1048576 &&
                                        block.crossfade_samples <= 524288 &&
                                        block.crossfade_samples <= block.decision_hop_samples &&
+                                       block.quality <= 99 && block.width <= 99 &&
                                    ((block.zone_start_frame == 0 &&
                                      block.zone_end_frame == 0) ||
                                     block.zone_start_frame < block.zone_end_frame);

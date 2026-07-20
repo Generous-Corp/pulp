@@ -3,6 +3,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/audio/sample_heritage_schema.hpp>
 #include <pulp/signal/iir_design.hpp>
+#include <pulp/signal/ladder_filter.hpp>
 
 #include <algorithm>
 #include <array>
@@ -40,13 +41,21 @@ public:
     static constexpr double kMaximumTailSeconds = 10.0;
 
     bool prepare(const SampleHeritagePreparedProfile& profile,
-                 double machine_sample_rate) noexcept {
+                 double processing_sample_rate) noexcept {
+        return prepare(profile, processing_sample_rate, processing_sample_rate);
+    }
+
+    bool prepare(const SampleHeritagePreparedProfile& profile,
+                 double machine_sample_rate,
+                 double host_sample_rate) noexcept {
         release();
         if (profile.voice_count > runtimes_.size() ||
-            !(machine_sample_rate > 0.0) || !std::isfinite(machine_sample_rate))
+            !(machine_sample_rate > 0.0) || !std::isfinite(machine_sample_rate) ||
+            !(host_sample_rate > 0.0) || !std::isfinite(host_sample_rate))
             return false;
         profile_ = profile;
         machine_sample_rate_ = machine_sample_rate;
+        host_sample_rate_ = host_sample_rate;
         for (std::size_t index = 0; index < profile_.voice_count; ++index) {
             auto& runtime = runtimes_[index];
             runtime.spec = profile_.voice[index];
@@ -63,7 +72,9 @@ public:
     void release() noexcept {
         profile_ = {};
         runtimes_ = {};
+        has_companded_8bit_decode_ = false;
         machine_sample_rate_ = 0.0;
+        host_sample_rate_ = 0.0;
         prepared_ = false;
     }
 
@@ -76,6 +87,7 @@ public:
             runtime.one_pole_state.fill(0.0f);
             runtime.sos_z1 = {};
             runtime.sos_z2 = {};
+            for (auto& filter : runtime.analog_filters) filter.reset();
             if (const auto* converter =
                     std::get_if<SampleHeritageVoiceConverterBlock>(
                         &runtime.spec.parameters))
@@ -106,23 +118,36 @@ public:
     }
 
     void process(BufferView<float> buffer) noexcept {
-        process_range(buffer, 0, profile_.voice_count, false);
+        process_range(buffer, 0, profile_.voice_count, false, Frame::Machine);
+        process_range(buffer, 0, profile_.voice_count, false, Frame::Host);
     }
 
     void process_before_live(BufferView<float> buffer,
                              bool draining_tail = false) noexcept {
-        process_range(buffer, 0, live_stage_index(), draining_tail);
+        process_range(buffer, 0, live_stage_index(), draining_tail,
+                      Frame::Machine);
     }
 
     void process_after_live(BufferView<float> buffer,
                             bool draining_tail = false) noexcept {
         const auto live = live_stage_index();
         process_range(buffer, live < profile_.voice_count ? live + 1 : live,
-                      profile_.voice_count, draining_tail);
+                      profile_.voice_count, draining_tail, Frame::Machine);
+    }
+
+    void process_host_frame(BufferView<float> buffer,
+                            bool draining_tail = false) noexcept {
+        process_range(buffer, 0, profile_.voice_count, draining_tail,
+                      Frame::Host);
+    }
+
+    void process_machine_tail(BufferView<float> buffer) noexcept {
+        process_range(buffer, 0, profile_.voice_count, true, Frame::Machine);
     }
 
     void process_tail(BufferView<float> buffer) noexcept {
-        process_range(buffer, 0, profile_.voice_count, true);
+        process_machine_tail(buffer);
+        process_host_frame(buffer, true);
     }
 
     std::size_t live_stage_index() const noexcept {
@@ -141,13 +166,25 @@ public:
     }
 
 private:
+    enum class Frame : std::uint8_t { Machine, Host };
+
+    static bool belongs_to_frame(const SampleHeritageVoiceBlockSpec& block,
+                                 Frame frame) noexcept {
+        const auto host =
+            std::holds_alternative<SampleHeritageVoiceReconstructionBlock>(
+                block.parameters) ||
+            std::holds_alternative<SampleHeritageVoiceAnalogColorBlock>(
+                block.parameters);
+        return host == (frame == Frame::Host);
+    }
+
     void process_range(BufferView<float> buffer, std::size_t begin,
-                       std::size_t end, bool draining_tail) noexcept {
+                       std::size_t end, bool draining_tail, Frame frame) noexcept {
         if (!prepared_) return;
         end = std::min(end, profile_.voice_count);
         for (std::size_t index = begin; index < end; ++index) {
             auto& runtime = runtimes_[index];
-            if (runtime.spec.bypass ||
+            if (runtime.spec.bypass || !belongs_to_frame(runtime.spec, frame) ||
                 (draining_tail &&
                  std::holds_alternative<SampleHeritageVoiceConverterBlock>(
                     runtime.spec.parameters)))
@@ -161,11 +198,29 @@ private:
 public:
 
     std::uint64_t tail_machine_frames() const noexcept {
+        const auto machine = tail_machine_domain_frames();
+        const auto host = tail_host_frames();
+        return machine > std::numeric_limits<std::uint64_t>::max() - host
+            ? std::numeric_limits<std::uint64_t>::max()
+            : machine + host;
+    }
+
+    std::uint64_t tail_machine_domain_frames() const noexcept {
+        return tail_frames(Frame::Machine, machine_sample_rate_);
+    }
+
+    std::uint64_t tail_host_frames() const noexcept {
+        return tail_frames(Frame::Host, host_sample_rate_);
+    }
+
+private:
+    std::uint64_t tail_frames(Frame frame, double sample_rate) const noexcept {
         if (!prepared_) return 0;
         long double frames = 0.0L;
         for (std::size_t index = 0; index < profile_.voice_count; ++index) {
             const auto& runtime = runtimes_[index];
-            if (runtime.spec.bypass) continue;
+            if (runtime.spec.bypass || !belongs_to_frame(runtime.spec, frame))
+                continue;
             std::visit(
                 [&](const auto& block) noexcept {
                     using Block = std::decay_t<decltype(block)>;
@@ -185,16 +240,29 @@ public:
                             frames += decay * static_cast<long double>(
                                 std::max<std::size_t>(1, runtime.sos_count + 1));
                         }
+                    } else if constexpr (
+                        std::is_same_v<Block,
+                                       SampleHeritageVoiceAnalogColorBlock>) {
+                        auto radius =
+                            static_cast<long double>(runtime.analog_decay_pole);
+                        if (block.filter_family !=
+                                SampleHeritageAnalogFilterFamily::None &&
+                            block.mix > 0.0f && radius > 0.0L && radius < 1.0L) {
+                            constexpr long double reference_peak = 16.0L;
+                            frames += 4.0L * std::ceil(
+                                std::log(static_cast<long double>(
+                                    kTailSilenceThreshold) / reference_peak) /
+                                std::log(radius));
+                        }
                     }
                 },
                 runtime.spec.parameters);
         }
-        const auto cap = std::ceil(static_cast<long double>(machine_sample_rate_) *
+        const auto cap = std::ceil(static_cast<long double>(sample_rate) *
                                    kMaximumTailSeconds);
         return static_cast<std::uint64_t>(std::clamp(frames, 0.0L, cap));
     }
 
-private:
     static constexpr std::size_t kMaximumSos = 8;
 
     struct SosCoefficients {
@@ -219,6 +287,9 @@ private:
         std::array<std::array<float, kMaximumSos>,
                    kSampleHeritageMaximumChannels> sos_z2{};
         float maximum_pole_radius = 0.0f;
+        std::array<pulp::signal::LadderFilter,
+                   kSampleHeritageMaximumChannels> analog_filters{};
+        float analog_decay_pole = 0.0f;
     };
 
     bool initialize(Runtime& runtime) noexcept {
@@ -229,6 +300,18 @@ private:
                 if constexpr (std::is_same_v<Block,
                                              SampleHeritageVoiceConverterBlock>) {
                     runtime.random_state = block.seed;
+                    has_companded_8bit_decode_ =
+                        block.bit_depth == 8.0f &&
+                        block.family != SampleHeritageConverterFamily::LinearPcm;
+                    if (has_companded_8bit_decode_) {
+                        for (std::size_t index = 0;
+                             index < companded_8bit_decode_.size(); ++index) {
+                            const auto code = static_cast<int>(index) - 128;
+                            companded_8bit_decode_[index] = expand(
+                                static_cast<float>(code) / 128.0f,
+                                block.family);
+                        }
+                    }
                 } else if constexpr (
                     std::is_same_v<Block,
                                    SampleHeritageVoiceReconstructionBlock>) {
@@ -237,6 +320,10 @@ private:
                     std::is_same_v<Block,
                                    SampleHeritageVoiceLiveCyclicStretchBlock>) {
                     return true;
+                } else if constexpr (
+                    std::is_same_v<Block,
+                                   SampleHeritageVoiceAnalogColorBlock>) {
+                    return initialize_analog_filter(runtime, block);
                 }
                 return true;
             },
@@ -250,16 +337,52 @@ private:
             : block.cutoff_value;
     }
 
+    double resolve_cutoff(
+        const SampleHeritageVoiceAnalogColorBlock& block) const noexcept {
+        return block.cutoff_law == SampleHeritageCutoffLaw::MachineRateRatio
+            ? block.cutoff_value * machine_sample_rate_
+            : block.cutoff_value;
+    }
+
+    bool initialize_analog_filter(
+        Runtime& runtime,
+        const SampleHeritageVoiceAnalogColorBlock& block) noexcept {
+        if (block.filter_family == SampleHeritageAnalogFilterFamily::None) {
+            runtime.analog_decay_pole = 0.0f;
+            return true;
+        }
+        const auto cutoff = resolve_cutoff(block);
+        if (!(cutoff >= 1.0 &&
+              cutoff <= host_sample_rate_ *
+                            kSampleHeritageMaximumLadderCutoffRatio) ||
+            !std::isfinite(cutoff) || block.resonance < 0.0f ||
+            block.resonance > kSampleHeritageMaximumLadderResonance ||
+            !std::isfinite(block.resonance))
+            return false;
+        for (auto& filter : runtime.analog_filters) {
+            filter.set_sample_rate(static_cast<float>(host_sample_rate_));
+            filter.set_frequency(static_cast<float>(cutoff));
+            filter.set_resonance(block.resonance);
+        }
+        const auto one_pole_decay = static_cast<float>(std::exp(
+            -2.0 * std::numbers::pi * cutoff / host_sample_rate_));
+        runtime.analog_decay_pole =
+            std::max(one_pole_decay, std::sqrt(block.resonance));
+        return runtime.analog_decay_pole >= 0.0f &&
+               runtime.analog_decay_pole < 1.0f &&
+               std::isfinite(runtime.analog_decay_pole);
+    }
+
     bool initialize_filter(
         Runtime& runtime,
         const SampleHeritageVoiceReconstructionBlock& block) noexcept {
         const auto cutoff = resolve_cutoff(block);
-        if (!(cutoff > 0.0 && cutoff < machine_sample_rate_ * 0.5) ||
+        if (!(cutoff > 0.0 && cutoff < host_sample_rate_ * 0.5) ||
             !std::isfinite(cutoff))
             return false;
         if (block.family == SampleHeritageReconstructionFamily::OnePole) {
             runtime.one_pole_pole = static_cast<float>(std::exp(
-                -2.0 * std::numbers::pi * cutoff / machine_sample_rate_));
+                -2.0 * std::numbers::pi * cutoff / host_sample_rate_));
             runtime.maximum_pole_radius = runtime.one_pole_pole;
             return true;
         }
@@ -272,7 +395,7 @@ private:
                 const auto designed = pulp::signal::IirDesign::elliptic_lowpass(
                     block.order, static_cast<float>(cutoff), block.ripple_db,
                     block.stopband_attenuation_db,
-                    static_cast<float>(machine_sample_rate_));
+                    static_cast<float>(host_sample_rate_));
                 if (designed.size() != runtime.sos_count) return false;
                 runtime.maximum_pole_radius = 0.0f;
                 for (std::size_t section = 0; section < runtime.sos_count;
@@ -299,7 +422,7 @@ private:
             }
         }
         const auto warped = std::tan(std::numbers::pi * cutoff /
-                                     machine_sample_rate_);
+                                     host_sample_rate_);
         const auto epsilon = block.family ==
                                      SampleHeritageReconstructionFamily::Butterworth
             ? 0.0
@@ -407,9 +530,9 @@ private:
                         const SampleHeritageVoiceLiveCyclicStretchBlock&,
                         BufferView<float>) noexcept {}
 
-    static void process(Runtime& runtime,
-                        const SampleHeritageVoiceConverterBlock& block,
-                        BufferView<float> buffer) noexcept {
+    void process(Runtime& runtime,
+                 const SampleHeritageVoiceConverterBlock& block,
+                 BufferView<float> buffer) noexcept {
         const auto levels = std::exp2(block.bit_depth - 1.0f);
         const auto minimum_code = -std::floor(levels);
         const auto maximum_code = std::floor(levels - 1.0f);
@@ -425,8 +548,15 @@ private:
                           block.dither_lsb;
                 const auto code = std::clamp(std::round(encoded * levels + dither),
                                              minimum_code, maximum_code);
+                const auto use_cached_decode = has_companded_8bit_decode_ &&
+                    std::isfinite(code) && code >= -128.0f && code <= 127.0f &&
+                    !(code == 0.0f && std::signbit(code));
+                const auto decoded = use_cached_decode
+                    ? companded_8bit_decode_[
+                          static_cast<std::size_t>(static_cast<int>(code) + 128)]
+                    : expand(code / levels, block.family);
                 sample = apply_dac_nonlinearity(
-                    expand(code / levels, block.family), block.dac_nonlinearity);
+                    decoded, block.dac_nonlinearity);
             }
         }
     }
@@ -463,25 +593,25 @@ private:
             return;
         }
         for (std::size_t channel = 0; channel < buffer.num_channels(); ++channel) {
-            for (auto& sample : buffer.channel(channel)) {
-                auto value = sample;
-                for (std::size_t section = 0; section < runtime.sos_count; ++section) {
-                    const auto& coefficients = runtime.sos[section];
-                    const auto output = coefficients.b0 * value +
-                                        runtime.sos_z1[channel][section];
-                    runtime.sos_z1[channel][section] =
-                        coefficients.b1 * value - coefficients.a1 * output +
-                        runtime.sos_z2[channel][section];
-                    runtime.sos_z2[channel][section] =
-                        coefficients.b2 * value - coefficients.a2 * output;
-                    value = output;
+            auto samples = buffer.channel(channel);
+            for (std::size_t section = 0; section < runtime.sos_count; ++section) {
+                const auto coefficients = runtime.sos[section];
+                auto z1 = runtime.sos_z1[channel][section];
+                auto z2 = runtime.sos_z2[channel][section];
+                for (auto& sample : samples) {
+                    const auto input = sample;
+                    const auto output = coefficients.b0 * input + z1;
+                    z1 = coefficients.b1 * input - coefficients.a1 * output + z2;
+                    z2 = coefficients.b2 * input - coefficients.a2 * output;
+                    sample = output;
                 }
-                sample = value;
+                runtime.sos_z1[channel][section] = z1;
+                runtime.sos_z2[channel][section] = z2;
             }
         }
     }
 
-    static void process(Runtime&,
+    static void process(Runtime& runtime,
                         const SampleHeritageVoiceAnalogColorBlock& block,
                         BufferView<float> buffer) noexcept {
         if (block.mix == 0.0f) return;
@@ -495,11 +625,16 @@ private:
         for (std::size_t channel = 0; channel < buffer.num_channels(); ++channel) {
             for (auto& sample : buffer.channel(channel)) {
                 const auto dry = sample;
-                const auto scale = dry >= 0.0f ? positive_scale : negative_scale;
-                const auto shifted = std::tanh(drive * dry + bias) - center;
+                const auto filtered = block.filter_family ==
+                        SampleHeritageAnalogFilterFamily::None
+                    ? dry
+                    : runtime.analog_filters[channel].process(dry);
+                const auto scale =
+                    filtered >= 0.0f ? positive_scale : negative_scale;
+                const auto shifted = std::tanh(drive * filtered + bias) - center;
                 const auto wet = std::abs(scale) > minimum_scale
                     ? static_cast<float>(shifted / scale)
-                    : dry;
+                    : filtered;
                 sample = dry + block.mix * (wet - dry);
             }
         }
@@ -507,7 +642,10 @@ private:
 
     SampleHeritagePreparedProfile profile_{};
     std::array<Runtime, kSampleHeritageMaximumVoiceBlocks> runtimes_{};
+    std::array<float, 256> companded_8bit_decode_{};
     double machine_sample_rate_ = 0.0;
+    double host_sample_rate_ = 0.0;
+    bool has_companded_8bit_decode_ = false;
     bool prepared_ = false;
 };
 

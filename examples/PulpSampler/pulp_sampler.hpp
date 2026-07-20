@@ -43,6 +43,7 @@ enum SamplerParams : state::ParamID {
     kSamplerLoop = 7,    // 0 = one-shot, 1 = loop
     kSamplerReverse = 8, // 0 = forward entry, 1 = reverse entry
     kSamplerInterpolation = 9,
+    kSamplerHeritageClockRatio = 10,
 };
 
 class PulpSamplerProcessor : public format::Processor {
@@ -126,6 +127,7 @@ class PulpSamplerProcessor : public format::Processor {
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         float pitch_semitones = 0.0f;
+        double heritage_clock_multiplier = 1.0;
         bool loop = false;
         bool reverse = false;
         audio::SampleInterpolationPolicy interpolation = audio::SampleInterpolationPolicy::Linear;
@@ -307,7 +309,8 @@ class PulpSamplerProcessor : public format::Processor {
                                             const RenderParams& params,
                                             std::size_t replaced_voice) const noexcept;
 
-    StreamRateContract pitch_rate_contract(double pitch_ratio) const noexcept;
+    StreamRateContract pitch_rate_contract(double pitch_ratio,
+                                            double clock_multiplier) const noexcept;
 
     audio::SampleStreamConsumptionDeclaration
     stream_consumption_declaration(const SamplerVoice& voice) const noexcept;

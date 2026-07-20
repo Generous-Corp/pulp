@@ -34,16 +34,19 @@ Voice order:
 
 1. `machine_domain`: `sample_rate`
 2. `clock`: `ratio`
-3. `pitch`: `family` (`variable_clock`, `drop_repeat`, `early_linear`)
+3. `pitch`: `family` (`variable_clock`, `drop_repeat`, `early_linear`),
+   `max_transpose_semitones`
 4. `converter`: `family` (`linear_pcm`, `mu_law`, `a_law`), `bit_depth`,
    `dac_nonlinearity`, `dither_lsb`, `seed`, `seed_policy`
 5. `live_cyclic_stretch`: `factor`, `cycle_ms`, `splice_ms`, `stereo_link`,
-   `shuffle_divisions`, `seed`, `seed_policy`
+   `shuffle_divisions`, `seed`, `seed_policy`, `pitch_mode` (`preserve`,
+   `rate_linked`), `tempo_lock`
 6. `hold_droop`: `mode` (`zero_order`), `hold_samples`, `droop`
 7. `reconstruction`: `family` (`one_pole`, `butterworth`, `chebyshev`,
    `elliptic`), `cutoff_law` (`fixed_hz`, `machine_rate_ratio`),
    `cutoff_value`, `order`, `ripple_db`, `stopband_attenuation_db`
-8. `analog_color`: `drive`, `asymmetry`, `mix`
+8. `analog_color`: `drive`, `asymmetry`, `mix`, `filter_family` (`none`,
+   `ladder_4pole`), `cutoff_law`, `cutoff_value`, `resonance`
 
 Bus order:
 
@@ -63,7 +66,7 @@ Record-commit order:
    `zone_start_frame`, and `zone_end_frame`; cyclic adds `cycle_samples` and
    `crossfade_samples`; adaptive adds `decision_hop_samples`,
    `search_radius_samples`, `search_stride_samples`, `crossfade_samples`, and
-   `stereo_link`
+   `stereo_link`, plus normalized `quality` and `width` controls from 0 to 99
 
 Do not infer detailed numeric constraints from this summary. Run validation
 after every material edit and use the field-path diagnostic to correct a value.
@@ -76,15 +79,28 @@ Schema-v3 field semantics are intentionally mechanical:
 - `mu_law` and `a_law` select continuous mu=255 and A=87.6 companding curves;
   they do not claim G.711 byte-code or table compatibility.
 - `dither_lsb` is the amplitude of deterministic bipolar-rectangular dither.
+- `input_drive_clip` and `output_drive` are bounded rational soft saturators
+  (softsign), not hard clamps. `clip_level` and `ceiling` set their respective
+  curve scales.
 - `dac_nonlinearity` and `droop` are normalized Pulp curve amounts, not DNL/INL
   or volts-per-second measurements.
 - `fixed_hz` gives the selected digital filter design edge in hertz;
   `machine_rate_ratio` gives it as a 0-to-0.5 machine-rate ratio. The filter
-  family determines the edge convention.
+  family determines the edge convention. Voice reconstruction and analog color
+  are processed in the fixed host-rate reconstruction frame, so the resolved
+  edge must also fit that processing rate.
 - `idle_amplitude` is always present; `noise_amplitude` follows `gate`. Both are
   normalized linear full-scale amplitudes, not SNR or weighted-noise values.
 - `early_linear` is the schema-v3 label for Pulp's two-point linear source
   interpolation. The word `early` is a flavor label, not a historical claim.
+- `max_transpose_semitones` declares the admitted note-pitch envelope used for
+  resource and streaming checks; runtime values beyond it fail closed.
+- `analog_color.filter_family: ladder_4pole` delegates to Pulp's existing
+  nonlinear four-pole module before the block's drive/VCA mix. It is neutral
+  topology vocabulary, not a named circuit or component-model claim. Its
+  validated stable envelope is 1 Hz through 0.49 times machine rate for cutoff
+  (also bounded by 0.49 times host rate) and 0 through 0.3 for resonance. With
+  `none`, use `fixed_hz`, zero cutoff, and zero resonance.
 
 ## Import, export, versioning, and migration
 

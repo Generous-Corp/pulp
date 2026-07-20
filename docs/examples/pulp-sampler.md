@@ -256,7 +256,7 @@ out-of-range, or out-of-order data instead of guessing.
 A minimal importable profile is:
 
 ```json
-{"schema_version":3,"profile_id":"neutral.gritty-cycle-v1","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"pitch","bypass":false,"family":"variable_clock"},{"domain":"voice","type":"converter","bypass":false,"family":"linear_pcm","bit_depth":12,"dac_nonlinearity":0.08,"dither_lsb":0.25,"seed":"17","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":0,"seed":"29","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.05},{"domain":"voice","type":"reconstruction","bypass":false,"family":"butterworth","cutoff_law":"machine_rate_ratio","cutoff_value":0.42,"order":4,"ripple_db":0,"stopband_attenuation_db":0},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.2,"asymmetry":0.04,"mix":0.7}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.001,"idle_amplitude":0.0002,"tilt_db_per_octave":-1.5,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"41","seed_policy":"restart_from_profile_seed"},{"domain":"bus","type":"output_drive","bypass":false,"drive":1.1,"ceiling":0.95}],"record_commit":[]}
+{"schema_version":3,"profile_id":"neutral.gritty-cycle-v1","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"pitch","bypass":false,"family":"variable_clock","max_transpose_semitones":24},{"domain":"voice","type":"converter","bypass":false,"family":"linear_pcm","bit_depth":12,"dac_nonlinearity":0.08,"dither_lsb":0.25,"seed":"17","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":0,"seed":"29","seed_policy":"restart_from_profile_seed","pitch_mode":"preserve","tempo_lock":true},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.05},{"domain":"voice","type":"reconstruction","bypass":false,"family":"butterworth","cutoff_law":"machine_rate_ratio","cutoff_value":0.42,"order":4,"ripple_db":0,"stopband_attenuation_db":0},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.2,"asymmetry":0.04,"mix":0.7,"filter_family":"ladder_4pole","cutoff_law":"machine_rate_ratio","cutoff_value":0.3,"resonance":0.1}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.001,"idle_amplitude":0.0002,"tilt_db_per_octave":-1.5,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"41","seed_policy":"restart_from_profile_seed"},{"domain":"bus","type":"output_drive","bypass":false,"drive":1.1,"ceiling":0.95}],"record_commit":[]}
 ```
 
 The `neutral.` prefix is mandatory. The remainder uses lowercase ASCII
@@ -273,24 +273,47 @@ The voice pitch block chooses how note pitch is produced:
 | `drop_repeat` | Keeps the machine clock fixed and advances source frames with zero-order drop/repeat selection |
 | `early_linear` | Keeps the machine clock fixed and uses linear source interpolation |
 
+`max_transpose_semitones` declares the largest absolute note transposition the
+profile supports. PulpSampler rejects new notes outside that envelope. When
+automation crosses it, a resident voice retains its last admitted rate; a
+streamed voice fades closed and terminates under the sampler's stream-contract
+failure policy.
+
+The `Heritage Clock Ratio` parameter multiplies the authored clock block from
+0.25x to 4x without changing note pitch. It is a realtime parameter; streamed
+voices admit the combined note pitch, authored clock, live-stretch consumption,
+and clock multiplier against the 4x certificate before adopting a change.
+
 The converter supports linear PCM and continuous mu=255 or A=87.6 companding
 curves with effective quantizer resolution, a normalized Pulp DAC-curve amount,
 and optional deterministic bipolar-rectangular dither measured in LSBs. These
 curve modes are not G.711 byte codecs. Hold count and droop are likewise neutral
 Pulp controls rather than claims about a physical converter's update period or
-volts-per-second behavior. Hold/droop,
-one-pole/Butterworth/Chebyshev/elliptic reconstruction filters, and analog
-color run in the per-voice machine domain. The bus can add voice-gated or
+volts-per-second behavior. Hold/droop runs in the variable machine frame. The
+one-pole/Butterworth/Chebyshev/elliptic reconstruction filters and analog
+color remain per voice but run in the fixed host-rate reconstruction frame,
+after return conversion from the machine frame. Analog color can feed Pulp's
+existing nonlinear four-pole ladder module before its normalized asymmetric
+drive/VCA mix; `none` keeps the filter out of the path. This is neutral DSP
+topology, not a claim about a named circuit or component family. Ladder cutoff
+is accepted from 1 Hz through 0.49 times machine rate, additionally bounded by
+0.49 times the host processing rate, and resonance from 0 through 0.3; the
+bounded envelope excludes self-oscillating settings. The bus can add voice-gated or
 always-on seeded noise/idle color with a deterministic spectral-tilt law, then
-apply bounded output drive. In that block, `idle_amplitude` is the always-on
+apply bounded output drive. `output_drive` is a bounded rational soft
+saturation (softsign), not a hard clamp: `ceiling` sets the saturation scale
+and `drive` sets how quickly the curve approaches it. In the noise block,
+`idle_amplitude` is the always-on
 component and `noise_amplitude` is controlled by `gate`; both are normalized
 linear full-scale amplitudes rather than SNR measurements.
 
 For reconstruction, `fixed_hz` expresses the profile's selected digital design
 edge in hertz and `machine_rate_ratio` expresses that edge as a 0-to-0.5 ratio
-of machine rate. The named filter family determines how that design edge is
-interpreted. The supported orders and parameter ranges are Pulp implementation
-bounds, not claims about historical hardware.
+of machine rate. The resolved edge must also remain below the host-rate Nyquist
+limit because the fixed reconstruction frame is processed at host rate. The
+named filter family determines how that design edge is interpreted. The
+supported orders and parameter ranges are Pulp implementation bounds, not
+claims about historical hardware.
 
 ### Live and committed stretch
 
@@ -298,17 +321,43 @@ Live cyclic stretch is a deliberately cyclic sampler mechanism, not the
 general-purpose phase-vocoder stretch API. It runs inside each voice between
 the converter and hold/reconstruction stages. `factor` controls duration,
 `cycle_ms` and `splice_ms` define machine-domain cycle and crossfade lengths,
-and optional seeded divisions rearrange material deterministically. Zero
+`pitch_mode` selects `preserve` (unit-rate reads within each cycle) or
+`rate_linked` (cycle-local reads follow the stretch ratio), and `tempo_lock`
+decides whether `factor` changes source consumption. With `tempo_lock:false`,
+the live stage is an exact duration-neutral bypass. Optional seeded divisions
+rearrange material deterministically. Zero
 shuffle divisions is identity order. The processor uses fixed-capacity rings,
 precomputed bounds, and no callback allocation, locks, FFT, or similarity
 search. A factor-one configuration has an exact bypass. At end of source it
 drains to exactly the rounded stretched one-shot duration.
 
-Record-commit stretch is separate and always offline. `cyclic` uses fixed
-sample-domain cycles and crossfades. `adaptive` performs deterministic,
-bounded similarity search with explicit hop, radius, stride, crossfade, zone,
-and stereo-link controls. It is intended for committing a transformed asset,
-not for work on the audio callback.
+An active non-unity configuration prebuffers one bounded cycle plus splice and
+interpolator guards from the asset before its first output. This is bounded
+source pre-read, not additional host/PDC latency or an adaptive lookahead
+window. Once activated, the algorithm is causal: it retains bounded source
+history and performs no future similarity search.
+
+Record commit begins with optional `input_drive_clip`, which uses the same
+bounded rational soft-saturation shape with `clip_level` as its scale; despite
+the field name, it is not a hard clamp. Record-commit stretch is separate and
+always offline. `cyclic` uses fixed
+sample-domain cycles and crossfades; the cycle value remains the output-domain
+snap period even when the crossfade is nonzero. `adaptive` performs
+deterministic, bounded similarity search with explicit hop, radius, stride,
+crossfade, zone, and stereo-link controls. `quality` and `width` are normalized
+0-to-99 authoring controls: `quality` scales the explicit search-radius maximum,
+and `width` scales the explicit crossfade maximum. Zero disables that derived
+search or crossfade; 99 uses the advanced low-level value in full. Intermediate
+values use deterministic rounded integer scaling. This does not claim to copy
+an undocumented historical algorithm. It is intended for committing a
+transformed asset, not for work on the audio callback.
+
+`estimate_sample_heritage_auto_cycle()` can suggest an explicit cyclic sample
+count before building the profile. It searches a caller-bounded lag range using
+DC-removed normalized correlation, returns its score, and deterministically
+keeps the shortest tied lag. Store the selected count in `cycle_samples`; the
+profile never performs hidden analysis during rendering. This is a neutral
+authoring helper, not a reproduction of a hardware auto-cycle control.
 
 `commit_sample_heritage_recording()` applies the record-domain drive, record
 filter/rate, converter, and optional stretch as one allocating transaction. It
@@ -454,11 +503,19 @@ cmake -S . -B build-aql -DCMAKE_BUILD_TYPE=Release \
   -DPULP_AUDIO_QUALITY_LAB_GATE=ON \
   -DPULP_AUDIO_QUALITY_LAB_PYTHON="$PWD/.venv-aql/bin/python"
 tools/ci/governed-build.sh cmake --build build-aql \
-  --target pulp-sampler-render-wav pulp-sampler-heritage-render-wav
+  --target pulp-sampler-render-wav pulp-sampler-heritage-render-wav \
+           pulp-test-sample-heritage-shipping-gates
 ctest --test-dir build-aql \
   -R '^sampler-(quality-lab|heritage-quality-lab)-' \
   --output-on-failure
+ctest --test-dir build-aql -L heritage-g1 --output-on-failure
+ctest --test-dir build-aql -N -L quality-lab
 ```
+
+The C++ shipping gate compares the full representative Heritage chain against
+the sampler's actual `LoopRenderer` ratio-tracking-sinc voice path, measures
+live cyclic cost after both short and long histories, and retains deterministic
+storage bounds. Run these CPU gates in Release builds.
 
 The checked-in interpolation benchmark under
 `docs/validation/sampler-interpolation/` is a current 108-row Release capture.

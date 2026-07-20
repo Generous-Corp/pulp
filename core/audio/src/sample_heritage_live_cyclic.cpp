@@ -54,11 +54,14 @@ SampleHeritageLiveCyclicResources SampleHeritageLiveCyclicStretch::resources_for
         config.crossfade_samples > config.cycle_samples / 2 || config.shuffle_divisions == 0 ||
         config.shuffle_divisions > kMaximumDivisions ||
         config.shuffle_divisions > config.cycle_samples || config.max_block_samples == 0 ||
-        config.channel_count == 0 || config.channel_count > kMaximumChannels) {
+        config.channel_count == 0 || config.channel_count > kMaximumChannels ||
+        (config.pitch_mode != SampleHeritageLivePitchMode::Preserve &&
+         config.pitch_mode != SampleHeritageLivePitchMode::RateLinked)) {
         return result;
     }
 
-    const auto ratio = 1.0L / static_cast<long double>(config.factor);
+    const auto effective_factor = config.tempo_lock ? config.factor : 1.0;
+    const auto ratio = 1.0L / static_cast<long double>(effective_factor);
     const auto block_advance = std::ceil(
         static_cast<long double>(config.max_block_samples) *
         std::max(1.0L, ratio));
@@ -74,23 +77,25 @@ SampleHeritageLiveCyclicResources SampleHeritageLiveCyclicStretch::resources_for
 
     const auto block_advance_frames = static_cast<std::size_t>(block_advance);
     const auto cycle_advance_frames = static_cast<std::size_t>(cycle_advance);
-    std::size_t cold_lookahead = config.cycle_samples;
+    std::size_t startup_prebuffer = config.cycle_samples;
     std::size_t boundary_demand = block_advance_frames;
-    if (!checked_add(cold_lookahead, config.crossfade_samples, cold_lookahead) ||
-        !checked_add(cold_lookahead, kInterpolatorGuardFrames, cold_lookahead) ||
+    if (!checked_add(startup_prebuffer, config.crossfade_samples,
+                     startup_prebuffer) ||
+        !checked_add(startup_prebuffer, kInterpolatorGuardFrames,
+                     startup_prebuffer) ||
         !checked_add(boundary_demand, cycle_advance_frames, boundary_demand) ||
         !checked_add(boundary_demand, config.crossfade_samples, boundary_demand) ||
         !checked_add(boundary_demand, kInterpolatorGuardFrames, boundary_demand)) {
         result.status = SampleHeritageLiveCyclicStatus::SizeOverflow;
         return result;
     }
-    result.maximum_input_frames = config.factor == 1.0
+    result.maximum_input_frames = effective_factor == 1.0
         ? config.max_block_samples
-        : std::max(cold_lookahead, boundary_demand);
+        : std::max(startup_prebuffer, boundary_demand);
 
     // process() admits a complete block before rendering its oldest frame. Keep
     // both that frame's cycle neighborhood and the largest boundary admission.
-    std::size_t required = cold_lookahead;
+    std::size_t required = startup_prebuffer;
     if (!checked_add(required, block_advance_frames, required) ||
         !checked_add(required, cycle_advance_frames, required) ||
         !checked_add(required, kInterpolatorGuardFrames, required) ||
@@ -134,9 +139,10 @@ SampleHeritageLiveCyclicStretch::prepare(const SampleHeritageLiveCyclicConfig& c
     }
     config_ = config;
     resources_ = required;
-    source_ratio_ = 1.0 / config.factor;
-    exact_bypass_ = config.factor == 1.0;
-    cold_lookahead_ =
+    const auto effective_factor = config.tempo_lock ? config.factor : 1.0;
+    source_ratio_ = 1.0 / effective_factor;
+    exact_bypass_ = effective_factor == 1.0;
+    startup_prebuffer_ =
         exact_bypass_ ? 0
                       : config.cycle_samples + config.crossfade_samples + kInterpolatorGuardFrames;
     prepared_ = true;
@@ -150,7 +156,7 @@ void SampleHeritageLiveCyclicStretch::release() noexcept {
     config_ = {};
     resources_ = {};
     source_ratio_ = 1.0;
-    cold_lookahead_ = 0;
+    startup_prebuffer_ = 0;
     accepted_source_frames_ = 0;
     rendered_output_frames_ = 0;
     real_source_frames_ = 0;
@@ -234,14 +240,14 @@ std::uint64_t SampleHeritageLiveCyclicStretch::required_source_through(
         required = std::max(required, previous_anchor + config_.cycle_samples +
                                           config_.crossfade_samples + kInterpolatorGuardFrames);
     }
-    return std::max(required, static_cast<std::uint64_t>(cold_lookahead_));
+    return std::max(required, static_cast<std::uint64_t>(startup_prebuffer_));
 }
 
 SampleHeritageLiveCyclicPlan
 SampleHeritageLiveCyclicStretch::plan(std::size_t output_frames) const noexcept {
     SampleHeritageLiveCyclicPlan result;
     result.output_frames = output_frames;
-    result.cold_lookahead_frames = cold_lookahead_;
+    result.startup_prebuffer_frames = startup_prebuffer_;
     if (!prepared_)
         return result;
     if (output_frames > config_.max_block_samples ||
@@ -404,7 +410,7 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
     if (end_of_source) {
         const auto target = std::floor(
             static_cast<long double>(real_source_frames_) *
-                static_cast<long double>(config_.factor) +
+                static_cast<long double>(config_.tempo_lock ? config_.factor : 1.0) +
             0.5L);
         if (!std::isfinite(target) || target > static_cast<long double>(
                 std::numeric_limits<std::uint64_t>::max()))
@@ -459,8 +465,15 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
             float join_weight = 1.0f;
             const auto mapped = mapped_cycle_offset(phase, cycle, permutation_channel, join,
                                                     alternate, join_weight);
-            auto value =
-                read_linear(channel, static_cast<double>(cycle_anchor + mapped), available);
+            const auto pitch_offset = [&](std::size_t offset) {
+                if (config_.pitch_mode == SampleHeritageLivePitchMode::Preserve)
+                    return static_cast<double>(offset);
+                return std::fmod(static_cast<double>(offset) * source_ratio_,
+                                 static_cast<double>(config_.cycle_samples));
+            };
+            auto value = read_linear(channel,
+                                     static_cast<double>(cycle_anchor) + pitch_offset(mapped),
+                                     available);
             if (cycle > 0 && phase < config_.crossfade_samples) {
                 const auto previous_anchor = source_anchor(cycle - 1, anchor_overflow);
                 if (anchor_overflow) {
@@ -468,7 +481,8 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
                     return SampleHeritageLiveCyclicStatus::SizeOverflow;
                 }
                 const auto old_value = read_linear(
-                    channel, static_cast<double>(previous_anchor + config_.cycle_samples + phase),
+                    channel, static_cast<double>(previous_anchor) +
+                                 pitch_offset(config_.cycle_samples + phase),
                     available);
                 const auto weight = config_.crossfade_samples == 1
                                         ? 1.0f
@@ -477,7 +491,9 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
                 value = old_value + (value - old_value) * weight;
             } else if (join) {
                 const auto old_value =
-                    read_linear(channel, static_cast<double>(cycle_anchor + alternate), available);
+                    read_linear(channel,
+                                static_cast<double>(cycle_anchor) + pitch_offset(alternate),
+                                available);
                 value = old_value + (value - old_value) * join_weight;
             }
             output.channel(channel)[frame] = available ? value : 0.0f;

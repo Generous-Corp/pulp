@@ -13,7 +13,7 @@ namespace {
 // Changing this byte contract requires a digest-version bump. The prefix keeps
 // these bytes out of every other SHA-256 protocol domain in Pulp.
 constexpr std::string_view kProfileDigestDomain =
-    "pulp.sample-heritage.profile-digest.v3";
+    "pulp.sample-heritage.profile-digest.v5";
 
 class CanonicalBytes {
 public:
@@ -78,8 +78,10 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritage
                 canonical.floating(block.sample_rate);
             else if constexpr (std::is_same_v<Block, SampleHeritageVoiceClockBlock>)
                 canonical.floating(block.ratio);
-            else if constexpr (std::is_same_v<Block, SampleHeritageVoicePitchBlock>)
+            else if constexpr (std::is_same_v<Block, SampleHeritageVoicePitchBlock>) {
                 canonical.integer(static_cast<std::uint8_t>(block.family));
+                canonical.floating(block.max_transpose_semitones);
+            }
             else if constexpr (std::is_same_v<Block, SampleHeritageVoiceConverterBlock>) {
                 canonical.integer(static_cast<std::uint8_t>(block.family));
                 canonical.floating(block.bit_depth);
@@ -104,6 +106,10 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritage
                 canonical.floating(block.drive);
                 canonical.floating(block.asymmetry);
                 canonical.floating(block.mix);
+                canonical.integer(static_cast<std::uint8_t>(block.filter_family));
+                canonical.integer(static_cast<std::uint8_t>(block.cutoff_law));
+                canonical.floating(block.cutoff_value);
+                canonical.floating(block.resonance);
             } else {
                 canonical.floating(block.factor);
                 canonical.floating(block.cycle_ms);
@@ -112,6 +118,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritage
                 canonical.integer(block.shuffle_divisions);
                 canonical.integer(block.seed);
                 seed_policy(block.seed_policy);
+                canonical.integer(static_cast<std::uint8_t>(block.pitch_mode));
+                canonical.byte(block.tempo_lock ? 1 : 0);
             }
         }, spec.parameters);
     }
@@ -183,6 +191,8 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritage
                 canonical.integer(block.zone_start_frame);
                 canonical.integer(block.zone_end_frame);
                 canonical.byte(block.stereo_link ? 1 : 0);
+                canonical.integer(block.quality);
+                canonical.integer(block.width);
             }
         }, spec.parameters);
     }

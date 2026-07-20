@@ -9,7 +9,7 @@
 
 namespace pulp::signal {
 
-// Moog-style ladder filter (4-pole, 24dB/oct)
+// Nonlinear ladder filter (4-pole, 24 dB/octave)
 // Non-linear, self-oscillating at high resonance.
 //
 // RT contract: setters, process paths, and reset are scalar/fixed-array only
@@ -30,16 +30,17 @@ public:
             resonance_ * SampleType{4.0f} * (stage_[3] - input * SampleType{0.5f});
         SampleType x = input - feedback;
 
-        // 4 cascaded one-pole filters with tanh saturation. Two saturations per
-        // stage — eight per sample — make this loop transcendental-bound, so the
-        // float specialization uses the Padé approximation rather than libm.
+        // Cache each snapped stage's saturation. The next stage and next sample
+        // reuse exactly that value, avoiding repeated transcendental calls.
+        SampleType saturated_prev = saturate(x);
         for (int i = 0; i < 4; ++i) {
-            SampleType prev = i > 0 ? stage_[i - 1] : x;
             // Snap each ladder stage: at high resonance the stages self-
             // oscillate and their tails otherwise decay into denormals with
             // no FTZ guard. No-op above 1e-15.
             stage_[i] = snap_to_zero(
-                stage_[i] + g_ * (saturate(prev) - saturate(stage_[i])));
+                stage_[i] + g_ * (saturated_prev - saturated_stage_[i]));
+            saturated_stage_[i] = saturate(stage_[i]);
+            saturated_prev = saturated_stage_[i];
         }
 
         return stage_[3];
@@ -52,6 +53,7 @@ public:
 
     void reset() {
         for (auto& s : stage_) s = 0;
+        for (auto& s : saturated_stage_) s = 0;
     }
 
 private:
@@ -74,6 +76,7 @@ private:
     SampleType resonance_ = SampleType{0.0f};
     SampleType g_ = 0;
     SampleType stage_[4] = {};
+    SampleType saturated_stage_[4] = {};
 
     void update() {
         g_ = SampleType{1.0f} -

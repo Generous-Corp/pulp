@@ -24,6 +24,38 @@
   defines hold droop as a rate of output-voltage change caused by hold-capacitor
   leakage; contributing leakage currents need not have the same polarity.
 
+## Five-machine evidence
+
+- **Confirmed — SP-1200.** The [owner's-manual MMA dump description](https://www.autistici.org/2000-maniax/texts/sp1200_manual.pdf)
+  (appendix, pages 87-88 and 93-95) identifies 12-bit linear sample words,
+  complement offset-binary coding, and a fixed 26.04 kHz playback rate. The
+  [service manual](https://archive.org/details/emu-sp-1200-service-manual-1987_202010)
+  documents a standard 12-bit linear DAC used for playback and as the trial DAC
+  in a CPU-controlled successive-approximation sampling circuit. This supports
+  linear quantization; it does not supply a measured DNL/INL curve.
+- **Confirmed — S950.** The [operator's manual](https://manuals.fdiskc.com/flat/Akai%20S-950%20Owners%20Manual.pdf),
+  page 8, specifies 12-bit sampling, 16-bit processing, and a maximum 48 kHz
+  sampling rate. **Test** — the manual does not identify a coding law; trace the
+  [service schematic](https://www.synthxl.com/wp-content/uploads/2019/10/AKAI-950-service-manual.pdf)
+  and measure the transfer before selecting linear or companded quantization.
+- **Confirmed — S1100.** The [service manual](https://manualzz.com/doc/6408169/akai-s1100-digital-sampler-service-manual),
+  specifications page, states a 16-bit linear data format and switchable
+  44.1/22.05 kHz sampling rates. **Test** — measure converter transfer and
+  low-level residuals; “16-bit linear” does not determine analog converter
+  nonlinearity or dither behavior.
+- **Confirmed — S612.** The [service manual, part 1](https://www.florian-anwander.de/akai_s612/Akai_S-612_Service_Manual_Part_1.pdf)
+  names an ADC0809 8-bit A/D converter and BA9201 8-bit D/A converter in the
+  added schematic material. The component labels alone do not establish the
+  complete storage/conversion path or its effective resolution. **Test** — trace
+  the full schematic and capture the code-step transfer before choosing an
+  effective bit depth or coding law.
+- **Confirmed — S-550.** The [service notes](https://archive.org/details/roland_S-550_SERVICE_NOTES),
+  specification and circuit-description pages 1 and 7-8, state 12-bit linear
+  sample data, a 16-bit D/A converter, 30/15 kHz sampling rates, and a
+  successive-approximation A/D built from the wave gate array, DAC, and
+  comparator. **Test** — distinguish stored-word quantization from the expanded
+  16-bit playback path with low-level code and residual captures.
+
 ## Mapping to the neutral mechanism
 
 - **Confirmed** — [`SampleHeritageVoiceConverterBlock`](../../../core/audio/include/pulp/audio/sample_heritage_schema.hpp)

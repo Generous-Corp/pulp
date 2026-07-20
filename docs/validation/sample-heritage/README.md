@@ -4,22 +4,25 @@ This directory describes the evidence layer around Pulp's neutral Sample
 Heritage profiles. The companion standard-library tool is
 `tools/audio/heritage-calibration/heritage_calibration.py`.
 
-The toolkit has three deliberately separate jobs:
+The toolkit has five deliberately separate jobs:
 
 1. verify capture provenance and content hashes;
-2. prove the cyclic-parameter recovery pipeline against analytic pseudo
-   hardware before using a hardware capture; and
-3. produce deterministic, level-matched, blinded A/B listening packs.
+2. reconcile the executed session against every mandatory plan row and role;
+3. measure C1-C5 captures with independent time/frequency-domain analyzers;
+4. prove cyclic and adaptive parameter recovery against narrow production
+   renderers before using a hardware capture; and
+5. produce deterministic, level-matched, blinded A/B listening packs.
 
-It is not a second sampler or stretch implementation. Its pseudo-hardware test
-only proves that the calibration pipeline can recover a known splice law. The
-product engine's analytic, composition, realtime, latency, and budget checks
-remain the G1-G3 C++ gates.
+It is not a second sampler or stretch implementation. Its independent Python
+oracles recover known behavior from WAVs produced by narrow production-engine
+renderers. The product engine's analytic, composition, realtime, latency, and
+budget checks remain the G1-G3 C++ gates.
 
 ## Capture session manifest
 
 A session is one directory containing `session.json` and its artifacts. Paths
-are relative to the manifest. SHA-256 and byte counts are mandatory; the
+must be normalized relative paths: absolute paths and `.`/`..` components are
+rejected. SHA-256 values must be lowercase, and byte counts are mandatory; the
 verifier rejects paths outside the session directory. Do not record a computer
 name, hostname, workstation name, login name, or other development-host
 identity. Those facts do not make a hardware measurement reproducible.
@@ -30,7 +33,8 @@ Hardware manufacturer and product names are trademarks of their respective
 owners and identify measured equipment only. No affiliation or endorsement is
 implied.
 
-Minimal schema:
+Abbreviated structure (one linked row and role are shown; a readiness-complete
+manifest contains every expanded row and required role):
 
 ```json
 {
@@ -54,13 +58,25 @@ Minimal schema:
     {"stage": "target", "description": "line input; normalized replay"},
     {"stage": "capture_converter", "description": "interface input 1, 48 kHz float"}
   ],
+  "capture_plan": {
+    "schema": "pulp.heritage.capture-plan.v2",
+    "sha256": "SHA-256 of the exact capture-plan.json used for the session"
+  },
+  "rows": [
+    {
+      "row_id": "c1-normalized-replay-pair",
+      "protocol_id": "C1",
+      "parameters": {"operation": "normalized-replay-pair"}
+    }
+  ],
   "artifacts": [
     {
-      "path": "wav/c6-impulse-factor-175.wav",
+      "path": "wav/c1-recorded-replay.wav",
       "sha256": "64 lowercase hexadecimal characters",
       "bytes": 123456,
-      "test_id": "C6-impulse-factor-175",
-      "role": "capture"
+      "test_id": "C1-normalized-replay-pair",
+      "row_id": "c1-normalized-replay-pair",
+      "role": "recorded_replay"
     }
   ],
   "trademark_notice": "Hardware manufacturer and product names are trademarks of their respective owners and identify measured equipment only. No affiliation or endorsement is implied."
@@ -81,12 +97,84 @@ python3 tools/audio/heritage-calibration/heritage_calibration.py \
   capture-verify evidence/session.json
 ```
 
+Then prove session readiness against the exact plan:
+
+```bash
+python3 tools/audio/heritage-calibration/heritage_calibration.py \
+  capture-ready evidence/session.json \
+  --plan evidence/capture-plan.json
+```
+
 ### Session protocol
 
 [`capture-plan.json`](capture-plan.json) is the machine-readable session script.
-Copy it into the private session directory, prune optional grid rows to the
-target's supported features, and preserve every `required_rows` entry. Use the
-protocol ID plus stable row parameters as each artifact's `test_id`.
+Copy it into the private session directory and bind its exact SHA-256 in the
+session manifest. Each protocol declares parameter axes, valid row variants,
+mandatory selectors, and the artifact roles needed for an executed row. The
+readiness audit expands those declarations rather than interpreting prose. It
+rejects missing mandatory rows, missing roles, duplicate coverage, orphaned
+artifacts, rows outside the declared axes, and a plan-hash mismatch.
+
+With no target-applicability declarations, the checked-in plan expands to 575
+mandatory rows. Each applicable C1-C5 or C7 protocol requires its whole
+declared matrix. C6 requires the literal union of every impulse-train
+row and every 100-percent analytic-stimulus row, including all declared
+adaptive quality/width combinations. The licensed break and vocal C6 rows are
+always optional; they are listening/calibration material, not analytic core.
+Other valid C6 rows may be pruned, but a mandatory selector may not. A manifest
+row has a session-local `row_id`, an exact `protocol_id`, and an exact
+`parameters` object; every artifact links back with the same `row_id` and one
+of the plan's required roles.
+
+A target session should first prune the protocol set to the questions in that
+target's research note. The canonical plan gives every protocol an evidence-
+bound applicability capability; it never permits arbitrary row-by-row skips.
+Bind each negative capability or research-applicability finding to the same
+canonical plan and to a hashed evidence file:
+
+```json
+{
+  "target_applicability": {
+    "schema": "pulp.heritage.target-applicability.v1",
+    "capture_plan_sha256": "same lowercase SHA-256 used by capture_plan",
+    "declarations": [
+      {
+        "capability": "offline-stretch",
+        "supported": false,
+        "evidence_path": "research/offline-stretch-applicability.json",
+        "evidence_sha256": "lowercase SHA-256 of that evidence file"
+      }
+    ]
+  }
+}
+```
+
+The referenced evidence file is itself validated rather than treated as an
+opaque attachment:
+
+```json
+{
+  "schema": "pulp.heritage.applicability-evidence.v1",
+  "capture_plan_sha256": "same lowercase SHA-256 used by capture_plan",
+  "capability": "offline-stretch",
+  "session_id": "same session_id used by the capture manifest",
+  "target": {
+    "manufacturer": "target manufacturer",
+    "model": "target model",
+    "serial": "target serial",
+    "revision": "target revision"
+  },
+  "conclusion": "not-applicable",
+  "finding": "The target has no offline stretch function.",
+  "sources": ["research note and primary-source section supporting the finding"]
+}
+```
+
+The readiness audit accepts an omission only when the canonical plan explicitly
+allows that capability to be absent and the evidence path/hash verifies. The
+evidence should cite the target research note and the primary source or operator
+check that makes the protocol inapplicable. With no declaration, the full
+canonical matrix remains required.
 
 The seven protocol families are:
 
@@ -110,10 +198,139 @@ hashed artifacts. The toolkit does not automate hardware control because the
 supported transport and storage interfaces vary; the declarative plan is the
 portable script and the manifest records the executed result.
 
+## Independent C1-C5 and adaptive-C6 analysis
+
+The standard-library analyzer reads WAVs named by a path-contained request and
+writes deterministic JSON. It does not share DSP code with the sampler and does
+not assign a machine identity. Its neutral measurements are:
+
+- C1: least-squares gain-matched record-vs-load null, residual, and correlation;
+- C2: fixed-tone measurements plus a start-to-end short-time FFT trace of every
+  swept-sine row, including unfolded/folded predictions and per-window error;
+- C3: declared-level normalization followed by a gain-matched null;
+- C4: active/idle RMS, peak, DC, dominant component, centroid, and spectral tilt;
+- C5: impulse peak/energy centroid and step final value/overshoot/transition; and
+- adaptive C6: variable splice positions and widths, decoded source anchors,
+  and aggregate factor from the same index-coded probe used by the cyclic
+  bootstrap.
+
+Create `analysis.json` next to its WAV inputs:
+
+```json
+{
+  "schema": "pulp.heritage.analysis-request.v1",
+  "analyses": [
+    {
+      "id": "c1-record-null",
+      "protocol": "C1",
+      "inputs": {
+        "recorded_replay": "wav/c1-recorded-replay.wav",
+        "loaded_replay": "wav/c1-loaded-replay.wav"
+      }
+    },
+    {
+      "id": "c2-transpose-matrix",
+      "protocol": "C2",
+      "inputs": {
+        "captures": [
+          {"transpose_semitones": -24, "stimulus": "fixed-period-tone", "stimulus_path": "wav/c2-tone-source.wav", "path": "wav/c2-tone-m24.wav"},
+          {"transpose_semitones": -12, "stimulus": "fixed-period-tone", "stimulus_path": "wav/c2-tone-source.wav", "path": "wav/c2-tone-m12.wav"},
+          {"transpose_semitones": 0, "stimulus": "fixed-period-tone", "stimulus_path": "wav/c2-tone-source.wav", "path": "wav/c2-tone-0.wav"},
+          {"transpose_semitones": 12, "stimulus": "fixed-period-tone", "stimulus_path": "wav/c2-tone-source.wav", "path": "wav/c2-tone-p12.wav"}
+        ]
+      }
+    },
+    {
+      "id": "c3-level-law",
+      "protocol": "C3",
+      "level_difference_db": -20,
+      "inputs": {"reference_level": "wav/c3-0.wav", "lower_level": "wav/c3-m20.wav"}
+    },
+    {
+      "id": "c4-noise",
+      "protocol": "C4",
+      "inputs": {"active": "wav/c4-active.wav", "idle": "wav/c4-idle.wav"}
+    },
+    {
+      "id": "c5-responses",
+      "protocol": "C5",
+      "inputs": {
+        "captures": [
+          {"transpose_semitones": 0, "stimulus": "unit-impulse", "path": "wav/c5-impulse-0.wav"},
+          {"transpose_semitones": 0, "stimulus": "unit-step", "path": "wav/c5-step-0.wav"}
+        ]
+      }
+    },
+    {
+      "id": "c6-adaptive-probe",
+      "protocol": "C6-adaptive",
+      "inputs": {
+        "source": "wav/c6-indexed-source.wav",
+        "captures": [
+          {
+            "path": "wav/c6-adaptive-capture.wav",
+            "factor_percent": 200,
+            "cycle_ms": "auto",
+            "adaptive_quality": 50,
+            "adaptive_width": 25,
+            "decision_hop_samples": 2048,
+            "search_radius_samples": 256,
+            "search_stride_samples": 1,
+            "crossfade_samples": 128,
+            "splice_shape": "equal_power_overlap_add"
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Run it and archive both the request and report beside the session evidence:
+
+```bash
+python3 tools/audio/heritage-calibration/heritage_calibration.py \
+  analyze evidence/analysis.json > evidence/analysis-report.json
+```
+
+The report binds the canonical request and every input WAV by SHA-256, so a
+later rerun can distinguish a changed capture from a changed analysis result.
+Adaptive analysis fails rather than emits a successful report when recovered
+factor, hop, or explicitly declared crossfade behavior misses tolerance.
+
+The C1-C5 unit fixtures exercise known gain, full-sweep frequency evolution,
+level, noise, impulse, and step behavior, including a deliberately reversed
+sweep that the C2 metric must reject. A separate product bootstrap runs before
+those fixtures in the focused CTest. It obtains all positive evidence from
+Pulp's production record-commit, pitch, voice-converter, bus-noise, and
+hold/droop APIs, then makes the independent Python analyzers recover the
+declared parameters. Swapped inputs and deliberately wrong laws or declarations
+provide a negative control for every protocol. The product bootstraps below
+prove both stretch paths independently. Ordinary program material is useful after
+bootstrap, but it cannot replace the indexed probe for exact source-anchor
+recovery.
+
+Run the C1-C5 product bootstrap directly when changing an analyzer:
+
+```bash
+tools/ci/governed-build.sh cmake --build build \
+  --target pulp-heritage-c1-c5-calibration-render
+python3 tools/audio/heritage-calibration/heritage_calibration.py \
+  c1-c5-bootstrap --out /tmp/heritage-c1-c5-bootstrap \
+  --renderer build/test/pulp-heritage-c1-c5-calibration-render
+```
+
+The resulting `report.json` binds the renderer and ten float-WAV artifacts by
+SHA-256. It records the declared-versus-recovered tolerances and the rejection
+result for each negative control. This bootstrap validates the calibration
+oracles; it is not capture evidence for a named hardware profile.
+
 ## Cyclic pseudo-hardware bootstrap
 
-The bootstrap creates an index-coded unit-impulse basis, renders the declared
-cyclic snap law, and independently recovers:
+The bootstrap creates an index-coded unit-impulse basis and renders the declared
+cyclic snap law. In this oracle, `cycle_frames` is always the output-domain snap
+period; a nonzero splice width does not shorten that period. It independently
+recovers:
 
 - cycle spacing from the recurring splice-boundary anomalies;
 - splice width from the anomaly run length;
@@ -151,6 +368,32 @@ hashed float-WAV fixtures. This is the required calibration-pipeline check
 before pointing the same kind of oracle
 at real captures. Synthetic inputs are sufficient for this bootstrap; hardware
 captures remain optional calibration evidence and do not block the neutral SDK.
+
+## Adaptive product bootstrap
+
+The adaptive bootstrap invokes only the production record-commit API. Its
+renderer creates an indexed source, applies the typed adaptive block, and writes
+the committed result. The independent Python oracle then recovers output hops,
+splice anomaly extent, source anchors, and factor and compares them with the
+declared neutral settings. A mismatch exits nonzero; Python never manufactures
+the positive product evidence.
+
+```bash
+tools/ci/governed-build.sh cmake --build build \
+  --target pulp-heritage-adaptive-calibration-render
+python3 tools/audio/heritage-calibration/heritage_calibration.py \
+  adaptive-bootstrap --out /tmp/heritage-adaptive-bootstrap \
+  --renderer build/test/pulp-heritage-adaptive-calibration-render \
+  --factor 1.75 --decision-hop 64 --search-radius 8 \
+  --search-stride 1 --crossfade 8 --source-frames 8192
+```
+
+`report.json` binds both WAVs and the renderer by SHA-256 and records the exact
+declared-versus-recovered comparison. The renderer identifies its production
+splice as `equal_power_overlap_add`; a hardware request must declare a splice
+shape only when it has an evidence-backed frame interpretation. Opaque hardware
+quality/width labels remain recorded settings and are not silently converted to
+frame counts.
 
 ## Keyed blinded listening packs
 
@@ -206,8 +449,11 @@ python3 tools/audio/heritage-calibration/heritage_calibration.py listening-verif
 ```
 
 Listeners should record `A`, `B`, or `no preference`, plus a short reason,
-before unblinding. G4 remains a human judgment of whether a neutral recipe is
-convincing, not a claim of exact identity to one serial-numbered unit.
+before unblinding. For the neutral SDK, G4 gates the reproducible keyed pack and
+verification mechanism. Human judgment gates publication of a particular
+calibrated recipe, not the neutral mechanism SDK, and remains a judgment of
+whether that recipe is convincing rather than a claim of exact identity to one
+serial-numbered unit.
 
 ## Focused self-test
 

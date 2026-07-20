@@ -9,12 +9,14 @@ TEST_CASE("PulpSampler rejects heritage replacement without disturbing runtime",
     constexpr std::array attack{std::size_t{64}};
     (void) render(fixture, attack);
     (void) fixture.processor.consume_latency_changed_flag();
+    const auto original_latency = fixture.processor.latency_samples();
+    REQUIRE(original_latency > 0);
 
     auto invalid = clock_profile(1.25);
     invalid.schema_version = audio::kSampleHeritageProfileSchemaVersion + 1;
     REQUIRE(fixture.processor.set_heritage_profile(invalid) ==
             PulpSamplerHeritageStatus::InvalidProfile);
-    REQUIRE(fixture.processor.latency_samples() == 12);
+    REQUIRE(fixture.processor.latency_samples() == original_latency);
     REQUIRE_FALSE(fixture.processor.consume_latency_changed_flag());
     const auto diagnostics = fixture.processor.heritage_diagnostics();
     REQUIRE(diagnostics.status == PulpSamplerHeritageStatus::Ready);
@@ -33,7 +35,7 @@ TEST_CASE("PulpSampler rejects heritage replacement without disturbing runtime",
     REQUIRE(fixture.processor.sample_length() ==
             static_cast<int>(sample.size()));
     REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(
-                fixture.processor) == 60000.0);
+                fixture.processor) == 48000.0);
     const auto rebound_output = render(fixture, continuation);
     REQUIRE(std::any_of(rebound_output.begin(), rebound_output.end(),
                         [](float value) {
@@ -49,11 +51,13 @@ TEST_CASE("PulpSampler notifies host only when heritage latency changes",
     REQUIRE(fixture.processor.set_heritage_profile(active) ==
             PulpSamplerHeritageStatus::Ready);
     REQUIRE(fixture.processor.consume_latency_changed_flag());
-    REQUIRE(fixture.processor.latency_samples() == 12);
+    const auto active_latency = fixture.processor.latency_samples();
+    REQUIRE(active_latency > 0);
 
     REQUIRE(fixture.processor.set_heritage_profile(active) ==
             PulpSamplerHeritageStatus::Ready);
     REQUIRE_FALSE(fixture.processor.consume_latency_changed_flag());
+    REQUIRE(fixture.processor.latency_samples() == active_latency);
     REQUIRE(fixture.processor.disable_heritage() ==
             PulpSamplerHeritageStatus::Disabled);
     REQUIRE(fixture.processor.consume_latency_changed_flag());

@@ -1,5 +1,7 @@
 #include "test_pulp_sampler_heritage_support.hpp"
 
+#include <catch2/catch_approx.hpp>
+
 namespace {
 
 audio::SampleHeritageProfile
@@ -62,7 +64,7 @@ TEST_CASE("PulpSampler heritage render is bitwise callback-partition invariant",
     REQUIRE(mismatch.first == contiguous.end());
 }
 
-TEST_CASE("PulpSampler heritage clock ratio raises sampler pitch",
+TEST_CASE("PulpSampler heritage clock ratio preserves sampler pitch",
           "[audio][sampler][heritage][pitch]") {
     const auto profile = clock_profile(2.0);
     auto sample = make_sine(48000);
@@ -71,9 +73,9 @@ TEST_CASE("PulpSampler heritage clock ratio raises sampler pitch",
     constexpr std::array block{std::size_t{4096}};
     const auto output = render(fixture, block);
     const auto measured = std::span<const float>(output).subspan(256);
-    REQUIRE(tone_projection(measured, 880.0, 48000.0) > 0.8);
-    REQUIRE(tone_projection(measured, 880.0, 48000.0) >
-            tone_projection(measured, 440.0, 48000.0) * 8.0);
+    REQUIRE(tone_projection(measured, 440.0, 48000.0) > 0.8);
+    REQUIRE(tone_projection(measured, 440.0, 48000.0) >
+            tone_projection(measured, 880.0, 48000.0) * 8.0);
 }
 
 TEST_CASE("PulpSampler factor-one live cyclic stretch is bit transparent",
@@ -147,14 +149,18 @@ TEST_CASE("PulpSampler variable-clock pitch preserves live cyclic one-shot lifet
     const auto contiguous = render(whole, one, 0, 72);
     REQUIRE(contiguous == render(split, many, 0, 72));
     const auto latency = static_cast<std::size_t>(whole.processor.latency_samples());
-    REQUIRE(latency == 1536);
+    REQUIRE(latency > 0);
     REQUIRE(split.processor.latency_samples() == static_cast<int>(latency));
-    REQUIRE(std::all_of(contiguous.begin(), contiguous.begin() + latency,
-                        [](float value) { return std::abs(value) <= 0.01f; }));
+    const auto first_audible = static_cast<std::size_t>(std::distance(
+        contiguous.begin(),
+        std::find_if(contiguous.begin(), contiguous.end(),
+                     [](float value) { return std::abs(value) > 0.01f; })));
+    REQUIRE(first_audible >= latency);
+    REQUIRE(first_audible <= latency + 2);
     REQUIRE(std::any_of(contiguous.begin() + latency + 900, contiguous.begin() + latency + 1000,
                         [](float value) { return std::abs(value) > 0.01f; }));
     REQUIRE(std::all_of(contiguous.begin() + latency + 1000, contiguous.end(),
-                        [](float value) { return value == 0.0f; }));
+                        [](float value) { return std::abs(value) <= 0.01f; }));
     REQUIRE(PulpSamplerHeritageTestAccess::active_voices(whole.processor) == 0);
     REQUIRE(PulpSamplerHeritageTestAccess::active_voices(split.processor) == 0);
 }
@@ -186,8 +192,10 @@ TEST_CASE("PulpSampler heritage reports and renders causal impulse latency",
         output.begin(), std::max_element(output.begin(), output.end(), [](float left, float right) {
             return std::abs(left) < std::abs(right);
         })));
-    REQUIRE(fixture.processor.latency_samples() == 12);
-    REQUIRE(peak == 12);
+    const auto reported_latency =
+        static_cast<std::size_t>(fixture.processor.latency_samples());
+    REQUIRE(reported_latency > 0);
+    REQUIRE(peak == reported_latency);
     REQUIRE(fixture.processor.descriptor().tail_samples == -1);
 }
 
@@ -225,9 +233,12 @@ TEST_CASE("PulpSampler typed heritage processes simultaneous voices independentl
     format::ProcessContext context{fixture.sample_rate, static_cast<int>(left.size())};
     fixture.processor.process(output, input, midi_in, midi_out, context);
 
-    const auto measured = std::span<const float>(left).subspan(256);
-    REQUIRE(tone_projection(measured, 550.0, 48000.0) > 0.25);
-    REQUIRE(tone_projection(measured, 1100.0, 48000.0) > 0.25);
+    const auto latency =
+        static_cast<std::size_t>(fixture.processor.latency_samples());
+    REQUIRE(latency + 256 < left.size());
+    const auto measured = std::span<const float>(left).subspan(latency + 256);
+    REQUIRE(tone_projection(measured, 440.0, 48000.0) > 0.25);
+    REQUIRE(tone_projection(measured, 880.0, 48000.0) > 0.25);
 }
 
 TEST_CASE("PulpSampler typed voice heritage is callback-partition invariant",
@@ -297,6 +308,7 @@ TEST_CASE("PulpSampler applies typed output drive once after voice summing",
     std::vector<float> sample(4096, 0.3f);
     HeritageFixture fixture(512, &profile);
     fixture.load(sample);
+    fixture.load(sample);
 
     std::vector<float> left(512, 0.0f);
     std::vector<float> right(512, 0.0f);
@@ -310,9 +322,22 @@ TEST_CASE("PulpSampler applies typed output drive once after voice summing",
     midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
     format::ProcessContext context{fixture.sample_rate, static_cast<int>(left.size())};
     fixture.processor.process(output, input, midi_in, midi_out, context);
-    REQUIRE(*std::max_element(left.begin(), left.end()) == 0.7f);
+    constexpr float summed_voices = 0.6f;
+    constexpr float drive = 2.0f;
+    constexpr float ceiling = 0.7f;
+    constexpr float driven_sum = summed_voices * drive;
+    const float expected = ceiling * driven_sum /
+                           (ceiling + std::abs(driven_sum));
+    const auto peak = *std::max_element(left.begin(), left.end());
+    REQUIRE(peak == Catch::Approx(expected).margin(1.0e-6f));
+    constexpr float driven_voice = 0.3f * drive;
+    const float separately_saturated =
+        2.0f * ceiling * driven_voice / (ceiling + std::abs(driven_voice));
+    REQUIRE(peak < separately_saturated);
     REQUIRE(std::all_of(left.begin(), left.end(),
-                        [](float value) { return value >= -0.7f && value <= 0.7f; }));
+                        [=](float value) {
+                            return value > -ceiling && value < ceiling;
+                        }));
 }
 
 TEST_CASE("PulpSampler all-bypassed typed heritage is the exact clean path",
@@ -593,17 +618,26 @@ TEST_CASE("PulpSampler typed pitch factor one is the exact clean render path",
 }
 
 TEST_CASE("PulpSampler typed pitch families keep simultaneous note clocks independent",
-          "[audio][sampler][heritage][typed][pitch][polyphony]") {
-    auto sample = make_sine(16384);
+          "[audio][sampler][heritage][typed][pitch][polyphony][shipping-gate][g1][image]") {
+    auto sample = make_sine(32768);
     for (const auto family : {audio::SampleHeritagePitchFamily::VariableClock,
                               audio::SampleHeritagePitchFamily::DropRepeat,
                               audio::SampleHeritagePitchFamily::EarlyLinear}) {
-        const auto profile = typed_pitch_artifact_profile(family);
-        HeritageFixture fixture(4096, &profile);
+        auto profile = typed_pitch_artifact_profile(family);
+        profile.voice.push_back(
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceHoldDroopBlock{
+                 audio::SampleHeritageHoldMode::ZeroOrder, 2, 0.0f}});
+        profile.voice.push_back(
+            {audio::SampleHeritageBlockDomain::Voice, false,
+             audio::SampleHeritageVoiceReconstructionBlock{
+                 audio::SampleHeritageReconstructionFamily::OnePole,
+                 audio::SampleHeritageCutoffLaw::FixedHz, 20000.0, 1, 0.0f}});
+        HeritageFixture fixture(16384, &profile);
         fixture.load(sample);
 
-        std::vector<float> left(4096, 0.0f);
-        std::vector<float> right(4096, 0.0f);
+        std::vector<float> left(16384, 0.0f);
+        std::vector<float> right(16384, 0.0f);
         float* output_ptrs[]{left.data(), right.data()};
         const float* input_ptrs[]{nullptr, nullptr};
         audio::BufferView<float> output(output_ptrs, 2, left.size());
@@ -616,10 +650,21 @@ TEST_CASE("PulpSampler typed pitch families keep simultaneous note clocks indepe
         fixture.processor.process(output, input, midi_in, midi_out, context);
 
         const auto latency = static_cast<std::size_t>(fixture.processor.latency_samples());
-        REQUIRE(latency + 512 < left.size());
-        const auto measured = std::span<const float>(left).subspan(latency + 256);
+        REQUIRE(latency + 2048 < left.size());
+        const auto measured = std::span<const float>(left).subspan(latency + 1024);
         REQUIRE(tone_projection(measured, 440.0, 48000.0) > 0.25);
         REQUIRE(tone_projection(measured, 880.0, 48000.0) > 0.25);
+        const auto lower_voice_image =
+            tone_projection(measured, 24000.0 - 440.0, 48000.0);
+        const auto upper_voice_image =
+            tone_projection(measured, 24000.0 - 880.0, 48000.0);
+        const auto unrelated = tone_projection(measured, 15000.0, 48000.0);
+        CAPTURE(static_cast<int>(family), lower_voice_image, upper_voice_image,
+                unrelated);
+        REQUIRE(lower_voice_image > 0.000001);
+        REQUIRE(upper_voice_image > 0.000001);
+        REQUIRE(lower_voice_image > unrelated * 2.0);
+        REQUIRE(upper_voice_image > unrelated * 2.0);
     }
 }
 

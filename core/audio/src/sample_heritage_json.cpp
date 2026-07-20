@@ -193,16 +193,21 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
             destination.parameters = SampleHeritageVoiceClockBlock{ratio};
         } else if (type == "pitch") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
-                                        "family"sv};
+                                        "family"sv, "max_transpose_semitones"sv};
             constexpr std::array families{
                 std::pair{"variable_clock"sv, SampleHeritagePitchFamily::VariableClock},
                 std::pair{"drop_repeat"sv, SampleHeritagePitchFamily::DropRepeat},
                 std::pair{"early_linear"sv, SampleHeritagePitchFamily::EarlyLinear}};
             SampleHeritagePitchFamily family{};
+            double max_transpose_semitones = 0.0;
             if (!audit_object(value, base, fields) || !common() ||
-                !enumeration(value, "family", base + ".family", families, family))
+                !enumeration(value, "family", base + ".family", families, family) ||
+                !number(value, "max_transpose_semitones",
+                        base + ".max_transpose_semitones", 0.0, 96.0,
+                        max_transpose_semitones))
                 return false;
-            destination.parameters = SampleHeritageVoicePitchBlock{family};
+            destination.parameters = SampleHeritageVoicePitchBlock{
+                family, max_transpose_semitones};
         } else if (type == "converter") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "family"sv, "bit_depth"sv, "dac_nonlinearity"sv,
@@ -322,24 +327,86 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 static_cast<float>(stopband_attenuation)};
         } else if (type == "analog_color") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
-                                        "drive"sv, "asymmetry"sv, "mix"sv};
-            double drive{}, asymmetry{}, mix{};
+                                        "drive"sv, "asymmetry"sv, "mix"sv,
+                                        "filter_family"sv, "cutoff_law"sv,
+                                        "cutoff_value"sv, "resonance"sv};
+            constexpr std::array filter_families{
+                std::pair{"none"sv,
+                          SampleHeritageAnalogFilterFamily::None},
+                std::pair{"ladder_4pole"sv,
+                          SampleHeritageAnalogFilterFamily::Ladder4Pole}};
+            constexpr std::array cutoff_laws{
+                std::pair{"fixed_hz"sv, SampleHeritageCutoffLaw::FixedHz},
+                std::pair{"machine_rate_ratio"sv,
+                          SampleHeritageCutoffLaw::MachineRateRatio}};
+            double drive{}, asymmetry{}, mix{}, cutoff{}, resonance{};
+            SampleHeritageAnalogFilterFamily filter_family{};
+            SampleHeritageCutoffLaw cutoff_law{};
             if (!audit_object(value, base, fields) || !common() ||
                 !number(value, "drive", base + ".drive", 0.0, 16.0, drive) ||
                 !number(value, "asymmetry", base + ".asymmetry", -1.0, 1.0,
                         asymmetry) ||
-                !number(value, "mix", base + ".mix", 0.0, 1.0, mix)) return false;
+                !number(value, "mix", base + ".mix", 0.0, 1.0, mix) ||
+                !enumeration(value, "filter_family", base + ".filter_family",
+                             filter_families, filter_family) ||
+                !enumeration(value, "cutoff_law", base + ".cutoff_law",
+                             cutoff_laws, cutoff_law) ||
+                !number(value, "cutoff_value", base + ".cutoff_value", 0.0,
+                        192000.0, cutoff) ||
+                !number(value, "resonance", base + ".resonance", 0.0,
+                        kSampleHeritageMaximumLadderResonance, resonance))
+                return false;
+            double machine_rate = result.profile.host_sample_rate;
+            for (std::size_t earlier = 0; earlier < index; ++earlier) {
+                const auto& spec = result.profile.voice[earlier];
+                if (spec.bypass) continue;
+                if (const auto* machine =
+                        std::get_if<SampleHeritageVoiceMachineDomainBlock>(
+                            &spec.parameters))
+                    machine_rate = machine->sample_rate;
+            }
+            if (filter_family == SampleHeritageAnalogFilterFamily::None &&
+                cutoff_law != SampleHeritageCutoffLaw::FixedHz)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cutoff_law");
+            if (filter_family == SampleHeritageAnalogFilterFamily::None &&
+                cutoff != 0.0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cutoff_value");
+            if (filter_family == SampleHeritageAnalogFilterFamily::None &&
+                resonance != 0.0)
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".resonance");
+            if (filter_family == SampleHeritageAnalogFilterFamily::Ladder4Pole &&
+                ((cutoff_law == SampleHeritageCutoffLaw::FixedHz &&
+                  (cutoff < 1.0 ||
+                   cutoff > machine_rate *
+                       kSampleHeritageMaximumLadderCutoffRatio)) ||
+                 (cutoff_law == SampleHeritageCutoffLaw::MachineRateRatio &&
+                  (cutoff * machine_rate < 1.0 ||
+                   cutoff > kSampleHeritageMaximumLadderCutoffRatio))))
+                return fail(SampleHeritageJsonStatus::NumberOutOfRange,
+                            base + ".cutoff_value");
             destination.parameters = SampleHeritageVoiceAnalogColorBlock{
-                static_cast<float>(drive), static_cast<float>(asymmetry),
-                static_cast<float>(mix)};
+                .drive = static_cast<float>(drive),
+                .asymmetry = static_cast<float>(asymmetry),
+                .mix = static_cast<float>(mix),
+                .filter_family = filter_family,
+                .cutoff_law = cutoff_law,
+                .cutoff_value = cutoff,
+                .resonance = static_cast<float>(resonance)};
         } else if (type == "live_cyclic_stretch") {
             constexpr std::array fields{"domain"sv, "type"sv, "bypass"sv,
                 "factor"sv, "cycle_ms"sv, "splice_ms"sv, "stereo_link"sv,
                 "shuffle_divisions"sv, "seed"sv,
-                "seed_policy"sv};
-            double factor{}, cycle{}, splice{}; bool stereo{};
+                "seed_policy"sv, "pitch_mode"sv, "tempo_lock"sv};
+            double factor{}, cycle{}, splice{}; bool stereo{}, tempo_lock{};
             std::uint16_t shuffle_divisions{};
             std::uint64_t seed_value{}; SampleHeritageSeedPolicy policy{};
+            SampleHeritageLivePitchMode pitch_mode{};
+            constexpr std::array pitch_modes{
+                std::pair{"preserve"sv, SampleHeritageLivePitchMode::Preserve},
+                std::pair{"rate_linked"sv, SampleHeritageLivePitchMode::RateLinked}};
             if (!audit_object(value, base, fields) || !common() ||
                 !number(value, "factor", base + ".factor", 0.25, 20.0, factor) ||
                 !number(value, "cycle_ms", base + ".cycle_ms", 0.0,
@@ -350,7 +417,10 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                 !integer(value, "shuffle_divisions", base + ".shuffle_divisions",
                          0, 64, shuffle_divisions) ||
                 !seed(value, "seed", base + ".seed", seed_value) ||
-                !seed_policy(value, "seed_policy", base + ".seed_policy", policy))
+                !seed_policy(value, "seed_policy", base + ".seed_policy", policy) ||
+                !enumeration(value, "pitch_mode", base + ".pitch_mode", pitch_modes,
+                             pitch_mode) ||
+                !boolean(value, "tempo_lock", base + ".tempo_lock", tempo_lock))
                 return false;
             if (cycle <= 0.0)
                 return fail(SampleHeritageJsonStatus::NumberOutOfRange,
@@ -368,7 +438,7 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                             base + ".seed");
             destination.parameters = SampleHeritageVoiceLiveCyclicStretchBlock{
                 factor, cycle, splice, stereo, shuffle_divisions,
-                seed_value, policy};
+                seed_value, policy, pitch_mode, tempo_lock};
         } else {
             return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
         }
@@ -615,8 +685,11 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                                             "crossfade_samples"sv,
                                             "zone_start_frame"sv,
                                             "zone_end_frame"sv,
-                                            "stereo_link"sv};
+                                            "stereo_link"sv,
+                                            "quality"sv,
+                                            "width"sv};
                 std::uint32_t hop{}, radius{}, stride{}, crossfade{};
+                std::uint8_t quality{}, width{};
                 bool stereo{};
                 if (!audit_object(value, base, fields) ||
                     !integer(value, "decision_hop_samples", base + ".decision_hop_samples", 1,
@@ -627,14 +700,16 @@ struct Parser : JsonParserBase<SampleHeritageJsonParseResult> {
                              1048576, stride) ||
                     !integer(value, "crossfade_samples", base + ".crossfade_samples", 0, 524288,
                              crossfade) ||
-                    !boolean(value, "stereo_link", base + ".stereo_link", stereo))
+                    !boolean(value, "stereo_link", base + ".stereo_link", stereo) ||
+                    !integer(value, "quality", base + ".quality", 0, 99, quality) ||
+                    !integer(value, "width", base + ".width", 0, 99, width))
                     return false;
                 if (crossfade > hop)
                     return fail(SampleHeritageJsonStatus::NumberOutOfRange,
                                 base + ".crossfade_samples");
                 destination.parameters = SampleHeritageRecordCommitAdaptiveStretchBlock{
                     factor, hop, radius, stride, crossfade, zone_start, zone_end,
-                stereo};
+                    stereo, quality, width};
             }
         } else {
             return fail(SampleHeritageJsonStatus::InvalidEnum, base + ".type");
@@ -755,6 +830,13 @@ std::string_view reconstruction_family_name(SampleHeritageReconstructionFamily f
         return "chebyshev";
     if (family == SampleHeritageReconstructionFamily::Elliptic) return "elliptic";
     return "one_pole";
+}
+
+std::string_view analog_filter_family_name(
+    SampleHeritageAnalogFilterFamily family) {
+    return family == SampleHeritageAnalogFilterFamily::Ladder4Pole
+        ? "ladder_4pole"
+        : "none";
 }
 
 std::string_view record_filter_family_name(SampleHeritageRecordFilterFamily family) {
@@ -940,6 +1022,8 @@ write_sample_heritage_profile_json(const SampleHeritageProfile& profile) {
                               ? "early_linear"
                               : "variable_clock";
                 output.push_back('"');
+                output += ",\"max_transpose_semitones\":";
+                append_number(output, block.max_transpose_semitones);
             } else if constexpr (std::is_same_v<Block,
                                                  SampleHeritageVoiceConverterBlock>) {
                 output += ",\"family\":\""; output += converter_family_name(block.family);
@@ -972,6 +1056,14 @@ write_sample_heritage_profile_json(const SampleHeritageProfile& profile) {
                 output += ",\"drive\":"; append_number(output, block.drive);
                 output += ",\"asymmetry\":"; append_number(output, block.asymmetry);
                 output += ",\"mix\":"; append_number(output, block.mix);
+                output += ",\"filter_family\":\"";
+                output += analog_filter_family_name(block.filter_family);
+                output += "\",\"cutoff_law\":\"";
+                output += cutoff_law_name(block.cutoff_law);
+                output += "\",\"cutoff_value\":";
+                append_number(output, block.cutoff_value);
+                output += ",\"resonance\":";
+                append_number(output, block.resonance);
             } else {
                 output += ",\"factor\":"; append_number(output, block.factor);
                 output += ",\"cycle_ms\":"; append_number(output, block.cycle_ms);
@@ -982,6 +1074,12 @@ write_sample_heritage_profile_json(const SampleHeritageProfile& profile) {
                 output += ",\"seed\":"; append_seed(output, block.seed);
                 output += ",\"seed_policy\":\"";
                 output += seed_policy_name(block.seed_policy); output.push_back('"');
+                output += ",\"pitch_mode\":\"";
+                output += block.pitch_mode == SampleHeritageLivePitchMode::Preserve
+                              ? "preserve"
+                              : "rate_linked";
+                output += "\",\"tempo_lock\":";
+                append_bool(output, block.tempo_lock);
             }
             output.push_back('}');
         }, spec.parameters);
@@ -1095,6 +1193,8 @@ write_sample_heritage_profile_json(const SampleHeritageProfile& profile) {
                 output += ",\"zone_end_frame\":" +
                           std::to_string(block.zone_end_frame);
                 output += ",\"stereo_link\":"; append_bool(output, block.stereo_link);
+                output += ",\"quality\":" + std::to_string(block.quality);
+                output += ",\"width\":" + std::to_string(block.width);
             }
             output.push_back('}');
         }, spec.parameters);

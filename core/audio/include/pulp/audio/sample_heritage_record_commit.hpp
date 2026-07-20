@@ -27,6 +27,33 @@ enum class SampleHeritageRecordCommitStatus : std::uint8_t {
     AudioHashMismatch,
 };
 
+enum class SampleHeritageAutoCycleStatus : std::uint8_t {
+    Ok,
+    InvalidSource,
+    InvalidRange,
+    InsufficientSignal,
+    NoReliableCycle,
+};
+
+struct SampleHeritageAutoCycleOptions {
+    std::uint32_t minimum_cycle_samples = 16;
+    std::uint32_t maximum_cycle_samples = 4096;
+    std::uint64_t analysis_start_frame = 0;
+    std::uint64_t analysis_end_frame = 0;
+    double minimum_correlation = 0.6;
+};
+
+struct SampleHeritageAutoCycleResult {
+    SampleHeritageAutoCycleStatus status =
+        SampleHeritageAutoCycleStatus::InvalidSource;
+    std::uint32_t cycle_samples = 0;
+    double correlation = 0.0;
+
+    bool valid() const noexcept {
+        return status == SampleHeritageAutoCycleStatus::Ok;
+    }
+};
+
 struct SampleHeritageRecordProvenance {
     std::string source_id;
     std::string capture_method;
@@ -83,6 +110,14 @@ struct SampleHeritageRecordCommitResult {
         return status == SampleHeritageRecordCommitStatus::Ok && asset.has_value();
     }
 };
+
+/// Suggests a repeatable cycle length from periodic similarity in an audio
+/// region. The returned cycle is an explicit neutral estimate, not a model of
+/// any hardware auto-cycle control. This offline helper is not suitable for the
+/// audio thread.
+SampleHeritageAutoCycleResult estimate_sample_heritage_auto_cycle(
+    BufferView<const float> source,
+    const SampleHeritageAutoCycleOptions& options = {});
 
 /// Applies the profile's record_commit recipe and returns machine-rate PCM plus
 /// a canonical, content-addressed metadata envelope. Allocates throughout and

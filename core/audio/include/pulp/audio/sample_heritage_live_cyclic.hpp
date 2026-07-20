@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/sample_heritage_schema.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +39,8 @@ struct SampleHeritageLiveCyclicConfig {
     SampleHeritageLiveCyclicShuffle shuffle = SampleHeritageLiveCyclicShuffle::Identity;
     std::size_t max_block_samples = 512;
     std::size_t channel_count = 2;
+    SampleHeritageLivePitchMode pitch_mode = SampleHeritageLivePitchMode::Preserve;
+    bool tempo_lock = true;
 };
 
 struct SampleHeritageLiveCyclicResources {
@@ -56,7 +59,7 @@ struct SampleHeritageLiveCyclicPlan {
     SampleHeritageLiveCyclicStatus status = SampleHeritageLiveCyclicStatus::NotPrepared;
     std::size_t output_frames = 0;
     std::size_t input_frames = 0;
-    std::size_t cold_lookahead_frames = 0;
+    std::size_t startup_prebuffer_frames = 0;
 
     bool valid() const noexcept {
         return status == SampleHeritageLiveCyclicStatus::Ok;
@@ -101,8 +104,8 @@ class SampleHeritageLiveCyclicStretch {
     double source_frames_per_output_frame() const noexcept {
         return source_ratio_;
     }
-    std::size_t cold_lookahead_frames() const noexcept {
-        return cold_lookahead_;
+    std::size_t startup_prebuffer_frames() const noexcept {
+        return startup_prebuffer_;
     }
     const SampleHeritageLiveCyclicResources& resources() const noexcept {
         return resources_;
@@ -150,7 +153,7 @@ class SampleHeritageLiveCyclicStretch {
     std::vector<float> ring_;
     std::vector<std::uint32_t> permutation_;
     double source_ratio_ = 1.0;
-    std::size_t cold_lookahead_ = 0;
+    std::size_t startup_prebuffer_ = 0;
     std::uint64_t accepted_source_frames_ = 0;
     std::uint64_t rendered_output_frames_ = 0;
     std::uint64_t real_source_frames_ = 0;

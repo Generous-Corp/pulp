@@ -299,6 +299,14 @@ public:
         return process_impl(input, output, ratio_, valid_input_frames, end_of_source, true);
     }
 
+    SampleHeritageSrcStatus process_source(
+        const BufferView<const float>& input, BufferView<float> output,
+        std::size_t valid_input_frames, bool end_of_source,
+        double source_frames_per_output) noexcept {
+        return process_impl(input, output, source_frames_per_output,
+                            valid_input_frames, end_of_source, true);
+    }
+
     std::size_t last_valid_output_frames() const noexcept {
         return last_valid_output_frames_;
     }

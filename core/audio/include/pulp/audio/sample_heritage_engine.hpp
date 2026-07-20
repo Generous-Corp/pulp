@@ -54,6 +54,7 @@ struct SampleHeritagePrepareConfig {
     // coefficient storage until the prepared engine is released.
     const SampleSincKernelBankView* external_sinc_bank = nullptr;
     double maximum_runtime_clock_factor = 1.0;
+    double maximum_note_pitch_factor = 1.0;
 };
 
 enum class SampleHeritagePlanStatus : std::uint8_t {
@@ -72,6 +73,7 @@ struct SampleHeritageProcessPlan {
     std::size_t pre_live_machine_frames = 0;
     std::size_t input_frames = 0;
     double runtime_clock_multiplier = 1.0;
+    double note_pitch_multiplier = 1.0;
 
     bool valid() const noexcept { return status == SampleHeritagePlanStatus::Ok; }
 };
@@ -100,7 +102,8 @@ public:
         return prepare_impl(config.profile, config.channel_count,
                             config.maximum_output_frames, true,
                             config.external_sinc_bank,
-                            config.maximum_runtime_clock_factor);
+                            config.maximum_runtime_clock_factor,
+                            config.maximum_note_pitch_factor);
     }
 
     void release() noexcept {
@@ -129,6 +132,8 @@ public:
         dynamic_identity_delay_frames_ = 0;
         dynamic_identity_delay_head_ = 0;
         dynamic_return_latency_output_frames_ = 0.0;
+        dynamic_input_latency_machine_frames_ = 0.0;
+        dynamic_return_src_latency_output_frames_ = 0.0;
         input_identity_ = true;
         return_identity_ = true;
         channel_count_ = 0;
@@ -137,6 +142,8 @@ public:
         maximum_machine_frames_ = 0;
         maximum_pre_live_machine_frames_ = 0;
         maximum_runtime_clock_factor_ = 1.0;
+        maximum_artifact_clock_factor_ = 1.0;
+        maximum_note_pitch_factor_ = 1.0;
         machine_sample_rate_ = 0.0;
         clock_ratio_ = 1.0;
         clocked_sample_rate_ = 0.0;
@@ -205,14 +212,15 @@ public:
         if (!exact_prepared_) return 0.0;
         if (!valid_runtime_clock_multiplier(runtime_clock_multiplier)) return 0.0;
         if (all_bypassed_ && !runtime_dynamic_clock_) return 0.0;
+        if (runtime_dynamic_clock_)
+            return dynamic_return_latency_output_frames_;
         constexpr double half =
             static_cast<double>(kHighQualitySampleSincHalfWidth);
-        const auto input_latency = input_identity_ ? 0.0 : half / clock_ratio_;
-        const auto effective_return_ratio =
-            return_ratio_ * runtime_clock_multiplier;
-        const auto return_latency = runtime_dynamic_clock_
-            ? dynamic_return_latency_output_frames_
-            : (return_identity_ ? 0.0 : half / effective_return_ratio);
+        const auto input_latency = input_identity_ ? 0.0 : half;
+        const auto effective_return_ratio = return_ratio_ *
+            runtime_clock_multiplier;
+        const auto return_latency =
+            return_identity_ ? 0.0 : half / effective_return_ratio;
         return input_latency + return_latency;
     }
 
@@ -222,8 +230,12 @@ public:
         if (!exact_prepared_ || (all_bypassed_ && !runtime_dynamic_clock_))
             return 0;
 
-        long double machine_frames =
-            typed_voice_ ? static_cast<long double>(voice_dsp_.tail_machine_frames()) : 0.0L;
+        long double machine_frames = typed_voice_
+            ? static_cast<long double>(voice_dsp_.tail_machine_domain_frames())
+            : 0.0L;
+        const auto host_frames = typed_voice_
+            ? static_cast<long double>(voice_dsp_.tail_host_frames())
+            : 0.0L;
         for (std::size_t index = 0; index < profile_.stage_count; ++index) {
             const auto& runtime = stages_[index];
             if (runtime.spec.bypass)
@@ -262,7 +274,9 @@ public:
         const auto required_frames =
             static_cast<long double>(latency_output_frames()) +
             machine_frames /
-                static_cast<long double>(return_ratio_ / maximum_runtime_clock_factor_);
+                static_cast<long double>(return_ratio_ /
+                                         maximum_runtime_clock_factor_) +
+            host_frames;
         const auto output_frames = std::ceil(required_frames);
         if (!std::isfinite(output_frames) || output_frames <= 0.0L)
             return output_frames <= 0.0L ? 0 : std::numeric_limits<std::uint64_t>::max();
@@ -280,6 +294,8 @@ public:
             return false;
         }
         process_machine_stages(buffer);
+        if (typed_voice_)
+            voice_dsp_.process_host_frame(buffer);
         return true;
     }
 
@@ -290,13 +306,22 @@ public:
     SampleHeritageProcessPlan plan_exact(
         std::size_t output_frames,
         double runtime_clock_multiplier) const noexcept {
+        return plan_exact(output_frames, runtime_clock_multiplier, 1.0);
+    }
+
+    SampleHeritageProcessPlan plan_exact(
+        std::size_t output_frames,
+        double runtime_clock_multiplier,
+        double note_pitch_multiplier) const noexcept {
         SampleHeritageProcessPlan result;
         result.prepare_epoch = prepare_epoch_;
         result.sequence = process_sequence_;
         result.output_frames = output_frames;
         result.runtime_clock_multiplier = runtime_clock_multiplier;
+        result.note_pitch_multiplier = note_pitch_multiplier;
         if (!exact_prepared_) return result;
-        if (!valid_runtime_clock_multiplier(runtime_clock_multiplier)) {
+        if (!valid_runtime_rate_multipliers(runtime_clock_multiplier,
+                                            note_pitch_multiplier)) {
             result.status = SampleHeritagePlanStatus::SizeOverflow;
             return result;
         }
@@ -309,8 +334,15 @@ public:
             result.input_frames = output_frames;
             return result;
         }
+        if (dynamic_identity_epoch_ && runtime_clock_multiplier == 1.0 &&
+            note_pitch_multiplier == 1.0) {
+            result.status = SampleHeritagePlanStatus::Ok;
+            result.input_frames = output_frames;
+            return result;
+        }
         const auto return_plan = return_src_.plan(
-            output_frames, return_ratio_ * runtime_clock_multiplier);
+            output_frames, return_ratio_ * runtime_clock_multiplier *
+                               note_pitch_multiplier);
         if (!return_plan.valid()) {
             result.status = SampleHeritagePlanStatus::SizeOverflow;
             return result;
@@ -325,7 +357,9 @@ public:
             }
             result.pre_live_machine_frames = live_plan.input_frames;
         }
-        const auto input_plan = input_src_.plan(result.pre_live_machine_frames);
+        const auto input_plan = input_src_.plan(
+            result.pre_live_machine_frames,
+            input_ratio_ / runtime_clock_multiplier);
         if (!input_plan.valid() || result.machine_frames > maximum_machine_frames_ ||
             result.pre_live_machine_frames > maximum_pre_live_machine_frames_ ||
             input_plan.input_frames > maximum_input_frames_) {
@@ -382,7 +416,8 @@ private:
         bool end_of_source) noexcept {
         if (!exact_prepared_) return SampleHeritageProcessStatus::NotPrepared;
         const auto expected = plan_exact(output.num_samples(),
-                                         plan.runtime_clock_multiplier);
+                                         plan.runtime_clock_multiplier,
+                                         plan.note_pitch_multiplier);
         if (!plan.valid() || !expected.valid() ||
             plan.prepare_epoch != expected.prepare_epoch ||
             plan.sequence != expected.sequence ||
@@ -390,7 +425,8 @@ private:
             plan.machine_frames != expected.machine_frames ||
             plan.pre_live_machine_frames != expected.pre_live_machine_frames ||
             plan.input_frames != expected.input_frames ||
-            plan.runtime_clock_multiplier != expected.runtime_clock_multiplier) {
+            plan.runtime_clock_multiplier != expected.runtime_clock_multiplier ||
+            plan.note_pitch_multiplier != expected.note_pitch_multiplier) {
             return SampleHeritageProcessStatus::InvalidPlan;
         }
         if (input.num_channels() != channel_count_ ||
@@ -408,16 +444,42 @@ private:
                 std::copy(input.channel(channel).begin(), input.channel(channel).end(),
                           output.channel(channel).begin());
             ++process_sequence_;
+            if (end_of_source)
+                last_valid_output_frames_ =
+                    std::min(output.num_samples(), valid_input_frames);
+            return SampleHeritageProcessStatus::Ok;
+        }
+        if (dynamic_identity_epoch_ &&
+            plan.runtime_clock_multiplier == 1.0 &&
+            plan.note_pitch_multiplier == 1.0) {
+            for (std::size_t channel = 0; channel < channel_count_; ++channel)
+                std::copy(input.channel(channel).begin(),
+                          input.channel(channel).end(),
+                          output.channel(channel).begin());
+            process_dynamic_latency_delay(output,
+                                           dynamic_identity_delay_frames_);
+            if (end_of_source) {
+                const auto valid =
+                    std::min(output.num_samples(), valid_input_frames);
+                last_valid_output_frames_ = valid + std::min(
+                    output.num_samples() - valid,
+                    dynamic_identity_delay_frames_);
+            }
+            ++process_sequence_;
             return SampleHeritageProcessStatus::Ok;
         }
 
         auto* prepared_ptrs = live_cyclic_active_ ? pre_live_ptrs_.data() : machine_ptrs_.data();
         BufferView<float> prepared_machine(prepared_ptrs, channel_count_,
                                            plan.pre_live_machine_frames);
+        const auto effective_input_ratio =
+            input_ratio_ / plan.runtime_clock_multiplier;
         const auto input_status = live_cyclic_active_
-                                      ? input_src_.process_source(input, prepared_machine,
-                                                                  valid_input_frames, end_of_source)
-                                      : input_src_.process(input, prepared_machine);
+            ? input_src_.process_source(input, prepared_machine,
+                                        valid_input_frames, end_of_source,
+                                        effective_input_ratio)
+            : input_src_.process(input, prepared_machine,
+                                 effective_input_ratio);
         if (input_status != SampleHeritageSrcStatus::Ok)
             return SampleHeritageProcessStatus::InternalContractFailure;
         BufferView<float> machine(machine_ptrs_.data(), channel_count_, plan.machine_frames);
@@ -440,7 +502,8 @@ private:
             if (live_end_of_source) {
                 const auto valid_machine = live_cyclic_.last_valid_output_frames();
                 const auto converted = std::ceil(static_cast<double>(valid_machine) /
-                                                 (return_ratio_ * plan.runtime_clock_multiplier));
+                    (return_ratio_ * plan.runtime_clock_multiplier *
+                     plan.note_pitch_multiplier));
                 last_valid_output_frames_ =
                     static_cast<std::size_t>(std::min<double>(output.num_samples(), converted));
             }
@@ -451,17 +514,36 @@ private:
         BufferView<const float> machine_input(machine_const_ptrs_.data(), channel_count_,
                                               plan.machine_frames);
         if (return_src_.process(machine_input, output,
-                                return_ratio_ * plan.runtime_clock_multiplier) !=
+                                return_ratio_ * plan.runtime_clock_multiplier *
+                                    plan.note_pitch_multiplier) !=
             SampleHeritageSrcStatus::Ok)
             return SampleHeritageProcessStatus::InternalContractFailure;
-        if (dynamic_identity_exact_) {
-            if (dynamic_identity_epoch_ &&
-                plan.runtime_clock_multiplier == 1.0 &&
-                input.num_samples() == output.num_samples()) {
-                process_dynamic_identity_delay(input, output);
-            } else if (plan.runtime_clock_multiplier != 1.0) {
+        if (typed_voice_)
+            voice_dsp_.process_host_frame(output, draining_tail);
+        if (runtime_dynamic_clock_) {
+            const auto effective_return_ratio = return_ratio_ *
+                plan.runtime_clock_multiplier * plan.note_pitch_multiplier;
+            const auto active_input_latency =
+                input_identity_ && maximum_artifact_clock_factor_ == 1.0
+                ? 0.0
+                : dynamic_input_latency_machine_frames_;
+            const auto raw_latency = static_cast<std::size_t>(std::ceil(
+                active_input_latency /
+                effective_return_ratio)) +
+                static_cast<std::size_t>(
+                    dynamic_return_src_latency_output_frames_);
+            const auto correction = raw_latency < dynamic_identity_delay_frames_
+                ? dynamic_identity_delay_frames_ - raw_latency
+                : 0;
+            process_dynamic_latency_delay(output, correction);
+            if (end_of_source &&
+                last_valid_output_frames_ < output.num_samples())
+                last_valid_output_frames_ += std::min(
+                    output.num_samples() - last_valid_output_frames_,
+                    correction);
+            if (plan.runtime_clock_multiplier != 1.0 ||
+                plan.note_pitch_multiplier != 1.0)
                 dynamic_identity_epoch_ = false;
-            }
         }
         ++process_sequence_;
         return SampleHeritageProcessStatus::Ok;
@@ -657,6 +739,19 @@ private:
         bool exact,
         const SampleSincKernelBankView* external_sinc_bank,
         double maximum_runtime_clock_factor = 1.0) noexcept {
+        return prepare_impl(profile, channel_count, maximum_output_frames,
+                            exact, external_sinc_bank,
+                            maximum_runtime_clock_factor, 1.0);
+    }
+
+    SampleHeritagePrepareStatus prepare_impl(
+        const SampleHeritagePreparedProfile& profile,
+        std::size_t channel_count,
+        std::size_t maximum_output_frames,
+        bool exact,
+        const SampleSincKernelBankView* external_sinc_bank,
+        double maximum_runtime_clock_factor,
+        double maximum_note_pitch_factor) noexcept {
         release();
         if (profile.schema_version != kSampleHeritageProfileSchemaVersion ||
             profile.stage_count > stages_.size() ||
@@ -669,7 +764,13 @@ private:
                       maximum_output_frames == 0 ||
                       !(maximum_runtime_clock_factor >= 1.0) ||
                       maximum_runtime_clock_factor > 64.0 ||
-                      !std::isfinite(maximum_runtime_clock_factor))) {
+                      !std::isfinite(maximum_runtime_clock_factor) ||
+                      !(maximum_note_pitch_factor >= 1.0) ||
+                      maximum_note_pitch_factor > 64.0 ||
+                      !std::isfinite(maximum_note_pitch_factor) ||
+                      maximum_runtime_clock_factor *
+                              maximum_note_pitch_factor >
+                          64.0)) {
             return SampleHeritagePrepareStatus::InvalidDimensions;
         }
         try {
@@ -740,9 +841,9 @@ private:
             }
         }
         clocked_sample_rate_ = machine_sample_rate_ * clock_ratio_;
-        input_ratio_ = profile_.host_sample_rate / machine_sample_rate_;
+        input_ratio_ = profile_.host_sample_rate / clocked_sample_rate_;
         return_ratio_ = clocked_sample_rate_ / profile_.host_sample_rate;
-        input_identity_ = machine_sample_rate_ == profile_.host_sample_rate;
+        input_identity_ = clocked_sample_rate_ == profile_.host_sample_rate;
         return_identity_ = clocked_sample_rate_ == profile_.host_sample_rate;
         if ((!input_identity_ && input_ratio_ >
                                   kMaximumDenseSampleSincConsumption) ||
@@ -768,7 +869,9 @@ private:
                              clocked_sample_rate_));
             }
         }
-        if (typed_voice_ && !voice_dsp_.prepare(profile_, machine_sample_rate_)) {
+        if (typed_voice_ &&
+            !voice_dsp_.prepare(profile_, machine_sample_rate_,
+                                profile_.host_sample_rate)) {
             release();
             return SampleHeritagePrepareStatus::InvalidProfile;
         }
@@ -779,10 +882,15 @@ private:
         }
 
         if (exact) {
-            runtime_dynamic_clock_ = maximum_runtime_clock_factor > 1.0;
+            const auto maximum_combined_factor =
+                maximum_runtime_clock_factor * maximum_note_pitch_factor;
+            runtime_dynamic_clock_ = maximum_combined_factor > 1.0;
             const auto maximum_return_ratio =
-                return_ratio_ * maximum_runtime_clock_factor;
-            const auto maximum_ratio = std::max(input_ratio_, maximum_return_ratio);
+                return_ratio_ * maximum_combined_factor;
+            const auto maximum_input_ratio =
+                input_ratio_ * maximum_runtime_clock_factor;
+            const auto maximum_ratio =
+                std::max(maximum_input_ratio, maximum_return_ratio);
             SampleSincKernelBankView bank;
             if (external_sinc_bank != nullptr) {
                 bank = *external_sinc_bank;
@@ -799,25 +907,32 @@ private:
                 }
                 bank = sinc_bank_.view();
             }
-            const auto input_selection = input_identity_
+            const auto input_selection = input_identity_ &&
+                    maximum_runtime_clock_factor == 1.0
                 ? SampleSincKernelSelection{}
                 : bank.select(input_ratio_);
             const auto return_selection = return_identity_
                 ? SampleSincKernelSelection{}
                 : bank.select(return_ratio_);
-            if ((!input_identity_ && !input_selection.valid()) ||
+            if ((!(input_identity_ && maximum_runtime_clock_factor == 1.0) &&
+                 !input_selection.valid()) ||
                 (!return_identity_ && !return_selection.valid())) {
                 release();
                 return SampleHeritagePrepareStatus::KernelBuildFailed;
             }
-            const auto input_status = input_src_.prepare(
-                input_ratio_, channel_count, input_selection, input_identity_);
-            const auto return_status = maximum_runtime_clock_factor == 1.0
+            const auto input_status = maximum_runtime_clock_factor == 1.0
+                ? input_src_.prepare(input_ratio_, channel_count,
+                                     input_selection, input_identity_)
+                : input_src_.prepare_variable(
+                      input_ratio_,
+                      input_ratio_ / maximum_runtime_clock_factor,
+                      maximum_input_ratio, channel_count, bank);
+            const auto return_status = maximum_combined_factor == 1.0
                 ? return_src_.prepare(return_ratio_, channel_count,
                                       return_selection, return_identity_)
                 : return_src_.prepare_variable(return_ratio_,
                                                return_ratio_ /
-                                                   maximum_runtime_clock_factor,
+                                                   maximum_combined_factor,
                                                maximum_return_ratio,
                                                channel_count, bank);
             if (input_status != SampleHeritageSrcStatus::Ok ||
@@ -838,7 +953,7 @@ private:
             if (!checked_frame_bound(maximum_output_frames,
                                      maximum_return_ratio,
                                      return_identity_ &&
-                                         maximum_runtime_clock_factor == 1.0,
+                                         maximum_combined_factor == 1.0,
                                      maximum_machine_frames_) ||
                 (channel_count != 0 && maximum_machine_frames_ >
                      std::numeric_limits<std::size_t>::max() / channel_count)) {
@@ -878,7 +993,9 @@ private:
                         ? SampleHeritageLiveCyclicShuffle::Identity
                         : SampleHeritageLiveCyclicShuffle::FisherYates,
                     .max_block_samples = maximum_machine_frames_,
-                    .channel_count = channel_count};
+                    .channel_count = channel_count,
+                    .pitch_mode = block->pitch_mode,
+                    .tempo_lock = block->tempo_lock};
                 const auto live_status = live_cyclic_.prepare(live_config);
                 if (live_status != SampleHeritageLiveCyclicStatus::Ok) {
                     release();
@@ -895,7 +1012,10 @@ private:
                 }
             }
             if (!checked_frame_bound(maximum_pre_live_machine_frames_,
-                                     input_ratio_, input_identity_,
+                                     input_ratio_ /
+                                         maximum_runtime_clock_factor,
+                                     input_identity_ &&
+                                         maximum_combined_factor == 1.0,
                                      maximum_input_frames_) ||
                 (channel_count != 0 && maximum_pre_live_machine_frames_ >
                      std::numeric_limits<std::size_t>::max() / channel_count)) {
@@ -910,13 +1030,23 @@ private:
                 dynamic_identity_exact_ = runtime_dynamic_clock_ &&
                                           runtime_clock_identity_only() &&
                                           input_identity_ && return_ratio_ == 1.0;
-                dynamic_return_latency_output_frames_ = runtime_dynamic_clock_
-                    ? std::ceil(static_cast<double>(
-                          kHighQualitySampleSincHalfWidth) /
-                                (return_ratio_ /
-                                 maximum_runtime_clock_factor))
+                dynamic_input_latency_machine_frames_ = runtime_dynamic_clock_
+                    ? std::ceil(
+                          static_cast<double>(kHighQualitySampleSincHalfWidth) /
+                          (input_ratio_ / maximum_runtime_clock_factor))
                     : 0.0;
-                dynamic_identity_delay_frames_ = dynamic_identity_exact_
+                dynamic_return_src_latency_output_frames_ = runtime_dynamic_clock_
+                    ? std::ceil(
+                          static_cast<double>(kHighQualitySampleSincHalfWidth) /
+                          (return_ratio_ / maximum_combined_factor))
+                    : 0.0;
+                dynamic_return_latency_output_frames_ = runtime_dynamic_clock_
+                    ? std::ceil(dynamic_input_latency_machine_frames_ /
+                                (return_ratio_ /
+                                 maximum_combined_factor)) +
+                          dynamic_return_src_latency_output_frames_
+                    : 0.0;
+                dynamic_identity_delay_frames_ = runtime_dynamic_clock_
                     ? static_cast<std::size_t>(
                           dynamic_return_latency_output_frames_)
                     : 0;
@@ -940,7 +1070,10 @@ private:
             }
             channel_count_ = channel_count;
             maximum_output_frames_ = maximum_output_frames;
-            maximum_runtime_clock_factor_ = maximum_runtime_clock_factor;
+            maximum_runtime_clock_factor_ = maximum_combined_factor;
+            maximum_artifact_clock_factor_ =
+                maximum_runtime_clock_factor;
+            maximum_note_pitch_factor_ = maximum_note_pitch_factor;
             exact_prepared_ = true;
             dynamic_identity_epoch_ = dynamic_identity_exact_;
         }
@@ -989,6 +1122,17 @@ private:
                multiplier <= maximum_runtime_clock_factor_;
     }
 
+    bool valid_runtime_rate_multipliers(double clock_multiplier,
+                                        double pitch_multiplier) const noexcept {
+        if (!(clock_multiplier > 0.0) || !std::isfinite(clock_multiplier) ||
+            !(pitch_multiplier > 0.0) || !std::isfinite(pitch_multiplier))
+            return false;
+        return clock_multiplier >= 1.0 / maximum_artifact_clock_factor_ &&
+               clock_multiplier <= maximum_artifact_clock_factor_ &&
+               pitch_multiplier >= 1.0 / maximum_note_pitch_factor_ &&
+               pitch_multiplier <= maximum_note_pitch_factor_;
+    }
+
     bool runtime_clock_identity_only() const noexcept {
         if (!typed_voice_) {
             for (std::size_t index = 0; index < profile_.stage_count; ++index) {
@@ -1028,9 +1172,8 @@ private:
                         return block.ratio == 1.0;
                     if constexpr (std::is_same_v<Block,
                                                  SampleHeritageVoicePitchBlock>) {
-                        has_pitch_marker =
-                            block.family == SampleHeritagePitchFamily::VariableClock;
-                        return has_pitch_marker;
+                        has_pitch_marker = true;
+                        return true;
                     }
                     return false;
                 },
@@ -1040,17 +1183,24 @@ private:
         return has_pitch_marker;
     }
 
-    void process_dynamic_identity_delay(
-        const BufferView<const float>& input,
-        BufferView<float> output) noexcept {
+    void process_dynamic_latency_delay(BufferView<float> output,
+                                       std::size_t delay_frames) noexcept {
         if (dynamic_identity_delay_frames_ == 0) return;
+        delay_frames = std::min(delay_frames, dynamic_identity_delay_frames_);
         for (std::size_t frame = 0; frame < output.num_samples(); ++frame) {
             for (std::size_t channel = 0; channel < channel_count_; ++channel) {
-                auto& delayed = dynamic_identity_delay_[
+                const auto read_index =
+                    (dynamic_identity_delay_head_ +
+                     dynamic_identity_delay_frames_ - delay_frames) %
+                    dynamic_identity_delay_frames_;
+                auto& destination = dynamic_identity_delay_[
                     channel * dynamic_identity_delay_frames_ +
                     dynamic_identity_delay_head_];
-                output.channel(channel)[frame] = delayed;
-                delayed = input.channel(channel)[frame];
+                const auto delayed = dynamic_identity_delay_[
+                    channel * dynamic_identity_delay_frames_ + read_index];
+                destination = output.channel(channel)[frame];
+                if (delay_frames != 0)
+                    output.channel(channel)[frame] = delayed;
             }
             dynamic_identity_delay_head_ =
                 (dynamic_identity_delay_head_ + 1) %
@@ -1071,9 +1221,9 @@ private:
                                 bool draining_tail = false) noexcept {
         if (typed_voice_) {
             if (draining_tail)
-                voice_dsp_.process_tail(buffer);
+                voice_dsp_.process_machine_tail(buffer);
             else
-                voice_dsp_.process(buffer);
+                voice_dsp_.process_before_live(buffer);
             return;
         }
         for (std::size_t index = 0; index < profile_.stage_count; ++index) {
@@ -1197,7 +1347,11 @@ private:
     double input_ratio_ = 1.0;
     double return_ratio_ = 1.0;
     double maximum_runtime_clock_factor_ = 1.0;
+    double maximum_artifact_clock_factor_ = 1.0;
+    double maximum_note_pitch_factor_ = 1.0;
     double dynamic_return_latency_output_frames_ = 0.0;
+    double dynamic_input_latency_machine_frames_ = 0.0;
+    double dynamic_return_src_latency_output_frames_ = 0.0;
     std::size_t dynamic_identity_delay_frames_ = 0;
     std::size_t dynamic_identity_delay_head_ = 0;
     std::uint64_t prepare_epoch_ = 1;

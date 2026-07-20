@@ -47,27 +47,27 @@ TEST_CASE("PulpSampler streams live cyclic source demand at inverse factor",
     REQUIRE(stretched_usage.block_scratch_bytes > clean_usage.block_scratch_bytes);
 }
 
-TEST_CASE("PulpSampler sizes streamed contracts in the heritage clock domain",
+TEST_CASE("PulpSampler keeps streamed contracts in the source domain",
           "[audio][sampler][heritage][stream][capacity]") {
     HeritageTempWav source("clock_domain", 2000000);
     const auto profile = clock_profile(2.0);
     HeritageFixture clocked(64, &profile);
     REQUIRE(clocked.processor.load_sample_file(source.path));
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(clocked.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(clocked.processor) == 48000.0);
     REQUIRE(PulpSamplerHeritageTestAccess::maximum_stream_block_frames(clocked.processor) > 64);
     const auto contract = PulpSamplerHeritageTestAccess::preload_contract(clocked.processor);
-    REQUIRE(contract.host_sample_rate == 96000.0);
+    REQUIRE(contract.host_sample_rate == 48000.0);
     REQUIRE(contract.maximum_host_block_frames ==
             PulpSamplerHeritageTestAccess::maximum_stream_block_frames(clocked.processor));
     constexpr std::array block{std::size_t{64}};
     (void)render(clocked, block);
     const auto clocked_position =
         PulpSamplerHeritageTestAccess::active_streamed_position(clocked.processor);
-    REQUIRE(clocked_position >= 127.0);
-    REQUIRE(clocked_position <= 129.0);
+    REQUIRE(clocked_position >= 63.0);
+    REQUIRE(clocked_position <= 65.0);
     for (int callback = 0; callback < 16; ++callback)
         (void)render(clocked, block, 65);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(clocked.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(clocked.processor) == 48000.0);
 
     const auto bypass = clock_profile(2.0, true);
     HeritageFixture neutral(64, &bypass);
@@ -80,41 +80,19 @@ TEST_CASE("PulpSampler sizes streamed contracts in the heritage clock domain",
     REQUIRE(PulpSamplerHeritageTestAccess::retire_reverse_tail_page(reverse_clocked.processor));
     (void)render(reverse_clocked, block);
     REQUIRE(PulpSamplerHeritageTestAccess::last_stream_demand_fps(reverse_clocked.processor) ==
-            96000.0);
+            48000.0);
 }
 
-TEST_CASE("PulpSampler transactionally rebinds loaded streams across clock changes",
+TEST_CASE("PulpSampler retains loaded streams across artifact clock changes",
           "[audio][sampler][heritage][stream][configuration]") {
     HeritageTempWav source("clock_rebind");
     const auto profile = clock_profile(2.0);
     HeritageFixture fixture(64, &profile);
     REQUIRE(fixture.processor.load_sample_file(source.path));
     REQUIRE(PulpSamplerHeritageTestAccess::has_retained_streamed_source(fixture.processor));
-    const auto source_frames = fixture.processor.sample_length();
     const auto replacement = clock_profile(1.25);
     const auto before = fixture.processor.heritage_diagnostics();
     const auto latency_before = fixture.processor.latency_samples();
-
-    PulpSamplerHeritageTestAccess::fail_next_stream_domain_prepare(fixture.processor);
-    REQUIRE(fixture.processor.set_heritage_profile(replacement) ==
-            PulpSamplerHeritageStatus::PrepareFailed);
-    REQUIRE(fixture.processor.heritage_diagnostics().profile() == profile.profile_id);
-    REQUIRE(fixture.processor.sample_length() == source_frames);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 96000.0);
-    constexpr std::array proof_block{std::size_t{64}};
-    const auto after_prepare_failure = render(fixture, proof_block);
-    REQUIRE(std::any_of(after_prepare_failure.begin(), after_prepare_failure.end(),
-                        [](float value) { return std::abs(value) > 0.001f; }));
-
-    PulpSamplerHeritageTestAccess::fail_next_stream_domain_source_restore(fixture.processor);
-    REQUIRE(fixture.processor.set_heritage_profile(replacement) ==
-            PulpSamplerHeritageStatus::PrepareFailed);
-    REQUIRE(fixture.processor.heritage_diagnostics().profile() == profile.profile_id);
-    REQUIRE(fixture.processor.sample_length() == source_frames);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 96000.0);
-    const auto after_restore_failure = render(fixture, proof_block, 65);
-    REQUIRE(std::any_of(after_restore_failure.begin(), after_restore_failure.end(),
-                        [](float value) { return std::abs(value) > 0.001f; }));
 
     REQUIRE(fixture.processor.set_heritage_profile(replacement) ==
             PulpSamplerHeritageStatus::Ready);
@@ -128,15 +106,15 @@ TEST_CASE("PulpSampler transactionally rebinds loaded streams across clock chang
     REQUIRE(after_replacement.rate_admission_rejections == before.rate_admission_rejections);
     REQUIRE(after_replacement.rate_automation_rejections == before.rate_automation_rejections);
     REQUIRE(fixture.processor.latency_samples() != latency_before);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 60000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
     const auto contract = PulpSamplerHeritageTestAccess::preload_contract(fixture.processor);
-    REQUIRE(contract.host_sample_rate == 60000.0);
+    REQUIRE(contract.host_sample_rate == 48000.0);
 
     const auto same_clock = clock_output_profile(2.0, 0.5f);
     REQUIRE(fixture.processor.set_heritage_profile(same_clock) == PulpSamplerHeritageStatus::Ready);
     REQUIRE(fixture.processor.has_sample());
     REQUIRE(fixture.processor.heritage_diagnostics().profile() == same_clock.profile_id);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
     REQUIRE(fixture.processor.disable_heritage() == PulpSamplerHeritageStatus::Disabled);
     REQUIRE(fixture.processor.has_sample());
     REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
@@ -144,7 +122,7 @@ TEST_CASE("PulpSampler transactionally rebinds loaded streams across clock chang
     REQUIRE(render(fixture, disabled_block).size() == 64);
 }
 
-TEST_CASE("PulpSampler sizes heritage pitch from the admitted clock product",
+TEST_CASE("PulpSampler sizes source buffers from note pitch independently of clock",
           "[audio][sampler][heritage][stream][capacity][resources]") {
     constexpr std::size_t block_frames = 64;
     const auto profile =
@@ -166,7 +144,7 @@ TEST_CASE("PulpSampler sizes heritage pitch from the admitted clock product",
     REQUIRE(pitched.set_heritage_profile(profile) == PulpSamplerHeritageStatus::PendingPrepare);
     const auto pitched_usage = pitched.estimate_prepare_resources(context);
     REQUIRE(pitched_usage.persistent_bytes > clean_usage.persistent_bytes);
-    REQUIRE(pitched_usage.block_scratch_bytes > clean_usage.block_scratch_bytes * 10u);
+    REQUIRE(pitched_usage.block_scratch_bytes > clean_usage.block_scratch_bytes);
 }
 
 TEST_CASE("PulpSampler preserves the configured streaming cap across clock changes",
@@ -182,7 +160,7 @@ TEST_CASE("PulpSampler preserves the configured streaming cap across clock chang
 
     REQUIRE(fixture.processor.set_heritage_profile(clock_profile(2.0)) ==
             PulpSamplerHeritageStatus::Ready);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
     REQUIRE(fixture.processor.diagnostics().streaming_memory_capacity_bytes == configured);
 }
 
@@ -222,7 +200,7 @@ TEST_CASE("PulpSampler serializes a staged load against stream-domain rebind",
     REQUIRE(loaded.loaded());
     REQUIRE(configured == PulpSamplerHeritageStatus::Ready);
     REQUIRE(fixture.processor.has_sample());
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
     const auto snapshot = fixture.processor.diagnostics();
     REQUIRE(snapshot.last_load.loaded());
     REQUIRE(snapshot.last_load.selection_generation != 0);
@@ -230,7 +208,7 @@ TEST_CASE("PulpSampler serializes a staged load against stream-domain rebind",
     cleanup.dismiss();
 }
 
-TEST_CASE("PulpSampler rejects streamed pitch times heritage clock above four",
+TEST_CASE("PulpSampler enforces streamed note-pitch cap independently of clock",
           "[audio][sampler][heritage][stream][admission]") {
     HeritageTempWav source("pitch_cap", 2000000);
     const auto profile = clock_profile(2.0);
@@ -239,22 +217,22 @@ TEST_CASE("PulpSampler rejects streamed pitch times heritage clock above four",
     REQUIRE(fixture.processor.load_sample_file(source.path));
     constexpr std::array block{std::size_t{64}};
 
-    (void)render(fixture, block, 0, 72);
+    (void)render(fixture, block, 0, 84);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
     REQUIRE(fixture.processor.stream_stats().invalid_preload_contract_events == 0);
-    (void)render(fixture, block, 0, 73);
+    (void)render(fixture, block, 0, 85);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
     const auto heritage = fixture.processor.heritage_diagnostics();
-    REQUIRE(heritage.rate_admission_rejections == 1);
+    REQUIRE(heritage.rate_admission_rejections == 0);
     REQUIRE(fixture.processor.stream_stats().aggregate_rate_admission_rejections == 0);
 
     const auto slow_profile = clock_profile(0.5);
     HeritageFixture slow(64, &slow_profile);
     slow.store.set_value(kSamplerLoop, 1.0f);
     REQUIRE(slow.processor.load_sample_file(source.path));
-    (void)render(slow, block, 0, 96);
+    (void)render(slow, block, 0, 84);
     for (int callback = 0; callback < 16; ++callback)
-        (void)render(slow, block, 65, 96);
+        (void)render(slow, block, 65, 84);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(slow.processor) == 1);
     REQUIRE(slow.processor.heritage_diagnostics().rate_admission_rejections == 0);
     REQUIRE(slow.processor.stream_stats().invalid_preload_contract_events == 0);
@@ -269,19 +247,19 @@ TEST_CASE("PulpSampler exempts resident voices from stream consumption admission
     HeritageTempWav streamed_source("resident_exemption_stream", 2000000);
     HeritageFixture streamed(64, &profile);
     REQUIRE(streamed.processor.load_sample_file(streamed_source.path));
-    (void)render(streamed, block, 0, 73);
+    (void)render(streamed, block, 0, 85);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(streamed.processor) == 0);
-    REQUIRE(streamed.processor.heritage_diagnostics().rate_admission_rejections == 1);
+    REQUIRE(streamed.processor.heritage_diagnostics().rate_admission_rejections == 0);
 
     HeritageFixture resident(64, &profile);
     const std::vector<float> sample(4096, 0.25f);
     resident.load(sample);
-    (void)render(resident, block, 0, 73);
+    (void)render(resident, block, 0, 85);
     REQUIRE(PulpSamplerHeritageTestAccess::active_voices(resident.processor) == 1);
     REQUIRE(resident.processor.heritage_diagnostics().rate_admission_rejections == 0);
 }
 
-TEST_CASE("PulpSampler declares typed pitch clock stream consumption",
+TEST_CASE("PulpSampler declares note-pitch stream consumption independently of clock",
           "[audio][sampler][heritage][stream][demand]") {
     HeritageTempWav source("typed_pitch_demand", 2000000);
     constexpr std::array block{std::size_t{64}};
@@ -294,7 +272,7 @@ TEST_CASE("PulpSampler declares typed pitch clock stream consumption",
     (void)render(fast, block, 0, 72);
     for (int callback = 0; callback < 16; ++callback)
         (void)render(fast, block, 65, 72);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(fast.processor) == 192000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(fast.processor) == 96000.0);
 
     HeritageFixture slow(64, &fast_profile);
     slow.store.set_value(kSamplerLoop, 1.0f);
@@ -302,14 +280,14 @@ TEST_CASE("PulpSampler declares typed pitch clock stream consumption",
     (void)render(slow, block, 0, 48);
     for (int callback = 0; callback < 16; ++callback)
         (void)render(slow, block, 65, 48);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(slow.processor) == 48000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(slow.processor) == 24000.0);
 
     HeritageFixture reverse(64, &fast_profile);
     reverse.store.set_value(kSamplerReverse, 1.0f);
     REQUIRE(reverse.processor.load_sample_file(source.path));
     REQUIRE(PulpSamplerHeritageTestAccess::retire_reverse_tail_page(reverse.processor));
     (void)render(reverse, block, 0, 72);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_stream_demand_fps(reverse.processor) == 192000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_stream_demand_fps(reverse.processor) == 96000.0);
 }
 
 TEST_CASE("PulpSampler admits a low typed pitch in a high clock domain",
@@ -347,7 +325,7 @@ TEST_CASE("PulpSampler counts frozen typed pitch during admission fade",
     HeritageFixture fixture(64, &profile);
     fixture.store.set_value(kSamplerLoop, 1.0f);
     REQUIRE(fixture.processor.load_sample_file(source.path));
-    PulpSamplerHeritageTestAccess::force_stream_rate_capacity(fixture.processor, 210000.0);
+    PulpSamplerHeritageTestAccess::force_stream_rate_capacity(fixture.processor, 100000.0);
     constexpr std::array attack{std::size_t{64}};
     (void)render(fixture, attack, 0, 72);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
@@ -355,12 +333,14 @@ TEST_CASE("PulpSampler counts frozen typed pitch during admission fade",
     fixture.store.set_value(kSamplerPitch, 2.0f);
     constexpr std::array fade_head{std::size_t{16}};
     (void)render(fixture, fade_head, 17, 72, false);
-    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 1);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 0);
+    REQUIRE(fixture.processor.stream_stats().aggregate_rate_automation_rejections == 1);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
 
     (void)render(fixture, fade_head, 0, 48);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
-    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 1);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 0);
+    REQUIRE(fixture.processor.stream_stats().aggregate_rate_admission_rejections == 1);
 }
 
 TEST_CASE("PulpSampler prepared state recall rebinds without dropping its source",
@@ -383,9 +363,12 @@ TEST_CASE("PulpSampler prepared state recall rebinds without dropping its source
     REQUIRE(fixture.processor.has_sample());
     REQUIRE(fixture.processor.sample_length() == source_frames);
     REQUIRE(fixture.processor.heritage_diagnostics().profile() == restored_profile.profile_id);
-    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 60000.0);
-    constexpr std::array block{std::size_t{64}};
-    const auto output = render(fixture, block);
+    REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(fixture.processor) == 48000.0);
+    const auto proof_frames = static_cast<std::size_t>(
+        fixture.processor.latency_samples()) + 512;
+    std::vector<std::size_t> blocks(
+        (proof_frames + 63) / 64, std::size_t{64});
+    const auto output = render(fixture, blocks);
     REQUIRE(std::any_of(output.begin(), output.end(),
                         [](float value) { return std::abs(value) > 0.001f; }));
 
@@ -405,7 +388,7 @@ TEST_CASE("PulpSampler prepared state recall rebinds without dropping its source
     REQUIRE_FALSE(PulpSamplerHeritageTestAccess::has_retained_streamed_source(fixture.processor));
 }
 
-TEST_CASE("PulpSampler multiplies streamed source throughput by heritage clock",
+TEST_CASE("PulpSampler artifact clock does not multiply streamed source throughput",
           "[audio][sampler][heritage][stream][admission]") {
     HeritageTempWav source("aggregate_clock");
     const auto profile = clock_profile(2.0);
@@ -416,9 +399,9 @@ TEST_CASE("PulpSampler multiplies streamed source throughput by heritage clock",
     constexpr std::array block{std::size_t{64}};
     (void)render(fixture, block);
 
-    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 0);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
     const auto heritage = fixture.processor.heritage_diagnostics();
-    REQUIRE(heritage.rate_admission_rejections == 1);
+    REQUIRE(heritage.rate_admission_rejections == 0);
     REQUIRE(fixture.processor.stream_stats().aggregate_rate_admission_rejections == 0);
 
     const auto bypass = clock_profile(2.0, true);
@@ -431,7 +414,7 @@ TEST_CASE("PulpSampler multiplies streamed source throughput by heritage clock",
     REQUIRE(neutral.processor.heritage_diagnostics().rate_admission_rejections == 0);
 }
 
-TEST_CASE("PulpSampler counts clock-driven streamed automation separately",
+TEST_CASE("PulpSampler admits maximum source-pitch streamed automation",
           "[audio][sampler][heritage][stream][automation]") {
     HeritageTempWav source("automation_clock");
     const auto profile = clock_profile(2.0);
@@ -442,16 +425,17 @@ TEST_CASE("PulpSampler counts clock-driven streamed automation separately",
     (void)render(fixture, block);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
 
-    fixture.store.set_value(kSamplerPitch, 13.0f);
+    fixture.store.set_value(kSamplerPitch, 24.0f);
     (void)render(fixture, block, 65);
-    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 0);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 1);
     const auto heritage = fixture.processor.heritage_diagnostics();
-    REQUIRE(heritage.rate_automation_rejections == 1);
+    REQUIRE(heritage.rate_automation_rejections == 0);
     REQUIRE(heritage.rate_admission_rejections == 0);
     REQUIRE(fixture.processor.stream_stats().aggregate_rate_automation_rejections == 0);
+    REQUIRE(fixture.processor.stream_stats().invalid_render_contract_events == 0);
 }
 
-TEST_CASE("PulpSampler pins heritage aggregate automation to the safe rate",
+TEST_CASE("PulpSampler admits aggregate automation from source pitch alone",
           "[audio][sampler][heritage][stream][automation][capacity]") {
     HeritageTempWav source("automation_aggregate_clock");
     const auto profile = clock_profile(2.0);
@@ -467,25 +451,20 @@ TEST_CASE("PulpSampler pins heritage aggregate automation to the safe rate",
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 2);
     const auto before = PulpSamplerHeritageTestAccess::active_streamed_position(fixture.processor);
 
-    // Pitch +5 remains below the effective pitch cap, but its clock-multiplied
-    // source throughput exceeds the forced aggregate certificate.
     fixture.store.set_value(kSamplerPitch, 5.0f);
     constexpr std::array fade_head{std::size_t{16}};
     (void)render(fixture, fade_head, 17);
     const auto after = PulpSamplerHeritageTestAccess::active_streamed_position(fixture.processor);
-    REQUIRE(after - before >= 31.0);
-    REQUIRE(after - before <= 33.0);
-    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 2);
+    const auto expected_advance = 16.0 * std::exp2(5.0 / 12.0);
+    REQUIRE(std::abs((after - before) - expected_advance) < 0.1);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 0);
     REQUIRE(fixture.processor.stream_stats().aggregate_rate_automation_rejections == 0);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(fixture.processor) == 96000.0);
     REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 2);
 
-    // A later note must count both still-reading fade voices at their pinned
-    // rates. Skipping them would incorrectly admit this third voice.
     constexpr std::array fade_tail{std::size_t{16}};
     (void)render(fixture, fade_tail);
-    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 0);
-    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 1);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(fixture.processor) == 3);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 0);
 }
 
 TEST_CASE("PulpSampler pins legacy aggregate automation to the safe rate",
@@ -506,9 +485,116 @@ TEST_CASE("PulpSampler pins legacy aggregate automation to the safe rate",
     constexpr std::array fade_head{std::size_t{16}};
     (void)render(fixture, fade_head, 17);
     const auto after = PulpSamplerHeritageTestAccess::active_streamed_position(fixture.processor);
-    REQUIRE(after - before >= 31.0);
-    REQUIRE(after - before <= 33.0);
+    REQUIRE(std::abs((after - before) - 16.0) < 0.1);
     REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 0);
     REQUIRE(fixture.processor.stream_stats().aggregate_rate_automation_rejections == 1);
-    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(fixture.processor) == 96000.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::last_lookahead_demand_fps(fixture.processor) == 48000.0);
+}
+
+TEST_CASE("PulpSampler admits realtime heritage clock automation within its certificate",
+          "[audio][sampler][heritage][clock][automation]") {
+    auto profile = typed_pitch_artifact_profile();
+    profile.voice[0].bypass = false;
+    HeritageFixture fixture(64, &profile);
+    fixture.load(std::vector<float>(4096, 0.25f));
+    constexpr std::array block{std::size_t{64}};
+    (void)render(fixture, block, 0, 60);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_clock_multiplier(
+                fixture.processor) == 1.0);
+
+    fixture.store.set_value(kSamplerHeritageClockRatio, 2.0f);
+    (void)render(fixture, block, 0, 60, false);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_clock_multiplier(
+                fixture.processor) == 2.0);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 0);
+}
+
+TEST_CASE("PulpSampler clock automation does not inflate streamed source demand",
+          "[audio][sampler][heritage][clock][automation][stream][admission]") {
+    HeritageTempWav source("clock_automation_cap", 2000000);
+    const auto profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 2.0);
+    HeritageFixture fixture(64, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.processor.load_sample_file(source.path));
+    constexpr std::array block{std::size_t{64}};
+    (void)render(fixture, block, 0, 60);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+
+    fixture.store.set_value(kSamplerHeritageClockRatio, 4.0f);
+    (void)render(fixture, block, 0, 60, false);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_clock_multiplier(
+                fixture.processor) == 4.0);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 0);
+}
+
+TEST_CASE("PulpSampler admits the full runtime factor behind a sub-unity authored clock",
+          "[audio][sampler][heritage][clock][stream][capacity]") {
+    HeritageTempWav source("sub_unity_clock_capacity", 2000000);
+    const auto profile = typed_pitch_artifact_profile(
+        audio::SampleHeritagePitchFamily::VariableClock, false, 0.5);
+    HeritageFixture fixture(64, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.store.set_value(kSamplerHeritageClockRatio, 4.0f);
+    REQUIRE(fixture.processor.load_sample_file(source.path));
+
+    constexpr std::array block{std::size_t{64}};
+    (void)render(fixture, block, 0, 72);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_pitch_factor(
+                fixture.processor) == 2.0);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_clock_multiplier(
+                fixture.processor) == 4.0);
+    REQUIRE(fixture.processor.heritage_diagnostics().status ==
+            PulpSamplerHeritageStatus::Ready);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 0);
+}
+
+TEST_CASE("PulpSampler enforces the profile transpose envelope at admission and automation",
+          "[audio][sampler][heritage][pitch][envelope]") {
+    auto profile = typed_pitch_artifact_profile();
+    auto& pitch = std::get<audio::SampleHeritageVoicePitchBlock>(
+        profile.voice[1].parameters);
+    pitch.max_transpose_semitones = 6.0;
+    HeritageFixture fixture(64, &profile);
+    fixture.load(std::vector<float>(4096, 0.25f));
+    constexpr std::array block{std::size_t{64}};
+
+    (void)render(fixture, block, 0, 72);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_voices(fixture.processor) == 0);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_admission_rejections == 1);
+
+    (void)render(fixture, block, 0, 60);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_voices(fixture.processor) == 1);
+    fixture.store.set_value(kSamplerPitch, 12.0f);
+    (void)render(fixture, block, 0, 60, false);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_pitch_factor(
+                fixture.processor) == 1.0);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 1);
+}
+
+TEST_CASE("PulpSampler fades streamed voices closed when automation leaves the profile envelope",
+          "[audio][sampler][heritage][pitch][envelope][stream][automation]") {
+    HeritageTempWav source("streamed_transpose_envelope", 2000000);
+    auto profile = typed_pitch_artifact_profile();
+    auto& pitch = std::get<audio::SampleHeritageVoicePitchBlock>(
+        profile.voice[1].parameters);
+    pitch.max_transpose_semitones = 6.0;
+    HeritageFixture fixture(64, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    REQUIRE(fixture.processor.load_sample_file(source.path));
+
+    constexpr std::array block{std::size_t{64}};
+    (void)render(fixture, block, 0, 60);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 1);
+    fixture.store.set_value(kSamplerPitch, 12.0f);
+    (void)render(fixture, block, 0, 60, false);
+    REQUIRE(PulpSamplerHeritageTestAccess::active_streamed_voices(
+                fixture.processor) == 0);
+    REQUIRE(fixture.processor.heritage_diagnostics().rate_automation_rejections == 1);
 }

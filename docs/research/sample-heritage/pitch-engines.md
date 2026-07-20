@@ -16,6 +16,39 @@
   linear interpolation, nor that a generic two-point interpolator matches a
   particular product.
 
+## Five-machine evidence
+
+- **Confirmed — SP-1200.** The [owner's manual](https://www.autistici.org/2000-maniax/texts/sp1200_manual.pdf),
+  pages 8 and 93, gives a tuning span of plus or minus a fifth, says tuning may
+  produce ring-modulation-like results, and says received sample-period metadata
+  is ignored because playback has one 26.04 kHz rate. **Probable** — this is a
+  fixed-output-rate family. **Test** — distinguish drop/repeat from interpolation
+  by inspecting repeated-sample patterns and alias trajectories; the manual does
+  not name that sub-mechanism.
+- **Confirmed — S950.** The [operator's manual](https://manuals.fdiskc.com/flat/Akai%20S-950%20Owners%20Manual.pdf),
+  page 40, permits per-keygroup transposition by plus or minus 50 semitones.
+  **Test** — the user control range does not identify the resampling topology;
+  capture output-rate images and pitch-step behavior before assigning
+  `variable_clock`, `drop_repeat`, or `early_linear`.
+- **Confirmed — S1100.** The [service-manual specifications](https://manualzz.com/doc/6408169/akai-s1100-digital-sampler-service-manual)
+  explicitly identify a 24-bit custom-LSI interpolation/decimation pitch
+  algorithm, a plus or minus two-octave range, and one-cent steps. **Probable** —
+  this belongs to a fixed-rate interpolating family, but it is not evidence for
+  Pulp's two-point `early_linear` kernel. **Test** — estimate the actual
+  interpolation response from fractional-delay and alias-residual captures.
+- **Probable — S612.** The [service manual, part 1](https://www.florian-anwander.de/akai_s612/Akai_S-612_Service_Manual_Part_1.pdf),
+  sampling instructions and Table 1, tie MIDI notes 36, 48, 60, and 72 to 4, 8,
+  16, and 32 kHz sampling clocks and explain the corresponding octave
+  transposition on playback. Intermediate notes select intermediate frequencies.
+  This strongly supports a clock-linked family. **Test** — capture DAC update
+  timing across notes to prove whether playback itself varies the converter
+  clock and to bound the usable range.
+- **Test — S-550.** The [service notes](https://archive.org/details/roland_S-550_SERVICE_NOTES),
+  pages 7-9, place note/envelope/loop computation and 12-to-16-bit waveform
+  expansion in the wave gate array, but do not specify the interpolation kernel.
+  Use fractional-pitch impulses and tones to classify the pitch family rather
+  than inferring it from the fixed 30/15 kHz record-rate choices.
+
 ## Mapping to the neutral mechanism
 
 - **Confirmed** — [`SampleHeritagePitchFamily`](../../../core/audio/include/pulp/audio/sample_heritage_schema.hpp)
