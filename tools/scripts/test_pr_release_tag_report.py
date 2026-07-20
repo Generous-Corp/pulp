@@ -134,8 +134,16 @@ class PrReleaseTagReportTests(GateFixtureTestCase):
         code, out = self._run_report(pr_title="Document later work")
         self.assertEqual(code, 0, msg=out)
         report = {item["surface"]: item for item in json.loads(out)}
+        # Behavior under test: the earlier Release: skip is honored despite the
+        # later unrelated push (no SDK tag). Previously the buried trailer was
+        # invisible (the squash void this same PR fixes), so the guard fell back
+        # to a sticky-skip lookup and the reason read "sticky skip". Now the
+        # trailer is rescued directly, so the reason names it. Assert the
+        # outcome + the real trailer, not the internal fallback path — the
+        # sticky-skip mechanism keeps its own coverage in
+        # test_auto_release_decision.py.
         self.assertEqual(report["sdk"]["expected_tag"], "")
-        self.assertIn("sticky skip", report["sdk"]["reason"])
+        self.assertIn("Release: skip", report["sdk"]["reason"])
 
     def test_synthetic_merge_uses_pr_tip_for_guard_prediction(self) -> None:
         self._tag_base_versions()
