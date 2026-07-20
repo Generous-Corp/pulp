@@ -224,9 +224,30 @@ std::optional<int> merge_frame_envelopes(const std::vector<fs::path>& envelopes,
 }
 
 fs::path make_scratch_dir(const std::string& tag, const std::string& input_file) {
+    const auto tmp_root = fs::temp_directory_path();
+
+    // Best-effort sweep of STALE scratch siblings for this tag. Every run
+    // removes its own scratch on exit, but a run killed mid-decode (test
+    // timeout, ^C during a sweep) never reaches that destructor and the dir
+    // leaks — hundreds had accumulated in $TMPDIR before this sweep existed.
+    // The 24h age floor keeps any plausibly-live concurrent import untouched.
+    const std::string prefix = "pulp-" + tag + "-";
+    const auto now = fs::file_time_type::clock::now();
+    constexpr auto kStaleAge = std::chrono::hours(24);
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(tmp_root, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        if (entry.path().filename().string().rfind(prefix, 0) != 0) continue;
+        const auto mtime = fs::last_write_time(entry.path(), ec);
+        if (ec) { ec.clear(); continue; }
+        if (now - mtime < kStaleAge) continue;
+        fs::remove_all(entry.path(), ec);
+        ec.clear();
+    }
+
     const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-    return fs::temp_directory_path()
-           / ("pulp-" + tag + "-" + fs::path(input_file).stem().string() + "-" +
+    return tmp_root
+           / (prefix + fs::path(input_file).stem().string() + "-" +
               std::to_string(tick));
 }
 
