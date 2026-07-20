@@ -16,6 +16,7 @@ add_library(pulp-timeline
     src/schema_json_parser.cpp
     src/schema_json_preflight.cpp
     src/schema_registry.cpp
+    src/sequence.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
