@@ -1,6 +1,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
 #include "track_schema_policy.hpp"
+#include "sequence_schema_policy.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -62,6 +63,8 @@ class StructuralScanner {
     std::size_t device_placements_ = 0;
     std::size_t automation_lanes_ = 0;
     std::size_t automation_points_ = 0;
+    std::size_t sequence_markers_ = 0;
+    std::size_t sequence_regions_ = 0;
     std::size_t locators_ = 0;
     std::size_t representations_ = 0;
 
@@ -568,24 +571,77 @@ class StructuralScanner {
         Span data;
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape)) return false;
-        if (type != "pulp.timeline.sequence") {
+        if (type != detail::sequence_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin)) return false;
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::sequence_schema_policy.oldest_readable_version,
+                                      detail::sequence_schema_policy.current_version)) return false;
         const auto data_path = path + "/data";
         if (!require_member(data, "absolute_duration", ObjectShape | NullShape, data_path) ||
             !require_member(data, "id", StringShape, data_path) ||
             !require_member(data, "musical_duration", StringShape | NullShape, data_path) ||
             !require_member(data, "name", StringShape, data_path)) return false;
         Span tracks;
-        bool found = false;
-        if (!member(data, "tracks", tracks, found)) return false;
-        if (!found) {
+        Span markers;
+        Span regions;
+        bool has_tracks = false;
+        bool has_markers = false;
+        bool has_regions = false;
+        if (!member(data, "tracks", tracks, has_tracks) ||
+            !member(data, "markers", markers, has_markers) ||
+            !member(data, "regions", regions, has_regions)) return false;
+        const bool has_annotations = detail::sequence_has_annotations(version);
+        if (!has_tracks || (has_annotations && (!has_markers || !has_regions)) ||
+            (!has_annotations && (has_markers || has_regions))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/tracks");
             return false;
         }
+        if (has_markers && !governed_array(
+            markers, sequence_markers_, limits_.max_sequence_markers, path + "/data/markers",
+            [&](Span element, std::size_t index) {
+                const auto item_path = path + "/data/markers/" + std::to_string(index);
+                std::string marker_type;
+                std::uint32_t marker_version = 0;
+                Span marker_data;
+                bool marker_shape = false;
+                if (!envelope(element, marker_type, marker_version, marker_data, marker_shape))
+                    return false;
+                if (marker_type != "pulp.timeline.sequence_marker") {
+                    set_error(PersistenceErrorCode::InvalidSchema, element.begin, 0, 0,
+                              item_path);
+                    return false;
+                }
+                return require_structural_shape(marker_shape, marker_version, item_path,
+                                                element.begin) &&
+                       require_member(marker_data, "id", StringShape, item_path + "/data") &&
+                       require_member(marker_data, "name", StringShape, item_path + "/data") &&
+                       require_member(marker_data, "point", ObjectShape, item_path + "/data") &&
+                       require_member(marker_data, "type", StringShape, item_path + "/data");
+            })) return false;
+        if (has_regions && !governed_array(
+            regions, sequence_regions_, limits_.max_sequence_regions, path + "/data/regions",
+            [&](Span element, std::size_t index) {
+                const auto item_path = path + "/data/regions/" + std::to_string(index);
+                std::string region_type;
+                std::uint32_t region_version = 0;
+                Span region_data;
+                bool region_shape = false;
+                if (!envelope(element, region_type, region_version, region_data, region_shape))
+                    return false;
+                if (region_type != "pulp.timeline.sequence_region") {
+                    set_error(PersistenceErrorCode::InvalidSchema, element.begin, 0, 0,
+                              item_path);
+                    return false;
+                }
+                return require_structural_shape(region_shape, region_version, item_path,
+                                                element.begin) &&
+                       require_member(region_data, "id", StringShape, item_path + "/data") &&
+                       require_member(region_data, "name", StringShape, item_path + "/data") &&
+                       require_member(region_data, "range", ObjectShape, item_path + "/data");
+            })) return false;
         return governed_array(
             tracks, tracks_, limits_.max_tracks, path + "/data/tracks",
             [&](Span element, std::size_t index) {

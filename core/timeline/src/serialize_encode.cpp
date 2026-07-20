@@ -4,6 +4,7 @@
 #include "schema_json_write_internal.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
+#include "sequence_schema_policy.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -137,6 +138,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "automation_lane";
     case ItemKind::AutomationPoint:
         return "automation_point";
+    case ItemKind::SequenceMarker:
+        return "sequence_marker";
+    case ItemKind::SequenceRegion:
+        return "sequence_region";
     }
     return "project";
 }
@@ -382,7 +387,8 @@ bool write_track(EncodeContext& context, const Track& track) {
 }
 
 bool write_sequence(EncodeContext& context, const Sequence& sequence) {
-    return write_envelope(context, "pulp.timeline.sequence", 1, [&] {
+    return write_envelope(context, detail::sequence_schema_policy.type_name,
+                          detail::sequence_schema_policy.current_version, [&] {
         if (!context.writer.append("{\"absolute_duration\":"))
             return false;
         if (sequence.absolute_duration()) {
@@ -395,7 +401,39 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
         } else if (!context.writer.append("null"))
             return false;
         if (!context.writer.append(",\"id\":") || !context.writer.u64(sequence.id().value, true) ||
-            !context.writer.append(",\"musical_duration\":"))
+            !context.writer.append(",\"markers\":["))
+            return false;
+        for (std::size_t index = 0; index < sequence.markers().size(); ++index) {
+            const auto& marker = sequence.markers()[index];
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_envelope(context, "pulp.timeline.sequence_marker", 1, [&] {
+                    if (!context.writer.append("{\"id\":") ||
+                        !context.writer.u64(marker.id.value, true) ||
+                        !context.writer.append(",\"name\":") ||
+                        !context.writer.quoted(marker.name) ||
+                        !context.writer.append(",\"point\":"))
+                        return false;
+                    if (const auto* musical = std::get_if<MusicalSequencePoint>(&marker.point)) {
+                        if (!context.writer.append("{\"kind\":\"musical\",\"position_ticks\":") ||
+                            !context.writer.i64(musical->position.value, true) ||
+                            !context.writer.character('}'))
+                            return false;
+                    } else {
+                        const auto& absolute = std::get<AbsoluteSequencePoint>(marker.point);
+                        if (!context.writer.append("{\"kind\":\"absolute\",\"position_sample\":") ||
+                            !context.writer.i64(absolute.position.value, true) ||
+                            !context.writer.append(",\"sample_rate\":") ||
+                            !write_rate(context, absolute.sample_rate) ||
+                            !context.writer.character('}'))
+                            return false;
+                    }
+                    return context.writer.append(",\"type\":") &&
+                           context.writer.quoted(marker.type.value()) &&
+                           context.writer.character('}');
+                }))
+                return false;
+        }
+        if (!context.writer.append("],\"musical_duration\":"))
             return false;
         if (sequence.duration()) {
             if (!context.writer.i64(sequence.duration()->value, true))
@@ -403,7 +441,36 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
         } else if (!context.writer.append("null"))
             return false;
         if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
-            !context.writer.append(",\"tracks\":["))
+            !context.writer.append(",\"regions\":["))
+            return false;
+        for (std::size_t index = 0; index < sequence.regions().size(); ++index) {
+            const auto& region = sequence.regions()[index];
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_envelope(context, "pulp.timeline.sequence_region", 1, [&] {
+                    if (!context.writer.append("{\"id\":") ||
+                        !context.writer.u64(region.id.value, true) ||
+                        !context.writer.append(",\"name\":") ||
+                        !context.writer.quoted(region.name) ||
+                        !context.writer.append(",\"range\":"))
+                        return false;
+                    if (const auto* musical = std::get_if<MusicalSequenceRange>(&region.range))
+                        return context.writer.append("{\"duration_ticks\":") &&
+                               context.writer.i64(musical->duration.value, true) &&
+                               context.writer.append(",\"kind\":\"musical\",\"start_ticks\":") &&
+                               context.writer.i64(musical->start.value, true) &&
+                               context.writer.append("}}");
+                    const auto& absolute = std::get<AbsoluteSequenceRange>(region.range);
+                    return context.writer.append("{\"kind\":\"absolute\",\"sample_count\":") &&
+                           context.writer.u64(absolute.sample_count, true) &&
+                           context.writer.append(",\"sample_rate\":") &&
+                           write_rate(context, absolute.sample_rate) &&
+                           context.writer.append(",\"start_sample\":") &&
+                           context.writer.i64(absolute.start.value, true) &&
+                           context.writer.append("}}");
+                }))
+                return false;
+        }
+        if (!context.writer.append("],\"tracks\":["))
             return false;
         for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
             if ((index != 0 && !context.writer.character(',')) ||
@@ -455,6 +522,18 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
+        for (std::size_t marker_index = 0; marker_index < sequence.markers().size(); ++marker_index) {
+            const auto& marker = sequence.markers()[marker_index];
+            if (!is_valid_utf8(marker.name) || !is_valid_utf8(marker.type.value()))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/markers/" +
+                                                    std::to_string(marker_index) + "/data");
+        }
+        for (std::size_t region_index = 0; region_index < sequence.regions().size(); ++region_index)
+            if (!is_valid_utf8(sequence.regions()[region_index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/regions/" +
+                                                    std::to_string(region_index) + "/data/name");
         for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index)
             if (!is_valid_utf8(sequence.tracks()[track_index].name()))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,

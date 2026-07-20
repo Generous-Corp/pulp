@@ -52,6 +52,7 @@ pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
+        test_timeline_annotation_persistence.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
@@ -109,9 +110,11 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_annotations.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_sequence_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp

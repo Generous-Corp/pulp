@@ -19,9 +19,11 @@ add_library(pulp-timeline
     src/schema_registry.cpp
     src/sequence.cpp
     src/sequence_annotations.cpp
+    src/sequence_schema_migrations.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
+    src/serialize_sequence_decode.cpp
     src/snapshot_equivalence.cpp
     src/structural_registry_validation.cpp
     src/track.cpp

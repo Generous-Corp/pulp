@@ -3,6 +3,7 @@
 #include "project_state_access.hpp"
 #include "serialize_automation_decode.hpp"
 #include "serialize_internal.hpp"
+#include "serialize_sequence_decode.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
@@ -12,6 +13,8 @@
 
 namespace pulp::timeline {
 namespace {
+
+using detail::DecodeCounts;
 
 template <typename T>
 runtime::Result<T, PersistenceError> fail(PersistenceErrorCode code, std::string path = {},
@@ -50,19 +53,12 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::AutomationLane);
     if (value == "automation_point")
         return runtime::Ok(ItemKind::AutomationPoint);
+    if (value == "sequence_marker")
+        return runtime::Ok(ItemKind::SequenceMarker);
+    if (value == "sequence_region")
+        return runtime::Ok(ItemKind::SequenceRegion);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
-
-struct DecodeCounts {
-    std::size_t assets = 0;
-    std::size_t sequences = 0;
-    std::size_t tracks = 0;
-    std::size_t clips = 0;
-    std::size_t notes = 0;
-    std::size_t device_placements = 0;
-    std::size_t automation_lanes = 0;
-    std::size_t automation_points = 0;
-};
 
 runtime::Result<const JsonValue*, PersistenceError>
 required(const JsonValue& object_value, std::string_view name, std::string path) {
@@ -619,65 +615,6 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
-runtime::Result<Sequence, PersistenceError>
-decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
-                const SchemaRegistry& registry, const DecodeLimits& limits, DecodeCounts& counts,
-                std::string path) {
-    if (++counts.sequences > limits.max_sequences)
-        return fail<Sequence>(PersistenceErrorCode::LimitExceeded, path, value.begin,
-                              counts.sequences, limits.max_sequences);
-    auto data = data_for(value, "pulp.timeline.sequence", path);
-    if (!data)
-        return fail<Sequence>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto tracks = required(*data.value(), "tracks", path + "/data");
-    auto musical = required(*data.value(), "musical_duration", path + "/data");
-    auto absolute = required(*data.value(), "absolute_duration", path + "/data");
-    if (!id || !name || !tracks || !musical || !absolute ||
-        tracks.value()->kind != JsonValue::Kind::Array)
-        return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
-    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
-    if (!decoded_id)
-        return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
-                              decoded_id.error().byte_offset);
-    std::optional<timebase::TickDuration> decoded_musical;
-    if (musical.value()->kind != JsonValue::Kind::Null) {
-        auto parsed = parse_canonical_i64_string(*musical.value(), path + "/data/musical_duration");
-        if (!parsed)
-            return fail<Sequence>(parsed.error().code, parsed.error().path,
-                                  parsed.error().byte_offset);
-        decoded_musical = timebase::TickDuration{parsed.value()};
-    }
-    std::optional<AbsoluteTimelineDuration> decoded_absolute;
-    if (absolute.value()->kind != JsonValue::Kind::Null) {
-        auto count = required(*absolute.value(), "sample_count", path + "/data/absolute_duration");
-        auto rate = required(*absolute.value(), "sample_rate", path + "/data/absolute_duration");
-        if (!count || !rate)
-            return fail<Sequence>(PersistenceErrorCode::MissingField, path);
-        auto decoded_count = parse_canonical_u64_string(
-            *count.value(), path + "/data/absolute_duration/sample_count");
-        auto decoded_rate =
-            decode_rate(*rate.value(), path + "/data/absolute_duration/sample_rate");
-        if (!decoded_count || !decoded_rate)
-            return fail<Sequence>(PersistenceErrorCode::InvalidNumber, path);
-        decoded_absolute = AbsoluteTimelineDuration{decoded_count.value(), decoded_rate.value()};
-    }
-    std::vector<Track> decoded_tracks;
-    for (std::size_t index = 0; index < tracks.value()->array.size(); ++index) {
-        auto decoded = decode_track(document, tracks.value()->array[index], registry, limits,
-                                    counts, path + "/data/tracks/" + std::to_string(index));
-        if (!decoded)
-            return runtime::Err(decoded.error());
-        decoded_tracks.push_back(std::move(decoded).value());
-    }
-    auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
-                                    decoded_absolute, std::move(decoded_tracks));
-    if (!created)
-        return model_fail<Sequence>(created.error(), std::move(path));
-    return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));
-}
-
 } // namespace
 
 runtime::Result<Project, PersistenceError> deserialize_project(std::string_view json,
@@ -724,8 +661,9 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
     }
     std::vector<Sequence> decoded_sequences;
     for (std::size_t index = 0; index < sequences.value()->array.size(); ++index) {
-        auto decoded = decode_sequence(parsed.value(), sequences.value()->array[index], registry,
-                                       limits, counts, "/data/sequences/" + std::to_string(index));
+        auto decoded = detail::decode_sequence(
+            parsed.value(), sequences.value()->array[index], registry, limits, counts,
+            "/data/sequences/" + std::to_string(index), decode_track);
         if (!decoded)
             return runtime::Err(decoded.error());
         decoded_sequences.push_back(std::move(decoded).value());

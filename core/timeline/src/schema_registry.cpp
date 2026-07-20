@@ -1,6 +1,8 @@
 #include <pulp/timeline/schema_registry.hpp>
 
 #include "track_schema_migrations.hpp"
+#include "sequence_schema_migrations.hpp"
+#include "sequence_schema_policy.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
@@ -280,12 +282,28 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"locators", SchemaValueKind::Array},
                                {"role", SchemaValueKind::String},
                                {"storage_policy", SchemaValueKind::String}}));
-    schemas.push_back(builtin("pulp.timeline.sequence", SchemaDomain::Document,
-                              {{"absolute_duration", SchemaValueKind::Object},
-                               {"id", SchemaValueKind::U64String},
-                               {"musical_duration", SchemaValueKind::I64String},
+    auto sequence = builtin(std::string(detail::sequence_schema_policy.type_name),
+                            SchemaDomain::Document,
+                            {{"absolute_duration", SchemaValueKind::Object},
+                             {"id", SchemaValueKind::U64String},
+                             {"markers", SchemaValueKind::Array},
+                             {"musical_duration", SchemaValueKind::I64String},
+                             {"name", SchemaValueKind::String},
+                             {"regions", SchemaValueKind::Array},
+                             {"tracks", SchemaValueKind::Array}},
+                            detail::sequence_schema_policy.current_version);
+    sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
+    sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
+    schemas.push_back(std::move(sequence));
+    schemas.push_back(builtin("pulp.timeline.sequence_marker", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
-                               {"tracks", SchemaValueKind::Array}}));
+                               {"point", SchemaValueKind::Object},
+                               {"type", SchemaValueKind::String}}));
+    schemas.push_back(builtin("pulp.timeline.sequence_region", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"range", SchemaValueKind::Object}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
                          {{"automation_lanes", SchemaValueKind::Array},
                           {"clips", SchemaValueKind::Array},

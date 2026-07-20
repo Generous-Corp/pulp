@@ -67,6 +67,8 @@ struct DecodeLimits {
     std::size_t max_device_placements = 100'000;
     std::size_t max_automation_lanes = 100'000;
     std::size_t max_automation_points = 5'000'000;
+    std::size_t max_sequence_markers = 100'000;
+    std::size_t max_sequence_regions = 100'000;
 
     static DecodeLimits web_defaults() noexcept;
 };
