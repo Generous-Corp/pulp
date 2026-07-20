@@ -289,8 +289,9 @@ bool SampleHeritageLiveCyclicStretch::fill_permutation(std::uint64_t cycle_index
         return true;
 
     const auto stream = config_.linked_channels ? 0u : static_cast<std::uint64_t>(channel);
-    auto state =
-        config_.seed ^ (cycle_index * 0xd1342543de82ef95ULL) ^ (stream * 0xa24baed4963ee407ULL);
+    std::uint64_t state =
+        config_.seed ^ (cycle_index * UINT64_C(0xd1342543de82ef95)) ^
+        (stream * UINT64_C(0xa24baed4963ee407));
     for (std::size_t count = config_.shuffle_divisions; count > 1; --count) {
         const auto selected = static_cast<std::size_t>(splitmix64(state) % count);
         std::swap(destination[count - 1], destination[selected]);
