@@ -277,6 +277,20 @@ def apply_and_push(
         if pushed.returncode == 0:
             return "applied", plan
 
+        # Surface git's real rejection. Without this the caller only prints the
+        # generic "branch kept moving" summary, so a NON-race rejection — a
+        # branch ruleset (e.g. GH006 "Changes must be made through the merge
+        # queue"), a permission/auth failure, a hook — is indistinguishable from
+        # a genuine fast-forward race and effectively invisible. The retry loop
+        # below still treats every failure as a lost race; this only makes the
+        # cause diagnosable in the run log.
+        detail = (pushed.stderr or pushed.stdout or "").strip()
+        sys.stderr.write(
+            f"version-at-land: push attempt {attempt} rejected "
+            f"(exit {pushed.returncode}){':' if detail else '.'}\n")
+        if detail:
+            sys.stderr.write(f"{detail}\n")
+
         # Non-fast-forward (someone else advanced the branch) — discard our
         # local bump commit and retry from the new tip.
         _git(repo, "reset", "--hard", head)

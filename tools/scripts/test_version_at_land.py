@@ -21,6 +21,8 @@ concurrent post-merge drains must not lose or duplicate a version (the
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -333,6 +335,35 @@ class ConcurrentDrainRaceTest(unittest.TestCase):
         # Applied EXACTLY once: 0.1.0 -> 0.2.0 (never 0.3.0), one bump commit.
         self.assertEqual(self._origin_cmake_version(), "0.2.0")
         self.assertEqual(self._origin_bump_commit_count(), 1)
+
+    def test_push_rejection_detail_is_surfaced(self) -> None:
+        # A rejected push must print git's real reason, not just the caller's
+        # generic "branch kept moving" summary — otherwise a NON-race rejection
+        # (branch ruleset / merge-queue / auth) is invisible in the run log.
+        a_status = {}
+
+        def land_A_first(attempt: int) -> None:
+            if attempt != 0 or a_status:
+                return
+            cfgA = self._load_for(self.cloneA)
+            a_status["status"], a_status["plan"] = val.apply_and_push(
+                self.cloneA, cfgA, remote="origin", branch="main",
+                max_retries=3)
+
+        cfgB = self._load_for(self.cloneB)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            b_status, _ = val.apply_and_push(
+                self.cloneB, cfgB, remote="origin", branch="main",
+                max_retries=3, on_before_push=land_A_first)
+        self.assertEqual(b_status, "noop")
+
+        captured = err.getvalue()
+        # The attempt-level line names the losing attempt and its exit code.
+        self.assertIn("push attempt 0 rejected", captured)
+        # And git's own rejection text is echoed (a non-ff push says "rejected"
+        # and hints "fetch first" / "[rejected]").
+        self.assertRegex(captured.lower(), r"reject|fetch first|non-fast")
 
     def test_single_run_applies_and_is_idempotent_on_rerun(self) -> None:
         cfgA = self._load_for(self.cloneA)
