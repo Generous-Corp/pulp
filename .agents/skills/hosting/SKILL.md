@@ -834,12 +834,14 @@ reuses the one backend, so the baked Processor only CALLS `process_routed`, neve
 defines a routing entry point.
 
 Gotchas:
-- **Lowerable subset is narrow by design.** Today: `AudioInput`/`AudioOutput`/`Gain`
-  only. `bake()` REFUSES loudly (null processor + a `LowerRejectReason`) for an
-  unprepared or executor-ineligible graph, a hosted `Plugin` node (opaque external
-  state — not self-contained), or a `Custom` node (lowering is a follow-up). The
-  node-kind refusals are checked BEFORE the eligibility predicate so a Plugin/Custom
-  graph reports its specific reason instead of a generic `NotExecutorEligible`.
+- **Lowerable subset is narrow by design.** Today: `AudioInput`/`AudioOutput`/`Gain`,
+  plus a `Custom` node whose registered type opts in (`lowerable = true`, shape
+  match, transport-independent). `bake()` REFUSES loudly (null processor + a
+  `LowerRejectReason`) for an unprepared or executor-ineligible graph, a hosted
+  `Plugin` node (opaque external state — not self-contained), or a `Custom` node that
+  does not meet the opt-in bar. The node-kind refusals are checked BEFORE the
+  eligibility predicate so a Plugin/Custom graph reports its specific reason instead
+  of a generic `NotExecutorEligible`.
 - **The baked Processor owns its Gain values.** `bake()` copies each Gain's value into
   the Processor; `prepare()` seeds one heap-stable `atomic<float>` per Gain (a
   `unique_ptr` vector, never a value vector) and resolves the routed Gain bindings to
@@ -857,6 +859,25 @@ Gotchas:
   live graph's legacy WALK and to its routed executor (the test asserts the walk case
   explicitly by forcing routing OFF, since canonical-executor routing is now ON by
   default).
+- **In-place hosts alias input over output — never let the executor's output-zero
+  destroy the input.** `process_routed()` zeroes the main output bus BEFORE its
+  `AudioInput` gather reads the input bus (AudioOutput nodes accumulate, so N sinks
+  mix). Logic-style hosts (AUv2, some AUv3) hand `process()` input and output views
+  over the SAME memory, so that zero used to wipe the input → total silence.
+  `BakedGraphProcessor::process()` now detects any input-channel/output-channel
+  overlap and reads the input from a scratch copy sized in `prepare()` (audio thread
+  does pointer compares + `copy_n` only — no allocation). Any OTHER direct caller of
+  `process_routed()` that bridges host buffers must apply the same guard; the
+  executor itself deliberately keeps the zero-then-gather order.
+- **Stateful Custom instances need their lifecycle re-run at baked `prepare()`.**
+  The captured `CustomNodeProcessFn` is an opaque closure over the instance; the
+  instance's `prepare`/`reset` hooks are NOT inside it. `bake()` therefore also
+  captures per-node `CustomNodeLifecycle` closures (type `prepare` + `reset` bound to
+  the instance shared_ptr) and `BakedGraphProcessor::prepare()` runs them — re-prepare
+  at the HOST's real rate/block (load_baked only prepares at a nominal 48k/512), then
+  reset so stale DSP state (a delay line's contents) never survives a re-prepare.
+  Note the instance is SHARED with the source graph — the baked path does not clone
+  it — so a baked re-prepare also resets that node in a still-live source graph.
 
 ## Common tripwires
 
