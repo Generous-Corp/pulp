@@ -23,7 +23,8 @@ constexpr const char* stretched_profile_json =
     "\"type\":\"live_cyclic_stretch\",\"bypass\":false,\"factor\":2,"
     "\"cycle_ms\":10,\"splice_ms\":1,\"stereo_link\":true,"
     "\"shuffle_divisions\":0,\"seed\":\"0\","
-    "\"seed_policy\":\"restart_from_profile_seed\"}],"
+    "\"seed_policy\":\"restart_from_profile_seed\","
+    "\"pitch_mode\":\"preserve\",\"tempo_lock\":true}],"
     "\"bus\":[],\"record_commit\":[]}";
 
 fs::path make_profile(const fs::path& directory, std::string_view contents = profile_json) {

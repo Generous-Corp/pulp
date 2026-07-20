@@ -106,7 +106,7 @@ pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
     INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/examples/PulpSampler
                  ${PROJECT_SOURCE_DIR}/test/harness
     COMPILE_DEFINITIONS PULP_SAMPLER_TEST_HOOKS=1
-    TEST_SPEC "[shipping-gate]~[g1],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
+    TEST_SPEC "[shipping-gate]~[g1]~[performance],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
     LABELS "audio;sampler;heritage;quality-lab;shipping-gate"
     TIMEOUT 30)
 catch_discover_tests(pulp-test-sample-heritage-shipping-gates
@@ -114,6 +114,13 @@ catch_discover_tests(pulp-test-sample-heritage-shipping-gates
     TEST_PREFIX "heritage-g1::"
     PROPERTIES
         LABELS "audio;sampler;heritage;heritage-g1;shipping-gate"
+        TIMEOUT 30)
+catch_discover_tests(pulp-test-sample-heritage-shipping-gates
+    TEST_SPEC "[shipping-gate][performance]"
+    TEST_PREFIX "heritage-performance::"
+    PROPERTIES
+        LABELS "audio;sampler;heritage;quality-lab;shipping-gate;performance"
+        RUN_SERIAL TRUE
         TIMEOUT 30)
 include("${CMAKE_CURRENT_LIST_DIR}/heritage_calibration_tests.cmake")
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
