@@ -115,6 +115,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
     pulp::runtime pulp::timebase)

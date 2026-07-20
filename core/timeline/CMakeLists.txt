@@ -24,6 +24,7 @@ add_library(pulp-timeline
     src/track.cpp
     src/track_schema_migrations.cpp
     src/transaction_automation_internal.cpp
+    src/transaction_reduction_support.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 
