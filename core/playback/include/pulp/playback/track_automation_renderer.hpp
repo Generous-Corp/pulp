@@ -40,6 +40,7 @@ enum class TrackAutomationRendererCode : std::uint8_t {
     TempoMapMismatch,
     LaneAdoptionRejected,
     LaneCapacityExceeded,
+    PointCapacityExceeded,
     DeviceCapacityExceeded,
     WorkCapacityExceeded,
     InvalidLimits,

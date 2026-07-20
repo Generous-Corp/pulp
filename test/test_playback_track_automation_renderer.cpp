@@ -61,6 +61,21 @@ hold_program(ItemId lane_id, DeviceParameterTarget target,
     return take(AutomationProgram::compile(lane, map, 1));
 }
 
+std::shared_ptr<const AutomationProgram>
+dense_continuous_program(ItemId lane_id, DeviceParameterTarget target,
+                         const std::shared_ptr<const CompiledTempoMap>& map,
+                         std::uint32_t point_count) {
+    std::vector<AutomationPoint> points;
+    points.reserve(point_count);
+    for (std::uint32_t index = 0; index < point_count; ++index) {
+        points.push_back({{lane_id.value * 10'000u + index + 1u},
+                          map->samples_to_ticks({index}), static_cast<float>(index)});
+    }
+    auto lane = take(AutomationLane::create(
+        lane_id, target, take(AutomationCurve::create(std::move(points)))));
+    return take(AutomationProgram::compile(lane, map, 1));
+}
+
 void prepare(MasterTransport& transport, const CompiledTempoMap& map,
              std::uint32_t maximum_frames) {
     MasterTransportConfig config;
@@ -263,34 +278,65 @@ TEST_CASE("track automation renderer rejects topology beyond prepared limits") {
             TrackAutomationRendererCode::DeviceCapacityExceeded);
 
     auto invalid_limits = AutomationPlaybackLimits{};
-    invalid_limits.max_render_candidates_per_block = 0;
+    invalid_limits.max_intersecting_segments_per_block = 0;
     const auto invalid = TrackAutomationRenderer::create(track(map, {first}), invalid_limits);
     REQUIRE_FALSE(invalid);
     REQUIRE(invalid.error().code == TrackAutomationRendererCode::InvalidLimits);
 }
 
-TEST_CASE("track automation renderer bounds total merge work and preserves candidate diagnostics") {
+TEST_CASE("track automation renderer bounds intersecting segment work") {
     const auto map = tempo_map();
-    const auto lane = program({10}, {{100}, 1}, map, 1, 1'999);
+    const auto lane = dense_continuous_program({10}, {{100}, 1}, map, 1'025);
     auto limits = AutomationPlaybackLimits{};
-    limits.max_render_candidates_per_block = 1'023;
+    limits.max_intersecting_segments_per_block = 1'024;
     auto renderer = take(TrackAutomationRenderer::create(track(map, {lane}), limits));
     MasterTransport transport;
-    prepare(transport, *map, 2'000);
+    prepare(transport, *map, 1'025);
 
-    const auto bounded = renderer.process(block(transport, 2'000));
+    const auto bounded = renderer.process(block(transport, 1'025));
     REQUIRE(bounded.code == TrackAutomationRendererCode::WorkCapacityExceeded);
     REQUIRE(bounded.failed_lane_id == ItemId{10});
-    REQUIRE(bounded.candidate_events > TrackAutomationRenderer::kEventsPerDevice);
     REQUIRE(renderer.batches()[0].events.empty());
 
-    limits.max_render_candidates_per_block = TrackAutomationRenderer::kEventsPerDevice;
-    auto coalesced = take(TrackAutomationRenderer::create(track(map, {lane}), limits));
+    const auto continuous = program({20}, {{100}, 1}, map, 1, 1'999);
+    limits.max_intersecting_segments_per_block = 2;
+    auto coalesced =
+        take(TrackAutomationRenderer::create(track(map, {continuous}), limits));
     MasterTransport second_transport;
     prepare(second_transport, *map, 2'000);
     const auto rendered = coalesced.process(block(second_transport, 2'000));
     REQUIRE(rendered.code == TrackAutomationRendererCode::Coalesced);
     REQUIRE(rendered.candidate_events > rendered.emitted_events);
+}
+
+TEST_CASE("track automation renderer rejects direct programs beyond point limits") {
+    const auto map = tempo_map();
+    const auto dense = hold_program({10}, {{100}, 1}, map, 5);
+
+    auto lane_limits = AutomationPlaybackLimits{};
+    lane_limits.max_points_per_lane = 4;
+    lane_limits.max_points_per_track = 3;
+    STATIC_REQUIRE(AutomationPlaybackLimits{
+                       .max_points_per_lane = 4, .max_points_per_track = 3}
+                       .valid());
+    const auto lane_rejected =
+        TrackAutomationRenderer::create(track(map, {dense}), lane_limits);
+    REQUIRE_FALSE(lane_rejected);
+    REQUIRE(lane_rejected.error().code ==
+            TrackAutomationRendererCode::PointCapacityExceeded);
+    REQUIRE(lane_rejected.error().lane_id == ItemId{10});
+
+    const auto first = hold_program({20}, {{100}, 2}, map, 2);
+    const auto second = hold_program({30}, {{100}, 3}, map, 2);
+    auto track_limits = AutomationPlaybackLimits{};
+    track_limits.max_points_per_lane = 2;
+    track_limits.max_points_per_track = 3;
+    const auto track_rejected = TrackAutomationRenderer::create(
+        track(map, {first, second}), track_limits);
+    REQUIRE_FALSE(track_rejected);
+    REQUIRE(track_rejected.error().code ==
+            TrackAutomationRendererCode::PointCapacityExceeded);
+    REQUIRE(track_rejected.error().lane_id == ItemId{30});
 }
 
 TEST_CASE("track automation renderer honors configured per-device output headroom") {

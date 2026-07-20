@@ -10,8 +10,9 @@ namespace pulp::playback {
 namespace {
 
 runtime::Result<TrackAutomationRendererAdoption, TrackAutomationRendererError>
-adoption_error(TrackAutomationRendererCode code, timeline::ItemId track_id = {}) {
-    return runtime::Err(TrackAutomationRendererError{code, track_id, {}});
+adoption_error(TrackAutomationRendererCode code, timeline::ItemId track_id = {},
+               timeline::ItemId lane_id = {}) {
+    return runtime::Err(TrackAutomationRendererError{code, track_id, lane_id});
 }
 
 TrackAutomationRendererCode cursor_code(AutomationCursorCode code) noexcept {
@@ -24,6 +25,8 @@ TrackAutomationRendererCode cursor_code(AutomationCursorCode code) noexcept {
         return TrackAutomationRendererCode::LaneAdoptionRejected;
     case AutomationCursorCode::InsufficientCapacity:
         return TrackAutomationRendererCode::LaneCapacityExceeded;
+    case AutomationCursorCode::WorkCapacityExceeded:
+        return TrackAutomationRendererCode::WorkCapacityExceeded;
     case AutomationCursorCode::Ok:
     case AutomationCursorCode::Coalesced:
         return TrackAutomationRendererCode::Ok;
@@ -69,6 +72,20 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
     if (program->programs().size() > limits_.max_lanes_per_track)
         return adoption_error(TrackAutomationRendererCode::LaneCapacityExceeded,
                               program->track_id());
+
+    std::uint64_t total_points = 0;
+    for (const auto& lane : program->programs()) {
+        const auto lane_points = lane->segments().size();
+        if (lane_points > limits_.max_points_per_lane) {
+            return adoption_error(TrackAutomationRendererCode::PointCapacityExceeded,
+                                  program->track_id(), lane->lane_id());
+        }
+        total_points += lane_points;
+        if (total_points > limits_.max_points_per_track) {
+            return adoption_error(TrackAutomationRendererCode::PointCapacityExceeded,
+                                  program->track_id(), lane->lane_id());
+        }
+    }
 
     std::vector<LaneState> next_lanes;
     next_lanes.reserve(program->programs().size());
@@ -151,26 +168,24 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
 
     bool lane_coalesced = false;
     std::uint64_t original_candidate_count = 0;
-    std::uint64_t merge_candidate_count = 0;
+    std::uint64_t intersecting_segment_count = 0;
     for (auto& lane : lanes_) {
         lane.next_cursor = lane.cursor;
-        const auto rendered = lane.next_cursor.process(*lane.program, transport, lane.scratch);
+        const auto remaining_segment_budget = static_cast<std::uint32_t>(
+            limits_.max_intersecting_segments_per_block - intersecting_segment_count);
+        const auto rendered = lane.next_cursor.process(*lane.program, transport, lane.scratch,
+                                                       remaining_segment_budget);
         if (rendered.code != AutomationCursorCode::Ok &&
             rendered.code != AutomationCursorCode::Coalesced) {
             result.code = cursor_code(rendered.code);
-            result.failed_lane_id = lane.program->lane_id();
-            return result;
-        }
-        lane.event_count = rendered.emitted_events;
-        original_candidate_count += rendered.candidate_points;
-        merge_candidate_count += rendered.emitted_events;
-        if (merge_candidate_count > limits_.max_render_candidates_per_block) {
-            result.code = TrackAutomationRendererCode::WorkCapacityExceeded;
             result.failed_lane_id = lane.program->lane_id();
             result.candidate_events = static_cast<std::uint32_t>(std::min<std::uint64_t>(
                 original_candidate_count, std::numeric_limits<std::uint32_t>::max()));
             return result;
         }
+        lane.event_count = rendered.emitted_events;
+        original_candidate_count += rendered.candidate_points;
+        intersecting_segment_count += rendered.intersecting_segments;
         lane.coalesced = rendered.code == AutomationCursorCode::Coalesced;
         lane_coalesced = lane_coalesced || lane.coalesced;
     }
