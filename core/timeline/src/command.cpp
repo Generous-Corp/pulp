@@ -1,6 +1,8 @@
 #include <pulp/timeline/command.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <limits>
 
 namespace pulp::timeline {
@@ -9,6 +11,15 @@ namespace {
 bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
     return lhs.id == rhs.id && lhs.start == rhs.start && lhs.duration == rhs.duration &&
            lhs.velocity == rhs.velocity && lhs.pitch == rhs.pitch && lhs.channel == rhs.channel;
+}
+
+bool equal_automation_point(const AutomationPoint& lhs, const AutomationPoint& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.position == rhs.position &&
+           std::bit_cast<std::uint32_t>(lhs.value) ==
+               std::bit_cast<std::uint32_t>(rhs.value) &&
+           lhs.interpolation == rhs.interpolation &&
+           std::bit_cast<std::uint32_t>(lhs.curvature) ==
+               std::bit_cast<std::uint32_t>(rhs.curvature);
 }
 
 bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
@@ -90,7 +101,7 @@ bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept {
     const auto left = lhs.curve().points();
     const auto right = rhs.curve().points();
     return lhs.id() == rhs.id() && lhs.target() == rhs.target() && left.size() == right.size() &&
-           std::equal(left.begin(), left.end(), right.begin());
+           std::equal(left.begin(), left.end(), right.begin(), equal_automation_point);
 }
 
 bool equivalent(const Command& lhs, const Command& rhs) noexcept {

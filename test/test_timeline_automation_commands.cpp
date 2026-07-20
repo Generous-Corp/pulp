@@ -14,10 +14,10 @@ template <typename T, typename E> T take(pulp::runtime::Result<T, E> result) {
     return std::move(result).value();
 }
 
-AutomationLane automation_lane(float final_value = 0.75f) {
+AutomationLane automation_lane(float final_value = 0.75f, float final_curvature = 0.5f) {
     auto curve = take(AutomationCurve::create({
         {{32}, {0}, 0.25f, AutomationInterpolation::Continuous, 0.0f},
-        {{33}, {kTicksPerQuarter}, final_value, AutomationInterpolation::Hold, 0.5f},
+        {{33}, {kTicksPerQuarter}, final_value, AutomationInterpolation::Hold, final_curvature},
     }));
     return take(AutomationLane::create({31}, DeviceParameterTarget{{20}, 7}, std::move(curve)));
 }
@@ -48,6 +48,9 @@ TEST_CASE("Automation commands compare and retain complete lane payloads") {
     const Command changed = InsertAutomationLane{{3}, {10}, automation_lane(0.5f)};
     REQUIRE(equivalent(inserted, same));
     REQUIRE_FALSE(equivalent(inserted, changed));
+    REQUIRE_FALSE(equivalent(automation_lane(0.0f), automation_lane(-0.0f)));
+    REQUIRE_FALSE(
+        equivalent(automation_lane(0.75f, 0.0f), automation_lane(0.75f, -0.0f)));
     REQUIRE(retained_size(inserted) >=
             sizeof(InsertAutomationLane) + 2 * sizeof(AutomationPoint));
 
@@ -55,6 +58,20 @@ TEST_CASE("Automation commands compare and retain complete lane payloads") {
                        Command{RemoveAutomationLane{{3}, {10}, {31}}}));
     REQUIRE_FALSE(equivalent(Command{RemoveAutomationLane{{3}, {10}, {31}}},
                              Command{RemoveAutomationLane{{3}, {10}, {32}}}));
+}
+
+TEST_CASE("Automation transaction collisions compare persisted float bits") {
+    auto session = std::move(DocumentSession::create(automation_project(false))).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto original = transaction(writer.id(), 1, 1, {},
+                                {InsertAutomationLane{{3}, {10}, automation_lane(0.0f)}});
+    REQUIRE(session->submit(writer, std::move(original)));
+
+    auto collision = transaction(writer.id(), 1, 1, {},
+                                 {InsertAutomationLane{{3}, {10}, automation_lane(-0.0f)}});
+    auto rejected = session->submit(writer, std::move(collision));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::TransactionIdCollision);
 }
 
 TEST_CASE("Automation insert is atomic and publishes owned identities") {
@@ -168,4 +185,15 @@ TEST_CASE("Journal checkpoint equivalence includes automation lane content") {
     auto rejected = session->journal().replay(automation_project(true, 0.5f), {});
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+
+    auto signed_zero_session =
+        std::move(DocumentSession::create(automation_project(true, 0.0f))).value();
+    auto signed_zero_writer = std::move(signed_zero_session->register_writer()).value();
+    auto signed_zero_edit = session_transaction(
+        signed_zero_writer, {}, {SetTempoMap{initial.tempo_map(), make_tempo_map(91.0)}});
+    REQUIRE(signed_zero_session->submit(signed_zero_writer, std::move(signed_zero_edit)));
+    auto signed_zero_rejected =
+        signed_zero_session->journal().replay(automation_project(true, -0.0f), {});
+    REQUIRE_FALSE(signed_zero_rejected);
+    REQUIRE(signed_zero_rejected.error().code == ConflictCode::ModelInvariant);
 }
