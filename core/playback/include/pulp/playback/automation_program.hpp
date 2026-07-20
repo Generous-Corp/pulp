@@ -13,6 +13,10 @@
 
 namespace pulp::playback {
 
+namespace detail {
+class AutomationProgramCompiler;
+}
+
 struct AutomationProgramInstanceToken {
     std::uint64_t value = 0;
     constexpr auto operator<=>(const AutomationProgramInstanceToken&) const = default;
@@ -83,6 +87,7 @@ class AutomationProgram {
     }
 
   private:
+    friend class detail::AutomationProgramCompiler;
     AutomationProgram(ProgramGeneration generation, AutomationProgramInstanceToken instance_token,
                       timeline::ItemId lane_id,
                       timeline::DeviceParameterTarget target,

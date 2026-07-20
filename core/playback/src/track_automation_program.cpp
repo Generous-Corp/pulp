@@ -1,5 +1,7 @@
 #include <pulp/playback/track_automation_program.hpp>
 
+#include "track_automation_order.hpp"
+
 #include <algorithm>
 #include <utility>
 
@@ -10,23 +12,6 @@ runtime::Result<std::shared_ptr<const TrackAutomationProgram>, TrackAutomationPr
 fail(TrackAutomationProgramErrorCode code, timeline::ItemId track, timeline::ItemId lane = {},
      timeline::ItemId related_lane = {}, timeline::DeviceParameterTarget target = {}) {
     return runtime::Err(TrackAutomationProgramError{code, track, lane, related_lane, target});
-}
-
-bool target_less(const AutomationProgram* lhs, const AutomationProgram* rhs) noexcept {
-    const auto lhs_target = lhs->target();
-    const auto rhs_target = rhs->target();
-    if (lhs_target.device_placement_id() != rhs_target.device_placement_id())
-        return lhs_target.device_placement_id() < rhs_target.device_placement_id();
-    if (lhs_target.param_id != rhs_target.param_id)
-        return lhs_target.param_id < rhs_target.param_id;
-    return lhs->lane_id() < rhs->lane_id();
-}
-
-bool lane_less(const std::shared_ptr<const AutomationProgram>& lhs,
-               const std::shared_ptr<const AutomationProgram>& rhs) noexcept {
-    if (lhs->lane_id() != rhs->lane_id())
-        return lhs->lane_id() < rhs->lane_id();
-    return target_less(lhs.get(), rhs.get());
 }
 
 } // namespace
@@ -50,7 +35,7 @@ TrackAutomationProgram::create(timeline::ItemId track_id,
             return fail(TrackAutomationProgramErrorCode::MissingProgram, track_id);
     }
 
-    std::sort(programs.begin(), programs.end(), lane_less);
+    std::sort(programs.begin(), programs.end(), detail::automation_lane_less);
     for (const auto& program : programs) {
         if (!program->lane_id().valid() || program->lane_id() == track_id)
             return fail(TrackAutomationProgramErrorCode::InvalidLaneId, track_id,
@@ -73,7 +58,7 @@ TrackAutomationProgram::create(timeline::ItemId track_id,
     by_target.reserve(programs.size());
     for (const auto& program : programs)
         by_target.push_back(program.get());
-    std::sort(by_target.begin(), by_target.end(), target_less);
+    std::sort(by_target.begin(), by_target.end(), detail::automation_target_less);
     for (std::size_t index = 1; index < by_target.size(); ++index) {
         if (by_target[index - 1]->target() == by_target[index]->target())
             return fail(TrackAutomationProgramErrorCode::DuplicateTarget, track_id,
