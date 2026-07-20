@@ -63,8 +63,25 @@ TEST_CASE("Sequence annotations validate typed time against their sequence", "[t
                                                        .name = "root",
                                                        .regions = {region(2, 0, 0)}});
     REQUIRE_FALSE(empty_region);
+    CHECK(empty_region.error().code == ModelErrorCode::InvalidDuration);
 
     const auto type = MarkerTypeId::cue();
+    auto invalid_marker_rate = Sequence::create(SequenceInput{
+        .id = {1},
+        .name = "root",
+        .markers = {{{2}, type, "cue", AbsoluteSequencePoint{{0}, RationalRate{48'000, 0}}}},
+    });
+    REQUIRE_FALSE(invalid_marker_rate);
+    CHECK(invalid_marker_rate.error().code == ModelErrorCode::InvalidSampleRate);
+
+    auto invalid_region_rate = Sequence::create(SequenceInput{
+        .id = {1},
+        .name = "root",
+        .regions = {{{2}, "verse", AbsoluteSequenceRange{{0}, 100, RationalRate{0, 1}}}},
+    });
+    REQUIRE_FALSE(invalid_region_rate);
+    CHECK(invalid_region_rate.error().code == ModelErrorCode::InvalidSampleRate);
+
     auto mixed_rates = Sequence::create(SequenceInput{
         .id = {1},
         .name = "root",

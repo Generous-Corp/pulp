@@ -144,17 +144,23 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, duplicate->first);
 
     for (auto& marker : input.markers) {
+        if (!marker.id.valid())
+            return fail<Sequence>(ModelErrorCode::InvalidItemId, marker.id, input.id);
+        if (const auto* absolute = std::get_if<AbsoluteSequencePoint>(&marker.point);
+            absolute && !absolute->sample_rate.valid())
+            return fail<Sequence>(ModelErrorCode::InvalidSampleRate, marker.id, input.id);
         if (!valid_marker(marker, input.musical_duration, input.absolute_duration))
-            return fail<Sequence>(marker.id.valid() ? ModelErrorCode::InvalidDuration
-                                                    : ModelErrorCode::InvalidItemId,
-                                  marker.id, input.id);
+            return fail<Sequence>(ModelErrorCode::InvalidDuration, marker.id, input.id);
         direct_ids.push_back(marker.id);
     }
     for (auto& region : input.regions) {
+        if (!region.id.valid())
+            return fail<Sequence>(ModelErrorCode::InvalidItemId, region.id, input.id);
+        if (const auto* absolute = std::get_if<AbsoluteSequenceRange>(&region.range);
+            absolute && !absolute->sample_rate.valid())
+            return fail<Sequence>(ModelErrorCode::InvalidSampleRate, region.id, input.id);
         if (!valid_region(region, input.musical_duration, input.absolute_duration))
-            return fail<Sequence>(region.id.valid() ? ModelErrorCode::InvalidDuration
-                                                    : ModelErrorCode::InvalidItemId,
-                                  region.id, input.id);
+            return fail<Sequence>(ModelErrorCode::InvalidDuration, region.id, input.id);
         direct_ids.push_back(region.id);
     }
     std::optional<timebase::RationalRate> annotation_rate;
