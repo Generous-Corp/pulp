@@ -70,6 +70,20 @@ public:
         return false;
     }
 
+    // In-flight ramp introspection, for continuing a ramp across block
+    // boundaries (a caller that owns the cursor's lifetime can read the active
+    // ramp's target + block-relative end offset and re-seed the next block).
+    // Meaningful only while is_ramping(id) is true; both return a benign
+    // fallback for an untracked or non-ramping param.
+    float ramp_target(ParamID id) const {
+        if (const auto* entry = find_entry(id)) return entry->ramp_target_value;
+        return value(id);
+    }
+    int32_t ramp_end_offset(ParamID id) const {
+        if (const auto* entry = find_entry(id)) return entry->ramp_end_sample_offset;
+        return 0;
+    }
+
     bool is_tracked(ParamID id) const {
         return find_entry(id) != nullptr;
     }

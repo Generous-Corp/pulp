@@ -504,6 +504,17 @@ target_sources(pulp-test-host-signal-graph PRIVATE
 target_link_libraries(pulp-test-host-signal-graph PRIVATE pulp::host Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-host-signal-graph)
 
+# Bake-layer parameter injection (Forge Probe A, production path). Exercises the
+# BakedGraphProcessor injection mailbox + ParamCursor over the routed executor;
+# reuses the same RT-allocation probe wiring as the signal-graph suite.
+add_executable(pulp-test-baked-graph-param-injection test_baked_graph_param_injection.cpp)
+target_sources(pulp-test-baked-graph-param-injection PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-baked-graph-param-injection
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-baked-graph-param-injection)
+
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
 add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)

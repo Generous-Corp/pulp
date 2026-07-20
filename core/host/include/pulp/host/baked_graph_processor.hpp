@@ -44,6 +44,22 @@
 
 namespace pulp::host {
 
+namespace detail {
+// Per-node injection substrate; full definitions live in the .cpp so this
+// widely-included header stays free of param_cursor/store.
+struct BakedParamMailbox;
+struct BakedParamNodeState;
+}  // namespace detail
+
+// Bake-layer parameter-injection binding captured at bake() for one param-
+// declaring custom node: the bound param-aware process callback (instance
+// keepalive captured) plus the node's declared params. Handed to the
+// BakedGraphProcessor so it can size the node's mailbox + build its cursor.
+struct BakedCustomParamBinding {
+    CustomNodeParamProcessFn process;
+    std::vector<CustomNodeBakedParam> params;
+};
+
 // Why a graph could not be lowered into a self-contained BakedGraphProcessor.
 enum class LowerRejectReason {
     None,
@@ -112,6 +128,57 @@ struct CustomNodeLifecycle {
     std::function<void()> reset;
 };
 
+// Outcome of a ParamInjector::inject() call. Distinguishes the two failure
+// modes the old bool return conflated: a dead handle (never call inject() on an
+// invalid() injector) versus a source queue that overflowed before it reached
+// us (the retained prefix is still published — a real, usable partial success).
+enum class InjectStatus {
+    Ok,               // published in full
+    PartialOverflow,  // the source queue overflowed; its retained prefix is published
+    InvalidHandle,    // this injector holds no live claim (valid() == false); nothing published
+};
+
+// Exclusive control-side handle for injecting parameters into ONE baked custom
+// node. Obtain from BakedGraphProcessor::claim_param_injection(); move-only;
+// releases the node's exclusive claim on destruction. inject() is RT-safe and
+// allocation-free — it publishes into the node's single-writer mailbox, which
+// the baked process() drains on its next block. Precedence mirrors the live
+// mailbox: latest-published-queue wins; WITHIN a queue events are sample-
+// accurate and may ramp (ParamCursor over sample_offset +
+// ramp_duration_sample_frames), and a ramp longer than one block continues to
+// completion across subsequent blocks. Exactly one injector may hold a node at
+// a time (two owners injecting into one node is the hazard this claim prevents).
+class ParamInjector {
+public:
+    ParamInjector() noexcept = default;
+    ~ParamInjector();
+    ParamInjector(ParamInjector&& other) noexcept;
+    ParamInjector& operator=(ParamInjector&& other) noexcept;
+    ParamInjector(const ParamInjector&) = delete;
+    ParamInjector& operator=(const ParamInjector&) = delete;
+
+    // True iff this handle holds a live exclusive claim on a node's mailbox.
+    bool valid() const noexcept { return mailbox_ != nullptr; }
+
+    // Publish a whole queue of sample-accurate events (the general path).
+    // Returns InvalidHandle iff !valid() (nothing published — this is a caller
+    // error, inject() is meant to be called only on a valid() handle), or
+    // PartialOverflow when `events` already reports source-side overflow (the
+    // retained prefix is still published — a usable partial success), otherwise
+    // Ok. RT-safe / allocation-free.
+    InjectStatus inject(const state::ParameterEventQueue& events) noexcept;
+    // Convenience: publish a single immediate (ramp_duration==0) or ramped
+    // event. A single event never overflows, so this returns only Ok or
+    // InvalidHandle.
+    InjectStatus inject(const state::ParameterEvent& event) noexcept;
+
+private:
+    friend class BakedGraphProcessor;
+    explicit ParamInjector(std::shared_ptr<detail::BakedParamMailbox> mailbox) noexcept;
+    void release() noexcept;
+    std::shared_ptr<detail::BakedParamMailbox> mailbox_;
+};
+
 // A SignalGraph frozen into a shippable Processor. Owns the reconstructed plan
 // (nodes + connections), its own heap-stable Gain atomics, and the canonical
 // executor's serialized routing snapshot + scratch pool. process() bridges the
@@ -144,7 +211,14 @@ public:
                         // re-prepare re-inits the instance's DSP state at the
                         // host's real rate/block. Empty for stateless nodes.
                         std::unordered_map<NodeId, CustomNodeLifecycle>
-                            custom_lifecycles = {});
+                            custom_lifecycles = {},
+                        // Bake-layer param-injection bindings (NodeId → bound
+                        // param-aware process + declared params). Empty for a
+                        // graph with no param-declaring custom nodes.
+                        std::unordered_map<NodeId, BakedCustomParamBinding>
+                            param_bindings = {});
+
+    ~BakedGraphProcessor() override;
 
     pulp::format::PluginDescriptor descriptor() const override;
     void define_parameters(pulp::state::StateStore& store) override;
@@ -155,7 +229,19 @@ public:
                  pulp::midi::MidiBuffer& midi_out,
                  const pulp::format::ProcessContext& context) override;
 
+    // Claim exclusive parameter-injection rights for a baked custom node. Returns
+    // a valid ParamInjector iff `node` is a param-declaring baked custom node AND
+    // no injector currently holds it; otherwise returns an invalid handle. The
+    // returned handle survives prepare()/re-prepare (the mailbox persists across
+    // both). Control thread only.
+    ParamInjector claim_param_injection(NodeId node) noexcept;
+
 private:
+    // Build per-node injection state and install the draining wrapper into
+    // custom_processors_ for each param-declaring custom node. Called by prepare()
+    // before the executor snapshot is built; off the audio thread.
+    void prepare_param_injection();
+
     // The frozen plan, captured at bake() time and owned for the Processor's
     // lifetime. Gain values ride GraphNode::gain; prepare() seeds the atomics.
     std::vector<GraphNode> nodes_;
@@ -193,6 +279,23 @@ private:
     // the audio thread only detects overlap and memcpys — no allocation.
     std::vector<float> input_alias_scratch_;
     std::vector<float*> input_alias_ptrs_;
+
+    // Bake-layer parameter injection. `param_bindings_` is captured at bake().
+    // `param_mailboxes_` (one single-writer mailbox per param node) is built in
+    // the constructor and PERSISTS across prepare() so a control-side claim is
+    // never dropped by a re-prepare. `param_states_` (per-node store + cursor
+    // scratch + held values) is (re)built in prepare(); prepare() also installs a
+    // draining wrapper into custom_processors_ for each param node BEFORE the
+    // executor snapshot is built, so the routed path invokes the injection path.
+    // A4 (should-fix-soon, not this slice): a param node is currently keyed
+    // across four NodeId-indexed maps (custom_processors_, param_bindings_,
+    // param_mailboxes_, param_states_). Consider consolidating into one
+    // NodeId → struct map once the shape settles.
+    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings_;
+    std::unordered_map<NodeId, std::shared_ptr<detail::BakedParamMailbox>>
+        param_mailboxes_;
+    std::unordered_map<NodeId, std::unique_ptr<detail::BakedParamNodeState>>
+        param_states_;
 
     std::string name_;
     std::string bundle_id_;

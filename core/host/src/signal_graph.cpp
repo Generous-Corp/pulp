@@ -1054,6 +1054,14 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
     return &it->second;
 }
 
+const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
+    NodeId id) const noexcept {
+    if (!live_slot_.live()) return nullptr;
+    auto it = live_slot_.live()->custom_param_processors.find(id);
+    if (it == live_slot_.live()->custom_param_processors.end()) return nullptr;
+    return &it->second;
+}
+
 std::shared_ptr<const void> SignalGraph::live_snapshot_handle() const noexcept {
     return live_slot_.live();  // aliases the live CompiledGraph as an opaque keepalive
 }
@@ -1589,6 +1597,23 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                         };
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
+                }
+                // Bake-layer param injection: if the type declared baked_params
+                // and a param-aware process, bind a closure that captures the
+                // instance shared_ptr by value (keepalive, same guarantee as the
+                // plain closure above). bake() copies this so a baked graph can
+                // deliver injected ParameterEvents to the node. The live routed
+                // path never calls it — it runs process_instance as usual.
+                if (n.custom_instance && type->process_instance_baked_param
+                    && !type->baked_params.empty()) {
+                    auto inst = n.custom_instance;
+                    auto pfn = type->process_instance_baked_param;
+                    cg->custom_param_processors[n.id] =
+                        [inst, pfn](audio::BufferView<float>& out,
+                                    const audio::BufferView<const float>& in,
+                                    int num_samples, const BakedParamView& params) {
+                            pfn(inst.get(), out, in, num_samples, params);
+                        };
                 }
                 // Transport-aware resolution mirrors the plain one: prefer the
                 // stateful variant when an instance + stateful callback exist,
