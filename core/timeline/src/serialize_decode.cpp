@@ -28,7 +28,6 @@ runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string pa
     return runtime::Result<T, PersistenceError>(runtime::Err(std::move(failure)));
 }
 
-
 runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view value,
                                                              std::string path) {
     if (value == "project")
@@ -43,9 +42,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::Clip);
     if (value == "note")
         return runtime::Ok(ItemKind::Note);
+    if (value == "device_placement")
+        return runtime::Ok(ItemKind::DevicePlacement);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
-
 
 struct DecodeCounts {
     std::size_t assets = 0;
@@ -53,6 +53,7 @@ struct DecodeCounts {
     std::size_t tracks = 0;
     std::size_t clips = 0;
     std::size_t notes = 0;
+    std::size_t device_placements = 0;
 };
 
 runtime::Result<const JsonValue*, PersistenceError>
@@ -78,29 +79,45 @@ string_field(const JsonValue& object_value, std::string_view name, std::string p
     return runtime::Result<std::string, PersistenceError>(runtime::Ok(value.value()->scalar));
 }
 
-runtime::Result<const JsonValue*, PersistenceError>
-data_for(const JsonValue& value, std::string_view expected_type, std::string path) {
+struct StructuralData {
+    const JsonValue* data = nullptr;
+    std::uint32_t version = 0;
+};
+
+runtime::Result<StructuralData, PersistenceError>
+data_for_versions(const JsonValue& value, std::string_view expected_type,
+                  std::uint32_t minimum_version, std::uint32_t maximum_version, std::string path) {
     auto type = string_field(value, "type_name", path);
     auto version = required(value, "version", path);
     auto data = required(value, "data", path);
     if (!type)
-        return fail<const JsonValue*>(type.error().code, type.error().path,
-                                      type.error().byte_offset);
+        return fail<StructuralData>(type.error().code, type.error().path, type.error().byte_offset);
     if (!version)
-        return version;
+        return fail<StructuralData>(version.error().code, version.error().path,
+                                    version.error().byte_offset);
     if (!data)
-        return data;
+        return fail<StructuralData>(data.error().code, data.error().path, data.error().byte_offset);
     auto decoded_version = parse_u32_number(*version.value(), path + "/version");
     if (type.value() != expected_type)
-        return fail<const JsonValue*>(PersistenceErrorCode::UnsupportedStructuralType,
-                                      std::move(path), value.begin);
-    if (!decoded_version || decoded_version.value() != 1)
-        return fail<const JsonValue*>(PersistenceErrorCode::UnsupportedSchemaVersion,
-                                      std::move(path), value.begin);
+        return fail<StructuralData>(PersistenceErrorCode::UnsupportedStructuralType,
+                                    std::move(path), value.begin);
+    if (!decoded_version || decoded_version.value() < minimum_version ||
+        decoded_version.value() > maximum_version)
+        return fail<StructuralData>(PersistenceErrorCode::UnsupportedSchemaVersion, std::move(path),
+                                    value.begin);
     if (data.value()->kind != JsonValue::Kind::Object)
-        return fail<const JsonValue*>(PersistenceErrorCode::UnexpectedType, path + "/data",
-                                      data.value()->begin);
-    return data;
+        return fail<StructuralData>(PersistenceErrorCode::UnexpectedType, path + "/data",
+                                    data.value()->begin);
+    return runtime::Ok(StructuralData{data.value(), decoded_version.value()});
+}
+
+runtime::Result<const JsonValue*, PersistenceError>
+data_for(const JsonValue& value, std::string_view expected_type, std::string path) {
+    auto decoded = data_for_versions(value, expected_type, 1, 1, std::move(path));
+    if (!decoded)
+        return fail<const JsonValue*>(decoded.error().code, decoded.error().path,
+                                      decoded.error().byte_offset);
+    return runtime::Ok(decoded.value().data);
 }
 
 runtime::Result<timebase::RationalRate, PersistenceError> decode_rate(const JsonValue& value,
@@ -126,8 +143,8 @@ runtime::Result<timebase::RationalRate, PersistenceError> decode_rate(const Json
     return runtime::Result<timebase::RationalRate, PersistenceError>(runtime::Ok(rate));
 }
 
-runtime::Result<timebase::TempoMap, PersistenceError>
-decode_tempo_map(const JsonValue& value, std::string path) {
+runtime::Result<timebase::TempoMap, PersistenceError> decode_tempo_map(const JsonValue& value,
+                                                                       std::string path) {
     if (value.kind != JsonValue::Kind::Array)
         return fail<timebase::TempoMap>(PersistenceErrorCode::UnexpectedType, std::move(path));
     std::vector<timebase::TempoPoint> points;
@@ -151,8 +168,8 @@ decode_tempo_map(const JsonValue& value, std::string path) {
         else
             return fail<timebase::TempoMap>(PersistenceErrorCode::InvalidSchema,
                                             item_path + "/curve");
-        points.push_back({{decoded_tick.value()}, std::bit_cast<double>(decoded_bits.value()),
-                          decoded_curve});
+        points.push_back(
+            {{decoded_tick.value()}, std::bit_cast<double>(decoded_bits.value()), decoded_curve});
     }
     auto created = timebase::TempoMap::create(points);
     if (!created)
@@ -160,8 +177,8 @@ decode_tempo_map(const JsonValue& value, std::string path) {
     return runtime::Ok(std::move(created).value());
 }
 
-runtime::Result<timebase::MeterMap, PersistenceError>
-decode_meter_map(const JsonValue& value, std::string path) {
+runtime::Result<timebase::MeterMap, PersistenceError> decode_meter_map(const JsonValue& value,
+                                                                       std::string path) {
     if (value.kind != JsonValue::Kind::Array)
         return fail<timebase::MeterMap>(PersistenceErrorCode::UnexpectedType, std::move(path));
     std::vector<timebase::MeterPoint> points;
@@ -179,8 +196,9 @@ decode_meter_map(const JsonValue& value, std::string path) {
         if (!d || !n || !t || d.value() > std::numeric_limits<std::int32_t>::max() ||
             n.value() > std::numeric_limits<std::int32_t>::max())
             return fail<timebase::MeterMap>(PersistenceErrorCode::InvalidNumber, item_path);
-        points.push_back({{t.value()}, {static_cast<std::int32_t>(n.value()),
-                                        static_cast<std::int32_t>(d.value())}});
+        points.push_back(
+            {{t.value()},
+             {static_cast<std::int32_t>(n.value()), static_cast<std::int32_t>(d.value())}});
     }
     auto created = timebase::MeterMap::create(points);
     if (!created)
@@ -520,13 +538,18 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     if (++counts.tracks > limits.max_tracks)
         return fail<Track>(PersistenceErrorCode::LimitExceeded, path, value.begin, counts.tracks,
                            limits.max_tracks);
-    auto data = data_for(value, "pulp.timeline.track", path);
-    if (!data)
-        return fail<Track>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto clips = required(*data.value(), "clips", path + "/data");
-    if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array)
+    auto envelope = data_for_versions(value, "pulp.timeline.track", 1, 2, path);
+    if (!envelope)
+        return fail<Track>(envelope.error().code, envelope.error().path,
+                           envelope.error().byte_offset);
+    const auto& data = *envelope.value().data;
+    auto id = required(data, "id", path + "/data");
+    auto name = string_field(data, "name", path + "/data");
+    auto clips = required(data, "clips", path + "/data");
+    const auto* devices = data.find("device_chain");
+    if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
+        (envelope.value().version == 1 && devices) ||
+        (envelope.value().version == 2 && (!devices || devices->kind != JsonValue::Kind::Array)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -541,8 +564,34 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                decoded.error().byte_offset);
         decoded_clips.push_back(std::move(decoded).value());
     }
-    auto created =
-        Track::create({decoded_id.value()}, std::move(name).value(), std::move(decoded_clips));
+    std::vector<DevicePlacement> decoded_devices;
+    decoded_devices.reserve(devices ? devices->array.size() : 0);
+    for (std::size_t index = 0; devices && index < devices->array.size(); ++index) {
+        const auto item_path = path + "/data/device_chain/" + std::to_string(index);
+        if (++counts.device_placements > limits.max_device_placements)
+            return fail<Track>(PersistenceErrorCode::LimitExceeded, item_path,
+                               devices->array[index].begin, counts.device_placements,
+                               limits.max_device_placements);
+        auto device_data =
+            data_for(devices->array[index], "pulp.timeline.device_placement", item_path);
+        if (!device_data)
+            return fail<Track>(device_data.error().code, device_data.error().path,
+                               device_data.error().byte_offset);
+        auto device_id = required(*device_data.value(), "id", item_path + "/data");
+        if (!device_id)
+            return fail<Track>(device_id.error().code, device_id.error().path,
+                               device_id.error().byte_offset);
+        auto decoded_device_id =
+            parse_canonical_u64_string(*device_id.value(), item_path + "/data/id");
+        if (!decoded_device_id)
+            return fail<Track>(decoded_device_id.error().code, decoded_device_id.error().path,
+                               decoded_device_id.error().byte_offset);
+        decoded_devices.push_back(DevicePlacement{{decoded_device_id.value()}});
+    }
+    auto created = Track::create(TrackInput{.id = {decoded_id.value()},
+                                            .name = std::move(name).value(),
+                                            .clips = std::move(decoded_clips),
+                                            .device_chain = std::move(decoded_devices)});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
@@ -608,9 +657,7 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
-
 } // namespace
-
 
 runtime::Result<Project, PersistenceError> deserialize_project(std::string_view json,
                                                                const SchemaRegistry& registry,

@@ -214,7 +214,7 @@ SchemaRegistry structurally_modified_registry(std::string_view omitted,
             continue;
         auto copy = original;
         if (copy.type_name == version_changed)
-            copy.current_version = 2;
+            ++copy.current_version;
         if (copy.type_name == field_changed) {
             if (copy.fields.empty())
                 copy.fields.emplace_back("unexpected", SchemaValueKind::String);

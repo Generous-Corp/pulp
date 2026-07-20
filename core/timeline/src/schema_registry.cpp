@@ -1,5 +1,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 
+#include "track_schema_migrations.hpp"
+
 #include <algorithm>
 #include <limits>
 
@@ -68,12 +70,12 @@ const MigrationStep* find_step(const std::vector<MigrationStep>& steps,
     return found != steps.end() && found->from_version == from ? &*found : nullptr;
 }
 
-TypeSchema builtin(std::string name, SchemaDomain domain,
-                   std::initializer_list<FieldSchema> fields) {
+TypeSchema builtin(std::string name, SchemaDomain domain, std::initializer_list<FieldSchema> fields,
+                   std::uint32_t version = 1) {
     TypeSchema schema;
     schema.type_name = std::move(name);
     schema.domain = domain;
-    schema.current_version = 1;
+    schema.current_version = version;
     schema.fields.assign(fields.begin(), fields.end());
     return schema;
 }
@@ -283,10 +285,17 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"musical_duration", SchemaValueKind::I64String},
                                {"name", SchemaValueKind::String},
                                {"tracks", SchemaValueKind::Array}}));
-    schemas.push_back(builtin("pulp.timeline.track", SchemaDomain::Document,
-                              {{"clips", SchemaValueKind::Array},
-                               {"id", SchemaValueKind::U64String},
-                               {"name", SchemaValueKind::String}}));
+    auto track = builtin("pulp.timeline.track", SchemaDomain::Document,
+                         {{"clips", SchemaValueKind::Array},
+                          {"device_chain", SchemaValueKind::Array},
+                          {"id", SchemaValueKind::U64String},
+                          {"name", SchemaValueKind::String}},
+                         2);
+    track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
+    track.downgrades.push_back({2, 1, {}, detail::migrate_track_v2_to_v1});
+    schemas.push_back(std::move(track));
+    schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.clip", SchemaDomain::Document,
                               {{"content", SchemaValueKind::Object},
                                {"fade_in_duration", SchemaValueKind::U64String, false},

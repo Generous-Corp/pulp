@@ -2,6 +2,7 @@
 
 #include <pulp/timeline/document_session.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 
@@ -82,13 +83,20 @@ inline bool same_project(const Project& lhs, const Project& rhs) {
             left_sequence.tracks().size() != right_sequence.tracks().size())
             return false;
         for (std::size_t t = 0; t < left_sequence.tracks().size(); ++t) {
-            const auto left_clips = left_sequence.tracks()[t].clips();
-            const auto right_clips = right_sequence.tracks()[t].clips();
+            const auto& left_track = left_sequence.tracks()[t];
+            const auto& right_track = right_sequence.tracks()[t];
+            const auto left_clips = left_track.clips();
+            const auto right_clips = right_track.clips();
             if (left_clips.size() != right_clips.size())
                 return false;
             for (std::size_t c = 0; c < left_clips.size(); ++c)
                 if (!equivalent(left_clips[c], right_clips[c]))
                     return false;
+            const auto left_devices = left_track.device_chain();
+            const auto right_devices = right_track.device_chain();
+            if (left_devices.size() != right_devices.size() ||
+                !std::equal(left_devices.begin(), left_devices.end(), right_devices.begin()))
+                return false;
         }
     }
     return true;

@@ -274,7 +274,11 @@ per-ABI entry point for it.** Go through the plugin's own state:
   closure. The playback automation program and cursor are portable engine
   sources. `TrackAutomationProgram` is part of the same closure: when adding or
   splitting a playback aggregate source, mirror it into both curated ABI lists
-  and keep `web-timeline-source-closure` green. Keep these modules threadless and
+  and keep `web-timeline-source-closure` green. Timeline schema-migration sources
+  are in the same closure even though they are document-persistence code rather
+  than playback: a Track schema migration TU counts as an engine module, so it
+  lands in `core/timeline/CMakeLists.txt` and both curated ABI lists together.
+  Keep these modules threadless and
   independent of state, host, and format code; compiling them into wasm does not
   by itself create a JavaScript-facing timeline API or Host delivery path.
 

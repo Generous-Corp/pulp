@@ -9,10 +9,8 @@ namespace pulp::timeline {
 namespace {
 
 template <typename T>
-runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {},
-                                    ItemId related = {}) {
-    return runtime::Result<T, ModelError>(
-        runtime::Err(ModelError{code, item, related}));
+runtime::Result<T, ModelError> fail(ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
+    return runtime::Result<T, ModelError>(runtime::Err(ModelError{code, item, related}));
 }
 
 std::int64_t clip_start_scalar(const Clip& clip) noexcept {
@@ -244,25 +242,41 @@ struct Track::Data {
     std::string name;
     NodePtr clips_by_start;
     NodePtr clips_by_id;
+    std::shared_ptr<const std::vector<DevicePlacement>> device_chain;
 };
 
 runtime::Result<Track, ModelError> Track::create(ItemId id, std::string name,
                                                  std::vector<Clip> clips) {
-    if (!id.valid())
-        return fail<Track>(ModelErrorCode::InvalidItemId, id);
-    if (!clips.empty()) {
-        const auto anchor = clips.front().time_anchor();
-        const auto absolute_rate = clips.front().absolute_sample_rate();
-        for (const auto& clip : clips) {
+    return create(TrackInput{.id = id, .name = std::move(name), .clips = std::move(clips)});
+}
+
+runtime::Result<Track, ModelError> Track::create(TrackInput input) {
+    if (!input.id.valid())
+        return fail<Track>(ModelErrorCode::InvalidItemId, input.id);
+    std::vector<ItemId> device_ids;
+    device_ids.reserve(input.device_chain.size());
+    for (const auto& placement : input.device_chain) {
+        if (!placement.valid())
+            return fail<Track>(ModelErrorCode::InvalidItemId, placement.id);
+        device_ids.push_back(placement.id);
+    }
+    std::sort(device_ids.begin(), device_ids.end());
+    if (const auto duplicate = std::adjacent_find(device_ids.begin(), device_ids.end());
+        duplicate != device_ids.end())
+        return fail<Track>(ModelErrorCode::DuplicateItemId, *duplicate);
+    if (!input.clips.empty()) {
+        const auto anchor = input.clips.front().time_anchor();
+        const auto absolute_rate = input.clips.front().absolute_sample_rate();
+        for (const auto& clip : input.clips) {
             if (clip.time_anchor() != anchor)
-                return fail<Track>(ModelErrorCode::MixedTimeAnchors, id, clip.id());
+                return fail<Track>(ModelErrorCode::MixedTimeAnchors, input.id, clip.id());
             if (anchor == ClipTimeAnchor::Absolute && clip.absolute_sample_rate() != absolute_rate)
-                return fail<Track>(ModelErrorCode::IncompatibleSampleRate, id, clip.id());
+                return fail<Track>(ModelErrorCode::IncompatibleSampleRate, input.id, clip.id());
         }
     }
     NodePtr by_start;
     NodePtr by_id;
-    for (auto& clip : clips) {
+    for (auto& clip : input.clips) {
         bool duplicate_start = false;
         bool duplicate_id = false;
         by_start = insert(std::move(by_start), clip, start_less, duplicate_start);
@@ -272,8 +286,11 @@ runtime::Result<Track, ModelError> Track::create(ItemId id, std::string name,
     }
     if (const auto overlap = first_overlap(by_start))
         return fail<Track>(ModelErrorCode::OverlappingClips, overlap->first, overlap->second);
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
-        Data{id, std::move(name), std::move(by_start), std::move(by_id)}))));
+    auto device_chain =
+        std::make_shared<const std::vector<DevicePlacement>>(std::move(input.device_chain));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(
+        std::make_shared<const Data>(Data{input.id, std::move(input.name), std::move(by_start),
+                                          std::move(by_id), std::move(device_chain)}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -300,8 +317,8 @@ runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
         return fail<Track>(ModelErrorCode::OverlappingClips, previous->id(), inserted->id());
     if (next && ranges_overlap(*inserted, *next))
         return fail<Track>(ModelErrorCode::OverlappingClips, inserted->id(), next->id());
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
-        Data{data_->id, data_->name, std::move(by_start), std::move(by_id)}))));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(Data{
+        data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain}))));
 }
 
 runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
@@ -330,8 +347,8 @@ runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
         return fail<Track>(ModelErrorCode::OverlappingClips, previous->id(), inserted->id());
     if (next && ranges_overlap(*inserted, *next))
         return fail<Track>(ModelErrorCode::OverlappingClips, inserted->id(), next->id());
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
-        Data{data_->id, data_->name, std::move(by_start), std::move(by_id)}))));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(Data{
+        data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain}))));
 }
 
 runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
@@ -340,8 +357,8 @@ runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
         return fail<Track>(ModelErrorCode::MissingItem, id);
     auto by_start = erase(data_->clips_by_start, *old, start_less);
     auto by_id = erase(data_->clips_by_id, *old, id_less);
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
-        Data{data_->id, data_->name, std::move(by_start), std::move(by_id)}))));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(Data{
+        data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain}))));
 }
 
 ItemId Track::id() const noexcept {
@@ -358,6 +375,17 @@ const Clip* Track::find_clip(ItemId id) const noexcept {
         return nullptr;
     const auto* indexed = find_id(data_->clips_by_id, id);
     return indexed ? find(data_->clips_by_start, *indexed, start_less) : nullptr;
+}
+std::span<const DevicePlacement> Track::device_chain() const noexcept {
+    return *data_->device_chain;
+}
+const DevicePlacement* Track::find_device_placement(ItemId id) const noexcept {
+    if (!id.valid())
+        return nullptr;
+    const auto found =
+        std::find_if(data_->device_chain->begin(), data_->device_chain->end(),
+                     [id](const DevicePlacement& placement) { return placement.id == id; });
+    return found == data_->device_chain->end() ? nullptr : &*found;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

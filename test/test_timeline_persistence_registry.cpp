@@ -9,6 +9,7 @@ TEST_CASE("Timeline persistence requires the complete compatible structural regi
         "pulp.timeline.asset_representation",
         "pulp.timeline.sequence",
         "pulp.timeline.track",
+        "pulp.timeline.device_placement",
         "pulp.timeline.clip",
         "pulp.timeline.content.empty",
         "pulp.timeline.content.media",

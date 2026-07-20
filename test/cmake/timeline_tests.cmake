@@ -2,7 +2,9 @@
 # validation. Keeping these registrations together prevents timeline changes
 # from invalidating evidence bundles owned by unrelated subsystems.
 
-pulp_add_test_suite(pulp-test-timeline-model LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-model
+    SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
+    LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -45,6 +47,7 @@ pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
+        test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
     LIBRARIES pulp::timeline)
@@ -102,6 +105,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE

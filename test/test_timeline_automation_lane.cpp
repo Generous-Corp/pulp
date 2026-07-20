@@ -66,7 +66,8 @@ TEST_CASE("AutomationLane rejects invalid document identities") {
     auto invalid_device =
         timeline::AutomationLane::create({1}, timeline::DeviceParameterTarget{{}, 7}, curve());
     REQUIRE_FALSE(invalid_device);
-    REQUIRE(invalid_device.error().code == timeline::AutomationLaneErrorCode::InvalidDeviceId);
+    REQUIRE(invalid_device.error().code ==
+            timeline::AutomationLaneErrorCode::InvalidDevicePlacementId);
     REQUIRE(invalid_device.error().lane == timeline::ItemId{1});
     REQUIRE(invalid_device.error().related_item == timeline::ItemId{});
 
@@ -74,7 +75,8 @@ TEST_CASE("AutomationLane rejects invalid document identities") {
         {1}, timeline::DeviceParameterTarget{{std::numeric_limits<std::uint64_t>::max()}, 7},
         curve());
     REQUIRE_FALSE(exhausted_device);
-    REQUIRE(exhausted_device.error().code == timeline::AutomationLaneErrorCode::InvalidDeviceId);
+    REQUIRE(exhausted_device.error().code ==
+            timeline::AutomationLaneErrorCode::InvalidDevicePlacementId);
     REQUIRE(exhausted_device.error().related_item ==
             timeline::ItemId{std::numeric_limits<std::uint64_t>::max()});
 }
