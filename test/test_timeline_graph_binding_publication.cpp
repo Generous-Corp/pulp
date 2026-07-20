@@ -99,6 +99,8 @@ TEST_CASE("timeline graph binding publishes coherent state during live reprepare
         while (!stop.load(std::memory_order_acquire)) {
             auto transport = snapshot(*program, 32, 0);
             transport.ranges[0].discontinuity = true;
+            transport.ranges[0].discontinuity_reason =
+                TransportDiscontinuityReason::Seek;
             const auto result = binding.process(output_view, input.const_view(),
                                                 transport);
             if (!result) {

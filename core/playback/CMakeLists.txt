@@ -7,6 +7,7 @@ add_library(pulp-playback
     src/note_renderer.cpp
     src/program.cpp
     src/program_compiler.cpp
+    src/schedule_ahead.cpp
     src/stable_renderer_shell.cpp
     src/track_automation_compiler.cpp
     src/track_automation_program.cpp
@@ -51,6 +52,7 @@ if(PULP_BUILD_TESTS AND NOT MSVC)
         src/note_renderer.cpp
         src/program.cpp
         src/program_compiler.cpp
+        src/schedule_ahead.cpp
         src/stable_renderer_shell.cpp
         src/track_automation_compiler.cpp
         src/track_automation_program.cpp

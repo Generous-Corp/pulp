@@ -112,6 +112,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/playback/src/note_renderer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program_compiler.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/schedule_ahead.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/stable_renderer_shell.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/track_automation_compiler.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/track_automation_program.cpp

@@ -72,6 +72,8 @@ TEST_CASE("timeline graph binding uses one exact split transport snapshot") {
     split.ranges[1].timeline_tick_start = map->samples_to_ticks({64});
     split.ranges[1].timeline_tick_end = map->samples_to_ticks({80});
     split.ranges[1].discontinuity = true;
+    split.ranges[1].discontinuity_reason =
+        TransportDiscontinuityReason::LoopWrap;
 
     Buffer direct(1, 32);
     REQUIRE(ArrangementAudioRenderer::process(*pinned, split, direct.view()) ==
@@ -122,6 +124,8 @@ TEST_CASE("timeline graph binding projects split transport as one callback conte
     split.ranges[1].timeline_tick_start = map->samples_to_ticks({64});
     split.ranges[1].timeline_tick_end = map->samples_to_ticks({80});
     split.ranges[1].discontinuity = true;
+    split.ranges[1].discontinuity_reason =
+        TransportDiscontinuityReason::LoopWrap;
     Buffer input(1, 32);
     Buffer output(1, 32);
     auto output_view = output.view();

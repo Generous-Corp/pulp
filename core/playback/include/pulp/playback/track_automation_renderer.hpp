@@ -31,6 +31,13 @@ struct DeviceAutomationBatch {
     bool coalesced = false;
 };
 
+/// Non-owning association between a canonical device placement and the
+/// transport window projected for that device.
+struct DeviceAutomationTransportView {
+    timeline::ItemId device_placement_id;
+    const TransportSnapshot* transport = nullptr;
+};
+
 enum class TrackAutomationRendererCode : std::uint8_t {
     Ok,
     Coalesced,
@@ -43,6 +50,7 @@ enum class TrackAutomationRendererCode : std::uint8_t {
     PointCapacityExceeded,
     DeviceCapacityExceeded,
     WorkCapacityExceeded,
+    DeviceScheduleMismatch,
     InvalidLimits,
 };
 
@@ -90,6 +98,8 @@ class TrackAutomationRenderer {
     adopt(std::shared_ptr<const TrackAutomationProgram> program);
 
     TrackAutomationRenderResult process(const TransportSnapshot& transport) noexcept;
+    TrackAutomationRenderResult
+    process(std::span<const DeviceAutomationTransportView> transports) noexcept;
     void reset() noexcept;
 
     timeline::ItemId track_id() const noexcept;
@@ -106,6 +116,10 @@ class TrackAutomationRenderer {
   private:
     TrackAutomationRenderer() = default;
 
+    TrackAutomationRenderResult
+    process_impl(const TransportSnapshot* uniform_transport,
+                 std::span<const DeviceAutomationTransportView> transports) noexcept;
+
     struct LaneState {
         std::shared_ptr<const AutomationProgram> program;
         AutomationCursor cursor;
@@ -116,6 +130,7 @@ class TrackAutomationRenderer {
         std::uint32_t selected_sample_offset = 0;
         bool has_selected_event = false;
         bool coalesced = false;
+        std::size_t device_index = 0;
     };
 
     struct DeviceState {

@@ -29,6 +29,13 @@ struct LoopRegion {
     constexpr auto operator<=>(const LoopRegion&) const = default;
 };
 
+enum class TransportDiscontinuityReason : std::uint8_t {
+    None,
+    Seek,
+    LoopWrap,
+    LoopConfiguration,
+};
+
 struct TransportRange {
     std::uint32_t sample_offset = 0;
     std::uint32_t frame_count = 0;
@@ -41,6 +48,8 @@ struct TransportRange {
     double tempo_bpm = 120.0;
     bool tempo_changed = false;
     bool discontinuity = false;
+    TransportDiscontinuityReason discontinuity_reason =
+        TransportDiscontinuityReason::None;
 };
 
 struct TransportSnapshot {
@@ -51,6 +60,8 @@ struct TransportSnapshot {
     std::uint64_t block_index = 0;
     std::uint32_t frame_count = 0;
     MeterSignature meter{};
+    timebase::TickPosition meter_anchor_tick{};
+    timebase::BarPosition meter_anchor_bar{};
     LoopRegion loop{};
     bool is_playing = false;
     bool transport_changed = false;
@@ -128,7 +139,8 @@ class MasterTransport {
     LoopRegion previous_loop_{};
     double previous_tempo_bpm_ = 120.0;
     bool first_block_ = true;
-    bool pending_discontinuity_ = false;
+    TransportDiscontinuityReason pending_discontinuity_ =
+        TransportDiscontinuityReason::None;
 };
 
 } // namespace pulp::playback

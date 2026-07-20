@@ -108,6 +108,16 @@ block without exposing partial device batches; optional refinement points may
 coalesce deterministically. The renderer owns all scratch storage after
 `prepare()` and performs no allocation in `process()`.
 
+For latency-compensated source queries, call `project_schedule_ahead()` once
+per prepared sink lead. The portable projector reconstructs one or two ranges
+at the future timeline position, advances monotonic time across complete loop
+cycles, and preserves callback-local event offsets; consumers must never render
+the base window and post-shift its events. Use the per-device
+`TrackAutomationRenderer::process()` view overload when device placements have
+different leads. Its views must cover canonical device order exactly and all
+projected snapshots must retain the same callback controls. Graph
+`ProcessContext` still receives the unprojected master transport.
+
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.
 
@@ -128,7 +138,9 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   in `ScopedNoAlloc`, and its test uses `ScopedRtProcessProbe` so Unix CI traps
   both allocations and pthread locks.
 - Starting playback is not a seek or DSP reset. Explicit seeks request a reset;
-  range discontinuities project to `ProcessContext::transport_jump`.
+  range discontinuities project to `ProcessContext::transport_jump`. Preserve
+  typed `Seek`, `LoopWrap`, and `LoopConfiguration` reasons when deriving new
+  scheduling windows; natural wraps are recomputed at the projected boundary.
 - Arrangement note events are compiled against the owning program's exact
   tempo map and ordered by sample, note-off before note-on, then clip/note ID.
   A renderer uses half-open sample ranges and never latches a callback size.
@@ -168,7 +180,7 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
 `pulp-test-playback-track-automation-renderer`, `pulp-test-playback-program`,
-`pulp-test-playback-transport`, `pulp-test-timebase`, and
+`pulp-test-playback-schedule-ahead`, `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
 When export/install wiring changes, also run the installed SDK consumer smoke.

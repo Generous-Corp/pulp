@@ -57,6 +57,8 @@ TEST_CASE("master transport starts without inventing a reset or jump") {
     REQUIRE_FALSE(snapshot.time_sig_changed);
     REQUIRE(snapshot.range_count == 1);
     REQUIRE_FALSE(snapshot.ranges[0].discontinuity);
+    REQUIRE(snapshot.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::None);
     REQUIRE(snapshot.ranges[0].frame_count == 64);
     REQUIRE_FALSE(snapshot.ranges[0].tempo_changed);
     REQUIRE(snapshot.ranges[0].timeline_sample_start == SamplePosition{0});
@@ -102,6 +104,8 @@ TEST_CASE("seek reanchors timeline while monotonic time remains continuous") {
     const auto snapshot = block(transport, 64);
     REQUIRE(snapshot.reset_requested);
     REQUIRE(snapshot.ranges[0].discontinuity);
+    REQUIRE(snapshot.ranges[0].discontinuity_reason ==
+            TransportDiscontinuityReason::Seek);
     REQUIRE(snapshot.ranges[0].timeline_sample_start == map.ticks_to_samples(target));
     REQUIRE(snapshot.ranges[0].timeline_tick_start == target);
     REQUIRE(snapshot.ranges[0].monotonic_start ==
@@ -224,6 +228,8 @@ TEST_CASE("one loop wrap yields exactly two contiguous block ranges") {
     REQUIRE(snapshot.ranges[0].frame_count + snapshot.ranges[1].frame_count == 1024);
     REQUIRE_FALSE(snapshot.ranges[0].discontinuity);
     REQUIRE(snapshot.ranges[1].discontinuity);
+    REQUIRE(snapshot.ranges[1].discontinuity_reason ==
+            TransportDiscontinuityReason::LoopWrap);
     REQUIRE(snapshot.ranges[1].timeline_sample_start == map.ticks_to_samples(loop.start));
     REQUIRE(snapshot.ranges[1].monotonic_start == snapshot.ranges[0].monotonic_end);
 }

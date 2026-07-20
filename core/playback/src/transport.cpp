@@ -1,6 +1,8 @@
 #include <pulp/playback/transport.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
+#include "transport_math.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -29,25 +31,6 @@ std::uint64_t distance(timebase::SamplePosition start,
     return static_cast<std::uint64_t>(end.value) - static_cast<std::uint64_t>(start.value);
 }
 
-timebase::BarPosition bar_at_tick(timebase::TickPosition tick,
-                                  timebase::TickPosition anchor_tick,
-                                  timebase::BarPosition anchor_bar,
-                                  MeterSignature meter) noexcept {
-    const long double ticks_per_bar =
-        static_cast<long double>(timebase::kTicksPerQuarter) *
-        static_cast<long double>(meter.numerator) * 4.0L /
-        static_cast<long double>(meter.denominator);
-    const long double relative_tick = static_cast<long double>(tick.value) -
-                                      static_cast<long double>(anchor_tick.value);
-    const long double projected = static_cast<long double>(anchor_bar.value) +
-                                  std::floor(relative_tick / ticks_per_bar);
-    if (projected >= static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-        return {std::numeric_limits<std::int64_t>::max()};
-    if (projected <= static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
-        return {std::numeric_limits<std::int64_t>::min()};
-    return {static_cast<std::int64_t>(projected)};
-}
-
 } // namespace
 
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
@@ -62,7 +45,10 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
         if (range.frame_count == 0 || range.sample_offset != expected_offset)
             return false;
         expected_offset += range.frame_count;
-        if (expected_offset > transport.frame_count || (index != 0 && !range.discontinuity))
+        if (expected_offset > transport.frame_count ||
+            (index != 0 && !range.discontinuity) ||
+            (!range.discontinuity && range.discontinuity_reason !=
+                 TransportDiscontinuityReason::None))
             return false;
     }
     return expected_offset == transport.frame_count;
@@ -182,7 +168,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         tempo_cursor_.seek(timeline_sample_);
         timeline_tick_ = desired.position;
         applied_seek_generation_ = desired.seek_generation;
-        pending_discontinuity_ = true;
+        pending_discontinuity_ = TransportDiscontinuityReason::Seek;
     }
 
     if (desired.meter != meter_anchor_signature_) {
@@ -190,8 +176,9 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
             meter_anchor_tick_ = {};
             meter_anchor_bar_ = {};
         } else {
-            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_,
-                                            meter_anchor_bar_, meter_anchor_signature_);
+            meter_anchor_bar_ = detail::bar_at_tick(
+                timeline_tick_, meter_anchor_tick_, meter_anchor_bar_,
+                meter_anchor_signature_);
             meter_anchor_tick_ = timeline_tick_;
         }
         meter_anchor_signature_ = desired.meter;
@@ -203,18 +190,21 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     snapshot.block_index = block_index_++;
     snapshot.frame_count = frame_count;
     snapshot.meter = desired.meter;
+    snapshot.meter_anchor_tick = meter_anchor_tick_;
+    snapshot.meter_anchor_bar = meter_anchor_bar_;
     snapshot.loop = desired.loop;
     snapshot.is_playing = desired.playing;
     snapshot.transport_changed = !first_block_ &&
-                                 (desired.playing != previous_playing_ ||
-                                  desired.loop.enabled != previous_loop_.enabled);
+                                  (desired.playing != previous_playing_ ||
+                                   desired.loop.enabled != previous_loop_.enabled);
     snapshot.transport_started = desired.playing &&
                                  (first_block_ || !previous_playing_);
     snapshot.reset_requested = seeked;
     snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
 
     auto make_range = [&](std::uint8_t index, std::uint32_t offset,
-                          std::uint32_t count, bool discontinuity,
+                          std::uint32_t count,
+                          TransportDiscontinuityReason discontinuity,
                           const timebase::TickPosition* forced_end_tick = nullptr) {
         auto& range = snapshot.ranges[index];
         range.sample_offset = offset;
@@ -222,14 +212,15 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.timeline_sample_start = timeline_sample_;
         range.timeline_tick_start = timeline_tick_;
         range.monotonic_start = monotonic_;
-        range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
-                                      meter_anchor_bar_, meter_anchor_signature_);
+        range.bar_start = detail::bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
+                                              meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
         range.tempo_changed = index == 0
                                   ? !first_block_ &&
                                         range.tempo_bpm != previous_tempo_bpm_
                                   : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
-        range.discontinuity = discontinuity;
+        range.discontinuity_reason = discontinuity;
+        range.discontinuity = discontinuity != TransportDiscontinuityReason::None;
         if (desired.playing) {
             const timebase::SamplePosition end_sample{
                 saturating_add(timeline_sample_.value, count)};
@@ -252,19 +243,23 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     if (!desired.playing) {
         make_range(0, 0, frame_count, pending_discontinuity_);
         snapshot.range_count = 1;
-        pending_discontinuity_ = false;
+        pending_discontinuity_ = TransportDiscontinuityReason::None;
     } else if (!desired.loop.enabled) {
         make_range(0, 0, frame_count, pending_discontinuity_);
         snapshot.range_count = 1;
-        pending_discontinuity_ = false;
+        pending_discontinuity_ = TransportDiscontinuityReason::None;
     } else {
         const auto loop_start = tempo_map_->ticks_to_samples(desired.loop.start);
         const auto loop_end = tempo_map_->ticks_to_samples(desired.loop.end);
-        if (timeline_sample_.value >= loop_end.value) {
+        if (timeline_sample_ >= loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
-            pending_discontinuity_ = true;
+            if (pending_discontinuity_ != TransportDiscontinuityReason::Seek) {
+                pending_discontinuity_ = desired.loop != previous_loop_
+                    ? TransportDiscontinuityReason::LoopConfiguration
+                    : TransportDiscontinuityReason::LoopWrap;
+            }
         }
 
         const auto until_wrap = distance(timeline_sample_, loop_end);
@@ -276,7 +271,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
                                          : nullptr;
             make_range(0, 0, first_count, pending_discontinuity_, forced_end);
             snapshot.range_count = 1;
-            pending_discontinuity_ = false;
+            pending_discontinuity_ = TransportDiscontinuityReason::None;
         }
 
         const auto remaining = frame_count - first_count;
@@ -284,13 +279,14 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
-            make_range(snapshot.range_count, first_count, remaining, true);
+            make_range(snapshot.range_count, first_count, remaining,
+                       TransportDiscontinuityReason::LoopWrap);
             ++snapshot.range_count;
         } else if (timeline_sample_ == loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
-            pending_discontinuity_ = true;
+            pending_discontinuity_ = TransportDiscontinuityReason::LoopWrap;
         }
     }
 
@@ -322,7 +318,7 @@ void MasterTransport::reset() noexcept {
     previous_loop_ = {};
     previous_tempo_bpm_ = 120.0;
     first_block_ = true;
-    pending_discontinuity_ = false;
+    pending_discontinuity_ = TransportDiscontinuityReason::None;
 }
 
 } // namespace pulp::playback

@@ -42,6 +42,19 @@ std::uint64_t selected_rank(std::uint32_t selection, std::uint32_t selected_coun
            (selected_count - 1u);
 }
 
+bool same_callback_controls(const TransportSnapshot& lhs,
+                            const TransportSnapshot& rhs) noexcept {
+    return lhs.block_index == rhs.block_index && lhs.frame_count == rhs.frame_count &&
+           lhs.sample_rate == rhs.sample_rate && lhs.is_playing == rhs.is_playing &&
+           lhs.loop == rhs.loop && lhs.meter == rhs.meter &&
+           lhs.meter_anchor_tick == rhs.meter_anchor_tick &&
+           lhs.meter_anchor_bar == rhs.meter_anchor_bar &&
+           lhs.transport_changed == rhs.transport_changed &&
+           lhs.transport_started == rhs.transport_started &&
+           lhs.reset_requested == rhs.reset_requested &&
+           lhs.time_sig_changed == rhs.time_sig_changed;
+}
+
 } // namespace
 
 runtime::Result<TrackAutomationRenderer, TrackAutomationRendererError>
@@ -131,6 +144,8 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
             [](const DeviceState& device, timeline::ItemId id) {
                 return device.device_placement_id < id;
             });
+        next_lanes[lane_index].device_index =
+            static_cast<std::size_t>(found - next_devices.begin());
         found->lane_indices.push_back(lane_index);
     }
     for (auto& device : next_devices)
@@ -146,6 +161,17 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
 
 TrackAutomationRenderResult
 TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
+    return process_impl(&transport, {});
+}
+
+TrackAutomationRenderResult TrackAutomationRenderer::process(
+    std::span<const DeviceAutomationTransportView> transports) noexcept {
+    return process_impl(nullptr, transports);
+}
+
+TrackAutomationRenderResult TrackAutomationRenderer::process_impl(
+    const TransportSnapshot* uniform_transport,
+    std::span<const DeviceAutomationTransportView> transports) noexcept {
     runtime::ScopedNoAlloc no_alloc;
     TrackAutomationRenderResult result;
     if (!program_) {
@@ -157,13 +183,47 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
         devices_[index].coalesced = false;
         batch_views_[index] = {devices_[index].device_placement_id, {}, false};
     }
-    if (!valid_transport_ranges(transport)) {
-        result.code = TrackAutomationRendererCode::InvalidTransport;
-        return result;
-    }
-    if (transport.tempo_map != &program_->tempo_map()) {
-        result.code = TrackAutomationRendererCode::TempoMapMismatch;
-        return result;
+    if (uniform_transport != nullptr) {
+        if (!valid_transport_ranges(*uniform_transport)) {
+            result.code = TrackAutomationRendererCode::InvalidTransport;
+            return result;
+        }
+        if (uniform_transport->tempo_map != &program_->tempo_map()) {
+            result.code = TrackAutomationRendererCode::TempoMapMismatch;
+            return result;
+        }
+    } else {
+        if (transports.size() != devices_.size()) {
+            result.code = TrackAutomationRendererCode::DeviceScheduleMismatch;
+            return result;
+        }
+        const TransportSnapshot* callback_transport = nullptr;
+        for (std::size_t index = 0; index < devices_.size(); ++index) {
+            const auto& view = transports[index];
+            if (view.device_placement_id != devices_[index].device_placement_id ||
+                view.transport == nullptr) {
+                result.code = TrackAutomationRendererCode::DeviceScheduleMismatch;
+                result.failed_device_placement_id = devices_[index].device_placement_id;
+                return result;
+            }
+            if (!valid_transport_ranges(*view.transport)) {
+                result.code = TrackAutomationRendererCode::InvalidTransport;
+                result.failed_device_placement_id = view.device_placement_id;
+                return result;
+            }
+            if (view.transport->tempo_map != &program_->tempo_map()) {
+                result.code = TrackAutomationRendererCode::TempoMapMismatch;
+                result.failed_device_placement_id = view.device_placement_id;
+                return result;
+            }
+            if (callback_transport != nullptr &&
+                !same_callback_controls(*callback_transport, *view.transport)) {
+                result.code = TrackAutomationRendererCode::DeviceScheduleMismatch;
+                result.failed_device_placement_id = view.device_placement_id;
+                return result;
+            }
+            callback_transport = view.transport;
+        }
     }
 
     bool lane_coalesced = false;
@@ -171,6 +231,9 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
     std::uint64_t intersecting_segment_count = 0;
     for (auto& lane : lanes_) {
         lane.next_cursor = lane.cursor;
+        const auto& transport = uniform_transport != nullptr
+                                    ? *uniform_transport
+                                    : *transports[lane.device_index].transport;
         const auto remaining_segment_budget = static_cast<std::uint32_t>(
             limits_.max_intersecting_segments_per_block - intersecting_segment_count);
         const auto rendered = lane.next_cursor.process(*lane.program, transport, lane.scratch,

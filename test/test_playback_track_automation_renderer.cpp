@@ -1,4 +1,5 @@
 #include <pulp/playback/track_automation_renderer.hpp>
+#include <pulp/playback/schedule_ahead.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
@@ -173,6 +174,102 @@ TEST_CASE("track automation renderer emits queue-ready ramp and immediate events
     REQUIRE(events[1] == TrackAutomationEvent{{10}, 7, 0, 1.0f, 1});
     REQUIRE(events[2] == TrackAutomationEvent{{10}, 7, 2, 0.25f, 0});
     REQUIRE(events[3] == TrackAutomationEvent{{10}, 7, 2, 0.75f, 1});
+}
+
+TEST_CASE("track automation renderer evaluates each device in its projected window") {
+    const auto map = tempo_map();
+    const auto first = hold_program({10}, {{100}, 1}, map, 16);
+    const auto second = hold_program({20}, {{200}, 2}, map, 16);
+    auto renderer =
+        take(TrackAutomationRenderer::create(track(map, {second, first})));
+
+    MasterTransport transport;
+    prepare(transport, *map, 4);
+    const auto base = block(transport, 4);
+    TransportSnapshot first_window;
+    TransportSnapshot second_window;
+    REQUIRE(project_schedule_ahead(base, 0, first_window) == ScheduleAheadCode::Ok);
+    REQUIRE(project_schedule_ahead(base, 8, second_window) == ScheduleAheadCode::Ok);
+    const std::array views{
+        DeviceAutomationTransportView{{100}, &first_window},
+        DeviceAutomationTransportView{{200}, &second_window},
+    };
+
+    TrackAutomationRenderResult rendered;
+    {
+        test::ScopedRtProcessProbe probe;
+        rendered = renderer.process(views);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(rendered.code == TrackAutomationRendererCode::Ok);
+    REQUIRE(renderer.batches().size() == 2);
+    REQUIRE(renderer.batches()[0].events[1].sample_offset == 1);
+    REQUIRE(renderer.batches()[0].events[1].value == 1.0f);
+    REQUIRE(renderer.batches()[1].events[1].sample_offset == 1);
+    REQUIRE(renderer.batches()[1].events[1].value == 9.0f);
+}
+
+TEST_CASE("track automation renderer rejects incomplete device schedules atomically") {
+    const auto map = tempo_map();
+    const auto first = hold_program({10}, {{100}, 1}, map, 16);
+    const auto second = hold_program({20}, {{200}, 2}, map, 16);
+    auto renderer =
+        take(TrackAutomationRenderer::create(track(map, {first, second})));
+    MasterTransport transport;
+    prepare(transport, *map, 4);
+    const auto snapshot = block(transport, 4);
+
+    const std::array missing{DeviceAutomationTransportView{{100}, &snapshot}};
+    REQUIRE(renderer.process(missing).code ==
+            TrackAutomationRendererCode::DeviceScheduleMismatch);
+    const std::array reversed{
+        DeviceAutomationTransportView{{200}, &snapshot},
+        DeviceAutomationTransportView{{100}, &snapshot},
+    };
+    REQUIRE(renderer.process(reversed).code ==
+            TrackAutomationRendererCode::DeviceScheduleMismatch);
+    const std::array duplicate{
+        DeviceAutomationTransportView{{100}, &snapshot},
+        DeviceAutomationTransportView{{100}, &snapshot},
+    };
+    REQUIRE(renderer.process(duplicate).code ==
+            TrackAutomationRendererCode::DeviceScheduleMismatch);
+    const std::array null_transport{
+        DeviceAutomationTransportView{{100}, &snapshot},
+        DeviceAutomationTransportView{{200}, nullptr},
+    };
+    REQUIRE(renderer.process(null_transport).code ==
+            TrackAutomationRendererCode::DeviceScheduleMismatch);
+
+    const auto next_block = block(transport, 4);
+    const std::array mismatched_block{
+        DeviceAutomationTransportView{{100}, &snapshot},
+        DeviceAutomationTransportView{{200}, &next_block},
+    };
+    const auto block_failure = renderer.process(mismatched_block);
+    REQUIRE(block_failure.code == TrackAutomationRendererCode::DeviceScheduleMismatch);
+    REQUIRE(block_failure.failed_device_placement_id == ItemId{200});
+
+    MasterTransport short_transport;
+    prepare(short_transport, *map, 4);
+    const auto short_snapshot = block(short_transport, 3);
+    const std::array mismatched_frames{
+        DeviceAutomationTransportView{{100}, &snapshot},
+        DeviceAutomationTransportView{{200}, &short_snapshot},
+    };
+    const auto frame_failure = renderer.process(mismatched_frames);
+    REQUIRE(frame_failure.code == TrackAutomationRendererCode::DeviceScheduleMismatch);
+    REQUIRE(frame_failure.failed_device_placement_id == ItemId{200});
+    for (const auto& batch : renderer.batches())
+        REQUIRE(batch.events.empty());
+
+    const std::array complete{
+        DeviceAutomationTransportView{{100}, &snapshot},
+        DeviceAutomationTransportView{{200}, &snapshot},
+    };
+    REQUIRE(renderer.process(complete).code == TrackAutomationRendererCode::Ok);
+    REQUIRE_FALSE(renderer.batches()[0].events.empty());
+    REQUIRE_FALSE(renderer.batches()[1].events.empty());
 }
 
 TEST_CASE("track automation renderer preserves cursor carry across program adoption") {
