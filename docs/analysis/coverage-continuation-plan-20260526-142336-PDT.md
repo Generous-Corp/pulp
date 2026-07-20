@@ -47,7 +47,7 @@ Deleted merged local branch:
 - Branch: `feature/coverage-cli-command-contracts-20260526`
 - Base: `origin/main` at `bbcdea0fa`
 - Commit: `501df8532047cf040cf01386cc4fe4fd8aae3893`
-- PR: https://github.com/danielraffel/pulp/pull/2998
+- PR: https://github.com/Generous-Corp/pulp/pull/2998
 - Current scope: `tools/cli/cmd_version.cpp` and `test/test_cli_shellout.cpp`
 - Codecov evidence: latest Codecov main report was stale relative to `origin/main` during this pass. The `tools/cli` path was at 35.51% coverage with `cmd_version.cpp` at 2.44% coverage.
 

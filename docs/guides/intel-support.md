@@ -19,7 +19,7 @@ Intel/AMD GPU.
 
 | Tier | What | Where | When | Blocking? |
 |------|------|-------|------|-----------|
-| 0 | Intel **canary**: static lint + `-DPULP_ENABLE_GPU=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64` compile of `pulp-runtime pulp-signal pulp-platform pulp-state pulp-format` | inside the existing ARM macOS job (`build.yml`), gated on the `PULP_INTEL_CANARY` repo variable | every PR (opt-in; forks pay nothing) | yes, on `danielraffel/pulp` |
+| 0 | Intel **canary**: static lint + `-DPULP_ENABLE_GPU=OFF -DCMAKE_OSX_ARCHITECTURES=x86_64` compile of `pulp-runtime pulp-signal pulp-platform pulp-state pulp-format` | inside the existing ARM macOS job (`build.yml`), gated on the `PULP_INTEL_CANARY` repo variable | every PR (opt-in; forks pay nothing) | yes, on `Generous-Corp/pulp` |
 | 1 | Path-triggered **advisory** x86_64 build + full ctest under Rosetta | `intel-portability.yml`, **stable** `macos-15` (arm64+Rosetta) | PRs that touch arch-sensitive paths | no (advisory) |
 | 2 | **Nightly** native Intel (job A) + universal cross-check (job B) | `nightly-intel.yml`: job A on `macos-15-intel`, job B on `macos-15` | cron, off-peak | no (opens a watchdog issue) |
 | 3 | **Universal cross-check**: universal build + `lipo -archs` + `codesign --verify` + dual-arch `auval` | `nightly-intel.yml` `universal-crosscheck` | nightly | advisory |
@@ -65,7 +65,7 @@ signal (`nightly-intel.yml` Job A) and the successor plan when it EOLs
 
 Runner discipline is absolute: **no Intel work ever routes to the self-hosted
 Mac Studios** that host the required `macos` gate, and **Namespace is never
-used** (cost). `danielraffel/pulp` is a public repo, so GitHub-hosted macOS
+used** (cost). `Generous-Corp/pulp` is a public repo, so GitHub-hosted macOS
 minutes — including the native `macos-15-intel` runner — are free; the only
 budget that matters is wall-clock, runner flakiness, and Studio capacity.
 
@@ -131,7 +131,7 @@ about its reach.
 The option is `OFF` by default so **external cloners pay nothing**. Most people
 who vendor Pulp ship a single-arch Apple-Silicon plugin and never build for
 Intel; forcing a cross-arch lint + compile on them would be a pure tax with no
-benefit. `danielraffel/pulp` — which does care about the Intel story — opts in
+benefit. `Generous-Corp/pulp` — which does care about the Intel story — opts in
 by setting the `PULP_INTEL_CANARY` repo variable to `1`, exactly like
 `PULP_REQUIRE_GPU_FOR_SDK` is flipped on only in the release workflow. Forks
 inherit `OFF` and their CI step is skipped.

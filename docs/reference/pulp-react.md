@@ -91,7 +91,7 @@ the in-repo path, those projects can continue installing the previously
 published tarball (`@pulp/react@0.0.1`) without any change. Once those
 consumers point their `package.json` at the monorepo path
 (`"@pulp/react": "file:../pulp/packages/pulp-react"` or a git URL like
-`"github:danielraffel/pulp#main&path:packages/pulp-react"`), the `node_modules`
+`"github:Generous-Corp/pulp#main&path:packages/pulp-react"`), the `node_modules`
 copy stops being volatile and edits flow round-trip through this directory.
 
 ## License

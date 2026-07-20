@@ -32,7 +32,7 @@ The reusable runner path is now the sibling `tartci` repo:
   guest process, ctest tail, and runner log together.
 - `tartci doctor --reap --json` is the local cleanup/health digest.
 - `TARTCI_RUNTIME_MEASURE=1 tartci serve ...` records per-job VM timings; use
-  `tartci runtime recent|summary|export --repo danielraffel/pulp --json` and
+  `tartci runtime recent|summary|export --repo Generous-Corp/pulp --json` and
   pipe exports into `shipyard metrics import tartci` for long-term agent
   baselines.
 - `shipyard --json runner fleet-status --target macos` is the cross-host pool
@@ -87,7 +87,7 @@ Skia/Dawn are pinned in `tools/deps/manifest.json` (release-asset URL + sha256 p
 - **macOS caps 2 concurrent running VMs PER HOST** (kernel quota; booting a 3rd throws "number of VMs exceeds the system limit"). For ≥3 concurrent, **distribute runners across multiple Macs** (e.g. Mac Studio + MacBook Pro M5 → 2+2 = 4) — each runs `tart-runner.sh`; new hosts inherit the host-class label (`*-studio`, `*-m1`, `*-m5`) and cap=2. A dedicated Studio *can* raise the cap via the kernel-quota override (plan Appendix D; SIP off + dev kernel — last resort).
 - A persistent operator VM (e.g. `pulp-vm`) on a host consumes 1 of its 2 slots.
 - **Capacity-aware local queue draining is implemented and VM-slot-aware.** The current tartci/Shipyard path shares one rule: a host has free macOS capacity when `running_macos_vms < cap` (cap = 2/host), and only macOS/Darwin guests consume the `macos` VM slot. Linux Tart and Windows QEMU lanes use their own labels, supervisors, and caps; they do not reduce macOS free slots, though CPU/RAM can still need route weights or reservations.
-- **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R danielraffel/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
+- **Local-first policy:** Pulp's automatic macOS overflow is disabled with `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON=local-only`. Do not point full-local saturation at GitHub-hosted `macos-15`; let jobs queue for the next local Mac slot. Hosted macOS is an explicit operator fallback for a local fleet outage/unhealthy fleet or a workflow that intentionally wants hosted coverage. Rollback for the old behavior: `gh variable set -R Generous-Corp/pulp PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["macos-15"]'`.
 - **Production required macOS route is VM-first (2026-06-10):** `PULP_LOCAL_MACOS_RUNS_ON_JSON=["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]` and `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build-vm`. The VM supervisors advertise both `pulp-build` and `pulp-build-vm`; bare-metal `pulp-build` runners stay online but are excluded from the default route by the extra `pulp-build-vm` label. Full rollback: restore `PULP_LOCAL_MACOS_RUNS_ON_JSON` to `["self-hosted","pulp-build"]`, restore `PULP_LOCAL_MAC_RUNNER_LABEL=pulp-build`, and unload the VM LaunchAgents if the VM pool itself is unhealthy.
 
 ## Linux + Windows pool runners (join the Actions pool like macOS)
@@ -211,8 +211,8 @@ main, reddening every PR's macOS gate.)
    - run `27251442228`: real PR, controller `pulp-vm-01`, `macOS (ARM64) [local]` success, `macos` alias success.
 4. **Rollback path:** keep bare-metal fallback online. To route back to bare-metal:
    ```bash
-   gh variable set -R danielraffel/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
-   gh variable set -R danielraffel/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
+   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","pulp-build"]'
+   gh variable set -R Generous-Corp/pulp PULP_LOCAL_MAC_RUNNER_LABEL --body 'pulp-build'
    launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner"
    ssh <secondary-host> 'launchctl bootout "gui/$(id -u)/com.danielraffel.pulp.tart-runner-macos-pilot"'
    ```

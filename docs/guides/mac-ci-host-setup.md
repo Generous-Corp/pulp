@@ -39,7 +39,7 @@ brew install cirruslabs/cli/tart hudochenkov/sshpass/sshpass
 # SSH keypair the golden will trust (or already trusts):
 test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
 gh auth login -h github.com            # config-file token storage (no keychain dependency); repo admin to mint JIT runner configs
-git clone https://github.com/danielraffel/pulp.git ~/Code/pulp   # tools/ci/* + the launchd template
+git clone https://github.com/Generous-Corp/pulp.git ~/Code/pulp   # tools/ci/* + the launchd template
 echo 'export TART_HOME=$HOME/VMs' >> ~/.zprofile && export TART_HOME=$HOME/VMs
 mkdir -p ~/VMs && touch ~/VMs/.metadata_never_index              # keep Spotlight off the VM store
 ```

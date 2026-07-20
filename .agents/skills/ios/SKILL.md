@@ -111,7 +111,7 @@ xcrun simctl launch --console booted com.example.MyApp
 
 **Policy**: assume XcodeBuildMCP when the user has it configured; do not hard-require or auto-install it. Leave install to user preference.
 
-**Audio etiquette for Sim launches**: `simctl launch --console …` opens a virtual coreaudio device that routes through the host Mac's `coreaudiod` — any non-muted audio path the app exercises plays out the host's speakers. Per CLAUDE.md → *Working with AI Tools* → *Local-dev audio etiquette*, announce before launching ("heads up — about to launch the Sim, audio may be active for ~30s"), cap the verify duration, and `simctl terminate` + `simctl shutdown` when done. Tracked as issue [#3173](https://github.com/danielraffel/pulp/issues/3173).
+**Audio etiquette for Sim launches**: `simctl launch --console …` opens a virtual coreaudio device that routes through the host Mac's `coreaudiod` — any non-muted audio path the app exercises plays out the host's speakers. Per CLAUDE.md → *Working with AI Tools* → *Local-dev audio etiquette*, announce before launching ("heads up — about to launch the Sim, audio may be active for ~30s"), cap the verify duration, and `simctl terminate` + `simctl shutdown` when done. Tracked as issue [#3173](https://github.com/Generous-Corp/pulp/issues/3173).
 
 ## AUv3 App Extension
 

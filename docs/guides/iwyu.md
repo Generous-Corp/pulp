@@ -5,7 +5,7 @@ catch transitive-include bugs at analysis time instead of waiting for
 the cross-platform matrix to reject them.
 
 This guide covers the Phase 2 advisory gate. See
-[issue #594](https://github.com/danielraffel/pulp/issues/594) for the
+[issue #594](https://github.com/Generous-Corp/pulp/issues/594) for the
 full 3-tier plan (Phase 1 tightened the coverage-build gate, Phase 2
 is this advisory IWYU check, Phase 3 will flip it to blocking once the
 false-positive rate settles).
@@ -22,9 +22,9 @@ Three real incidents on 2026-04-21 alone:
 
 | Incident      | File                                      | Missing   |
 |---------------|-------------------------------------------|-----------|
-| [#540](https://github.com/danielraffel/pulp/issues/540)   | `core/signal/include/pulp/signal/fft.hpp` | `<memory>`    |
+| [#540](https://github.com/Generous-Corp/pulp/issues/540)   | `core/signal/include/pulp/signal/fft.hpp` | `<memory>`    |
 | Slice 4 test  | `test/test_cli_version_diag.cpp`          | `<atomic>`    |
-| [#593](https://github.com/danielraffel/pulp/issues/593)   | `core/state/include/pulp/state/state_tree.hpp` | `<algorithm>` |
+| [#593](https://github.com/Generous-Corp/pulp/issues/593)   | `core/state/include/pulp/state/state_tree.hpp` | `<algorithm>` |
 
 Each bug was only detected by CI after landing on a feature branch.
 IWYU rejects them at analysis time.

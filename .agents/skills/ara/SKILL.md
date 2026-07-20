@@ -160,7 +160,7 @@ round-trips back to the same factory pointer.
 
 - Spec: `planning/production-readiness/06-ara.md`
 - Status: `planning/production-readiness/STATUS.md` (ARA / workstream 06 section)
-- Tracking: [#219](https://github.com/danielraffel/pulp/issues/219)
+- Tracking: [#219](https://github.com/Generous-Corp/pulp/issues/219)
 
 ## Skill maintenance
 

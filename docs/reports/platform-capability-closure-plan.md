@@ -26,9 +26,9 @@ implementation notes, tests, coverage proof, and PR link before shipping.
 | Track | Branch target | Worktree target | Status | Done means |
 | --- | --- | --- | --- | --- |
 | Threads and processes | `feature/platform-threads-processes` | `pulp-platform-threads-processes` | Merged via PR #2815 | Canonical platform process surface, runtime blocking wrapper, tested launch/wait/cancel/output/IPC behavior, no unneeded current-process or timer additions |
-| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/danielraffel/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
-| OSC | `feature/platform-osc` | `pulp-platform-osc` | Merged via PR [#2822](https://github.com/danielraffel/pulp/pull/2822) as `bbc1506ed` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
-| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/danielraffel/pulp/pull/2844) open; locally rebased and validated on `origin/main` `f10a6e32e` after #2822 and #2971 merged; SDK `0.254.0`; Claude plugin `0.122.0` | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
+| Native event loop | `feature/platform-main-thread-dispatch` | `pulp-platform-main-thread-dispatch` | Merged via PR [#2825](https://github.com/Generous-Corp/pulp/pull/2825) as `9c96f3dfa` | Cross-platform main-thread dispatcher contract, platform registrations where available, sync/async dispatch tests, EventLoop thread-id race fixed |
+| OSC | `feature/platform-osc` | `pulp-platform-osc` | Merged via PR [#2822](https://github.com/Generous-Corp/pulp/pull/2822) as `bbc1506ed` | Typed bundle send/receive, listener filtering using existing address matching, invalid-packet error callback, exclusive UDP receiver binding, focused UDP and pure parser tests |
+| Native windows | `feature/platform-native-window-embedding` | `pulp-platform-native-window-embedding` | PR [#2844](https://github.com/Generous-Corp/pulp/pull/2844) open; locally rebased and validated on `origin/main` `f10a6e32e` after #2822 and #2971 merged; SDK `0.254.0`; Claude plugin `0.122.0` | First-party non-Apple host/plugin embedding path or explicit supported-platform contract, child attach/bounds/detach tests, docs updated to avoid overclaiming |
 
 Validation expectations for each PR:
 - Add or update focused unit tests for every new public behavior.
@@ -151,7 +151,7 @@ PR1 local validation:
   75% floor.
 
 PR1 submit and review sweep:
-- PR: https://github.com/danielraffel/pulp/pull/2815
+- PR: https://github.com/Generous-Corp/pulp/pull/2815
 - Initial Shipyard submission opened the PR and ran local macOS validation.
   SSH-backed Windows/Ubuntu targets are not part of this focused validation
   pass; use GitHub-hosted platform checks and local/macOS evidence instead.
@@ -592,7 +592,7 @@ PR2 implementation scope:
   such as `{foo,}` and `{foo,bar,}`.
 
 PR2 validation and PR state:
-- PR #2822: https://github.com/danielraffel/pulp/pull/2822
+- PR #2822: https://github.com/Generous-Corp/pulp/pull/2822
 - The branch is rebased onto `origin/main` at `ad72d830` after #2825, #2905,
   #2900, #2909, #2906, #2914, #2908, #2898, #2913, the regenerated v0.238.0
   changelog, #2901, and #2902 landed. The fresh required SDK bump is
