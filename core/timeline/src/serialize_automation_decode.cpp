@@ -90,9 +90,10 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
             validate_exact_envelope(*target.value(),
                                     "pulp.timeline.automation_target.device_parameter", 1,
                                     lane_path + "/data/target");
-        if (!decoded_id || !target_data)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::InvalidSchema,
-                                                     lane_path);
+        if (!decoded_id)
+            return runtime::Err(decoded_id.error());
+        if (!target_data)
+            return runtime::Err(target_data.error());
         const auto* placement = member(*target_data.value(), "device_placement_id");
         const auto* parameter = member(*target_data.value(), "parameter_id");
         if (!placement || !parameter)
@@ -102,9 +103,10 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
             *placement, lane_path + "/data/target/data/device_placement_id");
         auto parameter_id =
             parse_u32_number(*parameter, lane_path + "/data/target/data/parameter_id");
-        if (!placement_id || !parameter_id)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::InvalidNumber,
-                                                     lane_path + "/data/target/data");
+        if (!placement_id)
+            return runtime::Err(placement_id.error());
+        if (!parameter_id)
+            return runtime::Err(parameter_id.error());
 
         std::vector<AutomationPoint> decoded_points;
         decoded_points.reserve(points.value()->array.size());
@@ -131,11 +133,20 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
             auto value_value = parse_canonical_u64_string(*value_bits, point_path + "/value_bits");
             auto curvature_value =
                 parse_canonical_u64_string(*curvature_bits, point_path + "/curvature_bits");
-            if (!id_value || !position_value || !value_value || !curvature_value ||
-                value_value.value() > std::numeric_limits<std::uint32_t>::max() ||
-                curvature_value.value() > std::numeric_limits<std::uint32_t>::max())
+            if (!id_value)
+                return runtime::Err(id_value.error());
+            if (!position_value)
+                return runtime::Err(position_value.error());
+            if (!value_value)
+                return runtime::Err(value_value.error());
+            if (!curvature_value)
+                return runtime::Err(curvature_value.error());
+            if (value_value.value() > std::numeric_limits<std::uint32_t>::max())
                 return fail<std::vector<AutomationLane>>(PersistenceErrorCode::InvalidNumber,
-                                                         point_path);
+                                                         point_path + "/value_bits");
+            if (curvature_value.value() > std::numeric_limits<std::uint32_t>::max())
+                return fail<std::vector<AutomationLane>>(PersistenceErrorCode::InvalidNumber,
+                                                         point_path + "/curvature_bits");
             AutomationInterpolation decoded_interpolation;
             if (interpolation->scalar == "hold")
                 decoded_interpolation = AutomationInterpolation::Hold;

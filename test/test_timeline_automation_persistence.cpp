@@ -174,3 +174,31 @@ TEST_CASE("Timeline automation quotas reject lanes and points during preflight")
     REQUIRE(web.max_automation_lanes < DecodeLimits{}.max_automation_lanes);
     REQUIRE(web.max_automation_points < DecodeLimits{}.max_automation_points);
 }
+
+TEST_CASE("Timeline automation decode preserves exact child parse errors") {
+    const auto snapshot = take(serialize_project(automation_project(), builtins())).json;
+    const auto reject_replacement = [&](std::string_view needle, std::string_view replacement,
+                                        PersistenceErrorCode code, std::string_view path) {
+        auto malformed = snapshot;
+        const auto position = malformed.find(needle);
+        REQUIRE(position != std::string::npos);
+        malformed.replace(position, needle.size(), replacement);
+        auto rejected = deserialize_project(malformed, builtins());
+        REQUIRE_FALSE(rejected.has_value());
+        REQUIRE(rejected.error().code == code);
+        REQUIRE(rejected.error().path == path);
+    };
+
+    reject_replacement(
+        R"("id":"5","points")", R"("id":"05","points")",
+        PersistenceErrorCode::InvalidNumber,
+        "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/id");
+    reject_replacement(
+        R"("device_placement_id":"4")", R"("device_placement_id":"04")",
+        PersistenceErrorCode::InvalidNumber,
+        "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/target/data/device_placement_id");
+    reject_replacement(
+        R"("parameter_id":7)", R"("parameter_id":4294967296)",
+        PersistenceErrorCode::InvalidNumber,
+        "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/target/data/parameter_id");
+}
