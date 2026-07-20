@@ -588,6 +588,13 @@ public:
         if (!ext || !ext->get) return 0;
         return (int)ext->get(plugin_);
     }
+    LatencyQuery latency_query() const override {
+        if (!plugin_) return LatencyQuery::QueryFailed;
+        auto* ext = static_cast<const clap_plugin_latency_t*>(
+            plugin_->get_extension(plugin_, CLAP_EXT_LATENCY));
+        return ext && ext->get ? LatencyQuery::Available
+                               : LatencyQuery::Unsupported;
+    }
     int tail_samples() const override {
         if (!plugin_) return 0;
         auto* ext = (const clap_plugin_tail_t*)plugin_->get_extension(plugin_, CLAP_EXT_TAIL);

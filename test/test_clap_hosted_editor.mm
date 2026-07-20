@@ -735,3 +735,12 @@ TEST_CASE("CLAP slot destroyed with an open editor still tears the gui down", "[
     // caller's struct is left over, which the caller owns.
     delete orphaned;
 }
+
+TEST_CASE("CLAP slot marks an absent latency extension unsupported",
+          "[clap][latency]") {
+    FakeClapPlugin fake;
+    auto slot = make_slot(fake);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->latency_samples() == 0);
+    REQUIRE(slot->latency_query() == PluginSlot::LatencyQuery::Unsupported);
+}

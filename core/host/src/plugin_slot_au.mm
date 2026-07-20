@@ -455,6 +455,16 @@ public:
         }
         return 0;
     }
+    LatencyQuery latency_query() const override {
+        if (!au_) return LatencyQuery::QueryFailed;
+        Float64 secs = 0.0;
+        UInt32 size = sizeof(secs);
+        return AudioUnitGetProperty(
+                   au_, kAudioUnitProperty_Latency,
+                   kAudioUnitScope_Global, 0, &secs, &size) == noErr
+                   ? LatencyQuery::Available
+                   : LatencyQuery::QueryFailed;
+    }
     int tail_samples() const override {
         if (!au_) return 0;
         Float64 secs = 0.0;

@@ -142,6 +142,7 @@ public:
         new_slot_->destroy_hosted_editor(std::move(ed));
     }
     int latency_samples() const override { return new_slot_->latency_samples(); }
+    LatencyQuery latency_query() const override { return new_slot_->latency_query(); }
     int tail_samples() const override { return new_slot_->tail_samples(); }
     void accept(NativeHandleVisitor& v) const override { new_slot_->accept(v); }
     bool wants_transport() const override { return new_slot_->wants_transport(); }

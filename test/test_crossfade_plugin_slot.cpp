@@ -24,8 +24,9 @@ namespace {
 // so we can tell old vs new output apart and confirm delegation targets the new slot.
 class ConstSlot final : public PluginSlot {
 public:
-    ConstSlot(float value, std::string tag, int latency)
-        : value_(value), latency_(latency) {
+    ConstSlot(float value, std::string tag, int latency,
+              LatencyQuery latency_query = LatencyQuery::Available)
+        : value_(value), latency_(latency), latency_query_(latency_query) {
         info_.name = std::move(tag);
         info_.num_inputs = 1;
         info_.num_outputs = 1;
@@ -63,11 +64,13 @@ public:
     void* create_editor_view() override { return nullptr; }
     void destroy_editor_view() override {}
     int latency_samples() const override { return latency_; }
+    LatencyQuery latency_query() const override { return latency_query_; }
     int tail_samples() const override { return 0; }
 
 private:
     float value_;
     int latency_;
+    LatencyQuery latency_query_;
     PluginInfo info_;
     std::shared_ptr<int> process_count_;
 };
@@ -128,10 +131,12 @@ TEST_CASE("CrossfadePluginSlot blends old->new click-free then settles on new",
 TEST_CASE("CrossfadePluginSlot delegates non-process calls to the new instance",
           "[host][graph][live-swap][crossfade]") {
     auto old_slot = std::make_shared<ConstSlot>(1.0f, "old", 128);
-    auto new_slot = std::make_shared<ConstSlot>(0.0f, "new", 64);
+    auto new_slot = std::make_shared<ConstSlot>(
+        0.0f, "new", 64, PluginSlot::LatencyQuery::Unsupported);
     CrossfadePluginSlot xf(new_slot, old_slot, 128, pulp::signal::TransitionCurve::Smoothstep, 1, 64);
     CHECK(xf.info().name == "new");
     CHECK(xf.latency_samples() == 64);              // the new instance's latency, not old's
+    CHECK(xf.latency_query() == PluginSlot::LatencyQuery::Unsupported);
     CHECK(xf.save_state() == new_slot->save_state());
     CHECK(xf.new_slot().get() == new_slot.get());
 }
