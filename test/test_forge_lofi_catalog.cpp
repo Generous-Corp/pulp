@@ -307,6 +307,54 @@ TEST_CASE("Forge lo-fi: injecting bitcrush rate reduction decimates a baked tone
     CHECK(decimated > 0);                   // but still latches periodically
 }
 
+// ── Delay: time + feedback are live on the baked feedback echo ───────────
+TEST_CASE("Forge lo-fi: injecting delay feedback changes a baked echo's tail",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    BakedFixture fx(lofi::make_delay_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    // Feed an impulse once, then measure the summed energy of `blocks` silent
+    // blocks. Both params are set together via a batch queue (a single-event
+    // inject would collapse two same-node params — the mailbox is latest-wins).
+    const std::vector<float> impulse = [] {
+        std::vector<float> v(kFrames, 0.0f);
+        v[0] = 1.0f;
+        return v;
+    }();
+    const std::vector<float> silence(kFrames, 0.0f);
+
+    auto tail_energy = [&](float time_ms, float feedback, int blocks) {
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kDelayTimeMs, time_ms)));
+        REQUIRE(q.push(immediate(lofi::kDelayFeedback, feedback)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        run_block(*fx.result.processor, impulse);
+        double e = 0.0;
+        for (int b = 0; b < blocks; ++b) {
+            const auto out = run_block(*fx.result.processor, silence);
+            for (float v : out) e += static_cast<double>(v) * v;
+        }
+        return e;
+    };
+
+    // A short 2 ms tap: feedback 0 gives a single echo that dies out; feedback
+    // 0.9 recirculates into a long decaying comb — much more summed tail energy.
+    const double fb_low = tail_energy(2.0f, 0.0f, 24);
+    const double fb_high = tail_energy(2.0f, 0.9f, 24);
+    INFO("fb_low=" << fb_low << " fb_high=" << fb_high);
+    CHECK(fb_high > fb_low * 1.5);   // more feedback => more tail
+
+    // Two clearly different tap times leave clearly different near-field energy
+    // over the same window — proof the injected time reaches the baked read tap.
+    const double t_a = tail_energy(2.0f, 0.7f, 8);
+    const double t_b = tail_energy(40.0f, 0.7f, 8);
+    const double hi = std::max(t_a, t_b);
+    const double lo = std::min(t_a, t_b);
+    INFO("t(2ms)=" << t_a << " t(40ms)=" << t_b);
+    CHECK(hi > lo * 1.5);            // the injected time moved the echo
+}
+
 // ── RT safety: every node's inject + process path is allocation-free ─────
 TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog node",
           "[host][baked][param-injection][forge][forge-lofi][rt]") {
@@ -317,6 +365,7 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
         float value;
     };
     std::vector<Case> cases;
+    cases.push_back({lofi::make_delay_node(), 1, lofi::kDelayTimeMs, 120.0f});
     cases.push_back({lofi::make_filter_node(), 1, lofi::kFilterCutoffHz, 1200.0f});
     cases.push_back({lofi::make_waveshaper_node(), 1, lofi::kWaveshaperDrive, 8.0f});
     cases.push_back({lofi::make_drywet_node(), 2, lofi::kDryWetMix, 0.5f});

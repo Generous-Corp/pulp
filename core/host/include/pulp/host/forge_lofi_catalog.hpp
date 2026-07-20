@@ -17,6 +17,8 @@
 // pulp::signal include path.
 //
 // Macro-knob mapping:
+//   * Delay (feedback echo)  → "Time"  = time_ms + "Feedback" = feedback
+//                                                     (time_ms per-sample, interpolated)
 //   * Filter (Svf lowpass)   → "Tone"  = cutoff_hz   (sample-accurate)
 //   * Waveshaper (tanh)      → "Drive" = drive       (sample-accurate)
 //   * Dry/Wet (DryWetMixer)  → "Mix"   = mix         (BLOCK-rate; see note below)
@@ -33,10 +35,12 @@
 
 #include <pulp/host/signal_graph.hpp>
 
+#include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/waveshaper.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +48,7 @@
 namespace pulp::host::forge_lofi {
 
 // ── Stable type ids ──────────────────────────────────────────────────────
+inline constexpr const char* kDelayTypeId      = "forge_lofi_delay";
 inline constexpr const char* kFilterTypeId     = "forge_lofi_filter";
 inline constexpr const char* kWaveshaperTypeId = "forge_lofi_waveshaper";
 inline constexpr const char* kDryWetTypeId     = "forge_lofi_drywet";
@@ -52,12 +57,84 @@ inline constexpr const char* kBitcrushTypeId   = "forge_lofi_bitcrush";
 
 // ── Injectable macro-knob param ids ──────────────────────────────────────
 // Node-local; the framework namespaces per node so two nodes never collide.
+inline constexpr state::ParamID kDelayTimeMs       = 1;  // "Time"
+inline constexpr state::ParamID kDelayFeedback     = 2;  // "Feedback"
 inline constexpr state::ParamID kFilterCutoffHz    = 1;  // "Tone"
 inline constexpr state::ParamID kWaveshaperDrive   = 1;  // "Drive"
 inline constexpr state::ParamID kDryWetMix         = 1;  // "Mix"
 inline constexpr state::ParamID kNoiseLevel        = 1;  // "Hiss"
 inline constexpr state::ParamID kBitcrushBitDepth  = 1;  // "Crush" (depth)
 inline constexpr state::ParamID kBitcrushRateDiv   = 2;  // "Crush" (rate reduction)
+
+// Longest delay the node can address; sizes the bake-time buffer allocation.
+inline constexpr float kDelayMaxMs = 2000.0f;
+
+// ── Delay (feedback echo) — "Time" + "Feedback" ──────────────────────────
+// A self-contained lo-fi feedback delay: a single interpolated DelayLine with a
+// recirculating feedback path, its output being dry + wet (an audible echo you
+// can drop straight between audio_in and audio_out). Both knobs are injectable
+// on the BAKED graph — no re-bake:
+//   * time_ms  (1 .. kDelayMaxMs): the tap position, read per-sample with linear
+//     interpolation, so a "Time" sweep glides (the classic tape-delay pitch
+//     smear) instead of stepping.
+//   * feedback (0 .. 0.95): the recirculation gain; clamped below unity so the
+//     tail always decays (no runaway — the verify gate's boundedness check).
+// The DelayLine buffer is sized once at prepare() for kDelayMaxMs; time_ms is
+// clamped into [1, buffer] each sample, so an injected value can never read past
+// the allocation. RT-safe: prepare() allocates, process() is pure arithmetic.
+struct DelayInstance {
+    signal::DelayLine line;
+    double sample_rate = 48000.0;
+    int max_delay_samples = 1;
+};
+
+inline CustomNodeType make_delay_node() {
+    CustomNodeType t;
+    t.type_id = kDelayTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Delay";
+    t.lowerable = true;
+    t.create = []() -> void* { return new DelayInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<DelayInstance*>(p); };
+    t.prepare = [](void* p, double sr, int /*max_block*/) {
+        auto* s = static_cast<DelayInstance*>(p);
+        s->sample_rate = sr;
+        s->max_delay_samples =
+            std::max(1, static_cast<int>(std::ceil(kDelayMaxMs * 0.001 * sr)));
+        s->line.prepare(s->max_delay_samples);
+    };
+    t.reset = [](void* p) { static_cast<DelayInstance*>(p)->line.reset(); };
+    // time_ms: 1 ms .. 2 s, default 250 ms. feedback: 0 .. 0.95, default 0.5.
+    t.baked_params.push_back({kDelayTimeMs, 1.0f, kDelayMaxMs, 250.0f});
+    t.baked_params.push_back({kDelayFeedback, 0.0f, 0.95f, 0.5f});
+    t.process_instance_baked_param =
+        [](void* p, audio::BufferView<float>& out,
+           const audio::BufferView<const float>& in, int n,
+           const BakedParamView& params) {
+            auto* s = static_cast<DelayInstance*>(p);
+            const float* i = in.channel_ptr(0);
+            float* o = out.channel_ptr(0);
+            const float sr_per_ms = static_cast<float>(s->sample_rate) * 0.001f;
+            const float max_d = static_cast<float>(s->max_delay_samples);
+            for (int k = 0; k < n; ++k) {
+                const auto off = static_cast<std::int32_t>(k);
+                const float time_ms = params.value_at(kDelayTimeMs, off);
+                float fb = params.value_at(kDelayFeedback, off);
+                fb = std::clamp(fb, 0.0f, 0.95f);
+
+                float delay_samples = time_ms * sr_per_ms;
+                delay_samples = std::clamp(delay_samples, 1.0f, max_d);
+
+                const float dry = i[static_cast<std::size_t>(k)];
+                const float wet = s->line.read(delay_samples);
+                s->line.push(dry + fb * wet);           // recirculate
+                o[static_cast<std::size_t>(k)] = dry + wet;  // dry + echo
+            }
+        };
+    return t;
+}
 
 // ── Filter (Svf lowpass) — "Tone" ────────────────────────────────────────
 struct FilterInstance {
