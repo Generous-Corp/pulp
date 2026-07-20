@@ -116,6 +116,53 @@ TEST_CASE("Sequence annotation decode preserves the failing field path",
     CHECK(rejected.error().path == "/data/sequences/0/data/markers/1/data/type");
 }
 
+TEST_CASE("Sequence annotation structural errors identify the exact field",
+          "[timeline][persistence][annotation]") {
+    const auto registry = builtins();
+    auto serialized = serialize_project(annotation_project(), registry);
+    REQUIRE(serialized);
+    const auto erase_through = [](std::string value, std::string_view first,
+                                  std::string_view next) {
+        const auto begin = value.find(first);
+        REQUIRE(begin != std::string::npos);
+        const auto end = value.find(next, begin);
+        REQUIRE(end != std::string::npos);
+        value.erase(begin, end - begin);
+        return value;
+    };
+    const auto sequence_v1 = [](std::string value) {
+        constexpr std::string_view from =
+            R"("type_name":"pulp.timeline.sequence","version":2)";
+        constexpr std::string_view to =
+            R"("type_name":"pulp.timeline.sequence","version":1)";
+        const auto offset = value.find(from);
+        REQUIRE(offset != std::string::npos);
+        value.replace(offset, from.size(), to);
+        return value;
+    };
+    const auto reject_at = [&](const std::string& json, std::string_view path) {
+        auto rejected = preflight_timeline_structure(json, DecodeLimits{});
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == PersistenceErrorCode::InvalidSchema);
+        CHECK(rejected.error().path == path);
+    };
+
+    const auto without_markers =
+        erase_through(serialized->json, R"("markers":)", R"("musical_duration":)");
+    const auto without_regions =
+        erase_through(serialized->json, R"("regions":)", R"("tracks":)");
+    auto without_tracks = serialized->json;
+    const auto tracks = without_tracks.find(R"(,"tracks":[])");
+    REQUIRE(tracks != std::string::npos);
+    without_tracks.erase(tracks, std::string_view(R"(,"tracks":[])").size());
+
+    reject_at(without_markers, "/data/sequences/0/data/markers");
+    reject_at(without_regions, "/data/sequences/0/data/regions");
+    reject_at(without_tracks, "/data/sequences/0/data/tracks");
+    reject_at(sequence_v1(without_regions), "/data/sequences/0/data/markers");
+    reject_at(sequence_v1(without_markers), "/data/sequences/0/data/regions");
+}
+
 TEST_CASE("Sequence annotation tombstones survive checkpoint serialization",
           "[timeline][persistence][annotation]") {
     auto session = std::move(DocumentSession::create(annotation_project())).value();

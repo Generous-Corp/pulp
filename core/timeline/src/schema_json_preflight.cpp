@@ -593,10 +593,29 @@ class StructuralScanner {
             !member(data, "markers", markers, has_markers) ||
             !member(data, "regions", regions, has_regions)) return false;
         const bool has_annotations = detail::sequence_has_annotations(version);
-        if (!has_tracks || (has_annotations && (!has_markers || !has_regions)) ||
-            (!has_annotations && (has_markers || has_regions))) {
+        if (!has_tracks) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/tracks");
+            return false;
+        }
+        if (has_annotations && !has_markers) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      path + "/data/markers");
+            return false;
+        }
+        if (has_annotations && !has_regions) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      path + "/data/regions");
+            return false;
+        }
+        if (!has_annotations && has_markers) {
+            set_error(PersistenceErrorCode::InvalidSchema, markers.begin, 0, 0,
+                      path + "/data/markers");
+            return false;
+        }
+        if (!has_annotations && has_regions) {
+            set_error(PersistenceErrorCode::InvalidSchema, regions.begin, 0, 0,
+                      path + "/data/regions");
             return false;
         }
         if (has_markers && !governed_array(
