@@ -515,6 +515,17 @@ target_link_libraries(pulp-test-baked-graph-param-injection
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-baked-graph-param-injection)
 
+# Forge lo-fi DSP catalog (F2-b). Bakes each catalog node (filter / waveshaper /
+# dry-wet / noise / bitcrush) and proves injecting its macro knob changes the
+# baked output over the same production injection path; same RT-probe wiring.
+add_executable(pulp-test-forge-lofi-catalog test_forge_lofi_catalog.cpp)
+target_sources(pulp-test-forge-lofi-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-forge-lofi-catalog
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-lofi-catalog)
+
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
 add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
