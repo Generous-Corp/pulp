@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07450"></a>
+## [0.745.0] - 2026-07-20
+
+- fix(format): AU v2 Cocoa view pins the design viewport so Logic resizes scale, not clip ([#6410](https://github.com/Generous-Corp/pulp/pull/6410))
+- fix(host): BakedGraphProcessor survives in-place buffers + resets node state on prepare ([#6408](https://github.com/Generous-Corp/pulp/pull/6408))
+
 <a id="v07440"></a>
 ## [0.744.0] - 2026-07-20
 
@@ -6815,6 +6821,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.745.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.745.0
 [0.744.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.744.0
 [0.743.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.743.0
 [0.742.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.742.0
