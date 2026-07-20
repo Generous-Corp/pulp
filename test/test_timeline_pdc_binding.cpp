@@ -2,6 +2,11 @@
 
 namespace {
 
+template <typename T, typename E> T checked_take(runtime::Result<T, E> result) {
+    REQUIRE(result);
+    return std::move(result).value();
+}
+
 class PdcProbeSlot final : public PluginSlot {
   public:
     explicit PdcProbeSlot(int latency,
@@ -74,26 +79,28 @@ class PdcProbeSlot final : public PluginSlot {
 std::shared_ptr<const Project> pdc_project(
     const CompiledTempoMap& map, ItemId automated_device,
     std::int64_t automation_sample) {
-    auto note_content = take(NoteContent::create(
-        {note(map, 101, automation_sample, automation_sample + 1)}));
-    auto note_clip = take(Clip::create(
+    auto note_content = checked_take(NoteContent::create(
+        {note(map, 101, 13, 14)}));
+    auto note_clip = checked_take(Clip::create(
         {102}, {0}, map.samples_to_ticks({128}) - TickPosition{0},
         std::move(note_content)));
-    auto curve = take(AutomationCurve::create({AutomationPoint{
+    auto curve = checked_take(AutomationCurve::create({AutomationPoint{
         {41}, map.samples_to_ticks({automation_sample}), 0.75f,
         AutomationInterpolation::Hold}}));
-    auto lane = take(AutomationLane::create(
+    auto lane = checked_take(AutomationLane::create(
         {31}, DeviceParameterTarget{automated_device, 7}, std::move(curve)));
-    auto track = take(Track::create(TrackInput{
-        .id = {10},
+    auto audio_track = checked_take(
+        Track::create({10}, "PDC audio", {audio_clip(1.0f, 128)}));
+    auto event_track = checked_take(Track::create(TrackInput{
+        .id = {11},
         .name = "PDC integration",
-        .clips = {audio_clip(1.0f, 128), std::move(note_clip)},
+        .clips = {std::move(note_clip)},
         .device_chain = {{{21}}, {{20}}},
         .automation_lanes = {std::move(lane)},
     }));
-    auto sequence = take(Sequence::create(
+    auto sequence = checked_take(Sequence::create(
         {2}, "root", std::nullopt, std::nullopt,
-        std::vector<Track>{std::move(track)}));
+        std::vector<Track>{std::move(audio_track), std::move(event_track)}));
     const auto hash = ContentHash::from_hex(std::string(64, 'b'));
     REQUIRE(hash);
     MediaAsset asset{.id = {3},
@@ -101,7 +108,7 @@ std::shared_ptr<const Project> pdc_project(
                      .frame_count = 128,
                      .sample_rate = {48'000, 1},
                      .content_hash = *hash};
-    return std::make_shared<const Project>(take(Project::create(ProjectInput{
+    return std::make_shared<const Project>(checked_take(Project::create(ProjectInput{
         {1}, "PDC integration", 1'000, {2}, {asset}, {std::move(sequence)}})));
 }
 
@@ -139,8 +146,10 @@ TEST_CASE("timeline binding applies sealed PDC schedules without shifting events
         TimelineDeviceGraphRoute{{20}, last_node},
         TimelineDeviceGraphRoute{{21}, first_node},
     };
-    const std::array routes{TimelineTrackGraphRoute{
-        {10}, first_node, 0, middle_node, devices}};
+    const std::array routes{
+        TimelineTrackGraphRoute{{10}, first_node, 0, 0},
+        TimelineTrackGraphRoute{{11}, first_node, 0, middle_node, devices},
+    };
     TimelineGraphPlaybackBinding binding(graph, programs.store);
     REQUIRE(binding.prepare(*first_program, routes, config(1), 48'000.0, 64));
 
@@ -165,7 +174,10 @@ TEST_CASE("timeline binding applies sealed PDC schedules without shifting events
     REQUIRE(binding.adopt_latest_program());
     auto second_transport = snapshot(*second_program, 16, 16);
     second_transport.block_index = 1;
-    REQUIRE(binding.process(output_view, input.const_view(), second_transport));
+    const auto second_result =
+        binding.process(output_view, input.const_view(), second_transport);
+    INFO("second process code " << static_cast<int>(second_result.code));
+    REQUIRE(second_result);
     REQUIRE(std::find(first_probe->parameter_offsets.begin(),
                       first_probe->parameter_offsets.end(), 1) !=
             first_probe->parameter_offsets.end());
@@ -175,8 +187,11 @@ TEST_CASE("timeline binding applies sealed PDC schedules without shifting events
         TimelineDeviceGraphRoute{{20}, unavailable},
         TimelineDeviceGraphRoute{{21}, first_node},
     };
-    const std::array unavailable_routes{TimelineTrackGraphRoute{
-        {10}, first_node, 0, middle_node, unavailable_devices}};
+    const std::array unavailable_routes{
+        TimelineTrackGraphRoute{{10}, first_node, 0, 0},
+        TimelineTrackGraphRoute{{11}, first_node, 0, middle_node,
+                                unavailable_devices},
+    };
     const auto failed = binding.prepare(
         *second_program, unavailable_routes, config(1), 48'000.0, 64);
     REQUIRE(failed.code == TimelineGraphAdmissionCode::LatencyNoOutputPath);

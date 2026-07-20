@@ -406,6 +406,20 @@ TimelineGraphAdmission TimelineGraphPlaybackBinding::build_candidate(
                 claimed_device_nodes, route_metadata[index]);
         if (!automation_admission) return automation_admission;
     }
+    claimed_device_nodes.clear();
+    for (const auto& track_metadata : route_metadata) {
+        for (const auto& device : track_metadata) {
+            const auto node = device.route.plugin_node;
+            const auto owner = std::lower_bound(
+                claimed_device_nodes.begin(), claimed_device_nodes.end(), node);
+            if (owner != claimed_device_nodes.end() && *owner == node) {
+                return reject(
+                    TimelineGraphAdmissionCode::DuplicateDeviceNodeOwnership,
+                    2, 1, device.route.device_placement_id, node);
+            }
+            claimed_device_nodes.insert(owner, node);
+        }
+    }
 
     auto next = std::make_shared<detail::TimelineGraphBindingState>();
     next->config = config;
