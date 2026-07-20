@@ -50,6 +50,26 @@ std::vector<ItemId> non_automation_ids(ItemId track_id, std::span<const DevicePl
     return ids;
 }
 
+std::shared_ptr<const std::vector<ItemId>>
+canonical_automation_owned_ids(std::span<const AutomationLane> lanes) {
+    std::vector<ItemId> ids;
+    detail::append_automation_owned_ids(lanes, ids);
+    std::sort(ids.begin(), ids.end());
+    return std::make_shared<const std::vector<ItemId>>(std::move(ids));
+}
+
+std::optional<ItemId> automation_identity_collision(
+    const Clip& clip, std::span<const ItemId> automation_owned_ids) noexcept {
+    if (std::binary_search(automation_owned_ids.begin(), automation_owned_ids.end(), clip.id()))
+        return clip.id();
+    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+        for (const auto& note : notes->notes())
+            if (std::binary_search(automation_owned_ids.begin(), automation_owned_ids.end(),
+                                   note.id))
+                return note.id;
+    return std::nullopt;
+}
+
 } // namespace
 
 static std::atomic<std::uint64_t> g_live_index_nodes{0};
@@ -262,6 +282,7 @@ struct Track::Data {
     NodePtr clips_by_id;
     std::shared_ptr<const std::vector<DevicePlacement>> device_chain;
     std::shared_ptr<const std::vector<AutomationLane>> automation_lanes;
+    std::shared_ptr<const std::vector<ItemId>> automation_owned_ids;
 };
 
 runtime::Result<Track, ModelError> Track::create(ItemId id, std::string name,
@@ -317,9 +338,11 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
         std::make_shared<const std::vector<DevicePlacement>>(std::move(input.device_chain));
     auto automation_lanes =
         std::make_shared<const std::vector<AutomationLane>>(std::move(input.automation_lanes));
+    auto automation_owned_ids = canonical_automation_owned_ids(*automation_lanes);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
         Data{input.id, std::move(input.name), std::move(by_start), std::move(by_id),
-             std::move(device_chain), std::move(automation_lanes)}))));
+             std::move(device_chain), std::move(automation_lanes),
+             std::move(automation_owned_ids)}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -333,6 +356,9 @@ runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
     if (replacement.time_anchor() == ClipTimeAnchor::Absolute &&
         replacement.absolute_sample_rate() != old->absolute_sample_rate())
         return fail<Track>(ModelErrorCode::IncompatibleSampleRate, data_->id, replacement.id());
+    if (const auto collision =
+            automation_identity_collision(replacement, *data_->automation_owned_ids))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, *collision);
     auto by_start = erase(data_->clips_by_start, *old, start_less);
     auto by_id = erase(data_->clips_by_id, *old, id_less);
     bool duplicate = false;
@@ -346,14 +372,9 @@ runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
         return fail<Track>(ModelErrorCode::OverlappingClips, previous->id(), inserted->id());
     if (next && ranges_overlap(*inserted, *next))
         return fail<Track>(ModelErrorCode::OverlappingClips, inserted->id(), next->id());
-    const auto other_ids =
-        non_automation_ids(data_->id, *data_->device_chain, ClipView(by_start, count(by_start)));
-    if (const auto error = detail::validate_attached_automation(*data_->automation_lanes,
-                                                                *data_->device_chain, other_ids))
-        return fail<Track>(error->code, error->item, error->related_item);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
         Data{data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain,
-             data_->automation_lanes}))));
+             data_->automation_lanes, data_->automation_owned_ids}))));
 }
 
 runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
@@ -361,6 +382,8 @@ runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
         return fail<Track>(ModelErrorCode::InvalidItemId, clip.id());
     if (find_clip(clip.id()))
         return fail<Track>(ModelErrorCode::DuplicateItemId, clip.id());
+    if (const auto collision = automation_identity_collision(clip, *data_->automation_owned_ids))
+        return fail<Track>(ModelErrorCode::DuplicateItemId, *collision);
     if (const auto first = clips().empty() ? nullptr : &clips()[0]) {
         if (clip.time_anchor() != first->time_anchor())
             return fail<Track>(ModelErrorCode::MixedTimeAnchors, data_->id, clip.id());
@@ -382,14 +405,9 @@ runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
         return fail<Track>(ModelErrorCode::OverlappingClips, previous->id(), inserted->id());
     if (next && ranges_overlap(*inserted, *next))
         return fail<Track>(ModelErrorCode::OverlappingClips, inserted->id(), next->id());
-    const auto other_ids =
-        non_automation_ids(data_->id, *data_->device_chain, ClipView(by_start, count(by_start)));
-    if (const auto error = detail::validate_attached_automation(*data_->automation_lanes,
-                                                                *data_->device_chain, other_ids))
-        return fail<Track>(error->code, error->item, error->related_item);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
         Data{data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain,
-             data_->automation_lanes}))));
+             data_->automation_lanes, data_->automation_owned_ids}))));
 }
 
 runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
@@ -400,7 +418,7 @@ runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
     auto by_id = erase(data_->clips_by_id, *old, id_less);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
         Data{data_->id, data_->name, std::move(by_start), std::move(by_id), data_->device_chain,
-             data_->automation_lanes}))));
+             data_->automation_lanes, data_->automation_owned_ids}))));
 }
 
 runtime::Result<Track, ModelError> Track::insert_automation_lane(AutomationLane lane) const {
@@ -416,9 +434,10 @@ runtime::Result<Track, ModelError> Track::insert_automation_lane(AutomationLane 
             detail::validate_attached_automation(lanes, *data_->device_chain, other_ids))
         return fail<Track>(error->code, error->item, error->related_item);
     auto storage = std::make_shared<const std::vector<AutomationLane>>(std::move(lanes));
+    auto automation_owned_ids = canonical_automation_owned_ids(*storage);
     return runtime::Ok(Track(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->clips_by_start, data_->clips_by_id, data_->device_chain,
-             std::move(storage)})));
+             std::move(storage), std::move(automation_owned_ids)})));
 }
 
 runtime::Result<Track, ModelError> Track::erase_automation_lane(ItemId id) const {
@@ -430,9 +449,10 @@ runtime::Result<Track, ModelError> Track::erase_automation_lane(ItemId id) const
         return fail<Track>(ModelErrorCode::MissingItem, id);
     lanes.erase(found);
     auto storage = std::make_shared<const std::vector<AutomationLane>>(std::move(lanes));
+    auto automation_owned_ids = canonical_automation_owned_ids(*storage);
     return runtime::Ok(Track(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->clips_by_start, data_->clips_by_id, data_->device_chain,
-             std::move(storage)})));
+             std::move(storage), std::move(automation_owned_ids)})));
 }
 
 ItemId Track::id() const noexcept {

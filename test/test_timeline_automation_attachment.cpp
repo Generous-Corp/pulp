@@ -94,6 +94,36 @@ TEST_CASE("Automation lane edits preserve immutable Track snapshots") {
     REQUIRE(erased.find_automation_lane({31}) == nullptr);
 }
 
+TEST_CASE("Clip edits check only changed identities against attached automation") {
+    const auto original = track_with_automation();
+
+    auto colliding_clip = original.insert_clip(take(Clip::create(
+        {41}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, EmptyContent{})));
+    REQUIRE_FALSE(colliding_clip.has_value());
+    REQUIRE(colliding_clip.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(colliding_clip.error().item == ItemId{41});
+
+    const auto notes = take(NoteContent::create(
+        {{{32}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{1}}}));
+    auto colliding_note = original.insert_clip(take(Clip::create(
+        {50}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, notes)));
+    REQUIRE_FALSE(colliding_note.has_value());
+    REQUIRE(colliding_note.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(colliding_note.error().item == ItemId{32});
+
+    const auto inserted = take(original.insert_clip(take(Clip::create(
+        {50}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, EmptyContent{}))));
+    auto replacement = inserted.replace_clip(take(Clip::create(
+        {50}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, notes)));
+    REQUIRE_FALSE(replacement.has_value());
+    REQUIRE(replacement.error().code == ModelErrorCode::DuplicateItemId);
+    REQUIRE(replacement.error().item == ItemId{32});
+
+    const auto erased = take(original.erase_automation_lane({31}));
+    REQUIRE(erased.insert_clip(take(Clip::create(
+        {41}, pulp::timebase::TickPosition{0}, pulp::timebase::TickDuration{10}, EmptyContent{}))));
+}
+
 TEST_CASE("Project identities describe automation lane and point ownership") {
     const auto project = project_with_automation();
     const auto lane_location = project.locate({31});
