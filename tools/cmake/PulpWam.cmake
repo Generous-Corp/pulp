@@ -82,6 +82,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/automation_curve.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/automation_document_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/automation_lane.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/clip_lane.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/command.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/document_session.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/identity_directory.cpp

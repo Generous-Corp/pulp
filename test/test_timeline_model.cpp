@@ -127,6 +127,7 @@ TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content")
     const auto* track = sequence->find_track({6});
     REQUIRE(track != nullptr);
     REQUIRE(track->clips().size() == 2);
+    REQUIRE(track->arrangement_lane().clips().size() == track->clips().size());
     REQUIRE(track->clips()[0].id() == ItemId{4});
     REQUIRE(track->clips()[1].id() == ItemId{5});
     REQUIRE(track->find_clip({5}) == &track->clips()[1]);
@@ -392,26 +393,62 @@ TEST_CASE("Timeline anchors model tempo-following and fixed absolute ranges") {
     REQUIRE(valid.value().absolute_duration()->sample_rate == RationalRate{48'000, 1});
 }
 
-TEST_CASE("Timeline clip edits path-copy bounded nodes and reclaim snapshots") {
-    const auto before = Track::index_stats();
+TEST_CASE("Clip lanes enforce independent sparse timeline invariants") {
+    const auto lane =
+        take_value(ClipLane::create({clip({12}, 10, 5), clip({10}, 0, 5), clip({11}, 5, 5)}));
+    REQUIRE(lane.clips().size() == 3);
+    REQUIRE(lane.clips()[0].id() == ItemId{10});
+    REQUIRE(lane.clips()[1].id() == ItemId{11});
+    REQUIRE(lane.clips()[2].id() == ItemId{12});
+    REQUIRE(lane.find_clip({11}) == &lane.clips()[1]);
+    REQUIRE(lane.find_clip({99}) == nullptr);
+
+    const auto inserted = take_value(lane.insert_clip(clip({13}, 15, 5)));
+    REQUIRE(lane.find_clip({13}) == nullptr);
+    REQUIRE(inserted.find_clip({13}) != nullptr);
+    REQUIRE(inserted.shared_index_nodes_with(lane) > 0);
+    const auto erased = take_value(inserted.erase_clip({11}));
+    REQUIRE(erased.find_clip({11}) == nullptr);
+    REQUIRE(inserted.find_clip({11}) != nullptr);
+
+    const auto overlap = ClipLane::create({clip({20}, 0, 10), clip({21}, 9, 10)});
+    REQUIRE_FALSE(overlap.has_value());
+    REQUIRE(overlap.error().code == ModelErrorCode::OverlappingClips);
+
+    const auto mixed = ClipLane::create({clip({30}, 0, 10), absolute_clip({31}, 20, 10)});
+    REQUIRE_FALSE(mixed.has_value());
+    REQUIRE(mixed.error().code == ModelErrorCode::MixedTimeAnchors);
+
+    const auto incompatible = ClipLane::create(
+        {absolute_clip({40}, 0, 10), absolute_clip({41}, 20, 10, EmptyContent{}, {44'100, 1})});
+    REQUIRE_FALSE(incompatible.has_value());
+    REQUIRE(incompatible.error().code == ModelErrorCode::IncompatibleSampleRate);
+
+    const auto alternative = take_value(ClipLane::create({clip({50}, 0, 10), clip({51}, 10, 10)}));
+    REQUIRE(alternative.clips()[0].start() == lane.clips()[0].start());
+    REQUIRE(alternative.clips()[0].end() > lane.clips()[0].end());
+}
+
+TEST_CASE("Clip lane edits path-copy bounded nodes and reclaim snapshots") {
+    const auto before = ClipLane::index_stats();
     {
         std::vector<Clip> clips;
         clips.reserve(10'000);
         for (std::uint64_t index = 0; index < 10'000; ++index)
             clips.push_back(clip({index + 1}, static_cast<std::int64_t>(index * 2), 1));
-        const auto original = take_value(Track::create({20'000}, "large", std::move(clips)));
-        const auto after_build = Track::index_stats();
+        const auto original = take_value(ClipLane::create(std::move(clips)));
+        const auto after_build = ClipLane::index_stats();
         REQUIRE(after_build.live_nodes - before.live_nodes == 20'000);
 
         const auto edited = take_value(original.replace_clip(clip({5'001}, 20'001, 1)));
-        const auto after_edit = Track::index_stats();
+        const auto after_edit = ClipLane::index_stats();
         REQUIRE(after_edit.nodes_created - after_build.nodes_created < 256);
         REQUIRE(original.find_clip({5'001})->start().value == 10'000);
         REQUIRE(edited.find_clip({5'001})->start().value == 20'001);
         REQUIRE(original.shared_index_nodes_with(edited) > 19'800);
         REQUIRE(edited.clips().size() == 10'000);
     }
-    REQUIRE(Track::index_stats().live_nodes == before.live_nodes);
+    REQUIRE(ClipLane::index_stats().live_nodes == before.live_nodes);
 }
 
 TEST_CASE("Timeline subtree remap is two-pass atomic and fixes external references") {

@@ -95,6 +95,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/clip_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp

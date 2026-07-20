@@ -3,6 +3,7 @@ add_library(pulp-timeline
     src/automation_curve.cpp
     src/automation_document_internal.cpp
     src/automation_lane.cpp
+    src/clip_lane.cpp
     src/command.cpp
     src/document_session.cpp
     src/identity_directory.cpp

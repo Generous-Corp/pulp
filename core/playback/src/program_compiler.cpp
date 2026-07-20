@@ -215,15 +215,15 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (clip_index_ == 0 && !clip_started_) {
-                current_clip_ids_.reserve(track.clips().size());
+                current_clip_ids_.reserve(track.arrangement_lane().clips().size());
                 const auto audio_capacity = static_cast<std::size_t>(std::min<std::uint64_t>(
-                    track.clips().size(), request_->audio_limits.max_clips));
+                    track.arrangement_lane().clips().size(), request_->audio_limits.max_clips));
                 current_audio_clips_.reserve(audio_capacity);
                 current_audio_ids_.reserve(audio_capacity);
                 audio_id_merge_buffer_.reserve(audio_capacity);
                 audio_merge_buffer_.reserve(audio_capacity);
             }
-            if (clip_index_ == track.clips().size()) {
+            if (clip_index_ == track.arrangement_lane().clips().size()) {
                 if (current_note_events_.size() > 1) {
                     note_merge_buffer_.reserve(current_note_events_.size());
                     note_merge_.reset(note_merge_buffer_);
@@ -237,7 +237,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
 
-            const auto& clip = track.clips()[clip_index_];
+            const auto& clip = track.arrangement_lane().clips()[clip_index_];
             if (!clip_started_) {
                 current_clip_ids_.push_back(clip.id());
                 if (std::holds_alternative<timeline::MediaRef>(clip.content())) {

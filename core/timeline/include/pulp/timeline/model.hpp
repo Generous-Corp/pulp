@@ -275,20 +275,14 @@ class Clip {
 
 struct ClipIndexNode;
 
-struct TrackIndexStats {
+struct ClipLaneIndexStats {
     std::uint64_t live_nodes = 0;
     std::uint64_t nodes_created = 0;
 };
 
-struct TrackInput {
-    ItemId id;
-    std::string name;
-    std::vector<Clip> clips;
-    std::vector<DevicePlacement> device_chain;
-    std::vector<AutomationLane> automation_lanes;
-};
+using TrackIndexStats = ClipLaneIndexStats;
 
-class Track {
+class ClipLane {
   public:
     class ClipView {
       public:
@@ -326,12 +320,41 @@ class Track {
         }
 
       private:
-        friend class Track;
+        friend class ClipLane;
         ClipView(std::shared_ptr<const ClipIndexNode> root, std::size_t size) noexcept
             : root_(std::move(root)), size_(size) {}
         std::shared_ptr<const ClipIndexNode> root_;
         std::size_t size_ = 0;
     };
+
+    static runtime::Result<ClipLane, ModelError> create(std::vector<Clip> clips);
+    runtime::Result<ClipLane, ModelError> insert_clip(Clip clip) const;
+    runtime::Result<ClipLane, ModelError> erase_clip(ItemId id) const;
+    runtime::Result<ClipLane, ModelError> replace_clip(Clip replacement) const;
+
+    ClipView clips() const noexcept;
+    const Clip* find_clip(ItemId id) const noexcept;
+    std::size_t shared_index_nodes_with(const ClipLane& other) const;
+    bool shares_storage_with(const ClipLane& other) const noexcept;
+    static ClipLaneIndexStats index_stats() noexcept;
+
+  private:
+    struct Data;
+    explicit ClipLane(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+    std::shared_ptr<const Data> data_;
+};
+
+struct TrackInput {
+    ItemId id;
+    std::string name;
+    std::vector<Clip> clips;
+    std::vector<DevicePlacement> device_chain;
+    std::vector<AutomationLane> automation_lanes;
+};
+
+class Track {
+  public:
+    using ClipView = ClipLane::ClipView;
 
     static runtime::Result<Track, ModelError> create(ItemId id, std::string name,
                                                      std::vector<Clip> clips);
@@ -346,6 +369,7 @@ class Track {
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
+    const ClipLane& arrangement_lane() const noexcept;
     // Ordered by (anchor, start, id) over a persistent AVL timeline index.
     ClipView clips() const noexcept;
     // Binary-searches the persistent ID index. Returned storage is snapshot-owned.
