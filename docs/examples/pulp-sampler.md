@@ -3,7 +3,7 @@
 `PulpSampler` is Pulp's production-shaped sampler example. It combines
 eight-voice MIDI playback, resident sample publication, strict file-backed
 streaming, loop and interpolation policies, starvation handling, and an
-optional synthetic heritage-processing chain. The validated plugin format is
+optional data-defined Sample Heritage chain. The validated plugin format is
 CLAP.
 
 The implementation is in `examples/PulpSampler/`. It is an example integration,
@@ -83,8 +83,9 @@ limit; it does not decode the whole source into RAM. Admission derives the
 resident preload and page geometry from
 the 20 ms certified I/O latency, 5 ms scheduler margin, 5 ms decoder allowance,
 host block size, interpolation guard, loop guard, and source rate. Streamed
-playback admits an effective consumption ratio of at most 4x: the note/key-map
-pitch ratio multiplied by the active heritage clock ratio.
+playback admits an effective source-consumption ratio of at most 4x. Admission
+combines note/key-map pitch, the selected Heritage pitch family and clock
+domain, and live cyclic stretch's `1 / factor` source demand.
 
 Resident mono and interleaved-stereo loads accept at most 2,880,000 frames.
 Automatic resident mips are attempted only up to 96,000 total samples (96,000
@@ -180,10 +181,10 @@ The stream service also enforces aggregate decode throughput. Across all active
 streamed voices it conservatively computes:
 
 ```text
-effective source frames/second = sum(pitch ratio * source sample rate) * active clock ratio
+effective source frames/second = sum(each voice's declared source consumption)
 ```
 
-Clock-driven note-on rejection increments heritage
+Heritage-driven note-on rejection increments heritage
 `rate_admission_rejections`; a live pitch change that invalidates an active
 streamed voice increments heritage `rate_automation_rejections`. Those counters
 are distinct from the legacy aggregate-rate counters in `stream_stats()`.
@@ -205,7 +206,7 @@ thread.
 | `has_sample()` / `sample_length()` | Inspect whether a source is published and its saturated integer frame length |
 | `stream_stats()` | Read detailed starvation, decode, admission, memory, and source/page lifecycle counters |
 | `diagnostics()` | Read one coherent prepare/load/preload/envelope/interpolation/heritage/memory snapshot, including sinc fallback selections |
-| `set_heritage_profile(profile)` / `disable_heritage()` | Replace or disable synthetic heritage processing and its latency contract |
+| `set_heritage_profile(profile)` / `disable_heritage()` | Replace or disable data-defined Sample Heritage processing and its latency contract |
 | `heritage_diagnostics()` | Inspect profile identity, clock/rate state, reported latency, failures, and admission counters |
 
 For example, return to the transparent zero-latency sampler path while stopped:
@@ -224,55 +225,210 @@ if (processor.disable_heritage() !=
 admission: PulpSampler still requires one or two channels and a source rate no
 greater than 192 kHz.
 
-## Synthetic heritage processing
+## Sample Heritage Kit
 
-An optional typed profile applies ordered, independently bypassable stages for
-machine-rate conversion, quantization, clock/pitch, DAC hold, reconstruction
-filtering, noise, and output. Profile IDs are neutral identifiers; no named
-hardware profile or capture-matched claim ships.
+The optional Sample Heritage Kit describes sampler character as strict,
+portable profile data. It is not a library of product emulations. Pulp ships
+the neutral engine, schema, authoring workflow, and verification tools; it does
+not currently ship named machine profiles.
+
+Schema version 3 separates three ordered domains:
+
+```text
+per voice (up to 8 blocks, one prepared engine per sampler voice)
+  machine domain -> clock -> pitch family -> converter
+  -> live cyclic stretch -> hold/droop -> reconstruction -> analog color
+
+post mix (up to 2 bus blocks)
+  noise/idle color -> output drive
+
+offline record commit (up to 4 blocks)
+  input drive/clip -> anti-alias + record rate -> converter -> commit stretch
+```
+
+Every block is independently bypassable, each type can appear at most once in
+its domain, and order is part of the contract. A profile may omit any block it
+does not need. Strict parsing rejects unknown, duplicate, missing, mistyped,
+out-of-range, or out-of-order data instead of guessing.
+
+### Typed profile format
+
+A minimal importable profile is:
+
+```json
+{"schema_version":3,"profile_id":"neutral.gritty-cycle-v1","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"pitch","bypass":false,"family":"variable_clock"},{"domain":"voice","type":"converter","bypass":false,"family":"linear_pcm","bit_depth":12,"dac_nonlinearity":0.08,"dither_lsb":0.25,"seed":"17","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":0,"seed":"29","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.05},{"domain":"voice","type":"reconstruction","bypass":false,"family":"butterworth","cutoff_law":"machine_rate_ratio","cutoff_value":0.42,"order":4,"ripple_db":0,"stopband_attenuation_db":0},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.2,"asymmetry":0.04,"mix":0.7}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.001,"idle_amplitude":0.0002,"tilt_db_per_octave":-1.5,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"41","seed_policy":"restart_from_profile_seed"},{"domain":"bus","type":"output_drive","bypass":false,"drive":1.1,"ceiling":0.95}],"record_commit":[]}
+```
+
+The `neutral.` prefix is mandatory. The remainder uses lowercase ASCII
+letters, digits, dots, and hyphens, without adjacent or trailing separators;
+the complete ID is at most 63 bytes. Seeds are decimal strings so JSON tools
+do not truncate 64-bit values. `host_sample_rate` is execution context and is
+not folded into the profile identity digest.
+
+The voice pitch block chooses how note pitch is produced:
+
+| Family | Behavior |
+|---|---|
+| `variable_clock` | Changes the machine clock, so pitch and machine-rate character move together |
+| `drop_repeat` | Keeps the machine clock fixed and advances source frames with zero-order drop/repeat selection |
+| `early_linear` | Keeps the machine clock fixed and uses linear source interpolation |
+
+The converter supports linear PCM and continuous mu=255 or A=87.6 companding
+curves with effective quantizer resolution, a normalized Pulp DAC-curve amount,
+and optional deterministic bipolar-rectangular dither measured in LSBs. These
+curve modes are not G.711 byte codecs. Hold count and droop are likewise neutral
+Pulp controls rather than claims about a physical converter's update period or
+volts-per-second behavior. Hold/droop,
+one-pole/Butterworth/Chebyshev/elliptic reconstruction filters, and analog
+color run in the per-voice machine domain. The bus can add voice-gated or
+always-on seeded noise/idle color with a deterministic spectral-tilt law, then
+apply bounded output drive. In that block, `idle_amplitude` is the always-on
+component and `noise_amplitude` is controlled by `gate`; both are normalized
+linear full-scale amplitudes rather than SNR measurements.
+
+For reconstruction, `fixed_hz` expresses the profile's selected digital design
+edge in hertz and `machine_rate_ratio` expresses that edge as a 0-to-0.5 ratio
+of machine rate. The named filter family determines how that design edge is
+interpreted. The supported orders and parameter ranges are Pulp implementation
+bounds, not claims about historical hardware.
+
+### Live and committed stretch
+
+Live cyclic stretch is a deliberately cyclic sampler mechanism, not the
+general-purpose phase-vocoder stretch API. It runs inside each voice between
+the converter and hold/reconstruction stages. `factor` controls duration,
+`cycle_ms` and `splice_ms` define machine-domain cycle and crossfade lengths,
+and optional seeded divisions rearrange material deterministically. Zero
+shuffle divisions is identity order. The processor uses fixed-capacity rings,
+precomputed bounds, and no callback allocation, locks, FFT, or similarity
+search. A factor-one configuration has an exact bypass. At end of source it
+drains to exactly the rounded stretched one-shot duration.
+
+Record-commit stretch is separate and always offline. `cyclic` uses fixed
+sample-domain cycles and crossfades. `adaptive` performs deterministic,
+bounded similarity search with explicit hop, radius, stride, crossfade, zone,
+and stereo-link controls. It is intended for committing a transformed asset,
+not for work on the audio callback.
+
+`commit_sample_heritage_recording()` applies the record-domain drive, record
+filter/rate, converter, and optional stretch as one allocating transaction. It
+returns machine-rate PCM plus canonical metadata containing the source and
+committed audio hashes, profile ID/digest, dimensions, and caller-supplied
+provenance. `reload_sample_heritage_committed_asset()` verifies that envelope
+and audio hash before publication. Record-commit blocks in a playback profile
+are not silently re-applied during live rendering.
+
+This is intentionally distinct from `signal::OfflineStretch`, which is the
+high-quality conventional tempo/pitch tool used by PulpTempoSampler. Choose
+Heritage cyclic stretch only when cyclic resynthesis itself is the desired
+character.
+
+### Load, export, inspect, and render
+
+Use the Heritage CLI off the audio thread:
+
+```bash
+pulp audio heritage validate profile.json --json
+pulp audio heritage canonicalize profile.json --out canonical.json
+pulp audio heritage canonicalize canonical.json --out canonical-again.json
+cmp canonical.json canonical-again.json
+pulp audio heritage inspect canonical.json --json
+pulp audio heritage render canonical.json --fixture impulse \
+  --out impulse.wav --report impulse.json
+```
+
+`canonicalize` is the export path: its deterministic schema-v3 JSON is the
+portable interchange artifact. Canonicalize twice to prove byte idempotence,
+then compare the digest reported by `inspect` before and after re-import. The
+render command also accepts `sine`, `two-tone`, or an exact-profile-rate mono
+WAV fixture and emits Float32 WAV plus a canonical evidence report. See the
+[CLI reference](../reference/cli.md#pulp-audio) and the public
+[`heritage-profile` skill](../../.agents/skills/heritage-profile/SKILL.md).
+
+Profiles carry an explicit schema version. A future incompatible format can
+therefore ship an explicit, tested old-to-new migration. Until the installed
+release documents such a migration, unsupported versions fail closed; do not
+change the number by hand or silently discard fields.
+
+### PulpSampler lifecycle, state, and admission
 
 Configure or replace a profile only while audio is stopped:
 
 ```cpp
-pulp::audio::SampleHeritageProfile profile{
-    .schema_version = pulp::audio::kSampleHeritageProfileSchemaVersion,
-    .profile_id = "neutral.example-two-leg-v2",
-    .host_sample_rate = 48000.0,
-    .stages = {
-        {false, pulp::audio::SampleHeritageMachineDomainStage{32000.0}},
-        {false, pulp::audio::SampleHeritageClockPitchStage{1.25}},
-    },
-};
+const auto parsed = pulp::audio::parse_sample_heritage_profile_json(json);
+if (!parsed.valid()) {
+    // Report parsed.status and parsed.field_path on the control thread.
+    return;
+}
 
-auto status = processor.set_heritage_profile(profile);
-auto diagnostics = processor.heritage_diagnostics();
+const auto status = processor.set_heritage_profile(parsed.profile);
+const auto diagnostics = processor.heritage_diagnostics();
 ```
 
-The engine validates and prepares off-thread. Active host-to-machine and
-machine-to-host conversion legs each contribute the causal 24-tap-half-width
-delay in their output coordinate; the processor rounds the resulting nominal
-host-frame latency up and notifies the host when it changes. An all-bypassed
-profile is transparent and reports zero latency. Render-plan or render failure
-fails closed to silence and increments heritage diagnostics.
+Validation, coefficient preparation, buffers, sinc banks, rings, and scratch
+allocation happen off the callback. The resource estimate accounts separately
+for all eight voice engines, bus state, conversion kernels, cyclic rings,
+fixed-clock pitch history, scratch, resident storage, and shared streaming
+storage. An undersized or unrepresentable configuration fails transactionally.
+The audio callback consumes only prepared fixed-capacity state.
 
-Prepare binds streaming to the heritage processing input domain. Its output
-sample rate is the host rate multiplied by the active clock ratio, and its
-maximum block is the heritage engine's maximum input-frame requirement. The
-preload contract therefore records this clocked stream rate, not always the
-host's external output rate. An all-bypassed profile uses a clock ratio of one.
+Active host-to-machine and machine-to-host conversion legs report their causal
+latency. PulpSampler rounds the nominal host-frame value up and notifies the
+host when it changes. An all-bypassed profile is transparent and zero-latency.
+Invalid plans or processing failures fail closed to silence and increment
+typed diagnostics.
 
-Canonical JSON readers/writers exist for profiles and bounded runtime state.
-Runtime persistence captures only RNG continuation for quantization/noise
-stages that opt into `ContinueSerializedState`; it does not capture SRC phase
-or history, DAC-hold state, or reconstruction-filter transients. The example's
-`sampler_heritage_state.hpp` adds a strict, versioned envelope for the profile
-and optional runtime JSON, and `PulpSamplerProcessor` uses that envelope for its
-outer plugin state. At callback end, the processor publishes a bounded RNG
-continuation snapshot through a `SeqLock`; same-rate restore applies it before
-the first callback. Restoring at a different host rate keeps the profile but
-resets runtime state and reports `ReadyRuntimeResetForHostRate`. SRC history,
-DAC-hold state, and reconstruction-filter transients always restart rather than
-pretending to continue across a session restore.
+Streaming admission follows actual source demand. The profile clock and
+variable-clock pitch change the machine rate; fixed-clock pitch changes source
+advance; live stretch consumes `1 / factor` source frames per stretched output
+frame. PulpSampler combines those terms for preload, page lookahead, aggregate
+decode-throughput admission, live automation checks, and frozen starvation
+fades. Resident sources are exempt from streamed decode admission. Loop and
+reverse traversal still use their canonical logical source order before the
+per-voice Heritage chain.
+
+Canonical JSON readers/writers cover both profiles and bounded runtime state.
+Typed runtime-state schema v2 preserves slot order for all eight voices and the
+bus. Only converter/noise/live-cyclic RNG streams that opt into
+`continue_serialized_state` continue; SRC phase/history, pitch history,
+hold/filter state, and other DSP transients reset. The example publishes its
+bounded continuation snapshot through a `SeqLock`. Same-rate restore applies
+it before the first callback. A different host rate keeps the profile but
+resets runtime continuation and reports `ReadyRuntimeResetForHostRate`.
+
+### Authoring profiles without overclaiming
+
+No capture or listening session is required to use, extend, or release the
+neutral SDK. Captures and listening are optional calibration evidence for a
+particular profile. A profile can instead be designed from a neutral audible
+goal and proved with analytic fixtures.
+
+If research refers to a real company, product, or model, use the name only
+where factually necessary in provenance. Those names and marks remain their
+owners' property. Do not place them in the neutral profile ID, imply
+affiliation or endorsement, or claim an exact hardware or serial-number match.
+Keep citations, confidence, inferences, prompts, renders, and optional captures
+in a caller-owned artifact repository; the runtime profile remains portable
+data.
+
+The public skill includes a neutral template, evidence-manifest template, and
+a complete copy-paste prompt. A concise handoff is:
+
+```text
+Use Pulp's heritage-profile skill to create a data-only schema-v3 profile for
+<desired character>. Research only legally accessible primary/technical
+sources, keep factual names in provenance rather than the neutral.* ID, and do
+not imply affiliation or an exact hardware match. Validate, canonicalize twice,
+inspect, render analytic and factor-one/all-bypass controls, prove one invalid
+profile fails, compare round-trip digests, and archive the prompt, citations,
+confidence per value, reports, hashes, and optional listening/capture notes in
+my chosen artifact repository. Report any mechanism the typed blocks cannot
+express instead of approximating it silently.
+```
+
+Creating named or reference-informed profiles is therefore an extension
+workflow, not an unshipped SDK dependency. Pulp currently bundles no named
+profiles.
 
 ## Verification
 
@@ -311,8 +467,3 @@ source bundle, binary hash, environment, and negative controls. Later sampler
 integration commits do not make it stale when the verifier's content-addressed
 interpolation source bundle remains unchanged; the current source-only verifier
 passes that exact digest.
-
-## Current gap
-
-- Named machine profiles remain intentionally unshipped until research,
-  provenance, capture, and listening gates are satisfied.

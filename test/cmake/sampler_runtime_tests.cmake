@@ -97,6 +97,7 @@ pulp_add_test_suite(pulp-test-sample-heritage-live-cyclic
 pulp_add_test_suite(pulp-test-sample-heritage-record-commit
     SOURCES test_sample_heritage_record_commit.cpp
     LIBRARIES pulp::audio pulp::audio-analysis)
+include("${CMAKE_CURRENT_LIST_DIR}/heritage_calibration_tests.cmake")
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
     SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)

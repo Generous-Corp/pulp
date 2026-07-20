@@ -90,11 +90,17 @@ summary. Shared streaming diagnostics remain in `SampleStreamServiceStats` and
 PulpSampler's typed aggregation. Resident PulpTempoSampler playback does not
 invent stream-service metrics.
 
-The existing sampler CLI remains the supported asset and inspection surface:
+The sampler CLI covers both asset operations and the separate Heritage profile
+interchange/verification boundary:
 
 ```bash
 pulp audio sampler-mip build source.wav --levels 2 --json
 pulp audio validate summarize render.wav --json
+pulp audio heritage validate profile.json --json
+pulp audio heritage canonicalize profile.json --out canonical.json
+pulp audio heritage inspect canonical.json --json
+pulp audio heritage render canonical.json --fixture impulse \
+  --out impulse.wav --report impulse.json
 ```
 
 See the [sampler playback chooser](../guides/sampler-playback.md),
@@ -112,3 +118,10 @@ See the [sampler playback chooser](../guides/sampler-playback.md),
   `PreparedSampleInterpolation` is the canonical new-code surface.
 - Generic allocator, AHDSR, or metrics expansion requires a concrete consumer
   whose policy matches.
+- Sample Heritage composes after canonical source traversal and interpolation;
+  it does not replace storage, loop, mapping, analysis, or starvation policy.
+- Heritage live/commit cyclic resynthesis is intentional character processing,
+  not a replacement for conventional `signal::OfflineStretch` tempo matching.
+- Pulp ships the neutral profile SDK and authoring workflow, with no bundled
+  named profiles. Optional captures or listening notes calibrate a particular
+  profile; they are not SDK release gates.

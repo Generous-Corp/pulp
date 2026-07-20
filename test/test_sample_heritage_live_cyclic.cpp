@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -143,8 +144,10 @@ TEST_CASE("live cyclic validates bounds and reports exact prepared storage",
     config.channel_count = 2;
     const auto resources = SampleHeritageLiveCyclicStretch::resources_for(config);
     REQUIRE(resources.valid());
-    CHECK(resources.ring_capacity_frames == 256);
-    CHECK(resources.persistent_bytes == 256 * 2 * sizeof(float) + 2 * 4 * sizeof(std::uint32_t));
+    CHECK(resources.maximum_input_frames == 202);
+    CHECK(resources.ring_capacity_frames == 512);
+    CHECK(resources.persistent_bytes ==
+          512 * 2 * sizeof(float) + 2 * 4 * sizeof(std::uint32_t));
     CHECK(resources.scratch_bytes == 0);
 
     config.crossfade_samples = 33;
@@ -176,6 +179,64 @@ TEST_CASE("live cyclic validates bounds and reports exact prepared storage",
     const auto& const_short_input = short_input;
     CHECK(processor.process(const_short_input.view(), output.view()) ==
           SampleHeritageLiveCyclicStatus::InputFrameMismatch);
+}
+
+TEST_CASE("live cyclic resource bounds survive repeated fast cycle boundaries",
+          "[sample][heritage][live-cyclic][resources]") {
+    for (const auto factor : {0.5, 0.25}) {
+        SampleHeritageLiveCyclicConfig config;
+        config.factor = factor;
+        config.cycle_samples = 480;
+        config.crossfade_samples = 48;
+        config.max_block_samples = 64;
+        config.channel_count = 1;
+        SampleHeritageLiveCyclicStretch processor;
+        REQUIRE(processor.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
+        const auto resources = processor.resources();
+        REQUIRE(resources.valid());
+
+        std::size_t source_cursor = 0;
+        for (std::size_t block = 0; block < 48; ++block) {
+            const auto plan = processor.plan(config.max_block_samples);
+            REQUIRE(plan.valid());
+            REQUIRE(plan.input_frames <= resources.maximum_input_frames);
+            Buffer<float> input(1, plan.input_frames);
+            Buffer<float> output(1, config.max_block_samples);
+            for (std::size_t frame = 0; frame < plan.input_frames; ++frame)
+                input.channel(0)[frame] = static_cast<float>(source_cursor + frame);
+            REQUIRE(processor.process(std::as_const(input).view(), output.view()) ==
+                    SampleHeritageLiveCyclicStatus::Ok);
+            source_cursor += plan.input_frames;
+        }
+    }
+}
+
+TEST_CASE("live cyclic ring retains old-cycle reads across arbitrary block partitions",
+          "[sample][heritage][live-cyclic][resources]") {
+    SampleHeritageLiveCyclicConfig config;
+    config.factor = 0.5;
+    config.cycle_samples = 960;
+    config.crossfade_samples = 8;
+    config.max_block_samples = 257;
+    config.channel_count = 1;
+    SampleHeritageLiveCyclicStretch processor;
+    REQUIRE(processor.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
+
+    constexpr std::array<std::size_t, 12> partitions{
+        257, 257, 257, 257, 31, 211, 89, 257, 13, 257, 173, 257};
+    std::size_t source_cursor = 0;
+    for (const auto frames : partitions) {
+        const auto plan = processor.plan(frames);
+        REQUIRE(plan.valid());
+        REQUIRE(plan.input_frames <= processor.resources().maximum_input_frames);
+        Buffer<float> input(1, plan.input_frames);
+        Buffer<float> output(1, frames);
+        for (std::size_t frame = 0; frame < plan.input_frames; ++frame)
+            input.channel(0)[frame] = static_cast<float>(source_cursor + frame);
+        REQUIRE(processor.process(std::as_const(input).view(), output.view()) ==
+                SampleHeritageLiveCyclicStatus::Ok);
+        source_cursor += plan.input_frames;
+    }
 }
 
 TEST_CASE("live cyclic marker ramp follows cycle anchors and previous-origin crossfades",
@@ -370,4 +431,29 @@ TEST_CASE("live cyclic prepared processing performs no allocation",
     }
     CHECK(status == SampleHeritageLiveCyclicStatus::Ok);
     CHECK_FALSE(allocated);
+}
+
+TEST_CASE("live cyclic finite sources end at rounded stretched duration",
+          "[sample][heritage][live-cyclic][eof]") {
+    SampleHeritageLiveCyclicConfig config;
+    config.factor = 2.0;
+    config.cycle_samples = 32;
+    config.crossfade_samples = 4;
+    config.max_block_samples = 128;
+    config.channel_count = 1;
+    SampleHeritageLiveCyclicStretch processor;
+    REQUIRE(processor.prepare(config) == SampleHeritageLiveCyclicStatus::Ok);
+    const auto plan = processor.plan(128);
+    REQUIRE(plan.valid());
+    Buffer<float> input(1, plan.input_frames);
+    Buffer<float> output(1, 128);
+    std::fill(input.channel(0).begin(), input.channel(0).end(), 0.25f);
+    const auto& const_input = input;
+    REQUIRE(processor.process(const_input.view(), output.view(), 37, true) ==
+            SampleHeritageLiveCyclicStatus::Ok);
+    CHECK(processor.last_valid_output_frames() == 74);
+    CHECK(processor.remaining_output_frames() == 0);
+    CHECK(std::all_of(output.channel(0).begin() + 74,
+                      output.channel(0).end(),
+                      [](float sample) { return sample == 0.0f; }));
 }

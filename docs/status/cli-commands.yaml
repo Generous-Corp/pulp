@@ -2001,6 +2001,50 @@ commands:
             kind: option
           - name: --json
             kind: flag
+      - name: heritage validate
+        summary: Strictly parse and validate a versioned sampler Heritage profile; optionally emit stable JSON diagnostics
+        args:
+          - name: profile
+            kind: positional
+            required: true
+          - name: --json
+            kind: flag
+      - name: heritage canonicalize
+        summary: Validate and atomically write the deterministic canonical JSON representation of a Heritage profile
+        args:
+          - name: profile
+            kind: positional
+            required: true
+          - name: --out
+            kind: option
+            required: true
+      - name: heritage inspect
+        summary: Summarize a Heritage profile's neutral identity, digest, typed blocks, active mechanisms, seeds, capabilities, latency, source-consumption ratio, and clean-path policy
+        args:
+          - name: profile
+            kind: positional
+            required: true
+          - name: --json
+            kind: flag
+      - name: heritage render
+        summary: Deterministically render an analytic or mono WAV fixture through a Heritage profile and atomically publish Float32 WAV and canonical JSON evidence
+        args:
+          - name: profile
+            kind: positional
+            required: true
+          - name: --fixture
+            kind: option
+            required: true
+          - name: --out
+            kind: option
+            required: true
+          - name: --report
+            kind: option
+            required: true
+          - name: --frames
+            kind: option
+          - name: --block-size
+            kind: option
       - name: scope
         summary: Capture Audio Scope JSON from a live standalone target or speakerless offline WAV input; offline mode can also emit a PNG trace artifact.
         args:

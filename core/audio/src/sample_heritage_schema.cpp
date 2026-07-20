@@ -109,7 +109,6 @@ std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritage
                 canonical.floating(block.cycle_ms);
                 canonical.floating(block.splice_ms);
                 canonical.byte(block.stereo_link ? 1 : 0);
-                canonical.byte(block.tempo_lock ? 1 : 0);
                 canonical.integer(block.shuffle_divisions);
                 canonical.integer(block.seed);
                 seed_policy(block.seed_policy);

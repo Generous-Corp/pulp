@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/buffer.hpp>
+#include <pulp/audio/sample_heritage_live_cyclic.hpp>
 #include <pulp/audio/sample_heritage_runtime_state.hpp>
 #include <pulp/audio/sample_heritage_src.hpp>
 #include <pulp/audio/sample_heritage_voice_dsp.hpp>
@@ -68,6 +69,7 @@ struct SampleHeritageProcessPlan {
     std::uint64_t sequence = 0;
     std::size_t output_frames = 0;
     std::size_t machine_frames = 0;
+    std::size_t pre_live_machine_frames = 0;
     std::size_t input_frames = 0;
     double runtime_clock_multiplier = 1.0;
 
@@ -106,16 +108,21 @@ public:
         stages_ = {};
         input_src_.release();
         return_src_.release();
+        live_cyclic_.release();
         voice_dsp_.release();
         sinc_bank_.release();
         std::vector<float>().swap(machine_scratch_);
+        std::vector<float>().swap(pre_live_scratch_);
         std::vector<float>().swap(dynamic_identity_delay_);
         machine_ptrs_.fill(nullptr);
         machine_const_ptrs_.fill(nullptr);
+        pre_live_ptrs_.fill(nullptr);
+        pre_live_const_ptrs_.fill(nullptr);
         prepared_ = false;
         exact_prepared_ = false;
         all_bypassed_ = false;
         typed_voice_ = false;
+        live_cyclic_active_ = false;
         runtime_dynamic_clock_ = false;
         dynamic_identity_exact_ = false;
         dynamic_identity_epoch_ = false;
@@ -128,6 +135,7 @@ public:
         maximum_output_frames_ = 0;
         maximum_input_frames_ = 0;
         maximum_machine_frames_ = 0;
+        maximum_pre_live_machine_frames_ = 0;
         maximum_runtime_clock_factor_ = 1.0;
         machine_sample_rate_ = 0.0;
         clock_ratio_ = 1.0;
@@ -135,6 +143,7 @@ public:
         input_ratio_ = 1.0;
         return_ratio_ = 1.0;
         process_sequence_ = 0;
+        last_valid_output_frames_ = 0;
         ++prepare_epoch_;
         if (prepare_epoch_ == 0) ++prepare_epoch_;
     }
@@ -158,12 +167,14 @@ public:
         }
         input_src_.reset();
         return_src_.reset();
+        live_cyclic_.reset();
         voice_dsp_.reset();
         std::fill(dynamic_identity_delay_.begin(),
                   dynamic_identity_delay_.end(), 0.0f);
         dynamic_identity_delay_head_ = 0;
         dynamic_identity_epoch_ = dynamic_identity_exact_;
         process_sequence_ = 0;
+        last_valid_output_frames_ = 0;
         ++prepare_epoch_;
         if (prepare_epoch_ == 0) ++prepare_epoch_;
     }
@@ -175,6 +186,12 @@ public:
     }
     std::size_t maximum_machine_frames() const noexcept {
         return maximum_machine_frames_;
+    }
+    std::size_t maximum_pre_live_machine_frames() const noexcept {
+        return maximum_pre_live_machine_frames_;
+    }
+    const SampleHeritageLiveCyclicResources& live_cyclic_resources() const noexcept {
+        return live_cyclic_.resources();
     }
     double machine_sample_rate() const noexcept { return machine_sample_rate_; }
     double clock_ratio() const noexcept { return clock_ratio_; }
@@ -202,29 +219,28 @@ public:
     /// Host-rate process_tail_exact() frames sufficient to flush every finite
     /// SRC, hold, and filter state for the prepared profile.
     std::uint64_t tail_output_frames() const noexcept {
-        if (!exact_prepared_ || (all_bypassed_ && !runtime_dynamic_clock_)) return 0;
+        if (!exact_prepared_ || (all_bypassed_ && !runtime_dynamic_clock_))
+            return 0;
 
-        long double machine_frames = typed_voice_
-            ? static_cast<long double>(voice_dsp_.tail_machine_frames())
-            : 0.0L;
+        long double machine_frames =
+            typed_voice_ ? static_cast<long double>(voice_dsp_.tail_machine_frames()) : 0.0L;
         for (std::size_t index = 0; index < profile_.stage_count; ++index) {
             const auto& runtime = stages_[index];
-            if (runtime.spec.bypass) continue;
+            if (runtime.spec.bypass)
+                continue;
             std::visit(
                 [&](const auto& stage) noexcept {
                     using Stage = std::decay_t<decltype(stage)>;
-                    if constexpr (std::is_same_v<Stage,
-                                                 SampleHeritageDacHoldStage>) {
+                    if constexpr (std::is_same_v<Stage, SampleHeritageDacHoldStage>) {
                         machine_frames += stage.hold_samples;
-                    } else if constexpr (
-                        std::is_same_v<Stage,
-                                       SampleHeritageReconstructionFilterStage>) {
+                    } else if constexpr (std::is_same_v<Stage,
+                                                        SampleHeritageReconstructionFilterStage>) {
                         const auto pole = static_cast<long double>(runtime.filter_pole);
                         if (pole > 0.0L && pole < 1.0L) {
                             constexpr long double reference_peak = 16.0L;
                             machine_frames += std::ceil(
                                 std::log(static_cast<long double>(
-                                    SampleHeritageVoiceDsp::kTailSilenceThreshold) /
+                                             SampleHeritageVoiceDsp::kTailSilenceThreshold) /
                                          reference_peak) /
                                 std::log(pole));
                         }
@@ -232,22 +248,25 @@ public:
                 },
                 runtime.spec.parameters);
         }
-        machine_frames = std::min(
-            machine_frames,
-            std::ceil(static_cast<long double>(machine_sample_rate_) *
-                      SampleHeritageVoiceDsp::kMaximumTailSeconds));
+        machine_frames =
+            std::min(machine_frames, std::ceil(static_cast<long double>(machine_sample_rate_) *
+                                               SampleHeritageVoiceDsp::kMaximumTailSeconds));
+        if (live_cyclic_active_)
+            machine_frames += static_cast<long double>(live_cyclic_.remaining_output_frames());
+        if (live_cyclic_active_) {
+            machine_frames +=
+                static_cast<long double>(input_src_.remaining_valid_output_frames()) /
+                static_cast<long double>(live_cyclic_.source_frames_per_output_frame());
+        }
 
         const auto required_frames =
             static_cast<long double>(latency_output_frames()) +
-            machine_frames / static_cast<long double>(
-                return_ratio_ / maximum_runtime_clock_factor_);
+            machine_frames /
+                static_cast<long double>(return_ratio_ / maximum_runtime_clock_factor_);
         const auto output_frames = std::ceil(required_frames);
         if (!std::isfinite(output_frames) || output_frames <= 0.0L)
-            return output_frames <= 0.0L
-                ? 0
-                : std::numeric_limits<std::uint64_t>::max();
-        if (output_frames >=
-            static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+            return output_frames <= 0.0L ? 0 : std::numeric_limits<std::uint64_t>::max();
+        if (output_frames >= static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
             return std::numeric_limits<std::uint64_t>::max();
         return static_cast<std::uint64_t>(output_frames);
     }
@@ -297,8 +316,18 @@ public:
             return result;
         }
         result.machine_frames = return_plan.input_frames;
-        const auto input_plan = input_src_.plan(result.machine_frames);
+        result.pre_live_machine_frames = result.machine_frames;
+        if (live_cyclic_active_) {
+            const auto live_plan = live_cyclic_.plan(result.machine_frames);
+            if (!live_plan.valid()) {
+                result.status = SampleHeritagePlanStatus::SizeOverflow;
+                return result;
+            }
+            result.pre_live_machine_frames = live_plan.input_frames;
+        }
+        const auto input_plan = input_src_.plan(result.pre_live_machine_frames);
         if (!input_plan.valid() || result.machine_frames > maximum_machine_frames_ ||
+            result.pre_live_machine_frames > maximum_pre_live_machine_frames_ ||
             input_plan.input_frames > maximum_input_frames_) {
             result.status = SampleHeritagePlanStatus::SizeOverflow;
             return result;
@@ -312,7 +341,22 @@ public:
         const SampleHeritageProcessPlan& plan,
         const BufferView<const float>& input,
         BufferView<float> output) noexcept {
-        return process_exact_impl(plan, input, output, false);
+        return process_exact_impl(plan, input, output, false,
+                                  input.num_samples(), false);
+    }
+
+    SampleHeritageProcessStatus process_source_exact(
+        const SampleHeritageProcessPlan& plan,
+        const BufferView<const float>& input,
+        BufferView<float> output,
+        std::size_t valid_input_frames,
+        bool end_of_source) noexcept {
+        return process_exact_impl(plan, input, output, false,
+                                  valid_input_frames, end_of_source);
+    }
+
+    std::size_t last_valid_output_frames() const noexcept {
+        return last_valid_output_frames_;
     }
 
     /// Advances finite SRC, hold, and filter memory without exciting noise or
@@ -325,7 +369,7 @@ public:
             for (const auto sample : input.channel(channel))
                 if (sample != 0.0f)
                     return SampleHeritageProcessStatus::TailInputNotSilent;
-        return process_exact_impl(plan, input, output, true);
+        return process_exact_impl(plan, input, output, true, 0, true);
     }
 
 private:
@@ -333,7 +377,9 @@ private:
         const SampleHeritageProcessPlan& plan,
         const BufferView<const float>& input,
         BufferView<float> output,
-        bool draining_tail) noexcept {
+        bool draining_tail,
+        std::size_t valid_input_frames,
+        bool end_of_source) noexcept {
         if (!exact_prepared_) return SampleHeritageProcessStatus::NotPrepared;
         const auto expected = plan_exact(output.num_samples(),
                                          plan.runtime_clock_multiplier);
@@ -342,6 +388,7 @@ private:
             plan.sequence != expected.sequence ||
             plan.output_frames != expected.output_frames ||
             plan.machine_frames != expected.machine_frames ||
+            plan.pre_live_machine_frames != expected.pre_live_machine_frames ||
             plan.input_frames != expected.input_frames ||
             plan.runtime_clock_multiplier != expected.runtime_clock_multiplier) {
             return SampleHeritageProcessStatus::InvalidPlan;
@@ -352,6 +399,9 @@ private:
         }
         if (input.num_samples() != plan.input_frames)
             return SampleHeritageProcessStatus::InputFrameMismatch;
+        if (valid_input_frames > input.num_samples())
+            return SampleHeritageProcessStatus::InputFrameMismatch;
+        last_valid_output_frames_ = output.num_samples();
 
         if (all_bypassed_ && !runtime_dynamic_clock_) {
             for (std::size_t channel = 0; channel < channel_count_; ++channel)
@@ -361,13 +411,45 @@ private:
             return SampleHeritageProcessStatus::Ok;
         }
 
-        BufferView<float> machine(machine_ptrs_.data(), channel_count_,
-                                  plan.machine_frames);
-        if (input_src_.process(input, machine) != SampleHeritageSrcStatus::Ok)
+        auto* prepared_ptrs = live_cyclic_active_ ? pre_live_ptrs_.data() : machine_ptrs_.data();
+        BufferView<float> prepared_machine(prepared_ptrs, channel_count_,
+                                           plan.pre_live_machine_frames);
+        const auto input_status = live_cyclic_active_
+                                      ? input_src_.process_source(input, prepared_machine,
+                                                                  valid_input_frames, end_of_source)
+                                      : input_src_.process(input, prepared_machine);
+        if (input_status != SampleHeritageSrcStatus::Ok)
             return SampleHeritageProcessStatus::InternalContractFailure;
-        process_machine_stages(machine, draining_tail);
-        BufferView<const float> machine_input(machine_const_ptrs_.data(),
-                                              channel_count_, plan.machine_frames);
+        BufferView<float> machine(machine_ptrs_.data(), channel_count_, plan.machine_frames);
+        if (live_cyclic_active_) {
+            const auto valid_pre_live_frames = input_src_.last_valid_output_frames();
+            BufferView<float> valid_pre_live(pre_live_ptrs_.data(), channel_count_,
+                                             valid_pre_live_frames);
+            voice_dsp_.process_before_live(valid_pre_live, draining_tail);
+            if (valid_pre_live_frames < plan.pre_live_machine_frames) {
+                for (std::size_t channel = 0; channel < channel_count_; ++channel)
+                    std::fill(pre_live_ptrs_[channel] + valid_pre_live_frames,
+                              pre_live_ptrs_[channel] + plan.pre_live_machine_frames, 0.0f);
+            }
+            BufferView<const float> live_input(pre_live_const_ptrs_.data(), channel_count_,
+                                               plan.pre_live_machine_frames);
+            const auto live_end_of_source = end_of_source && input_src_.source_drained();
+            if (live_cyclic_.process(live_input, machine, valid_pre_live_frames,
+                                     live_end_of_source) != SampleHeritageLiveCyclicStatus::Ok)
+                return SampleHeritageProcessStatus::InternalContractFailure;
+            if (live_end_of_source) {
+                const auto valid_machine = live_cyclic_.last_valid_output_frames();
+                const auto converted = std::ceil(static_cast<double>(valid_machine) /
+                                                 (return_ratio_ * plan.runtime_clock_multiplier));
+                last_valid_output_frames_ =
+                    static_cast<std::size_t>(std::min<double>(output.num_samples(), converted));
+            }
+            voice_dsp_.process_after_live(machine, draining_tail);
+        } else {
+            process_machine_stages(machine, draining_tail);
+        }
+        BufferView<const float> machine_input(machine_const_ptrs_.data(), channel_count_,
+                                              plan.machine_frames);
         if (return_src_.process(machine_input, output,
                                 return_ratio_ * plan.runtime_clock_multiplier) !=
             SampleHeritageSrcStatus::Ok)
@@ -387,8 +469,9 @@ private:
 
 public:
 
-    /// Captures only ContinueSerializedState RNG streams. SRC, hold, and filter
-    /// transients are deliberately outside the serialized contract.
+    /// Captures ContinueSerializedState RNG streams and the live shuffler's
+    /// next-cycle sequence. SRC, ring, hold, and filter transients remain
+    /// outside the serialized contract.
     SampleHeritageRuntimeStateCapture capture_runtime_state() const noexcept {
         SampleHeritageRuntimeStateCapture result;
         if (!prepared_) return result;
@@ -398,13 +481,32 @@ public:
         result.state.profile_digest = profile_.profile_digest;
         if (typed_voice_) {
             for (std::size_t index = 0; index < profile_.voice_count; ++index) {
-                if (!voice_dsp_.converter_continues_state(index)) continue;
+                if (voice_dsp_.converter_continues_state(index)) {
+                    auto& saved = result.state.rng_states[
+                        result.state.rng_state_count++];
+                    saved.stage_index = static_cast<std::uint8_t>(index);
+                    saved.stage_type =
+                        SampleHeritageRuntimeRngStageType::Quantization;
+                    saved.random_state = voice_dsp_.converter_random_state(index);
+                    continue;
+                }
+                const auto* live =
+                    std::get_if<SampleHeritageVoiceLiveCyclicStretchBlock>(
+                        &profile_.voice[index].parameters);
+                if (live == nullptr || profile_.voice[index].bypass ||
+                    live->seed_policy !=
+                        SampleHeritageSeedPolicy::ContinueSerializedState)
+                    continue;
+                const auto continuation =
+                    live_cyclic_.capture_next_cycle_rng_continuation();
+                if (continuation.next_cycle_index ==
+                    std::numeric_limits<std::uint64_t>::max())
+                    return {};
                 auto& saved = result.state.rng_states[
                     result.state.rng_state_count++];
                 saved.stage_index = static_cast<std::uint8_t>(index);
-                saved.stage_type =
-                    SampleHeritageRuntimeRngStageType::Quantization;
-                saved.random_state = voice_dsp_.converter_random_state(index);
+                saved.stage_type = SampleHeritageRuntimeRngStageType::LiveCyclic;
+                saved.random_state = continuation.next_cycle_index + 1;
             }
             result.status = SampleHeritageRuntimeStateStatus::Ok;
             return result;
@@ -453,13 +555,23 @@ public:
         if (typed_voice_) {
             std::size_t expected_count = 0;
             for (std::size_t index = 0; index < profile_.voice_count; ++index) {
-                if (!voice_dsp_.converter_continues_state(index)) continue;
+                const auto* live =
+                    std::get_if<SampleHeritageVoiceLiveCyclicStretchBlock>(
+                        &profile_.voice[index].parameters);
+                const auto converter =
+                    voice_dsp_.converter_continues_state(index);
+                const auto cyclic = live != nullptr &&
+                    !profile_.voice[index].bypass &&
+                    live->seed_policy ==
+                        SampleHeritageSeedPolicy::ContinueSerializedState;
+                if (!converter && !cyclic) continue;
                 if (expected_count >= state.rng_state_count)
                     return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
                 const auto& saved = state.rng_states[expected_count];
                 if (saved.stage_index != index ||
-                    saved.stage_type !=
-                        SampleHeritageRuntimeRngStageType::Quantization ||
+                    saved.stage_type != (converter
+                        ? SampleHeritageRuntimeRngStageType::Quantization
+                        : SampleHeritageRuntimeRngStageType::LiveCyclic) ||
                     saved.random_state == 0)
                     return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
                 ++expected_count;
@@ -470,9 +582,20 @@ public:
             reset();
             for (std::size_t index = 0; index < state.rng_state_count; ++index) {
                 const auto& saved = state.rng_states[index];
-                if (!voice_dsp_.restore_converter_random_state(
-                        saved.stage_index, saved.random_state))
-                    return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
+                if (saved.stage_type ==
+                    SampleHeritageRuntimeRngStageType::Quantization) {
+                    if (!voice_dsp_.restore_converter_random_state(
+                            saved.stage_index, saved.random_state))
+                        return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
+                } else {
+                    const auto* live =
+                        std::get_if<SampleHeritageVoiceLiveCyclicStretchBlock>(
+                            &profile_.voice[saved.stage_index].parameters);
+                    if (live == nullptr || live->seed == 0)
+                        return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
+                    live_cyclic_.reset_with_rng_continuation(
+                        {live->seed, saved.random_state - 1});
+                }
             }
             return SampleHeritageRuntimeStateStatus::Ok;
         }
@@ -649,6 +772,11 @@ private:
             release();
             return SampleHeritagePrepareStatus::InvalidProfile;
         }
+        live_cyclic_active_ = typed_voice_ && voice_dsp_.live_stage_active();
+        if (live_cyclic_active_ && !exact) {
+            release();
+            return SampleHeritagePrepareStatus::UnsupportedRateConversion;
+        }
 
         if (exact) {
             runtime_dynamic_clock_ = maximum_runtime_clock_factor > 1.0;
@@ -712,16 +840,73 @@ private:
                                      return_identity_ &&
                                          maximum_runtime_clock_factor == 1.0,
                                      maximum_machine_frames_) ||
-                !checked_frame_bound(maximum_machine_frames_, input_ratio_,
-                                     input_identity_, maximum_input_frames_) ||
-                (channel_count != 0 &&
-                 maximum_machine_frames_ >
+                (channel_count != 0 && maximum_machine_frames_ >
+                     std::numeric_limits<std::size_t>::max() / channel_count)) {
+                release();
+                return SampleHeritagePrepareStatus::SizeOverflow;
+            }
+            maximum_pre_live_machine_frames_ = maximum_machine_frames_;
+            if (live_cyclic_active_) {
+                const auto live_index = voice_dsp_.live_stage_index();
+                const auto* block =
+                    std::get_if<SampleHeritageVoiceLiveCyclicStretchBlock>(
+                        &profile_.voice[live_index].parameters);
+                std::size_t cycle_samples = 0;
+                std::size_t splice_samples = 0;
+                if (block == nullptr ||
+                    !milliseconds_to_machine_frames(block->cycle_ms,
+                                                    machine_sample_rate_,
+                                                    cycle_samples) ||
+                    !milliseconds_to_machine_frames(block->splice_ms,
+                                                    machine_sample_rate_,
+                                                    splice_samples, true) ||
+                    splice_samples > cycle_samples / 2) {
+                    release();
+                    return SampleHeritagePrepareStatus::InvalidProfile;
+                }
+                const auto divisions = block->shuffle_divisions == 0
+                    ? std::size_t{1}
+                    : static_cast<std::size_t>(block->shuffle_divisions);
+                const SampleHeritageLiveCyclicConfig live_config{
+                    .factor = block->factor,
+                    .cycle_samples = cycle_samples,
+                    .crossfade_samples = splice_samples,
+                    .shuffle_divisions = divisions,
+                    .linked_channels = block->stereo_link,
+                    .seed = block->seed,
+                    .shuffle = block->shuffle_divisions == 0
+                        ? SampleHeritageLiveCyclicShuffle::Identity
+                        : SampleHeritageLiveCyclicShuffle::FisherYates,
+                    .max_block_samples = maximum_machine_frames_,
+                    .channel_count = channel_count};
+                const auto live_status = live_cyclic_.prepare(live_config);
+                if (live_status != SampleHeritageLiveCyclicStatus::Ok) {
+                    release();
+                    return live_status ==
+                               SampleHeritageLiveCyclicStatus::AllocationFailed
+                        ? SampleHeritagePrepareStatus::AllocationFailed
+                        : SampleHeritagePrepareStatus::SizeOverflow;
+                }
+                maximum_pre_live_machine_frames_ =
+                    live_cyclic_.resources().maximum_input_frames;
+                if (maximum_pre_live_machine_frames_ == 0) {
+                    release();
+                    return SampleHeritagePrepareStatus::SizeOverflow;
+                }
+            }
+            if (!checked_frame_bound(maximum_pre_live_machine_frames_,
+                                     input_ratio_, input_identity_,
+                                     maximum_input_frames_) ||
+                (channel_count != 0 && maximum_pre_live_machine_frames_ >
                      std::numeric_limits<std::size_t>::max() / channel_count)) {
                 release();
                 return SampleHeritagePrepareStatus::SizeOverflow;
             }
             try {
                 machine_scratch_.assign(channel_count * maximum_machine_frames_, 0.0f);
+                if (live_cyclic_active_)
+                    pre_live_scratch_.assign(
+                        channel_count * maximum_pre_live_machine_frames_, 0.0f);
                 dynamic_identity_exact_ = runtime_dynamic_clock_ &&
                                           runtime_clock_identity_only() &&
                                           input_identity_ && return_ratio_ == 1.0;
@@ -746,6 +931,12 @@ private:
                     channel * maximum_machine_frames_;
                 machine_ptrs_[channel] = pointer;
                 machine_const_ptrs_[channel] = pointer;
+                if (live_cyclic_active_) {
+                    auto* pre_live = pre_live_scratch_.data() +
+                        channel * maximum_pre_live_machine_frames_;
+                    pre_live_ptrs_[channel] = pre_live;
+                    pre_live_const_ptrs_[channel] = pre_live;
+                }
             }
             channel_count_ = channel_count;
             maximum_output_frames_ = maximum_output_frames;
@@ -775,6 +966,21 @@ private:
             return false;
         result = static_cast<std::size_t>(frames) + 1;
         return result != 0;
+    }
+
+    /// Millisecond controls use nearest-frame rounding with ties toward the
+    /// next frame, making the same profile deterministic at a given rate.
+    static bool milliseconds_to_machine_frames(double milliseconds,
+                                               double sample_rate,
+                                               std::size_t& result,
+                                               bool allow_zero = false) noexcept {
+        const auto frames = std::floor(milliseconds * sample_rate * 0.001 + 0.5);
+        if (!std::isfinite(frames) || frames < 0.0 ||
+            frames >= static_cast<double>(std::numeric_limits<std::size_t>::max()) ||
+            (!allow_zero && frames < 1.0))
+            return false;
+        result = static_cast<std::size_t>(frames);
+        return true;
     }
 
     bool valid_runtime_clock_multiplier(double multiplier) const noexcept {
@@ -960,15 +1166,21 @@ private:
     SampleSincKernelBank sinc_bank_;
     SampleHeritageCausalSrc input_src_;
     SampleHeritageCausalSrc return_src_;
+    SampleHeritageLiveCyclicStretch live_cyclic_;
     SampleHeritageVoiceDsp voice_dsp_;
     std::vector<float> machine_scratch_;
+    std::vector<float> pre_live_scratch_;
     std::vector<float> dynamic_identity_delay_;
     std::array<float*, kSampleHeritageMaximumChannels> machine_ptrs_{};
     std::array<const float*, kSampleHeritageMaximumChannels> machine_const_ptrs_{};
+    std::array<float*, kSampleHeritageMaximumChannels> pre_live_ptrs_{};
+    std::array<const float*, kSampleHeritageMaximumChannels>
+        pre_live_const_ptrs_{};
     bool prepared_ = false;
     bool exact_prepared_ = false;
     bool all_bypassed_ = false;
     bool typed_voice_ = false;
+    bool live_cyclic_active_ = false;
     bool input_identity_ = true;
     bool return_identity_ = true;
     bool runtime_dynamic_clock_ = false;
@@ -978,6 +1190,7 @@ private:
     std::size_t maximum_output_frames_ = 0;
     std::size_t maximum_input_frames_ = 0;
     std::size_t maximum_machine_frames_ = 0;
+    std::size_t maximum_pre_live_machine_frames_ = 0;
     double machine_sample_rate_ = 0.0;
     double clock_ratio_ = 1.0;
     double clocked_sample_rate_ = 0.0;
@@ -989,6 +1202,7 @@ private:
     std::size_t dynamic_identity_delay_head_ = 0;
     std::uint64_t prepare_epoch_ = 1;
     std::uint64_t process_sequence_ = 0;
+    std::size_t last_valid_output_frames_ = 0;
 };
 
 }  // namespace pulp::audio

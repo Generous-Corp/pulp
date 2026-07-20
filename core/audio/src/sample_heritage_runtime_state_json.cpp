@@ -123,7 +123,8 @@ SampleHeritageRuntimeStateStatus validate_engine_state(
             (index != 0 &&
              state.rng_states[index - 1].stage_index >= rng.stage_index) ||
             (rng.stage_type != SampleHeritageRuntimeRngStageType::Quantization &&
-             rng.stage_type != SampleHeritageRuntimeRngStageType::Noise))
+             rng.stage_type != SampleHeritageRuntimeRngStageType::Noise &&
+             rng.stage_type != SampleHeritageRuntimeRngStageType::LiveCyclic))
             return SampleHeritageRuntimeStateStatus::InvalidStageLayout;
         if (rng.random_state == 0)
             return SampleHeritageRuntimeStateStatus::InvalidRandomState;
@@ -231,6 +232,8 @@ bool parse_engine_state(Parser& parser, Value object, std::string_view path,
             state.stage_type = SampleHeritageRuntimeRngStageType::Quantization;
         else if (stage_type == "noise")
             state.stage_type = SampleHeritageRuntimeRngStageType::Noise;
+        else if (stage_type == "live_cyclic")
+            state.stage_type = SampleHeritageRuntimeRngStageType::LiveCyclic;
         else
             return parser.fail(SampleHeritageJsonStatus::InvalidEnum,
                                base + ".stage_type");
@@ -255,7 +258,9 @@ void append_engine_state(std::string& output,
         output += ",\"stage_type\":\"";
         output += rng.stage_type == SampleHeritageRuntimeRngStageType::Quantization
                       ? "quantization"
-                      : "noise";
+                      : (rng.stage_type == SampleHeritageRuntimeRngStageType::Noise
+                             ? "noise"
+                             : "live_cyclic");
         output += "\",\"random_state\":";
         append_random_state(output, rng.random_state);
         output.push_back('}');
@@ -455,7 +460,9 @@ write_sample_heritage_typed_runtime_state_json(
             result.json +=
                 rng.stage_type == SampleHeritageRuntimeRngStageType::Quantization
                     ? "quantization"
-                    : "noise";
+                    : (rng.stage_type == SampleHeritageRuntimeRngStageType::Noise
+                           ? "noise"
+                           : "live_cyclic");
             result.json += "\",\"random_state\":";
             append_random_state(result.json, rng.random_state);
             result.json.push_back('}');

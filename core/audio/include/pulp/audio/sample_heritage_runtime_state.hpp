@@ -18,6 +18,7 @@ inline constexpr std::size_t kSampleHeritageRuntimeVoiceSlots = 8;
 enum class SampleHeritageRuntimeRngStageType : std::uint8_t {
     Quantization,
     Noise,
+    LiveCyclic,
 };
 
 struct SampleHeritageRuntimeRngState {
@@ -27,12 +28,12 @@ struct SampleHeritageRuntimeRngState {
     std::uint64_t random_state = 0;
 };
 
-/// Fixed-capacity RNG-stream continuation payload. It intentionally does not
-/// serialize whole-engine DSP transients: restore resets both SRC phases and
-/// histories, DAC-hold phase/value, and reconstruction-filter history before
-/// resuming only stages that opt into ContinueSerializedState. Capture and
-/// restore require the audio callback to be quiescent; JSON conversion remains
-/// an off-audio-thread API.
+/// Fixed-capacity continuation payload for seeded stages. It intentionally
+/// does not serialize whole-engine DSP transients: restore resets SRC phases
+/// and histories, the live-stretch ring, DAC-hold phase/value, and filter
+/// history before resuming only stages that opt into ContinueSerializedState.
+/// Capture and restore require a quiescent audio callback; JSON conversion
+/// remains an off-audio-thread API.
 struct SampleHeritageRuntimeState {
     std::uint32_t schema_version = kSampleHeritageRuntimeStateSchemaVersion;
     std::uint32_t profile_schema_version = 0;

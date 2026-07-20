@@ -88,9 +88,9 @@ Features:
 **Formats**: CLAP
 **Purpose**: A production-shaped sampler with MIDI triggering, ADSR, pitch,
 loop/reverse playback, selectable interpolation, bounded file streaming, and
-an optional synthetic heritage-processing chain. Validates transactional
+an optional data-defined Sample Heritage chain. Validates transactional
 off-thread mono/stereo publication, multi-voice playback, starvation handling,
-streamed mip selection, and parameter/state round-trips.
+streamed mip selection, and parameter/profile/runtime-state round-trips.
 
 Features:
 - Off-thread mono/stereo resident loading and strict ranged WAV/AIFF streaming
@@ -100,11 +100,19 @@ Features:
 - Resident and persisted streamed octave mips with ratio-tracking sinc fallback
 - Checked streaming-memory configuration plus typed prepare/load and coherent
   combined diagnostics
-- Optional typed synthetic heritage processing, transactional clock-domain
-  rebind, and strict profile/runtime-state persistence
+- Strict schema-v3 Heritage profiles with per-voice machine-domain, clock,
+  pitch-family, converter, live cyclic, hold/filter/color, post-mix bus, and
+  separately committed offline record-domain blocks
+- Transactional clock/rate/resource rebind, demand-aware streaming admission,
+  deterministic runtime continuation, canonical profile import/export, and
+  analytic CLI rendering
 
 See the [sampler playback chooser](sampler-playback.md) before reusing its
 shared paged architecture for a simpler sequential or resident product.
+The [full PulpSampler guide](../examples/pulp-sampler.md) documents the Heritage
+format and links the public profile-authoring skill and prompt. Pulp ships no
+named profiles; captures and listening are optional profile-calibration
+evidence rather than SDK release gates.
 
 ## PulpTempoSampler
 
@@ -123,6 +131,8 @@ Features:
 - Stable parameter identities and plugin-state schema v2
 
 See the [full example guide](../examples/pulp-tempo-sampler.md).
+Its `signal::OfflineStretch` path is conventional offline tempo matching, not
+the intentional fixed/adaptive cyclic mechanism in a Heritage profile.
 
 ## PulpPluck
 

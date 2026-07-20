@@ -30,7 +30,7 @@ class SamplerHeritageRuntime {
 public:
     static constexpr std::size_t kVoiceSlots = 8;
     static constexpr double maximum_live_source_consumption_ratio() noexcept {
-        return 1.0;
+        return 1.0 / audio::kSampleHeritageCyclicStretchMinimumFactor;
     }
 
     static double maximum_variable_clock_factor(
@@ -113,6 +113,8 @@ public:
         bool voice_processing_required = false;
         bool voice_artifact_path_active = false;
         bool pitch_active = false;
+        bool live_cyclic_active = false;
+        double live_source_consumption_ratio = 1.0;
         audio::SampleHeritagePitchFamily pitch_family =
             audio::SampleHeritagePitchFamily::VariableClock;
         bool bus_processing_required = false;
@@ -240,6 +242,8 @@ public:
         voice_processing_required_ = false;
         voice_artifact_path_active_ = false;
         pitch_active_ = false;
+        live_cyclic_active_ = false;
+        live_source_consumption_ratio_ = 1.0;
         pitch_family_ = audio::SampleHeritagePitchFamily::VariableClock;
         bus_processing_required_ = false;
         legacy_processing_required_ = false;
@@ -280,6 +284,9 @@ public:
     }
     bool pitch_active() const noexcept {
         return prepared_ && pitch_active_ && !failed_closed_;
+    }
+    bool live_cyclic_active() const noexcept {
+        return prepared_ && live_cyclic_active_ && !failed_closed_;
     }
     bool runtime_pitch_factor_supported(double factor) const noexcept {
         if (!pitch_active()) return true;
@@ -326,7 +333,9 @@ public:
         return prepared_ && !all_stages_bypassed_ ? clock_ratio_ : 1.0;
     }
     double active_live_source_consumption_ratio() const noexcept {
-        return maximum_live_source_consumption_ratio();
+        return prepared_ && !all_stages_bypassed_
+            ? live_source_consumption_ratio_
+            : 1.0;
     }
     std::size_t maximum_input_frames() const noexcept {
         return prepared_ && !all_stages_bypassed_ ? maximum_input_frames_ : 0;
@@ -461,37 +470,51 @@ public:
         return dry_buffer(frames);
     }
 
-    bool process_voice(std::size_t slot,
-                       const VoiceProcessPlan& plan,
-                       audio::BufferView<float> output) noexcept {
-        if (slot >= kVoiceSlots || !voice_processing_required() ||
-            !plan.valid() || plan.input_frames > maximum_input_frames_ ||
+    bool process_voice(std::size_t slot, const VoiceProcessPlan& plan,
+                       audio::BufferView<float> output, std::size_t valid_input_frames,
+                       bool end_of_source) noexcept {
+        if (slot >= kVoiceSlots || !voice_processing_required() || !plan.valid() ||
+            plan.input_frames > maximum_input_frames_ ||
             plan.engine.input_frames > maximum_engine_input_frames_ ||
-            (plan.pitch_active &&
-             plan.pitch_factor != voices_[slot].pitch.factor())) {
+            (plan.pitch_active && plan.pitch_factor != voices_[slot].pitch.factor())) {
             fail_process();
             return false;
         }
         auto engine_input = dry_input(plan.engine.input_frames);
+        auto valid_engine_input_frames = std::min(valid_input_frames, plan.engine.input_frames);
         if (plan.pitch_active) {
-            audio::BufferView<float> pitched(
-                pitch_ptrs_.data(), channel_count_, plan.engine.input_frames);
-            if (voices_[slot].pitch.process(
-                    dry_input(plan.input_frames), pitched) !=
+            audio::BufferView<float> pitched(pitch_ptrs_.data(), channel_count_,
+                                             plan.engine.input_frames);
+            if (voices_[slot].pitch.process(dry_input(plan.input_frames), pitched) !=
                 audio::SampleHeritagePitchStatus::Ok) {
                 fail_process();
                 return false;
             }
-            engine_input = audio::BufferView<const float>(
-                pitch_const_ptrs_.data(), channel_count_, plan.engine.input_frames);
+            engine_input = audio::BufferView<const float>(pitch_const_ptrs_.data(), channel_count_,
+                                                          plan.engine.input_frames);
+            if (pitch_family_ != audio::SampleHeritagePitchFamily::VariableClock &&
+                (valid_input_frames < plan.input_frames || end_of_source)) {
+                const auto converted =
+                    std::ceil(static_cast<double>(valid_input_frames) /
+                              std::max(plan.pitch_factor,
+                                       audio::SampleHeritagePitchProcessor::kMinimumFactor));
+                valid_engine_input_frames =
+                    static_cast<std::size_t>(std::min<double>(plan.engine.input_frames, converted));
+            }
         }
-        if (voices_[slot].engine.process_exact(
-                plan.engine, engine_input, output) ==
+        if (voices_[slot].engine.process_source_exact(plan.engine, engine_input, output,
+                                                      valid_engine_input_frames, end_of_source) ==
             audio::SampleHeritageProcessStatus::Ok) {
             return true;
         }
         fail_process();
         return false;
+    }
+
+    std::size_t last_valid_voice_output_frames(std::size_t slot) const noexcept {
+        return slot < kVoiceSlots && voices_ != nullptr
+                   ? voices_[slot].engine.last_valid_output_frames()
+                   : 0;
     }
 
     bool process_voice_tail(std::size_t slot,
@@ -634,6 +657,13 @@ private:
                 converter->seed_policy ==
                     audio::SampleHeritageSeedPolicy::ContinueSerializedState)
                 return true;
+            if (const auto* live =
+                    std::get_if<audio::SampleHeritageVoiceLiveCyclicStretchBlock>(
+                        &profile.voice[index].parameters);
+                live != nullptr &&
+                live->seed_policy ==
+                    audio::SampleHeritageSeedPolicy::ContinueSerializedState)
+                return true;
         }
         for (std::size_t index = 0; index < profile.bus_count; ++index) {
             if (profile.bus[index].bypass) continue;
@@ -693,7 +723,9 @@ private:
         const audio::SampleHeritageVoiceBlockSpec& spec,
         bool& artifact_path_active,
         bool& pitch_active,
-        audio::SampleHeritagePitchFamily& pitch_family) {
+        audio::SampleHeritagePitchFamily& pitch_family,
+        double& live_source_consumption_ratio,
+        bool& live_cyclic_active) {
         if (spec.bypass) return true;
         return std::visit(
             [&](const auto& block) {
@@ -708,9 +740,11 @@ private:
                 } else if constexpr (std::is_same_v<
                                          Block,
                                          audio::SampleHeritageVoiceLiveCyclicStretchBlock>) {
-                    // H8 owns the realtime live-stretch implementation. Keep
-                    // an active block fail-closed until that processor exists.
-                    return false;
+                    artifact_path_active = true;
+                    live_cyclic_active = true;
+                    live_source_consumption_ratio = 1.0 / block.factor;
+                    return std::isfinite(live_source_consumption_ratio) &&
+                           live_source_consumption_ratio > 0.0;
                 } else {
                     return true;
                 }
@@ -724,12 +758,16 @@ private:
         audio::SampleHeritagePreparedProfile& voice_profile,
         bool& voice_artifact_path_active,
         bool& pitch_active,
-        audio::SampleHeritagePitchFamily& pitch_family) {
+        audio::SampleHeritagePitchFamily& pitch_family,
+        double& live_source_consumption_ratio,
+        bool& live_cyclic_active) {
         try {
             for (std::size_t index = 0; index < profile.voice_count; ++index) {
                 if (!inspect_voice_block(profile.voice[index],
                                          voice_artifact_path_active,
-                                         pitch_active, pitch_family))
+                                         pitch_active, pitch_family,
+                                         live_source_consumption_ratio,
+                                         live_cyclic_active))
                     return false;
             }
             audio::SampleHeritageProfile native_voice;
@@ -767,14 +805,23 @@ private:
             profile.voice.assign(source.voice.begin(),
                                  source.voice.begin() + source.voice_count);
             for (auto& spec : profile.voice) {
-                auto* converter =
-                    std::get_if<audio::SampleHeritageVoiceConverterBlock>(
-                        &spec.parameters);
-                if (converter == nullptr || converter->seed == 0) continue;
-                converter->seed ^=
-                    UINT64_C(0x9e3779b97f4a7c15) * (slot + 1);
-                if (converter->seed == 0)
-                    converter->seed = UINT64_C(0xd1b54a32d192ed03) ^ slot;
+                std::visit(
+                    [&](auto& block) {
+                        using Block = std::decay_t<decltype(block)>;
+                        if constexpr (
+                            std::is_same_v<Block,
+                                           audio::SampleHeritageVoiceConverterBlock> ||
+                            std::is_same_v<Block,
+                                           audio::SampleHeritageVoiceLiveCyclicStretchBlock>) {
+                            if (block.seed == 0) return;
+                            block.seed ^=
+                                UINT64_C(0x9e3779b97f4a7c15) * (slot + 1);
+                            if (block.seed == 0)
+                                block.seed =
+                                    UINT64_C(0xd1b54a32d192ed03) ^ slot;
+                        }
+                    },
+                    spec.parameters);
             }
             const auto validation = audio::validate_sample_heritage_profile(
                 profile);
@@ -838,7 +885,9 @@ private:
             if (!build_typed_runtime_profiles(
                     profile, host_sample_rate, voice_profile,
                     candidate.voice_artifact_path_active,
-                    candidate.pitch_active, candidate.pitch_family)) {
+                    candidate.pitch_active, candidate.pitch_family,
+                    candidate.live_source_consumption_ratio,
+                    candidate.live_cyclic_active)) {
                 return PulpSamplerHeritageStatus::PrepareFailed;
             }
             candidate.voice_processing_required = false;
@@ -931,7 +980,7 @@ private:
                     maximum_stream_pitch_factor,
                     maximum_stream_pitch_factor /
                         (clock_ratio *
-                         maximum_live_source_consumption_ratio()));
+                         candidate.live_source_consumption_ratio));
                 if (candidate.pitch_active &&
                     candidate.pitch_family !=
                         audio::SampleHeritagePitchFamily::VariableClock) {
@@ -1068,6 +1117,9 @@ private:
         voice_processing_required_ = candidate.voice_processing_required;
         voice_artifact_path_active_ = candidate.voice_artifact_path_active;
         pitch_active_ = candidate.pitch_active;
+        live_cyclic_active_ = candidate.live_cyclic_active;
+        live_source_consumption_ratio_ =
+            candidate.live_source_consumption_ratio;
         pitch_family_ = candidate.pitch_family;
         bus_processing_required_ = candidate.bus_processing_required;
         legacy_processing_required_ = candidate.legacy_processing_required;
@@ -1159,6 +1211,8 @@ private:
     bool voice_processing_required_ = false;
     bool voice_artifact_path_active_ = false;
     bool pitch_active_ = false;
+    bool live_cyclic_active_ = false;
+    double live_source_consumption_ratio_ = 1.0;
     audio::SampleHeritagePitchFamily pitch_family_ =
         audio::SampleHeritagePitchFamily::VariableClock;
     bool bus_processing_required_ = false;

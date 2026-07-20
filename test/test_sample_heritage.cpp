@@ -723,34 +723,129 @@ TEST_CASE("Typed heritage analog color is normalized bounded and measurable",
                         [](float sample) { return std::isfinite(sample); }));
 }
 
-TEST_CASE("Active typed live cyclic stretch fails preparation until implemented",
+TEST_CASE("Active typed live cyclic stretch prepares in the exact engine",
           "[audio][sampler][heritage][validation]") {
     const auto profile = typed_voice_profile({{
         SampleHeritageBlockDomain::Voice, false,
         SampleHeritageVoiceLiveCyclicStretchBlock{
-            1.5, 12.0, 2.0, true, false, 0, 0}}});
+            1.5, 12.0, 2.0, true, 0, 0}}});
     const auto validated = validate_sample_heritage_profile(profile);
     REQUIRE(validated.valid());
     SampleHeritageEngine engine;
-    REQUIRE_FALSE(engine.prepare(validated.profile));
+    REQUIRE(engine.prepare({validated.profile, 1, 128}) ==
+            SampleHeritagePrepareStatus::Ok);
+    const auto plan = engine.plan_exact(128);
+    REQUIRE(plan.valid());
+    REQUIRE(plan.pre_live_machine_frames > plan.machine_frames);
+    Buffer<float> input(1, plan.input_frames);
+    Buffer<float> output(1, plan.output_frames);
+    for (std::size_t frame = 0; frame < input.num_samples(); ++frame)
+        input.channel(0)[frame] = static_cast<float>(std::sin(frame * 0.1));
+    const auto& const_input = input;
+    REQUIRE(engine.process_exact(plan, const_input.view(), output.view()) ==
+            SampleHeritageProcessStatus::Ok);
+    REQUIRE(std::all_of(output.channel(0).begin(), output.channel(0).end(),
+                        [](float sample) { return std::isfinite(sample); }));
+}
+
+TEST_CASE("Exact engine live cyclic sizing remains valid across fast cycle boundaries",
+          "[audio][sampler][heritage][validation][live-cyclic]") {
+    for (const auto factor : {0.5, 0.25}) {
+        const auto profile = typed_voice_profile({{
+            SampleHeritageBlockDomain::Voice, false,
+            SampleHeritageVoiceLiveCyclicStretchBlock{
+                factor, 10.0, 1.0, true, 0, 0}}});
+        const auto validated = validate_sample_heritage_profile(profile);
+        REQUIRE(validated.valid());
+        SampleHeritageEngine engine;
+        REQUIRE(engine.prepare({validated.profile, 1, 64}) ==
+                SampleHeritagePrepareStatus::Ok);
+
+        std::size_t source_cursor = 0;
+        for (std::size_t block = 0; block < 48; ++block) {
+            const auto plan = engine.plan_exact(64);
+            REQUIRE(plan.valid());
+            REQUIRE(plan.pre_live_machine_frames <=
+                    engine.maximum_pre_live_machine_frames());
+            Buffer<float> input(1, plan.input_frames);
+            Buffer<float> output(1, plan.output_frames);
+            for (std::size_t frame = 0; frame < plan.input_frames; ++frame)
+                input.channel(0)[frame] = static_cast<float>(
+                    std::sin(static_cast<double>(source_cursor + frame) * 0.01));
+            REQUIRE(engine.process_exact(plan, std::as_const(input).view(),
+                                         output.view()) ==
+                    SampleHeritageProcessStatus::Ok);
+            source_cursor += plan.input_frames;
+        }
+    }
+}
+
+TEST_CASE("Live cyclic preserves finite input SRC history at source exhaustion",
+          "[audio][sampler][heritage][live-cyclic][src][eof]") {
+    const auto profile = typed_voice_profile({
+        {SampleHeritageBlockDomain::Voice, false, SampleHeritageVoiceMachineDomainBlock{32000.0}},
+        {SampleHeritageBlockDomain::Voice, false,
+         SampleHeritageVoiceLiveCyclicStretchBlock{1.0, 10.0, 1.0, true, 0, 0}},
+    });
+    const auto validated = validate_sample_heritage_profile(profile);
+    REQUIRE(validated.valid());
+    SampleHeritageEngine engine;
+    REQUIRE(engine.prepare({validated.profile, 1, 256}) == SampleHeritagePrepareStatus::Ok);
+    const auto plan = engine.plan_exact(256);
+    REQUIRE(plan.valid());
+    REQUIRE(plan.input_frames > 64);
+    Buffer<float> input(1, plan.input_frames);
+    input.channel(0)[63] = 1.0f;
+    Buffer<float> output(1, plan.output_frames);
+    REQUIRE(engine.process_source_exact(plan, std::as_const(input).view(), output.view(), 64,
+                                        true) == SampleHeritageProcessStatus::Ok);
+    REQUIRE(engine.last_valid_output_frames() > 65);
+    REQUIRE(std::any_of(output.channel(0).begin() + 65, output.channel(0).begin() + 128,
+                        [](float value) { return std::abs(value) > 1.0e-5f; }));
+
+    SampleHeritageEngine draining_engine;
+    REQUIRE(draining_engine.prepare({validated.profile, 1, 32}) == SampleHeritagePrepareStatus::Ok);
+    auto draining_plan = draining_engine.plan_exact(32);
+    REQUIRE(draining_plan.valid());
+    REQUIRE(draining_plan.input_frames > 1);
+    const auto valid_input_frames = draining_plan.input_frames - 1;
+    Buffer<float> draining_input(1, draining_plan.input_frames);
+    draining_input.channel(0)[valid_input_frames - 1] = 1.0f;
+    Buffer<float> draining_output(1, draining_plan.output_frames);
+    REQUIRE(draining_engine.process_source_exact(
+                draining_plan, std::as_const(draining_input).view(), draining_output.view(),
+                valid_input_frames, true) == SampleHeritageProcessStatus::Ok);
+    REQUIRE(draining_engine.tail_output_frames() > 0);
+    bool tail_heard = false;
+    for (std::size_t block = 0; block < 8; ++block) {
+        draining_plan = draining_engine.plan_exact(32);
+        REQUIRE(draining_plan.valid());
+        Buffer<float> zero_input(1, draining_plan.input_frames);
+        Buffer<float> tail_output(1, draining_plan.output_frames);
+        REQUIRE(draining_engine.process_tail_exact(draining_plan, std::as_const(zero_input).view(),
+                                                   tail_output.view()) ==
+                SampleHeritageProcessStatus::Ok);
+        tail_heard =
+            tail_heard || std::any_of(tail_output.channel(0).begin(), tail_output.channel(0).end(),
+                                      [](float value) { return std::abs(value) > 1.0e-5f; });
+    }
+    REQUIRE(tail_heard);
 }
 
 TEST_CASE("Typed heritage tails use an audible-silence bound and hard time cap",
           "[audio][sampler][heritage][tail]") {
     const auto profile = typed_voice_profile({
         {SampleHeritageBlockDomain::Voice, false,
-         SampleHeritageVoiceHoldDroopBlock{
-             SampleHeritageHoldMode::ZeroOrder, 65536, 0.0f}},
+         SampleHeritageVoiceHoldDroopBlock{SampleHeritageHoldMode::ZeroOrder, 65536, 0.0f}},
         {SampleHeritageBlockDomain::Voice, false,
-         SampleHeritageVoiceReconstructionBlock{
-             SampleHeritageReconstructionFamily::OnePole,
-             SampleHeritageCutoffLaw::FixedHz, 1.0, 1, 0.0f, 0.0f}},
+         SampleHeritageVoiceReconstructionBlock{SampleHeritageReconstructionFamily::OnePole,
+                                                SampleHeritageCutoffLaw::FixedHz, 1.0, 1, 0.0f,
+                                                0.0f}},
     });
     const auto validated = validate_sample_heritage_profile(profile);
     REQUIRE(validated.valid());
     SampleHeritageEngine engine;
-    REQUIRE(engine.prepare({validated.profile, 1, 64}) ==
-            SampleHeritagePrepareStatus::Ok);
+    REQUIRE(engine.prepare({validated.profile, 1, 64}) == SampleHeritagePrepareStatus::Ok);
     REQUIRE(engine.tail_output_frames() >= 65536);
     REQUIRE(engine.tail_output_frames() <= 480000);
 }

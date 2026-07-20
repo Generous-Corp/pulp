@@ -322,7 +322,7 @@ docs:
   - slug: example-pulp-sampler
     path: examples/pulp-sampler.md
     kind: guide
-    summary: PulpSampler - eight-voice sampler with bounded streaming, loops, interpolation, mips, and synthetic heritage processing
+    summary: PulpSampler - eight-voice sampler with bounded streaming, loops, interpolation, mips, and data-defined Sample Heritage profiles
   - slug: example-pulp-tempo-sampler
     path: examples/pulp-tempo-sampler.md
     kind: guide
@@ -441,6 +441,37 @@ docs:
     path: reference/processing-models.md
     kind: reference
     summary: When to author a Processor vs. compose with SignalGraph, plus reserved terminology
+
+  # Sample Heritage mechanism research
+  - slug: heritage-research-converters
+    path: research/sample-heritage/converters-and-coding-laws.md
+    kind: reference
+    summary: Primary-source bounds for neutral converter, companding, dither, hold, and droop vocabulary
+
+  - slug: heritage-research-filters
+    path: research/sample-heritage/filters.md
+    kind: reference
+    summary: Primary-source bounds for reconstruction and record-filter families and calibration
+
+  - slug: heritage-research-pitch
+    path: research/sample-heritage/pitch-engines.md
+    kind: reference
+    summary: Primary-source bounds for variable-clock, zero-order, and linear sampler pitch mechanisms
+
+  - slug: heritage-research-noise
+    path: research/sample-heritage/noise-and-idle.md
+    kind: reference
+    summary: Primary-source bounds for idle, activity-conditioned noise, measurement, and spectral fitting
+
+  - slug: heritage-research-cyclic-stretch
+    path: research/sample-heritage/cyclic-stretch.md
+    kind: reference
+    summary: Primary-source bounds for fixed cyclic, bounded adaptive WSOLA, and live cyclic stretch
+
+  - slug: heritage-calibration-validation
+    path: validation/sample-heritage/README.md
+    kind: guide
+    summary: Reproducible C1-C7 capture protocol, independent cyclic calibration oracle, and keyed listening-pack workflow
 
   # Policies
   - slug: code-style

@@ -395,3 +395,36 @@ TEST_CASE("Prepared PulpSampler heritage callbacks allocate nothing",
         fixture.processor.process(output, input, midi_in, midi_out, context);
     REQUIRE_FALSE(probe.saw_allocation());
 }
+
+TEST_CASE("Prepared PulpSampler live cyclic callbacks allocate nothing",
+          "[audio][sampler][heritage][stretch][rt]") {
+    const audio::SampleHeritageProfile profile{
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.live-cyclic-rt-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {{audio::SampleHeritageBlockDomain::Voice, false,
+                   audio::SampleHeritageVoiceLiveCyclicStretchBlock{
+                       1.6, 10.0, 1.0, true, 4, 0x1234u,
+                       audio::SampleHeritageSeedPolicy::RestartFromProfileSeed}}},
+    };
+    auto sample = make_sine(48000);
+    HeritageFixture fixture(16, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.load(sample);
+    constexpr std::array attack{std::size_t{16}};
+    (void)render(fixture, attack);
+
+    std::array<float, 16> left{};
+    std::array<float, 16> right{};
+    float* output_ptrs[]{left.data(), right.data()};
+    const float* input_ptrs[]{nullptr, nullptr};
+    audio::BufferView<float> output(output_ptrs, 2, left.size());
+    audio::BufferView<const float> input(input_ptrs, 0, left.size());
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    format::ProcessContext context{48000.0, static_cast<int>(left.size())};
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 1000; ++callback)
+        fixture.processor.process(output, input, midi_in, midi_out, context);
+    REQUIRE_FALSE(probe.saw_allocation());
+}

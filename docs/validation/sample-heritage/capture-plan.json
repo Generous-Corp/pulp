@@ -1,0 +1,67 @@
+{
+  "protocols": [
+    {
+      "id": "C1",
+      "name": "record-vs-load-null",
+      "required_rows": [
+        "same stimulus recorded through target ADC",
+        "same digital stimulus loaded without target ADC",
+        "normalized replay of both stored assets"
+      ],
+      "purpose": "isolate record-path behavior from playback behavior"
+    },
+    {
+      "id": "C2",
+      "name": "multi-transpose-sweep",
+      "stimuli": ["fixed-period tone", "swept sine"],
+      "transpose_semitones": [-24, -12, 0, 12],
+      "purpose": "identify pitch family and fixed-filter versus changing-clock geometry"
+    },
+    {
+      "id": "C3",
+      "name": "dual-level",
+      "levels_dbfs_relative": [0, -20],
+      "purpose": "distinguish linear quantization from level-dependent coding after gain matching"
+    },
+    {
+      "id": "C4",
+      "name": "playback-noise",
+      "required_rows": ["digital silence looping with voice active", "true idle"],
+      "purpose": "separate active playback noise from idle noise"
+    },
+    {
+      "id": "C5",
+      "name": "impulse-step-per-transpose",
+      "stimuli": ["unit impulse", "unit step"],
+      "transpose_semitones": [-24, -12, 0, 12],
+      "purpose": "measure DAC hold and reconstruction behavior jointly"
+    },
+    {
+      "id": "C6",
+      "name": "stretch-grid",
+      "stimuli": [
+        "impulse train",
+        "fixed-period tone",
+        "swept sine",
+        "correlated stereo noise",
+        "licensed transient break",
+        "licensed vocal phrase"
+      ],
+      "factor_percent": [50, 100, 200, 400, 1000, 2000],
+      "cycle_ms": [5, 10, 20, 40, 65, "auto"],
+      "modes": ["cyclic", "adaptive"],
+      "adaptive_quality": [10, 50, 99],
+      "adaptive_width": [0, 25, 99],
+      "required_rows": ["all impulse-train rows", "all 100-percent transparency rows"],
+      "purpose": "identify splice spacing, rounding, fade law, adaptation, arithmetic, and stereo coherence"
+    },
+    {
+      "id": "C7",
+      "name": "transient-listening-corpus",
+      "stimuli": ["licensed kick", "licensed snare", "licensed break"],
+      "transpose_semitones": [-24, -12, 0, 12],
+      "purpose": "supply transient-dependent blinded listening material"
+    }
+  ],
+  "schema": "pulp.heritage.capture-plan.v1"
+}

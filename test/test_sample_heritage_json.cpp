@@ -12,7 +12,7 @@ using namespace pulp::audio;
 
 namespace {
 
-constexpr std::string_view canonical_json = R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"tempo_lock":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"decision_hop_samples":2048,"search_radius_samples":256,"search_stride_samples":1,"crossfade_samples":128,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true}]})";
+constexpr std::string_view canonical_json = R"({"schema_version":3,"profile_id":"neutral.canonical-v3","host_sample_rate":48000,"voice":[{"domain":"voice","type":"machine_domain","bypass":false,"sample_rate":32000},{"domain":"voice","type":"clock","bypass":false,"ratio":0.75},{"domain":"voice","type":"pitch","bypass":false,"family":"drop_repeat"},{"domain":"voice","type":"converter","bypass":false,"family":"mu_law","bit_depth":12,"dac_nonlinearity":0.1,"dither_lsb":0.5,"seed":"7","seed_policy":"continue_serialized_state"},{"domain":"voice","type":"live_cyclic_stretch","bypass":false,"factor":1.25,"cycle_ms":40,"splice_ms":2,"stereo_link":true,"shuffle_divisions":4,"seed":"9","seed_policy":"restart_from_profile_seed"},{"domain":"voice","type":"hold_droop","bypass":false,"mode":"zero_order","hold_samples":2,"droop":0.25},{"domain":"voice","type":"reconstruction","bypass":false,"family":"elliptic","cutoff_law":"machine_rate_ratio","cutoff_value":0.4,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"voice","type":"analog_color","bypass":false,"drive":1.5,"asymmetry":-0.25,"mix":0.75}],"bus":[{"domain":"bus","type":"noise_idle","bypass":false,"noise_amplitude":0.01,"idle_amplitude":0.02,"tilt_db_per_octave":-3,"tilt_reference_hz":1000,"tilt_floor_hz":20,"gate":"voice_active","seed":"11","seed_policy":"continue_serialized_state"},{"domain":"bus","type":"output_drive","bypass":false,"drive":2,"ceiling":0.9}],"record_commit":[{"domain":"record_commit","type":"input_drive_clip","bypass":false,"drive":1.25,"clip_level":0.8},{"domain":"record_commit","type":"anti_alias_record_rate","bypass":false,"filter_family":"elliptic","sample_rate":22050,"cutoff_law":"fixed_hz","cutoff_value":9000,"order":4,"ripple_db":0.5,"stopband_attenuation_db":60},{"domain":"record_commit","type":"converter","bypass":false,"family":"a_law","bit_depth":10,"dac_nonlinearity":0.2,"dither_lsb":0.25,"seed":"13","seed_policy":"restart_from_profile_seed"},{"domain":"record_commit","type":"commit_stretch","bypass":false,"family":"adaptive","factor":0.75,"decision_hop_samples":2048,"search_radius_samples":256,"search_stride_samples":1,"crossfade_samples":128,"zone_start_frame":100,"zone_end_frame":10000,"stereo_link":true}]})";
 
 std::string replace_once(std::string source, std::string_view from,
                          std::string_view to) {
@@ -277,9 +277,9 @@ TEST_CASE("Sample heritage v3 JSON rejects wrong types enums and domains exactly
                   "$.voice[3].seed_policy");
     require_error(
         replace_once(std::string(canonical_json),
-                               "\"tempo_lock\":true",
-                               "\"tempo_lock\":\"true\""),
-                  SampleHeritageJsonStatus::WrongType,
+                               "\"stereo_link\":true",
+                               "\"stereo_link\":true,\"tempo_lock\":true"),
+                  SampleHeritageJsonStatus::UnknownField,
                   "$.voice[4].tempo_lock");
     require_error(
         replace_once(std::string(canonical_json),
@@ -641,8 +641,8 @@ TEST_CASE("Sample heritage v3 boundary neighbors remain accepted",
                          "\"cycle_ms\":40,\"splice_ms\":20");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json),
-                         "\"tempo_lock\":true,\"shuffle_divisions\":4",
-                         "\"tempo_lock\":false,\"shuffle_divisions\":0");
+                         "\"shuffle_divisions\":4",
+                         "\"shuffle_divisions\":0");
     REQUIRE(parse_sample_heritage_profile_json(valid).valid());
     valid = replace_once(std::string(canonical_json),
                          "\"noise_amplitude\":0.01",

@@ -319,6 +319,11 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     bool voice_processing = false;
     bool bus_processing = false;
     bool pitch_active = false;
+    bool live_cyclic_active = false;
+    double live_factor = 1.0;
+    double live_cycle_ms = 0.0;
+    double live_splice_ms = 0.0;
+    std::size_t live_shuffle_divisions = 1;
     bool dynamic_identity_voice = true;
     audio::SampleHeritagePitchFamily pitch_family =
         audio::SampleHeritagePitchFamily::VariableClock;
@@ -361,6 +366,17 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
                 dynamic_identity_voice = dynamic_identity_voice &&
                     pitch->family ==
                         audio::SampleHeritagePitchFamily::VariableClock;
+            } else if (const auto* live =
+                    std::get_if<audio::SampleHeritageVoiceLiveCyclicStretchBlock>(
+                        &block.parameters)) {
+                live_cyclic_active = true;
+                live_factor = live->factor;
+                live_cycle_ms = live->cycle_ms;
+                live_splice_ms = live->splice_ms;
+                live_shuffle_divisions = live->shuffle_divisions == 0
+                    ? 1u
+                    : live->shuffle_divisions;
+                dynamic_identity_voice = false;
             } else {
                 dynamic_identity_voice = false;
             }
@@ -406,8 +422,45 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
                       return_ratio == 1.0 &&
                           maximum_runtime_clock_factor == 1.0)
         : block_frames;
+    auto maximum_pre_live_machine_frames = maximum_machine_frames;
+    audio::SampleHeritageLiveCyclicResources live_resources;
+    std::size_t live_cycle_frames = 0;
+    std::size_t live_splice_frames = 0;
+    if (live_cyclic_active) {
+        const auto rounded_frames = [&](double milliseconds,
+                                        bool allow_zero) noexcept {
+            const auto value =
+                std::floor(milliseconds * machine_rate * 0.001 + 0.5);
+            if (!std::isfinite(value) || value < (allow_zero ? 0.0 : 1.0) ||
+                value >= static_cast<double>(
+                    std::numeric_limits<std::size_t>::max()))
+                return std::numeric_limits<std::size_t>::max();
+            return static_cast<std::size_t>(value);
+        };
+        live_cycle_frames = rounded_frames(live_cycle_ms, false);
+        live_splice_frames = rounded_frames(live_splice_ms, true);
+        if (live_cycle_frames == std::numeric_limits<std::size_t>::max() ||
+            live_splice_frames == std::numeric_limits<std::size_t>::max())
+            return usage;
+        const audio::SampleHeritageLiveCyclicConfig config{
+            .factor = live_factor,
+            .cycle_samples = live_cycle_frames,
+            .crossfade_samples = live_splice_frames,
+            .shuffle_divisions = live_shuffle_divisions,
+            .linked_channels = true,
+            .seed = 1,
+            .shuffle = live_shuffle_divisions == 1
+                ? audio::SampleHeritageLiveCyclicShuffle::Identity
+                : audio::SampleHeritageLiveCyclicShuffle::FisherYates,
+            .max_block_samples = maximum_machine_frames,
+            .channel_count = static_cast<std::size_t>(ctx.output_channels)};
+        live_resources =
+            audio::SampleHeritageLiveCyclicStretch::resources_for(config);
+        if (!live_resources.valid()) return usage;
+        maximum_pre_live_machine_frames = live_resources.maximum_input_frames;
+    }
     const auto maximum_engine_input_frames = heritage_processing
-        ? frame_bound(maximum_machine_frames, input_ratio,
+        ? frame_bound(maximum_pre_live_machine_frames, input_ratio,
                       input_ratio == 1.0)
         : block_frames;
     auto maximum_heritage_input_frames = maximum_engine_input_frames;
@@ -421,16 +474,38 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
     const auto admitted_stream_pitch_factor = pitch_active
         ? std::min(SamplerStreamingRuntime::maximum_pitch_ratio(),
                    SamplerStreamingRuntime::maximum_pitch_ratio() /
-                       (clock_ratio * SamplerHeritageRuntime::
-                                          maximum_live_source_consumption_ratio()))
+                       (clock_ratio * (live_cyclic_active
+                                           ? 1.0 / live_factor
+                                           : 1.0)))
         : 1.0;
     auto maximum_stream_input_frames = maximum_engine_input_frames;
     if (pitch_active &&
         pitch_family == audio::SampleHeritagePitchFamily::VariableClock) {
         const auto stream_machine_frames = frame_bound(
             block_frames, return_ratio * admitted_stream_pitch_factor, false);
+        auto stream_pre_live_frames = stream_machine_frames;
+        if (live_cyclic_active) {
+            const audio::SampleHeritageLiveCyclicConfig stream_live_config{
+                .factor = live_factor,
+                .cycle_samples = live_cycle_frames,
+                .crossfade_samples = live_splice_frames,
+                .shuffle_divisions = live_shuffle_divisions,
+                .linked_channels = true,
+                .seed = 1,
+                .shuffle = live_shuffle_divisions == 1
+                    ? audio::SampleHeritageLiveCyclicShuffle::Identity
+                    : audio::SampleHeritageLiveCyclicShuffle::FisherYates,
+                .max_block_samples = stream_machine_frames,
+                .channel_count = static_cast<std::size_t>(ctx.output_channels)};
+            const auto stream_live_resources =
+                audio::SampleHeritageLiveCyclicStretch::resources_for(
+                    stream_live_config);
+            if (!stream_live_resources.valid()) return usage;
+            stream_pre_live_frames =
+                stream_live_resources.maximum_input_frames;
+        }
         maximum_stream_input_frames = frame_bound(
-            stream_machine_frames, input_ratio, input_ratio == 1.0);
+            stream_pre_live_frames, input_ratio, input_ratio == 1.0);
     } else if (pitch_active) {
         maximum_stream_input_frames = fixed_pitch_bound(
             maximum_engine_input_frames, admitted_stream_pitch_factor,
@@ -518,9 +593,18 @@ PulpSamplerProcessor::estimate_prepare_resources(const format::PrepareContext& c
         const auto voice_engine_bytes = engine_dynamic_bytes(
             maximum_machine_frames, maximum_runtime_clock_factor,
             input_ratio, return_ratio, dynamic_identity_voice);
+        auto live_engine_bytes = std::size_t{0};
+        if (live_cyclic_active) {
+            live_engine_bytes = add(
+                live_resources.persistent_bytes,
+                multiply(multiply(channels,
+                                  maximum_pre_live_machine_frames),
+                         sizeof(float)));
+        }
         persistent = add(
             persistent,
-            multiply(voice_engine_count, voice_engine_bytes));
+            multiply(voice_engine_count,
+                     add(voice_engine_bytes, live_engine_bytes)));
         if (legacy_engine_count != 0)
             persistent = add(
                 persistent,

@@ -95,7 +95,6 @@ struct SampleHeritageVoiceLiveCyclicStretchBlock {
     double cycle_ms = 1.0;
     double splice_ms = 0.0;
     bool stereo_link = true;
-    bool tempo_lock = false;
     std::uint16_t shuffle_divisions = 0;
     std::uint64_t seed = 0;
     SampleHeritageSeedPolicy seed_policy =

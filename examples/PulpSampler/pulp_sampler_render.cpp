@@ -4,33 +4,27 @@ namespace pulp::examples {
 
 namespace {
 
-std::uint64_t tail_frames_consumed(std::size_t output_frames,
-                                   std::size_t planned_input_frames,
+std::uint64_t tail_frames_consumed(std::size_t output_frames, std::size_t planned_input_frames,
                                    std::size_t source_frames_rendered) noexcept {
     if (planned_input_frames == 0)
         return output_frames;
     const auto valid = std::min(planned_input_frames, source_frames_rendered);
     const auto missing = planned_input_frames - valid;
-    return static_cast<std::uint64_t>(
-        (static_cast<long double>(missing) * output_frames) /
-        planned_input_frames);
+    return static_cast<std::uint64_t>((static_cast<long double>(missing) * output_frames) /
+                                      planned_input_frames);
 }
 
-std::uint32_t voice_activity_frames(
-    std::uint32_t output_frames,
-    std::size_t planned_input_frames,
-    std::size_t source_frames_rendered,
-    std::uint64_t available_tail_frames) noexcept {
+std::uint32_t voice_activity_frames(std::uint32_t output_frames, std::size_t planned_input_frames,
+                                    std::size_t source_frames_rendered,
+                                    std::uint64_t available_tail_frames) noexcept {
     const auto tail_window = std::min<std::uint64_t>(
         output_frames,
-        tail_frames_consumed(output_frames, planned_input_frames,
-                             source_frames_rendered));
+        tail_frames_consumed(output_frames, planned_input_frames, source_frames_rendered));
     const auto source_backed = output_frames - tail_window;
-    return static_cast<std::uint32_t>(
-        source_backed + std::min(tail_window, available_tail_frames));
+    return static_cast<std::uint32_t>(source_backed + std::min(tail_window, available_tail_frames));
 }
 
-}  // namespace
+} // namespace
 
 void PulpSamplerProcessor::process(audio::BufferView<float>& output,
                                    const audio::BufferView<const float>&, midi::MidiBuffer& midi_in,
@@ -214,12 +208,12 @@ PulpSamplerProcessor::prepared_interpolation(audio::SampleInterpolationPolicy po
     return interpolation;
 }
 
-audio::PreparedSampleInterpolation PulpSamplerProcessor::prepared_rate_safe_interpolation(
-    audio::SampleInterpolationPolicy policy, double source_frames_per_output) noexcept {
+audio::PreparedSampleInterpolation
+PulpSamplerProcessor::prepared_rate_safe_interpolation(audio::SampleInterpolationPolicy policy,
+                                                       double source_frames_per_output) noexcept {
     if (polynomial_mip_policy(policy) && source_frames_per_output > 1.0) {
         if (heritage_.voice_artifact_path_active()) {
-            sinc_promotion_suppressions_ =
-                saturated_add(sinc_promotion_suppressions_, 1);
+            sinc_promotion_suppressions_ = saturated_add(sinc_promotion_suppressions_, 1);
         } else {
             policy = audio::SampleInterpolationPolicy::RatioTrackingSinc;
         }
@@ -227,17 +221,12 @@ audio::PreparedSampleInterpolation PulpSamplerProcessor::prepared_rate_safe_inte
     return prepared_interpolation(policy, source_frames_per_output);
 }
 
-audio::PreparedSampleInterpolation
-PulpSamplerProcessor::prepared_pitch_source_interpolation(
-    audio::SampleInterpolationPolicy policy,
-    double source_frames_per_output,
+audio::PreparedSampleInterpolation PulpSamplerProcessor::prepared_pitch_source_interpolation(
+    audio::SampleInterpolationPolicy policy, double source_frames_per_output,
     double artifact_source_frames_per_output) noexcept {
-    if (heritage_.voice_artifact_path_active() &&
-        polynomial_mip_policy(policy) &&
-        artifact_source_frames_per_output > 1.0 &&
-        source_frames_per_output <= 1.0) {
-        sinc_promotion_suppressions_ =
-            saturated_add(sinc_promotion_suppressions_, 1);
+    if (heritage_.voice_artifact_path_active() && polynomial_mip_policy(policy) &&
+        artifact_source_frames_per_output > 1.0 && source_frames_per_output <= 1.0) {
+        sinc_promotion_suppressions_ = saturated_add(sinc_promotion_suppressions_, 1);
     }
     return prepared_rate_safe_interpolation(policy, source_frames_per_output);
 }
@@ -252,8 +241,7 @@ PulpSamplerProcessor::StreamRateContract PulpSamplerProcessor::stream_rate_contr
         !(candidate_source_frames_per_output > 0.0)) {
         return StreamRateContract::LegacyRejected;
     }
-    double legacy_frames_per_second =
-        candidate_source_frames_per_output * host_sample_rate_;
+    double legacy_frames_per_second = candidate_source_frames_per_output * host_sample_rate_;
     double effective_frames_per_second = 0.0;
     const auto add_effective = [&](double pitch_ratio, double source_sample_rate,
                                    double live_ratio) noexcept {
@@ -262,11 +250,9 @@ PulpSamplerProcessor::StreamRateContract PulpSamplerProcessor::stream_rate_contr
              .clock_ratio = heritage_.active_clock_ratio(),
              .live_source_consumption_ratio = live_ratio},
             SamplerStreamingRuntime::maximum_pitch_ratio());
-        if (evaluation.status ==
-            audio::SampleStreamConsumptionStatus::LegacyRejected)
+        if (evaluation.status == audio::SampleStreamConsumptionStatus::LegacyRejected)
             return StreamRateContract::LegacyRejected;
-        if (evaluation.status ==
-            audio::SampleStreamConsumptionStatus::HeritageRejected)
+        if (evaluation.status == audio::SampleStreamConsumptionStatus::HeritageRejected)
             return StreamRateContract::HeritageRejected;
         const auto contribution = source_sample_rate * evaluation.effective_ratio;
         if (!std::isfinite(contribution) ||
@@ -275,13 +261,12 @@ PulpSamplerProcessor::StreamRateContract PulpSamplerProcessor::stream_rate_contr
         effective_frames_per_second += contribution;
         return StreamRateContract::Allowed;
     };
-    const auto candidate_pitch_ratio =
-        candidate_source_frames_per_output * host_sample_rate_ /
-        static_cast<double>(candidate.sample_rate);
-    auto factor_contract = add_effective(
-        candidate_pitch_ratio, candidate.sample_rate,
-        heritage_.active_live_source_consumption_ratio());
-    if (factor_contract != StreamRateContract::Allowed) return factor_contract;
+    const auto candidate_pitch_ratio = candidate_source_frames_per_output * host_sample_rate_ /
+                                       static_cast<double>(candidate.sample_rate);
+    auto factor_contract = add_effective(candidate_pitch_ratio, candidate.sample_rate,
+                                         heritage_.active_live_source_consumption_ratio());
+    if (factor_contract != StreamRateContract::Allowed)
+        return factor_contract;
     for (std::size_t index = 0; index < kMaxVoices; ++index) {
         if (index == replaced_voice)
             continue;
@@ -292,19 +277,19 @@ PulpSamplerProcessor::StreamRateContract PulpSamplerProcessor::stream_rate_contr
         // does not expose that assignment, so aggregate all streamed voices to
         // keep each worker within one certified throughput budget.
         if (voice.stream_contract_fade_pending) {
-            legacy_frames_per_second += voice.heritage_pitch_factor *
-                                        voice.streamed_asset.sample_rate;
-            factor_contract = add_effective(
-                voice.heritage_pitch_factor, voice.streamed_asset.sample_rate,
-                voice.heritage_live_consumption_factor);
+            legacy_frames_per_second +=
+                voice.heritage_pitch_factor * voice.streamed_asset.sample_rate;
+            factor_contract =
+                add_effective(voice.heritage_pitch_factor, voice.streamed_asset.sample_rate,
+                              voice.heritage_live_consumption_factor);
         } else {
             const auto ratio = key_map_.pitch_ratio_for_note(voice.note, params.pitch_semitones);
             legacy_frames_per_second += ratio * voice.streamed_asset.sample_rate;
-            factor_contract = add_effective(
-                ratio, voice.streamed_asset.sample_rate,
-                heritage_.active_live_source_consumption_ratio());
+            factor_contract = add_effective(ratio, voice.streamed_asset.sample_rate,
+                                            heritage_.active_live_source_consumption_ratio());
         }
-        if (factor_contract != StreamRateContract::Allowed) return factor_contract;
+        if (factor_contract != StreamRateContract::Allowed)
+            return factor_contract;
     }
     auto certified_frames_per_second = static_cast<double>(candidate.stream_source.page_frames) /
                                        SamplerStreamingRuntime::certified_decoder_latency_seconds();
@@ -328,35 +313,32 @@ PulpSamplerProcessor::pitch_rate_contract(double pitch_ratio) const noexcept {
     const auto evaluation = audio::evaluate_sample_stream_consumption(
         {.pitch_ratio = pitch_ratio,
          .clock_ratio = heritage_.active_clock_ratio(),
-         .live_source_consumption_ratio =
-             heritage_.active_live_source_consumption_ratio()},
+         .live_source_consumption_ratio = heritage_.active_live_source_consumption_ratio()},
         SamplerStreamingRuntime::maximum_pitch_ratio());
     switch (evaluation.status) {
-        case audio::SampleStreamConsumptionStatus::Allowed:
-            return heritage_.runtime_pitch_factor_supported(pitch_ratio)
-                ? StreamRateContract::Allowed
-                : StreamRateContract::HeritageRejected;
-        case audio::SampleStreamConsumptionStatus::HeritageRejected:
-            return StreamRateContract::HeritageRejected;
-        case audio::SampleStreamConsumptionStatus::LegacyRejected:
-            return StreamRateContract::LegacyRejected;
+    case audio::SampleStreamConsumptionStatus::Allowed:
+        return heritage_.runtime_pitch_factor_supported(pitch_ratio)
+                   ? StreamRateContract::Allowed
+                   : StreamRateContract::HeritageRejected;
+    case audio::SampleStreamConsumptionStatus::HeritageRejected:
+        return StreamRateContract::HeritageRejected;
+    case audio::SampleStreamConsumptionStatus::LegacyRejected:
+        return StreamRateContract::LegacyRejected;
     }
     return StreamRateContract::LegacyRejected;
 }
 
 audio::SampleStreamConsumptionDeclaration
-PulpSamplerProcessor::stream_consumption_declaration(
-    const SamplerVoice& voice) const noexcept {
+PulpSamplerProcessor::stream_consumption_declaration(const SamplerVoice& voice) const noexcept {
     const auto evaluation = audio::evaluate_sample_stream_consumption(
         {.pitch_ratio = voice.heritage_pitch_factor,
          .clock_ratio = heritage_.active_clock_ratio(),
-         .live_source_consumption_ratio =
-             voice.heritage_live_consumption_factor},
+         .live_source_consumption_ratio = voice.heritage_live_consumption_factor},
         SamplerStreamingRuntime::maximum_pitch_ratio());
-    if (!evaluation.allowed()) return {};
+    if (!evaluation.allowed())
+        return {};
     return {.source_frames_per_second =
-                static_cast<double>(voice.streamed_asset.sample_rate) *
-                evaluation.effective_ratio};
+                static_cast<double>(voice.streamed_asset.sample_rate) * evaluation.effective_ratio};
 }
 
 void PulpSamplerProcessor::render_output_segment(audio::BufferView<float>& output,
@@ -379,8 +361,7 @@ void PulpSamplerProcessor::render_output_segment(audio::BufferView<float>& outpu
     }
 
     if (heritage_.typed_profile()) {
-        std::fill_n(bus_voice_activity_.begin() + start_frame, frames,
-                    std::uint8_t{0});
+        std::fill_n(bus_voice_activity_.begin() + start_frame, frames, std::uint8_t{0});
         render_active_voices(output, start_frame, frames, params);
         if (!heritage_.processing_required()) {
             clear_output_segment(output, start_frame, frames);
@@ -393,8 +374,8 @@ void PulpSamplerProcessor::render_output_segment(audio::BufferView<float>& outpu
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
             segment_ptrs[channel] = output.channel_ptr(channel) + start_frame;
         audio::BufferView<float> segment(segment_ptrs.data(), output.num_channels(), frames);
-        const auto activity = std::span<const std::uint8_t>(
-            bus_voice_activity_.data() + start_frame, frames);
+        const auto activity =
+            std::span<const std::uint8_t>(bus_voice_activity_.data() + start_frame, frames);
         if (!heritage_.process_bus(segment, activity))
             clear_output_segment(output, start_frame, frames);
         return;
@@ -451,27 +432,27 @@ void PulpSamplerProcessor::render_active_voices(audio::BufferView<float>& output
             const bool process_heritage_voice = heritage_.voice_processing_required();
             const bool draining_heritage_tail = voice.heritage_source_exhausted;
             const auto voice_frames = draining_heritage_tail
-                ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
-                      chunk, voice.heritage_tail_frames_remaining))
-                : chunk;
-            audio::BufferView<float> voice_scratch(
-                voice_scratch_ptrs_.data(), output_channels, voice_frames);
+                                          ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                                                chunk, voice.heritage_tail_frames_remaining))
+                                          : chunk;
+            audio::BufferView<float> voice_scratch(voice_scratch_ptrs_.data(), output_channels,
+                                                   voice_frames);
             SamplerHeritageRuntime::VoiceProcessPlan heritage_plan;
             std::uint32_t raw_frames = voice_frames;
             std::uint64_t rendered_raw_frames = raw_frames;
             audio::BufferView<float> raw = voice_scratch;
-            const auto pitch_factor = draining_heritage_tail
-                ? voice.heritage_pitch_factor
-                : key_map_.pitch_ratio_for_note(voice.note,
-                                                params.pitch_semitones);
+            const auto pitch_factor =
+                draining_heritage_tail
+                    ? voice.heritage_pitch_factor
+                    : key_map_.pitch_ratio_for_note(voice.note, params.pitch_semitones);
             if (!draining_heritage_tail)
                 voice.heritage_pitch_factor = pitch_factor;
             if (process_heritage_voice) {
                 const auto planned = draining_heritage_tail
-                    ? heritage_.plan_voice_tail(voice_index, voice_frames,
-                                                pitch_factor, heritage_plan)
-                    : heritage_.plan_voice(voice_index, voice_frames,
-                                           pitch_factor, heritage_plan);
+                                         ? heritage_.plan_voice_tail(voice_index, voice_frames,
+                                                                     pitch_factor, heritage_plan)
+                                         : heritage_.plan_voice(voice_index, voice_frames,
+                                                                pitch_factor, heritage_plan);
                 if (!planned) {
                     reset_voice(voice);
                     continue;
@@ -495,13 +476,13 @@ void PulpSamplerProcessor::render_active_voices(audio::BufferView<float>& output
                     reset_voice(voice);
                     continue;
                 }
-                audio::BufferView<const float> source(
-                    sample_ptrs.data(), voice.sample.num_channels,
-                    static_cast<std::size_t>(source_frames));
+                audio::BufferView<const float> source(sample_ptrs.data(), voice.sample.num_channels,
+                                                      static_cast<std::size_t>(source_frames));
 
-                const auto source_frames_per_output = heritage_.pitch_active()
-                    ? source_sample_rate / static_cast<double>(host_sample_rate_)
-                    : playback_speed(voice.note, source_sample_rate, params);
+                const auto source_frames_per_output =
+                    heritage_.pitch_active()
+                        ? source_sample_rate / static_cast<double>(host_sample_rate_)
+                        : playback_speed(voice.note, source_sample_rate, params);
                 const auto interpolation = prepared_pitch_source_interpolation(
                     params.interpolation, source_frames_per_output,
                     playback_speed(voice.note, source_sample_rate, params));
@@ -511,17 +492,17 @@ void PulpSamplerProcessor::render_active_voices(audio::BufferView<float>& output
                     continue;
                 }
                 voice.renderer.set_playback_rate(source_frames_per_output);
-                const auto source_render =
-                    voice.renderer.render(source, raw, raw_frames);
+                const auto source_render = voice.renderer.render(source, raw, raw_frames);
                 source_active = source_render.active;
                 rendered_raw_frames = source_render.source_backed_frames;
             }
-            const auto heritage_processed = !process_heritage_voice ||
+            const auto heritage_processed =
+                !process_heritage_voice ||
                 (draining_heritage_tail
-                     ? heritage_.process_voice_tail(voice_index, heritage_plan,
-                                                    voice_scratch)
-                     : heritage_.process_voice(voice_index, heritage_plan,
-                                               voice_scratch));
+                     ? heritage_.process_voice_tail(voice_index, heritage_plan, voice_scratch)
+                     : heritage_.process_voice(voice_index, heritage_plan, voice_scratch,
+                                               static_cast<std::size_t>(rendered_raw_frames),
+                                               !source_active));
             if (process_heritage_voice && !heritage_processed) {
                 reset_voice(voice);
                 continue;
@@ -529,13 +510,17 @@ void PulpSamplerProcessor::render_active_voices(audio::BufferView<float>& output
 
             voice.adsr.set_params(params.adsr);
             bool voice_finished = false;
-            const auto active_frames = draining_heritage_tail || source_active
-                ? voice_frames
-                : voice_activity_frames(
-                      voice_frames, raw_frames, rendered_raw_frames,
-                      process_heritage_voice
-                          ? heritage_.voice_tail_output_frames()
-                          : 0);
+            const auto live_valid_frames =
+                process_heritage_voice && heritage_.live_cyclic_active()
+                    ? heritage_.last_valid_voice_output_frames(voice_index)
+                    : rendered_raw_frames;
+            const auto active_frames =
+                draining_heritage_tail || source_active
+                    ? voice_frames
+                    : voice_activity_frames(
+                          voice_frames, heritage_.live_cyclic_active() ? voice_frames : raw_frames,
+                          live_valid_frames,
+                          process_heritage_voice ? heritage_.voice_tail_output_frames() : 0);
             for (std::uint32_t i = 0; i < active_frames; ++i) {
                 const float env = voice.adsr.next();
                 if (env <= 0.0001f && voice.released) {
@@ -560,16 +545,15 @@ void PulpSamplerProcessor::render_active_voices(audio::BufferView<float>& output
                 if (voice.heritage_tail_frames_remaining == 0)
                     reset_voice(voice);
             } else if (!source_active) {
-                if (!process_heritage_voice ||
-                    heritage_.voice_tail_output_frames() == 0) {
+                if (!process_heritage_voice || heritage_.voice_tail_output_frames() == 0) {
                     reset_voice(voice);
                 } else {
                     voice.heritage_source_exhausted = true;
                     const auto consumed = tail_frames_consumed(
-                        voice_frames, raw_frames, rendered_raw_frames);
+                        voice_frames, heritage_.live_cyclic_active() ? voice_frames : raw_frames,
+                        live_valid_frames);
                     const auto tail = heritage_.voice_tail_output_frames();
-                    voice.heritage_tail_frames_remaining =
-                        tail > consumed ? tail - consumed : 0;
+                    voice.heritage_tail_frames_remaining = tail > consumed ? tail - consumed : 0;
                     if (voice.heritage_tail_frames_remaining == 0)
                         reset_voice(voice);
                 }
@@ -587,15 +571,14 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     const bool process_heritage_voice = heritage_.voice_processing_required();
     const bool draining_heritage_tail = voice.heritage_source_exhausted;
     const auto voice_frames = draining_heritage_tail
-        ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
-              frames, voice.heritage_tail_frames_remaining))
-        : frames;
+                                  ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                                        frames, voice.heritage_tail_frames_remaining))
+                                  : frames;
     SamplerHeritageRuntime::VoiceProcessPlan heritage_plan;
     std::uint32_t raw_frames = voice_frames;
     audio::BufferView<float> raw(voice_scratch_ptrs_.data(), output_channels, voice_frames);
     if (draining_heritage_tail && process_heritage_voice) {
-        if (!heritage_.plan_voice_tail(voice_index, voice_frames,
-                                       voice.heritage_pitch_factor,
+        if (!heritage_.plan_voice_tail(voice_index, voice_frames, voice.heritage_pitch_factor,
                                        heritage_plan)) {
             queue_voice_cancellation(voice_index, voice.requester);
             reset_voice(voice);
@@ -606,8 +589,8 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
         clear_output(raw);
     }
     if (draining_heritage_tail) {
-        audio::BufferView<float> processed(
-            voice_scratch_ptrs_.data(), output_channels, voice_frames);
+        audio::BufferView<float> processed(voice_scratch_ptrs_.data(), output_channels,
+                                           voice_frames);
         if (!heritage_.process_voice_tail(voice_index, heritage_plan, processed)) {
             reset_voice(voice);
             return;
@@ -636,8 +619,7 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
 
     const auto pitch_ratio = key_map_.pitch_ratio_for_note(voice.note, params.pitch_semitones);
     const auto previous_pitch_factor = voice.heritage_pitch_factor;
-    const auto previous_live_consumption_factor =
-        voice.heritage_live_consumption_factor;
+    const auto previous_live_consumption_factor = voice.heritage_live_consumption_factor;
     const auto pitch_contract = pitch_rate_contract(pitch_ratio);
     if (pitch_contract == StreamRateContract::LegacyRejected) {
         streaming_->record_voice_outcome(
@@ -652,12 +634,10 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     const auto unpitched_source_frames_per_output =
         static_cast<double>(voice.streamed_asset.sample_rate) /
         static_cast<double>(host_sample_rate_);
-    auto source_frames_per_output = heritage_.pitch_active()
-        ? unpitched_source_frames_per_output
-        : requested_source_frames_per_output;
+    auto source_frames_per_output = heritage_.pitch_active() ? unpitched_source_frames_per_output
+                                                             : requested_source_frames_per_output;
     auto effective_pitch_factor = pitch_ratio;
-    auto effective_live_consumption_factor =
-        heritage_.active_live_source_consumption_ratio();
+    auto effective_live_consumption_factor = heritage_.active_live_source_consumption_ratio();
     if (!voice.stream_contract_fade_pending &&
         pitch_contract == StreamRateContract::HeritageRejected) {
         heritage_.record_rate_automation_rejection();
@@ -665,17 +645,14 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
         voice.stream_contract_fade_position = 0;
         source_frames_per_output = voice.stream_playback_rate;
         effective_pitch_factor = voice.heritage_pitch_factor;
-        effective_live_consumption_factor =
-            voice.heritage_live_consumption_factor;
+        effective_live_consumption_factor = voice.heritage_live_consumption_factor;
     } else if (!voice.stream_contract_fade_pending) {
         const auto aggregate_contract = stream_rate_contract(
-            voice.streamed_asset, requested_source_frames_per_output, params,
-            voice_index);
+            voice.streamed_asset, requested_source_frames_per_output, params, voice_index);
         if (aggregate_contract != StreamRateContract::Allowed) {
             source_frames_per_output = voice.stream_playback_rate;
             effective_pitch_factor = voice.heritage_pitch_factor;
-            effective_live_consumption_factor =
-                voice.heritage_live_consumption_factor;
+            effective_live_consumption_factor = voice.heritage_live_consumption_factor;
             if (aggregate_contract == StreamRateContract::HeritageRejected) {
                 heritage_.record_rate_automation_rejection();
             } else {
@@ -687,16 +664,14 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     } else if (voice.stream_contract_fade_pending) {
         source_frames_per_output = voice.stream_playback_rate;
         effective_pitch_factor = voice.heritage_pitch_factor;
-        effective_live_consumption_factor =
-            voice.heritage_live_consumption_factor;
+        effective_live_consumption_factor = voice.heritage_live_consumption_factor;
     }
     voice.heritage_pitch_factor = effective_pitch_factor;
-    voice.heritage_live_consumption_factor =
-        effective_live_consumption_factor;
+    voice.heritage_live_consumption_factor = effective_live_consumption_factor;
 
     if (process_heritage_voice) {
-        if (!heritage_.plan_voice(voice_index, voice_frames,
-                                  effective_pitch_factor, heritage_plan)) {
+        if (!heritage_.plan_voice(voice_index, voice_frames, effective_pitch_factor,
+                                  heritage_plan)) {
             queue_voice_cancellation(voice_index, voice.requester);
             reset_voice(voice);
             return;
@@ -711,15 +686,14 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     std::array<float*, kMaxOutputChannels> source_ptrs{};
     for (std::size_t channel = 0; channel < voice.streamed_asset.channels; ++channel) {
         source_ptrs[channel] = adapt_stream_channels
-            ? stream_source_scratch_ptrs_[channel]
-            : (process_heritage_voice ? raw.channel_ptr(channel)
-                                      : voice_scratch_ptrs_[channel]);
+                                   ? stream_source_scratch_ptrs_[channel]
+                                   : (process_heritage_voice ? raw.channel_ptr(channel)
+                                                             : voice_scratch_ptrs_[channel]);
     }
-    audio::BufferView<float> source_scratch(source_ptrs.data(),
-                                            voice.streamed_asset.channels, raw_frames);
+    audio::BufferView<float> source_scratch(source_ptrs.data(), voice.streamed_asset.channels,
+                                            raw_frames);
     const auto interpolation = prepared_pitch_source_interpolation(
-        params.interpolation, source_frames_per_output,
-        requested_source_frames_per_output);
+        params.interpolation, source_frames_per_output, requested_source_frames_per_output);
     if (!interpolation.valid()) {
         streaming_->record_voice_outcome(
             audio::SampleStreamVoiceOutcomeClass::InvalidRenderContract);
@@ -731,8 +705,7 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     const bool rate_changed = voice.stream_playback_rate != source_frames_per_output;
     const bool consumption_changed =
         previous_pitch_factor != voice.heritage_pitch_factor ||
-        previous_live_consumption_factor !=
-            voice.heritage_live_consumption_factor;
+        previous_live_consumption_factor != voice.heritage_live_consumption_factor;
     const bool interpolation_changed =
         !audio::same_sample_interpolation(voice.stream_reader.interpolation(), interpolation);
     if (rate_changed || interpolation_changed || consumption_changed) {
@@ -770,41 +743,48 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     }
 
     enqueue_stream_lookahead(voice, raw_frames, source_frames_per_output);
-    auto plan = voice.stream_reader.plan_block(
-        voice.streamed_asset, raw_frames, stream_output_sample_rate_,
-        stream_consumption_declaration(voice));
-    if (plan.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
-        plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
-        streaming_->record_voice_outcome(
-            plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration
-                ? audio::SampleStreamVoiceOutcomeClass::StaleGeneration
-                : audio::SampleStreamVoiceOutcomeClass::InvalidPreloadContract);
-        queue_voice_cancellation(voice_index, voice.requester);
-        reset_voice(voice);
-        return;
-    }
-    if (holding_stream_attack && !stream_plan_pages_ready(plan)) {
-        voice.stream_reader.mark_held_starvation(raw_frames);
-        streaming_->record_voice_outcome(audio::SampleStreamVoiceOutcomeClass::ServiceStarvation,
-                                         raw_frames);
-        return;
-    }
-    if (holding_stream_attack)
-        voice.stream_attack_pending = false;
-    const auto rendered =
-        voice.stream_reader.render_block(voice.streamed_asset, plan, source_scratch);
-    streaming_->record_voice_outcome(rendered.outcome,
-                                     rendered.supply == audio::SampleStreamVoiceSupply::Starved
-                                         ? raw_frames - rendered.ready_output_frames
-                                         : 0);
-    if (rendered.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
-        rendered.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
-        queue_voice_cancellation(voice_index, voice.requester);
-        reset_voice(voice);
-        return;
+    audio::SampleStreamVoiceBlockResult rendered{.supply = audio::SampleStreamVoiceSupply::Ready,
+                                                 .outcome =
+                                                     audio::SampleStreamVoiceOutcomeClass::None,
+                                                 .ready_output_frames = 0};
+    if (raw_frames != 0) {
+        const auto plan = voice.stream_reader.plan_block(voice.streamed_asset, raw_frames,
+                                                         stream_output_sample_rate_,
+                                                         stream_consumption_declaration(voice));
+        if (plan.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
+            plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
+            streaming_->record_voice_outcome(
+                plan.supply == audio::SampleStreamVoiceSupply::StaleGeneration
+                    ? audio::SampleStreamVoiceOutcomeClass::StaleGeneration
+                    : audio::SampleStreamVoiceOutcomeClass::InvalidPreloadContract);
+            queue_voice_cancellation(voice_index, voice.requester);
+            reset_voice(voice);
+            return;
+        }
+        if (holding_stream_attack && !stream_plan_pages_ready(plan)) {
+            voice.stream_reader.mark_held_starvation(raw_frames);
+            streaming_->record_voice_outcome(
+                audio::SampleStreamVoiceOutcomeClass::ServiceStarvation, raw_frames);
+            return;
+        }
+        if (holding_stream_attack)
+            voice.stream_attack_pending = false;
+        rendered = voice.stream_reader.render_block(voice.streamed_asset, plan, source_scratch);
+        streaming_->record_voice_outcome(rendered.outcome,
+                                         rendered.supply == audio::SampleStreamVoiceSupply::Starved
+                                             ? raw_frames - rendered.ready_output_frames
+                                             : 0);
+        if (rendered.supply == audio::SampleStreamVoiceSupply::InvalidContract ||
+            rendered.supply == audio::SampleStreamVoiceSupply::StaleGeneration) {
+            queue_voice_cancellation(voice_index, voice.requester);
+            reset_voice(voice);
+            return;
+        }
     }
     voice.lookahead_lead_source_frames -=
         static_cast<double>(raw_frames) * source_frames_per_output;
+    const bool source_exhausted = rendered.supply == audio::SampleStreamVoiceSupply::EndOfSource ||
+                                  !voice.stream_reader.active();
     if (process_heritage_voice) {
         if (adapt_stream_channels) {
             for (std::size_t channel = 0; channel < output_channels; ++channel) {
@@ -812,9 +792,10 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
                             raw.channel_ptr(channel));
             }
         }
-        audio::BufferView<float> processed(
-            voice_scratch_ptrs_.data(), output_channels, voice_frames);
-        if (!heritage_.process_voice(voice_index, heritage_plan, processed)) {
+        audio::BufferView<float> processed(voice_scratch_ptrs_.data(), output_channels,
+                                           voice_frames);
+        if (!heritage_.process_voice(voice_index, heritage_plan, processed,
+                                     rendered.ready_output_frames, source_exhausted)) {
             queue_voice_cancellation(voice_index, voice.requester);
             reset_voice(voice);
             return;
@@ -822,15 +803,16 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     }
     voice.adsr.set_params(params.adsr);
     bool voice_finished = false;
-    const bool source_exhausted =
-        rendered.supply == audio::SampleStreamVoiceSupply::EndOfSource ||
-        !voice.stream_reader.active();
-    const auto active_frames = !source_exhausted
-        ? voice_frames
-        : voice_activity_frames(
-              voice_frames, raw_frames, rendered.ready_output_frames,
-              process_heritage_voice ? heritage_.voice_tail_output_frames()
-                                     : 0);
+    const auto live_valid_frames = process_heritage_voice && heritage_.live_cyclic_active()
+                                       ? heritage_.last_valid_voice_output_frames(voice_index)
+                                       : rendered.ready_output_frames;
+    const auto active_frames =
+        !source_exhausted
+            ? voice_frames
+            : voice_activity_frames(
+                  voice_frames, heritage_.live_cyclic_active() ? voice_frames : raw_frames,
+                  live_valid_frames,
+                  process_heritage_voice ? heritage_.voice_tail_output_frames() : 0);
     for (std::uint32_t frame = 0; frame < active_frames; ++frame) {
         const float envelope = voice.adsr.next();
         if (envelope <= 0.0001f && voice.released) {
@@ -874,7 +856,8 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
         } else {
             voice.heritage_source_exhausted = true;
             const auto consumed = tail_frames_consumed(
-                voice_frames, raw_frames, rendered.ready_output_frames);
+                voice_frames, heritage_.live_cyclic_active() ? voice_frames : raw_frames,
+                live_valid_frames);
             voice.heritage_tail_frames_remaining =
                 tail_frames > consumed ? tail_frames - consumed : 0;
             if (voice.heritage_tail_frames_remaining == 0)
@@ -883,8 +866,7 @@ void PulpSamplerProcessor::render_streamed_voice(std::size_t voice_index, Sample
     }
 }
 
-bool PulpSamplerProcessor::prepare_reverse_attack_horizon(
-    SamplerVoice& voice, double) noexcept {
+bool PulpSamplerProcessor::prepare_reverse_attack_horizon(SamplerVoice& voice, double) noexcept {
     const auto& asset = voice.streamed_asset;
     if (asset.fully_resident())
         return true;
@@ -1002,9 +984,8 @@ void PulpSamplerProcessor::enqueue_stream_lookahead(SamplerVoice& voice, std::ui
                                  contract.decoder_latency_seconds;
     const auto consumption = stream_consumption_declaration(voice);
     const auto plan_advance = static_cast<double>(planning_frames) * source_frames_per_output;
-    const auto contract_lead =
-        latency_seconds * consumption.source_frames_per_second + plan_advance +
-        source_frames_per_output;
+    const auto contract_lead = latency_seconds * consumption.source_frames_per_second +
+                               plan_advance + source_frames_per_output;
     const auto resident_horizon = voice.streamed_asset.preload_frames > 0
                                       ? static_cast<double>(voice.streamed_asset.preload_frames - 1)
                                       : 0.0;
@@ -1030,8 +1011,7 @@ void PulpSamplerProcessor::enqueue_stream_lookahead(SamplerVoice& voice, std::ui
         ++lookahead_plans_last_callback_for_test_;
 #endif
         auto plan = voice.lookahead_reader.plan_block(voice.streamed_asset, planning_frames,
-                                                      stream_output_sample_rate_,
-                                                      consumption,
+                                                      stream_output_sample_rate_, consumption,
                                                       audio::SampleStreamDemandClass::Sustain);
 #if defined(PULP_SAMPLER_TEST_HOOKS)
         if (plan.demand_count != 0) {
@@ -1066,8 +1046,7 @@ std::uint64_t PulpSamplerProcessor::stream_lead_source_frames(double lead) noexc
     return static_cast<std::uint64_t>(std::floor(lead));
 }
 
-void PulpSamplerProcessor::enqueue_forward_stream_boundary(
-    SamplerVoice& voice, double) noexcept {
+void PulpSamplerProcessor::enqueue_forward_stream_boundary(SamplerVoice& voice, double) noexcept {
     if (!voice.stream_boundary_pending)
         return;
     const auto& asset = voice.streamed_asset;
@@ -1156,12 +1135,11 @@ void PulpSamplerProcessor::trigger_note(int note, float velocity,
         const auto& selected = mip == nullptr ? source.streamed : mip->asset;
         const auto requested_source_frames_per_output =
             pitch_ratio * selected.sample_rate / static_cast<double>(host_sample_rate_);
-        const auto source_frames_per_output = heritage_.pitch_active()
-            ? selected.sample_rate / static_cast<double>(host_sample_rate_)
-            : requested_source_frames_per_output;
-        const auto aggregate_contract =
-            stream_rate_contract(selected, requested_source_frames_per_output,
-                                 params, target_index);
+        const auto source_frames_per_output =
+            heritage_.pitch_active() ? selected.sample_rate / static_cast<double>(host_sample_rate_)
+                                     : requested_source_frames_per_output;
+        const auto aggregate_contract = stream_rate_contract(
+            selected, requested_source_frames_per_output, params, target_index);
         if (aggregate_contract != StreamRateContract::Allowed) {
             if (aggregate_contract == StreamRateContract::HeritageRejected) {
                 heritage_.record_rate_admission_rejection();
@@ -1179,12 +1157,11 @@ void PulpSamplerProcessor::trigger_note(int note, float velocity,
             make_region(selected.total_frames, selected.sample_rate, params.loop, params.reverse);
         reset_voice(*target);
         if (!target->start_streamed(
-            note, velocity, host_sample_rate_, selected, region, source_frames_per_output,
-            prepared_pitch_source_interpolation(
-                params.interpolation, source_frames_per_output,
-                requested_source_frames_per_output),
-            {target_index + 1, requester_generation}, source.selection_generation,
-            mip == nullptr ? 0 : mip->octave)) {
+                note, velocity, host_sample_rate_, selected, region, source_frames_per_output,
+                prepared_pitch_source_interpolation(params.interpolation, source_frames_per_output,
+                                                    requested_source_frames_per_output),
+                {target_index + 1, requester_generation}, source.selection_generation,
+                mip == nullptr ? 0 : mip->octave)) {
             reset_voice(*target);
         } else {
             target->heritage_pitch_factor = pitch_ratio;
@@ -1208,13 +1185,12 @@ void PulpSamplerProcessor::trigger_note(int note, float velocity,
     const auto selected_frames = mip.valid() ? mip.frames : sample.num_frames;
     const auto selected_rate = mip.valid() ? mip.sample_rate : sample.sample_rate;
     const auto region = make_region(selected_frames, selected_rate, params.loop, params.reverse);
-    const auto pitch_ratio = key_map_.pitch_ratio_for_note(
-        note, params.pitch_semitones);
+    const auto pitch_ratio = key_map_.pitch_ratio_for_note(note, params.pitch_semitones);
     const auto speed = heritage_.pitch_active()
-        ? selected_rate / static_cast<double>(host_sample_rate_)
-        : playback_speed(note, selected_rate, params);
-    const auto interpolation = prepared_pitch_source_interpolation(
-        params.interpolation, speed, base_speed);
+                           ? selected_rate / static_cast<double>(host_sample_rate_)
+                           : playback_speed(note, selected_rate, params);
+    const auto interpolation =
+        prepared_pitch_source_interpolation(params.interpolation, speed, base_speed);
     if (!interpolation.valid())
         return;
     reset_voice(*target);
@@ -1224,8 +1200,7 @@ void PulpSamplerProcessor::trigger_note(int note, float velocity,
         return;
     }
     target->heritage_pitch_factor = pitch_ratio;
-    target->heritage_live_consumption_factor =
-        heritage_.active_live_source_consumption_ratio();
+    target->heritage_live_consumption_factor = heritage_.active_live_source_consumption_ratio();
     target->selection_generation = source.selection_generation;
 }
 

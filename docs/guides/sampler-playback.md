@@ -11,6 +11,7 @@ ownership model.
 | Resident generation-published playback | `PublishedSampleStore`/`PublishedSampleView` + `LoopRenderer` |
 | Zone/pool instruments | `SampleZoneMap`/`SamplePool`/`InstrumentRuntime`, with allocator/envelope only when their policy fits |
 | Offline tempo matching | Offline stretch, then resident publication as demonstrated by PulpTempoSampler |
+| Data-defined sampler character, clock/converter behavior, or intentional cyclic resynthesis | Sample Heritage profile around the chosen resident or streamed voice path, as demonstrated by PulpSampler |
 | Slice/key analysis | `OnsetDetector` → `SlicePointAnalyzer` → `SliceMap` → `SampleKeyMap` |
 
 ## Sequential playback
@@ -35,8 +36,9 @@ Build persisted streamed octave mips off the audio thread with:
 pulp audio sampler-mip build source.wav --levels 2 --json
 ```
 
-The existing `pulp audio validate` commands can inspect rendered WAVs; the
-sampler playback APIs do not add separate CLI commands.
+The existing `pulp audio validate` commands can inspect rendered WAVs. Sampler
+asset playback APIs do not add commands, while the separate profile layer uses
+`pulp audio heritage validate|canonicalize|inspect|render`.
 
 ## Resident playback
 
@@ -52,6 +54,31 @@ LoopRegion → LoopPlaybackCursor → PreparedSampleInterpolation → LoopReader
 when an instrument already owns pool resolution, optional `AhdsrEnvelope`,
 steal fades, and accumulate/overwrite policy, but it is not the preferred
 general rich-loop engine.
+
+## Heritage character processing
+
+Use the [PulpSampler Heritage Kit](../examples/pulp-sampler.md#sample-heritage-kit)
+after choosing a storage and traversal model. It prepares one character engine
+per voice and an optional post-mix bus. The existing reader still owns source
+order, reverse, loops, crossfades, interpolation, mips, and starvation; Heritage
+then applies its machine-domain clock, pitch family, converter, live cyclic
+stretch, hold/filter/color, and bus stages.
+
+Heritage live cyclic stretch is not a replacement for `LoopRenderer`:
+`LoopRenderer` repeats or crossfades a declared source region, while cyclic
+stretch resynthesizes successive machine-domain cycles to change duration. It
+is also not a replacement for conventional `signal::OfflineStretch`. Use the
+latter for transparent tempo matching; use fixed/adaptive Heritage commit
+stretch when cyclic behavior is deliberately part of the sound.
+
+Profiles are strict schema-v3 JSON with neutral `neutral.*` IDs and canonical
+import/export. Pulp ships several
+[neutral example recipes](../../examples/PulpSampler/heritage-profiles/README.md),
+but no named hardware profiles. Captures and listening are optional calibration
+evidence for a profile, not requirements for using or extending the neutral SDK.
+The public
+[`heritage-profile` skill](../../.agents/skills/heritage-profile/SKILL.md)
+includes templates and a reusable authoring prompt.
 
 ## Instrument and analysis policy
 

@@ -42,6 +42,7 @@ struct SampleHeritageLiveCyclicConfig {
 
 struct SampleHeritageLiveCyclicResources {
     SampleHeritageLiveCyclicStatus status = SampleHeritageLiveCyclicStatus::InvalidConfiguration;
+    std::size_t maximum_input_frames = 0;
     std::size_t ring_capacity_frames = 0;
     std::size_t persistent_bytes = 0;
     std::size_t scratch_bytes = 0;
@@ -110,6 +111,18 @@ class SampleHeritageLiveCyclicStretch {
     SampleHeritageLiveCyclicPlan plan(std::size_t output_frames) const noexcept;
     SampleHeritageLiveCyclicStatus process(BufferView<const float> input,
                                            BufferView<float> output) noexcept;
+    SampleHeritageLiveCyclicStatus process(BufferView<const float> input,
+                                           BufferView<float> output,
+                                           std::size_t valid_input_frames,
+                                           bool end_of_source) noexcept;
+    std::size_t last_valid_output_frames() const noexcept {
+        return last_valid_output_frames_;
+    }
+    std::uint64_t remaining_output_frames() const noexcept {
+        return source_ended_ && target_output_frames_ > rendered_output_frames_
+            ? target_output_frames_ - rendered_output_frames_
+            : 0;
+    }
 
     bool division_permutation(std::uint64_t cycle_index, std::size_t channel,
                               std::span<std::uint32_t> destination) const noexcept;
@@ -140,10 +153,14 @@ class SampleHeritageLiveCyclicStretch {
     std::size_t cold_lookahead_ = 0;
     std::uint64_t accepted_source_frames_ = 0;
     std::uint64_t rendered_output_frames_ = 0;
+    std::uint64_t real_source_frames_ = 0;
+    std::uint64_t target_output_frames_ = 0;
     std::uint64_t cycle_index_offset_ = 0;
     std::uint64_t permutation_cycle_ = static_cast<std::uint64_t>(-1);
     bool prepared_ = false;
     bool exact_bypass_ = false;
+    bool source_ended_ = false;
+    std::size_t last_valid_output_frames_ = 0;
 };
 
 } // namespace pulp::audio

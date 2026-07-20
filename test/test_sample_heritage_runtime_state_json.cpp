@@ -110,7 +110,7 @@ SampleHeritageTypedRuntimeState typed_runtime_state() {
         0, SampleHeritageRuntimeRngStageType::Quantization, 11};
     state.voice_states[2].engine.rng_state_count = 1;
     state.voice_states[7].engine.rng_states[0] = {
-        3, SampleHeritageRuntimeRngStageType::Noise, 22};
+        3, SampleHeritageRuntimeRngStageType::LiveCyclic, 22};
     state.voice_states[7].engine.rng_state_count = 1;
     state.bus_state.rng_states[0] = {
         1, SampleHeritageRuntimeRngStageType::Noise, 33};
@@ -119,7 +119,7 @@ SampleHeritageTypedRuntimeState typed_runtime_state() {
 }
 
 std::string expected_typed_runtime_state_json() {
-    return R"({"schema_version":2,"profile_schema_version":3,"profile_id":"neutral.typed-state","profile_digest_version":3,"profile_digest":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f","host_sample_rate":44100.5,"voice_states":[{"slot_index":0,"rng_states":[]},{"slot_index":1,"rng_states":[]},{"slot_index":2,"rng_states":[{"stage_index":0,"stage_type":"quantization","random_state":"11"}]},{"slot_index":3,"rng_states":[]},{"slot_index":4,"rng_states":[]},{"slot_index":5,"rng_states":[]},{"slot_index":6,"rng_states":[]},{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"noise","random_state":"22"}]}],"bus_state":{"rng_states":[{"stage_index":1,"stage_type":"noise","random_state":"33"}]}})";
+    return R"({"schema_version":2,"profile_schema_version":3,"profile_id":"neutral.typed-state","profile_digest_version":3,"profile_digest":"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f","host_sample_rate":44100.5,"voice_states":[{"slot_index":0,"rng_states":[]},{"slot_index":1,"rng_states":[]},{"slot_index":2,"rng_states":[{"stage_index":0,"stage_type":"quantization","random_state":"11"}]},{"slot_index":3,"rng_states":[]},{"slot_index":4,"rng_states":[]},{"slot_index":5,"rng_states":[]},{"slot_index":6,"rng_states":[]},{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"live_cyclic","random_state":"22"}]}],"bus_state":{"rng_states":[{"stage_index":1,"stage_type":"noise","random_state":"33"}]}})";
 }
 
 }  // namespace
@@ -544,7 +544,7 @@ TEST_CASE("Typed Heritage runtime state rejects ambiguous slot layouts",
 
     const auto valid = expected_typed_runtime_state_json();
     const auto missing = replace_once(
-        valid, R"(,{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"noise","random_state":"22"}]})",
+        valid, R"(,{"slot_index":7,"rng_states":[{"stage_index":3,"stage_type":"live_cyclic","random_state":"22"}]})",
         "");
     const auto missing_result =
         parse_sample_heritage_typed_runtime_state_json(missing);

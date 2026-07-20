@@ -284,10 +284,10 @@ class PulpSamplerProcessor : public format::Processor {
                                             double base_source_frames_per_output, bool loop,
                                             bool reverse) noexcept;
 
-    const SamplerStreamMipLevelView*
-    select_streamed_mip(const SamplerPublishedSource& source,
-                        audio::SampleInterpolationPolicy policy,
-                        double base_source_frames_per_output, bool loop, bool reverse) noexcept;
+    const SamplerStreamMipLevelView* select_streamed_mip(const SamplerPublishedSource& source,
+                                                         audio::SampleInterpolationPolicy policy,
+                                                         double base_source_frames_per_output,
+                                                         bool loop, bool reverse) noexcept;
 
     audio::PreparedSampleInterpolation
     prepared_interpolation(audio::SampleInterpolationPolicy policy,
@@ -297,10 +297,10 @@ class PulpSamplerProcessor : public format::Processor {
     prepared_rate_safe_interpolation(audio::SampleInterpolationPolicy policy,
                                      double source_frames_per_output) noexcept;
 
-    audio::PreparedSampleInterpolation prepared_pitch_source_interpolation(
-        audio::SampleInterpolationPolicy policy,
-        double source_frames_per_output,
-        double artifact_source_frames_per_output) noexcept;
+    audio::PreparedSampleInterpolation
+    prepared_pitch_source_interpolation(audio::SampleInterpolationPolicy policy,
+                                        double source_frames_per_output,
+                                        double artifact_source_frames_per_output) noexcept;
 
     StreamRateContract stream_rate_contract(const audio::SampleAssetView& candidate,
                                             double candidate_source_frames_per_output,
@@ -323,8 +323,7 @@ class PulpSamplerProcessor : public format::Processor {
                                std::uint32_t frames, std::uint32_t output_channels,
                                const RenderParams& params) noexcept;
 
-    bool prepare_reverse_attack_horizon(SamplerVoice& voice,
-                                        double) noexcept;
+    bool prepare_reverse_attack_horizon(SamplerVoice& voice, double) noexcept;
 
     static bool stream_plan_pages_ready(const audio::SampleStreamLoopBlockPlan& plan) noexcept;
 
@@ -337,8 +336,7 @@ class PulpSamplerProcessor : public format::Processor {
 
     static std::uint64_t stream_lead_source_frames(double lead) noexcept;
 
-    void enqueue_forward_stream_boundary(SamplerVoice& voice,
-                                         double) noexcept;
+    void enqueue_forward_stream_boundary(SamplerVoice& voice, double) noexcept;
 
     void trigger_note(int note, float velocity, const SamplerPublishedSource& source,
                       const RenderParams& params);

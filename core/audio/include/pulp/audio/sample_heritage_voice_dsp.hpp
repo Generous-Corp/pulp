@@ -106,29 +106,59 @@ public:
     }
 
     void process(BufferView<float> buffer) noexcept {
-        if (!prepared_) return;
-        for (std::size_t index = 0; index < profile_.voice_count; ++index) {
-            auto& runtime = runtimes_[index];
-            if (runtime.spec.bypass) continue;
-            std::visit(
-                [&](const auto& block) noexcept { process(runtime, block, buffer); },
-                runtime.spec.parameters);
-        }
+        process_range(buffer, 0, profile_.voice_count, false);
+    }
+
+    void process_before_live(BufferView<float> buffer,
+                             bool draining_tail = false) noexcept {
+        process_range(buffer, 0, live_stage_index(), draining_tail);
+    }
+
+    void process_after_live(BufferView<float> buffer,
+                            bool draining_tail = false) noexcept {
+        const auto live = live_stage_index();
+        process_range(buffer, live < profile_.voice_count ? live + 1 : live,
+                      profile_.voice_count, draining_tail);
     }
 
     void process_tail(BufferView<float> buffer) noexcept {
-        if (!prepared_) return;
+        process_range(buffer, 0, profile_.voice_count, true);
+    }
+
+    std::size_t live_stage_index() const noexcept {
+        if (!prepared_) return profile_.voice_count;
         for (std::size_t index = 0; index < profile_.voice_count; ++index) {
+            if (!runtimes_[index].spec.bypass &&
+                std::holds_alternative<SampleHeritageVoiceLiveCyclicStretchBlock>(
+                    runtimes_[index].spec.parameters))
+                return index;
+        }
+        return profile_.voice_count;
+    }
+
+    bool live_stage_active() const noexcept {
+        return live_stage_index() < profile_.voice_count;
+    }
+
+private:
+    void process_range(BufferView<float> buffer, std::size_t begin,
+                       std::size_t end, bool draining_tail) noexcept {
+        if (!prepared_) return;
+        end = std::min(end, profile_.voice_count);
+        for (std::size_t index = begin; index < end; ++index) {
             auto& runtime = runtimes_[index];
             if (runtime.spec.bypass ||
-                std::holds_alternative<SampleHeritageVoiceConverterBlock>(
-                    runtime.spec.parameters))
+                (draining_tail &&
+                 std::holds_alternative<SampleHeritageVoiceConverterBlock>(
+                    runtime.spec.parameters)))
                 continue;
             std::visit(
                 [&](const auto& block) noexcept { process(runtime, block, buffer); },
                 runtime.spec.parameters);
         }
     }
+
+public:
 
     std::uint64_t tail_machine_frames() const noexcept {
         if (!prepared_) return 0;
@@ -206,7 +236,7 @@ private:
                 } else if constexpr (
                     std::is_same_v<Block,
                                    SampleHeritageVoiceLiveCyclicStretchBlock>) {
-                    return false;
+                    return true;
                 }
                 return true;
             },

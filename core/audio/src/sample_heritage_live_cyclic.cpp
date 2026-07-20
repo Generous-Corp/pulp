@@ -58,21 +58,45 @@ SampleHeritageLiveCyclicResources SampleHeritageLiveCyclicStretch::resources_for
         return result;
     }
 
-    const auto ratio = 1.0 / config.factor;
-    const auto demand =
-        std::ceil(static_cast<double>(config.max_block_samples) * std::max(1.0, ratio));
-    if (!std::isfinite(demand) ||
-        demand > static_cast<double>(std::numeric_limits<std::size_t>::max())) {
+    const auto ratio = 1.0L / static_cast<long double>(config.factor);
+    const auto block_advance = std::ceil(
+        static_cast<long double>(config.max_block_samples) *
+        std::max(1.0L, ratio));
+    const auto cycle_advance =
+        std::ceil(static_cast<long double>(config.cycle_samples) * ratio);
+    const auto maximum_size =
+        static_cast<long double>(std::numeric_limits<std::size_t>::max());
+    if (!std::isfinite(block_advance) || !std::isfinite(cycle_advance) ||
+        block_advance >= maximum_size || cycle_advance >= maximum_size) {
         result.status = SampleHeritageLiveCyclicStatus::SizeOverflow;
         return result;
     }
 
-    std::size_t required = config.cycle_samples;
-    if (!checked_add(required, config.crossfade_samples, required) ||
-        !checked_add(required, static_cast<std::size_t>(demand), required) ||
+    const auto block_advance_frames = static_cast<std::size_t>(block_advance);
+    const auto cycle_advance_frames = static_cast<std::size_t>(cycle_advance);
+    std::size_t cold_lookahead = config.cycle_samples;
+    std::size_t boundary_demand = block_advance_frames;
+    if (!checked_add(cold_lookahead, config.crossfade_samples, cold_lookahead) ||
+        !checked_add(cold_lookahead, kInterpolatorGuardFrames, cold_lookahead) ||
+        !checked_add(boundary_demand, cycle_advance_frames, boundary_demand) ||
+        !checked_add(boundary_demand, config.crossfade_samples, boundary_demand) ||
+        !checked_add(boundary_demand, kInterpolatorGuardFrames, boundary_demand)) {
+        result.status = SampleHeritageLiveCyclicStatus::SizeOverflow;
+        return result;
+    }
+    result.maximum_input_frames = config.factor == 1.0
+        ? config.max_block_samples
+        : std::max(cold_lookahead, boundary_demand);
+
+    // process() admits a complete block before rendering its oldest frame. Keep
+    // both that frame's cycle neighborhood and the largest boundary admission.
+    std::size_t required = cold_lookahead;
+    if (!checked_add(required, block_advance_frames, required) ||
+        !checked_add(required, cycle_advance_frames, required) ||
         !checked_add(required, kInterpolatorGuardFrames, required) ||
         !next_power_of_two(required, result.ring_capacity_frames)) {
         result.status = SampleHeritageLiveCyclicStatus::SizeOverflow;
+        result.maximum_input_frames = 0;
         return result;
     }
 
@@ -86,6 +110,7 @@ SampleHeritageLiveCyclicResources SampleHeritageLiveCyclicStretch::resources_for
         !checked_multiply(permutation_count, sizeof(std::uint32_t), permutation_bytes) ||
         !checked_add(ring_bytes, permutation_bytes, result.persistent_bytes)) {
         result.status = SampleHeritageLiveCyclicStatus::SizeOverflow;
+        result.maximum_input_frames = 0;
         result.ring_capacity_frames = 0;
         return result;
     }
@@ -128,10 +153,14 @@ void SampleHeritageLiveCyclicStretch::release() noexcept {
     cold_lookahead_ = 0;
     accepted_source_frames_ = 0;
     rendered_output_frames_ = 0;
+    real_source_frames_ = 0;
+    target_output_frames_ = 0;
     cycle_index_offset_ = 0;
     permutation_cycle_ = static_cast<std::uint64_t>(-1);
     prepared_ = false;
     exact_bypass_ = false;
+    source_ended_ = false;
+    last_valid_output_frames_ = 0;
 }
 
 void SampleHeritageLiveCyclicStretch::reset() noexcept {
@@ -140,8 +169,12 @@ void SampleHeritageLiveCyclicStretch::reset() noexcept {
     std::fill(ring_.begin(), ring_.end(), 0.0f);
     accepted_source_frames_ = 0;
     rendered_output_frames_ = 0;
+    real_source_frames_ = 0;
+    target_output_frames_ = 0;
     cycle_index_offset_ = 0;
     permutation_cycle_ = static_cast<std::uint64_t>(-1);
+    source_ended_ = false;
+    last_valid_output_frames_ = 0;
 }
 
 void SampleHeritageLiveCyclicStretch::reset_with_rng_continuation(
@@ -344,6 +377,14 @@ void SampleHeritageLiveCyclicStretch::write_input(BufferView<const float> input)
 SampleHeritageLiveCyclicStatus
 SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
                                          BufferView<float> output) noexcept {
+    return process(input, output, input.num_samples(), false);
+}
+
+SampleHeritageLiveCyclicStatus
+SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
+                                         BufferView<float> output,
+                                         std::size_t valid_input_frames,
+                                         bool end_of_source) noexcept {
     const auto expected = plan(output.num_samples());
     if (!expected.valid())
         return expected.status;
@@ -352,11 +393,42 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
         return SampleHeritageLiveCyclicStatus::InvalidDimensions;
     if (input.num_samples() != expected.input_frames)
         return SampleHeritageLiveCyclicStatus::InputFrameMismatch;
+    if (valid_input_frames > input.num_samples() ||
+        (source_ended_ && valid_input_frames != 0))
+        return SampleHeritageLiveCyclicStatus::InputFrameMismatch;
+
+    if (valid_input_frames >
+        std::numeric_limits<std::uint64_t>::max() - real_source_frames_)
+        return SampleHeritageLiveCyclicStatus::SizeOverflow;
+    real_source_frames_ += valid_input_frames;
+    if (end_of_source) {
+        const auto target = std::floor(
+            static_cast<long double>(real_source_frames_) *
+                static_cast<long double>(config_.factor) +
+            0.5L);
+        if (!std::isfinite(target) || target > static_cast<long double>(
+                std::numeric_limits<std::uint64_t>::max()))
+            return SampleHeritageLiveCyclicStatus::SizeOverflow;
+        target_output_frames_ = static_cast<std::uint64_t>(target);
+        source_ended_ = true;
+    }
+    const auto available_output = source_ended_
+        ? (target_output_frames_ > rendered_output_frames_
+               ? target_output_frames_ - rendered_output_frames_
+               : 0)
+        : static_cast<std::uint64_t>(output.num_samples());
+    last_valid_output_frames_ = static_cast<std::size_t>(std::min<std::uint64_t>(
+        available_output, output.num_samples()));
 
     if (exact_bypass_) {
         for (std::size_t channel = 0; channel < config_.channel_count; ++channel)
             std::copy(input.channel(channel).begin(), input.channel(channel).end(),
                       output.channel(channel).begin());
+        for (std::size_t frame = last_valid_output_frames_;
+             frame < output.num_samples(); ++frame)
+            for (std::size_t channel = 0; channel < config_.channel_count;
+                 ++channel)
+                output.channel(channel)[frame] = 0.0f;
         accepted_source_frames_ += input.num_samples();
         rendered_output_frames_ += output.num_samples();
         return SampleHeritageLiveCyclicStatus::Ok;
@@ -365,6 +437,12 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
     write_input(input);
     bool available = true;
     for (std::size_t frame = 0; frame < output.num_samples(); ++frame) {
+        if (frame >= last_valid_output_frames_) {
+            for (std::size_t channel = 0; channel < config_.channel_count;
+                 ++channel)
+                output.channel(channel)[frame] = 0.0f;
+            continue;
+        }
         const auto absolute_output = rendered_output_frames_ + frame;
         const auto cycle = absolute_output / config_.cycle_samples;
         const auto phase = static_cast<std::size_t>(absolute_output % config_.cycle_samples);
@@ -406,8 +484,8 @@ SampleHeritageLiveCyclicStretch::process(BufferView<const float> input,
         }
     }
     rendered_output_frames_ += output.num_samples();
-    return available ? SampleHeritageLiveCyclicStatus::Ok
-                     : SampleHeritageLiveCyclicStatus::SourceUnavailable;
+    return (available || source_ended_) ? SampleHeritageLiveCyclicStatus::Ok
+                                        : SampleHeritageLiveCyclicStatus::SourceUnavailable;
 }
 
 SampleHeritageLiveCyclicRngContinuation
