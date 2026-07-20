@@ -124,4 +124,62 @@ migrate_track_v2_to_v1(std::string_view source, BoundedJsonSink& output, const v
     return runtime::Ok(SchemaWriteSuccess{});
 }
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v2_to_v3(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    if (!data || !version || data->kind != JsonValue::Kind::Object ||
+        !valid_track_data_shape(*data) || !mutable_member(*data, "device_chain") ||
+        mutable_member(*data, "automation_lanes") || data->end == 0 ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{data->end - 1, data->end - 1, ",\"automation_lanes\":[]"},
+                     RawEdit{version->begin, version->end, "3"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v3_to_v2(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    auto* lanes = data ? mutable_member(*data, "automation_lanes") : nullptr;
+    if (!data || !version || !valid_track_data_shape(*data) || !lanes ||
+        lanes->kind != JsonValue::Kind::Array || !lanes->array.empty())
+        return migration_fail<SchemaWriteSuccess>();
+    const auto found =
+        std::find_if(data->object.begin(), data->object.end(),
+                     [](const auto& member) { return member.first == "automation_lanes"; });
+    const auto index = static_cast<std::size_t>(found - data->object.begin());
+    std::size_t erase_begin = data->begin + 1;
+    std::size_t erase_end = lanes->end;
+    if (index != 0) {
+        erase_begin = source.find(',', data->object[index - 1].second.end);
+        if (erase_begin == std::string_view::npos || erase_begin >= lanes->begin)
+            return migration_fail<SchemaWriteSuccess>();
+    } else {
+        const auto comma = source.find(',', lanes->end);
+        if (comma == std::string_view::npos || data->object.size() < 2 ||
+            comma >= data->object[1].second.begin)
+            return migration_fail<SchemaWriteSuccess>();
+        erase_end = comma + 1;
+    }
+    std::array edits{RawEdit{erase_begin, erase_end, {}},
+                     RawEdit{version->begin, version->end, "2"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
 } // namespace pulp::timeline::detail

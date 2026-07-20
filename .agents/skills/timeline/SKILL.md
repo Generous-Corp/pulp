@@ -63,10 +63,11 @@ invariants.
 - Schema-v1 project persistence writes canonical `tempo_map` and `meter_map`
   arrays. BPM is stored by exact IEEE-754 bits; older v1 snapshots without map
   fields remain readable as 120 BPM and 4/4, then canonicalize on save.
-- Track schema v2 owns the required device-chain field. Its v1 upgrade adds an
-  empty chain; its downgrade succeeds only for an empty chain and fails rather
-  than discard placement identity. Each placement remains a separately versioned
-  structural envelope.
+- Track schema v2 introduced the required device-chain field; v3 adds required
+  attached automation lanes. Adjacent downgrades succeed only when the field
+  being removed is empty, so neither placement nor automation identity can be
+  discarded. Placements, lanes, and lane targets remain separately versioned
+  structural envelopes.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify

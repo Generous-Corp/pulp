@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "project_state_access.hpp"
+#include "serialize_automation_decode.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -45,6 +46,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::Note);
     if (value == "device_placement")
         return runtime::Ok(ItemKind::DevicePlacement);
+    if (value == "automation_lane")
+        return runtime::Ok(ItemKind::AutomationLane);
+    if (value == "automation_point")
+        return runtime::Ok(ItemKind::AutomationPoint);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
 
@@ -55,6 +60,8 @@ struct DecodeCounts {
     std::size_t clips = 0;
     std::size_t notes = 0;
     std::size_t device_placements = 0;
+    std::size_t automation_lanes = 0;
+    std::size_t automation_points = 0;
 };
 
 runtime::Result<const JsonValue*, PersistenceError>
@@ -550,9 +557,12 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto name = string_field(data, "name", path + "/data");
     auto clips = required(data, "clips", path + "/data");
     const auto* devices = data.find("device_chain");
+    const auto* automation = data.find("automation_lanes");
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (envelope.value().version == 1 && devices) ||
-        (envelope.value().version == 2 && (!devices || devices->kind != JsonValue::Kind::Array)))
+        (envelope.value().version >= 2 && (!devices || devices->kind != JsonValue::Kind::Array)) ||
+        (envelope.value().version < 3 && automation) ||
+        (envelope.value().version == 3 && !automation))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -591,10 +601,22 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                decoded_device_id.error().byte_offset);
         decoded_devices.push_back(DevicePlacement{{decoded_device_id.value()}});
     }
+    std::vector<AutomationLane> decoded_automation;
+    if (automation) {
+        auto decoded = detail::decode_automation_lanes(*automation, limits, counts.automation_lanes,
+                                                       counts.automation_points,
+                                                       path + "/data/automation_lanes");
+        if (!decoded)
+            return fail<Track>(decoded.error().code, decoded.error().path,
+                               decoded.error().byte_offset, decoded.error().actual,
+                               decoded.error().limit);
+        decoded_automation = std::move(decoded).value();
+    }
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
-                                            .device_chain = std::move(decoded_devices)});
+                                            .device_chain = std::move(decoded_devices),
+                                            .automation_lanes = std::move(decoded_automation)});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
@@ -728,6 +750,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             auto track_value = required(value, "track_id", path);
             auto clip_value = required(value, "clip_id", path);
             auto active_value = required(value, "active", path);
+            const auto* automation_lane_value = value.find("automation_lane_id");
             if (!id_value || !kind_value || !sequence_value || !track_value || !clip_value ||
                 !active_value || active_value.value()->kind != JsonValue::Kind::Boolean)
                 return fail<Project>(PersistenceErrorCode::MissingField, path);
@@ -737,14 +760,20 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
                 parse_canonical_u64_string(*sequence_value.value(), path + "/sequence_id");
             auto track_id = parse_canonical_u64_string(*track_value.value(), path + "/track_id");
             auto clip_id = parse_canonical_u64_string(*clip_value.value(), path + "/clip_id");
-            if (!item || !kind || !sequence_id || !track_id || !clip_id)
+            runtime::Result<std::uint64_t, PersistenceError> automation_lane_id =
+                runtime::Ok(std::uint64_t{0});
+            if (automation_lane_value)
+                automation_lane_id = parse_canonical_u64_string(*automation_lane_value,
+                                                                path + "/automation_lane_id");
+            if (!item || !kind || !sequence_id || !track_id || !clip_id || !automation_lane_id)
                 return fail<Project>(PersistenceErrorCode::InvalidNumber, path);
             decoded_identities.push_back({{item.value()},
                                           {kind.value(),
                                            {sequence_id.value()},
                                            {track_id.value()},
                                            {clip_id.value()},
-                                           active_value.value()->boolean}});
+                                           active_value.value()->boolean,
+                                           {automation_lane_id.value()}}});
         }
     }
     timebase::TempoMap decoded_tempo_map;

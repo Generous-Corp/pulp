@@ -53,6 +53,8 @@ class StructuralScanner {
     std::size_t clips_ = 0;
     std::size_t notes_ = 0;
     std::size_t device_placements_ = 0;
+    std::size_t automation_lanes_ = 0;
+    std::size_t automation_points_ = 0;
     std::size_t locators_ = 0;
     std::size_t representations_ = 0;
 
@@ -601,15 +603,21 @@ class StructuralScanner {
             !require_member(data, "name", StringShape, data_path)) return false;
         Span clips;
         Span devices;
+        Span automation;
         bool has_clips = false;
         bool has_devices = false;
+        bool has_automation = false;
         if (!member(data, "clips", clips, has_clips) ||
-            !member(data, "device_chain", devices, has_devices)) return false;
+            !member(data, "device_chain", devices, has_devices) ||
+            !member(data, "automation_lanes", automation, has_automation)) return false;
         if (!has_clips ||
             (version == detail::track_schema_policy.oldest_readable_version && has_devices) ||
-            (version > detail::track_schema_policy.oldest_readable_version && !has_devices)) {
+            (version > detail::track_schema_policy.oldest_readable_version && !has_devices) ||
+            (version < 3 && has_automation) || (version == 3 && !has_automation)) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
-                      path + (has_clips ? "/data/device_chain" : "/data/clips"));
+                      path + (has_clips ? (version == 3 ? "/data/automation_lanes"
+                                                       : "/data/device_chain")
+                                        : "/data/clips"));
             return false;
         }
         if (!governed_array(
@@ -618,12 +626,69 @@ class StructuralScanner {
                 return walk_clip(element,
                                  path + "/data/clips/" + std::to_string(index));
             })) return false;
+        if (has_automation && !governed_array(
+            automation, automation_lanes_, limits_.max_automation_lanes,
+            path + "/data/automation_lanes", [&](Span element, std::size_t index) {
+                return walk_automation_lane(
+                    element, path + "/data/automation_lanes/" + std::to_string(index));
+            })) return false;
         return !has_devices || governed_array(
             devices, device_placements_, limits_.max_device_placements,
             path + "/data/device_chain", [&](Span element, std::size_t index) {
                 return walk_device_placement(
                     element, path + "/data/device_chain/" + std::to_string(index));
             });
+    }
+
+    bool walk_automation_lane(Span value, const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape)) return false;
+        if (type != "pulp.timeline.automation_lane" ||
+            !require_structural_shape(valid_shape, version, path, value.begin)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        const auto data_path = path + "/data";
+        if (!require_member(data, "id", StringShape, data_path) ||
+            !require_member(data, "target", ObjectShape, data_path)) return false;
+        Span points;
+        Span target;
+        bool has_points = false;
+        bool has_target = false;
+        if (!member(data, "points", points, has_points) ||
+            !member(data, "target", target, has_target) || !has_points || !has_target)
+            return false;
+        if (!governed_array(points, automation_points_, limits_.max_automation_points,
+                            data_path + "/points", [&](Span point, std::size_t index) {
+                                const auto point_path = data_path + "/points/" +
+                                                        std::to_string(index);
+                                return require_member(point, "curvature_bits", StringShape,
+                                                      point_path) &&
+                                       require_member(point, "id", StringShape, point_path) &&
+                                       require_member(point, "interpolation", StringShape,
+                                                      point_path) &&
+                                       require_member(point, "position_ticks", StringShape,
+                                                      point_path) &&
+                                       require_member(point, "value_bits", StringShape,
+                                                      point_path);
+                            })) return false;
+        if (!envelope(target, type, version, data, valid_shape)) return false;
+        if (type != "pulp.timeline.automation_target.device_parameter" ||
+            !require_structural_shape(valid_shape, version, data_path + "/target",
+                                      target.begin)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, target.begin, 0, 0,
+                          data_path + "/target");
+            return false;
+        }
+        return require_member(data, "device_placement_id", StringShape,
+                              data_path + "/target/data") &&
+               require_member(data, "parameter_id", NumberShape,
+                              data_path + "/target/data");
     }
 
     bool walk_device_placement(Span value, const std::string& path) {

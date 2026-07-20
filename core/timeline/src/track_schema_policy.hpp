@@ -14,7 +14,7 @@ struct StructuralSchemaVersionPolicy {
 inline constexpr StructuralSchemaVersionPolicy track_schema_policy{
     "pulp.timeline.track",
     1,
-    2,
+    3,
 };
 static_assert(track_schema_policy.oldest_readable_version > 0 &&
               track_schema_policy.oldest_readable_version <=

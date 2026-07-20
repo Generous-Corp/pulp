@@ -287,14 +287,25 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"name", SchemaValueKind::String},
                                {"tracks", SchemaValueKind::Array}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
-                         {{"clips", SchemaValueKind::Array},
+                         {{"automation_lanes", SchemaValueKind::Array},
+                          {"clips", SchemaValueKind::Array},
                           {"device_chain", SchemaValueKind::Array},
                           {"id", SchemaValueKind::U64String},
                           {"name", SchemaValueKind::String}},
                          detail::track_schema_policy.current_version);
     track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
+    track.upgrades.push_back({2, 3, {}, detail::migrate_track_v2_to_v3});
+    track.downgrades.push_back({3, 2, {}, detail::migrate_track_v3_to_v2});
     track.downgrades.push_back({2, 1, {}, detail::migrate_track_v2_to_v1});
     schemas.push_back(std::move(track));
+    schemas.push_back(builtin("pulp.timeline.automation_lane", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"points", SchemaValueKind::Array},
+                               {"target", SchemaValueKind::Object}}));
+    schemas.push_back(builtin("pulp.timeline.automation_target.device_parameter",
+                              SchemaDomain::Document,
+                              {{"device_placement_id", SchemaValueKind::U64String},
+                               {"parameter_id", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.clip", SchemaDomain::Document,

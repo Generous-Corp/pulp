@@ -133,6 +133,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "note";
     case ItemKind::DevicePlacement:
         return "device_placement";
+    case ItemKind::AutomationLane:
+        return "automation_lane";
+    case ItemKind::AutomationPoint:
+        return "automation_point";
     }
     return "project";
 }
@@ -313,25 +317,68 @@ bool write_device_placement(EncodeContext& context, const DevicePlacement& place
     });
 }
 
-bool write_track(EncodeContext& context, const Track& track) {
-    return write_envelope(context, detail::track_schema_policy.type_name,
-                          detail::track_schema_policy.current_version, [&] {
-        if (!context.writer.append("{\"clips\":["))
+bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
+    return write_envelope(context, "pulp.timeline.automation_lane", 1, [&] {
+        if (!context.writer.append("{\"id\":") || !context.writer.u64(lane.id().value, true) ||
+            !context.writer.append(",\"points\":["))
             return false;
-        for (std::size_t index = 0; index < track.clips().size(); ++index)
+        for (std::size_t index = 0; index < lane.curve().points().size(); ++index) {
+            const auto& point = lane.curve().points()[index];
             if ((index != 0 && !context.writer.character(',')) ||
-                !write_clip(context, track.clips()[index]))
+                !context.writer.append("{\"curvature_bits\":") ||
+                !context.writer.u64(std::bit_cast<std::uint32_t>(point.curvature), true) ||
+                !context.writer.append(",\"id\":") || !context.writer.u64(point.id.value, true) ||
+                !context.writer.append(",\"interpolation\":") ||
+                !context.writer.quoted(
+                    point.interpolation == AutomationInterpolation::Hold ? "hold" : "continuous") ||
+                !context.writer.append(",\"position_ticks\":") ||
+                !context.writer.i64(point.position.value, true) ||
+                !context.writer.append(",\"value_bits\":") ||
+                !context.writer.u64(std::bit_cast<std::uint32_t>(point.value), true) ||
+                !context.writer.character('}'))
                 return false;
-        if (!context.writer.append("],\"device_chain\":["))
-            return false;
-        for (std::size_t index = 0; index < track.device_chain().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_device_placement(context, track.device_chain()[index]))
-                return false;
-        return context.writer.append("],\"id\":") && context.writer.u64(track.id().value, true) &&
-               context.writer.append(",\"name\":") && context.writer.quoted(track.name()) &&
+        }
+        const auto& target = std::get<DeviceParameterTarget>(lane.target());
+        return context.writer.append("],\"target\":") &&
+               write_envelope(
+                   context, "pulp.timeline.automation_target.device_parameter", 1,
+                   [&] {
+                       return context.writer.append("{\"device_placement_id\":") &&
+                              context.writer.u64(target.device_placement_id().value, true) &&
+                              context.writer.append(",\"parameter_id\":") &&
+                              context.writer.u64(target.param_id) && context.writer.character('}');
+                   }) &&
                context.writer.character('}');
     });
+}
+
+bool write_track(EncodeContext& context, const Track& track) {
+    return write_envelope(
+        context, detail::track_schema_policy.type_name, detail::track_schema_policy.current_version,
+        [&] {
+            if (!context.writer.append("{\"automation_lanes\":["))
+                return false;
+            for (std::size_t index = 0; index < track.automation_lanes().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_automation_lane(context, track.automation_lanes()[index]))
+                    return false;
+            if (!context.writer.append("],\"clips\":["))
+                return false;
+            for (std::size_t index = 0; index < track.clips().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_clip(context, track.clips()[index]))
+                    return false;
+            if (!context.writer.append("],\"device_chain\":["))
+                return false;
+            for (std::size_t index = 0; index < track.device_chain().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_device_placement(context, track.device_chain()[index]))
+                    return false;
+            return context.writer.append("],\"id\":") &&
+                   context.writer.u64(track.id().value, true) &&
+                   context.writer.append(",\"name\":") && context.writer.quoted(track.name()) &&
+                   context.writer.character('}');
+        });
 }
 
 bool write_sequence(EncodeContext& context, const Sequence& sequence) {
@@ -432,6 +479,8 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
             if ((index != 0 && !context.writer.character(',')) ||
                 !context.writer.append("{\"active\":") ||
                 !context.writer.append(location.active ? "true" : "false") ||
+                !context.writer.append(",\"automation_lane_id\":") ||
+                !context.writer.u64(location.automation_lane_id.value, true) ||
                 !context.writer.append(",\"clip_id\":") ||
                 !context.writer.u64(location.clip_id.value, true) ||
                 !context.writer.append(",\"id\":") ||
