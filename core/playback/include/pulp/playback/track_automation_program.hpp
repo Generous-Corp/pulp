@@ -12,6 +12,10 @@
 
 namespace pulp::playback {
 
+namespace detail {
+class TrackAutomationCompiler;
+}
+
 enum class TrackAutomationProgramErrorCode : std::uint8_t {
     InvalidTrackId,
     MissingTempoMap,
@@ -58,6 +62,7 @@ class TrackAutomationProgram {
     const AutomationProgram* find_lane(timeline::ItemId lane_id) const noexcept;
 
   private:
+    friend class detail::TrackAutomationCompiler;
     TrackAutomationProgram(timeline::ItemId track_id,
                            std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                            std::vector<std::shared_ptr<const AutomationProgram>> programs) noexcept;

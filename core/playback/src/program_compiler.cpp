@@ -1,6 +1,7 @@
 #include <pulp/playback/program_compiler.hpp>
 
 #include "budgeted_stable_merge.hpp"
+#include "track_automation_compiler.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -24,12 +25,14 @@ class ProgramCompilerTask final : public CompileTask {
         SortTrackAudioIds,
         ValidateTrackAudioIds,
         SortTrackAudio,
+        CompileTrackAutomation,
         FinalizeTrack,
         Link,
         Validate,
         Publish,
     };
     CompileTaskStatus fail(CompileError error) noexcept;
+    void begin_track_automation();
 
     std::shared_ptr<PlaybackProgramCompilerCore> core_;
     std::unique_ptr<ProgramCompileRequest> request_;
@@ -52,6 +55,8 @@ class ProgramCompilerTask final : public CompileTask {
     std::size_t audio_id_validation_index_ = 1;
     std::vector<AudioClipRendererProgram> audio_merge_buffer_;
     detail::BudgetedStableMergeState audio_merge_;
+    detail::TrackAutomationCompiler automation_compiler_;
+    detail::CompiledTrackAutomation current_automation_;
     std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
@@ -151,6 +156,12 @@ struct PlaybackProgramCompilerCore
     const bool bound;
 };
 
+void ProgramCompilerTask::begin_track_automation() {
+    const auto& track = sequence_->tracks()[track_index_];
+    automation_compiler_.reset(track, request_->tempo_map, generation_);
+    stage_ = Stage::CompileTrackAutomation;
+}
+
 CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budget) noexcept {
     if (!request_) {
         request_ = core_->take_pending();
@@ -232,7 +243,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     audio_id_merge_.reset(audio_id_merge_buffer_);
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
-                    stage_ = Stage::FinalizeTrack;
+                    begin_track_automation();
                 }
                 continue;
             }
@@ -301,7 +312,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     audio_id_merge_.reset(audio_id_merge_buffer_);
                     stage_ = Stage::SortTrackAudioIds;
                 } else {
-                    stage_ = Stage::FinalizeTrack;
+                    begin_track_automation();
                 }
             }
             continue;
@@ -343,7 +354,19 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 });
             work += step.work_units;
             if (step.complete)
+                begin_track_automation();
+            continue;
+        }
+        if (stage_ == Stage::CompileTrackAutomation) {
+            auto step = automation_compiler_.step();
+            ++work;
+            if (!step)
+                return fail({CompileErrorCode::AutomationProgramInvalid, step.error().item,
+                             request_->document_revision});
+            if (step.value() == detail::TrackAutomationCompileStatus::Complete) {
+                current_automation_ = automation_compiler_.take_result();
                 stage_ = Stage::FinalizeTrack;
+            }
             continue;
         }
         if (stage_ == Stage::FinalizeTrack) {
@@ -374,12 +397,15 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
-                std::move(current_note_events_), std::move(audio_program))));
+                std::move(current_note_events_), std::move(audio_program),
+                std::move(current_automation_.ordered_device_placement_ids),
+                std::move(current_automation_.program))));
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();
             current_audio_clips_.clear();
             current_audio_ids_.clear();
+            current_automation_ = {};
             clip_index_ = 0;
             note_index_ = 0;
             clip_started_ = false;
