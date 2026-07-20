@@ -73,8 +73,8 @@ or ramps linearly from the preceding emitted point. Span capacity is the
 explicit per-lane budget: range seeds and unique in-range authored knots are
 mandatory, remaining capacity refines continuous spans deterministically, and
 output never overflows. Keep device-wide budgeting, lane aggregation, parameter
-metadata, normalization, and the single SignalGraph mailbox write in the future
-host binding; playback must not depend on `pulp::state` merely to mirror
+metadata, normalization, and the SignalGraph mailbox write in the host binding;
+playback must not depend on `pulp::state` merely to mirror
 `ParameterEventQueue`.
 
 Group already-compiled lane owners with `TrackAutomationProgram::create()` on
@@ -83,8 +83,26 @@ requires exact tempo-map owner identity, rejects duplicate lane IDs and
 device-parameter targets, and stores programs in lane-ItemId order. Preserve
 unchanged program owners when rebuilding it: mixed child generations are
 intentional because each cursor adopts by its lane program's generation and
-instance token. This grouping is not proof of Timeline document attachment;
-authored-lane dirty tracking belongs to the future track compiler.
+instance token.
+
+`ProgramCompiler` is the attachment boundary for authored automation. It walks
+each track's ordered device placements, compiles only lanes owned by that track,
+and publishes the resulting `TrackAutomationProgram` inside the immutable
+`TrackProgram`. Use `AutomationPlaybackLimits` on every compile request: reject
+over-limit device, lane, and point counts before reserving proportional storage,
+and use `platform_defaults()` so wasm/threadless builds receive their lower
+budgets. Incremental compilation retains unchanged lane owners; attachment,
+target, or point edits dirty only the affected track/lane.
+
+On the audio thread, give one `TrackAutomationRenderer` the exact immutable
+track automation program and the shared transport snapshot. It emits bounded
+per-device `ParameterEvent` batches in device-placement order: seeds become
+zero-duration endpoints, linear points preserve their ramp duration, and
+immediate points step at their sample offset. Candidate traversal and emitted
+events have separate limits. A mandatory event that cannot fit fails the whole
+block without exposing partial device batches; optional refinement points may
+coalesce deterministically. The renderer owns all scratch storage after
+`prepare()` and performs no allocation in `process()`.
 
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.
@@ -114,6 +132,11 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   selected sample. Do not interpolate by sample fraction across tempo ramps.
   Each loop/seek/adoption range is reseeded, stopped blocks emit only when
   reseeding, and same-lane adoption requires a strictly newer generation.
+- Attached automation compilation and rendering remain portable playback code.
+  Mirror every new playback translation unit into the native target, the
+  no-exceptions target, and both WAM/WebCLAP curated source lists; keep
+  `web-timeline-source-closure` green. This proves wasm compilation only, not a
+  JavaScript timeline API or host parameter delivery.
 - Audio and note renderers must consume the same `TransportSnapshot` for a
   callback. The replay golden uses a varying schedule up to the transport's
   prepared `max_buffer_size`; never cache the first callback size in either
@@ -140,6 +163,7 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 
 Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-track-automation-program`,
+`pulp-test-playback-track-automation-renderer`, `pulp-test-playback-program`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
