@@ -7,24 +7,20 @@ namespace {
 
 template <typename T>
 runtime::Result<T, TransactionError> reject(ConflictCode code, const Transaction& transaction,
-                                            CommandId command, ItemId item,
-                                            ItemId related = {}) {
+                                            CommandId command, ItemId item, ItemId related = {}) {
     return reject_reduction<T>(code, transaction, command, item, related);
 }
 
 template <typename Value>
 runtime::Result<AnnotationCommandReduction, TransactionError>
-insert_value(const Project& project, ItemId sequence_id, const Value& value,
-             ItemKind kind, const Transaction& transaction, CommandId command,
-             bool allow_tombstone_restore) {
-    if (const auto code = target_error(project, sequence_id,
-                                       {.kind = ItemKind::Sequence,
-                                        .sequence_id = sequence_id,
-                                        .active = true}))
+insert_value(const Project& project, ItemId sequence_id, const Value& value, ItemKind kind,
+             const Transaction& transaction, CommandId command, bool allow_tombstone_restore) {
+    if (const auto code =
+            target_error(project, sequence_id,
+                         {.kind = ItemKind::Sequence, .sequence_id = sequence_id, .active = true}))
         return reject<AnnotationCommandReduction>(*code, transaction, command, sequence_id);
-    const OwnedIdentity identity{value.id, {.kind = kind,
-                                            .sequence_id = sequence_id,
-                                            .active = true}};
+    const OwnedIdentity identity{value.id,
+                                 {.kind = kind, .sequence_id = sequence_id, .active = true}};
     auto plan = plan_identity_insert(project, std::span(&identity, 1), allow_tombstone_restore,
                                      transaction, command);
     if (!plan)
@@ -49,8 +45,11 @@ insert_value(const Project& project, ItemId sequence_id, const Value& value,
             return RemoveSequenceRegion{sequence_id, value.id};
     }();
     return runtime::Ok(AnnotationCommandReduction{
-        std::move(replaced).value(), std::move(inverse),
-        {value.id, {}, sequence_id,
+        std::move(replaced).value(),
+        std::move(inverse),
+        {value.id,
+         {},
+         sequence_id,
          DirtyFlags::Structure | DirtyFlags::Annotation | DirtyFlags::Added}});
 }
 
@@ -59,9 +58,7 @@ runtime::Result<AnnotationCommandReduction, TransactionError>
 remove_value(const Project& project, ItemId sequence_id, ItemId item_id, ItemKind kind,
              const Transaction& transaction, CommandId command) {
     if (const auto code = target_error(project, item_id,
-                                       {.kind = kind,
-                                        .sequence_id = sequence_id,
-                                        .active = true}))
+                                       {.kind = kind, .sequence_id = sequence_id, .active = true}))
         return reject<AnnotationCommandReduction>(*code, transaction, command, item_id,
                                                   sequence_id);
     const auto* sequence = project.find_sequence(sequence_id);
@@ -72,12 +69,11 @@ remove_value(const Project& project, ItemId sequence_id, ItemId item_id, ItemKin
             return sequence ? sequence->find_region(item_id) : nullptr;
     }();
     if (!value)
-        return reject<AnnotationCommandReduction>(ConflictCode::TargetMissing, transaction,
-                                                  command, item_id);
+        return reject<AnnotationCommandReduction>(ConflictCode::TargetMissing, transaction, command,
+                                                  item_id);
     const Value removed = *value;
-    const OwnedIdentity identity{item_id, {.kind = kind,
-                                           .sequence_id = sequence_id,
-                                           .active = true}};
+    const OwnedIdentity identity{item_id,
+                                 {.kind = kind, .sequence_id = sequence_id, .active = true}};
     const auto mutations = plan_identity_deactivate(std::span(&identity, 1));
     runtime::Result<Sequence, ModelError> next = [&] {
         if constexpr (std::is_same_v<Value, SequenceMarker>)
@@ -87,7 +83,8 @@ remove_value(const Project& project, ItemId sequence_id, ItemId item_id, ItemKin
     }();
     if (!next)
         return runtime::Err(model_failure(transaction, command, next.error()));
-    auto replaced = ProjectEditAccess::replace_sequence(project, std::move(next).value(), mutations);
+    auto replaced =
+        ProjectEditAccess::replace_sequence(project, std::move(next).value(), mutations);
     if (!replaced)
         return runtime::Err(model_failure(transaction, command, replaced.error()));
     Command inverse = [&]() -> Command {
@@ -97,8 +94,11 @@ remove_value(const Project& project, ItemId sequence_id, ItemId item_id, ItemKin
             return InsertSequenceRegion{sequence_id, removed};
     }();
     return runtime::Ok(AnnotationCommandReduction{
-        std::move(replaced).value(), std::move(inverse),
-        {item_id, {}, sequence_id,
+        std::move(replaced).value(),
+        std::move(inverse),
+        {item_id,
+         {},
+         sequence_id,
          DirtyFlags::Structure | DirtyFlags::Annotation | DirtyFlags::Removed}});
 }
 
@@ -111,9 +111,7 @@ set_value(const Project& project, ItemId sequence_id, ItemId item_id, const Valu
         return reject<AnnotationCommandReduction>(ConflictCode::InvalidIdentifier, transaction,
                                                   command, item_id);
     if (const auto code = target_error(project, item_id,
-                                       {.kind = kind,
-                                        .sequence_id = sequence_id,
-                                        .active = true}))
+                                       {.kind = kind, .sequence_id = sequence_id, .active = true}))
         return reject<AnnotationCommandReduction>(*code, transaction, command, item_id,
                                                   sequence_id);
     const auto* sequence = project.find_sequence(sequence_id);
@@ -124,8 +122,8 @@ set_value(const Project& project, ItemId sequence_id, ItemId item_id, const Valu
             return sequence ? sequence->find_region(item_id) : nullptr;
     }();
     if (!current || *current != expected)
-        return reject<AnnotationCommandReduction>(ConflictCode::ExpectedValueMismatch,
-                                                  transaction, command, item_id);
+        return reject<AnnotationCommandReduction>(ConflictCode::ExpectedValueMismatch, transaction,
+                                                  command, item_id);
     runtime::Result<Sequence, ModelError> next = [&] {
         if constexpr (std::is_same_v<Value, SequenceMarker>)
             return sequence->replace_marker(replacement);
@@ -134,18 +132,27 @@ set_value(const Project& project, ItemId sequence_id, ItemId item_id, const Valu
     }();
     if (!next)
         return runtime::Err(model_failure(transaction, command, next.error()));
+    const Value canonical_replacement = [&] {
+        if constexpr (std::is_same_v<Value, SequenceMarker>)
+            return *next->find_marker(item_id);
+        else
+            return *next->find_region(item_id);
+    }();
     auto replaced = ProjectEditAccess::replace_sequence(project, std::move(next).value());
     if (!replaced)
         return runtime::Err(model_failure(transaction, command, replaced.error()));
     Command inverse = [&]() -> Command {
         if constexpr (std::is_same_v<Value, SequenceMarker>)
-            return SetSequenceMarker{sequence_id, item_id, replacement, expected};
+            return SetSequenceMarker{sequence_id, item_id, canonical_replacement, expected};
         else
-            return SetSequenceRegion{sequence_id, item_id, replacement, expected};
+            return SetSequenceRegion{sequence_id, item_id, canonical_replacement, expected};
     }();
     return runtime::Ok(AnnotationCommandReduction{
-        std::move(replaced).value(), std::move(inverse),
-        {item_id, {}, sequence_id,
+        std::move(replaced).value(),
+        std::move(inverse),
+        {item_id,
+         {},
+         sequence_id,
          DirtyFlags::Timing | DirtyFlags::Content | DirtyFlags::Annotation}});
 }
 
@@ -182,8 +189,8 @@ reduce_annotation_command(const Project& project, const Command& command,
     if (const auto* value = std::get_if<SetSequenceRegion>(&command))
         return set_value(project, value->sequence_id, value->region_id, value->expected,
                          value->replacement, ItemKind::SequenceRegion, transaction, command_id);
-    return reject<AnnotationCommandReduction>(ConflictCode::ModelInvariant, transaction,
-                                              command_id, {});
+    return reject<AnnotationCommandReduction>(ConflictCode::ModelInvariant, transaction, command_id,
+                                              {});
 }
 
 } // namespace pulp::timeline::detail
