@@ -36,6 +36,12 @@ Trust rules:
 
 Built plugins should embed `pulp.plugin-runtime.json` via `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`. Agents and in-app installers should preview with that manifest before approval, then install with `approved=true`. Validate built bundles with `ValidationHarness::validate_plugin_runtime_manifest(...)`.
 
+Sampler Heritage profile JSON is not a content pack: validate, canonicalize,
+inspect, and render it with `pulp audio heritage ...`. Use `pulp content` only
+when a profile and its assets are deliberately packaged as data for an
+installed plugin; the Heritage CLI itself neither installs files nor targets a
+plugin content root.
+
 ## Commands
 
 ```bash

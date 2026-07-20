@@ -83,10 +83,46 @@ pulp_add_test_suite(pulp-test-sample-asset LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-memory-governor LIBRARIES pulp::audio)
 pulp_add_test_suite(pulp-test-sample-heritage
     SOURCES test_sample_heritage.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::audio)
+    LIBRARIES pulp::audio pulp::audio-analysis)
 pulp_add_test_suite(pulp-test-sample-heritage-json
     SOURCES test_sample_heritage_json.cpp
+            test_sample_heritage_runtime_state_json.cpp
     LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-pitch
+    SOURCES test_sample_heritage_pitch.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-live-cyclic
+    SOURCES test_sample_heritage_live_cyclic.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::audio)
+pulp_add_test_suite(pulp-test-sample-heritage-record-commit
+    SOURCES test_sample_heritage_record_commit.cpp
+    LIBRARIES pulp::audio pulp::audio-analysis)
+include("${PROJECT_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake")
+pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
+    SOURCES test_sample_heritage_shipping_gates.cpp
+            ${PROJECT_SOURCE_DIR}/examples/PulpSampler/test_pulp_sampler_heritage_render_clock.cpp
+            ${PULP_SAMPLER_IMPLEMENTATION}
+    LIBRARIES pulp::format pulp::audio pulp::signal pulp::audio-analysis
+    INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/examples/PulpSampler
+                 ${PROJECT_SOURCE_DIR}/test/harness
+    COMPILE_DEFINITIONS PULP_SAMPLER_TEST_HOOKS=1
+    TEST_SPEC "[shipping-gate]~[g1]~[performance],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
+    LABELS "audio;sampler;heritage;quality-lab;shipping-gate"
+    TIMEOUT 30)
+catch_discover_tests(pulp-test-sample-heritage-shipping-gates
+    TEST_SPEC "[shipping-gate][g1]"
+    TEST_PREFIX "heritage-g1::"
+    PROPERTIES
+        LABELS "audio;sampler;heritage;heritage-g1;shipping-gate"
+        TIMEOUT 30)
+catch_discover_tests(pulp-test-sample-heritage-shipping-gates
+    TEST_SPEC "[shipping-gate][performance]"
+    TEST_PREFIX "heritage-performance::"
+    PROPERTIES
+        LABELS "audio;sampler;heritage;quality-lab;shipping-gate;performance"
+        RUN_SERIAL TRUE
+        TIMEOUT 30)
+include("${CMAKE_CURRENT_LIST_DIR}/heritage_calibration_tests.cmake")
 pulp_add_test_suite(pulp-test-sample-starvation-envelope
     SOURCES test_sample_starvation_envelope.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::audio)

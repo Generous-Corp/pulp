@@ -475,6 +475,17 @@ tools:
     skill: audio-harness
     docs: guides/audio-quality-lab.md
 
+  - name: heritage-calibration
+    path: tools/audio/heritage-calibration/heritage_calibration.py
+    category: audio
+    use_when: Build and verify blinded capture packs for a sampler heritage profile without recording machine identity.
+    invocation: python3 tools/audio/heritage-calibration/heritage_calibration.py --help
+    inputs: A validated heritage profile, the C1-C7 capture plan, rendered WAVs, and private provenance supplied by the profile author.
+    outputs: Packed captures, authenticated role assignments, measurements, and verification reports for the private listening workflow.
+    availability: always
+    skill: heritage-profile
+    docs: validation/sample-heritage/README.md
+
 # ── On `availability: planned` ──────────────────────────────────────────────
 # There are deliberately NO planned entries right now. The schema supports them
 # (pointer required, invocation forbidden) and the tests cover those rules, but

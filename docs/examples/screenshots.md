@@ -71,7 +71,8 @@ actual plugin editor screenshots.
   auto-generated
 - **Engine:** Eight voices; resident or bounded ranged-file playback; forward
   and reverse one-shots/loops; selectable interpolation, octave mips,
-  starvation fades, and optional synthetic heritage processing
+  starvation fades, and optional schema-v3 Sample Heritage per-voice/bus
+  processing with live cyclic stretch
 - **Formats:** CLAP only
 
 ## GPU Demo — Modulation Matrix

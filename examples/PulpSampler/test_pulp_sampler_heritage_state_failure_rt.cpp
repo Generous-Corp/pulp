@@ -9,12 +9,14 @@ TEST_CASE("PulpSampler rejects heritage replacement without disturbing runtime",
     constexpr std::array attack{std::size_t{64}};
     (void) render(fixture, attack);
     (void) fixture.processor.consume_latency_changed_flag();
+    const auto original_latency = fixture.processor.latency_samples();
+    REQUIRE(original_latency > 0);
 
     auto invalid = clock_profile(1.25);
     invalid.schema_version = audio::kSampleHeritageProfileSchemaVersion + 1;
     REQUIRE(fixture.processor.set_heritage_profile(invalid) ==
             PulpSamplerHeritageStatus::InvalidProfile);
-    REQUIRE(fixture.processor.latency_samples() == 12);
+    REQUIRE(fixture.processor.latency_samples() == original_latency);
     REQUIRE_FALSE(fixture.processor.consume_latency_changed_flag());
     const auto diagnostics = fixture.processor.heritage_diagnostics();
     REQUIRE(diagnostics.status == PulpSamplerHeritageStatus::Ready);
@@ -33,7 +35,7 @@ TEST_CASE("PulpSampler rejects heritage replacement without disturbing runtime",
     REQUIRE(fixture.processor.sample_length() ==
             static_cast<int>(sample.size()));
     REQUIRE(PulpSamplerHeritageTestAccess::stream_output_sample_rate(
-                fixture.processor) == 60000.0);
+                fixture.processor) == 48000.0);
     const auto rebound_output = render(fixture, continuation);
     REQUIRE(std::any_of(rebound_output.begin(), rebound_output.end(),
                         [](float value) {
@@ -49,11 +51,13 @@ TEST_CASE("PulpSampler notifies host only when heritage latency changes",
     REQUIRE(fixture.processor.set_heritage_profile(active) ==
             PulpSamplerHeritageStatus::Ready);
     REQUIRE(fixture.processor.consume_latency_changed_flag());
-    REQUIRE(fixture.processor.latency_samples() == 12);
+    const auto active_latency = fixture.processor.latency_samples();
+    REQUIRE(active_latency > 0);
 
     REQUIRE(fixture.processor.set_heritage_profile(active) ==
             PulpSamplerHeritageStatus::Ready);
     REQUIRE_FALSE(fixture.processor.consume_latency_changed_flag());
+    REQUIRE(fixture.processor.latency_samples() == active_latency);
     REQUIRE(fixture.processor.disable_heritage() ==
             PulpSamplerHeritageStatus::Disabled);
     REQUIRE(fixture.processor.consume_latency_changed_flag());
@@ -114,9 +118,9 @@ TEST_CASE("PulpSampler outer state round-trip resumes heritage RNG",
         source.processor.serialize_plugin_state());
     REQUIRE(before.valid());
     REQUIRE(before.state.has_runtime_state);
-    REQUIRE(before.state.runtime_state.rng_state_count == 1);
+    REQUIRE(before.state.runtime_state.bus_state.rng_state_count == 1);
     const auto saved_rng =
-        before.state.runtime_state.rng_states[0].random_state;
+        before.state.runtime_state.bus_state.rng_states[0].random_state;
 
     const auto envelope =
         format::plugin_state_io::serialize(source.store, source.processor);
@@ -134,7 +138,7 @@ TEST_CASE("PulpSampler outer state round-trip resumes heritage RNG",
         restored.processor.serialize_plugin_state());
     REQUIRE(immediate.valid());
     REQUIRE(immediate.state.has_runtime_state);
-    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
+    REQUIRE(immediate.state.runtime_state.bus_state.rng_states[0].random_state ==
             saved_rng);
 
     // Callback-end publication atomically replaces it with the advanced RNG.
@@ -143,7 +147,7 @@ TEST_CASE("PulpSampler outer state round-trip resumes heritage RNG",
         restored.processor.serialize_plugin_state());
     REQUIRE(advanced.valid());
     REQUIRE(advanced.state.has_runtime_state);
-    REQUIRE(advanced.state.runtime_state.rng_states[0].random_state !=
+    REQUIRE(advanced.state.runtime_state.bus_state.rng_states[0].random_state !=
             saved_rng);
 }
 
@@ -179,8 +183,63 @@ TEST_CASE("PulpSampler state restored before prepare reaches first callback",
         restored.serialize_plugin_state());
     REQUIRE(immediate.valid());
     REQUIRE(immediate.state.has_runtime_state);
-    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
-            saved.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(immediate.state.runtime_state.bus_state.rng_states[0].random_state ==
+            saved.state.runtime_state.bus_state.rng_states[0].random_state);
+}
+
+TEST_CASE("PulpSampler typed state preserves two voice RNG slot identities",
+          "[audio][sampler][heritage][state][voice]") {
+    const auto profile = continued_converter_profile();
+    HeritageFixture source(64, &profile);
+    source.load(make_sine(4096));
+
+    std::array<float, 64> left{}, right{};
+    float* outputs[]{left.data(), right.data()};
+    const float* inputs[]{nullptr, nullptr};
+    audio::BufferView<float> output(outputs, 2, left.size());
+    audio::BufferView<const float> input(inputs, 0, left.size());
+    midi::MidiBuffer midi_in, midi_out;
+    midi_in.add(midi::MidiEvent::note_on(0, 60, 127));
+    midi_in.add(midi::MidiEvent::note_on(0, 64, 127));
+    format::ProcessContext context{48000.0, 64};
+    source.processor.process(output, input, midi_in, midi_out, context);
+
+    const auto saved_bytes = source.processor.serialize_plugin_state();
+    const auto saved = parse_sampler_heritage_state(saved_bytes);
+    REQUIRE(saved.valid());
+    REQUIRE(saved.state.has_runtime_state);
+    const auto slot_zero = saved.state.runtime_state.voice_states[0]
+                               .engine.rng_states[0].random_state;
+    const auto slot_one = saved.state.runtime_state.voice_states[1]
+                              .engine.rng_states[0].random_state;
+    REQUIRE(slot_zero != 0);
+    REQUIRE(slot_one != 0);
+    REQUIRE(slot_zero != slot_one);
+
+    HeritageFixture restored(64);
+    REQUIRE(restored.processor.deserialize_plugin_state(saved_bytes));
+    const auto immediate = parse_sampler_heritage_state(
+        restored.processor.serialize_plugin_state());
+    REQUIRE(immediate.valid());
+    REQUIRE(immediate.state.runtime_state.voice_states[0].slot_index == 0);
+    REQUIRE(immediate.state.runtime_state.voice_states[1].slot_index == 1);
+    REQUIRE(immediate.state.runtime_state.voice_states[0]
+                .engine.rng_states[0].random_state == slot_zero);
+    REQUIRE(immediate.state.runtime_state.voice_states[1]
+                .engine.rng_states[0].random_state == slot_one);
+
+    auto forged = saved.state;
+    forged.runtime_state.voice_states[0].engine.rng_states[0].stage_type =
+        audio::SampleHeritageRuntimeRngStageType::Noise;
+    const auto forged_bytes = write_sampler_heritage_state(forged);
+    REQUIRE(forged_bytes.valid());
+    REQUIRE_FALSE(restored.processor.deserialize_plugin_state(
+        forged_bytes.bytes));
+    const auto after_rejection = parse_sampler_heritage_state(
+        restored.processor.serialize_plugin_state());
+    REQUIRE(after_rejection.valid());
+    REQUIRE(after_rejection.state.runtime_state.voice_states[0]
+                .engine.rng_states[0].random_state == slot_zero);
 }
 
 TEST_CASE("PulpSampler downstream prepare failure preserves pending RNG for retry",
@@ -230,15 +289,15 @@ TEST_CASE("PulpSampler downstream prepare failure preserves pending RNG for retr
         retry.serialize_plugin_state());
     REQUIRE(after_failure.valid());
     REQUIRE(after_failure.state.has_runtime_state);
-    REQUIRE(after_failure.state.runtime_state.rng_states[0].random_state ==
-            saved.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(after_failure.state.runtime_state.bus_state.rng_states[0].random_state ==
+            saved.state.runtime_state.bus_state.rng_states[0].random_state);
 
     prepare(retry);
     REQUIRE(retry.prepare_result().prepared());
     const auto immediate = parse_sampler_heritage_state(
         retry.serialize_plugin_state());
-    REQUIRE(immediate.state.runtime_state.rng_states[0].random_state ==
-            saved.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(immediate.state.runtime_state.bus_state.rng_states[0].random_state ==
+            saved.state.runtime_state.bus_state.rng_states[0].random_state);
     advance(retry);
     const auto retry_advanced = parse_sampler_heritage_state(
         retry.serialize_plugin_state());
@@ -250,10 +309,10 @@ TEST_CASE("PulpSampler downstream prepare failure preserves pending RNG for retr
     advance(direct);
     const auto direct_advanced = parse_sampler_heritage_state(
         direct.serialize_plugin_state());
-    REQUIRE(retry_advanced.state.runtime_state.rng_states[0].random_state ==
-            direct_advanced.state.runtime_state.rng_states[0].random_state);
-    REQUIRE(retry_advanced.state.runtime_state.rng_states[0].random_state !=
-            saved.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(retry_advanced.state.runtime_state.bus_state.rng_states[0].random_state ==
+            direct_advanced.state.runtime_state.bus_state.rng_states[0].random_state);
+    REQUIRE(retry_advanced.state.runtime_state.bus_state.rng_states[0].random_state !=
+            saved.state.runtime_state.bus_state.rng_states[0].random_state);
 }
 
 TEST_CASE("PulpSampler outer state resets RNG when host rate changes",
@@ -291,24 +350,7 @@ TEST_CASE("PulpSampler outer state resets RNG when host rate changes",
         restored.processor.serialize_plugin_state());
     REQUIRE(saved_at_44100.valid());
     REQUIRE(saved_at_44100.state.has_runtime_state);
-    REQUIRE(saved_at_44100.state.runtime_host_sample_rate == 44100.0);
-
-    auto legacy_v1_at_44100 = restored.processor.serialize_plugin_state();
-    legacy_v1_at_44100.erase(
-        legacy_v1_at_44100.begin() + kSamplerHeritageStateV1HeaderBytes,
-        legacy_v1_at_44100.begin() + kSamplerHeritageStateHeaderBytes);
-    legacy_v1_at_44100[4] = 1;
-    HeritageFixture legacy_same_rate(64, nullptr, 44100.0);
-    REQUIRE(legacy_same_rate.processor.deserialize_plugin_state(
-        legacy_v1_at_44100));
-    REQUIRE(legacy_same_rate.processor.heritage_diagnostics().status ==
-            PulpSamplerHeritageStatus::ReadyRuntimeResetForHostRate);
-    REQUIRE(legacy_same_rate.processor.heritage_diagnostics()
-                .runtime_state_status ==
-            audio::SampleHeritageRuntimeStateStatus::NotPrepared);
-    REQUIRE_FALSE(parse_sampler_heritage_state(
-        legacy_same_rate.processor.serialize_plugin_state())
-                      .state.has_runtime_state);
+    REQUIRE(saved_at_44100.state.runtime_state.host_sample_rate == 44100.0);
 
     HeritageFixture same_rate(64, nullptr, 44100.0);
     REQUIRE(format::plugin_state_io::deserialize(
@@ -321,8 +363,8 @@ TEST_CASE("PulpSampler outer state resets RNG when host rate changes",
         same_rate.processor.serialize_plugin_state());
     REQUIRE(resumed.valid());
     REQUIRE(resumed.state.has_runtime_state);
-    REQUIRE(resumed.state.runtime_state.rng_states[0].random_state ==
-            saved_at_44100.state.runtime_state.rng_states[0].random_state);
+    REQUIRE(resumed.state.runtime_state.bus_state.rng_states[0].random_state ==
+            saved_at_44100.state.runtime_state.bus_state.rng_states[0].random_state);
 
     HeritageFixture changed_again(64, nullptr, 48000.0);
     REQUIRE(format::plugin_state_io::deserialize(
@@ -354,6 +396,39 @@ TEST_CASE("Prepared PulpSampler heritage callbacks allocate nothing",
     format::ProcessContext context{48000.0, static_cast<int>(left.size())};
     pulp::test::RtAllocationProbe probe;
     for (int callback = 0; callback < 10000; ++callback)
+        fixture.processor.process(output, input, midi_in, midi_out, context);
+    REQUIRE_FALSE(probe.saw_allocation());
+}
+
+TEST_CASE("Prepared PulpSampler live cyclic callbacks allocate nothing",
+          "[audio][sampler][heritage][stretch][rt]") {
+    const audio::SampleHeritageProfile profile{
+        .schema_version = audio::kSampleHeritageProfileSchemaVersion,
+        .profile_id = "neutral.live-cyclic-rt-v3",
+        .host_sample_rate = 48000.0,
+        .voice = {{audio::SampleHeritageBlockDomain::Voice, false,
+                   audio::SampleHeritageVoiceLiveCyclicStretchBlock{
+                       1.6, 10.0, 1.0, true, 4, 0x1234u,
+                       audio::SampleHeritageSeedPolicy::RestartFromProfileSeed}}},
+    };
+    auto sample = make_sine(48000);
+    HeritageFixture fixture(16, &profile);
+    fixture.store.set_value(kSamplerLoop, 1.0f);
+    fixture.load(sample);
+    constexpr std::array attack{std::size_t{16}};
+    (void)render(fixture, attack);
+
+    std::array<float, 16> left{};
+    std::array<float, 16> right{};
+    float* output_ptrs[]{left.data(), right.data()};
+    const float* input_ptrs[]{nullptr, nullptr};
+    audio::BufferView<float> output(output_ptrs, 2, left.size());
+    audio::BufferView<const float> input(input_ptrs, 0, left.size());
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    format::ProcessContext context{48000.0, static_cast<int>(left.size())};
+    pulp::test::RtAllocationProbe probe;
+    for (int callback = 0; callback < 1000; ++callback)
         fixture.processor.process(output, input, midi_in, midi_out, context);
     REQUIRE_FALSE(probe.saw_allocation());
 }

@@ -239,11 +239,14 @@ struct PulpSamplerEnvelopeDiagnostics {
     audio::SampleStarvationEnvelopeStats lifetime{};
 };
 
-/// Lifetime count of render selections where the requested ratio-tracking sinc
-/// table did not cover the playback ratio and Cubic Hermite kept the voice
-/// audible.
+/// Lifetime interpolation and mip-selection decisions observed on the audio
+/// callback, including clean-path assistance intentionally suppressed by an
+/// active heritage pitch family.
 struct PulpSamplerInterpolationDiagnostics {
     std::uint64_t sinc_fallback_selections = 0;
+    std::uint64_t resident_mip_suppressions = 0;
+    std::uint64_t streamed_mip_suppressions = 0;
+    std::uint64_t sinc_promotion_suppressions = 0;
 };
 
 enum class PulpSamplerHeritageStatus : std::uint8_t {

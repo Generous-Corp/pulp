@@ -15,15 +15,218 @@
 
 namespace pulp::audio {
 
-inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 2;
-inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 2;
+inline constexpr std::uint32_t kSampleHeritageProfileSchemaVersion = 3;
+inline constexpr std::uint32_t kSampleHeritageProfileDigestVersion = 5;
+inline constexpr std::uint32_t kSampleHeritageSpectralTiltLawVersion = 1;
+inline constexpr double kSampleHeritageMaximumLadderCutoffRatio = 0.49;
+inline constexpr float kSampleHeritageMaximumLadderResonance = 0.3f;
 inline constexpr std::size_t kSampleHeritageMaximumStages = 7;
+inline constexpr std::size_t kSampleHeritageMaximumVoiceBlocks = 8;
+inline constexpr std::size_t kSampleHeritageMaximumBusBlocks = 2;
+inline constexpr std::size_t kSampleHeritageMaximumRecordCommitBlocks = 4;
 inline constexpr std::size_t kSampleHeritageMaximumChannels = 8;
 inline constexpr std::size_t kSampleHeritageMaximumProfileIdBytes = 63;
 
 enum class SampleHeritageSeedPolicy : std::uint8_t {
     RestartFromProfileSeed,
     ContinueSerializedState,
+};
+
+enum class SampleHeritageBlockDomain : std::uint8_t { Voice, Bus, RecordCommit };
+enum class SampleHeritagePitchFamily : std::uint8_t {
+    VariableClock,
+    DropRepeat,
+    EarlyLinear,
+};
+enum class SampleHeritageConverterFamily : std::uint8_t {
+    LinearPcm,
+    MuLaw,
+    ALaw,
+};
+enum class SampleHeritageHoldMode : std::uint8_t { ZeroOrder };
+enum class SampleHeritageCutoffLaw : std::uint8_t { FixedHz, MachineRateRatio };
+enum class SampleHeritageNoiseGate : std::uint8_t { AlwaysOn, VoiceActive };
+enum class SampleHeritageReconstructionFamily : std::uint8_t {
+    OnePole,
+    Butterworth,
+    Chebyshev,
+    Elliptic,
+};
+enum class SampleHeritageRecordFilterFamily : std::uint8_t {
+    OnePole,
+    Butterworth,
+    Chebyshev,
+    Elliptic,
+};
+enum class SampleHeritageAnalogFilterFamily : std::uint8_t { None, Ladder4Pole };
+enum class SampleHeritageLivePitchMode : std::uint8_t { Preserve, RateLinked };
+
+struct SampleHeritageVoiceMachineDomainBlock { double sample_rate = 0.0; };
+struct SampleHeritageVoiceClockBlock { double ratio = 1.0; };
+struct SampleHeritageVoicePitchBlock {
+    SampleHeritagePitchFamily family = SampleHeritagePitchFamily::VariableClock;
+    double max_transpose_semitones = 24.0;
+};
+struct SampleHeritageVoiceConverterBlock {
+    SampleHeritageConverterFamily family = SampleHeritageConverterFamily::LinearPcm;
+    float bit_depth = 16.0f;
+    float dac_nonlinearity = 0.0f;
+    float dither_lsb = 0.0f;
+    std::uint64_t seed = 0;
+    SampleHeritageSeedPolicy seed_policy =
+        SampleHeritageSeedPolicy::RestartFromProfileSeed;
+};
+struct SampleHeritageVoiceHoldDroopBlock {
+    SampleHeritageHoldMode mode = SampleHeritageHoldMode::ZeroOrder;
+    std::uint32_t hold_samples = 1;
+    float droop = 0.0f;
+};
+struct SampleHeritageVoiceReconstructionBlock {
+    SampleHeritageReconstructionFamily family =
+        SampleHeritageReconstructionFamily::OnePole;
+    SampleHeritageCutoffLaw cutoff_law = SampleHeritageCutoffLaw::FixedHz;
+    double cutoff_value = 0.0;
+    std::uint8_t order = 1;
+    float ripple_db = 0.0f;
+    float stopband_attenuation_db = 0.0f;
+};
+struct SampleHeritageVoiceAnalogColorBlock {
+    float drive = 1.0f;
+    float asymmetry = 0.0f;
+    float mix = 1.0f;
+    SampleHeritageAnalogFilterFamily filter_family =
+        SampleHeritageAnalogFilterFamily::None;
+    SampleHeritageCutoffLaw cutoff_law = SampleHeritageCutoffLaw::FixedHz;
+    double cutoff_value = 0.0;
+    float resonance = 0.0f;
+};
+struct SampleHeritageVoiceLiveCyclicStretchBlock {
+    double factor = 1.0;
+    double cycle_ms = 1.0;
+    double splice_ms = 0.0;
+    bool stereo_link = true;
+    std::uint16_t shuffle_divisions = 0;
+    std::uint64_t seed = 0;
+    SampleHeritageSeedPolicy seed_policy =
+        SampleHeritageSeedPolicy::RestartFromProfileSeed;
+    SampleHeritageLivePitchMode pitch_mode = SampleHeritageLivePitchMode::Preserve;
+    bool tempo_lock = true;
+};
+
+using SampleHeritageVoiceBlockParameters =
+    std::variant<SampleHeritageVoiceMachineDomainBlock,
+    SampleHeritageVoiceClockBlock,
+    SampleHeritageVoicePitchBlock,
+    SampleHeritageVoiceConverterBlock,
+    SampleHeritageVoiceLiveCyclicStretchBlock,
+    SampleHeritageVoiceHoldDroopBlock,
+    SampleHeritageVoiceReconstructionBlock,
+    SampleHeritageVoiceAnalogColorBlock>;
+
+struct SampleHeritageVoiceBlockSpec {
+    SampleHeritageBlockDomain domain = SampleHeritageBlockDomain::Voice;
+    bool bypass = true;
+    SampleHeritageVoiceBlockParameters parameters =
+        SampleHeritageVoiceMachineDomainBlock{};
+};
+
+struct SampleHeritageBusNoiseIdleBlock {
+    float noise_amplitude = 0.0f;
+    float idle_amplitude = 0.0f;
+    float tilt_db_per_octave = 0.0f;
+    SampleHeritageNoiseGate gate = SampleHeritageNoiseGate::AlwaysOn;
+    std::uint64_t seed = 0;
+    SampleHeritageSeedPolicy seed_policy =
+        SampleHeritageSeedPolicy::RestartFromProfileSeed;
+    // Tilt law version 1 is a deterministic cascade of unit-slope RBJ high
+    // shelves. The lowest shelf starts at tilt_floor_hz. Successive shelves
+    // span one octave, or the last partial octave through Nyquist, with a
+    // geometric-mean center and tilt_db_per_octave times the octave width.
+    // The cascade is normalized to 0 dB at tilt_reference_hz. The requested
+    // slope is a target, not an exact power law. Below the floor, response
+    // approaches the low-frequency asymptote rather than being hard-clamped.
+    // Compatibility compares the prepared response; the ideal slope has no
+    // normative error tolerance.
+    double tilt_reference_hz = 1000.0;
+    double tilt_floor_hz = 20.0;
+};
+struct SampleHeritageBusOutputDriveBlock {
+    float drive = 1.0f;
+    float ceiling = 1.0f;
+};
+using SampleHeritageBusBlockParameters =
+    std::variant<SampleHeritageBusNoiseIdleBlock,
+    SampleHeritageBusOutputDriveBlock>;
+struct SampleHeritageBusBlockSpec {
+    SampleHeritageBlockDomain domain = SampleHeritageBlockDomain::Bus;
+    bool bypass = true;
+    SampleHeritageBusBlockParameters parameters = SampleHeritageBusNoiseIdleBlock{};
+};
+
+struct SampleHeritageRecordInputDriveClipBlock {
+    float drive = 1.0f;
+    float clip_level = 1.0f;
+};
+struct SampleHeritageRecordRateBlock {
+    SampleHeritageRecordFilterFamily filter_family =
+        SampleHeritageRecordFilterFamily::OnePole;
+    double sample_rate = 0.0;
+    SampleHeritageCutoffLaw cutoff_law = SampleHeritageCutoffLaw::FixedHz;
+    double cutoff_value = 0.0;
+    std::uint8_t order = 1;
+    float ripple_db = 0.0f;
+    float stopband_attenuation_db = 0.0f;
+};
+struct SampleHeritageRecordConverterBlock {
+    SampleHeritageConverterFamily family = SampleHeritageConverterFamily::LinearPcm;
+    float bit_depth = 16.0f;
+    float dac_nonlinearity = 0.0f;
+    float dither_lsb = 0.0f;
+    std::uint64_t seed = 0;
+    SampleHeritageSeedPolicy seed_policy =
+        SampleHeritageSeedPolicy::RestartFromProfileSeed;
+};
+struct SampleHeritageRecordCommitCyclicStretchBlock {
+    double factor = 1.0;
+    std::uint32_t cycle_samples = 1;
+    std::uint32_t crossfade_samples = 0;
+    std::uint64_t zone_start_frame = 0;
+    std::uint64_t zone_end_frame = 0;
+};
+struct SampleHeritageRecordCommitAdaptiveStretchBlock {
+    double factor = 1.0;
+    std::uint32_t decision_hop_samples = 1;
+    std::uint32_t search_radius_samples = 0;
+    std::uint32_t search_stride_samples = 1;
+    std::uint32_t crossfade_samples = 0;
+    std::uint64_t zone_start_frame = 0;
+    std::uint64_t zone_end_frame = 0;
+    bool stereo_link = true;
+    std::uint8_t quality = 99;
+    std::uint8_t width = 99;
+};
+
+inline constexpr std::uint32_t sample_heritage_adaptive_effective_search_radius(
+    const SampleHeritageRecordCommitAdaptiveStretchBlock& block) noexcept {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(block.search_radius_samples) * block.quality + 49u) / 99u);
+}
+
+inline constexpr std::uint32_t sample_heritage_adaptive_effective_crossfade_samples(
+    const SampleHeritageRecordCommitAdaptiveStretchBlock& block) noexcept {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(block.crossfade_samples) * block.width + 49u) / 99u);
+}
+using SampleHeritageRecordCommitBlockParameters =
+    std::variant<SampleHeritageRecordInputDriveClipBlock,
+    SampleHeritageRecordRateBlock,
+    SampleHeritageRecordConverterBlock, SampleHeritageRecordCommitCyclicStretchBlock,
+                 SampleHeritageRecordCommitAdaptiveStretchBlock>;
+struct SampleHeritageRecordCommitBlockSpec {
+    SampleHeritageBlockDomain domain = SampleHeritageBlockDomain::RecordCommit;
+    bool bypass = true;
+    SampleHeritageRecordCommitBlockParameters parameters =
+        SampleHeritageRecordInputDriveClipBlock{};
 };
 
 struct SampleHeritageMachineDomainStage {
@@ -61,8 +264,8 @@ struct SampleHeritageOutputStage {
     float gain = 1.0f;
 };
 
-using SampleHeritageStageParameters = std::variant<
-    SampleHeritageMachineDomainStage,
+using SampleHeritageStageParameters =
+    std::variant<SampleHeritageMachineDomainStage,
     SampleHeritageQuantizationStage,
     SampleHeritageClockPitchStage,
     SampleHeritageDacHoldStage,
@@ -81,6 +284,12 @@ struct SampleHeritageProfile {
     std::uint32_t schema_version = kSampleHeritageProfileSchemaVersion;
     std::string profile_id;
     double host_sample_rate = 0.0;
+    std::vector<SampleHeritageVoiceBlockSpec> voice;
+    std::vector<SampleHeritageBusBlockSpec> bus;
+    std::vector<SampleHeritageRecordCommitBlockSpec> record_commit;
+
+    // Flat stages are an in-memory engine representation and never cross the
+    // profile JSON boundary.
     std::vector<SampleHeritageStageSpec> stages;
 };
 
@@ -88,6 +297,15 @@ struct SampleHeritagePreparedProfile {
     std::uint32_t schema_version = 0;
     std::array<char, kSampleHeritageMaximumProfileIdBytes + 1> profile_id{};
     double host_sample_rate = 0.0;
+    std::array<SampleHeritageVoiceBlockSpec, kSampleHeritageMaximumVoiceBlocks>
+        voice{};
+    std::size_t voice_count = 0;
+    std::array<SampleHeritageBusBlockSpec, kSampleHeritageMaximumBusBlocks> bus{};
+    std::size_t bus_count = 0;
+    std::array<SampleHeritageRecordCommitBlockSpec,
+               kSampleHeritageMaximumRecordCommitBlocks> record_commit{};
+    std::size_t record_commit_count = 0;
+    // The post-mix engine consumes flat stages; profile JSON does not.
     std::array<SampleHeritageStageSpec, kSampleHeritageMaximumStages> stages{};
     std::size_t stage_count = 0;
     std::array<std::uint8_t, 32> profile_digest{};
@@ -105,6 +323,10 @@ enum class SampleHeritageProfileStatus : std::uint8_t {
     InvalidProfileId,
     InvalidHostSampleRate,
     TooManyStages,
+    TooManyBlocks,
+    WrongBlockDomain,
+    MixedLegacyAndTypedBlocks,
+    NonCanonicalProfileRepresentation,
     DuplicateStage,
     InvalidStageOrder,
     InvalidStageParameter,
@@ -116,6 +338,7 @@ struct SampleHeritageProfileValidation {
     SampleHeritageProfileStatus status =
         SampleHeritageProfileStatus::UnsupportedSchemaVersion;
     std::size_t stage_index = 0;
+    SampleHeritageBlockDomain block_domain = SampleHeritageBlockDomain::Voice;
     SampleHeritagePreparedProfile profile{};
 
     bool valid() const noexcept { return status == SampleHeritageProfileStatus::Ok; }
@@ -142,7 +365,7 @@ inline bool valid_neutral_profile_id(std::string_view id) noexcept {
     return !previous_separator;
 }
 
-template<typename Stage>
+template <typename Stage>
 inline constexpr std::size_t stage_type_index = [] {
     if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>) return 0u;
     if constexpr (std::is_same_v<Stage, SampleHeritageQuantizationStage>) return 1u;
@@ -158,11 +381,10 @@ inline constexpr std::size_t stage_type_index = [] {
 /// SHA-256 over a versioned, domain-separated, little-endian canonical byte
 /// encoding of the authoring profile. This allocates and is strictly an
 /// off-audio-thread API.
-std::array<std::uint8_t, 32> sample_heritage_profile_digest(
-    const SampleHeritageProfile& profile);
+std::array<std::uint8_t, 32> sample_heritage_profile_digest(const SampleHeritageProfile& profile);
 
-inline SampleHeritageProfileValidation validate_sample_heritage_profile(
-    const SampleHeritageProfile& source) noexcept {
+inline SampleHeritageProfileValidation
+validate_sample_heritage_profile(const SampleHeritageProfile& source) noexcept {
     SampleHeritageProfileValidation result;
     if (source.schema_version != kSampleHeritageProfileSchemaVersion) {
         result.status = SampleHeritageProfileStatus::UnsupportedSchemaVersion;
@@ -177,8 +399,346 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
         result.status = SampleHeritageProfileStatus::InvalidHostSampleRate;
         return result;
     }
+    const bool has_typed_blocks = !source.voice.empty() || !source.bus.empty() ||
+                                  !source.record_commit.empty();
+    if (has_typed_blocks && !source.stages.empty()) {
+        result.status = SampleHeritageProfileStatus::MixedLegacyAndTypedBlocks;
+        return result;
+    }
     if (source.stages.size() > kSampleHeritageMaximumStages) {
         result.status = SampleHeritageProfileStatus::TooManyStages;
+        return result;
+    }
+    if (source.voice.size() > kSampleHeritageMaximumVoiceBlocks ||
+        source.bus.size() > kSampleHeritageMaximumBusBlocks ||
+        source.record_commit.size() > kSampleHeritageMaximumRecordCommitBlocks) {
+        result.status = SampleHeritageProfileStatus::TooManyBlocks;
+        return result;
+    }
+
+    if (has_typed_blocks) {
+        const auto finite_range = [](auto value, auto minimum, auto maximum) {
+            return std::isfinite(value) && value >= minimum && value <= maximum;
+        };
+        const auto valid_seed_policy = [](SampleHeritageSeedPolicy policy) {
+            return policy == SampleHeritageSeedPolicy::RestartFromProfileSeed ||
+                   policy == SampleHeritageSeedPolicy::ContinueSerializedState;
+        };
+        const auto validate_seed = [&](float amount, std::uint64_t seed,
+                                       SampleHeritageSeedPolicy policy) {
+            return valid_seed_policy(policy) &&
+                   !((amount > 0.0f ||
+                      policy == SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                     seed == 0);
+        };
+        double voice_machine_rate = source.host_sample_rate;
+        for (const auto& spec : source.voice) {
+            if (spec.bypass) continue;
+            if (const auto* machine =
+                    std::get_if<SampleHeritageVoiceMachineDomainBlock>(&spec.parameters))
+                voice_machine_rate = machine->sample_rate;
+        }
+        const auto validate_cutoff = [&](SampleHeritageCutoffLaw law,
+                                         double value,
+                                         double sample_rate) {
+            if (law == SampleHeritageCutoffLaw::MachineRateRatio)
+                return std::isfinite(value) && value > 0.0 && value < 0.5;
+            return law == SampleHeritageCutoffLaw::FixedHz &&
+                   std::isfinite(value) && value >= 1.0 &&
+                   std::isfinite(sample_rate) && value < sample_rate * 0.5;
+        };
+        const auto resolved_voice_cutoff = [&](SampleHeritageCutoffLaw law,
+                                               double value) {
+            return law == SampleHeritageCutoffLaw::MachineRateRatio
+                ? value * voice_machine_rate
+                : value;
+        };
+        const auto validate_ordered = [&](const auto& blocks,
+                                          SampleHeritageBlockDomain domain,
+                                          auto validate_block) {
+            std::array<bool, std::variant_size_v<std::decay_t<decltype(blocks.front().parameters)>>> seen{};
+            std::size_t previous = 0;
+            bool have_previous = false;
+            for (std::size_t index = 0; index < blocks.size(); ++index) {
+                result.stage_index = index;
+                result.block_domain = domain;
+                if (blocks[index].domain != domain)
+                    return SampleHeritageProfileStatus::WrongBlockDomain;
+                const auto type = blocks[index].parameters.index();
+                if (std::exchange(seen[type], true))
+                    return SampleHeritageProfileStatus::DuplicateStage;
+                if (have_previous && type < previous)
+                    return SampleHeritageProfileStatus::InvalidStageOrder;
+                previous = type;
+                have_previous = true;
+                if (!validate_block(blocks[index].parameters))
+                    return SampleHeritageProfileStatus::InvalidStageParameter;
+            }
+            return SampleHeritageProfileStatus::Ok;
+        };
+
+        auto status = validate_ordered(
+            source.voice, SampleHeritageBlockDomain::Voice,
+            [&](const SampleHeritageVoiceBlockParameters& parameters) {
+                return std::visit(
+                    [&](const auto& block) {
+                    using Block = std::decay_t<decltype(block)>;
+                    if constexpr (std::is_same_v<Block,
+                                                  SampleHeritageVoiceMachineDomainBlock>)
+                        return finite_range(block.sample_rate, 8000.0, 384000.0);
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoiceClockBlock>)
+                        return finite_range(block.ratio, 0.015625, 64.0);
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoicePitchBlock>)
+                        return (block.family == SampleHeritagePitchFamily::VariableClock ||
+                                block.family == SampleHeritagePitchFamily::DropRepeat ||
+                                block.family == SampleHeritagePitchFamily::EarlyLinear) &&
+                               finite_range(block.max_transpose_semitones, 0.0, 96.0);
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoiceConverterBlock>)
+                        return (block.family == SampleHeritageConverterFamily::LinearPcm ||
+                                block.family == SampleHeritageConverterFamily::MuLaw ||
+                                block.family == SampleHeritageConverterFamily::ALaw) &&
+                               finite_range(block.bit_depth, 4.0f, 16.0f) &&
+                               finite_range(block.dac_nonlinearity, 0.0f, 1.0f) &&
+                               finite_range(block.dither_lsb, 0.0f, 2.0f) &&
+                               validate_seed(block.dither_lsb, block.seed,
+                                             block.seed_policy);
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoiceHoldDroopBlock>)
+                        return block.mode == SampleHeritageHoldMode::ZeroOrder &&
+                               block.hold_samples >= 1 && block.hold_samples <= 65536 &&
+                               finite_range(block.droop, 0.0f, 1.0f);
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoiceReconstructionBlock>)
+                        return validate_cutoff(block.cutoff_law, block.cutoff_value,
+                                               voice_machine_rate) &&
+                               resolved_voice_cutoff(block.cutoff_law,
+                                                     block.cutoff_value) <
+                                   source.host_sample_rate * 0.5 &&
+                               ((block.family ==
+                                     SampleHeritageReconstructionFamily::OnePole &&
+                                 block.order == 1 && block.ripple_db == 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Butterworth &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 block.ripple_db == 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Chebyshev &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                 block.ripple_db > 0.0f &&
+                                 block.stopband_attenuation_db == 0.0f) ||
+                                (block.family ==
+                                     SampleHeritageReconstructionFamily::Elliptic &&
+                                 block.order >= 2 && block.order <= 16 &&
+                                 (block.order & 1u) == 0 &&
+                                 finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                 block.ripple_db > 0.0f &&
+                                 finite_range(block.stopband_attenuation_db,
+                                              block.ripple_db, 180.0f) &&
+                                 block.stopband_attenuation_db > block.ripple_db));
+                    else if constexpr (std::is_same_v<Block,
+                                                       SampleHeritageVoiceAnalogColorBlock>)
+                        return finite_range(block.drive, 0.0f, 16.0f) &&
+                               finite_range(block.asymmetry, -1.0f, 1.0f) &&
+                               finite_range(block.mix, 0.0f, 1.0f) &&
+                               ((block.filter_family ==
+                                     SampleHeritageAnalogFilterFamily::None &&
+                                 block.cutoff_law ==
+                                     SampleHeritageCutoffLaw::FixedHz &&
+                                 block.cutoff_value == 0.0 &&
+                                 block.resonance == 0.0f) ||
+                                (block.filter_family ==
+                                     SampleHeritageAnalogFilterFamily::Ladder4Pole &&
+                                 ((block.cutoff_law ==
+                                       SampleHeritageCutoffLaw::MachineRateRatio &&
+                                   std::isfinite(block.cutoff_value) &&
+                                   block.cutoff_value * voice_machine_rate >= 1.0 &&
+                                   block.cutoff_value <=
+                                       kSampleHeritageMaximumLadderCutoffRatio) ||
+                                  (block.cutoff_law ==
+                                       SampleHeritageCutoffLaw::FixedHz &&
+                                   std::isfinite(block.cutoff_value) &&
+                                   block.cutoff_value >= 1.0 &&
+                                   block.cutoff_value <=
+                                       voice_machine_rate *
+                                           kSampleHeritageMaximumLadderCutoffRatio)) &&
+                                 resolved_voice_cutoff(block.cutoff_law,
+                                                       block.cutoff_value) <=
+                                     source.host_sample_rate *
+                                         kSampleHeritageMaximumLadderCutoffRatio &&
+                                 finite_range(
+                                     block.resonance, 0.0f,
+                                     kSampleHeritageMaximumLadderResonance)));
+                    else
+                        return finite_range(block.factor, 0.25, 20.0) &&
+                               std::isfinite(block.cycle_ms) && block.cycle_ms > 0.0 &&
+                               block.cycle_ms * voice_machine_rate * 0.001 <=
+                                   1048576.0 &&
+                               finite_range(block.splice_ms, 0.0, 20.0) &&
+                               block.splice_ms <= block.cycle_ms * 0.5 &&
+                               (block.shuffle_divisions == 0 ||
+                                (block.shuffle_divisions >= 2 &&
+                                 block.shuffle_divisions <= 64)) &&
+                               (block.pitch_mode == SampleHeritageLivePitchMode::Preserve ||
+                                block.pitch_mode == SampleHeritageLivePitchMode::RateLinked) &&
+                               valid_seed_policy(block.seed_policy) &&
+                               !((block.shuffle_divisions != 0 ||
+                                  block.seed_policy ==
+                                      SampleHeritageSeedPolicy::ContinueSerializedState) &&
+                                 block.seed == 0);
+                }, parameters);
+            });
+        if (status == SampleHeritageProfileStatus::Ok)
+            status = validate_ordered(
+                source.bus, SampleHeritageBlockDomain::Bus,
+                [&](const SampleHeritageBusBlockParameters& parameters) {
+                    return std::visit(
+                        [&](const auto& block) {
+                        using Block = std::decay_t<decltype(block)>;
+                        if constexpr (std::is_same_v<Block,
+                                                      SampleHeritageBusNoiseIdleBlock>)
+                            return finite_range(block.noise_amplitude, 0.0f, 1.0f) &&
+                                   finite_range(block.idle_amplitude, 0.0f, 1.0f) &&
+                                   finite_range(block.tilt_db_per_octave, -24.0f,
+                                                24.0f) &&
+                                   std::isfinite(block.tilt_floor_hz) &&
+                                   block.tilt_floor_hz >= 1.0 &&
+                                   std::isfinite(block.tilt_reference_hz) &&
+                                   block.tilt_reference_hz >= block.tilt_floor_hz &&
+                                   block.tilt_reference_hz <
+                                       source.host_sample_rate * 0.5 &&
+                                   (block.gate == SampleHeritageNoiseGate::AlwaysOn ||
+                                    block.gate ==
+                                        SampleHeritageNoiseGate::VoiceActive) &&
+                                       validate_seed(
+                                           std::max(block.noise_amplitude,
+                                                          block.idle_amplitude),
+                                                 block.seed, block.seed_policy);
+                        else
+                            return finite_range(block.drive, 0.0f, 16.0f) &&
+                                   finite_range(block.ceiling, 0.001f, 4.0f);
+                    }, parameters);
+                });
+        double record_processing_rate = source.host_sample_rate;
+        if (status == SampleHeritageProfileStatus::Ok)
+            status = validate_ordered(
+                source.record_commit, SampleHeritageBlockDomain::RecordCommit,
+                [&](const SampleHeritageRecordCommitBlockParameters& parameters) {
+                    return std::visit(
+                        [&](const auto& block) {
+                        using Block = std::decay_t<decltype(block)>;
+                        if constexpr (std::is_same_v<Block,
+                                                      SampleHeritageRecordInputDriveClipBlock>)
+                            return finite_range(block.drive, 0.0f, 16.0f) &&
+                                   finite_range(block.clip_level, 0.001f, 4.0f);
+                        else if constexpr (std::is_same_v<Block,
+                                                           SampleHeritageRecordRateBlock>) {
+                            const auto valid =
+                                   finite_range(block.sample_rate, 8000.0,
+                                                384000.0) &&
+                                   validate_cutoff(block.cutoff_law,
+                                                   block.cutoff_value,
+                                                   record_processing_rate) &&
+                                   ((block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::OnePole &&
+                                     block.order == 1 && block.ripple_db == 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Butterworth &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     block.ripple_db == 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Chebyshev &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                     block.ripple_db > 0.0f &&
+                                     block.stopband_attenuation_db == 0.0f) ||
+                                    (block.filter_family ==
+                                         SampleHeritageRecordFilterFamily::Elliptic &&
+                                     block.order >= 2 && block.order <= 16 &&
+                                     (block.order & 1u) == 0 &&
+                                     finite_range(block.ripple_db, 0.0f, 12.0f) &&
+                                     block.ripple_db > 0.0f &&
+                                     finite_range(block.stopband_attenuation_db,
+                                                  block.ripple_db, 180.0f) &&
+                                     block.stopband_attenuation_db >
+                                         block.ripple_db));
+                            if (valid &&
+                                !source.record_commit[result.stage_index].bypass)
+                                record_processing_rate = block.sample_rate;
+                            return valid;
+                        }
+                        else if constexpr (std::is_same_v<Block,
+                                                           SampleHeritageRecordConverterBlock>)
+                            return (block.family == SampleHeritageConverterFamily::LinearPcm ||
+                                    block.family == SampleHeritageConverterFamily::MuLaw ||
+                                    block.family == SampleHeritageConverterFamily::ALaw) &&
+                                   finite_range(block.bit_depth, 4.0f, 16.0f) &&
+                                   finite_range(block.dac_nonlinearity, 0.0f, 1.0f) &&
+                                   finite_range(block.dither_lsb, 0.0f, 2.0f) &&
+                                   validate_seed(block.dither_lsb, block.seed,
+                                                 block.seed_policy);
+                        else if constexpr (std::is_same_v<
+                                                   Block,
+                                                   SampleHeritageRecordCommitCyclicStretchBlock>)
+                            return
+                                   finite_range(block.factor, 0.25, 20.0) &&
+                                   block.cycle_samples >= 1 &&
+                                   block.cycle_samples <= 1048576 &&
+                                       block.crossfade_samples <= block.cycle_samples / 2 &&
+                                       ((block.zone_start_frame == 0 &&
+                                         block.zone_end_frame == 0) ||
+                                        block.zone_start_frame < block.zone_end_frame);
+                            else
+                                return finite_range(block.factor, 0.25, 20.0) &&
+                                       block.decision_hop_samples >= 1 &&
+                                       block.decision_hop_samples <= 1048576 &&
+                                       block.search_radius_samples <= 1048576 &&
+                                       block.search_stride_samples >= 1 &&
+                                       block.search_stride_samples <= 1048576 &&
+                                       block.crossfade_samples <= 524288 &&
+                                       block.crossfade_samples <= block.decision_hop_samples &&
+                                       block.quality <= 99 && block.width <= 99 &&
+                                   ((block.zone_start_frame == 0 &&
+                                     block.zone_end_frame == 0) ||
+                                    block.zone_start_frame < block.zone_end_frame);
+                    }, parameters);
+                });
+        if (status != SampleHeritageProfileStatus::Ok) {
+            result.status = status;
+            return result;
+        }
+
+        result.profile.schema_version = source.schema_version;
+        std::copy(source.profile_id.begin(), source.profile_id.end(),
+                  result.profile.profile_id.begin());
+        result.profile.host_sample_rate =
+            source.host_sample_rate == 0.0 ? 0.0 : source.host_sample_rate;
+        result.profile.voice_count = source.voice.size();
+        result.profile.bus_count = source.bus.size();
+        result.profile.record_commit_count = source.record_commit.size();
+        std::copy(source.voice.begin(), source.voice.end(), result.profile.voice.begin());
+        std::copy(source.bus.begin(), source.bus.end(), result.profile.bus.begin());
+        std::copy(source.record_commit.begin(), source.record_commit.end(),
+                  result.profile.record_commit.begin());
+        try {
+            result.profile.profile_digest = sample_heritage_profile_digest(source);
+        } catch (...) {
+            result.status = SampleHeritageProfileStatus::DigestUnavailable;
+            return result;
+        }
+        result.status = SampleHeritageProfileStatus::Ok;
+        result.stage_index = source.record_commit.size();
         return result;
     }
 
@@ -299,7 +859,8 @@ inline SampleHeritageProfileValidation validate_sample_heritage_profile(
     result.profile.stage_count = source.stages.size();
     std::copy(source.stages.begin(), source.stages.end(), result.profile.stages.begin());
     for (std::size_t index = 0; index < result.profile.stage_count; ++index) {
-        std::visit([&](auto& stage) noexcept {
+        std::visit(
+            [&](auto& stage) noexcept {
             using Stage = std::decay_t<decltype(stage)>;
             if constexpr (std::is_same_v<Stage, SampleHeritageMachineDomainStage>)
                 stage.sample_rate = canonical_zero(stage.sample_rate);

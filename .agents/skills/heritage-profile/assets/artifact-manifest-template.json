@@ -1,0 +1,60 @@
+{
+  "schema": "pulp.sample-heritage-evidence.v1",
+  "desired_character": "",
+  "profile": {
+    "authoring_path": "profile.json",
+    "canonical_path": "canonical.json",
+    "sha256": "",
+    "digest": "",
+    "schema_version": 3,
+    "pulp_version": ""
+  },
+  "claims": [
+    {
+      "field": "",
+      "value": "",
+      "confidence": "test",
+      "source": {
+        "kind": "primary",
+        "citation": "",
+        "locator": "",
+        "url": "",
+        "accessed": "",
+        "use_or_license_basis": ""
+      },
+      "source_says": "",
+      "inference": ""
+    }
+  ],
+  "captures": [
+    {
+      "path": "",
+      "sha256": "",
+      "role": "optional-calibration",
+      "provenance": "",
+      "capture_method": "",
+      "right_to_use": ""
+    }
+  ],
+  "validation": {
+    "commands_path": "commands.txt",
+    "passing_report": "validate.json",
+    "negative_control_report": "validate-negative.json",
+    "canonical_idempotence": "",
+    "round_trip_digest_match": ""
+  },
+  "renders": [
+    {
+      "fixture": "",
+      "wav_path": "",
+      "report_path": "",
+      "sha256": "",
+      "purpose": ""
+    }
+  ],
+  "listening_notes_path": "listening.md",
+  "agent_prompt_path": "prompt.txt",
+  "artifact_hashes_path": "hashes.sha256",
+  "unresolved": [],
+  "trademark_and_affiliation": "Any company, product, and model names cited in provenance remain their respective owners' property. This independent profile is not affiliated with or endorsed by those owners and does not claim an exact product or serial-number match."
+}

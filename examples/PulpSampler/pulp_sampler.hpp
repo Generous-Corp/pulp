@@ -13,6 +13,7 @@
 #include <pulp/audio/loop_types.hpp>
 #include <pulp/audio/sample_key_map.hpp>
 #include <pulp/audio/sample_slot_bank.hpp>
+#include <pulp/audio/sample_stream_consumption.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/signal/adsr.hpp>
@@ -42,6 +43,7 @@ enum SamplerParams : state::ParamID {
     kSamplerLoop = 7,    // 0 = one-shot, 1 = loop
     kSamplerReverse = 8, // 0 = forward entry, 1 = reverse entry
     kSamplerInterpolation = 9,
+    kSamplerHeritageClockRatio = 10,
 };
 
 class PulpSamplerProcessor : public format::Processor {
@@ -125,6 +127,7 @@ class PulpSamplerProcessor : public format::Processor {
         float gain = 1.0f;
         signal::Adsr::Params adsr;
         float pitch_semitones = 0.0f;
+        double heritage_clock_multiplier = 1.0;
         bool loop = false;
         bool reverse = false;
         audio::SampleInterpolationPolicy interpolation = audio::SampleInterpolationPolicy::Linear;
@@ -142,8 +145,7 @@ class PulpSamplerProcessor : public format::Processor {
     };
 
     struct PublishedHeritageRuntimeState {
-        audio::SampleHeritageRuntimeState state{};
-        double host_sample_rate = 0.0;
+        audio::SampleHeritageTypedRuntimeState state{};
         bool valid = false;
     };
 
@@ -204,16 +206,17 @@ class PulpSamplerProcessor : public format::Processor {
     runtime::SeqLock<PulpSamplerInterpolationDiagnostics> interpolation_snapshot_{};
     std::atomic<bool> interpolation_snapshot_available_{false};
     std::uint64_t sinc_fallback_selections_ = 0;
+    std::uint64_t resident_mip_suppressions_ = 0;
+    std::uint64_t streamed_mip_suppressions_ = 0;
+    std::uint64_t sinc_promotion_suppressions_ = 0;
     PulpSamplerConfig config_{};
     runtime::SeqLock<PulpSamplerPrepareResult> prepare_result_{};
     runtime::SeqLock<PulpSamplerLoadResult> last_load_result_{};
     mutable std::recursive_mutex control_mutex_;
     mutable runtime::SeqLock<PulpSamplerDiagnostics> diagnostics_snapshot_{};
     mutable std::uint64_t diagnostics_snapshot_epoch_ = 0;
-    audio::SampleHeritageRuntimeState restored_runtime_state_{};
-    audio::SampleHeritageRuntimeState pending_runtime_state_{};
-    double restored_runtime_host_sample_rate_ = 0.0;
-    double pending_runtime_host_sample_rate_ = 0.0;
+    audio::SampleHeritageTypedRuntimeState restored_runtime_state_{};
+    audio::SampleHeritageTypedRuntimeState pending_runtime_state_{};
     bool restored_runtime_state_available_ = false;
     bool pending_runtime_state_available_ = false;
     std::unique_ptr<audio::SampleSincKernelBank> sinc_bank_ =
@@ -221,6 +224,9 @@ class PulpSamplerProcessor : public format::Processor {
     audio::SampleKeyMap key_map_;
     std::array<std::vector<float>, kMaxOutputChannels> voice_scratch_{};
     std::array<float*, kMaxOutputChannels> voice_scratch_ptrs_{};
+    std::array<std::vector<float>, kMaxSampleChannels> stream_source_scratch_{};
+    std::array<float*, kMaxSampleChannels> stream_source_scratch_ptrs_{};
+    std::vector<std::uint8_t> bus_voice_activity_{};
     float host_sample_rate_ = 44100.0f;
     double stream_output_sample_rate_ = 44100.0;
     std::uint32_t max_block_frames_ = 512;
@@ -275,15 +281,15 @@ class PulpSamplerProcessor : public format::Processor {
 
     static bool polynomial_mip_policy(audio::SampleInterpolationPolicy policy) noexcept;
 
-    static SamplerMipLevelView select_resident_mip(const SamplerPublishedSource& source,
-                                                   audio::SampleInterpolationPolicy policy,
-                                                   double base_source_frames_per_output, bool loop,
-                                                   bool reverse) noexcept;
+    SamplerMipLevelView select_resident_mip(const SamplerPublishedSource& source,
+                                            audio::SampleInterpolationPolicy policy,
+                                            double base_source_frames_per_output, bool loop,
+                                            bool reverse) noexcept;
 
-    static const SamplerStreamMipLevelView*
-    select_streamed_mip(const SamplerPublishedSource& source,
-                        audio::SampleInterpolationPolicy policy,
-                        double base_source_frames_per_output, bool loop, bool reverse) noexcept;
+    const SamplerStreamMipLevelView* select_streamed_mip(const SamplerPublishedSource& source,
+                                                         audio::SampleInterpolationPolicy policy,
+                                                         double base_source_frames_per_output,
+                                                         bool loop, bool reverse) noexcept;
 
     audio::PreparedSampleInterpolation
     prepared_interpolation(audio::SampleInterpolationPolicy policy,
@@ -293,12 +299,21 @@ class PulpSamplerProcessor : public format::Processor {
     prepared_rate_safe_interpolation(audio::SampleInterpolationPolicy policy,
                                      double source_frames_per_output) noexcept;
 
+    audio::PreparedSampleInterpolation
+    prepared_pitch_source_interpolation(audio::SampleInterpolationPolicy policy,
+                                        double source_frames_per_output,
+                                        double artifact_source_frames_per_output) noexcept;
+
     StreamRateContract stream_rate_contract(const audio::SampleAssetView& candidate,
                                             double candidate_source_frames_per_output,
                                             const RenderParams& params,
                                             std::size_t replaced_voice) const noexcept;
 
-    StreamRateContract pitch_rate_contract(double pitch_ratio) const noexcept;
+    StreamRateContract pitch_rate_contract(double pitch_ratio,
+                                            double clock_multiplier) const noexcept;
+
+    audio::SampleStreamConsumptionDeclaration
+    stream_consumption_declaration(const SamplerVoice& voice) const noexcept;
 
     void render_output_segment(audio::BufferView<float>& output, std::uint32_t start_frame,
                                std::uint32_t frames, const RenderParams& params) noexcept;
@@ -311,8 +326,7 @@ class PulpSamplerProcessor : public format::Processor {
                                std::uint32_t frames, std::uint32_t output_channels,
                                const RenderParams& params) noexcept;
 
-    bool prepare_reverse_attack_horizon(SamplerVoice& voice,
-                                        double source_frames_per_output) noexcept;
+    bool prepare_reverse_attack_horizon(SamplerVoice& voice, double) noexcept;
 
     static bool stream_plan_pages_ready(const audio::SampleStreamLoopBlockPlan& plan) noexcept;
 
@@ -325,8 +339,7 @@ class PulpSamplerProcessor : public format::Processor {
 
     static std::uint64_t stream_lead_source_frames(double lead) noexcept;
 
-    void enqueue_forward_stream_boundary(SamplerVoice& voice,
-                                         double source_frames_per_output) noexcept;
+    void enqueue_forward_stream_boundary(SamplerVoice& voice, double) noexcept;
 
     void trigger_note(int note, float velocity, const SamplerPublishedSource& source,
                       const RenderParams& params);

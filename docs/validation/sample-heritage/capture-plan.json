@@ -1,0 +1,187 @@
+{
+  "protocols": [
+    {
+      "analysis": "gain-matched-null",
+      "axes": {
+        "operation": [
+          "record-through-adc",
+          "load-bypassing-adc",
+          "normalized-replay-pair"
+        ]
+      },
+      "id": "C1",
+      "name": "record-vs-load-null",
+      "purpose": "isolate record-path behavior from playback behavior",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "record-vs-load-path"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {"operation": "record-through-adc"},
+          "required_artifact_roles": ["stimulus", "stored_asset", "target_settings", "session_log"],
+          "vary": []
+        },
+        {
+          "fixed": {"operation": "load-bypassing-adc"},
+          "required_artifact_roles": ["stimulus", "stored_asset", "target_settings", "session_log"],
+          "vary": []
+        },
+        {
+          "fixed": {"operation": "normalized-replay-pair"},
+          "required_artifact_roles": ["recorded_replay", "loaded_replay", "target_settings", "session_log"],
+          "vary": []
+        }
+      ]
+    },
+    {
+      "analysis": "windowed-fft-fold-pattern",
+      "axes": {
+        "stimulus": ["fixed-period-tone", "swept-sine"],
+        "transpose_semitones": [-24, -12, 0, 12]
+      },
+      "id": "C2",
+      "name": "multi-transpose-sweep",
+      "purpose": "identify pitch family and fixed-filter versus changing-clock geometry",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "transposed-playback"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["stimulus", "transpose_semitones"]
+        }
+      ]
+    },
+    {
+      "analysis": "declared-level-gain-matched-null",
+      "axes": {"level_dbfs_relative": [0, -20]},
+      "id": "C3",
+      "name": "dual-level",
+      "purpose": "distinguish linear quantization from level-dependent coding after gain matching",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "converter-level-response"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["level_dbfs_relative"]
+        }
+      ]
+    },
+    {
+      "analysis": "active-idle-noise-spectrum",
+      "axes": {"state": ["digital-silence-voice-active", "true-idle"]},
+      "id": "C4",
+      "name": "playback-noise",
+      "purpose": "separate active playback noise from idle noise",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "active-idle-observation"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {},
+          "required_artifact_roles": ["raw_capture", "target_settings", "session_log"],
+          "vary": ["state"]
+        }
+      ]
+    },
+    {
+      "analysis": "time-domain-impulse-step-response",
+      "axes": {
+        "stimulus": ["unit-impulse", "unit-step"],
+        "transpose_semitones": [-24, -12, 0, 12]
+      },
+      "id": "C5",
+      "name": "impulse-step-per-transpose",
+      "purpose": "measure DAC hold and reconstruction behavior jointly",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "impulse-step-playback"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["stimulus", "transpose_semitones"]
+        }
+      ]
+    },
+    {
+      "analysis": "cyclic-or-adaptive-splice-recovery",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "offline-stretch"
+      },
+      "axes": {
+        "adaptive_quality": [10, 50, 99],
+        "adaptive_width": [0, 25, 99],
+        "cycle_ms": [5, 10, 20, 40, 65, "auto"],
+        "factor_percent": [50, 100, 200, 400, 1000, 2000],
+        "mode": ["cyclic", "adaptive"],
+        "stimulus": [
+          "impulse-train",
+          "fixed-period-tone",
+          "swept-sine",
+          "correlated-stereo-noise",
+          "licensed-transient-break",
+          "licensed-vocal-phrase"
+        ]
+      },
+      "id": "C6",
+      "name": "stretch-grid",
+      "purpose": "identify splice spacing, rounding, fade law, adaptation, arithmetic, and stereo coherence",
+      "required_selectors": [
+        {"stimulus": "impulse-train"},
+        {"factor_percent": 100, "stimulus": "fixed-period-tone"},
+        {"factor_percent": 100, "stimulus": "swept-sine"},
+        {"factor_percent": 100, "stimulus": "correlated-stereo-noise"}
+      ],
+      "variants": [
+        {
+          "fixed": {"mode": "cyclic"},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["stimulus", "factor_percent", "cycle_ms"]
+        },
+        {
+          "fixed": {"mode": "adaptive"},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["stimulus", "factor_percent", "cycle_ms", "adaptive_quality", "adaptive_width"]
+        }
+      ]
+    },
+    {
+      "analysis": "blinded-listening-corpus",
+      "axes": {
+        "stimulus": ["licensed-kick", "licensed-snare", "licensed-break"],
+        "transpose_semitones": [-24, -12, 0, 12]
+      },
+      "id": "C7",
+      "name": "transient-listening-corpus",
+      "purpose": "supply transient-dependent blinded listening material",
+      "applicability": {
+        "allow_omit_when_absent": true,
+        "capability": "licensed-listening-corpus"
+      },
+      "required_selectors": [{}],
+      "variants": [
+        {
+          "fixed": {},
+          "required_artifact_roles": ["stimulus", "raw_capture", "target_settings", "session_log"],
+          "vary": ["stimulus", "transpose_semitones"]
+        }
+      ]
+    }
+  ],
+  "schema": "pulp.heritage.capture-plan.v2"
+}

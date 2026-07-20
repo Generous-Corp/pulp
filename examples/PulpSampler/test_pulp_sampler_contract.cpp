@@ -106,7 +106,9 @@ TEST_CASE("PulpSampler resource estimates enforce exact checked limits",
     const auto usage = reference.estimate_prepare_resources(context);
     REQUIRE(usage.persistent_bytes > 46'080'000u);
     REQUIRE(usage.block_scratch_bytes ==
-            512u * PulpSamplerProcessor::kMaxOutputChannels * sizeof(float));
+            512u * (PulpSamplerProcessor::kMaxOutputChannels +
+                    PulpSamplerProcessor::kMaxSampleChannels) * sizeof(float) +
+                512u * sizeof(std::uint8_t));
     REQUIRE(usage.total_bytes() >= usage.persistent_bytes);
 
     auto require_limit = [&](format::PrepareResourceLimit expected,

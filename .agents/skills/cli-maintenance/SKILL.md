@@ -2560,3 +2560,19 @@ with exit -1 while libc++abi prints the message on stderr anyway — so a test
 asserting only "nonzero exit and the message is present" passes on the crash and
 proves nothing. Assert the exact code, and that stderr carries no termination
 banner.
+
+## `audio heritage` owns sampler-profile interchange and evidence renders
+
+`pulp audio heritage <validate|canonicalize|inspect|render>` is the neutral,
+versioned interchange surface for sampler Heritage profiles. Keep profile
+parsing, canonical JSON, validation, digesting, and rendering in `pulp::audio`;
+the CLI should remain argument parsing, atomic output, and stable reporting.
+Mirror any verb or flag change in `docs/status/cli-commands.yaml`,
+`docs/reference/cli.md`, and the `heritage-profile` skill. This nested audio
+verb intentionally has no separate slash command or MCP mirror.
+
+`canonicalize` is the import/export normalization boundary: it must parse and
+validate before atomically writing canonical schema-v3 JSON. `render` must keep
+the profile, fixture, WAV, and report paths distinct, execute record-commit as
+its separately reported transaction, and emit a deterministic evidence report
+through the same production profile/runtime path that consumers use.

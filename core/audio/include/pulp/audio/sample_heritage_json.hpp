@@ -61,11 +61,31 @@ struct SampleHeritageRuntimeStateJsonWriteResult {
     bool valid() const noexcept { return status == SampleHeritageJsonStatus::Ok; }
 };
 
-/// Parses the complete schema-v2 contract. This is an allocating, off-audio-thread API.
+struct SampleHeritageTypedRuntimeStateJsonParseResult {
+    SampleHeritageJsonStatus status = SampleHeritageJsonStatus::InvalidJson;
+    std::string field_path;
+    SampleHeritageRuntimeStateStatus runtime_status =
+        SampleHeritageRuntimeStateStatus::InvalidStageLayout;
+    SampleHeritageTypedRuntimeState state;
+
+    bool valid() const noexcept { return status == SampleHeritageJsonStatus::Ok; }
+};
+
+struct SampleHeritageTypedRuntimeStateJsonWriteResult {
+    SampleHeritageJsonStatus status =
+        SampleHeritageJsonStatus::ProfileValidationFailed;
+    SampleHeritageRuntimeStateStatus runtime_status =
+        SampleHeritageRuntimeStateStatus::InvalidStageLayout;
+    std::string json;
+
+    bool valid() const noexcept { return status == SampleHeritageJsonStatus::Ok; }
+};
+
+/// Parses the complete schema-v3 contract. This is an allocating, off-audio-thread API.
 SampleHeritageJsonParseResult parse_sample_heritage_profile_json(
     std::string_view json);
 
-/// Validates and writes one deterministic, whitespace-free schema-v2 representation.
+/// Validates and writes one deterministic, whitespace-free schema-v3 representation.
 /// This is an allocating, off-audio-thread API.
 SampleHeritageJsonWriteResult write_sample_heritage_profile_json(
     const SampleHeritageProfile& profile);
@@ -75,5 +95,13 @@ SampleHeritageRuntimeStateJsonParseResult parse_sample_heritage_runtime_state_js
     std::string_view json);
 SampleHeritageRuntimeStateJsonWriteResult write_sample_heritage_runtime_state_json(
     const SampleHeritageRuntimeState& state);
+
+/// Strict schema-v2 persistence for the fixed typed sampler engine bank.
+/// Schema dispatch is the migration boundary; unknown newer versions fail closed.
+SampleHeritageTypedRuntimeStateJsonParseResult
+parse_sample_heritage_typed_runtime_state_json(std::string_view json);
+SampleHeritageTypedRuntimeStateJsonWriteResult
+write_sample_heritage_typed_runtime_state_json(
+    const SampleHeritageTypedRuntimeState& state);
 
 }  // namespace pulp::audio

@@ -193,6 +193,16 @@
         "empty-ok": "handoff is a cross-session process skill; it owns no source paths, so no diff triggers a required update (same pattern as code-comments and pr-review-sweep)."
       }
     },
+    "heritage-profile": {
+      "paths": [
+        "core/audio/**/*sample_heritage*",
+        "examples/PulpSampler/**/*heritage*",
+        "test/**/*sample_heritage*",
+        "tools/audio/quality-lab/**/*sampler_heritage*",
+        "tools/cli/**/*heritage*",
+        "docs/**/*heritage*"
+      ]
+    },
     "hosting": {
       "paths": [
         "core/host/**",

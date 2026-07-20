@@ -136,3 +136,9 @@ audio/MIDI byte stream with both the committed snapshot and pinned fixture.
 Also verify installed-header consumption, `-fno-exceptions -fno-rtti`, and that
 timeline translation units do not include or link `pulp::format`, `pulp::host`,
 or `pulp::view`.
+
+`test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
+runtime tests. That shared CMake inventory does not make profile JSON, capture
+evidence, or sampler rendering part of the timeline document schema; keep those
+contracts in `pulp::audio` unless a future version explicitly adds a document
+reference type.

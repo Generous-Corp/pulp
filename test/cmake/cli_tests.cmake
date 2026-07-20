@@ -133,7 +133,8 @@ function(pulp_bind_cli_shellout_target target)
     endif()
 endfunction()
 
-add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp)
+add_executable(pulp-test-cli-shellout test_cli_shellout.cpp test_cli_fmt_shellout.cpp
+    test_cli_audio_heritage.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 pulp_bind_cli_shellout_target(pulp-test-cli-shellout)
 

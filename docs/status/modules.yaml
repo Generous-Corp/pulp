@@ -33,7 +33,7 @@ modules:
     docs: reference/modules.md#events
 
   - name: audio
-    summary: Multi-platform device I/O (CoreAudio, WASAPI, ALSA, JACK, Web Audio), portable codecs and writers, surround and offline processing, plus resident, sequential-streaming, and shared paged sampler playback with canonical loop/interpolation traversal, slice/key analysis, and realtime contract inventory
+    summary: Multi-platform device I/O (CoreAudio, WASAPI, ALSA, JACK, Web Audio), portable codecs and writers, surround and offline processing, plus resident, sequential-streaming, and shared paged sampler playback with canonical loop/interpolation traversal, slice/key analysis, strict data-defined Sample Heritage character profiles, and realtime contract inventory
     status: usable
     dependencies: [runtime]
     docs: reference/modules.md#audio

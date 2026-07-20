@@ -830,6 +830,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.

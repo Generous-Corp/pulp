@@ -34,6 +34,10 @@ struct SamplerVoice {
     std::uint32_t stream_boundary_demand_index = 0;
     std::uint32_t streamed_mip_octave = 0;
     double stream_playback_rate = 0.0;
+    double heritage_pitch_factor = 1.0;
+    double heritage_clock_multiplier = 1.0;
+    double heritage_live_consumption_factor = 1.0;
+    bool heritage_rate_automation_rejected = false;
     double lookahead_lead_source_frames = 0.0;
     bool streamed = false;
     bool stream_attack_pending = false;
@@ -41,6 +45,8 @@ struct SamplerVoice {
     bool pending_lookahead_valid = false;
     bool stream_contract_fade_pending = false;
     std::uint32_t stream_contract_fade_position = 0;
+    std::uint64_t heritage_tail_frames_remaining = 0;
+    bool heritage_source_exhausted = false;
     bool released = false;
 
     void reset() {
@@ -60,6 +66,10 @@ struct SamplerVoice {
         stream_boundary_demand_index = 0;
         streamed_mip_octave = 0;
         stream_playback_rate = 0.0;
+        heritage_pitch_factor = 1.0;
+        heritage_clock_multiplier = 1.0;
+        heritage_live_consumption_factor = 1.0;
+        heritage_rate_automation_rejected = false;
         lookahead_lead_source_frames = 0.0;
         streamed = false;
         stream_attack_pending = false;
@@ -67,6 +77,8 @@ struct SamplerVoice {
         pending_lookahead_valid = false;
         stream_contract_fade_pending = false;
         stream_contract_fade_position = 0;
+        heritage_tail_frames_remaining = 0;
+        heritage_source_exhausted = false;
         released = false;
         adsr.reset();
         renderer.reset();
