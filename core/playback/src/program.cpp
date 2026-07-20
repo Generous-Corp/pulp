@@ -31,10 +31,12 @@ PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t doc
                                  std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                                  std::shared_ptr<const DecodedAudioAssetPool> audio_assets,
                                  AudioRendererLimits audio_limits,
+                                 AutomationPlaybackLimits automation_limits,
                                  std::vector<std::shared_ptr<const TrackProgram>> tracks) noexcept
     : generation_(generation), document_revision_(document_revision), project_id_(project_id),
       sequence_id_(sequence_id), tempo_map_(std::move(tempo_map)),
       audio_assets_(std::move(audio_assets)), audio_limits_(audio_limits),
+      automation_limits_(automation_limits),
       tracks_(std::move(tracks)) {}
 
 const std::shared_ptr<const TrackProgram>*

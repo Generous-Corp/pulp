@@ -46,6 +46,21 @@ track(const std::shared_ptr<const CompiledTempoMap>& map,
     return take(TrackAutomationProgram::create({5}, map, std::move(programs)));
 }
 
+std::shared_ptr<const AutomationProgram>
+hold_program(ItemId lane_id, DeviceParameterTarget target,
+             const std::shared_ptr<const CompiledTempoMap>& map, std::uint32_t point_count) {
+    std::vector<AutomationPoint> points;
+    points.reserve(point_count);
+    for (std::uint32_t index = 0; index < point_count; ++index) {
+        points.push_back({{lane_id.value * 10'000u + index + 1u},
+                          map->samples_to_ticks({index}), static_cast<float>(index),
+                          AutomationInterpolation::Hold});
+    }
+    auto lane = take(AutomationLane::create(
+        lane_id, target, take(AutomationCurve::create(std::move(points)))));
+    return take(AutomationProgram::compile(lane, map, 1));
+}
+
 void prepare(MasterTransport& transport, const CompiledTempoMap& map,
              std::uint32_t maximum_frames) {
     MasterTransportConfig config;
@@ -195,7 +210,10 @@ TEST_CASE("track automation renderer fails closed when mandatory device topology
             lane_id, DeviceParameterTarget{{100}, index}, std::move(curve)));
         programs.push_back(take(AutomationProgram::compile(lane, map, 1)));
     }
-    auto renderer = take(TrackAutomationRenderer::create(track(map, std::move(programs))));
+    auto limits = AutomationPlaybackLimits{};
+    limits.max_lanes_per_track = 513;
+    auto renderer = take(
+        TrackAutomationRenderer::create(track(map, std::move(programs)), limits));
     MasterTransport transport;
     prepare(transport, *map, 2);
 
@@ -221,4 +239,100 @@ TEST_CASE("track automation renderer clears published batches on render failure"
     REQUIRE(failed.code == TrackAutomationRendererCode::InvalidTransport);
     REQUIRE_FALSE(failed.failed_lane_id.valid());
     REQUIRE(renderer.batches()[0].events.empty());
+}
+
+TEST_CASE("track automation renderer rejects topology beyond prepared limits") {
+    const auto map = tempo_map();
+    const auto first = program({10}, {{100}, 1}, map, 1);
+    const auto second = program({20}, {{200}, 2}, map, 1);
+
+    auto lane_limits = AutomationPlaybackLimits{};
+    lane_limits.max_lanes_per_track = 1;
+    const auto too_many_lanes = TrackAutomationRenderer::create(
+        track(map, {first, second}), lane_limits);
+    REQUIRE_FALSE(too_many_lanes);
+    REQUIRE(too_many_lanes.error().code ==
+            TrackAutomationRendererCode::LaneCapacityExceeded);
+
+    auto device_limits = AutomationPlaybackLimits{};
+    device_limits.max_device_placements_per_track = 1;
+    const auto too_many_devices = TrackAutomationRenderer::create(
+        track(map, {first, second}), device_limits);
+    REQUIRE_FALSE(too_many_devices);
+    REQUIRE(too_many_devices.error().code ==
+            TrackAutomationRendererCode::DeviceCapacityExceeded);
+
+    auto invalid_limits = AutomationPlaybackLimits{};
+    invalid_limits.max_render_candidates_per_block = 0;
+    const auto invalid = TrackAutomationRenderer::create(track(map, {first}), invalid_limits);
+    REQUIRE_FALSE(invalid);
+    REQUIRE(invalid.error().code == TrackAutomationRendererCode::InvalidLimits);
+}
+
+TEST_CASE("track automation renderer bounds total merge work and preserves candidate diagnostics") {
+    const auto map = tempo_map();
+    const auto lane = program({10}, {{100}, 1}, map, 1, 1'999);
+    auto limits = AutomationPlaybackLimits{};
+    limits.max_render_candidates_per_block = 1'023;
+    auto renderer = take(TrackAutomationRenderer::create(track(map, {lane}), limits));
+    MasterTransport transport;
+    prepare(transport, *map, 2'000);
+
+    const auto bounded = renderer.process(block(transport, 2'000));
+    REQUIRE(bounded.code == TrackAutomationRendererCode::WorkCapacityExceeded);
+    REQUIRE(bounded.failed_lane_id == ItemId{10});
+    REQUIRE(bounded.candidate_events > TrackAutomationRenderer::kEventsPerDevice);
+    REQUIRE(renderer.batches()[0].events.empty());
+
+    limits.max_render_candidates_per_block = TrackAutomationRenderer::kEventsPerDevice;
+    auto coalesced = take(TrackAutomationRenderer::create(track(map, {lane}), limits));
+    MasterTransport second_transport;
+    prepare(second_transport, *map, 2'000);
+    const auto rendered = coalesced.process(block(second_transport, 2'000));
+    REQUIRE(rendered.code == TrackAutomationRendererCode::Coalesced);
+    REQUIRE(rendered.candidate_events > rendered.emitted_events);
+}
+
+TEST_CASE("track automation renderer honors configured per-device output headroom") {
+    const auto map = tempo_map();
+    const auto continuous = program({10}, {{100}, 1}, map, 1, 99);
+    auto limits = AutomationPlaybackLimits{};
+    limits.max_events_per_device_per_block = 16;
+    auto renderer = take(
+        TrackAutomationRenderer::create(track(map, {continuous}), limits));
+    MasterTransport transport;
+    prepare(transport, *map, 100);
+
+    const auto rendered = renderer.process(block(transport, 100));
+    REQUIRE(rendered.code == TrackAutomationRendererCode::Coalesced);
+    REQUIRE(rendered.emitted_events == 16);
+    REQUIRE(renderer.batches()[0].events.size() == 16);
+
+    const auto mandatory = hold_program({20}, {{100}, 2}, map, 5);
+    limits.max_events_per_device_per_block = 4;
+    auto mandatory_renderer = take(
+        TrackAutomationRenderer::create(track(map, {mandatory}), limits));
+    MasterTransport mandatory_transport;
+    prepare(mandatory_transport, *map, 5);
+    const auto failed = mandatory_renderer.process(block(mandatory_transport, 5));
+    REQUIRE(failed.code == TrackAutomationRendererCode::DeviceCapacityExceeded);
+    REQUIRE(mandatory_renderer.batches()[0].events.empty());
+}
+
+TEST_CASE("track automation renderer never exposes partial batches when a later device fails") {
+    const auto map = tempo_map();
+    const auto first_device = program({10}, {{100}, 1}, map, 1, 599);
+    const auto dense_one = hold_program({20}, {{200}, 2}, map, 600);
+    const auto dense_two = hold_program({30}, {{200}, 3}, map, 600);
+    auto renderer = take(TrackAutomationRenderer::create(
+        track(map, {first_device, dense_one, dense_two})));
+    MasterTransport transport;
+    prepare(transport, *map, 600);
+
+    const auto failed = renderer.process(block(transport, 600));
+    REQUIRE(failed.code == TrackAutomationRendererCode::DeviceCapacityExceeded);
+    REQUIRE(failed.failed_device_placement_id == ItemId{200});
+    REQUIRE(renderer.batches().size() == 2);
+    REQUIRE(renderer.batches()[0].events.empty());
+    REQUIRE(renderer.batches()[1].events.empty());
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/audio/rt_safety_contract.hpp>
+#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/automation_cursor.hpp>
 #include <pulp/playback/track_automation_program.hpp>
 #include <pulp/runtime/result.hpp>
@@ -40,6 +41,8 @@ enum class TrackAutomationRendererCode : std::uint8_t {
     LaneAdoptionRejected,
     LaneCapacityExceeded,
     DeviceCapacityExceeded,
+    WorkCapacityExceeded,
+    InvalidLimits,
 };
 
 enum class TrackAutomationRendererAdoption : std::uint8_t {
@@ -66,12 +69,14 @@ struct TrackAutomationRenderResult {
 /// for lanes with the same identity and preallocates all block storage.
 class TrackAutomationRenderer {
   public:
-    static constexpr std::size_t kEventsPerDevice = 1024;
+    static constexpr std::size_t kEventsPerDevice =
+        AutomationPlaybackLimits::kMaximumEventsPerDevicePerBlock;
     static constexpr audio::RtSafetyClass process_rt_safety_class =
         audio::RtSafetyClass::AudioCallbackSafeWithImmutableInputs;
 
     static runtime::Result<TrackAutomationRenderer, TrackAutomationRendererError>
-    create(std::shared_ptr<const TrackAutomationProgram> program);
+    create(std::shared_ptr<const TrackAutomationProgram> program,
+           AutomationPlaybackLimits limits = AutomationPlaybackLimits::platform_defaults());
 
     TrackAutomationRenderer(const TrackAutomationRenderer&) = delete;
     TrackAutomationRenderer& operator=(const TrackAutomationRenderer&) = delete;
@@ -89,6 +94,9 @@ class TrackAutomationRenderer {
     timeline::ItemId track_id() const noexcept;
     const std::shared_ptr<const TrackAutomationProgram>& program() const noexcept {
         return program_;
+    }
+    const AutomationPlaybackLimits& limits() const noexcept {
+        return limits_;
     }
     std::span<const DeviceAutomationBatch> batches() const noexcept {
         return batch_views_;
@@ -125,6 +133,7 @@ class TrackAutomationRenderer {
     };
 
     std::shared_ptr<const TrackAutomationProgram> program_;
+    AutomationPlaybackLimits limits_;
     std::vector<LaneState> lanes_;
     std::vector<DeviceState> devices_;
     std::vector<DeviceAutomationBatch> batch_views_;
