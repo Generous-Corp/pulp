@@ -33,7 +33,12 @@ TEST_CASE("Timeline Track v3 automation is canonical and round trips") {
     REQUIRE(encoded.json.find("pulp.timeline.automation_target.device_parameter") !=
             std::string::npos);
 
-    const auto decoded = take(deserialize_project(encoded.json, builtins()));
+    auto decoded_result = deserialize_project(encoded.json, builtins());
+    const auto decoded_code = decoded_result ? -1 : static_cast<int>(decoded_result.error().code);
+    const auto decoded_path = decoded_result ? std::string{} : decoded_result.error().path;
+    INFO("code=" << decoded_code << " path=" << decoded_path);
+    REQUIRE(decoded_result);
+    const auto decoded = std::move(decoded_result).value();
     const auto& lane = decoded.sequences()[0].tracks()[0].automation_lanes()[0];
     REQUIRE(lane.id() == ItemId{5});
     REQUIRE(lane.curve().points().size() == 2);
@@ -54,7 +59,12 @@ TEST_CASE("Timeline identity decoding accepts snapshots predating automation own
 }
 
 TEST_CASE("Timeline permanent Track v3 automation fixture remains readable") {
-    const auto decoded = take(deserialize_project(fixture("v3/automation-lane.json"), builtins()));
+    auto decoded_result = deserialize_project(fixture("v3/automation-lane.json"), builtins());
+    const auto decoded_code = decoded_result ? -1 : static_cast<int>(decoded_result.error().code);
+    const auto decoded_path = decoded_result ? std::string{} : decoded_result.error().path;
+    INFO("code=" << decoded_code << " path=" << decoded_path);
+    REQUIRE(decoded_result);
+    const auto decoded = std::move(decoded_result).value();
     const auto& track = decoded.sequences()[0].tracks()[0];
     REQUIRE(track.automation_lanes().size() == 1);
     REQUIRE(track.automation_lanes()[0].curve().points()[1].interpolation ==

@@ -300,6 +300,7 @@ class StructuralScanner {
     }
 
     bool string_value(Span span, std::string& value) {
+        value.clear();
         std::size_t position = span.begin;
         if (!scan_string(position, &value)) return false;
         return position == span.end;
