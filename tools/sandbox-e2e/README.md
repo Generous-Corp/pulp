@@ -5,7 +5,7 @@ runs in a fresh tempdir with a shadowed `$PATH` and isolated
 `$PULP_HOME`; the contamination audit enforces **zero writes** to the
 user's real `~/.pulp/` install.
 
-Tracked in [pulp#732](https://github.com/danielraffel/pulp/issues/732).
+Tracked in [pulp#732](https://github.com/Generous-Corp/pulp/issues/732).
 Sibling harness pattern for Shipyard lives in
 [Shipyard#248](https://github.com/danielraffel/Shipyard/issues/248).
 

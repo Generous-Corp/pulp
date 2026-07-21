@@ -67,6 +67,11 @@ The lexical choice makes two caller obligations load-bearing rather than implied
 
 Validation reads `pulp.package.json` plus declared local files only. It checks shape, licenses, Pulp/C++ requirements, known Pulp module dependencies, and declared evidence hashes before plan/apply. `content-pack` manifests can be searched, validated, and inspected, but `pulp kit plan/apply/publish` rejects them; switch to `pulp content ...`.
 
+A sampler Heritage profile is also not a kit by itself. Use `pulp audio
+heritage validate|canonicalize|inspect|render` for the versioned profile and
+its evidence. Use the kit lane only when a reviewed package intentionally wraps
+that data together with Pulp source, UI, templates, or project mutations.
+
 Developer notes:
 
 - `pulp kit search` is local discovery only; it never fetches and never makes a result trusted.

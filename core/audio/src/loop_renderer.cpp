@@ -144,6 +144,7 @@ LoopRenderResult LoopRenderer::render(BufferView<const float> source,
         if (gain == 0.0f) ++result.silent_frames;
 
         if (should_advance) {
+            ++result.source_backed_frames;
             const auto advanced = cursor_.advance();
             sample_wrapped = sample_wrapped || advanced.wrapped;
         }

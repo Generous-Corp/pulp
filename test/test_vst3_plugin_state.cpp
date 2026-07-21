@@ -2,6 +2,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/vst3_adapter.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pulp/view/input_events.hpp>
+#include <pluginterfaces/base/keycodes.h>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/vst3_midi_mapping.hpp>
@@ -667,6 +670,9 @@ struct PulpPlugViewTestAccess {
     }
     static pulp::state::StateStore& store(PulpPlugView& view) {
         return view.store_;
+    }
+    static pulp::view::View* root(PulpPlugView& view) {
+        return view.bridge_.view();
     }
 };
 } // namespace pulp::format::vst3
@@ -4878,6 +4884,43 @@ TEST_CASE("VST3 canResize is true when the plugin declares min bounds",
     pulp::state::StateStore store;
     pulp::format::vst3::PulpPlugView view(proc, store);
     REQUIRE(view.canResize() == Steinberg::kResultTrue);
+}
+
+// The REAPER-spacebar fix at the VST3 key layer. REAPER (with "send all keyboard
+// input to plug-in" OFF — its default) offers keys through IPlugView::onKeyDown
+// BEFORE its transport accelerator; PulpPlugView must consume Space for a focused
+// text field, and MUST NOT touch anything else (or it eats the host's transport /
+// Musical Typing / shortcuts). These pin the scoping guards that are the whole risk
+// of the fix; the positive "Space types into the field" path is additionally
+// proven live via an A/B CGEvent test in default REAPER.
+TEST_CASE("VST3 onKeyDown leaves non-Space keys to the host",
+          "[vst3][gui][keyboard][daw-transport][reaper]") {
+    Vst3ResizeProcessor proc(ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+    // A letter must fall through to the host — never consumed here.
+    REQUIRE(view.onKeyDown(u'a', 0, 0) == Steinberg::kResultFalse);
+}
+
+TEST_CASE("VST3 onKeyDown leaves Cmd/Ctrl-Space to the host (system chord)",
+          "[vst3][gui][keyboard][daw-transport][reaper]") {
+    Vst3ResizeProcessor proc(ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+    REQUIRE(view.onKeyDown(u' ', Steinberg::KEY_SPACE, Steinberg::kCommandKey) ==
+            Steinberg::kResultFalse);
+    REQUIRE(view.onKeyDown(u' ', Steinberg::KEY_SPACE, Steinberg::kControlKey) ==
+            Steinberg::kResultFalse);
+}
+
+TEST_CASE("VST3 onKeyDown leaves Space to the host when no text field is focused",
+          "[vst3][gui][keyboard][daw-transport][reaper]") {
+    // Nothing focused → the host keeps the spacebar for transport (play/stop).
+    // This is the guarantee that the fix does not hijack Space wholesale.
+    Vst3ResizeProcessor proc(ViewSize{400, 300, 0, 0, 0, 0, 0.0});
+    pulp::state::StateStore store;
+    pulp::format::vst3::PulpPlugView view(proc, store);
+    REQUIRE(view.onKeyDown(u' ', Steinberg::KEY_SPACE, 0) == Steinberg::kResultFalse);
 }
 
 TEST_CASE("VST3 checkSizeConstraint free-resize clamps min/max without aspect snap",

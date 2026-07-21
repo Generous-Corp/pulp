@@ -15,8 +15,8 @@
 site_name: Pulp
 site_description: Cross-platform audio plugin and application framework. MIT-licensed.
 site_url: https://generouscorp.com/pulp/
-repo_url: https://github.com/danielraffel/pulp
-repo_name: danielraffel/pulp
+repo_url: https://github.com/Generous-Corp/pulp
+repo_name: Generous-Corp/pulp
 edit_uri: edit/main/docs/
 
 docs_dir: docs

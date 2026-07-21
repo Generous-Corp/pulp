@@ -28,8 +28,8 @@ the optional metrics workflow, or skip metrics and inspect live jobs directly.
 Use these commands as the normal agent loop:
 
 ```bash
-shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
-tartci runtime export --repo danielraffel/pulp --since-days 14 \
+shipyard metrics import github --repo Generous-Corp/pulp --limit 50 --json
+tartci runtime export --repo Generous-Corp/pulp --since-days 14 \
   | shipyard metrics import tartci --json
 shipyard metrics summary --project pulp --json
 shipyard metrics watch --project pulp --since 14d --json
@@ -270,7 +270,7 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    `macos` gate runs on the **local self-hosted Mac Studios** (`pulp-studio-01/02/03`,
    + the M5 overflow), which are usually idle. Confirm with:
    ```bash
-   ghapp api repos/danielraffel/pulp/actions/runners \
+   ghapp api repos/Generous-Corp/pulp/actions/runners \
      | python3 -c "import sys,json;[print(r['name'],r['status'],'busy='+str(r['busy'])) for r in json.load(sys.stdin)['runners']]"
    ```
    If the Studios show `busy=False`, the pool is NOT saturated — say so. What DOES
@@ -311,6 +311,19 @@ once that pool is confirmed always-on, or the gate just starves elsewhere. It
 defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
 for this triad; full design in
 `planning/2026-07-06-ci-queue-saturation-watchdog.md`.
+
+**Caveat to step 3 (part 2) — a *different flaky test each re-run* is Studio
+oversubscription, not a code bug.** The Studio runs up to `macos_vm_cap` (2, the
+Apple guest limit) concurrent build VMs. RELATIVE-timing / CPU-budget / benchmark
+tests (labels `performance`, `bench`, `quality-lab` — e.g. heritage-performance's
+"Representative chain stays within the shipping CPU budget", a ratio ≤ 2.0×1.05
+vs an in-run baseline) tolerate steady load but NOT the load *variance* a sibling
+VM's bursty compile creates → they flake whenever 2 gate builds run at once. It is
+NOT a real failure and re-running makes it worse (adds load). Those labels are now
+excluded from the required PR/merge_group gate (build.yml `label_exclude`) — a
+perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
+dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
+label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
 
 ## A dead lane is only visible as queue age — never as a missing runner
 
@@ -492,11 +505,11 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   ```yaml
   jobs:
     check:
-      if: github.event_name != 'schedule' || github.repository == 'danielraffel/pulp'
+      if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
   ```
 
   compose it with an existing condition as
-  `if: (github.event_name != 'schedule' || github.repository == 'danielraffel/pulp') && (<existing>)`.
+  `if: (github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp') && (<existing>)`.
   It only suppresses the **schedule** event on forks — `push` / `pull_request` /
   `workflow_dispatch` are untouched, so PRs to this repo (which run in this repo's
   context) and manual dispatches behave exactly as before. A workflow that
@@ -593,17 +606,30 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
-  post-merge half of the version-bump intent-trailer model — and the workflow
-  ships in DRY-RUN.** They exist to kill the version-bump merge treadmill (PRs
-  editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json` re-conflict
-  every time main advances, and N parallel PRs endlessly re-bump the same
-  shared counter). The endgame: a PR declares `Version-Bump: <surface>=<level>`
-  and touches NO version files, and this bot assigns the exact number AFTER
-  merge from main's current version — so no two PRs ever contend for the same
-  number. **Today (dry-run): computes and logs what it WOULD assign; writes and
-  pushes nothing**, so it is safe to land while PRs still hand-bump. The
-  `--push` path (`apply_and_push`) is built and unit-tested but the workflow
-  does not call it yet.
+  post-merge half of the version-bump intent-trailer model, and the workflow
+  runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill
+  (PRs editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json`
+  re-conflict every time main advances, and N parallel PRs endlessly re-bump the
+  same shared counter). A PR declares `Version-Bump: <surface>=<level>` (or the
+  level is inferred from its paths / conventional-commit subject) and touches NO
+  version files; this bot assigns the exact number AFTER merge from main's
+  current version — so no two PRs ever contend for the same number.
+  - **Landing route — `--route {direct,pr}`, selected by the `PULP_BUMP_ROUTE`
+    repo variable (unset ⇒ `direct`).**
+    - `direct` (default, live today): `apply_and_push` pushes the
+      `chore: bump versions` commit straight to `main` with `--ff-only`. This is
+      what publishes releases now. It is INCOMPATIBLE with a "Require merge
+      queue" branch rule (the rule blocks all direct pushes to main — that
+      incompatibility caused the 2026-07-20 release drought).
+    - `pr` (dormant until flipped): `apply_via_pr` opens a `chore: bump versions`
+      PR on the fixed `release/version-bump` branch and arms
+      `gh pr merge --auto --merge`, so the bump lands THROUGH the merge queue.
+      Requires the `RELEASE_BOT_TOKEN` PAT (a GITHUB_TOKEN-created PR does not
+      trigger checks). When `PULP_BUMP_ROUTE=pr`, the workflow's `concurrency`
+      group becomes a single constant so all drains SERIALIZE (the PR-route's
+      shared-branch reclaim is only race-free without a competing drain). Plan +
+      rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
+      This is the path back to the merge queue we moved to an org for.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into
@@ -1220,7 +1246,7 @@ down this list before touching build code:
 runner is *actually* running (it prints the live `Running job:` line), and
 
 ```bash
-ghapp api repos/danielraffel/pulp/actions/runners     # busy/idle per runner
+ghapp api repos/Generous-Corp/pulp/actions/runners     # busy/idle per runner
 ```
 
 distinguishes "saturated" from "wedged" from "starved by a lower-priority lane."
@@ -1746,7 +1772,7 @@ than parsing error strings.
 **Shipyard is Pulp's primary CI tool.** All merges, validations, and
 ship cycles should use Shipyard. `local_ci.py` remains in the repo as
 a fallback but is scheduled for removal after a 2-week observation
-period (see danielraffel/pulp#120).
+period (see Generous-Corp/pulp#120).
 
 **Prefer Shipyard for GitHub work — it dodges the personal `gh` rate
 limit.** Shipyard authenticates with its own **GitHub App token**
@@ -1931,7 +1957,7 @@ If a PR's macOS check is queued, first verify whether it is actually
 waiting on the self-hosted runner pool before taking action:
 
 ```bash
-gh api repos/danielraffel/pulp/actions/runners --jq \
+gh api repos/Generous-Corp/pulp/actions/runners --jq \
   '.runners[] | select(.labels[].name == "pulp-build") |
    {name,status,busy,labels:[.labels[].name]}'
 ```
@@ -2805,10 +2831,10 @@ test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config
 
 # Verify GitHub Actions runner routing. Namespace handles macOS PR work
 # (2026-05-18 re-commissioning); GHA-hosted handles Linux+Windows.
-gh variable list -R danielraffel/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
-gh variable list -R danielraffel/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_DEFAULT_RUNNER_PROVIDER[[:space:]]*github-hosted' || echo "WARNING: PULP_DEFAULT_RUNNER_PROVIDER should be github-hosted"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_LOCAL_MACOS_RUNS_ON_JSON is missing; macOS build will use hosted macos-15"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON' || echo "WARNING: PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON is missing; macOS overflow will not reach Namespace"
+gh variable list -R Generous-Corp/pulp | grep -q '^PULP_LOCAL_MAC_OVERFLOW_THRESHOLD[[:space:]]*0' || echo "INFO: PULP_LOCAL_MAC_OVERFLOW_THRESHOLD is non-zero; macOS leg will prefer the local self-hosted Mac before overflowing to Namespace"
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
@@ -2904,7 +2930,7 @@ Routing variables (verify before debugging "stuck" macOS PRs):
 
 `shipyard pr` is the authoritative ship path. Do NOT push empty commits to
 retrigger a slow macOS check. If macOS is queued >45 min, check
-`gh api repos/danielraffel/pulp/actions/runners` first.
+`gh api repos/Generous-Corp/pulp/actions/runners` first.
 
 ## Pre-push rebase hygiene
 
@@ -2953,9 +2979,9 @@ through — and slots the new SHA to the BACK of the Namespace concurrency
 queue. The correct re-run pattern when CI hit transient breakage is:
 
 ```bash
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/rerun
 # or to rerun only failed jobs:
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/rerun-failed-jobs
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/rerun-failed-jobs
 ```
 
 That keeps your SHA + queue position, only re-fires the failed legs.
@@ -2974,7 +3000,7 @@ stuck", confirm:
 
 ```bash
 # Are the pulp-build runners online and busy?
-gh api repos/danielraffel/pulp/actions/runners --jq \
+gh api repos/Generous-Corp/pulp/actions/runners --jq \
   '.runners[] | select(.labels[].name == "pulp-build")
    | "\(.name) status=\(.status) busy=\(.busy)"'
 ```
@@ -2992,7 +3018,7 @@ those rerun attempts can still consume runner minutes. Cancel them
 explicitly:
 
 ```bash
-gh api -X POST repos/danielraffel/pulp/actions/runs/<RUN_ID>/cancel
+gh api -X POST repos/Generous-Corp/pulp/actions/runs/<RUN_ID>/cancel
 ```
 
 The default chain (`.github/workflows/build.yml` `resolve-provider` job):
@@ -3061,7 +3087,7 @@ hit a generator-mismatch error against the warm dir.
   `resolve-provider`). A plain dispatch routes Linux/Windows to
   GitHub-hosted runners; no `-f runner_provider` is needed:
   ```bash
-  gh workflow run build.yml --repo danielraffel/pulp --ref <branch>
+  gh workflow run build.yml --repo Generous-Corp/pulp --ref <branch>
   ```
   Passing `-f runner_provider=namespace` will fail until the
   `PULP_NAMESPACE_BUILD_*_RUNS_ON_JSON` repo variables are restored.
@@ -4494,7 +4520,7 @@ Intel portability is verified in four tiers (owned by the `intel-canary` skill;
 full design in `docs/guides/intel-support.md`). CI-relevant facts:
 
 - **Tier 0** is a step in `build.yml`'s ARM macOS job, gated on the
-  `PULP_INTEL_CANARY` repo variable (set `1` on `danielraffel/pulp`; forks
+  `PULP_INTEL_CANARY` repo variable (set `1` on `Generous-Corp/pulp`; forks
   default off and skip it). It runs the lint + a GPU-off x86_64 compile.
 - **Tier 1** is `intel-portability.yml` — a path-triggered **advisory** x86_64
   lane on the STABLE `macos-15` (arm+Rosetta). Do NOT add it to required checks.

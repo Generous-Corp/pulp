@@ -68,7 +68,7 @@ adapter/ABI sources. Two ways to wire the dependencies:
   ```bash
   # download + unpack the SDK dev tarball, then point CMAKE_PREFIX_PATH at it
   curl -L -o pulp-sdk.tgz \
-    https://github.com/danielraffel/pulp/releases/latest/download/pulp-sdk-darwin-arm64.tar.gz
+    https://github.com/Generous-Corp/pulp/releases/latest/download/pulp-sdk-darwin-arm64.tar.gz
   tar xzf pulp-sdk.tgz            # -> ./pulp-sdk/lib/cmake/Pulp/...
   cmake -S . -B build -DCMAKE_PREFIX_PATH="$PWD/pulp-sdk"
   cmake --build build -j
@@ -82,7 +82,7 @@ adapter/ABI sources. Two ways to wire the dependencies:
   path:
 
   ```bash
-  git clone https://github.com/danielraffel/pulp && cd pulp
+  git clone https://github.com/Generous-Corp/pulp && cd pulp
   export SKIA_DIR=/path/to/external/skia-build
   cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release -DPULP_ENABLE_GPU=ON \
         -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF \

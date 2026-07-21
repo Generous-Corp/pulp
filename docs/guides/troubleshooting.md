@@ -12,14 +12,14 @@ Common issues and solutions when building and using Pulp.
 
 **macOS / Linux**
 ```bash
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 ./setup.sh
 ```
 
 **Windows (PowerShell)**
 ```powershell
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```

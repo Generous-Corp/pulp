@@ -830,6 +830,7 @@ for the real guidance. If nothing here fits, say so — then hand-roll.
 - Render a plugin bundle offline — no DAW, no audio device — to a WAV + metrics. → `pulp audio render`
 - Look at a sample window of a WAV — waveform/spectrum — as JSON or PNG. → `pulp audio scope`
 - Prove what a plugin actually emitted — summarize, diagnose, compare, or gate a WAV. → `pulp audio validate summarize`
+- Build and verify blinded capture packs for a sampler heritage profile without recording machine identity. → `tools/audio/heritage-calibration/heritage_calibration.py`
 
 This digest is GENERATED from `docs/status/tools.yaml` by
 `tools/scripts/tools_registry_check.py --write`. Do not edit it by hand.
@@ -1443,7 +1444,7 @@ is listening to music, on a call, near sleeping people, or just away
 from the desk, mystery audio is at minimum confusing and at worst
 embarrassing or harmful.
 
-Until issue [#3173](https://github.com/danielraffel/pulp/issues/3173)
+Until issue [#3173](https://github.com/Generous-Corp/pulp/issues/3173)
 ships a real solution (announce-before / bounded-duration / muting /
 configurable signature / `audio_consent` knob), the interim contract
 for every agent (Claude Code, Codex, human-driven scripts) is:
@@ -1466,7 +1467,7 @@ for every agent (Claude Code, Codex, human-driven scripts) is:
    + `xcrun simctl shutdown ...`) rather than leaving it open. Same
    for `auval` host processes, REAPER / Logic test instances.
 
-When [#3173](https://github.com/danielraffel/pulp/issues/3173) lands a
+When [#3173](https://github.com/Generous-Corp/pulp/issues/3173) lands a
 real solution, **remove this section** and replace it with a pointer
 to the new mechanism. This contract exists only because the proper
 fix is still on the issue tracker.
@@ -1647,7 +1648,7 @@ auto-trigger `pull_request` workflows, so `ghapp workflow run build.yml --ref
 <branch>` + `… version-skill-check.yml --ref <branch>` are often needed;
 (2) check for a version-bump race (PR goes `DIRTY` on the `CMakeLists.txt`
 VERSION line — re-merge `main`); (3) only then verify capacity with
-`ghapp api repos/danielraffel/pulp/actions/runners` (`busy` per runner) —
+`ghapp api repos/Generous-Corp/pulp/actions/runners` (`busy` per runner) —
 GitHub-*hosted* advisory lanes queue independently and don't block merge. Full
 diagnosis + the non-Shipyard fallback: the `ci` skill, "Diagnosing a slow /
 stuck PR."

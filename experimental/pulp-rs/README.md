@@ -3,7 +3,7 @@
 Rust prototype built to evaluate whether the Pulp CLI
 (`tools/cli/*.cpp`) should be rewritten in Rust. **Not shipping. Not
 user-facing. Not wired into any Pulp build.** See GitHub issue
-[#686](https://github.com/danielraffel/pulp/issues/686) for the full
+[#686](https://github.com/Generous-Corp/pulp/issues/686) for the full
 evaluation framework and decision criteria.
 
 This crate lives on `explore/rust-cli-prototype` and will never merge

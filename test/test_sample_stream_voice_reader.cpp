@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <limits>
 
 using Catch::Matchers::WithinAbs;
 using pulp::audio::Buffer;
@@ -104,6 +105,39 @@ float nonlinear_sample(std::uint64_t frame) {
 }
 
 }  // namespace
+
+TEST_CASE("Stream consumption evaluates pitch clock and live factors together",
+          "[audio][sampler][stream-voice][contract]") {
+    using pulp::audio::SampleStreamConsumptionFactors;
+    using pulp::audio::SampleStreamConsumptionStatus;
+    using pulp::audio::evaluate_sample_stream_consumption;
+
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{2.0, 2.0, 1.0}, 4.0)
+                .status == SampleStreamConsumptionStatus::Allowed);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{2.0, 2.0, 1.01}, 4.0)
+                .status == SampleStreamConsumptionStatus::HeritageRejected);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{4.0, 0.5, 2.0}, 4.0)
+                .status == SampleStreamConsumptionStatus::Allowed);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{8.0, 0.5, 1.0}, 4.0)
+                .status == SampleStreamConsumptionStatus::Allowed);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{
+                    std::numeric_limits<double>::infinity(), 1.0, 1.0},
+                4.0)
+                .status == SampleStreamConsumptionStatus::LegacyRejected);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{1.0, 1.0, 0.0}, 4.0)
+                .status == SampleStreamConsumptionStatus::HeritageRejected);
+    REQUIRE(evaluate_sample_stream_consumption(
+                SampleStreamConsumptionFactors{
+                    std::numeric_limits<double>::max(), 2.0, 1.0},
+                std::numeric_limits<double>::max())
+                .status == SampleStreamConsumptionStatus::HeritageRejected);
+}
 
 TEST_CASE("Stream voice reader is exact across preload and pages at pitched ratios",
           "[audio][sampler][stream-voice]") {
@@ -487,6 +521,34 @@ TEST_CASE("Stream voice reader enforces the asset preload capability",
             SampleStreamVoiceSupply::InvalidContract);
     REQUIRE(reader.plan_block(asset, 8, 1.0, 44100.0).supply ==
             SampleStreamVoiceSupply::InvalidContract);
+}
+
+TEST_CASE("Stream voice demand declaration is independent of cursor geometry",
+          "[audio][sampler][stream-voice][contract][demand]") {
+    StreamedRampAsset fixture;
+    const auto asset = fixture.asset.view();
+    SampleStreamVoiceReader reader;
+    REQUIRE(reader.prepare(asset, {13, 1}));
+    REQUIRE(reader.seek(asset, 35.0));
+
+    const auto declared = reader.plan_block(
+        asset, 8, 1.0, 48000.0,
+        {.source_frames_per_second = 96000.0});
+    REQUIRE(declared.supply == SampleStreamVoiceSupply::Ready);
+    REQUIRE(declared.demand_count != 0);
+    REQUIRE(declared.demands[0].consumption_frames_per_second == 96000.0);
+
+    const auto over_cap = reader.plan_block(
+        asset, 8, 1.0, 48000.0,
+        {.source_frames_per_second = 192001.0});
+    REQUIRE(over_cap.supply == SampleStreamVoiceSupply::InvalidContract);
+    REQUIRE(over_cap.demand_count == 0);
+    const auto nonfinite = reader.plan_block(
+        asset, 8, 1.0, 48000.0,
+        {.source_frames_per_second =
+             std::numeric_limits<double>::infinity()});
+    REQUIRE(nonfinite.supply == SampleStreamVoiceSupply::InvalidContract);
+    REQUIRE(nonfinite.demand_count == 0);
 }
 
 TEST_CASE("Stream voice reader reports and clears end of source",

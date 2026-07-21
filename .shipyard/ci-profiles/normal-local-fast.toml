@@ -15,37 +15,37 @@
 name = "normal-local-fast"
 description = "Fast PRs on local ARM64 VMs; nightly GitHub Intel validation."
 
-[repo."danielraffel/pulp".pr.macos]
+[repo."Generous-Corp/pulp".pr.macos]
 strategy = "ordered-fallback"
 targets = ["macstudio.macos-arm64-vm", "m5.macos-arm64-vm", "github.macos-arm64"]
 github_variable = "PULP_LOCAL_MACOS_RUNS_ON_JSON"
 
-[repo."danielraffel/pulp".pr.linux]
+[repo."Generous-Corp/pulp".pr.linux]
 strategy = "ordered-fallback"
 targets = ["macstudio.linux-arm64-vm", "m5.linux-arm64-vm", "github.linux-x64"]
 github_variable = "PULP_LOCAL_LINUX_RUNS_ON_JSON"
 
-[repo."danielraffel/pulp".pr.windows]
+[repo."Generous-Corp/pulp".pr.windows]
 strategy = "github-only"
 targets = ["github.windows-x64-runtime"]
 
-[repo."danielraffel/pulp".release.macos]
+[repo."Generous-Corp/pulp".release.macos]
 strategy = "ordered-fallback"
 targets = ["macstudio.macos-arm64-release-vm", "github.macos-arm64"]
 github_variable = "PULP_RELEASE_MACOS_RUNS_ON_JSON"
 
-[repo."danielraffel/pulp".coverage.macos]
+[repo."Generous-Corp/pulp".coverage.macos]
 strategy = "ordered-fallback"
 targets = ["macstudio.macos-arm64-coverage-vm", "github.macos-arm64"]
 github_variable = "PULP_COVERAGE_MACOS_RUNS_ON_JSON"
 ephemeral_required = true
 
-[repo."danielraffel/pulp".coverage.windows]
+[repo."Generous-Corp/pulp".coverage.windows]
 strategy = "github-only"
 targets = ["github.windows-x64"]
 github_variable = "PULP_COVERAGE_WINDOWS_RUNS_ON_JSON"
 
-[repo."danielraffel/pulp".scheduled.nightly_intel]
+[repo."Generous-Corp/pulp".scheduled.nightly_intel]
 enabled = true
 branch = "main"
 workflow = "cross-platform-check.yml"

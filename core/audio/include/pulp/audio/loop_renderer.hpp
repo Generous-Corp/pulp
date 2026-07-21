@@ -11,6 +11,7 @@ namespace pulp::audio {
 
 struct LoopRenderResult {
     std::uint64_t rendered_frames = 0;
+    std::uint64_t source_backed_frames = 0;
     std::uint64_t silent_frames = 0;
     bool active = false;
     bool wrapped = false;

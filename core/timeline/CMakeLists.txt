@@ -1,6 +1,7 @@
 add_library(pulp-timeline
     src/assets.cpp
     src/automation_curve.cpp
+    src/automation_document_internal.cpp
     src/automation_lane.cpp
     src/command.cpp
     src/document_session.cpp
@@ -9,6 +10,8 @@ add_library(pulp-timeline
     src/journal.cpp
     src/model.cpp
     src/transaction.cpp
+    src/transaction_automation_internal.cpp
+    src/transaction_reduction_support.cpp
     src/undo.cpp
     src/schema_json.cpp
     src/schema_json_canonical.cpp
@@ -17,8 +20,10 @@ add_library(pulp-timeline
     src/schema_registry.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
+    src/snapshot_equivalence.cpp
     src/structural_registry_validation.cpp
     src/track.cpp
+    src/track_schema_migrations.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

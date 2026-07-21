@@ -5,6 +5,10 @@ generation-safe playback. It detects a loop tempo and onsets, renders the
 time-stretched result away from the audio callback, and atomically publishes
 the sample with its matching fixed-capacity slice regions.
 
+This example uses conventional `signal::OfflineStretch`; it does not consume a
+Sample Heritage profile. Heritage fixed/adaptive commit stretch is the separate
+choice when audible cyclic resynthesis is itself the intended character.
+
 The example is version 1.7.1 and builds as CLAP, VST3, standalone, and AU v2
 on Apple platforms. Its bundle identifier, parameter IDs, and plugin-state v2
 schema remain stable.

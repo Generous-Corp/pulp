@@ -108,7 +108,7 @@ the bypass-trailer gates depend on it; use the opt-in `no_merges=` flag.
 
 ## Claude plugin marketplace reads main HEAD (staleness window)
 
-`claude plugin marketplace add danielraffel/pulp` tracks the repository's
+`claude plugin marketplace add Generous-Corp/pulp` tracks the repository's
 **default branch (`main`) HEAD** — it reads `.claude-plugin/marketplace.json`
 and `.claude-plugin/plugin.json` from main, NOT from a release tag
 (`docs/guides/claude-code-plugin.md`; there is no `@ref` pin anywhere in the
@@ -218,6 +218,39 @@ open across the flip boundary:
 
 The rule exists only for the flip boundary; once the queue has cycled, every
 PR is intent-only and there are no stragglers.
+
+## Landing route: `direct` vs `pr` (merge-queue compatibility)
+
+The bump can land two ways, selected by the `PULP_BUMP_ROUTE` repo variable
+(`version_at_land.py --route {direct,pr}`; unset ⇒ `direct` ⇒ current behavior):
+
+- **`direct`** (default, live): `apply_and_push` pushes the `chore: bump
+  versions` commit straight to `main` with `--ff-only`. This publishes releases
+  today. It is **incompatible with a "Require merge queue" branch rule** — that
+  rule blocks all direct pushes to `main`, which is exactly what broke releases
+  on 2026-07-20 when the queue was briefly enabled.
+
+- **`pr`** (dormant until flipped): `apply_via_pr` pushes the bump to the fixed
+  `release/version-bump` branch, opens a `chore: bump versions` PR, and arms
+  `gh pr merge --auto --merge`, so the bump lands **through the merge queue**
+  (and as a normal auto-merge PR when no queue is enabled — so the route flip
+  and the queue-enable are independent steps). Requirements and invariants:
+  - **PAT required.** PR-route runs only with `RELEASE_BOT_TOKEN`; a
+    `GITHUB_TOKEN`-created PR does not trigger workflows, so its checks never run
+    and auto-merge stalls. The workflow fails loudly if the PAT is absent.
+  - **`--merge`, never `--squash`** (`.agents/contract.toml`): squash folds the
+    `Version-Bump-Applied` marker commit and trips an auto-release false alarm.
+  - **Serialized.** When `PULP_BUMP_ROUTE=pr` the workflow's `concurrency` group
+    collapses to a single constant so all drains run one-at-a-time — the
+    shared-branch reclaim is only race-free without a competing drain. The
+    `direct` path keeps its event-scoped group unchanged.
+  - **No regression / no double-bump.** `_strictly_increasing` drops any
+    assignment that does not exceed the surface's version at the fresh head, so a
+    stale drain can never walk a version backward (independent of whether the
+    marker survives the merge).
+
+The full rollout, merge-queue validation evidence, and canary checklist live in
+`planning/2026-07-20-merge-queue-reenable-plan.md`.
 
 ## Rollback
 

@@ -80,6 +80,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timebase/src/compiled_tempo_map.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/assets.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/automation_curve.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/automation_document_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/automation_lane.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/command.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/document_session.cpp
@@ -94,9 +95,13 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_registry.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_encode.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/snapshot_equivalence.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/structural_registry_validation.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/track.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/track_schema_migrations.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/transaction_automation_internal.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/transaction_reduction_support.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/undo.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/audio_renderer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/automation_cursor.cpp

@@ -1,9 +1,33 @@
 #include "serialize_internal.hpp"
+#include "track_schema_policy.hpp"
 
+#include <algorithm>
 #include <span>
 #include <string_view>
 
 namespace pulp::timeline::detail {
+
+namespace {
+
+bool has_contiguous_migration_path(std::span<const MigrationStep> steps,
+                                   std::uint32_t source_version,
+                                   std::uint32_t target_version) noexcept {
+    auto version = source_version;
+    while (version != target_version) {
+        const auto found = std::find_if(steps.begin(), steps.end(), [version](const auto& step) {
+            return step.from_version == version;
+        });
+        if (found == steps.end() || !found->migrate)
+            return false;
+        const auto next_version = version < target_version ? version + 1 : version - 1;
+        if (found->to_version != next_version)
+            return false;
+        version = next_version;
+    }
+    return true;
+}
+
+} // namespace
 
 std::optional<PersistenceErrorCode>
 validate_structural_registry(const SchemaRegistry& registry) noexcept {
@@ -16,6 +40,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         SchemaDomain domain;
         std::string_view type_name;
         std::span<const ExpectedField> fields;
+        std::uint32_t current_version = 1;
+        std::uint32_t oldest_readable_version = 1;
     };
 
     static constexpr ExpectedField project_fields[] = {
@@ -50,8 +76,12 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     static constexpr ExpectedField track_fields[] = {
         {"clips", SchemaValueKind::Array},
+        {"device_chain", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
+    };
+    static constexpr ExpectedField device_placement_fields[] = {
+        {"id", SchemaValueKind::U64String},
     };
     static constexpr ExpectedField clip_fields[] = {
         {"content", SchemaValueKind::Object},
@@ -75,7 +105,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
         {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
-        {SchemaDomain::Document, "pulp.timeline.track", track_fields},
+        {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
+         track_schema_policy.current_version, track_schema_policy.oldest_readable_version},
+        {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
@@ -85,8 +117,13 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         const auto* schema = registry.find(expected.domain, expected.type_name);
         if (!schema)
             return PersistenceErrorCode::UnsupportedStructuralType;
-        if (schema->current_version != 1)
+        if (schema->current_version != expected.current_version)
             return PersistenceErrorCode::UnsupportedSchemaVersion;
+        if (!has_contiguous_migration_path(schema->upgrades, expected.oldest_readable_version,
+                                           expected.current_version) ||
+            !has_contiguous_migration_path(schema->downgrades, expected.current_version,
+                                           expected.oldest_readable_version))
+            return PersistenceErrorCode::MigrationPathMissing;
         if (schema->fields.size() != expected.fields.size())
             return PersistenceErrorCode::InvalidSchema;
         for (std::size_t index = 0; index < expected.fields.size(); ++index) {

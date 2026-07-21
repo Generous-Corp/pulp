@@ -798,6 +798,23 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
         [self setNeedsDisplay:YES];
         return YES;
     }
+    // A focused text field must ALSO win plain printable keys the host otherwise
+    // claims for transport — most importantly Space (play/stop), also Return, etc.
+    // Like Cmd-chords, these arrive via performKeyEquivalent: BEFORE keyDown:, so a
+    // host (REAPER/Logic/Live) grabs the spacebar and the typed space never reaches
+    // the field. Route them through the same key path here and report handled so the
+    // host never sees them. Gated on pulp_text_input_focused_under_root, so with no
+    // text field focused the key falls through to the DAW for transport + Musical
+    // Typing; the cmd/ctrl guard leaves real host shortcuts alone. (pulp: AU
+    // hosted-view key routing — the "DAW eats the spacebar" fix.)
+    const NSEventModifierFlags pulp_cmd_ctrl =
+        NSEventModifierFlagCommand | NSEventModifierFlagControl;
+    if ((event.modifierFlags & pulp_cmd_ctrl) == 0 &&
+        pulp_text_input_focused_under_root(self.rootView) &&
+        pulp_plugin_key_down(self, self.rootView, event)) {
+        [self setNeedsDisplay:YES];
+        return YES;
+    }
     return [super performKeyEquivalent:event];
 }
 // Resolve a window-space event into root-view coords, applying the inverse
@@ -1490,6 +1507,19 @@ private:
 // focused editor so the host doesn't swallow them. See pulp_plugin_key_equivalent.
 - (BOOL)performKeyEquivalent:(NSEvent*)event {
     if (pulp_plugin_key_equivalent(self.rootView, event)) {
+        self.rootView ? self.rootView->request_repaint() : (void)0;
+        return YES;
+    }
+    // See PulpPluginView::performKeyEquivalent: — a focused text field must win
+    // plain printable keys (Space/Return) the host claims for transport, since they
+    // arrive here before keyDown:. Gated on a text field actually being focused so
+    // transport + Musical Typing keep working when not typing. (pulp: the "DAW eats
+    // the spacebar" fix.)
+    const NSEventModifierFlags pulp_cmd_ctrl =
+        NSEventModifierFlagCommand | NSEventModifierFlagControl;
+    if ((event.modifierFlags & pulp_cmd_ctrl) == 0 &&
+        pulp_text_input_focused_under_root(self.rootView) &&
+        pulp_plugin_key_down(self, self.rootView, event)) {
         self.rootView ? self.rootView->request_repaint() : (void)0;
         return YES;
     }

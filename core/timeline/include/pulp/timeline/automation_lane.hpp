@@ -10,17 +10,17 @@
 
 namespace pulp::timeline {
 
-/// Format-neutral document target for a device parameter. The device ID is a
-/// referenced Timeline identity, not a host graph node. The parameter ID is the
-/// device's stable host-facing 32-bit ID, scoped by device_id; it is not a
-/// registration index, graph port, or Timeline ItemId. Timeline preserves it
-/// verbatim, while range and metadata validation belong to the delivery layer.
+/// Format-neutral document target for a placed device parameter. The placement
+/// ID is a referenced Timeline identity, not a host graph node. The parameter ID
+/// is the device's stable host-facing 32-bit ID, scoped by the placement; it is
+/// not a registration index, graph port, or Timeline ItemId. Timeline preserves
+/// it verbatim, while range and metadata validation belong to the delivery layer.
 struct DeviceParameterTarget {
-    ItemId device_id;
+    ItemId device_placement_id;
     std::uint32_t param_id = 0;
 
     constexpr bool valid() const noexcept {
-        return device_id.valid();
+        return device_placement_id.valid();
     }
 
     constexpr bool operator==(const DeviceParameterTarget&) const = default;
@@ -32,7 +32,8 @@ using AutomationTarget = std::variant<DeviceParameterTarget>;
 
 enum class AutomationLaneErrorCode : std::uint8_t {
     InvalidLaneId,
-    InvalidDeviceId,
+    InvalidDevicePlacementId,
+    InvalidDeviceId = InvalidDevicePlacementId,
 };
 
 struct AutomationLaneError {
@@ -46,7 +47,7 @@ struct AutomationLaneError {
 /// attachment, playback compilation, metadata validation, normalization, and
 /// host delivery are separate concerns and intentionally absent from this value.
 /// When attached and remapped later, the lane and curve-point IDs are owned
-/// identities; target device IDs are references, and parameter IDs stay verbatim.
+/// identities; target placement IDs are references, and parameter IDs stay verbatim.
 class AutomationLane {
   public:
     static runtime::Result<AutomationLane, AutomationLaneError>

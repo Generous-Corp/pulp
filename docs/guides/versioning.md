@@ -10,7 +10,7 @@ Pulp versions three surfaces independently:
 - **Shipyard pinned binary** — `tools/shipyard.toml`, consumed by
   `tools/install-shipyard.sh`. This is an upstream release we
   consume, not a surface we ship; see [Dependency Update
-  Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
+  Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
 The first two are **enforced**: PRs that change code in a surface's
 trigger paths without bumping its version are rejected before merge.
@@ -101,7 +101,7 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 
 ## CI workflow
 
-`.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge.
+`.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge. Its `concurrency` uses **`cancel-in-progress: false`** (2026-07-21): because it posts the *required* `Enforce version & skill sync` check, cancelling an in-flight run under a churning main would leave that required check stuck at `cancelled` (never `success`), silently blocking merge. Do not flip a required-check gate back to `cancel-in-progress: true`.
 
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
@@ -126,6 +126,16 @@ pulp-react-build) moved OFF `pull_request` to `push: main` + nightly +
 un-starves the GitHub-hosted ubuntu pool the release bot + version-skill run
 on. It is a reversible DIAL: ratchet a platform back up by restoring its
 `pull_request` trigger. See planning/fleet/2026-07-17-ci-destarve-analysis.md.
+
+**Relative-timing / perf tests are off the required gate (2026-07-21).** ctest
+labels `performance`, `bench`, and `quality-lab` are excluded from the required
+PR/merge_group `macos` run (build.yml `label_exclude`). These are ratio /
+CPU-budget / benchmark tests (e.g. heritage-performance's shipping-CPU-budget
+gate) that tolerate steady load but flake under the load *variance* of the
+Studio's 2 concurrent build VMs (cap=2) — a perf/ratio test cannot be a required
+gate on a runner that (correctly) runs 2 VMs at once. They still run on `push`
+(informational) and belong in a dedicated cap=1 nightly/perf lane. Same
+reversible-DIAL principle: drop the labels from the exclude to re-gate.
 
 ### fix/feat-needs-bump (issue #1009)
 
@@ -345,4 +355,4 @@ guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
 macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
 and asset metadata should move together.
 
-See [CLAUDE.md § Dependency Update Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
+See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.

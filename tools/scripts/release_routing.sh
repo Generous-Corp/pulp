@@ -22,7 +22,7 @@
 # explicit labelset, but you have to mean it.
 set -euo pipefail
 
-REPO="${PULP_REPO:-danielraffel/pulp}"
+REPO="${PULP_REPO:-Generous-Corp/pulp}"
 GH="${TARTCI_GH_CLI:-ghapp}"
 command -v "$GH" >/dev/null 2>&1 || GH=gh
 

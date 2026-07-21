@@ -78,7 +78,7 @@ and the component tracker comments as the live source of truth, then
 verify with GitHub before reporting or merging:
 
 ```bash
-gh pr list --repo danielraffel/pulp --label codecov --state open \
+gh pr list --repo Generous-Corp/pulp --label codecov --state open \
   --json number,title,headRefOid,mergeStateStatus,mergeable,updatedAt,url
 ```
 

@@ -619,6 +619,189 @@ TEST_CASE("A signed .pulpbake round-trips to a bit-identical baked Processor",
     CHECK(rejected.reason == LowerRejectReason::CodecRejected);
 }
 
+TEST_CASE("Baked processor survives in-place (aliased) host buffers",
+          "[host][graph][bake][in-place]") {
+    // Logic-style in-place hosts hand process() input and output views over the
+    // SAME memory. process_routed zeroes the main output bus before gathering
+    // AudioInput, so without the scratch-copy guard the input is destroyed and
+    // the output is total silence. The output must be the correctly-processed
+    // signal (0.5 × input), not silence.
+    const float kGain = 0.5f;
+
+    SECTION("mono") {
+        SignalGraph g;
+        const auto in = g.add_input_node(1, "In");
+        const auto gn = g.add_gain_node("G");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, gn, 0));
+        REQUIRE(g.connect(gn, 0, out, 0));
+        REQUIRE(g.set_node_gain(gn, kGain));
+        REQUIRE(g.prepare(kSr, kFrames));
+
+        auto r = bake(g);
+        REQUIRE(r.accepted);
+        r.processor->prepare(make_prepare_ctx(1));
+
+        // ONE buffer, viewed as both input and output.
+        std::vector<float> shared = ramp(kFrames, 0.7f);
+        const std::vector<float> original = shared;
+        const float* ip = shared.data();
+        float* op = shared.data();
+        pulp::audio::BufferView<const float> iv(&ip, 1, kFrames);
+        pulp::audio::BufferView<float> ov(&op, 1, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        pulp::format::ProcessContext ctx;
+        ctx.sample_rate = kSr;
+        ctx.num_samples = kFrames;
+        r.processor->process(ov, iv, midi_in, midi_out, ctx);
+
+        float peak = 0.0f;
+        for (int s = 0; s < kFrames; ++s) {
+            REQUIRE(shared[static_cast<std::size_t>(s)] ==
+                    kGain * original[static_cast<std::size_t>(s)]);
+            peak = std::max(peak, std::fabs(shared[static_cast<std::size_t>(s)]));
+        }
+        CHECK(peak > 0.1f);  // non-vacuity: real signal, not silence == silence
+    }
+
+    SECTION("stereo, allocation-free on the audio thread") {
+        SignalGraph g;
+        const auto in = g.add_input_node(2, "In");
+        const auto gn = g.add_gain_node("G");
+        const auto out = g.add_output_node(2, "Out");
+        REQUIRE(g.connect(in, 0, gn, 0));
+        REQUIRE(g.connect(in, 1, gn, 1));
+        REQUIRE(g.connect(gn, 0, out, 0));
+        REQUIRE(g.connect(gn, 1, out, 1));
+        REQUIRE(g.set_node_gain(gn, kGain));
+        REQUIRE(g.prepare(kSr, kFrames));
+
+        auto r = bake(g);
+        REQUIRE(r.accepted);
+        r.processor->prepare(make_prepare_ctx(2));
+
+        // Per-channel buffers shared between the input and output views.
+        std::vector<float> left = ramp(kFrames, 0.8f), right = ramp(kFrames, 0.6f);
+        const std::vector<float> lorig = left, rorig = right;
+        std::array<const float*, 2> ic{left.data(), right.data()};
+        std::array<float*, 2> oc{left.data(), right.data()};
+        pulp::audio::BufferView<const float> iv(ic.data(), 2, kFrames);
+        pulp::audio::BufferView<float> ov(oc.data(), 2, kFrames);
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        pulp::format::ProcessContext ctx;
+        ctx.sample_rate = kSr;
+        ctx.num_samples = kFrames;
+
+        r.processor->process(ov, iv, midi_in, midi_out, ctx);  // warm-up
+        // Re-seed and run the measured aliased block: the overlap detection +
+        // scratch copy must not allocate on the audio thread.
+        left = lorig;
+        right = rorig;
+        {
+            pulp::test::RtAllocationProbe probe;
+            r.processor->process(ov, iv, midi_in, midi_out, ctx);
+            REQUIRE_FALSE(probe.saw_allocation());
+        }
+
+        float peak = 0.0f;
+        for (int s = 0; s < kFrames; ++s) {
+            REQUIRE(left[static_cast<std::size_t>(s)] ==
+                    kGain * lorig[static_cast<std::size_t>(s)]);
+            REQUIRE(right[static_cast<std::size_t>(s)] ==
+                    kGain * rorig[static_cast<std::size_t>(s)]);
+            peak = std::max(peak, std::fabs(left[static_cast<std::size_t>(s)]));
+        }
+        CHECK(peak > 0.1f);
+    }
+}
+
+TEST_CASE("Baked processor prepare() re-inits stateful Custom instance state",
+          "[host][graph][bake][custom][lifecycle]") {
+    // prepare() is a re-init boundary: a stateful Custom instance's DSP state
+    // (here a delay line's contents) must NOT survive a re-prepare. Without the
+    // captured lifecycle hooks the baked Processor never re-runs the type's
+    // prepare/reset, so audio pushed before the re-prepare would recirculate
+    // into the fresh stream.
+    constexpr std::size_t kDelay = 48;
+    struct DelayState {
+        std::vector<float> line;
+        std::size_t pos = 0;
+    };
+    int prepare_calls = 0;
+
+    SignalGraph g;
+    CustomNodeType t;
+    t.type_id = "bakedelay";
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.lowerable = true;
+    t.create = []() -> void* { return new DelayState(); };
+    t.destroy = [](void* p) { delete static_cast<DelayState*>(p); };
+    // Allocate-only prepare (contents preserved), so clearing stale state is
+    // proven to come from the reset hook, not incidentally from prepare.
+    t.prepare = [&prepare_calls](void* p, double, int) {
+        auto* s = static_cast<DelayState*>(p);
+        if (s->line.empty()) s->line.assign(kDelay, 0.0f);
+        ++prepare_calls;
+    };
+    t.reset = [](void* p) {
+        auto* s = static_cast<DelayState*>(p);
+        std::fill(s->line.begin(), s->line.end(), 0.0f);
+        s->pos = 0;
+    };
+    t.process_instance = [](void* p, pulp::audio::BufferView<float>& out,
+                            const pulp::audio::BufferView<const float>& in, int n) {
+        auto* s = static_cast<DelayState*>(p);
+        const float* i = in.channel_ptr(0);
+        float* o = out.channel_ptr(0);
+        for (int k = 0; k < n; ++k) {
+            o[static_cast<std::size_t>(k)] = s->line[s->pos];
+            s->line[s->pos] = i[static_cast<std::size_t>(k)];
+            s->pos = (s->pos + 1) % s->line.size();
+        }
+    };
+    REQUIRE(g.register_custom_node_type(t));
+    const auto in = g.add_input_node(1, "In");
+    const auto cn = g.add_custom_node("bakedelay", 1, "C");
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(in, 0, cn, 0));
+    REQUIRE(g.connect(cn, 0, out, 0));
+    REQUIRE(g.prepare(kSr, kFrames));  // instance created + prepared once here
+
+    auto r = bake(g);
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    r.processor->prepare(make_prepare_ctx(1));
+    // The baked prepare must re-run the type's prepare hook (the graph's own
+    // prepare ran it once; the baked Processor must not depend on that rate).
+    CHECK(prepare_calls == 2);
+
+    // Push signal so the delay line accumulates state, and prove the delay is
+    // live (the delayed ramp emerges after kDelay samples — non-vacuous state).
+    const std::vector<std::vector<float>> loud{ramp(kFrames, 0.9f)};
+    const auto before = run_baked(*r.processor, kFrames, loud, 1);
+    float tail_peak = 0.0f;
+    for (int s = static_cast<int>(kDelay); s < kFrames; ++s) {
+        tail_peak = std::max(tail_peak, std::fabs(before[0][static_cast<std::size_t>(s)]));
+    }
+    REQUIRE(tail_peak > 0.1f);  // the line really carries state
+
+    // Re-prepare: the boundary that must discard that state.
+    r.processor->prepare(make_prepare_ctx(1));
+    CHECK(prepare_calls == 3);
+
+    // A silent block after the re-prepare must be ALL zeros — any nonzero
+    // sample is pre-boundary audio recirculating out of the stale delay line.
+    const std::vector<std::vector<float>> silence{
+        std::vector<float>(static_cast<std::size_t>(kFrames), 0.0f)};
+    const auto after = run_baked(*r.processor, kFrames, silence, 1);
+    for (int s = 0; s < kFrames; ++s) {
+        INFO("sample " << s);
+        REQUIRE(after[0][static_cast<std::size_t>(s)] == 0.0f);
+    }
+}
+
 TEST_CASE("load_baked refuses a signed plan whose Custom node carries state",
           "[host][graph][bake][codec]") {
     // The stateless-only v1 restriction: even a validly-signed plan with a small,

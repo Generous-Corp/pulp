@@ -32,7 +32,9 @@
 
 using pulp::format::FrameRate;
 using pulp::format::ProcessContext;
+using pulp::format::TransportField;
 using pulp::format::detail::PlayheadSnapshot;
+using pulp::format::detail::TransportDiffMode;
 using pulp::format::detail::compute_playhead_changes;
 using pulp::format::detail::derive_bar_from_beats;
 
@@ -589,4 +591,141 @@ TEST_CASE("compute_playhead_changes: stop then play raises transport_started aga
     // Re-arm: a second run must produce a second start edge, or a generator
     // that captured its run origin on the first start never re-anchors.
     REQUIRE(block(true, 1024).transport_started);
+}
+
+TEST_CASE("field-valid playhead accepts zero positions as authoritative",
+          "[format][playhead][validity][transport-jump]") {
+    SECTION("sample position advances continuously from zero") {
+        PlayheadSnapshot snapshot;
+        ProcessContext first;
+        first.sample_rate = 48000.0;
+        first.num_samples = 64;
+        first.is_playing = true;
+        first.position_samples = 0;
+        first.transport_validity.set(TransportField::Playing);
+        first.transport_validity.set(TransportField::SamplePosition);
+        compute_playhead_changes(first, snapshot, TransportDiffMode::FieldValidity);
+
+        ProcessContext next = first;
+        next.position_samples = 64;
+        compute_playhead_changes(next, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(next.transport_jump);
+    }
+
+    SECTION("beat position advances continuously from zero") {
+        PlayheadSnapshot snapshot;
+        ProcessContext first;
+        first.sample_rate = 48000.0;
+        first.num_samples = 64;
+        first.is_playing = true;
+        first.tempo_bpm = 120.0;
+        first.position_beats = 0.0;
+        first.transport_validity.set(TransportField::Playing);
+        first.transport_validity.set(TransportField::Tempo);
+        first.transport_validity.set(TransportField::BeatPosition);
+        compute_playhead_changes(first, snapshot, TransportDiffMode::FieldValidity);
+
+        ProcessContext next = first;
+        next.position_beats = (64.0 / 48000.0) * (120.0 / 60.0);
+        compute_playhead_changes(next, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(next.transport_jump);
+    }
+}
+
+TEST_CASE("field validity acquisition and loss raise change flags",
+          "[format][playhead][validity][change-flags]") {
+    PlayheadSnapshot snapshot;
+    ProcessContext unavailable;
+    unavailable.tempo_bpm = 120.0;
+    compute_playhead_changes(
+        unavailable, snapshot, TransportDiffMode::FieldValidity);
+
+    ProcessContext acquired = unavailable;
+    acquired.transport_validity.set(TransportField::Tempo);
+    compute_playhead_changes(acquired, snapshot, TransportDiffMode::FieldValidity);
+    REQUIRE(acquired.tempo_changed);
+
+    ProcessContext lost = unavailable;
+    compute_playhead_changes(lost, snapshot, TransportDiffMode::FieldValidity);
+    REQUIRE(lost.tempo_changed);
+    REQUIRE_FALSE(lost.transport_jump);
+}
+
+TEST_CASE("field-valid play state is required for a transport start",
+          "[format][playhead][validity][transport-start]") {
+    SECTION("unavailable play state") {
+        PlayheadSnapshot snapshot;
+        ProcessContext ctx;
+        ctx.is_playing = true;
+        compute_playhead_changes(ctx, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(ctx.transport_started);
+    }
+
+    SECTION("available play state") {
+        PlayheadSnapshot snapshot;
+        ProcessContext ctx;
+        ctx.is_playing = true;
+        ctx.transport_validity.set(TransportField::Playing);
+        compute_playhead_changes(ctx, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE(ctx.transport_started);
+    }
+}
+
+TEST_CASE("position validity transitions do not synthesize jumps",
+          "[format][playhead][validity][transport-jump]") {
+    SECTION("sample position disappears") {
+        PlayheadSnapshot snapshot;
+        ProcessContext first;
+        first.sample_rate = 48000.0;
+        first.num_samples = 64;
+        first.position_samples = 4096;
+        first.transport_validity.set(TransportField::SamplePosition);
+        compute_playhead_changes(first, snapshot, TransportDiffMode::FieldValidity);
+
+        ProcessContext next;
+        next.sample_rate = 48000.0;
+        next.num_samples = 64;
+        compute_playhead_changes(next, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(next.transport_jump);
+    }
+
+    SECTION("position source switches without overlap") {
+        PlayheadSnapshot snapshot;
+        ProcessContext samples;
+        samples.sample_rate = 48000.0;
+        samples.num_samples = 64;
+        samples.position_samples = 4096;
+        samples.transport_validity.set(TransportField::SamplePosition);
+        compute_playhead_changes(samples, snapshot, TransportDiffMode::FieldValidity);
+
+        ProcessContext beats;
+        beats.sample_rate = 48000.0;
+        beats.num_samples = 64;
+        beats.position_beats = 12.0;
+        beats.transport_validity.set(TransportField::BeatPosition);
+        compute_playhead_changes(beats, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(beats.transport_jump);
+    }
+
+    SECTION("remaining beat source establishes continuity") {
+        PlayheadSnapshot snapshot;
+        ProcessContext first;
+        first.sample_rate = 48000.0;
+        first.num_samples = 64;
+        first.is_playing = true;
+        first.tempo_bpm = 120.0;
+        first.position_beats = 4.0;
+        first.position_samples = 96000;
+        first.transport_validity.set(TransportField::Playing);
+        first.transport_validity.set(TransportField::Tempo);
+        first.transport_validity.set(TransportField::BeatPosition);
+        first.transport_validity.set(TransportField::SamplePosition);
+        compute_playhead_changes(first, snapshot, TransportDiffMode::FieldValidity);
+
+        ProcessContext next = first;
+        next.position_beats += (64.0 / 48000.0) * (120.0 / 60.0);
+        next.transport_validity.set(TransportField::SamplePosition, false);
+        compute_playhead_changes(next, snapshot, TransportDiffMode::FieldValidity);
+        REQUIRE_FALSE(next.transport_jump);
+    }
 }

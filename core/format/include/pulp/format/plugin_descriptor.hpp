@@ -63,6 +63,23 @@ constexpr ViewSize view_size_from_design(uint32_t preferred_width,
     };
 }
 
+/// Editor-host resize contract shared by the format adapters (VST3
+/// PulpPlugView, the AU v2 Cocoa view; mac AUv3 pins unconditionally and
+/// predates the free-resize case). One predicate so the formats cannot drift:
+///   - not resizable (min==0): pin the design viewport at preferred so an
+///     off-size DAW pane letterbox-scales the content.
+///   - resizable (min>0, CLAP's `gui_can_resize` convention) + aspect_ratio>0:
+///     pin viewport + lock aspect (design-import path).
+///   - resizable + aspect_ratio==0: free drag within [min,max] — NO pin, NO
+///     aspect lock; the root reflows via Yoga at the host size.
+/// True == the editor host should call set_design_viewport(preferred) +
+/// set_fixed_aspect_ratio(preferred_w / preferred_h).
+constexpr bool should_pin_design_viewport(const ViewSize& hints) {
+    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
+    const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
+    return hints.preferred_width > 0 && hints.preferred_height > 0 && !free_resize;
+}
+
 /// Plugin category — determines bus layout expectations and DAW behavior.
 enum class PluginCategory {
     Effect,      ///< Audio effect (takes input, produces output)

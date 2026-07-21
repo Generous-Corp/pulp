@@ -14,6 +14,7 @@ namespace pulp::audio {
 
 inline constexpr std::size_t kMaximumSampleSincCutoffTables = 32;
 inline constexpr std::size_t kMaximumSampleSincOctaveTables = 8;
+inline constexpr double kMaximumDenseSampleSincConsumption = 128.0;
 inline constexpr std::uint32_t kDefaultSampleSincHalfWidth = 16;
 inline constexpr std::uint32_t kHighQualitySampleSincHalfWidth = 24;
 
@@ -308,7 +309,8 @@ public:
         double kaiser_beta = 9.0) {
         release();
         if (!(maximum_source_frames_per_output > 0.0) ||
-            maximum_source_frames_per_output > 128.0 ||
+            maximum_source_frames_per_output >
+                kMaximumDenseSampleSincConsumption ||
             !std::isfinite(maximum_source_frames_per_output) ||
             tables_per_octave == 0 || tables_per_octave > 8) {
             return false;

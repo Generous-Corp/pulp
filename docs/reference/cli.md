@@ -1481,7 +1481,7 @@ exit codes, diagnostics, and current limitations).
 | `--emit classnames` | Force-emit `classnames.json` (default on for `--from claude`). |
 | `--no-emit-classnames` | Skip the classname artifact for the run. |
 | `--tokens <path>` | Output token file (default: `tokens.json`; `theme.css` for `--format css-variables`). |
-| `--emit-w3c-tokens <path>` | Additionally write the imported tokens as a W3C Design Tokens (DTCG) document (`-` = stdout). `/` in token names nests into DTCG groups, dimensions use the `{"value": N, "unit": "px"}` object form, and variable provenance (id/collection/mode/adapter) lands under `$extensions["dev.pulp.source"]`. Additive — no other output changes. |
+| `--emit-w3c-tokens <path>` | Additionally write the imported tokens as a W3C Design Tokens (DTCG) document (`-` = stdout). `/` in token names nests into DTCG groups, dimensions use the `{"value": N, "unit": "px"}` object form, and variable provenance (id/collection/mode/adapter) lands under `$extensions["dev.pulp.source"]`. String tokens whose names clearly denote a font family (segments like `fontFamily`/`typeface`/`font`, split on `/` or `.`) emit as `$type: "fontFamily"` (comma-separated stacks become the DTCG array form); all other strings are parked losslessly under the document-root `$extensions["dev.pulp.nonStandardTokens"]` with their provenance, so every emitted token carries a standard DTCG `$type`. Additive — no other output changes. |
 | `--screenshot-backend {skia\|coregraphics}` | `--validate` render backend. `skia` (default) composites file-backed images; `coregraphics` draws an image's filename placeholder, so it is not faithful for asset-rich designs. |
 | `--knob-style {silver\|sprite\|auto\|standard\|default}` | Knob rendering mode. The default is the native silver/vector path; `sprite` opts into PNG sprite skinning. |
 | `--fader-style {skin\|skinned\|default\|plain}` | Fader rendering mode. The default is derived skinning; `default` and `plain` opt out to the unskinned native look. |
@@ -1545,6 +1545,10 @@ pulp audio model activate <model-id> [--json]   # Activate an installed model
 pulp audio excerpt-find --text "warm analog pad" --input /path/to/wavs [options]
 pulp audio read-bundle <path-to-bundle> [--json]
 pulp audio sampler-mip build <source.wav|source.aiff> [--levels 1|2] [--json]
+pulp audio heritage validate PROFILE [--json]
+pulp audio heritage canonicalize PROFILE --out FILE
+pulp audio heritage inspect PROFILE [--json]
+pulp audio heritage render PROFILE --fixture impulse|sine|two-tone|WAV --out WAV --report JSON [--frames N] [--block-size N]
 pulp audio scope [target] --window 2048 --trigger rising-zero --channel 0 [--json scope.json]
 pulp audio scope --input-wav tone.wav --window 2048 [--json scope.json] [--png scope.png]
 pulp audio validate summarize <file.wav> [--json]
@@ -1582,6 +1586,10 @@ same mistake as reading it as a pass.
 | `excerpt-find` | Rank WAV windows deterministically from a text query, then emit an excerpt bundle with backend metadata |
 | `read-bundle` | Pretty-print a previously emitted excerpt bundle |
 | `sampler-mip build` | Build streamed-sampler octave mips with Pulp's 140 dB decimator; publish immutable source-and-payload-hash-addressed WAVs, then atomically replace and self-verify the `.pulpmip` manifest |
+| `heritage validate` | Strictly parse a versioned sampler Heritage profile; `--json` emits stable `status`, `field_path`, and `profile_status` diagnostics |
+| `heritage canonicalize` | Validate and atomically write the canonical profile JSON bytes used by Pulp's parser, writer, and digest boundary |
+| `heritage inspect` | Print the neutral profile ID, schema, digest, declared host rate, typed block counts, active mechanisms, stateful seeds, capabilities, prepared latency, profile clock/live source-consumption ratio, resident exemption and 4x streamed-admission bound, and clean-path-assistance policy; `--json` emits a stable object and identifies runtime note pitch as an external multiplier |
+| `heritage render` | Deterministically render a built-in analytic or exact-rate mono WAV fixture through checked voice plans and the typed bus, writing Float32 WAV plus a canonical evidence report. Record-commit blocks run as a separately reported verified transaction rather than being silently composed across a rate boundary |
 | `scope` | Capture `pulp.audio.scope.v1` JSON from a live standalone target or a speakerless offline WAV; offline mode can also write a PNG trace artifact |
 | `validate summarize` | Decode a WAV and print an agent-readable signal summary (peak/RMS/DC/dominant pitch); `--json` for machine output |
 | `validate doctor` | Offline Audio Doctor over a WAV: THD/THD+N (`--thd`) and/or spectrum magnitude at checkpoints (`--response`); writes a JSON curve artifact |

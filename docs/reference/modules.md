@@ -336,13 +336,30 @@ Start with the [sampler playback chooser](../guides/sampler-playback.md): the
 sequential source, shared page service, and resident publication path have
 different ownership and traversal contracts.
 
+The Heritage Kit adds a character-processing and profile layer; it does not
+replace the existing sampler foundation. Keep these boundaries when composing
+the APIs:
+
+| Existing surface | Relationship to Sample Heritage | Consolidation guidance |
+|---|---|---|
+| `SampleAsset`, resident publication, stream service, and voice readers | Own source storage, generations, page demand, and logical forward/reverse traversal | Reuse them unchanged; feed each voice's ordered samples into its prepared Heritage voice engine |
+| `LoopPlaybackCursor`, `LoopReader`, and `LoopRenderer` | Own one-shot/loop regions, wraps, reverse traversal, and loop crossfades | They do not perform Heritage cyclic resynthesis. Resolve traversal first, then run live cyclic stretch in the per-voice character chain |
+| `sample_interpolation.hpp` and sinc kernels | Reconstruct samples at playback-rate positions and protect high-rate playback | Heritage converter/hold blocks model the variable machine frame; Heritage reconstruction is the fixed per-voice frame after return conversion. They are complementary, not alternate names for playback interpolation |
+| `sample_asset_io.hpp` and edit/bounce metadata | Import, export, and describe audio assets | Heritage JSON imports/exports profiles; record commit emits its own content-addressed audio/provenance envelope. Do not merge these formats |
+| Onset, slice, key/tempo, transient, and loop-point analyzers | Derive content metadata and suggested regions | Analysis can inform authoring or zone selection but does not select or mutate Heritage blocks at runtime |
+| `signal::OfflineStretch` and realtime pitch/time processors | Conventional high-quality tempo/pitch processing | Use these when transparency or ordinary tempo matching is the goal. Use Heritage fixed/adaptive cyclic stretch only when cyclic resynthesis is the intended character |
+
+In short: consolidate on the existing storage, traversal, interpolation, and
+analysis primitives; let Heritage own only its typed profile, per-voice/bus
+character path, live cyclic stage, and offline record-commit transaction.
+
 | Feature | Headers | Description |
 |---------|---------|-------------|
 | Stream handoff and rolling capture | `audio_stream_handoff.hpp`, `planar_audio_ring_buffer.hpp`, `rolling_audio_capture_buffer.hpp`, `realtime_sample_recorder.hpp` | Bridge generated/live/model audio into host-paced processing, keep bounded rolling history, freeze stable windows, and materialize captures off the audio thread |
 | Resident publication and shared paged storage | `published_sample_store.hpp`, `sample_slot_bank.hpp`, `sample_slot_materializer.hpp`, `sample_pool.hpp`, `sample_asset.hpp`, `sample_stream_window.hpp`, `sample_stream_scheduler.hpp`, `sample_stream_service.hpp`, `sample_stream_async_service.hpp`, `sample_stream_decode_pool.hpp`, `sample_memory_governor.hpp`, `sample_preload_contract.hpp`, `sample_stream_voice_reader.hpp`, `sample_stream_loop_voice_reader.hpp` | Publish resident generations or build immutable assets over a shared page cache; bounded commands, fixed-scratch decode, shared memory budgeting, and narrow or loop-aware voice readers keep the two ownership models explicit |
 | Sample interpolation | `sample_interpolation.hpp`, `sample_sinc_kernel.hpp` | Share hold, nearest, linear, Hermite, Lagrange, and prepared ratio-tracking sinc footprints across resident and paged playback; build normalized immutable cutoff tables off the callback |
 | Sampler octave mips | `sample_mip_builder.hpp`, `sample_mip_sidecar.hpp` | Build resident or persisted octave levels with the sampler decimator; authenticate source and payload identities, then publish sidecar manifests transactionally for strict runtime admission |
-| Synthetic sampler heritage | `sample_heritage.hpp`, `sample_heritage_schema.hpp`, `sample_heritage_engine.hpp`, `sample_heritage_src.hpp`, `sample_heritage_json.hpp`, `sample_heritage_runtime_state.hpp` | Define validated synthetic coloration/clock profiles, processing and rate conversion, strict JSON, and versioned runtime state without claiming emulation of named hardware |
+| Sample Heritage profiles and processing | `sample_heritage.hpp`, `sample_heritage_schema.hpp`, `sample_heritage_engine.hpp`, `sample_heritage_pitch.hpp`, `sample_heritage_live_cyclic.hpp`, `sample_heritage_bus_dsp.hpp`, `sample_heritage_record_commit.hpp`, `sample_heritage_src.hpp`, `sample_heritage_json.hpp`, `sample_heritage_runtime_state.hpp` | Define strict schema-v3 voice/bus/record-commit profiles; prepare per-voice variable machine-frame character and fixed-frame reconstruction/color, pitch families, converter/hold, live cyclic stretch, post-mix bus color, deterministic state, neutral offline cycle estimation, and content-addressed offline commits without claiming emulation of named hardware |
 | Sequential streaming source | `streaming_sample_source.hpp`, `streaming_sample_source_file.hpp` | Play a preload head plus background-filled SPSC tail; WAV and uncompressed AIFF use immutable private mapped snapshots for ranged reads while fallback codec capability remains explicit |
 | Stream starvation envelope | `sample_starvation_envelope.hpp` | Supply equal-power fade gains for valid low-water and recovered frames with explicit predicted, insufficient-lead, and emergency telemetry; source-position advancement remains voice-renderer policy |
 | Looping and playback | `loop_types.hpp`, `loop_playback_cursor.hpp`, `sample_interpolation.hpp`, `loop_reader.hpp`, `loop_renderer.hpp`, `loop_point_analyzer.hpp`, `sample_voice_renderer.hpp`, `voice_sum_mixer.hpp` | Share `LoopRegion` traversal, cursor plans, prepared interpolation footprints, and tap mapping across resident and paged storage; `LoopRenderer` is the resident rich-loop orchestrator, while `SampleVoiceRenderer` remains a compatible pool/envelope/fade adapter |
@@ -504,7 +521,7 @@ a working convolution and would hide the bug. Assert
 | Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
 | Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
 | FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
-| Ladder | `ladder_filter.hpp` | 4-pole Moog-style resonant filter with saturation — classic analog synth sound |
+| Ladder | `ladder_filter.hpp` | Four-pole nonlinear resonant ladder filter with saturation |
 | Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
 | State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |
 
@@ -794,6 +811,11 @@ auto track = Track::create({2}, "Notes", {std::move(empty).value()});
 Every owned object uses a nonzero monotonic `ItemId`; a `Project` stores the
 next never-used value; `UINT64_MAX` is the explicit exhausted allocator state
 and is valid project state after ownership reaches `UINT64_MAX - 1`.
+`Project::locate()` returns an `ItemLocation` whose `kind` and immediate
+`parent_id` are the canonical ownership key. Its sequence, track, and clip IDs
+are ancestor-navigation caches, not additional ownership axes. Snapshot decode
+derives `parent_id` for older identity records that predate the field, while
+canonical output writes it explicitly.
 `ClipTimeAnchor` distinguishes tempo-following musical tick ranges from fixed
 absolute ranges expressed as `SamplePosition`, integer sample count, and a
 normalized `RationalRate`. `ClipPlaybackProperties` carries nonnegative linear
@@ -820,14 +842,23 @@ per-block event coalescing belong to `pulp::playback`; neither concern is folded
 into the curve container.
 
 `automation_lane.hpp` provides an unattached immutable binding from one curve
-to a format-neutral device identity and opaque 32-bit parameter ID. Construction
-validates only the lane and device IDs via `ItemId::valid()` (neither zero nor
-the exhausted `UINT64_MAX` sentinel): it does not prove that the device exists
-in a Project, register global identity, clamp plain-domain values, or consult
-plugin metadata. The lane is not yet attached to a Track, persisted, reachable
-through commands or `DocumentSession`, or delivered to a host graph.
+to a format-neutral device-placement identity and opaque 32-bit parameter ID.
+Construction validates only the lane and placement IDs via `ItemId::valid()`
+(neither zero nor the exhausted `UINT64_MAX` sentinel): it does not prove that
+the placement exists in a Project, register global identity, clamp plain-domain
+values, or consult plugin metadata. The lane is not yet attached to a Track,
+persisted, reachable through commands or `DocumentSession`, or delivered to a
+host graph.
 `pulp::playback` can compile and exercise this standalone value without
 implying document attachment.
+
+`device_placement.hpp` defines the durable identity of one logical placement in
+a Track-owned device chain. The chain preserves authored processing order
+through immutable clip edits, persistence, and ID remapping. A placement is
+identity/order-only: runtime instances, graph nodes, plugin formats, paths, and
+platform metadata stay outside Timeline. Durable device definition and
+configuration needed for project save/load will be future document-owned state
+keyed by placement identity.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
@@ -839,9 +870,9 @@ exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
 opaque objects so callers can surface compatibility risk. This is snapshot JSON
 only; it does not read or write ZIP/package containers.
 
-This initial surface intentionally excludes durable journal sinks, package I/O,
+This surface intentionally excludes durable journal sinks, package I/O,
 playback, document-attached automation lanes and delivery, launch slots, takes,
-nesting, devices, routing, and UI.
+nesting, device implementation and routing, and UI.
 
 ## playback
 

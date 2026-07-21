@@ -39,6 +39,15 @@ public:
     // PluginViewHost scales content to fit via its design viewport.
     Steinberg::tresult PLUGIN_API canResize() override;
     Steinberg::tresult PLUGIN_API checkSizeConstraint(Steinberg::ViewRect* rect) override;
+    // Space-to-focused-text-field via the IPlugView key pipeline. REAPER (with
+    // "send all keyboard input to plug-in" OFF — its default) offers keys to the
+    // view through onKeyDown BEFORE its own accelerator table; returning
+    // kResultFalse is what lets Space fall through to transport, so the NSView
+    // key path never sees it at all (host_quirks: reaper_keyboard_only_space —
+    // Space is also the only key REAPER delivers well-formed here). Consumed
+    // only when a text field inside THIS editor's tree holds focus.
+    Steinberg::tresult PLUGIN_API onKeyDown(Steinberg::char16 key, Steinberg::int16 keyCode,
+                                            Steinberg::int16 modifiers) override;
 
 private:
     friend struct PulpPlugViewTestAccess;

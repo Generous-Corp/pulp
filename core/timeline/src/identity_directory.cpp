@@ -112,8 +112,7 @@ const IdentityNode* find(const NodePtr& root, ItemId id) noexcept {
 }
 
 bool same_location(const ItemLocation& lhs, const ItemLocation& rhs) noexcept {
-    return lhs.kind == rhs.kind && lhs.sequence_id == rhs.sequence_id &&
-           lhs.track_id == rhs.track_id && lhs.clip_id == rhs.clip_id && lhs.active == rhs.active;
+    return lhs == rhs;
 }
 
 bool entries_match(const NodePtr& source, const NodePtr& other) noexcept {

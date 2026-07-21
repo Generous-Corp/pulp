@@ -971,8 +971,21 @@ jobs:
           # exactly the PR content that already passed here, and the required
           # macos gate rides the serialized self-hosted runner — running the
           # heavier `slow` set only on push/nightly keeps the queue landable.
+          #
+          # `performance|bench|quality-lab` are ALSO excluded from the required
+          # PR/merge_group gate (added 2026-07-21). These are RELATIVE-timing /
+          # CPU-budget / benchmark tests (e.g. heritage-performance's
+          # "Representative chain stays within the shipping CPU budget", which
+          # asserts a ratio ≤ 2.0×1.05 vs an in-run baseline). They are robust to
+          # STEADY load but NOT to the load VARIANCE created when the Studio runs
+          # its 2 concurrent build VMs (cap=2) — a sibling VM's bursty compile
+          # inflates the ratio past threshold → flake. A perf/ratio test cannot be
+          # a required gate on a runner that (correctly) runs 2 concurrent VMs, so
+          # it belongs in a dedicated cap=1 nightly/perf lane, not gating every
+          # merge. They still run on push (informational). See
+          # planning/org-flip-status.md §A.
           if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
-            label_exclude="validation|slow"
+            label_exclude="validation|slow|performance|bench|quality-lab"
           fi
           exclude='STFT|VisualizationBridge|Clipboard|Toolbar add items'
           if [ "${RUNNER_OS}" = "macOS" ]; then
@@ -1017,6 +1030,12 @@ jobs:
             exclude="${exclude}|DesignFrameView xy_pad puck renders"
             exclude="${exclude}|DesignFrameView slides"
             exclude="${exclude}|DesignFrameView rotates"
+            # Flaky on the ephemeral macOS CI VMs (offscreen GPU replay is
+            # environment-sensitive: passes locally + on most runs, but
+            # intermittently fails, evicting whole merge-queue batches and
+            # disabling auto-merge on every PR in them). Quarantined until the
+            # offscreen GPU-replay path is stabilized. Tracking: flaky-gpu-3327.
+            exclude="${exclude}|Subtree cache composites a GPU image on the replay frame"
           fi
           # --repeat until-pass:2 retries a failed test once before failing the
           # leg, so a single timing-flake (e.g. a ReDoS-guard test slowed by
@@ -1081,9 +1100,9 @@ jobs:
         run: |
           chcp 65001
           set "PULP_CTEST_LABEL_EXCLUDE=validation"
-          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
-          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
-          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"
+          if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
+          if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
+          if "%GITHUB_EVENT_NAME%"=="merge_group" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine|performance|bench|quality-lab"
           ctest --test-dir "%PULP_BUILD_DIR%" --output-on-failure --repeat until-pass:2 -C Release -LE "%PULP_CTEST_LABEL_EXCLUDE%" -j8 --timeout 120 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items|baked C.* exporter emits ownable C.* source artifacts|pulp-import-design handles literal file paths and rejects unsafe URLs"
 
       # Plugin bundle uploads only run on push/schedule events — pull_request

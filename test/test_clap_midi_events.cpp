@@ -2021,6 +2021,17 @@ TEST_CASE("CLAP transport state maps into ProcessContext",
     REQUIRE(g_capturing->captured_context.time_sig_numerator == 7);
     REQUIRE(g_capturing->captured_context.time_sig_denominator == 8);
     REQUIRE(g_capturing->captured_context.num_samples == static_cast<int>(Harness::kFrames));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::Playing));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::Recording));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::Looping));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::Tempo));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::BeatPosition));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::SamplePosition));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::TimeSignature));
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::Bar));
+    REQUIRE_FALSE(g_capturing->captured_context.has_transport(TransportField::LoopRange));
+    REQUIRE_FALSE(g_capturing->captured_context.has_transport(TransportField::HostTime));
+    REQUIRE_FALSE(g_capturing->captured_context.has_transport(TransportField::FrameRate));
 }
 
 TEST_CASE("CLAP transport without seconds timeline leaves sample position unset",
@@ -2047,6 +2058,101 @@ TEST_CASE("CLAP transport without seconds timeline leaves sample position unset"
     REQUIRE(g_capturing->captured_context.tempo_bpm == 120.0);
     REQUIRE(g_capturing->captured_context.position_beats == 16.0);
     REQUIRE(g_capturing->captured_context.position_samples == 0);
+    REQUIRE(g_capturing->captured_context.has_transport(TransportField::BeatPosition));
+    REQUIRE_FALSE(g_capturing->captured_context.has_transport(
+        TransportField::SamplePosition));
+}
+
+TEST_CASE("CLAP transport preserves valid zero positions",
+          "[clap][transport][validity]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_BEATS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_SECONDS_TIMELINE
+                    | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    transport.tempo = 120.0;
+    transport.tsig_num = 4;
+    transport.tsig_denom = 4;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    const auto& ctx = g_capturing->captured_context;
+    REQUIRE(ctx.position_beats == 0.0);
+    REQUIRE(ctx.position_samples == 0);
+    REQUIRE(ctx.bar == 0);
+    REQUIRE(ctx.has_transport(TransportField::BeatPosition));
+    REQUIRE(ctx.has_transport(TransportField::SamplePosition));
+    REQUIRE(ctx.has_transport(TransportField::Bar));
+    REQUIRE_FALSE(ctx.transport_jump);
+}
+
+TEST_CASE("CLAP null transport reports validity loss without a jump",
+          "[clap][transport][validity]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_IS_PLAYING
+                    | CLAP_TRANSPORT_HAS_TEMPO
+                    | CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
+    transport.tempo = 120.0;
+    transport.song_pos_seconds = CLAP_SECTIME_FACTOR;
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_validity.empty());
+
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         nullptr) == CLAP_PROCESS_CONTINUE);
+
+    const auto& ctx = g_capturing->captured_context;
+    REQUIRE(ctx.transport_validity.empty());
+    REQUIRE(ctx.tempo_changed);
+    REQUIRE(ctx.transport_changed);
+    REQUIRE_FALSE(ctx.transport_jump);
+}
+
+TEST_CASE("CLAP position source switching does not synthesize a jump",
+          "[clap][transport][validity]") {
+    g_pending_opts_mpe = false;
+    g_pending_opts_ump = false;
+    Harness h(make_capturing);
+
+    clap_event_transport_t transport{};
+    transport.header = make_header(sizeof(transport), CLAP_EVENT_TRANSPORT, 0);
+    transport.flags = CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
+    transport.song_pos_seconds = CLAP_SECTIME_FACTOR;
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+
+    transport.flags = CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+    transport.song_pos_beats = 8 * CLAP_BEATTIME_FACTOR;
+    REQUIRE(h.run_custom(nullptr, nullptr,
+                         &h.audio_in, 1,
+                         &h.audio_out, 1,
+                         Harness::kFrames,
+                         &transport) == CLAP_PROCESS_CONTINUE);
+    REQUIRE_FALSE(g_capturing->captured_context.transport_jump);
 }
 
 TEST_CASE("CLAP transport jumps request processor reset through ProcessContext",

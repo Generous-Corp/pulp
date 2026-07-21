@@ -22,7 +22,8 @@ MIT-licensed. No royalties. No copyleft.
 - [Getting Started](guides/getting-started.md) — build your first plugin step by step
 - [Examples](examples/index.md) — browse example projects by category
 - [Sampler Playback Chooser](guides/sampler-playback.md) — select sequential,
-  shared paged, resident, instrument, tempo-matched, or analysis surfaces
+  shared paged, resident, instrument, tempo-matched, Heritage-character, or
+  analysis surfaces
 - **Plugin hosting and analysis** — [host third-party plugins](guides/hosting.md) or [inspect, render, and compare them](guides/plugin-interrogation.md)
 - [Capabilities](reference/capabilities.md) — full capability matrix with status
 - [Overview](concepts/overview.md) — what Pulp is and how it is organized
@@ -45,7 +46,8 @@ MIT-licensed. No royalties. No copyleft.
 - [Hosting Plugins](guides/hosting.md) — embed CLAP, VST3, AU, and LV2 plugins in a Pulp application
 - [Plugin Interrogation](guides/plugin-interrogation.md) — inspect parameters and run automated A/B renders from the CLI or MCP
 - [Sampler Playback Chooser](guides/sampler-playback.md) — choose the sampler
-  ownership and traversal model that matches the product
+  ownership, traversal, conventional stretch, and optional Heritage-character
+  model that matches the product
 - [Web Plugins](guides/web-plugins.md) — WAMv2, WebCLAP, browser-host status
 - [Design from Figma](guides/figma-plugin.md) — the "Design for Pulp" plugin, export, and import ([model](reference/design-import-model.md))
 - [Docs Maintenance](guides/docs-maintenance.md) — how docs stay consistent with code

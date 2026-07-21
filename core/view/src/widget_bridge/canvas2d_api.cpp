@@ -814,6 +814,23 @@ void BridgeRegistrars::register_canvas2d_api(WidgetBridge& self) {
         return choc::value::Value();
     });
 
+    // Curated named GPU shader post-effect — the SAFE counterpart to the CSS
+    // `canvasSetFilter` chain. Distinct from the CSS-filter path: this selects
+    // ONE of a small vetted set of SkSL effects by NAME (never arbitrary shader
+    // source) and post-processes the whole canvas on the GPU. Sticky /
+    // declarative (not a per-draw command): set once, applies every frame until
+    // changed — no animation loop required for a static CRT/grain overlay.
+    // Args: (id, name, intensity=1.0). Known names: "crt", "grain", "vignette",
+    // "noise", "brushed", "bloom". "none"/"" disables; unknown names are a
+    // graceful no-op (never rejects the build). intensity clamps to [0,1].
+    register_bridge_function(api, "canvasSetShaderEffect", [&self](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {
+            c->set_shader_effect(args.get<std::string>(1, "none"),
+                                 (float)args.get<double>(2, 1.0));
+        }
+        return choc::value::Value();
+    });
+
     // Canvas arc — for pie charts, circular progress, arcs
     register_bridge_function(api, "canvasArc", [&self](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(self.widget(args.get<std::string>(0, "")))) {

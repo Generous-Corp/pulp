@@ -114,6 +114,12 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   selected sample. Do not interpolate by sample fraction across tempo ramps.
   Each loop/seek/adoption range is reseeded, stopped blocks emit only when
   reseeding, and same-lane adoption requires a strictly newer generation.
+- `DeviceParameterTarget::device_id` holds a device *placement* ID, not a device
+  ID. Prefer the `device_placement_id()` accessor; it is what target ordering and
+  the aggregate's duplicate-target rejection compare. Two placements of the same
+  device are distinct automation targets, so deduplicating by the underlying
+  device would silently collapse them. `AutomationLaneErrorCode::InvalidDeviceId`
+  is a compatibility alias for `InvalidDevicePlacementId`.
 - Audio and note renderers must consume the same `TransportSnapshot` for a
   callback. The replay golden uses a varying schedule up to the transport's
   prepared `max_buffer_size`; never cache the first callback size in either
@@ -154,3 +160,8 @@ stream with both the committed snapshot and the pinned fixture.
 `web-timeline-source-closure` compares the native timebase, timeline, and
 playback source lists with both curated production web ABI lists. Add a portable
 engine translation unit to native, WAM, and WebCLAP ownership together.
+
+`test/cmake/sampler_runtime_tests.cmake` also registers sampler Heritage
+runtime tests. Those tests exercise `pulp::audio` profile/runtime behavior and
+do not make Heritage profiles part of the immutable playback-program model;
+keep that ownership boundary when extending the shared test inventory.
