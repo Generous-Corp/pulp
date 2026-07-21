@@ -8,6 +8,15 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v07460"></a>
+## [0.746.0] - 2026-07-21
+
+- refactor(timeline): attachment prep — canonical identity + snapshot-equivalence/schema-policy extraction ([#6424](https://github.com/Generous-Corp/pulp/pull/6424))
+- feat(canvas): curated named GPU shader effects for scripted-UI canvas ([#6422](https://github.com/Generous-Corp/pulp/pull/6422))
+- chore(test): register test_gate_common.py as a ctest ([#6412](https://github.com/Generous-Corp/pulp/pull/6412))
+- feat(release): add toggle-gated PR-route to version-at-land bumper ([#6415](https://github.com/Generous-Corp/pulp/pull/6415))
+- fix(view): fit + proportionally resize the AutoUi default editor ([#6418](https://github.com/Generous-Corp/pulp/pull/6418))
+
 <a id="v07450"></a>
 ## [0.745.0] - 2026-07-20
 
@@ -6821,6 +6830,7 @@ to its [GitHub Release](https://github.com/Generous-Corp/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/Generous-Corp/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/Generous-Corp/pulp/pull/2))
 
+[0.746.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.746.0
 [0.745.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.745.0
 [0.744.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.744.0
 [0.743.0]: https://github.com/Generous-Corp/pulp/releases/tag/v0.743.0
