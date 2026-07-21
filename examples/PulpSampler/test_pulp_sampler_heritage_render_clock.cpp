@@ -429,8 +429,8 @@ TEST_CASE("PulpSampler routes rich typed voice blocks through native DSP",
           "[audio][sampler][heritage][typed][native]") {
     const auto profile = typed_rich_voice_profile();
     auto sample = make_sine(4096);
-    HeritageFixture whole(512, &profile);
-    HeritageFixture split(512, &profile);
+    HeritageFixture whole(2048, &profile);
+    HeritageFixture split(2048, &profile);
     whole.load(sample);
     split.load(sample);
     constexpr std::array one{std::size_t{2048}};
@@ -442,6 +442,26 @@ TEST_CASE("PulpSampler routes rich typed voice blocks through native DSP",
     REQUIRE(std::all_of(contiguous.begin(), contiguous.end(),
                         [](float value) { return std::isfinite(value); }));
     REQUIRE(contiguous != std::vector<float>(sample.begin(), sample.begin() + contiguous.size()));
+}
+
+TEST_CASE("PulpSampler clamps a typed heritage block to the prepared maximum",
+          "[audio][sampler][heritage][typed][max-block]") {
+    const auto profile = typed_rich_voice_profile();
+    auto sample = make_sine(4096);
+    constexpr std::size_t prepared_frames = 512;
+    HeritageFixture prepared(prepared_frames, &profile);
+    HeritageFixture oversized(prepared_frames, &profile);
+    prepared.load(sample);
+    oversized.load(sample);
+    constexpr std::array legal{prepared_frames};
+    constexpr std::array oversize{prepared_frames * 4};
+    const auto reference = render(prepared, legal);
+    const auto clamped = render(oversized, oversize);
+    REQUIRE(reference.size() == prepared_frames);
+    REQUIRE(clamped.size() == prepared_frames * 4);
+    REQUIRE(std::equal(reference.begin(), reference.end(), clamped.begin()));
+    REQUIRE(std::all_of(clamped.begin() + prepared_frames, clamped.end(),
+                        [](float value) { return value == 0.0f; }));
 }
 
 TEST_CASE("PulpSampler drains a finite typed voice tail after source exhaustion",

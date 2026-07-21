@@ -112,6 +112,32 @@ into the caller-selected artifact directory or repository.
     secrets, private machine identifiers, and unrelated private evidence. Link
     the archive to the resulting profile only when the caller wants that link.
 
+## Gotchas
+
+- **Prepare a heritage render fixture for the largest block it will render.**
+  A `Processor` sizes every scratch buffer once at `prepare()` to the prepared
+  maximum block, so rendering a longer block is a contract violation, not a
+  stress test. `PulpSamplerProcessor::process()` clamps to the prepared maximum
+  and leaves the tail silent, so an over-long block quietly renders only its
+  first `max_buffer_size` frames — a partition-invariance comparison built on
+  one will not mean what it looks like it means. Size the fixture to at least
+  `max(partitions)`.
+- **A typed profile makes the bus activity buffer part of that contract.**
+  The typed render path zeroes and indexes `bus_voice_activity_`, which is
+  sized to the prepared maximum, for every segment — including for a profile
+  with no `bus` blocks at all. A typed profile therefore has no "voice-only"
+  exemption from the block-size bound.
+- **Heap damage from the render path surfaces at teardown, not at the render.**
+  The audible output and every bit-exactness assertion can pass while the
+  overrun lands in a neighbouring allocation; the crash then appears as a
+  segfault inside the streaming runtime's `release()`, or as a
+  `system_error: mutex lock failed: Invalid argument` escaping the noexcept
+  streaming service loop. Heap layout decides whether it trips at all, so such
+  a case can pass in a full-suite run and fail every time it runs alone — which
+  is how `catch_discover_tests` makes ctest run it. Reach for guard malloc
+  (`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) or an ASan build before
+  reading the teardown stack as a lifetime bug.
+
 ## Deliverable gate
 
 Do not call a profile complete until all of these are present:

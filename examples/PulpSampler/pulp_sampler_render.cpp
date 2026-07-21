@@ -40,7 +40,14 @@ void PulpSamplerProcessor::process(audio::BufferView<float>& output,
     const bool can_trigger = published_source_valid(published);
 
     const auto params = current_params();
-    const auto block_frames = static_cast<std::uint32_t>(output.num_samples());
+    // Voice scratch, bus voice activity and the heritage buffers are all sized
+    // once to the prepared maximum block, so only that many frames can be
+    // rendered. A longer block keeps the silence clear_output() already wrote
+    // past the maximum, the same clamp the CLAP and VST3 adapters apply before
+    // a Processor ever sees an oversized block
+    // (core/format/include/pulp/format/max_block_contract.hpp).
+    const auto block_frames = static_cast<std::uint32_t>(
+        std::min<std::size_t>(output.num_samples(), max_block_frames_));
     midi_in.sort();
 
     std::uint32_t cursor = 0;
