@@ -471,6 +471,22 @@ NSView directly, so native frame changes are forwarded to `bridge->resize()`
 through that seam. Full contract: the `view-bridge` skill's "GPU view host
 auto-selection" section.
 
+### The Cocoa view MUST pin the design viewport, or a Logic resize CLIPS
+
+AU v2 has no size negotiation (no `checkSizeConstraint` / `gui_adjust_size`) —
+Logic resizes the returned NSView directly. Without a design-viewport pin the
+fixed-size tree CLIPS instead of scaling; VST3 and mac AUv3 always pinned, AU v2
+historically did not. `au_v2_cocoa_view.mm` now routes the decision through the
+shared `pulp::format::should_pin_design_viewport(ViewSize)` predicate
+(`plugin_descriptor.hpp`, same one `PulpPlugView` uses): pin viewport + lock
+aspect + `set_design_viewport_top_align(true)` (mac-AUv3 parity — slack collects
+as one bottom strip) unless the plugin opted into free drag
+(`min>0 && aspect_ratio==0`), which stays unpinned so Yoga reflows via the
+resize-callback seam above. Contract test: `test/test_au_v2_cocoa_ui.mm`
+`[resize]`. The windowed `set_design_viewport` call itself cannot run headlessly
+(`editor_launch_blocked_by_environment` refuses editors in CI) — verify visually
+in Logic/auval when touching this path.
+
 ### AU v2 MUST advertise its Cocoa view, or the host shows its generic UI
 
 Selecting the GPU host (above) is necessary but NOT sufficient. The host only

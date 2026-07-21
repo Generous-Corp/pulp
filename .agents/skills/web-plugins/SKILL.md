@@ -282,6 +282,20 @@ per-ABI entry point for it.** Go through the plugin's own state:
   independent of state, host, and format code; compiling them into wasm does not
   by itself create a JavaScript-facing timeline API or Host delivery path.
 
+- A new `core/timeline` translation unit belongs in four source lists:
+  `core/timeline/CMakeLists.txt`, the `pulp-test-timeline-no-exceptions` OBJECT
+  library in `test/cmake/timeline_tests.cmake`, `PulpWam.cmake`, and
+  `PulpWclap.cmake`. That fourth list mirrors the timeline sources specifically,
+  so it applies to timeline units and not to engine units from other modules.
+  `web-timeline-source-closure` compares only the WAM and WebCLAP lanes, so a
+  missing no-exceptions entry passes that check and surfaces instead as an
+  undefined symbol when the no-exceptions target links.
+
+- Extraction produces a new translation unit and carries the same obligation.
+  Moving a helper out of an already-listed engine `.cpp` into its own file reads
+  as a pure refactor, because the origin unit stays listed everywhere — but the
+  extracted file is new to every list its module maintains.
+
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
   through the `clap.state` extension — and both produce the *same* `PLST` blob the

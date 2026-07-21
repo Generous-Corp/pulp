@@ -47,6 +47,7 @@
 #include <pulp/canvas/skia_canvas.hpp>
 #ifdef PULP_HAS_SKIA
 #include "skia_canvas_internal.hpp"  // skia_blend_mode_for, to_sk_color4f
+#include "named_shader_effects.hpp"  // make_named_shader_effect (curated SkSL)
 #endif
 
 #ifdef PULP_HAS_SKIA
@@ -378,6 +379,39 @@ void SkiaCanvas::save_layer_with_filters(float x, float y, float w, float h,
 
     push_layer(x, y, w, h, opacity, /*blur=*/0.0f, Canvas::BlendMode::normal,
                std::move(composed), /*force_non_opaque=*/reduces_coverage);
+}
+
+// Curated named GPU post-effect (crt / grain / vignette / noise / brushed /
+// bloom). Resolves the name to a vetted SkSL runtime shader and applies it as
+// an SkImageFilters::RuntimeShader over the whole compositing layer. Safe by
+// construction: generated UIs pick an effect by NAME with a single clamped
+// intensity — never arbitrary shader source. An unknown name or an SkSL
+// compile failure yields a null filter, so the layer opens plain and the
+// effect is simply skipped (graceful no-op, never a hard error).
+void SkiaCanvas::save_layer_with_shader_effect(float x, float y,
+                                               float w, float h,
+                                               const std::string& effect_name,
+                                               float intensity) {
+    if (!canvas_) { save(); return; }
+    // The RuntimeShader image filter runs in the layer's DEVICE space, so its
+    // main(float2 coord) sees device pixels. Feed the effect the device-space
+    // resolution (logical size x CTM scale) so position-dependent effects
+    // (vignette centering, CRT curvature, bloom kernel radius) stay correct
+    // under HiDPI / any canvas scale. At DPR=1 this is a no-op.
+    const SkMatrix m = canvas_->getTotalMatrix();
+    const float sx = std::hypot(m.getScaleX(), m.getSkewY());
+    const float sy = std::hypot(m.getSkewX(), m.getScaleY());
+    const float dw = w * (sx > 0.0f ? sx : 1.0f);
+    const float dh = h * (sy > 0.0f ? sy : 1.0f);
+    sk_sp<SkImageFilter> fx =
+        make_named_shader_effect(effect_name, intensity, dw, dh, /*time=*/0.0f);
+    // A runtime-shader post-effect can drop coverage below opaque, so mark the
+    // layer non-opaque when an effect is actually active (matches the
+    // filter-chain path) for correct greyscale text AA inside the layer.
+    const bool active = static_cast<bool>(fx);
+    push_layer(x, y, w, h, /*opacity=*/1.0f, /*blur=*/0.0f,
+               Canvas::BlendMode::normal, std::move(fx),
+               /*force_non_opaque=*/active);
 }
 
 void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,

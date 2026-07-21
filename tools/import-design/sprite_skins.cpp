@@ -10,9 +10,11 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -481,6 +483,82 @@ void resolve_sprite_skins(pulp::view::DesignIR& ir,
             }
         }
     }
+}
+
+void localize_ir_assets(pulp::view::DesignIR& ir, const std::string& output_file) {
+    if (output_file.empty()) return;
+
+    fs::path out_dir = fs::path(output_file).parent_path();
+    std::error_code ec;
+    if (out_dir.empty()) out_dir = fs::current_path(ec);
+    const fs::path assets_dir = out_dir / "assets";
+
+    std::unordered_map<std::string, std::string> rel_by_source;   // abs source → assets/<file>
+    std::unordered_map<std::string, std::string> source_by_name;  // <file> → abs source
+    bool dir_ready = false;
+
+    auto localize = [&](std::string& path_ref) {
+        if (path_ref.empty()) return;
+        const fs::path src(path_ref);
+        // Already-relative references (an envelope that lives in the output
+        // dir, or a re-run over localized IR) are portable as-is.
+        if (src.is_relative()) return;
+        if (auto hit = rel_by_source.find(path_ref); hit != rel_by_source.end()) {
+            path_ref = hit->second;
+            return;
+        }
+        std::error_code lec;
+        if (!fs::is_regular_file(src, lec) || lec) return;  // unresolved ref — leave for diagnostics
+
+        // Asset filenames are content hashes in the export lanes, so clashes
+        // only happen for genuinely different files; suffix those.
+        std::string name = src.filename().string();
+        for (int n = 2;; ++n) {
+            auto used = source_by_name.find(name);
+            if (used == source_by_name.end() || used->second == path_ref) break;
+            name = src.stem().string() + "-" + std::to_string(n)
+                 + src.extension().string();
+        }
+
+        if (!dir_ready) {
+            fs::create_directories(assets_dir, lec);
+            if (lec) {
+                std::cerr << "Warning: could not create " << assets_dir << ": "
+                          << lec.message()
+                          << " — keeping absolute asset path in output\n";
+                return;
+            }
+            dir_ready = true;
+        }
+        const fs::path dst = assets_dir / name;
+        const bool same_file = fs::exists(dst, lec) && !lec
+                            && fs::equivalent(src, dst, lec) && !lec;
+        lec.clear();
+        if (!same_file) {
+            fs::copy_file(src, dst, fs::copy_options::overwrite_existing, lec);
+            if (lec) {
+                std::cerr << "Warning: could not copy asset " << src << " → "
+                          << dst << ": " << lec.message()
+                          << " — keeping absolute asset path in output\n";
+                return;
+            }
+        }
+        // generic_string(): the relative path is baked into generated JS and
+        // must use '/' on every platform (same reason as the resolve pass).
+        std::string rel = (fs::path("assets") / name).generic_string();
+        rel_by_source.emplace(path_ref, rel);
+        source_by_name.emplace(std::move(name), path_ref);
+        path_ref = rel;
+    };
+
+    std::function<void(IRNode&)> walk = [&](IRNode& n) {
+        if (auto it = n.attributes.find("asset_path"); it != n.attributes.end())
+            localize(it->second);
+        for (auto& alt : n.alternate_frames) walk(alt);
+        for (auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    for (auto& fa : ir.font_family_assets) localize(fa.resolved_path);
 }
 
 }  // namespace pulp::import_design

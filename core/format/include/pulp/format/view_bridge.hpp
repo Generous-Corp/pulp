@@ -306,6 +306,7 @@ private:
     view::HostActionSurface* host_actions_ = nullptr;  ///< caller-owned; may be null
     std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
     bool uses_script_ui_ = false;
+    bool uses_auto_ui_ = false;  ///< true when the editor is the AutoUi default
     bool attached_ = false;  ///< true between notify_attached() and close()
     bool released_ = false;  ///< true after release_view() transfers ownership
     uint64_t last_reload_generation_ = 0;  ///< editor-reload generation last applied (1.9)

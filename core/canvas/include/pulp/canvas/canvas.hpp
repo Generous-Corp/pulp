@@ -947,6 +947,30 @@ public:
         save_layer(x, y, w, h, opacity, blur);
     }
 
+    /// Curated, named GPU post-effect layer save.
+    ///
+    /// This is the SAFE shader-effect entry for scripted / generated UIs:
+    /// the subtree paints into an offscreen layer, and at restore() the
+    /// whole layer is post-processed by ONE of a small vetted set of SkSL
+    /// effects selected BY NAME — never arbitrary shader source. Known
+    /// names (see core/canvas/src/named_shader_effects.hpp): `crt`,
+    /// `grain`, `vignette`, `noise`, `brushed`, `bloom`. `intensity` is
+    /// the single 0..1 strength knob (clamped by the backend).
+    ///
+    /// Unknown names, degenerate sizes, or a Skia/GPU-unavailable backend
+    /// all degrade gracefully to a plain `save_layer` (effect skipped) so
+    /// a generated UI can request an effect unconditionally and headless
+    /// CPU renders never crash. The default impl here IS that fallback;
+    /// only SkiaCanvas builds the runtime-effect image filter.
+    virtual void save_layer_with_shader_effect(float x, float y,
+                                               float w, float h,
+                                               const std::string& effect_name,
+                                               float intensity) {
+        (void)effect_name;
+        (void)intensity;
+        save_layer(x, y, w, h);
+    }
+
     /// CSS `mask-image` + `mask-size` paint slice.
     /// Composes the subtree with a mask shader applied via SkBlendMode::
     /// kDstIn so the painted result keeps only the alpha that the mask
