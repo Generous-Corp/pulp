@@ -7,6 +7,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <string>
@@ -218,6 +219,27 @@ public:
         native_gpu_texture_provider_ = std::move(provider);
     }
 
+    /// Request a curated, named GPU post-effect over the whole canvas.
+    ///
+    /// This is the SAFE shader-effect surface for generated / scripted UIs
+    /// (Forge): `name` selects one of a small vetted set of SkSL effects
+    /// (`crt`, `grain`, `vignette`, `noise`, `brushed`, `bloom`) — never
+    /// arbitrary shader source. `intensity` is a single strength knob,
+    /// clamped to [0,1]. `"none"` / `""` clears the effect. The effect is
+    /// sticky (declarative): it persists across command-list rebuilds until
+    /// changed, so a static CRT/grain overlay needs no per-frame re-issue.
+    /// Applied at paint() time to the per-canvas compositing layer; unknown
+    /// names and non-Skia/CPU backends degrade to no effect (see
+    /// Canvas::save_layer_with_shader_effect).
+    void set_shader_effect(std::string name, float intensity = 1.0f) {
+        shader_effect_name_ = std::move(name);
+        shader_effect_intensity_ = std::clamp(intensity, 0.0f, 1.0f);
+    }
+    /// Active curated effect name (`"none"` / `""` when disabled). Read-only
+    /// accessor for tests; the bridge owns mutation via set_shader_effect.
+    const std::string& shader_effect() const { return shader_effect_name_; }
+    float shader_effect_intensity() const { return shader_effect_intensity_; }
+
     void paint(canvas::Canvas& canvas) override;
 
 private:
@@ -232,6 +254,10 @@ private:
     std::vector<CanvasDrawCmd> commands_;
     NativeGpuTextureProvider native_gpu_texture_provider_;
     bool last_native_gpu_texture_draw_succeeded_ = false;
+    // Curated named GPU post-effect state (see set_shader_effect). Sticky
+    // across command-list rebuilds; "none"/"" means no effect.
+    std::string shader_effect_name_ = "none";
+    float shader_effect_intensity_ = 1.0f;
 };
 
 } // namespace pulp::view
