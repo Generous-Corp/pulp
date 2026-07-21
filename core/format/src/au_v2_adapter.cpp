@@ -6,15 +6,11 @@
 #include <AudioToolbox/AudioUnitUtilities.h>
 #include <AudioToolbox/AudioToolbox.h>  // kAudioUnitProperty_CocoaUI, AudioUnitCocoaViewInfo
 
-#include <mach/mach_time.h>
-
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/quirk_apply.hpp>
 #include <pulp/format/detail/param_host_sync.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/format/detail/audio_buffer_list_validation.hpp>
-#include <pulp/format/plugin_state_io.hpp>
-#include <pulp/format/parameter_text.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -27,57 +23,6 @@
 #include <string>
 
 namespace pulp::format::au {
-
-// Set while the HOST is writing a parameter (SetParameter), so the store's
-// UI-push listener — which fires inline on the same thread — skips echoing the
-// change back to the host. Thread-local so the guard is scoped to the writing
-// thread only.
-namespace { thread_local bool g_host_writing_param = false; }
-
-// Cross-TU Cocoa-view hook (see au_v2_adapter.hpp). Hidden visibility keeps it
-// per-loaded-image so two Pulp AU components in one host don't share state.
-// Installed by au_v2_cocoa_view.mm's static-init when a *_AU target links it
-// (PULP_AU_GUI); null for CLAP / Standalone / headless builds of pulp-format.
-#if defined(__clang__) || defined(__GNUC__)
-__attribute__((visibility("hidden")))
-#endif
-CocoaViewInfoFiller g_cocoa_view_info_filler = nullptr;
-
-// Parameter IDs for the AU system map 1:1 from Pulp ParamIDs
-// AU uses AudioUnitParameterID (UInt32) which matches our state::ParamID
-
-midi::MidiEvent decode_midi_event(uint8_t inStatus,
-                                  uint8_t inChannel,
-                                  uint8_t inData1,
-                                  uint8_t inData2) noexcept
-{
-    // AUMIDIBase::MIDIEvent (AudioUnitSDK 1.4 AUMIDIBase.h) splits the
-    // wire-format status byte unconditionally:
-    //
-    //     strippedStatus = inStatus & 0xF0   // top nibble  -> our inStatus
-    //     channel        = inStatus & 0x0F   // low nibble  -> our inChannel
-    //     HandleMIDIEvent(strippedStatus, channel, ...)
-    //
-    // The split is the SAME for every status byte the host delivers to
-    // this callback — channel-voice (0x80-0xEF) AND system (0xF0-0xFF).
-    // For system common (0xF1-0xF7) and system realtime (0xF8-0xFF), the
-    // low nibble carries the system-message subtype rather than a channel,
-    // but the bit-layout reassembly is identical: status = top | low.
-    //
-    // Returning inStatus unchanged for system messages would turn every
-    // system message into 0xF0 (sysex start), so MIDI clock / start / stop /
-    // continue / song-position / quarter-frame would arrive at the Processor
-    // with the wrong status byte. The unit test in test_au_v2_effect.cpp
-    // mirrors the SDK splitting so the regression cannot reappear.
-    const uint8_t status_byte =
-        static_cast<uint8_t>((inStatus & 0xF0) | (inChannel & 0x0F));
-    midi::MidiEvent ev{
-        choc::midi::ShortMessage(status_byte, inData1, inData2),
-        /*sample_offset=*/0,
-        /*timestamp=*/0.0,
-    };
-    return ev;
-}
 
 PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
     : PulpAUEffect(ci, registered_factory())
@@ -115,54 +60,10 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
                 }
             }
 
-            // Wire gesture callbacks for undo grouping support.
-            store_.set_gesture_callbacks(
-                [this](state::ParamID id) {
-                    AudioUnitEvent event;
-                    event.mEventType = kAudioUnitEvent_BeginParameterChangeGesture;
-                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    event.mArgument.mParameter.mParameterID = static_cast<AudioUnitParameterID>(id);
-                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    event.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &event);
-                },
-                [this](state::ParamID id) {
-                    AudioUnitEvent event;
-                    event.mEventType = kAudioUnitEvent_EndParameterChangeGesture;
-                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    event.mArgument.mParameter.mParameterID = static_cast<AudioUnitParameterID>(id);
-                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    event.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &event);
-                });
-
-            // UI → host parameter NOTIFICATION. When the editor edits a
-            // parameter (ParameterEdit → store), tell the host its value
-            // changed so it re-reads (via our GetParameter override) and records
-            // automation. This is a plain AUEventListenerNotify — NOT
-            // AudioUnitSetParameter on ourselves (which re-dispatches through the
-            // AU and, observed in Logic, wedges the render on gesture release).
-            //
-            // Registered as an Audio listener so it runs INLINE, synchronously,
-            // on whichever thread set the store: a UI edit fires it on the
-            // message thread (correct); a host write (SetParameter) fires it with
-            // g_host_writing_param set, so the echo is suppressed. The render
-            // thread never writes the store (no reconcile), so this never
-            // notifies from the render thread.
-            ui_push_listener_ = store_.add_listener(
-                [this](state::ParamID id, float /*value*/) {
-                    if (g_host_writing_param) return; // host's own write — no echo
-                    AudioUnitEvent ev;
-                    std::memset(&ev, 0, sizeof(ev));
-                    ev.mEventType = kAudioUnitEvent_ParameterValueChange;
-                    ev.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    ev.mArgument.mParameter.mParameterID =
-                        static_cast<AudioUnitParameterID>(id);
-                    ev.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    ev.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &ev);
-                },
-                state::ListenerThread::Audio);
+            // Editor -> host parameter path: gesture brackets + value-change
+            // notification, wired once through the shared AU v2 bridge.
+            wire_host_parameter_bridge(store_, GetComponentInstance(),
+                                               ui_push_listener_);
 
             // Set defaults in AU parameter system at construction time so hosts
             // can inspect them before Initialize() is called.
@@ -179,97 +80,25 @@ OSStatus PulpAUEffect::GetParameterList(AudioUnitScope inScope,
                                         AudioUnitParameterID* outParameterList,
                                         UInt32& outNumParameters)
 {
-    if (inScope != kAudioUnitScope_Global) {
-        outNumParameters = 0;
-        return noErr;
-    }
-
-    outNumParameters = static_cast<UInt32>(store_.param_count());
-    if (outParameterList) {
-        auto params = store_.all_params();
-        for (std::size_t i = 0; i < params.size(); ++i) {
-            outParameterList[i] = static_cast<AudioUnitParameterID>(params[i].id);
-        }
-    }
-    return noErr;
+    return fill_parameter_list(store_, inScope, outParameterList,
+                                       outNumParameters);
 }
 
 OSStatus PulpAUEffect::GetParameterInfo(AudioUnitScope inScope,
                                         AudioUnitParameterID inParameterID,
                                         AudioUnitParameterInfo& outParameterInfo)
 {
-    if (inScope != kAudioUnitScope_Global)
-        return kAudioUnitErr_InvalidParameter;
-
-    const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
-    if (!param) return kAudioUnitErr_InvalidParameter;
-
-    outParameterInfo.flags = kAudioUnitParameterFlag_IsWritable
-                           | kAudioUnitParameterFlag_IsReadable
-                           | kAudioUnitParameterFlag_HasCFNameString;
-
-    // Advertise author-supplied value strings so the host queries our display
-    // formatting. For DISCRETE params the host reads the enumerated list via
-    // GetParameterValueStrings; for CONTINUOUS params it round-trips single
-    // values through kAudioUnitProperty_ParameterStringFromValue /
-    // ...ValueFromString (handled in GetProperty). Both are gated on to_string,
-    // so a plugin that declares no converter keeps the host's stock numeric
-    // display unchanged.
-    if (param->to_string || !param->value_labels.empty()) {
-        outParameterInfo.flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
-    }
-
-    CFStringRef name = CFStringCreateWithCString(
-        kCFAllocatorDefault, param->name.c_str(), kCFStringEncodingUTF8);
-    outParameterInfo.cfNameString = name;
-    strlcpy(reinterpret_cast<char*>(outParameterInfo.name),
-            param->name.c_str(), sizeof(outParameterInfo.name));
-
-    outParameterInfo.minValue = param->range.min;
-    outParameterInfo.maxValue = param->range.max;
-    outParameterInfo.defaultValue = param->range.default_value;
-
-    if (param->unit == "dB") {
-        outParameterInfo.unit = kAudioUnitParameterUnit_Decibels;
-    } else if (param->unit == "Hz") {
-        outParameterInfo.unit = kAudioUnitParameterUnit_Hertz;
-    } else if (param->unit == "%") {
-        outParameterInfo.unit = kAudioUnitParameterUnit_Percent;
-    } else if (state::is_boolean_param(*param)) {
-        outParameterInfo.unit = kAudioUnitParameterUnit_Boolean;
-    } else {
-        outParameterInfo.unit = kAudioUnitParameterUnit_Generic;
-    }
-
-    return noErr;
+    return fill_parameter_info(store_, inScope, inParameterID,
+                               outParameterInfo,
+                               /*advertise_value_strings=*/true);
 }
 
 OSStatus PulpAUEffect::GetParameterValueStrings(AudioUnitScope inScope,
                                                 AudioUnitParameterID inParameterID,
                                                 CFArrayRef* outStrings)
 {
-    if (inScope != kAudioUnitScope_Global)
-        return kAudioUnitErr_InvalidParameter;
-
-    const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
-    if (!param) return kAudioUnitErr_InvalidParameter;
-
-    if (!state::is_discrete_param(*param))
-        return kAudioUnitErr_InvalidPropertyValue;
-
-    const int count = static_cast<int>(state::param_value_count(*param));
-    CFMutableArrayRef strings = CFArrayCreateMutable(kCFAllocatorDefault, count, &kCFTypeArrayCallBacks);
-    for (int i = 0; i < count; ++i) {
-        const float step = param->range.step > 0.0f ? param->range.step : 1.0f;
-        float value = param->range.min + i * step;
-        auto str = format_parameter_text(*param, value);
-        CFStringRef cfStr = CFStringCreateWithCString(
-            kCFAllocatorDefault, str.c_str(), kCFStringEncodingUTF8);
-        CFArrayAppendValue(strings, cfStr);
-        CFRelease(cfStr);
-    }
-    *outStrings = strings;
-    return noErr;
+    return fill_parameter_value_strings(store_, inScope, inParameterID,
+                                                outStrings);
 }
 
 OSStatus PulpAUEffect::GetParameter(AudioUnitParameterID inID, AudioUnitScope inScope,
@@ -293,13 +122,12 @@ OSStatus PulpAUEffect::SetParameter(AudioUnitParameterID inID, AudioUnitScope in
     // Host-side write (automation playback, generic UI, preset recall) lands
     // straight in the store that process() reads. set_value_rt is RT-safe (the
     // host may call this from the render thread) and fires the inline Audio
-    // listener synchronously, where g_host_writing_param suppresses the echo
+    // listener synchronously, where the host-write guard suppresses the echo
     // back to the host.
     if (inScope == kAudioUnitScope_Global &&
         store_.info(static_cast<state::ParamID>(inID)) != nullptr) {
-        g_host_writing_param = true;
+        ScopedHostParamWrite host_write;
         store_.set_value_rt(static_cast<state::ParamID>(inID), inValue);
-        g_host_writing_param = false;
         return noErr;
     }
     return AUMIDIEffectBase::SetParameter(inID, inScope, inElement, inValue,
@@ -378,36 +206,16 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         plugin_produces_midi()) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (!outData) return kAudioUnitErr_InvalidProperty;
-        // One MIDI output stream named after the plugin. The host owns the array
-        // and its element (it releases them), so create with +1 retain.
-        CFStringRef name = CFStringCreateWithCString(
-            kCFAllocatorDefault,
-            processor_ ? processor_->descriptor().name.c_str() : "MIDI Out",
-            kCFStringEncodingUTF8);
-        CFStringRef values[1] = {name};
-        CFArrayRef array = CFArrayCreate(kCFAllocatorDefault,
-                                         reinterpret_cast<const void**>(values),
-                                         1, &kCFTypeArrayCallBacks);
-        if (name) CFRelease(name);  // the array retained it
-        *static_cast<CFArrayRef*>(outData) = array;
+        // One MIDI output stream named after the plugin.
+        *static_cast<CFArrayRef*>(outData) = make_midi_output_names(
+            descriptor_.name.c_str());
         return noErr;
     }
     if (inID == kAudioUnitProperty_MIDIOutputCallback &&
         plugin_produces_midi()) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
-        if (!outData) return kAudioUnitErr_InvalidProperty;
         // Reflect the currently published pair (acquire-load the snapshot).
-        auto* out = static_cast<AUMIDIOutputCallbackStruct*>(outData);
-        const auto* pair =
-            midi_output_callback_.load(std::memory_order_acquire);
-        if (pair) {
-            out->midiOutputCallback = pair->callback;
-            out->userData = pair->user_data;
-        } else {
-            out->midiOutputCallback = nullptr;
-            out->userData = nullptr;
-        }
-        return noErr;
+        return midi_output_callback_.reflect(outData);
     }
     // Continuous-parameter display: value -> string. The host owns and releases
     // outString, so create it with a +1 retain. inValue == nullptr means "use
@@ -415,34 +223,13 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
     if (inID == kAudioUnitProperty_ParameterStringFromValue) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (!outData) return kAudioUnitErr_InvalidProperty;
-        auto* sfv = static_cast<AudioUnitParameterStringFromValue*>(outData);
-        const auto* param = store_.info(static_cast<state::ParamID>(sfv->inParamID));
-        if (!param) return kAudioUnitErr_InvalidPropertyValue;
-        const float value = sfv->inValue
-            ? static_cast<float>(*sfv->inValue)
-            : store_.get_value(static_cast<state::ParamID>(sfv->inParamID));
-        const std::string text = format_parameter_text(*param, value);
-        sfv->outString = CFStringCreateWithCString(
-            kCFAllocatorDefault, text.c_str(), kCFStringEncodingUTF8);
-        if (!sfv->outString) return kAudioUnitErr_InvalidPropertyValue;
-        return noErr;
+        return parameter_string_from_value(store_, outData);
     }
     // Continuous-parameter text entry: string -> value.
     if (inID == kAudioUnitProperty_ParameterValueFromString) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
         if (!outData) return kAudioUnitErr_InvalidProperty;
-        auto* vfs = static_cast<AudioUnitParameterValueFromString*>(outData);
-        const auto* param = store_.info(static_cast<state::ParamID>(vfs->inParamID));
-        if (!param || !vfs->inString)
-            return kAudioUnitErr_InvalidPropertyValue;
-        char buf[256] = {0};
-        if (!CFStringGetCString(vfs->inString, buf, sizeof(buf),
-                                kCFStringEncodingUTF8))
-            return kAudioUnitErr_InvalidPropertyValue;
-        const auto parsed = parse_parameter_text(*param, buf);
-        if (!parsed) return kAudioUnitErr_InvalidPropertyValue;
-        vfs->outValue = *parsed;
-        return noErr;
+        return parameter_value_from_string(store_, outData);
     }
     return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
 }
@@ -459,21 +246,7 @@ OSStatus PulpAUEffect::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
     // it; the render side acquire-loads a single, internally-consistent pair.
     if (inID == kAudioUnitProperty_MIDIOutputCallback && plugin_produces_midi()) {
         if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
-        if (!inData || inDataSize < sizeof(AUMIDIOutputCallbackStruct))
-            return kAudioUnitErr_InvalidPropertyValue;
-        const auto* in = static_cast<const AUMIDIOutputCallbackStruct*>(inData);
-        const std::uint8_t slot =
-            midi_output_callback_write_slot_.load(std::memory_order_relaxed);
-        midi_output_callback_slots_[slot].callback = in->midiOutputCallback;
-        midi_output_callback_slots_[slot].user_data = in->userData;
-        // Publish the freshly written slot, then flip the write cursor so the
-        // next SetProperty writes the other slot (never the one the render thread
-        // may still be reading).
-        midi_output_callback_.store(&midi_output_callback_slots_[slot],
-                                    std::memory_order_release);
-        midi_output_callback_write_slot_.store(slot ^ 1,
-                                               std::memory_order_relaxed);
-        return noErr;
+        return midi_output_callback_.publish(inData, inDataSize);
     }
     return AUMIDIEffectBase::SetProperty(inID, inScope, inElement, inData, inDataSize);
 }
@@ -804,8 +577,7 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     // is a plain audio effect), this is a cheap no-op. Packet timestamps are
     // sample offsets within the block, clamped to it; the host callback receives
     // the current render time as its base, the documented contract.
-    const auto* midi_cb =
-        midi_output_callback_.load(std::memory_order_acquire);
+    const auto* midi_cb = midi_output_callback_.load();
     if (midi_cb != nullptr && midi_cb->callback != nullptr &&
         (midi_out.size() > 0 || midi_out.sysex_size() > 0)) {
         const MIDIPacketList* list =
@@ -846,60 +618,24 @@ OSStatus PulpAUEffect::SaveState(CFPropertyListRef* outData)
 {
     auto result = AUEffectBase::SaveState(outData);
     if (result != noErr) return result;
-
     if (!processor_) return kAudioUnitErr_Uninitialized;
-    auto data = plugin_state_io::serialize(store_, *processor_);
-    CFDataRef cfData = CFDataCreate(kCFAllocatorDefault,
-                                    data.data(),
-                                    static_cast<CFIndex>(data.size()));
-    if (cfData) {
-        CFMutableDictionaryRef dict = nullptr;
-        if (*outData && CFGetTypeID(*outData) == CFDictionaryGetTypeID()) {
-            dict = CFDictionaryCreateMutableCopy(
-                kCFAllocatorDefault, 0,
-                static_cast<CFDictionaryRef>(*outData));
-        } else {
-            dict = CFDictionaryCreateMutable(kCFAllocatorDefault,
-                                             0,
-                                             &kCFTypeDictionaryKeyCallBacks,
-                                             &kCFTypeDictionaryValueCallBacks);
-        }
-
-        if (*outData) {
-            CFRelease(*outData);
-        }
-
-        CFDictionarySetValue(dict, CFSTR("pulp-state"), cfData);
-        *outData = dict;
-        CFRelease(cfData);
-    }
-    return noErr;
+    return save_pulp_state(store_, *processor_, outData);
 }
 
 OSStatus PulpAUEffect::RestoreState(CFPropertyListRef plist)
 {
     auto result = AUEffectBase::RestoreState(plist);
     if (result != noErr) return result;
+    if (!processor_) return kAudioUnitErr_Uninitialized;
+    result = restore_pulp_state(store_, *processor_, plist);
+    if (result != noErr) return result;
 
-    if (CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
-        auto dict = static_cast<CFDictionaryRef>(plist);
-        auto cfData = static_cast<CFDataRef>(
-            CFDictionaryGetValue(dict, CFSTR("pulp-state")));
-        if (cfData && CFGetTypeID(cfData) == CFDataGetTypeID()) {
-            auto* bytes = CFDataGetBytePtr(cfData);
-            auto length = CFDataGetLength(cfData);
-            if (!processor_) return kAudioUnitErr_Uninitialized;
-            if (!plugin_state_io::deserialize({bytes, static_cast<size_t>(length)},
-                                              store_, *processor_)) {
-                return kAudioUnitErr_InvalidPropertyValue;
-            }
-
-            for (const auto& param : store_.all_params()) {
-                Globals()->SetParameter(
-                    static_cast<AudioUnitParameterID>(param.id),
-                    store_.get_value(param.id));
-            }
-        }
+    // Mirror the restored values into the AU's own parameter storage so a host
+    // query that falls through our GetParameter override still reads the
+    // preset rather than construction defaults.
+    for (const auto& param : store_.all_params()) {
+        Globals()->SetParameter(static_cast<AudioUnitParameterID>(param.id),
+                                store_.get_value(param.id));
     }
     return noErr;
 }

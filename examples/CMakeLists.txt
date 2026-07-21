@@ -102,6 +102,10 @@ add_subdirectory(mpe-synth)
 # (1 main + 7 aux). Exercises the AU v2 aumu multi-output-element path.
 add_subdirectory(pulp-multi-out)
 
+# MIDI-effect demo: transposes notes, no audio path. Exercises the AU v2 aumi
+# (MIDI-processor) path and the CLAP note-effect path.
+add_subdirectory(pulp-transpose)
+
 # PulpSampler: sample-buffer sampler with MIDI + ADSR
 add_subdirectory(PulpSampler)
 add_subdirectory(virtual-list-sample-manager)

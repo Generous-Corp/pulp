@@ -20,7 +20,7 @@ for its complete, authoritative guidance.
 | `ara` | Optional ARA support for Pulp, including developer-supplied ARA SDK setup, CMake enablement, adapter companion APIs, validation, and ARA-aware plugin implementation guidance. |
 | `audio-harness` | The measurement surface for ALL Pulp DSP and audio-pipeline work — read it BEFORE writing or gating DSP, not only when something already sounds wrong. |
 | `audio-headless-debug` | Reproduce and debug "only happens in a DAW" audio plugin bugs (cutouts, glitches, parameter-change failures) entirely offline — headless Processor scenes for DSP bugs and a standalone AudioUnit host probe for adapter/host-interaction bugs. |
-| `auv2` | Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu), wiring MIDI input, and avoiding the DAW-side component cache that silently masks repackaging. |
+| `auv2` | Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu) and its matching entry macro, wiring MIDI input and output (including the aumi MIDI-processor adapter), sharing the base-class-free adapter surface, and avoiding the DAW-side component cache that silently masks repackaging. |
 | `auv3` | Audio Unit v3 (AUAudioUnit) format adapter for Pulp — render-block wiring, parameter tree bridging, MIDI / sysex via AURenderEvent, sidechain pulls, state persistence, iOS extension surface, and the pitfalls discovered while wiring the adapter. |
 | `ci` | Local and cloud CI for Pulp — validate branches, create PRs, merge on green. |
 | `clap` | CLAP format adapter for Pulp — how Processor bridges to clap_plugin_t, how parameters / modulation / sidechain / MPE / UMP / sysex flow, and the pitfalls discovered while wiring the adapter. |

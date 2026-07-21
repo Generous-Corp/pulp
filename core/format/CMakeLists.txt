@@ -159,8 +159,10 @@ endif()
 if(PULP_HAS_AUSDK)
     if(APPLE)
         target_sources(pulp-format PRIVATE
+            src/au_v2_common.cpp
             src/au_v2_adapter.cpp
             src/au_v2_instrument.cpp
+            src/au_v2_midi_processor.cpp
         )
         # AudioUnitSDK 1.4 headers use std::expected (C++23). PUBLIC feature
         # propagation from the ausdk target isn't reliable across all Apple

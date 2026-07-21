@@ -121,6 +121,9 @@ formats:
       MIDI-accepting effects package as kAudioUnitType_MusicEffect (aumf)
       so AU hosts route inbound MIDI — set ACCEPTS_MIDI on pulp_add_plugin()
       when descriptor.accepts_midi=true. Audio-only effects stay on aufx.
+      CATEGORY MidiEffect packages as kAudioUnitType_MIDIProcessor (aumi):
+      MIDI in, MIDI out, no audio path, so the plugin appears in a host's
+      MIDI-FX slot.
   clap:
     macos: usable
     windows: partial
@@ -194,6 +197,7 @@ format_limitations:
   au_v2:
     - "Outbound MIDI IS wired: a plugin that sets produces_midi=true emits into midi_out during process(), and the adapter delivers it to the host via kAudioUnitProperty_MIDIOutputCallback (+ ...Info). Per-event sample offsets are preserved (offset N in -> N out), matching VST3/CLAP — proven by pulp-test-midi-out-offset-parity. produces_midi does NOT reclassify aufx->aumf: an aufx effect emits via the callback, while aumf is reserved for MIDI-ACCEPTING effects the host routes inbound MIDI to."
     - "Instruments (aumu / MusicDeviceBase) advertise one AU output ELEMENT per descriptor-declared output bus (main + aux), so an AU host lists every aux output and can route each to its own mixer channel (see examples/pulp-multi-out, an 8-voice / 8-bus synth; auval-validated multi-out). A processor that overrides process(ProcessBuffers&) writes each aux bus; one that only implements the simple process() leaves the aux buses silent (the adapter pre-zeroes every routed output bus). Buses a host leaves disconnected are delivered inactive/silent without reordering the bus->buffer mapping."
+    - "MIDI effects (aumi / kAudioUnitType_MIDIProcessor) are wired end to end: PulpAUMidiProcessor, reached via PULP_AU_MIDI_EFFECT, receives host MIDI + SysEx, runs Processor::process() with no audio buses, and returns the Processor's midi_out through kAudioUnitProperty_MIDIOutputCallback with per-event sample offsets preserved. The component advertises zero audio input elements and one silent audio output element — the host renders that element to advance the plugin, which is what drives MIDI processing. A declared Bypass parameter passes MIDI through untouched (a bypassed MIDI FX is a wire, not a mute). auval -v aumi covers discovery, initialize, scope formats, properties, and the parameter surface; it runs no render or MIDI test for aumi, so in-DAW MIDI-FX behavior is only proven by hosting the plugin."
     - "Effects (aufx/aumf) are single main-in/main-out at the SDK level (AUEffectBase = AUBase(ci,1,1), and its Render pulls only input element 0). A descriptor-declared sidechain input surfaces as an inactive Sidechain bus in ProcessBuffers so sidechain_input() returns null gracefully; live sidechain-audio delivery into an AU effect requires the aumu/multi-bus path or a future 2nd-input-element pull (not testable via auval, which feeds no sidechain)."
   clap:
     - "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."

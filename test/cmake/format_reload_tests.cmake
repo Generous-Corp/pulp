@@ -333,6 +333,18 @@ if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
     set_target_properties(pulp-test-au-v2-effect PROPERTIES CXX_STANDARD 23)
     catch_discover_tests(pulp-test-au-v2-effect)
 
+    # AU v2 MIDI-processor (`aumi`) adapter. Drives the real adapter end to end:
+    # host MIDI in through the SDK entry points, a host-installed
+    # kAudioUnitProperty_MIDIOutputCallback, and Render() to advance the block.
+    add_executable(pulp-test-au-v2-midi-processor test_au_v2_midi_processor.cpp)
+    target_link_libraries(pulp-test-au-v2-midi-processor PRIVATE
+        pulp::format pulp::midi ausdk Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+        "-framework CoreMIDI")
+    set_target_properties(pulp-test-au-v2-midi-processor PROPERTIES CXX_STANDARD 23)
+    catch_discover_tests(pulp-test-au-v2-midi-processor)
+
     # AU v2 multi-bus contract — guards the multi-output-element lift (instrument
     # advertises one output element per declared bus) and the effect's Sidechain
     # input surface. Pure descriptor->bus helpers, so no live AU host needed.

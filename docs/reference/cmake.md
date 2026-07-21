@@ -213,6 +213,17 @@ component-type rules:
 | `CATEGORY Effect` plus `ACCEPTS_MIDI` | `aumf` | Effects |
 | `CATEGORY Effect` without `ACCEPTS_MIDI` | `aufx` | Effects |
 
+The component type has to agree with the AU entry macro in the plugin's
+`au_v2_entry.cpp`, or the component loads and then silently ignores every MIDI
+message the host sends it:
+
+| AU component type | Entry macro | Header |
+|-------------------|-------------|--------|
+| `aufx` | `PULP_AU_PLUGIN` | `pulp/format/au_v2_entry.hpp` |
+| `aumf` | `PULP_AU_MIDI_PLUGIN` | `pulp/format/au_v2_entry.hpp` |
+| `aumi` | `PULP_AU_MIDI_EFFECT` | `pulp/format/au_v2_midi_effect_entry.hpp` |
+| `aumu` | `PULP_AU_INSTRUMENT` | `pulp/format/au_v2_instrument_entry.hpp` |
+
 `PLUGIN_CODE` and `MANUFACTURER_CODE` must be exactly four characters for AU
 and AUv3 targets. `VERSION` is converted to the AU integer form from numeric
 `major[.minor[.patch]]` components with an optional `-` or `+` suffix, so
