@@ -400,9 +400,41 @@ TEST_CASE("PulpSampler envelope lifetime survives natural EOS contract reset and
     }
 }
 
-TEST_CASE("PulpSampler has 9 parameters", "[sampler]") {
+namespace {
+/// Render a parameter-id list for a Catch2 INFO line, so a mismatch names the
+/// parameter that drifted instead of only reporting two counts.
+std::string ids_to_string(const std::vector<state::ParamID>& ids) {
+    std::string out;
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        if (i) out += ", ";
+        out += std::to_string(static_cast<unsigned long long>(ids[i]));
+    }
+    return out;
+}
+}  // namespace
+
+TEST_CASE("PulpSampler registers exactly its declared parameter set", "[sampler]") {
     SamplerFixture f;
-    REQUIRE(f.store.param_count() == 9);
+    // Assert the SET, not just the count. A bare count fails as "10 != 9",
+    // which says nothing about which parameter moved; the heritage clock ratio
+    // was added while this assertion still read 9, and the example only builds
+    // on lanes that compile examples, so nothing caught it before it landed.
+    const state::ParamID expected[] = {
+        kSamplerGain,          kSamplerAttack,        kSamplerDecay,
+        kSamplerSustain,       kSamplerRelease,       kSamplerPitch,
+        kSamplerLoop,          kSamplerReverse,       kSamplerInterpolation,
+        kSamplerHeritageClockRatio,
+    };
+    const auto params = f.store.all_params();
+
+    std::vector<state::ParamID> actual;
+    actual.reserve(params.size());
+    for (const auto& info : params) actual.push_back(info.id);
+
+    std::vector<state::ParamID> wanted(std::begin(expected), std::end(expected));
+    INFO("registered ids: " << ids_to_string(actual));
+    INFO("declared ids:   " << ids_to_string(wanted));
+    REQUIRE(actual == wanted);
 }
 
 TEST_CASE("PulpSampler exposes each scalar interpolation policy", "[sampler]") {
