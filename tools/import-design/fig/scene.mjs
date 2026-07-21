@@ -1037,13 +1037,21 @@ function firstImageFill(node) {
 
 function cornerRadius(node) {
   if (typeof node.cornerRadius === 'number') return Math.round(node.cornerRadius);
-  const corners = [
+  const raw = [
     node.rectangleTopLeftCornerRadius,
     node.rectangleTopRightCornerRadius,
     node.rectangleBottomRightCornerRadius,
     node.rectangleBottomLeftCornerRadius,
-  ].filter((v) => typeof v === 'number');
-  if (corners.length && corners.every((v) => v === corners[0])) return Math.round(corners[0]);
+  ];
+  if (!raw.some((v) => typeof v === 'number')) return null;
+  // A corner Figma omits is SQUARE (0), not "inherit the others": kiwi
+  // drops zero fields, so a panel rounded only at the bottom arrives as
+  // {br: 2, bl: 2} — filtering the absent corners out made those two look
+  // uniform and rounded ALL FOUR corners, silently. Normalize first, then
+  // collapse only when all four truly agree; perCornerRadii carries the
+  // asymmetric case.
+  const corners = raw.map((v) => (typeof v === 'number' ? v : 0));
+  if (corners.every((v) => v === corners[0])) return Math.round(corners[0]);
   return null;
 }
 
@@ -1208,6 +1216,13 @@ export function materializeFrame(scene, frame, ctx) {
   // Every font family the frame references. Reported at the end so a
   // missing font is a stated result, not a mystery in the pixels.
   const fontsSeen = new Set();
+  // Glyph-outline outcomes per fontsSeen key, recorded where the lowering
+  // actually happens. The frame-level icon-font warning used to claim icons
+  // "will read as words" unconditionally — false whenever every glyph was
+  // baked from derivedTextData and renders correctly with no font at all.
+  // The warning copy has to follow what actually happened, so track it.
+  const glyphOutlineBaked = new Set();
+  const glyphOutlineMissing = new Set();
 
   function pushDiag(code, node, detail) {
     diagnostics.push({
@@ -2027,6 +2042,29 @@ export function materializeFrame(scene, frame, ctx) {
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
+    // A BOOLEAN_OPERATION's paint IS its combined geometry. One with a null
+    // geometry blob (0 bytes), no size, and nothing else to offer paints
+    // NOTHING in Figma — but the box fallback below emitted it as a 0-sized
+    // frame that still carried its fill as a stray background slab, which
+    // layout parity then rightly flagged as an EXTRA node. Skipping IS the
+    // correct rendering, exactly like SLICE; only suppress when BOTH the
+    // geometry and the box are absent, so a boolean op whose geometry
+    // resolves (or that at least has real extent) keeps its current paths.
+    if (type === 'BOOLEAN_OPERATION') {
+      const bw = node.size && node.size.x;
+      const bh = node.size && node.size.y;
+      if (!(bw > 0) || !(bh > 0)) {
+        let boolGeometry = null;
+        try {
+          boolGeometry = geometryToPath(node, scene.blobs || []);
+        } catch { /* unreadable counts as none; the node has no box either way */ }
+        if (!boolGeometry) {
+          pushDiag('boolean-empty-skipped', node,
+            'BOOLEAN_OPERATION with null geometry and no size paints nothing and emits no node');
+          return null;
+        }
+      }
+    }
     const { style, assetRef, layout } = styleFor(node, parent);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
@@ -2378,6 +2416,13 @@ export function materializeFrame(scene, frame, ctx) {
         } catch (err) {
           pushDiag('vector-simplified', node, `glyph outline unreadable: ${err.message}`);
         }
+        // The same key fontToken adds to fontsSeen, so the frame-level
+        // font report can tell a fully-outlined icon font from one whose
+        // glyphs are missing and will really render as words.
+        const fontStyle = node.fontName.style;
+        const fontKey = fontStyle && fontStyle !== 'Regular'
+          ? `${node.fontName.family} ${fontStyle}` : node.fontName.family;
+        (glyphs ? glyphOutlineBaked : glyphOutlineMissing).add(fontKey);
         if (glyphs) {
           // Same contract the VECTOR branch emits below — path_data + viewBox +
           // fill is what design_ir_json already lowers to an SvgPathWidget.
@@ -2394,6 +2439,19 @@ export function materializeFrame(scene, frame, ctx) {
           // The glyph paints in the text's own color.
           out.fill = out.style.color || 'none';
           delete out.style.color;
+          // A gradient-filled label keeps its gradient. TEXT never takes the
+          // box branch above (a text fill is the glyph color, not a
+          // background), so without this the outline flattened to
+          // firstSolidFill — the sequencer's rainbow "GENERATE PATTERN"
+          // imported flat gray. Same channel contract as the VECTOR branch:
+          // `fillGradient` rides beside `fill` (design_ir_json lowers it to
+          // svg_fill_gradient → setSvgFillGradient), the solid stays as the
+          // widget's parse-failure fallback, and a non-linear gradient
+          // returns null here so the generic gradient-approximated
+          // diagnostic below still states that loss.
+          const glyphGrad = firstGradient(node.fillPaints);
+          const glyphGradCss = gradientPaintToCss(glyphGrad, style.width, style.height);
+          if (glyphGradCss) out.fillGradient = glyphGradCss;
           // Keep the box and position styleFor already derived from the node's
           // size and transform: the glyph is drawn inside the designer's text
           // box, and re-placing the node on the glyph's ink would strip the
@@ -2691,8 +2749,18 @@ export function materializeFrame(scene, frame, ctx) {
     pushDiag('fonts-required', { name: '<frame>' },
              `text uses ${fonts.length} font(s): ${fonts.join(', ')} — each must be installed where this UI renders, or text falls back`);
     for (const f of iconish) {
-      pushDiag('icon-font-required', { name: '<frame>' },
-               `"${f}" is an ICON font: glyphs come from LIGATURES, so without it every icon renders as its literal name (e.g. "lock" instead of a padlock). Install it, or the icons will read as words.`);
+      // Two truths, and the copy must match the one that happened: when every
+      // glyph was lowered to the file's baked outline, the icons render
+      // correctly WITHOUT the font, and warning that they "will read as
+      // words" is false. Only a font with missing/unreadable outlines (or
+      // textAsOutlines 'never') really degrades to literal ligature names.
+      if (glyphOutlineBaked.has(f) && !glyphOutlineMissing.has(f)) {
+        pushDiag('icon-font-required', { name: '<frame>' },
+                 `"${f}" is an ICON font (glyphs come from LIGATURES). Its icons were imported as the file's baked glyph outlines and render correctly without the font; installing it matters only if you re-author these icons as live, editable text.`);
+      } else {
+        pushDiag('icon-font-required', { name: '<frame>' },
+                 `"${f}" is an ICON font: glyphs come from LIGATURES, so without it every icon renders as its literal name (e.g. "lock" instead of a padlock). Install it, or the icons will read as words.`);
+      }
     }
   }
 
@@ -3198,6 +3266,9 @@ export const DIAGNOSTIC_SEVERITY = {
   // (see the registry contract above), and a dispatch decision written
   // precisely to end silent node drops must never itself be invisible.
   'slice-skipped': 'warning',
+  // A null-geometry, zero-size BOOLEAN_OPERATION paints nothing in Figma;
+  // the skip is correct rendering, stated for the same reason as slice-skipped.
+  'boolean-empty-skipped': 'warning',
   // Paint-stack codes (audit item 7). All 'warning' for the same reason as
   // the dispatch codes: a diagnostic written precisely to end a silent paint
   // drop must never itself be invisible.
