@@ -12,4 +12,12 @@ runtime::Result<SchemaWriteSuccess, PersistenceError>
 migrate_track_v2_to_v1(std::string_view source, BoundedJsonSink& output,
                        const void* context) noexcept;
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v2_to_v3(std::string_view source, BoundedJsonSink& output,
+                       const void* context) noexcept;
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v3_to_v2(std::string_view source, BoundedJsonSink& output,
+                       const void* context) noexcept;
+
 } // namespace pulp::timeline::detail

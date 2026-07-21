@@ -75,6 +75,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField track_fields[] = {
+        {"automation_lanes", SchemaValueKind::Array},
         {"clips", SchemaValueKind::Array},
         {"device_chain", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
@@ -82,6 +83,15 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     static constexpr ExpectedField device_placement_fields[] = {
         {"id", SchemaValueKind::U64String},
+    };
+    static constexpr ExpectedField automation_lane_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"points", SchemaValueKind::Array},
+        {"target", SchemaValueKind::Object},
+    };
+    static constexpr ExpectedField automation_target_fields[] = {
+        {"device_placement_id", SchemaValueKind::U64String},
+        {"parameter_id", SchemaValueKind::U32},
     };
     static constexpr ExpectedField clip_fields[] = {
         {"content", SchemaValueKind::Object},
@@ -107,6 +117,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
          track_schema_policy.current_version, track_schema_policy.oldest_readable_version},
+        {SchemaDomain::Document, "pulp.timeline.automation_lane", automation_lane_fields},
+        {SchemaDomain::Document, "pulp.timeline.automation_target.device_parameter",
+         automation_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
