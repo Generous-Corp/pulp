@@ -43,7 +43,9 @@ using pulp::view::CanvasDrawCmd;
 #include "canvas_pixel_probe.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
+#include <utility>
 #include <vector>
 
 using pulp::canvas::SkiaCanvas;
@@ -229,6 +231,138 @@ TEST_CASE("named shader effect: vignette stays centered under 2x canvas scale",
     int corner = sample_pixel(surface.get(), 6, 6).r;     // device corner
     REQUIRE(center > 150);
     REQUIRE(corner < center - 30);
+}
+
+// ── Layer bounds ──────────────────────────────────────────────────────────
+// Every case above paints the widget at the full surface size, which cannot
+// observe what an effect does OUTSIDE the widget. A runtime-shader image
+// filter reports unbounded output, so without an explicit crop the compositing
+// layer expands past the widget to the whole device clip and the restore paints
+// shader output over content the widget never owned. These cases pin the
+// effect to the widget's own rect, and pin that the crop is not so tight that
+// it eats the effect at the widget's edge.
+
+namespace {
+
+// Paint a green field over the whole surface, then an OFFSET shader-effect
+// widget of `size` at (`ox`,`oy`) filled solid white. `scale` applies a canvas
+// transform first, so the same assertions exercise the local-vs-device
+// coordinate space of the crop. Offsets/sizes are in LOGICAL (pre-scale) units.
+sk_sp<SkSurface> render_offset_widget(const std::string& effect, float intensity,
+                                      float ox, float oy, float size,
+                                      float scale = 1.0f) {
+    const int device = static_cast<int>(kW * scale);
+    SkImageInfo info = SkImageInfo::Make(device, device, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    surface->getCanvas()->clear(SK_ColorBLACK);
+    if (scale != 1.0f) surface->getCanvas()->scale(scale, scale);
+
+    // The surrounding content the widget must not touch.
+    SkPaint field;
+    field.setColor(SkColorSetARGB(255, 0, 200, 0));
+    surface->getCanvas()->drawRect(SkRect::MakeWH((float)kW, (float)kH), field);
+
+    // A parent view translates to the child's origin before painting it; the
+    // widget always draws its own content from (0,0). Mirror that here.
+    surface->getCanvas()->save();
+    surface->getCanvas()->translate(ox, oy);
+
+    CanvasWidget cw;
+    cw.set_bounds({ox, oy, size, size});
+    if (!effect.empty()) cw.set_shader_effect(effect, intensity);
+    CanvasDrawCmd fill;
+    fill.type = CanvasDrawCmd::Type::fill_rect;
+    fill.x = 0; fill.y = 0; fill.w = size; fill.h = size;
+    fill.color = pulp::canvas::Color::rgba8(230, 230, 230, 255);
+    cw.add_command(fill);
+
+    SkiaCanvas canvas(surface->getCanvas());
+    cw.paint(canvas);
+    surface->getCanvas()->restore();
+    return surface;
+}
+
+} // namespace
+
+TEST_CASE("named shader effect: does not paint outside its own canvas",
+          "[canvas_widget][shader_effect][skia]") {
+    // A 32x32 widget at (40,40) leaves the rest of the 96x96 field green. An
+    // effect that escapes its layer paints shader output over that field —
+    // in a real UI that is the whole window going black behind one small
+    // scanline screen.
+    const float ox = 40, oy = 40, size = 32;
+
+    for (const char* effect : {"crt", "vignette", "grain", "noise", "brushed",
+                               "bloom"}) {
+        auto out = render_offset_widget(effect, 0.9f, ox, oy, size);
+
+        // Well clear of the widget, in every direction. CHECK rather than
+        // REQUIRE so a regression names EVERY effect that escapes, not just
+        // the first one alphabetically.
+        for (auto pt : {std::pair<int, int>{8, 8}, {80, 8}, {8, 80}, {80, 80},
+                        {20, 56}, {84, 56}}) {
+            Pixel p = sample_pixel(out.get(), pt.first, pt.second);
+            INFO("effect " << effect << " at (" << pt.first << "," << pt.second << ")");
+            CHECK(p.g > 150);   // still the green field
+            CHECK(p.r < 60);
+            CHECK(p.b < 60);
+        }
+    }
+}
+
+TEST_CASE("named shader effect: still renders inside an offset canvas",
+          "[canvas_widget][shader_effect][skia]") {
+    // The other half of the contract: cropping the effect to the widget must
+    // not clip the effect ITSELF. A vignette confined to a 48x48 widget still
+    // has to darken that widget's own corners relative to its own centre.
+    const float ox = 24, oy = 24, size = 48;
+    auto plain = render_offset_widget("", 1.0f, ox, oy, size);
+    auto vig = render_offset_widget("vignette", 1.0f, ox, oy, size);
+
+    const int cx = static_cast<int>(ox + size / 2);
+    const int cy = static_cast<int>(oy + size / 2);
+    const int ex = static_cast<int>(ox + 3);
+    const int ey = static_cast<int>(oy + 3);
+
+    const int plain_centre = sample_pixel(plain.get(), cx, cy).r;
+    const int plain_edge = sample_pixel(plain.get(), ex, ey).r;
+    REQUIRE(plain_centre > 200);
+    REQUIRE(std::abs(plain_centre - plain_edge) <= 3);  // flat without the effect
+
+    const int vig_centre = sample_pixel(vig.get(), cx, cy).r;
+    const int vig_edge = sample_pixel(vig.get(), ex, ey).r;
+    REQUIRE(vig_centre > 150);                 // the middle is still lit
+    REQUIRE(vig_edge < vig_centre - 30);       // the widget's own corner darkens
+}
+
+TEST_CASE("named shader effect: layer crop holds under a canvas scale",
+          "[canvas_widget][shader_effect][skia]") {
+    // The effect samples in DEVICE space while the layer rect is LOCAL, so a
+    // crop expressed in the wrong space passes at 1x and leaks (or clips) under
+    // a transform. Same geometry at 2x, checked from both sides.
+    const float ox = 24, oy = 24, size = 48;
+
+    // Containment, using the effect that demonstrably escapes without a crop.
+    auto crt = render_offset_widget("crt", 0.9f, ox, oy, size, /*scale=*/2.0f);
+    for (auto pt : {std::pair<int, int>{16, 16}, {170, 16}, {16, 170}, {170, 170}}) {
+        Pixel p = sample_pixel(crt.get(), pt.first, pt.second);
+        INFO("device pixel (" << pt.first << "," << pt.second << ")");
+        CHECK(p.g > 150);
+        CHECK(p.r < 60);
+    }
+
+    // ...and the effect still reaching the widget's own edge under the same
+    // transform, so an over-tight or mis-spaced crop cannot pass silently.
+    auto vig = render_offset_widget("vignette", 1.0f, ox, oy, size, /*scale=*/2.0f);
+    const int centre = sample_pixel(vig.get(), static_cast<int>((ox + size / 2) * 2),
+                                    static_cast<int>((oy + size / 2) * 2)).r;
+    const int edge = sample_pixel(vig.get(), static_cast<int>((ox + 3) * 2),
+                                  static_cast<int>((oy + 3) * 2)).r;
+    REQUIRE(centre > 150);
+    REQUIRE(edge < centre - 30);
 }
 
 TEST_CASE("named shader effect: bloom bleeds light past bright edges",

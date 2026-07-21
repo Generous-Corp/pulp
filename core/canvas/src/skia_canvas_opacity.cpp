@@ -405,6 +405,18 @@ void SkiaCanvas::save_layer_with_shader_effect(float x, float y,
     const float dh = h * (sy > 0.0f ? sy : 1.0f);
     sk_sp<SkImageFilter> fx =
         make_named_shader_effect(effect_name, intensity, dw, dh, /*time=*/0.0f);
+    // Confine the effect to the layer rect. A RuntimeShader filter reports
+    // UNBOUNDED output — it can write at any coordinate, whether or not the
+    // child drew there — so saveLayer treats its bounds argument as a hint and
+    // grows the layer to the device clip. An effect that writes opaque pixels
+    // where the child is transparent (crt's scanlines + aperture mask do) then
+    // composites over everything already painted behind this canvas, which
+    // reads as the whole window going black behind one small screen. Cropping
+    // the filter makes containment structural rather than a property each
+    // curated effect has to preserve in its alpha. kDecal (Crop's default) is
+    // transparent outside the rect, so the surrounding content shows through
+    // untouched. The rect is in the same local space as the layer bounds.
+    if (fx) fx = SkImageFilters::Crop(SkRect::MakeXYWH(x, y, w, h), std::move(fx));
     // A runtime-shader post-effect can drop coverage below opaque, so mark the
     // layer non-opaque when an effect is actually active (matches the
     // filter-chain path) for correct greyscale text AA inside the layer.
