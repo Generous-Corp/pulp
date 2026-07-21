@@ -411,6 +411,15 @@ public:
                                   const FilterChainEntry* chain,
                                   int count) override;
 
+    // Curated named GPU post-effect layer (crt / grain / vignette / noise /
+    // brushed / bloom). Builds an SkImageFilters::RuntimeShader from the
+    // vetted SkSL library and applies it to the compositing layer. Unknown
+    // names / compile failures fall back to a plain saveLayer (effect
+    // skipped) — see core/canvas/src/named_shader_effects.{hpp,cpp}.
+    void save_layer_with_shader_effect(float x, float y, float w, float h,
+                                       const std::string& effect_name,
+                                       float intensity) override;
+
     // CSS mask-image + mask-size paint composite.
     // SkiaCanvas implements the 2-saveLayer pattern with kDstIn:
     //   1. open the content layer (saveLayer with opacity)

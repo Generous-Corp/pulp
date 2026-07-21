@@ -127,6 +127,10 @@ if(PULP_HAS_SKIA)
         src/image_file_cache.cpp
         src/skia_canvas_opacity.cpp
         src/skia_canvas_shaders.cpp
+        # Curated named GPU post-effects (crt / grain / vignette / noise /
+        # brushed / bloom) for the scripted-UI canvas — safe named SkSL, no
+        # arbitrary shader source from generated UIs.
+        src/named_shader_effects.cpp
         src/bundled_fonts.cpp
         # TextFontContext glues emoji_segmenter into the SkShaper +
         # SkParagraph paths and owns the per-context FontCollection used
