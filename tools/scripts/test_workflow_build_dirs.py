@@ -13,6 +13,7 @@ Run:
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -33,31 +34,60 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertIn('cmake --build "$PULP_BUILD_DIR" --config Release', text)
         self.assertIn('ctest --test-dir "$PULP_BUILD_DIR"', text)
         self.assertIn('ctest --test-dir "%PULP_BUILD_DIR%"', text)
-        self.assertIn('label_exclude="validation|slow"', text)
+        self.assertIn('label_exclude="validation|slow', text)
         self.assertIn(
-            'set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
+            'set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine',
             text,
         )
 
         self.assertNotIn("working-directory: build", text)
 
     def test_build_workflow_shipyard_dispatch_excludes_slow_ctests(self) -> None:
+        """The three gating events share one reduced ctest label set.
+
+        `pull_request`, `workflow_dispatch`, and `merge_group` all gate a
+        landing, so they must exclude the same labels — the slow suite plus the
+        relative-timing suites, which measure ratios against an in-run baseline
+        and cannot be a required gate on a runner hosting concurrent build VMs.
+        `push` deliberately keeps them (informational). Asserted by label
+        membership rather than one literal line so adding a label to the set
+        does not require restating the whole condition here.
+        """
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")
 
-        self.assertIn(
-            """if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
-            label_exclude="validation|slow"
-          fi""",
+        # Deliberately single-line (`[^\n]*`): build.yml has other
+        # `event_name == pull_request` guards, and a DOTALL match would span
+        # from the first of them to this one and read the wrong label set.
+        posix_condition = re.search(
+            r'if \[ "\$\{\{ github\.event_name \}\}" = "pull_request" \][^\n]*\n'
+            r'\s*label_exclude="(?P<labels>[^"]+)"\n',
             text,
         )
-        self.assertIn(
-            'if "%GITHUB_EVENT_NAME%"=="pull_request" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
-            text,
+        self.assertIsNotNone(
+            posix_condition, "reduced-ctest condition not found in build.yml"
         )
-        self.assertIn(
-            'if "%GITHUB_EVENT_NAME%"=="workflow_dispatch" set "PULP_CTEST_LABEL_EXCLUDE=validation|slow|windows-pr-quarantine"',
-            text,
+        guard = posix_condition.group(0)
+        for event in ("pull_request", "workflow_dispatch", "merge_group"):
+            with self.subTest(event=event, shell="posix"):
+                self.assertIn(f'= "{event}"', guard)
+        posix_labels = set(posix_condition.group("labels").split("|"))
+        self.assertLessEqual(
+            {"validation", "slow", "performance", "bench", "quality-lab"},
+            posix_labels,
         )
+
+        for event in ("pull_request", "workflow_dispatch", "merge_group"):
+            with self.subTest(event=event, shell="cmd"):
+                cmd = re.search(
+                    rf'if "%GITHUB_EVENT_NAME%"=="{event}" '
+                    rf'set "PULP_CTEST_LABEL_EXCLUDE=(?P<labels>[^"]+)"',
+                    text,
+                )
+                self.assertIsNotNone(cmd, f"no cmd label exclude for {event}")
+                self.assertLessEqual(
+                    posix_labels | {"windows-pr-quarantine"},
+                    set(cmd.group("labels").split("|")),
+                )
 
     def test_build_workflow_shipyard_dispatch_skips_examples_with_gpu_off(self) -> None:
         text = BUILD_WORKFLOW.read_text(encoding="utf-8")

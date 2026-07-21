@@ -395,15 +395,16 @@ warm each other. Only a non-PR run on the default branch writes an entry every
 subsequent PR can read. Without the `push` trigger the `Save …` steps are
 unreachable and the matching `Restore …` steps are a permanent miss.
 
-A push run is deliberately **narrower than a PR run**:
+Each trigger runs a deliberately different slice of the matrix:
 
-| | PR / merge_group run | `push: main` cache run |
-|---|---|---|
-| Linux + Windows matrix legs | yes | yes (these publish the caches) |
-| macOS matrix leg | yes | **no** — omitted by `resolve-provider` |
-| `macos` / `linux` / `windows` alias jobs | yes | no |
-| `windows-{msvc-release,midi2,ble}-gate` | yes | no |
-| Writes to GitHub's cloud cache | no | Linux + Windows only |
+| | PR run | `merge_group` run | `push: main` cache run |
+|---|---|---|---|
+| macOS matrix leg | yes | yes | **no** — omitted by `resolve-provider` |
+| Linux matrix leg | yes | yes | yes (publishes the cache) |
+| Windows matrix leg | **no** — see below | yes | yes (publishes the cache) |
+| `windows-{msvc-release,midi2,ble}-gate` | **no** — see below | yes | no |
+| `macos` / `linux` / `windows` alias jobs | yes | yes | no |
+| Writes to GitHub's cloud cache | no | no | Linux + Windows only |
 
 The macOS leg is dropped because macOS builds on the **self-hosted** Macs that
 serve the one required check in this repo, and those machines keep ccache and
@@ -423,6 +424,48 @@ The `classify` job diffs an **event-dependent base**
 push, `origin/main` resolves to HEAD itself and the diff is always empty — so a
 docs-only merge is indistinguishable from a core merge, and the run never
 skips. A docs-only merge to main now correctly skips the whole matrix.
+
+## Windows is gated by the merge queue, not by the PR head
+
+Windows is advisory and runs entirely on GitHub-hosted runners, and a single
+run carries **four** Windows jobs: the `Windows (x64)` matrix leg plus the
+`windows-msvc-release-gate`, `windows-midi2-gate`, and `windows-ble-gate`
+compile gates. The repository draws all of those from one fixed pool of
+concurrent GitHub-hosted jobs, shared with every other workflow.
+
+That pool is the scarce resource, and Windows is by far its largest consumer.
+With a handful of PRs open at once, advisory Windows work fills nearly every
+slot and the **required** hosted check — `Build + prove + (owner-gated)
+deploy`, on `ubuntu-latest` — cannot get a runner. The merge queue then holds
+its entry in `AWAITING_CHECKS` until the ruleset's check-response timeout
+expires, evicts it, and nothing lands at all. macOS is never implicated: it
+runs on the self-hosted Macs, which sit outside the hosted pool.
+
+So Windows runs where it actually gates:
+
+- **`merge_group`** — the serial queue validation, which builds PR ∪ main.
+  This is strictly better coverage than a PR-head build, and being serial it
+  costs at most one run's worth of Windows jobs at a time.
+- **`push: main`** — publishes the Windows ccache.
+- **`workflow_dispatch`** — explicit reruns when you want Windows early.
+
+A PR head keeps macOS (self-hosted) and Linux (self-hosted Linux VMs) for fast
+signal; neither competes for the hosted pool. The advisory `windows` alias job
+short-circuits to green on `pull_request` — without that it would fail closed
+looking for a matrix leg that deliberately did not run.
+
+The trade is later Windows feedback: a Windows-only break is caught when the PR
+reaches the queue rather than on the PR head, costing one eviction and a
+requeue. That is cheaper than the failure it replaces, where *no* PR could
+merge at all. Dispatch `build.yml` manually against the branch if you want
+Windows before enqueueing.
+
+`tools/scripts/test_windows_runner_policy.py` locks this in: it executes
+`resolve-provider`'s matrix resolver for each event and asserts the Windows leg
+is absent on `pull_request` and present on `merge_group` / `workflow_dispatch`,
+that all three compile gates skip `pull_request`, and — as a negative control —
+that macOS and Linux still run on the PR head.
+
 ## Routing contract (checked)
 
 Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
