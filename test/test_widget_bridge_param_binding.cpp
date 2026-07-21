@@ -12,6 +12,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/state/store.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -391,4 +392,101 @@ TEST_CASE("binding an unknown param is a no-op that returns false",
                         .getWithDefault<bool>(true);
     REQUIRE_FALSE(ok);
     REQUIRE(bridge.param_binding_count() == 0);
+}
+
+// ── Custom-drawn controls: the canvas owns its own value ────────────────────
+//
+// A scripted UI that paints its own knobs into a canvas does not use a Knob
+// widget at all: it records draw commands and drives the param from its own
+// pointer handlers. Nothing pinned that a canvas is reachable by a drag, so the
+// whole idiom could break — a canvas losing its pointer wiring, or the
+// simulator diverging from the host dispatch — with every test still green.
+
+namespace {
+
+// The generated shape: a canvas, a drag that maps vertical travel to [0,1], and
+// setParam on every move. Deliberately verbatim in structure (local drag state
+// captured on press, clientY delta over a fixed pixel span) so a regression in
+// any hop — hit_test, registerPointer, on_drag, __dispatch__, setParam — fails
+// here rather than in a DAW.
+constexpr const char* kCanvasKnobScript = R"JS(
+    var cvs = createCanvas('gain-canvas-knob', '');
+    var st = { val: getParam('gain'), drag: false, y0: 0, v0: 0 };
+    on(cvs, 'pointerdown', function (e) {
+        st.drag = true; st.y0 = e.clientY; st.v0 = st.val;
+    });
+    on(cvs, 'pointermove', function (e) {
+        if (!st.drag) return;
+        st.val = Math.max(0, Math.min(1, st.v0 + (st.y0 - e.clientY) / 150));
+        setParam('gain', st.val);
+        canvasClear(cvs);
+        canvasFillRect(cvs, 0, 84 - st.val * 84, 84, st.val * 84, '#4af');
+    });
+    on(cvs, 'pointerup', function () { st.drag = false; });
+)JS";
+
+} // namespace
+
+TEST_CASE("a custom-drawn canvas knob drives its param through a drag",
+          "[view][bridge][state-binding][pointer]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    add_params(store);
+    store.set_normalized(1, 0.5f);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(kCanvasKnobScript);
+
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget("gain-canvas-knob"));
+    REQUIRE(canvas != nullptr);
+    // The host's layout pass places the canvas in a real editor; place it here.
+    canvas->set_bounds({20, 20, 84, 84});
+    // A canvas is hit-testable with no opt-in, and `on(...)` wired the pointer
+    // channels. Both are preconditions for the drag below — assert them so a
+    // failure names which half broke.
+    REQUIRE(root.hit_test({62, 62}) == canvas);
+    REQUIRE(static_cast<bool>(canvas->on_pointer_event));
+    REQUIRE(static_cast<bool>(canvas->on_drag));
+
+    // Drag upward by 50px inside the canvas: +50/150 = +0.3333 over the 0.5 the
+    // press latched.
+    root.simulate_drag({62, 90}, {62, 40}, 5);
+
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.8333f, 1e-3f));
+    // The handler repainted as it went, so the canvas carries its draw commands.
+    REQUIRE(canvas->command_count() > 0);
+    // Release ended the gesture: a later move with no button must not move the
+    // param.
+    canvas->on_drag({40, 0});
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.8333f, 1e-3f));
+}
+
+TEST_CASE("binding a canvas to a param returns false instead of silently no-op'ing",
+          "[view][bridge][state-binding]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createCanvas('gain-canvas', '');");
+    // A canvas is not a value widget: the per-frame push has no way to write it,
+    // so accepting the bind would hand the caller a truthy "bound" for a push
+    // that can never happen.
+    const bool value_ok = engine.evaluate("bindWidgetToParam('gain-canvas', 'gain')")
+                              .getWithDefault<bool>(true);
+    REQUIRE_FALSE(value_ok);
+    const bool meter_ok = engine.evaluate("bindMeter('gain-canvas', 'gain')")
+                              .getWithDefault<bool>(true);
+    REQUIRE_FALSE(meter_ok);
+    REQUIRE(bridge.param_binding_count() == 0);
+
+    // A real value widget still binds — the rejection is type-scoped, not a
+    // blanket tightening.
+    bridge.load_script("createKnob('gain-knob');");
+    REQUIRE(engine.evaluate("bindWidgetToParam('gain-knob', 'gain')")
+                .getWithDefault<bool>(false));
 }
