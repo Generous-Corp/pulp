@@ -1,12 +1,108 @@
 #include <pulp/host/baked_graph_processor.hpp>
 
+#include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/state/param_cursor.hpp>
+#include <pulp/state/parameter.hpp>
+#include <pulp/state/parameter_event_queue.hpp>
+#include <pulp/state/store.hpp>
+
 #include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <utility>
+#include <vector>
 
 namespace pulp::host {
+
+namespace detail {
+
+// Latest-published parameter batch for one baked custom node. Fixed-capacity
+// (kCapacity from ParameterEventQueue) so publication is allocation-free. The
+// source-overflow signal is NOT carried here: it is a control-side fact the
+// caller learns synchronously from inject()'s InjectStatus, and the audio side
+// has no use for it (the retained prefix is authoritative once published).
+struct BakedParamBlockSnapshot {
+    std::array<state::ParameterEvent, state::ParameterEventQueue::kCapacity> events{};
+    std::size_t size = 0;
+    std::uint64_t sequence = 0;   // 0 == nothing published yet
+};
+
+// Single-writer (control thread) / single-reader (audio thread) mailbox, one per
+// param-declaring baked custom node. Mirrors the live ParameterInputMailbox: a
+// TripleBuffer holds the latest whole queue; `next_sequence` numbers each
+// publish so the reader applies a batch exactly once. `claimed` enforces the
+// per-node exclusive-claim discipline (one ParamInjector at a time).
+struct BakedParamMailbox {
+    runtime::TripleBuffer<BakedParamBlockSnapshot> published;
+    BakedParamBlockSnapshot writer_scratch;   // control-thread-owned
+    std::atomic<std::uint64_t> next_sequence{0};
+    // Last publish the audio side has APPLIED (stored by the drain closure).
+    // Lets inject(single) accumulate: while the last published batch is still
+    // unconsumed, a new single event MERGES into it instead of replacing it, so
+    // N single injects to different params between blocks all land (the raw
+    // latest-snapshot-wins TripleBuffer would otherwise collapse them to the
+    // last one and silently drop the rest — the F2-review footgun).
+    std::atomic<std::uint64_t> consumed_sequence{0};
+    std::atomic<bool> claimed{false};
+};
+
+// In-flight ramp carried from one block into the next, so a ramp longer than a
+// single block completes instead of freezing at the block boundary (a rebuilt
+// per-block cursor otherwise loses the ramp and holds a scalar). Parallel to
+// `current`: index i describes the ramp state of current[i]'s param.
+struct BakedParamRampCarry {
+    bool ramping = false;
+    float target = 0.0f;
+    std::int32_t remaining = 0;   // ramp samples still to elapse at the next block's start
+};
+
+// Audio-thread-owned per-node state for the injection path. Built at prepare():
+// a StateStore holding the declared params (range → clamp), a scratch queue the
+// mailbox batch is drained into, the held current values that persist the last
+// value across blocks with no new injection, and per-param ramp continuation.
+struct BakedParamNodeState {
+    state::StateStore store;
+    state::ParameterEventQueue scratch;
+    std::vector<state::ParamSnapshotEntry> current;   // held values, per declared param
+    std::vector<BakedParamRampCarry> ramp_carry;      // in-flight ramp, parallel to `current`
+    std::uint64_t sequence_seen = 0;                  // last applied publish
+    CustomNodeParamProcessFn process;                 // bound param-aware node call
+    BakedParamMailbox* mailbox = nullptr;             // owned by param_mailboxes_
+};
+
+}  // namespace detail
+
 namespace {
 namespace fmt = pulp::format;
+
+// Concrete BakedParamView over a block-local ParamCursor. value_at advances the
+// cursor monotonically (nodes query offsets in non-decreasing order within a
+// block) so ramps interpolate sample-accurately; value() reads the current
+// position. Non-owning; lives only for the node's process call.
+class CursorParamView final : public BakedParamView {
+public:
+    explicit CursorParamView(state::ParamCursor& cursor) noexcept : cursor_(cursor) {}
+    float value_at(state::ParamID id, std::int32_t sample_offset) const override {
+        // The backing cursor only moves forward; a node must query offsets in
+        // non-decreasing order within a block or it silently reads a stale value.
+        // Assert that contract in debug builds (the view is per-block, so
+        // last_offset_ resets each block).
+        assert(sample_offset >= last_offset_ &&
+               "BakedParamView::value_at offsets must be non-decreasing within a block");
+        last_offset_ = sample_offset;
+        cursor_.advance_to(sample_offset);
+        return cursor_.value(id);
+    }
+    float value(state::ParamID id) const override { return cursor_.value(id); }
+
+private:
+    state::ParamCursor& cursor_;
+    mutable std::int32_t last_offset_ = std::numeric_limits<std::int32_t>::min();
+};
 
 // The plugin's bus arity, derived from the AudioInput/AudioOutput node ports. Shared
 // by bake() (in-memory) and bake_to_plan() (on-disk) so the derivation can't drift.
@@ -184,6 +280,11 @@ LowerResult bake(const SignalGraph& graph) {
     // contract documented in the header.
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
     std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles;
+    // Bake-layer param-injection bindings for any lowerable custom node whose
+    // type declared baked_params + process_instance_baked_param. The bound
+    // callback captured the instance keepalive (self-contained), and the declared
+    // params come from the registered type — never from the graph node.
+    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings;
     const auto [input_channels, output_channels] = derive_bus_arity(graph);
     for (const auto& src : graph.nodes()) {
         GraphNode n;
@@ -216,6 +317,14 @@ LowerResult bake(const SignalGraph& graph) {
                     custom_lifecycles[src.id] = std::move(lc);
                 }
             }
+            if (const CustomNodeParamProcessFn* pfn =
+                    graph.live_custom_param_processor(src.id)) {
+                if (const CustomNodeType* type = graph.custom_node_type(
+                        src.custom_type_id, src.custom_type_version)) {
+                    param_bindings[src.id] =
+                        BakedCustomParamBinding{*pfn, type->baked_params};
+                }
+            }
         }
         nodes.push_back(std::move(n));
     }
@@ -226,7 +335,7 @@ LowerResult bake(const SignalGraph& graph) {
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
         "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors),
-        std::move(custom_lifecycles));
+        std::move(custom_lifecycles), std::move(param_bindings));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
@@ -379,15 +488,28 @@ BakedGraphProcessor::BakedGraphProcessor(
     std::string name,
     std::string bundle_id,
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors,
-    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles)
+    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles,
+    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       custom_processors_(std::move(custom_processors)),
       custom_lifecycles_(std::move(custom_lifecycles)),
+      param_bindings_(std::move(param_bindings)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
       input_channels_(input_channels),
-      output_channels_(output_channels) {}
+      output_channels_(output_channels) {
+    // One single-writer mailbox per param-declaring node, allocated here (not in
+    // prepare()) so a control-side claim/inject is valid before the first
+    // prepare() and survives every re-prepare — the mailbox is fixed-capacity, so
+    // this is the only allocation the injection path ever does.
+    for (const auto& [node_id, binding] : param_bindings_) {
+        if (binding.params.empty() || !binding.process) continue;
+        param_mailboxes_[node_id] = std::make_shared<detail::BakedParamMailbox>();
+    }
+}
+
+BakedGraphProcessor::~BakedGraphProcessor() = default;
 
 fmt::PluginDescriptor BakedGraphProcessor::descriptor() const {
     fmt::PluginDescriptor desc;
@@ -430,10 +552,21 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     // delay line still holding the source graph's audio — leaks into the baked
     // stream. prepare() is a re-init boundary; the header documents that a baked
     // Processor starts from zero. Control-thread only, never on the audio path.
+    // Runs BEFORE prepare_param_injection() so the injection state's reset of
+    // held params to declared defaults lands on a freshly re-inited instance —
+    // one coherent re-init boundary for both DSP state and injected params.
     for (auto& [id, lc] : custom_lifecycles_) {
         if (lc.prepare) lc.prepare(context.sample_rate, max_block);
         if (lc.reset) lc.reset();
     }
+
+    // Build per-node injection state for every param-declaring custom node and
+    // install a draining wrapper into custom_processors_ so the routed executor
+    // invokes the injection path. This MUST run before build_executor_snapshot
+    // (which resolves each Custom node through custom_processors_). All the sizing
+    // — StateStore registration, the fixed-capacity scratch queue, held-value
+    // storage — happens here, off the audio thread, so process() never allocates.
+    prepare_param_injection();
 
     // Build the canonical executor's serialized routing snapshot for the frozen
     // plan, resolving each Gain node to its owned atomic and each lowerable Custom
@@ -551,6 +684,204 @@ void BakedGraphProcessor::process(
     if (!block.validate() || !executor_.process_routed(block, snapshot_, pool_).ok()) {
         audio_output.clear();
     }
+}
+
+void BakedGraphProcessor::prepare_param_injection() {
+    param_states_.clear();
+    for (auto& [node_id, binding] : param_bindings_) {
+        if (binding.params.empty() || !binding.process) continue;
+        const auto mb_it = param_mailboxes_.find(node_id);
+        if (mb_it == param_mailboxes_.end()) continue;  // mailbox built in ctor
+
+        auto st = std::make_unique<detail::BakedParamNodeState>();
+        st->process = binding.process;
+        st->mailbox = mb_it->second.get();
+        st->current.reserve(binding.params.size());
+        for (const auto& p : binding.params) {
+            state::ParamInfo info;
+            info.id = p.id;
+            info.name = "baked_param_" + std::to_string(p.id);
+            info.range.min = p.min_value;
+            info.range.max = p.max_value;
+            info.range.default_value = p.default_value;
+            st->store.add_parameter(info);
+            // Held value starts at the (clamped) declared default; persists across
+            // blocks until the first injection arrives.
+            st->current.push_back(state::ParamSnapshotEntry{
+                p.id, std::clamp(p.default_value, p.min_value, p.max_value)});
+        }
+        st->ramp_carry.resize(st->current.size());  // no ramp in flight yet
+
+        detail::BakedParamNodeState* rt = st.get();  // stable (unique_ptr target)
+        param_states_[node_id] = std::move(st);
+
+        // Follow-ups for a future pass, should-fix-soon but deliberately not done
+        // in this slice (they don't change behavior, only footprint):
+        //   A1: state::ParamCursor is ~32KB on-stack (kCapacity=1024 entries) per
+        //       node per block — consider a param-count-bounded cursor.
+        //   A2: a full state::StateStore per param-node exists only to clamp to
+        //       declared ranges — consider a lightweight per-node range table.
+
+        // The routed executor calls this (out,in,n) closure for the node. It
+        // seeds any in-flight ramp (so a multi-block ramp continues), drains the
+        // node's mailbox and applies the latest batch exactly once via a
+        // ParamCursor (sample-accurate + ramps), runs the node's param-aware
+        // callback, then commits the end-of-block values AND ramp state so both
+        // hold into the next block. Allocation-free: the cursor is a fixed
+        // on-stack array, the scratch queue is fixed-capacity, and nothing here
+        // touches the heap.
+        custom_processors_[node_id] =
+            [rt](pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in, int n) {
+                pulp::runtime::ScopedNoAlloc no_alloc;
+
+                rt->scratch.clear();
+
+                // Seed a continuation event for each in-flight ramp FIRST, at
+                // offset 0 with the remaining duration. Because the stable sort
+                // keeps push order for equal offsets, a fresh event at offset 0
+                // (pushed after, below) is applied last and correctly supersedes
+                // the carry; a ramp with no fresh event simply continues gliding.
+                // Without this, a ramp longer than one block would freeze at the
+                // boundary (the cursor is rebuilt from a scalar held value).
+                for (std::size_t i = 0; i < rt->current.size(); ++i) {
+                    const auto& carry = rt->ramp_carry[i];
+                    if (!carry.ramping || carry.remaining <= 0) continue;
+                    rt->scratch.push(state::ParameterEvent{
+                        rt->current[i].param_id, /*sample_offset=*/0, carry.target,
+                        /*ramp_duration_sample_frames=*/carry.remaining});
+                }
+
+                const auto& snap = rt->mailbox->published.read();
+                if (snap.sequence > rt->sequence_seen) {
+                    for (std::size_t i = 0; i < snap.size; ++i) {
+                        rt->scratch.push(snap.events[i]);
+                    }
+                    rt->sequence_seen = snap.sequence;
+                    // Tell the control side this batch is applied so the next
+                    // inject(single) starts a FRESH pending batch instead of
+                    // merging with (and re-publishing) already-applied events.
+                    rt->mailbox->consumed_sequence.store(snap.sequence,
+                                                         std::memory_order_release);
+                }
+                rt->scratch.sort();
+
+                state::ParamCursor cursor(rt->store, &rt->scratch, rt->current);
+                CursorParamView view(cursor);
+                rt->process(out, in, n, view);
+
+                if (n > 0) {
+                    cursor.advance_to(n);  // settle ramps to the block boundary
+                    for (std::size_t i = 0; i < rt->current.size(); ++i) {
+                        const auto id = rt->current[i].param_id;
+                        rt->current[i].value = cursor.value(id);
+                        auto& carry = rt->ramp_carry[i];
+                        // Carry the ramp forward only while it is still in flight
+                        // at the boundary; a ramp that completed this block holds
+                        // its target as a plain scalar next block.
+                        if (cursor.is_ramping(id)) {
+                            carry.ramping = true;
+                            carry.target = cursor.ramp_target(id);
+                            carry.remaining = cursor.ramp_end_offset(id) - n;
+                            if (carry.remaining <= 0) carry.ramping = false;
+                        } else {
+                            carry.ramping = false;
+                            carry.remaining = 0;
+                        }
+                    }
+                }
+            };
+    }
+}
+
+ParamInjector BakedGraphProcessor::claim_param_injection(NodeId node) noexcept {
+    const auto it = param_mailboxes_.find(node);
+    if (it == param_mailboxes_.end()) return ParamInjector{};
+    bool expected = false;
+    if (!it->second->claimed.compare_exchange_strong(
+            expected, true, std::memory_order_acq_rel)) {
+        return ParamInjector{};  // another injector already holds this node
+    }
+    return ParamInjector{it->second};
+}
+
+// ── ParamInjector ───────────────────────────────────────────────────────
+
+ParamInjector::ParamInjector(
+    std::shared_ptr<detail::BakedParamMailbox> mailbox) noexcept
+    : mailbox_(std::move(mailbox)) {}
+
+ParamInjector::~ParamInjector() { release(); }
+
+ParamInjector::ParamInjector(ParamInjector&& other) noexcept
+    : mailbox_(std::move(other.mailbox_)) {}
+
+ParamInjector& ParamInjector::operator=(ParamInjector&& other) noexcept {
+    if (this != &other) {
+        release();
+        mailbox_ = std::move(other.mailbox_);
+    }
+    return *this;
+}
+
+void ParamInjector::release() noexcept {
+    if (mailbox_) {
+        mailbox_->claimed.store(false, std::memory_order_release);
+        mailbox_.reset();
+    }
+}
+
+InjectStatus ParamInjector::inject(const state::ParameterEventQueue& events) noexcept {
+    if (!mailbox_) return InjectStatus::InvalidHandle;
+    auto& mb = *mailbox_;
+    auto& scratch = mb.writer_scratch;  // control-thread-owned
+    scratch.size = 0;
+    for (const auto& e : events.events()) {
+        if (scratch.size >= scratch.events.size()) break;
+        scratch.events[scratch.size++] = e;
+    }
+    scratch.sequence = mb.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    mb.published.write(scratch);
+    // On source-side overflow the retained prefix is still published — a usable
+    // partial success the caller can distinguish from a dead handle.
+    return events.overflowed() ? InjectStatus::PartialOverflow : InjectStatus::Ok;
+}
+
+InjectStatus ParamInjector::inject(const state::ParameterEvent& event) noexcept {
+    if (!mailbox_) return InjectStatus::InvalidHandle;
+    auto& mb = *mailbox_;
+    auto& scratch = mb.writer_scratch;
+    // ACCUMULATE, don't replace. A raw publish-per-event would let the
+    // TripleBuffer's latest-snapshot-wins collapse two single injects to the
+    // SAME node with no intervening process() into only the last one — a
+    // multi-param node would silently drop a param. Instead: while the last
+    // published batch is still unconsumed, merge the new event into it (the
+    // new event supersedes only THIS param's pending entries; other params'
+    // pending events are preserved) and re-publish the merged batch. Once the
+    // audio side has applied the pending batch, start fresh — never re-publish
+    // already-applied events (a re-applied ramp would re-glide).
+    if (mb.consumed_sequence.load(std::memory_order_acquire) >= scratch.sequence) {
+        scratch.size = 0;  // previous batch consumed — nothing left to merge with
+    }
+    std::size_t w = 0;
+    for (std::size_t r = 0; r < scratch.size; ++r) {
+        if (scratch.events[r].param_id != event.param_id) {
+            scratch.events[w++] = scratch.events[r];
+        }
+    }
+    scratch.size = w;
+    if (scratch.size >= scratch.events.size()) {
+        // Pathological: the pending batch is FULL of other params' events (a
+        // full-capacity queue publish, none for this param, not yet consumed).
+        // Refuse to silently evict someone else's pending event; the pending
+        // batch stays published unchanged and THIS event is dropped — reported
+        // loudly, mirroring the queue path's overflow contract.
+        return InjectStatus::PartialOverflow;
+    }
+    scratch.events[scratch.size++] = event;
+    scratch.sequence = mb.next_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    mb.published.write(scratch);
+    return InjectStatus::Ok;
 }
 
 } // namespace pulp::host
