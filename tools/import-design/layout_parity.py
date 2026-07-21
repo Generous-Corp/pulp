@@ -101,6 +101,21 @@ EXIT_FINDINGS = 1
 EXIT_USAGE = 2
 
 
+def _is_synthetic(node_id: str, name: str = "") -> bool:
+    """Whether a node is one the IMPORT synthesizes, with no design counterpart
+    by construction.
+
+    The mask lowering wraps masked siblings in a clip frame the design never
+    declared (``scene.mjs``: node_id ``<key>/mask-scope``, name ``"<name> (mask
+    scope)"``). Those ids reaching the Pulp layout dump is correct behavior, so
+    counting them as EXTRA buried the real signal — ~16 known-synthetic rows per
+    FX file drowning out any genuinely unexpected node. Matched narrowly (exact
+    suffixes, not a substring grep) so a real design node cannot be waved
+    through: EXTRA must keep meaning "the render invented a node".
+    """
+    return node_id.endswith("/mask-scope") or name.endswith(" (mask scope)")
+
+
 class Rect:
     """One node's box, in frame-relative design px."""
 
@@ -305,7 +320,12 @@ def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
     pulp = load_layout(layout_path)
 
     dropped = sorted(set(design) - set(pulp))
-    extra = sorted(set(pulp) - set(design))
+    unmatched = sorted(set(pulp) - set(design))
+    # Known-synthetic import nodes (mask-scope wrappers) are expected to have no
+    # design counterpart; they are tallied separately so EXTRA stays a real
+    # completeness signal rather than a fixed background of false positives.
+    extra = [n for n in unmatched if not _is_synthetic(n)]
+    synthetic_extra = [n for n in unmatched if _is_synthetic(n)]
     deltas = compute_deltas(design, pulp, meta)
     findings = cluster_findings(deltas, meta, tol)
 
@@ -324,6 +344,7 @@ def compare(geometry_path: pathlib.Path, layout_path: pathlib.Path,
         "matched": len(deltas),
         "dropped": [{"node_id": n, "label": _label(n, meta)} for n in dropped],
         "extra": extra,
+        "synthetic_extra": synthetic_extra,
         "findings": findings,
     }
 
@@ -359,6 +380,13 @@ def render_report(report: dict, max_findings: int) -> str:
             lines.append(f"  {node_id}")
         if len(report["extra"]) > max_findings:
             lines.append(f"  … and {len(report['extra']) - max_findings} more")
+
+    if report.get("synthetic_extra"):
+        # Stated, not hidden: the count proves the whitelist matched only what
+        # it was written for, and a surprising number here is itself a signal.
+        lines.append("")
+        lines.append(f"(ignored {len(report['synthetic_extra'])} synthetic "
+                     f"mask-scope node(s) the import adds by design)")
 
     def render_findings(heading: str, group: list[dict]) -> None:
         if not group:

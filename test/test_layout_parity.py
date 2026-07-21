@@ -300,6 +300,32 @@ class TestStructuralCompleteness(ParityTestCase):
         report = self.compare(geom, lay)
         self.assertEqual(report["extra"], ["0:9"])
 
+    def test_a_synthetic_mask_scope_view_is_not_counted_as_extra(self):
+        # The mask lowering wraps masked siblings in a clip frame the design
+        # never declared (node_id `<key>/mask-scope`). Reporting it as EXTRA
+        # made every FX file carry ~16 fixed false positives, which is a signal
+        # nobody reads. It is tallied separately instead — visible, not gating.
+        geom = geometry(node("0:1", None, 0, 0, 100, 100))
+        lay = layout(view("0:1", 0, 0, 100, 100), view("0:4/mask-scope", 0, 0))
+        report = self.compare(geom, lay)
+        self.assertEqual(report["extra"], [])
+        self.assertEqual(report["synthetic_extra"], ["0:4/mask-scope"])
+        self.assertFalse(layout_parity.report_fails(report))
+        rendered = layout_parity.render_report(report, 25)
+        self.assertIn("1 synthetic", rendered)
+        self.assertIn("PASS", rendered)
+
+    def test_the_synthetic_whitelist_is_a_suffix_match_not_a_substring_grep(self):
+        # A real design node whose id merely CONTAINS the marker must still be
+        # EXTRA — over-whitelisting would let the render invent nodes for free.
+        geom = geometry(node("0:1", None, 0, 0, 100, 100))
+        lay = layout(view("0:1", 0, 0, 100, 100),
+                     view("0:4/mask-scope/0:9", 0, 0))
+        report = self.compare(geom, lay)
+        self.assertEqual(report["extra"], ["0:4/mask-scope/0:9"])
+        self.assertEqual(report["synthetic_extra"], [])
+        self.assertTrue(layout_parity.report_fails(report))
+
     def test_an_unanchored_view_is_ignored_rather_than_counted_as_extra(self):
         # Codegen emits scaffolding the design never named (wrappers, spacers).
         # It carries no node_id, so it joins to nothing and must not be noise.
