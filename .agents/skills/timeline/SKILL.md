@@ -53,6 +53,14 @@ invariants.
   exist in its device chain, and permits only one lane per placement/parameter
   pair. Lane and point IDs are Project identities owned by that Track; host
   delivery remains a separate contract.
+- Automation lanes are command-addressable: `InsertAutomationLane` /
+  `RemoveAutomationLane` reduce through the shared transaction pipeline
+  (`transaction_reduction_support` + `transaction_automation_internal`),
+  validating the target sequence/track/placement, allocating lane and point
+  identities as owned Project identities, and emitting inverse commands so undo,
+  redo, and journal replay restore the lane and its tombstone ownership exactly.
+  Command equivalence compares lane payloads bit-exactly (float bits), so a
+  re-authored point differing only in a signed zero is not treated as equal.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
