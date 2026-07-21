@@ -556,3 +556,101 @@ TEST_CASE("AU v2 MIDI processor round-trips its state through an AU preset",
     REQUIRE(value == 12.0f);
     CFRelease(saved);
 }
+
+// A MIDI processor that delays events (a quantizer, a humanizer with lookahead)
+// reports that latency so the host can compensate.
+TEST_CASE("AU v2 MIDI processor reports its latency in seconds",
+          "[au][au-v2][midi-processor][latency]")
+{
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+
+    // The test Processor declares no latency, so the reported value is 0 and
+    // the sample-rate divide is still exercised.
+    REQUIRE(live.unit.GetLatency() == 0.0);
+    // No audio tail on a MIDI processor.
+    REQUIRE(live.unit.SupportsTail() == false);
+}
+
+// The host negotiates the (silent) output element's format and schedules
+// parameters; the input scope has no element at all.
+TEST_CASE("AU v2 MIDI processor exposes only a writable output scope",
+          "[au][au-v2][midi-processor][element]")
+{
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+
+    REQUIRE(live.unit.StreamFormatWritable(kAudioUnitScope_Output, 0) == true);
+    REQUIRE(live.unit.StreamFormatWritable(kAudioUnitScope_Input, 0) == false);
+    REQUIRE(live.unit.CanScheduleParameters() == true);
+    REQUIRE(live.unit.Inputs().GetNumberOfElements() == 0);
+    REQUIRE(live.unit.Outputs().GetNumberOfElements() == 1);
+}
+
+// Every Pulp-owned property is Global scope. A scoped query for the wrong scope
+// must be refused rather than served from element 0.
+TEST_CASE("AU v2 MIDI processor rejects Pulp properties outside global scope",
+          "[au][au-v2][midi-processor][properties]")
+{
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+
+    UInt32 size = 0;
+    bool writable = false;
+    REQUIRE(live.unit.GetPropertyInfo(kAudioUnitProperty_MIDIOutputCallback,
+                                      kAudioUnitScope_Input, 0, size,
+                                      writable) == kAudioUnitErr_InvalidScope);
+    REQUIRE(live.unit.GetPropertyInfo(kAudioUnitProperty_ParameterStringFromValue,
+                                      kAudioUnitScope_Input, 0, size,
+                                      writable) == kAudioUnitErr_InvalidScope);
+
+    AUMIDIOutputCallbackStruct cb{};
+    REQUIRE(live.unit.SetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                  kAudioUnitScope_Input, 0, &cb,
+                                  sizeof(cb)) == kAudioUnitErr_InvalidScope);
+    // An undersized payload is refused rather than read past its end.
+    REQUIRE(live.unit.SetProperty(kAudioUnitProperty_MIDIOutputCallback,
+                                  kAudioUnitScope_Global, 0, &cb, 1) ==
+            kAudioUnitErr_InvalidPropertyValue);
+
+    // Non-global parameter scopes report no parameters rather than erroring.
+    UInt32 count = 99;
+    REQUIRE(live.unit.GetParameterList(kAudioUnitScope_Input, nullptr, count) ==
+            noErr);
+    REQUIRE(count == 0);
+    AudioUnitParameterInfo info{};
+    REQUIRE(live.unit.GetParameterInfo(kAudioUnitScope_Input, 1, info) ==
+            kAudioUnitErr_InvalidParameter);
+}
+
+// A parameter with no declared `to_string` keeps the host's stock numeric
+// display, but the adapter still answers the conversion properties when asked.
+TEST_CASE("AU v2 MIDI processor converts parameter values to and from text",
+          "[au][au-v2][midi-processor][params]")
+{
+    ScopedFactoryRegistration registration;
+    LiveMidiProcessor live;
+
+    AudioUnitParameterStringFromValue sfv{};
+    sfv.inParamID = TransposeProcessor::kSemitonesId;
+    const Float32 value = 5.0f;
+    sfv.inValue = &value;
+    REQUIRE(live.unit.GetProperty(kAudioUnitProperty_ParameterStringFromValue,
+                                  kAudioUnitScope_Global, 0, &sfv) == noErr);
+    REQUIRE(sfv.outString != nullptr);
+    CFRelease(sfv.outString);
+
+    // An unknown ParamID is refused rather than formatted from garbage.
+    AudioUnitParameterStringFromValue unknown{};
+    unknown.inParamID = 9999;
+    REQUIRE(live.unit.GetProperty(kAudioUnitProperty_ParameterStringFromValue,
+                                  kAudioUnitScope_Global, 0, &unknown) ==
+            kAudioUnitErr_InvalidPropertyValue);
+
+    AudioUnitParameterValueFromString vfs{};
+    vfs.inParamID = TransposeProcessor::kSemitonesId;
+    vfs.inString = CFSTR("-7");
+    REQUIRE(live.unit.GetProperty(kAudioUnitProperty_ParameterValueFromString,
+                                  kAudioUnitScope_Global, 0, &vfs) == noErr);
+    REQUIRE(vfs.outValue == -7.0f);
+}

@@ -3,6 +3,15 @@
 # `aumi` component type (kAudioUnitType_MIDIProcessor), and the AU entry binds
 # PulpAUMidiProcessor through AUMIDIEffectFactory.
 
+# ── Headless MIDI-transform test ─────────────────────────────────────────────
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-transpose-test test_pulp_transpose.cpp)
+    target_link_libraries(pulp-transpose-test PRIVATE
+        pulp::format pulp::audio pulp::midi pulp::state Catch2::Catch2WithMain)
+    target_include_directories(pulp-transpose-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-transpose-test)
+endif()
+
 set(PTR_FORMATS CLAP)
 if(APPLE)
     list(APPEND PTR_FORMATS AU)   # aumi (MIDI processor), via CATEGORY MidiEffect
