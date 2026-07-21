@@ -71,6 +71,7 @@ TEST_CASE("Timeline projects register device placement ownership globally") {
     const auto location = project.locate({21});
     REQUIRE(location.has_value());
     REQUIRE(location->kind == ItemKind::DevicePlacement);
+    REQUIRE(location->parent_id == ItemId{10});
     REQUIRE(location->sequence_id == ItemId{3});
     REQUIRE(location->track_id == ItemId{10});
     REQUIRE_FALSE(location->clip_id.valid());
@@ -111,6 +112,8 @@ TEST_CASE("Timeline remap treats device placements as owned identities") {
     REQUIRE(project_track->device_chain()[1].id == *remapped_project.ids.find({20}));
     REQUIRE(remapped_project.project.locate(*remapped_project.ids.find({21}))->kind ==
             ItemKind::DevicePlacement);
+    REQUIRE(remapped_project.project.locate(*remapped_project.ids.find({21}))->parent_id ==
+            *remapped_project.ids.find({10}));
 
     ItemIdAllocator exhausted(std::numeric_limits<std::uint64_t>::max() - 2);
     const auto before = exhausted.next_value();

@@ -271,9 +271,9 @@ TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactiv
 
     auto malformed = encoded->json;
     const std::string valid_tombstone =
-        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","parent_id":"4","sequence_id":"3","track_id":"4"})";
     const std::string malformed_tombstone =
-        R"({"active":false,"clip_id":"0","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+        R"({"active":false,"clip_id":"0","id":"5","kind":"clip","parent_id":"4","sequence_id":"3","track_id":"4"})";
     const auto tombstone_position = malformed.find(valid_tombstone);
     REQUIRE(tombstone_position != std::string::npos);
     malformed.replace(tombstone_position, valid_tombstone.size(), malformed_tombstone);
@@ -285,7 +285,7 @@ TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactiv
 
     malformed = encoded->json;
     const std::string orphaned_tombstone =
-        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"2","track_id":"4"})";
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","parent_id":"4","sequence_id":"2","track_id":"4"})";
     const auto orphan_position = malformed.find(valid_tombstone);
     REQUIRE(orphan_position != std::string::npos);
     malformed.replace(orphan_position, valid_tombstone.size(), orphaned_tombstone);

@@ -335,7 +335,8 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
             return true;
         };
         const auto mapped_item = table.find(identity.item);
-        if (!mapped_item || !remap_owner(location.sequence_id) || !remap_owner(location.track_id) ||
+        if (!mapped_item || !remap_owner(location.parent_id) ||
+            !remap_owner(location.sequence_id) || !remap_owner(location.track_id) ||
             !remap_owner(location.clip_id))
             return fail<RemappedProject>(ModelErrorCode::InvalidSchemaIdentity, identity.item);
         remapped_identities.push_back({*mapped_item, location});
