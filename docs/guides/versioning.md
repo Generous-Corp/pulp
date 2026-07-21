@@ -103,6 +103,8 @@ The legacy `PULP_ENFORCE_PREPUSH=1` and `PULP_ENFORCE_PREPUSH_DIFF_COVER=1` env 
 
 `.github/workflows/version-skill-check.yml` runs on every PR to `main` or `develop`. It fetches full history (so `origin/base_ref` is reachable) and invokes the two scripts in `report` mode. Failure blocks merge.
 
+Its `concurrency` uses **`cancel-in-progress: false`** (not `true`). Because this workflow posts the *required* `Enforce version & skill sync` check, cancelling an in-flight run under a churning `main` would leave that required check stuck at `cancelled` — which never settles to `success` and silently blocks merge on PRs whose code is fine (observed 2026-07-21). Letting superseded runs complete is cheap (fast python scripts on a github-hosted runner) and guarantees the gate reaches a terminal state. Do not flip a required-check gate back to `cancel-in-progress: true`.
+
 Alongside the version and skill gates, this same workflow enforces two house
 invariants over Pulp's own source, both hard-failing:
 

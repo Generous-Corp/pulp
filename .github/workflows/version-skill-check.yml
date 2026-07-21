@@ -29,7 +29,16 @@ on:
 
 concurrency:
   group: version-skill-check-${{ github.ref }}
-  cancel-in-progress: true
+  # This workflow posts the REQUIRED `Enforce version & skill sync` check.
+  # cancel-in-progress must be FALSE for a required gate: under a churning main
+  # (frequent version-at-land bumps + concurrent merges), an in-flight run that
+  # is cancelled leaves the required check stuck at `cancelled` — never a stable
+  # `success` — which silently blocks merge on PRs whose code is actually fine
+  # (observed 2026-07-21: many PRs wedged on a cancelled vskill even with macos
+  # + Build+prove green). Letting runs complete is cheap here (the gate is a
+  # few fast python scripts on a github-hosted runner), and the required check
+  # then always settles to a terminal success/failure the merge can act on.
+  cancel-in-progress: false
 
 jobs:
   version-skill-check:

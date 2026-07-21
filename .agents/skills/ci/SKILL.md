@@ -210,6 +210,22 @@ out to be non-hardware (a misdiagnosis worth not repeating). Check in this order
    This is the most common reason a Shipyard PR "sits." (`shipyard pr` dispatches
    `build.yml` itself but you may still need `version-skill-check.yml`.) After a
    new push the head SHA changes — re-dispatch on the new SHA.
+1b. **Is a required check stuck `cancelled` (not failed)?** `version-skill-check`
+   posts the required `Enforce version & skill sync`. Its `concurrency` is
+   `cancel-in-progress: false` (fixed 2026-07-21) precisely so a churning `main`
+   can't leave that gate stuck at `cancelled` — a required check at `cancelled`
+   never settles to `success` and silently blocks merge even when `macos` +
+   `Build+prove` are green. If you see `cancelled` on a required check, look for
+   a `cancel-in-progress: true` regression, not a code problem. Re-dispatch to
+   get a fresh terminal run.
+1c. **macOS flaking a *different* test each run?** That's Studio
+   **oversubscription**, not a real break: `ctest -j8` per build × multiple
+   builds per Mac = 16–24 parallel test processes → CPU-budget / timing tests
+   (`heritage-performance :: stays within the shipping CPU budget`, SignalGraph
+   oracle, sampler-evidence) flake. **Re-running makes it worse** (adds load).
+   Fix by *reducing* concurrent Mac builds to ≤3 fleet-wide (coordinate agents),
+   not by re-triggering. Durable fix: per-Mac VM cap / pull perf tests off the
+   PR gate — see `planning/org-flip-status.md` §A.
 2. **Is it a version-bump race?** The other concurrent agent re-bumping `main`'s
    `CMakeLists.txt VERSION` makes the PR `DIRTY` (conflict on the VERSION line).
    Merge `origin/main` in, re-resolve the VERSION to one above main, push,
