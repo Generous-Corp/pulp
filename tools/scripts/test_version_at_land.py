@@ -377,5 +377,286 @@ class ConcurrentDrainRaceTest(unittest.TestCase):
         self.assertEqual(self._origin_bump_commit_count(), 1)
 
 
+class _FakeGh:
+    """Stub for `version_at_land._gh`. The PR-route's git ops (push to the bump
+    branch) hit a real local bare remote; only the GitHub-facing `gh` calls are
+    faked so the transaction is exercised end-to-end without network.
+
+    `open_prs_seq` overrides `open_prs` for successive `pr list` calls (to model
+    a PR appearing mid-transaction — the concurrent-clobber race)."""
+
+    def __init__(self, *, open_prs: int = 0, open_prs_seq: list[int] | None = None,
+                 list_rc: int = 0, list_rc_seq: list[int] | None = None,
+                 create_rc: int = 0, create_stderr: str = "",
+                 merge_rc: int = 0) -> None:
+        self.open_prs = open_prs
+        self.open_prs_seq = list(open_prs_seq) if open_prs_seq else None
+        self.list_rc = list_rc
+        self.list_rc_seq = list(list_rc_seq) if list_rc_seq else None
+        self.create_rc = create_rc
+        self.create_stderr = create_stderr
+        self.merge_rc = merge_rc
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, repo, *args, check: bool = True):
+        self.calls.append(tuple(args))
+        head = tuple(args[:2])
+        if head == ("pr", "list"):
+            rc = (self.list_rc_seq.pop(0) if self.list_rc_seq
+                  else self.list_rc)
+            if rc != 0:
+                return subprocess.CompletedProcess(
+                    args, rc, stdout="", stderr="gh: API error")
+            n = (self.open_prs_seq.pop(0) if self.open_prs_seq
+                 else self.open_prs)
+            payload = json.dumps([{"number": i + 1} for i in range(n)])
+            return subprocess.CompletedProcess(args, 0, stdout=payload, stderr="")
+        if head == ("pr", "create"):
+            return subprocess.CompletedProcess(
+                args, self.create_rc, stdout="", stderr=self.create_stderr)
+        if head == ("pr", "merge"):
+            return subprocess.CompletedProcess(
+                args, self.merge_rc, stdout="", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    def did(self, *prefix: str) -> bool:
+        return any(c[:len(prefix)] == prefix for c in self.calls)
+
+
+class PrRouteTest(unittest.TestCase):
+    """`apply_via_pr` (PULP_BUMP_ROUTE=pr): build the bump on a dedicated branch,
+    open a PR, arm auto-merge. The lock (one open bump PR at a time) and
+    double-bump safety are the load-bearing behaviors."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="pulp-val-pr-"))
+        self.seed = self.root / "seed"
+        self.seed.mkdir()
+        Fixture(self.seed).init()
+        self.origin = self.root / "origin.git"
+        subprocess.run(["git", "clone", "--bare", "-q",
+                        str(self.seed), str(self.origin)], check=True)
+        # A fix PR lands on origin: intent trailer, NO version-file edit.
+        land = self.root / "land"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(land)],
+                       check=True)
+        self._config(land)
+        (land / "core/runtime/src/foo.cpp").write_text("int foo(){return 9;}\n")
+        _git(land, "add", "--", "core/runtime/src/foo.cpp")
+        _git(land, "commit", "-q", "-m",
+             "feat(core): user-facing change\n\nVersion-Bump: sdk=minor\n")
+        _git(land, "push", "-q", "origin", "HEAD:main")
+        # The commit BEFORE the feat landed — the original drain base, used to
+        # replay an intent range whose marker was later lost.
+        self.pre_feat = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "main~1"],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.clone = self.root / "clone"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(self.clone)],
+                       check=True)
+        self._config(self.clone, "release-bot")
+        self._orig_gh = val._gh
+
+    def tearDown(self) -> None:
+        val._gh = self._orig_gh
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    @staticmethod
+    def _config(repo: Path, who: str = "bot") -> None:
+        _git(repo, "config", "user.email", f"{who}@example.com")
+        _git(repo, "config", "user.name", who)
+        _git(repo, "config", "commit.gpgsign", "false")
+
+    def _cfg(self):
+        return load_config(self.clone / "tools/scripts/versioning.json")
+
+    def _origin_has_branch(self, ref: str) -> bool:
+        return subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", "--verify", "-q", ref],
+            capture_output=True).returncode == 0
+
+    def _branch_cmake_version(self, ref: str) -> str:
+        import re
+        show = subprocess.run(
+            ["git", "-C", str(self.origin), "show", f"{ref}:CMakeLists.txt"],
+            capture_output=True, text=True, check=True).stdout
+        return re.search(r"VERSION (\d+\.\d+\.\d+)", show).group(1)
+
+    def test_pr_route_opens_and_arms_bump_pr(self) -> None:
+        fake = _FakeGh(open_prs=0)
+        val._gh = fake
+        status, plan = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pr-opened", plan)
+        # The bump landed on the dedicated branch (0.1.0 -> 0.2.0), NOT on main.
+        self.assertTrue(self._origin_has_branch(f"refs/heads/{val.BUMP_BRANCH}"))
+        self.assertEqual(self._branch_cmake_version(val.BUMP_BRANCH), "0.2.0")
+        # main is untouched — the PR, not a direct push, carries the bump.
+        self.assertEqual(self._branch_cmake_version("main"), "0.1.0")
+        # A PR was opened and auto-merge armed with --merge (contract: NEVER
+        # --squash — squash folds the bump-marker commit and trips auto-release).
+        self.assertTrue(fake.did("pr", "create"))
+        self.assertTrue(fake.did("pr", "merge"))
+        self.assertIn("--auto", fake.calls[-1])
+        self.assertIn("--merge", fake.calls[-1])
+        self.assertNotIn("--squash", fake.calls[-1])
+        # The bump commit carries the applied marker.
+        msg = subprocess.run(
+            ["git", "-C", str(self.origin), "log", "-1", "--format=%B",
+             val.BUMP_BRANCH], capture_output=True, text=True, check=True).stdout
+        self.assertIn(f"{val.APPLIED_MARKER}:", msg)
+
+    def test_pr_route_defers_and_rearms_when_open_bump_pr_exists(self) -> None:
+        fake = _FakeGh(open_prs=1)  # a bump PR is already open
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pending")
+        # The lock held: no branch pushed, no PR created.
+        self.assertFalse(self._origin_has_branch(f"refs/heads/{val.BUMP_BRANCH}"))
+        self.assertFalse(fake.did("pr", "create"))
+        # ...but it RE-ARMED the existing PR (self-heals a prior failed arm).
+        self.assertTrue(fake.did("pr", "merge"))
+        self.assertIn("--merge", fake.calls[-1])
+
+    def test_pr_route_defers_when_create_races(self) -> None:
+        # Lock check passes but `pr create` loses the race → GitHub rejects the
+        # duplicate head. The confirm-list then finds the rival PR → re-arm it
+        # and defer. (top list=0 to proceed, confirm list=1 finds the PR.)
+        fake = _FakeGh(open_prs_seq=[0, 1], create_rc=1,
+                       create_stderr="a pull request for branch already exists")
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pending")
+        self.assertTrue(fake.did("pr", "merge"))  # re-armed the rival PR
+
+    def test_pr_route_arm_failed_surfaces_when_merge_fails(self) -> None:
+        # Arming auto-merge fails → return an error status (run goes red +
+        # retries), NOT a false "pr-opened" that would wedge the drain forever.
+        fake = _FakeGh(open_prs=0, merge_rc=1)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "arm-failed")
+        self.assertTrue(fake.did("pr", "create"))  # the PR IS open (retriable)
+
+    def test_pr_route_no_clobber_when_pr_appears_after_lock_check(self) -> None:
+        # The concurrent race: a queued bump PR's head already sits on the
+        # branch, but the top-of-function `pr list` momentarily reports none (a
+        # real API race). The plain push must be REJECTED by divergence and we
+        # must NOT force over the queued PR's head.
+        other = self.root / "other"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)],
+                       check=True)
+        self._config(other)
+        _git(other, "checkout", "-q", "-b", val.BUMP_BRANCH)
+        (other / "QUEUED.txt").write_text("queued PR head\n")
+        _git(other, "add", "-A")
+        _git(other, "commit", "--no-verify", "-q", "-m", "queued bump PR head")
+        _git(other, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        queued_sha = _git(other, "rev-parse", "HEAD").strip()
+
+        fake = _FakeGh(open_prs_seq=[0, 1, 1])  # invisible, then visible
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "pending")
+        origin_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(origin_sha, queued_sha,
+                         "clobbered the queued bump PR head with a force-push")
+        self.assertTrue(fake.did("pr", "merge"))  # re-armed theirs
+
+    def test_pr_route_unknown_pr_state_never_forces(self) -> None:
+        # A divergent branch exists, but the PR lookup ERRORS (unknown state).
+        # We must fail closed — never force over a branch that might carry a
+        # queued PR head.
+        other = self.root / "otherapi"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(other)],
+                       check=True)
+        self._config(other)
+        _git(other, "checkout", "-q", "-b", val.BUMP_BRANCH)
+        (other / "MAYBE_QUEUED.txt").write_text("could be a queued PR head\n")
+        _git(other, "add", "-A")
+        _git(other, "commit", "--no-verify", "-q", "-m", "maybe-queued head")
+        _git(other, "push", "-q", "origin", f"HEAD:{val.BUMP_BRANCH}")
+        pre_sha = _git(other, "rev-parse", "HEAD").strip()
+
+        fake = _FakeGh(list_rc=1)  # every `pr list` errors → unknown
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "exhausted")
+        origin_sha = subprocess.run(
+            ["git", "-C", str(self.origin), "rev-parse", val.BUMP_BRANCH],
+            capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(origin_sha, pre_sha,
+                         "force-reclaimed a branch while PR state was unknown")
+
+    def test_pr_route_create_race_unknown_lookup_fails_closed(self) -> None:
+        # `pr create` says a PR exists, but the confirming lookup ERRORS. We must
+        # NOT report a green "pending" for a PR we cannot confirm or arm.
+        # First list (top lock check) → ok/0 PRs (proceed); second list (the
+        # create-race confirm) → API error.
+        fake = _FakeGh(list_rc_seq=[0, 1], create_rc=1,
+                       create_stderr="a pull request for branch already exists")
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "exhausted")
+
+    def test_pr_route_rearm_failure_on_pending_is_arm_failed(self) -> None:
+        # An open bump PR exists but re-arming its auto-merge fails → surface
+        # "arm-failed" (red run), NOT a green "pending" that would let a
+        # persistently-unarmable PR wedge the drain silently.
+        fake = _FakeGh(open_prs=1, merge_rc=1)
+        val._gh = fake
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "arm-failed")
+
+    def test_pr_route_noop_without_intent(self) -> None:
+        # Drain an origin that already carries the marker → nothing to bump.
+        fake1 = _FakeGh(open_prs=0)
+        val._gh = fake1
+        self.assertEqual(val.apply_via_pr(self.clone, self._cfg())[0], "pr-opened")
+        # Simulate the bump PR having merged: fast-forward main to the branch.
+        subprocess.run(["git", "-C", str(self.origin), "update-ref",
+                        "refs/heads/main", val.BUMP_BRANCH], check=True)
+        fake2 = _FakeGh(open_prs=0)
+        val._gh = fake2
+        status, _ = val.apply_via_pr(self.clone, self._cfg())
+        self.assertEqual(status, "noop")
+        self.assertFalse(fake2.did("pr", "create"),
+                         "opened a redundant bump PR after the range drained")
+
+    def test_pr_route_regression_guard_no_backward_bump_if_marker_lost(self) -> None:
+        # Squash can drop the marker. Land the bump content (0.2.0) on main
+        # WITHOUT the marker, then REPLAY the original intent range (fallback
+        # base = pre-feat). The plan recomputes 0.2.0 but the fresh head is
+        # already 0.2.0 → _strictly_increasing drops it → noop. The ordinal
+        # guard (not marker survival) is what prevents the double/backward bump.
+        fake1 = _FakeGh(open_prs=0)
+        val._gh = fake1
+        self.assertEqual(val.apply_via_pr(self.clone, self._cfg())[0], "pr-opened")
+        squash = self.root / "squash"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(squash)],
+                       check=True)
+        self._config(squash)
+        _git(squash, "checkout", "-q", f"origin/{val.BUMP_BRANCH}",
+             "--", "CMakeLists.txt")
+        _git(squash, "commit", "--no-verify", "-q", "-m",
+             "chore: bump versions (squashed, marker dropped)")
+        _git(squash, "push", "-q", "origin", "HEAD:main")
+        subprocess.run(["git", "-C", str(self.origin), "branch", "-D", "-q",
+                        val.BUMP_BRANCH], check=True)
+        fake2 = _FakeGh(open_prs=0)
+        val._gh = fake2
+        status, _ = val.apply_via_pr(self.clone, self._cfg(),
+                                     fallback_base=self.pre_feat)
+        self.assertEqual(status, "noop",
+                         "regressed/double-bumped: ordinal guard failed")
+        self.assertFalse(fake2.did("pr", "create"))
+
+    def test_semver_compares_numerically_not_lexically(self) -> None:
+        self.assertGreater(val._semver("0.10.0"), val._semver("0.9.9"))
+        self.assertGreater(val._semver("1.0.0"), val._semver("0.99.99"))
+        self.assertFalse(val._semver("0.2.0") > val._semver("0.2.0"))
+
+
 if __name__ == "__main__":
     unittest.main()

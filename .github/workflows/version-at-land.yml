@@ -42,16 +42,28 @@ on:
   workflow_dispatch: {}
 
 concurrency:
-  # Event-scoped so a scheduled drain is never superseded by pushes (and vice
-  # versa). Concurrent push+schedule drains are safe: apply_and_push is
-  # --ff-only + Version-Bump-Applied-marker idempotent + recompute-per-retry, so
-  # a loser re-syncs past the winner's marker and no-ops (test_version_at_land.py
-  # concurrency proof). No double-bump.
-  group: version-at-land-${{ github.event_name }}
+  # DIRECT route (default): event-scoped so a scheduled drain is never
+  # superseded by pushes (and vice versa). Concurrent push+schedule drains are
+  # safe there: apply_and_push is --ff-only + Version-Bump-Applied-marker
+  # idempotent + recompute-per-retry, so a loser re-syncs past the winner's
+  # marker and no-ops (test_version_at_land.py concurrency proof). No double-bump.
+  #
+  # PR route (PULP_BUMP_ROUTE=pr): a SINGLE constant group so ALL bumper runs
+  # SERIALIZE. The PR-route lands via a shared `release/version-bump` branch +
+  # bump PR, and PR-existence vs branch-SHA cannot be read atomically — two
+  # concurrent drains have an irreducible race (a PR appearing on an unchanged
+  # ref between the no-PR check and a reclaim). Serialization removes the
+  # competitor entirely, so that race cannot occur. The direct path's group is
+  # left exactly as before, so this changes nothing until the toggle is flipped.
+  group: >-
+    ${{ vars.PULP_BUMP_ROUTE == 'pr'
+        && 'version-at-land-serial'
+        || format('version-at-land-{0}', github.event_name) }}
   cancel-in-progress: false
 
 permissions:
   contents: write  # the single-writer bot pushes the `chore: bump versions` commit
+  pull-requests: write  # the PR-route (PULP_BUMP_ROUTE=pr) opens + auto-merges a bump PR
 
 jobs:
   drain-dry-run:
@@ -75,10 +87,34 @@ jobs:
         run: bash tools/scripts/configure_release_bot_ssh_signing.sh
 
       - name: Assign versions (single-writer push)
+        # GH_TOKEN authenticates the `gh` CLI the PR-route uses to open + arm the
+        # bump PR. RELEASE_BOT_TOKEN (a real user PAT) so the PR + its checks are
+        # not GITHUB_TOKEN-suppressed; GITHUB_TOKEN as the direct-route fallback.
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_RELEASE_PAT: ${{ secrets.RELEASE_BOT_TOKEN != '' }}
+          BUMP_ROUTE: ${{ vars.PULP_BUMP_ROUTE || 'direct' }}
         run: |
+          # The PR-route MUST use a real PAT: a PR opened by GITHUB_TOKEN does
+          # not trigger workflows (GitHub's loop-prevention), so its required
+          # checks never run and auto-merge stalls forever. Fail loudly rather
+          # than open a bump PR that can never merge.
+          if [ "$BUMP_ROUTE" = "pr" ] && [ "$HAS_RELEASE_PAT" != "true" ]; then
+            echo "::error::PULP_BUMP_ROUTE=pr requires the RELEASE_BOT_TOKEN PAT" \
+                 "(GITHUB_TOKEN-created PRs do not trigger checks). Aborting."
+            exit 1
+          fi
           # --push recomputes from a fresh origin/main, prefers the
-          # `Version-Bump-Applied` marker, and pushes `chore: bump versions`
-          # --ff-only with retry. `--base` is only the first-run FALLBACK before
-          # any marker exists; `github.event.before` bounds it to this push.
+          # `Version-Bump-Applied` marker, and lands `chore: bump versions`.
+          # --route selects HOW it lands (repo variable PULP_BUMP_ROUTE; unset ⇒
+          # direct ⇒ today's --ff-only push, no behavior change):
+          #   direct — push --ff-only straight to main (incompatible with a
+          #            "Require merge queue" rule).
+          #   pr     — open a bump PR + auto-merge (--merge) it (routes through
+          #            the merge queue when enabled; a normal auto-merge PR when
+          #            not).
+          # --base is only the first-run FALLBACK before any marker exists;
+          # `github.event.before` bounds it to this push.
           python3 tools/scripts/version_at_land.py --push \
+              --route "$BUMP_ROUTE" \
               --base "${{ github.event.before }}"

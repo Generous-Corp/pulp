@@ -1,5 +1,23 @@
 #include "support/timeline_persistence_test_support.hpp"
 
+namespace {
+
+std::string erase_parent_ids(std::string snapshot) {
+    constexpr std::string_view prefix = ",\"parent_id\":\"";
+    std::size_t search_from = 0;
+    auto begin = snapshot.find(prefix, search_from);
+    while (begin != std::string::npos) {
+        const auto end = snapshot.find('"', begin + prefix.size());
+        REQUIRE(end != std::string::npos);
+        snapshot.erase(begin, end - begin + 1);
+        search_from = begin;
+        begin = snapshot.find(prefix, search_from);
+    }
+    return snapshot;
+}
+
+} // namespace
+
 TEST_CASE("Timeline snapshots round trip canonically with durable asset identity") {
     const auto registry = builtins();
     const auto original = project_with();
@@ -17,6 +35,24 @@ TEST_CASE("Timeline snapshots round trip canonically with durable asset identity
     auto second = serialize_project(decoded.value(), registry);
     REQUIRE(second.has_value());
     REQUIRE(second.value().json == first.value().json);
+}
+
+TEST_CASE("Timeline identity persistence derives immediate parents from legacy snapshots") {
+    const auto registry = builtins();
+    const auto encoded = take(serialize_project(mixed_project(), registry));
+    const auto legacy = erase_parent_ids(encoded.json);
+    REQUIRE(legacy.find("\"parent_id\"") == std::string::npos);
+
+    const auto decoded = take(deserialize_project(legacy, registry));
+    REQUIRE(decoded.locate({1})->parent_id == ItemId{});
+    REQUIRE(decoded.locate({2})->parent_id == ItemId{1});
+    REQUIRE(decoded.locate({8})->parent_id == ItemId{1});
+    REQUIRE(decoded.locate({3})->parent_id == ItemId{8});
+    REQUIRE(decoded.locate({5})->parent_id == ItemId{3});
+    REQUIRE(decoded.locate({6})->parent_id == ItemId{5});
+
+    const auto canonical = take(serialize_project(decoded, registry));
+    REQUIRE(canonical.json == encoded.json);
 }
 
 TEST_CASE("Timeline schema-v1 owns and canonically replays editable tempo and meter maps") {

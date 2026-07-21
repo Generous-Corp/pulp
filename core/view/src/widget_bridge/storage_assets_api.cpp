@@ -260,8 +260,8 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
     // Font loading: loadFont(path) -> success boolean.
     // This is an existence probe for web-compat callers; actual renderer font
     // registration is handled by registerFont(family, path) below.
-    register_bridge_function(api, "loadFont", [](choc::javascript::ArgumentList args) {
-        auto path = args.get<std::string>(0, "");
+    register_bridge_function(api, "loadFont", [&self](choc::javascript::ArgumentList args) {
+        auto path = self.resolve_script_relative(args.get<std::string>(0, ""));
         bool exists = !path.empty() && std::filesystem::exists(path);
         return choc::value::createBool(exists);
     });
@@ -271,11 +271,12 @@ void BridgeRegistrars::register_font_assets_api(WidgetBridge& self) {
     // shipped face instead of a same-named system font (or a generic fallback).
     // Codegen emits these from the envelope's font_family_assets before any
     // setFontFamily.
-    register_bridge_function(api, "registerFont", [](choc::javascript::ArgumentList args) {
+    register_bridge_function(api, "registerFont", [&self](choc::javascript::ArgumentList args) {
         auto family = args.get<std::string>(0, "");
         auto path = args.get<std::string>(1, "");
         if (family.empty() || path.empty()) return choc::value::createBool(false);
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
+        path = self.resolve_script_relative(path);
         if (!std::filesystem::exists(path)) return choc::value::createBool(false);
         // register_font_family decodes the file + registers the typeface with
         // the canvas font registry (Skia on GPU builds; no-op stub otherwise).

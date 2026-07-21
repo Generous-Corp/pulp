@@ -2,6 +2,7 @@
 
 #include "project_state_access.hpp"
 #include "serialize_internal.hpp"
+#include "track_schema_policy.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -538,7 +539,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     if (++counts.tracks > limits.max_tracks)
         return fail<Track>(PersistenceErrorCode::LimitExceeded, path, value.begin, counts.tracks,
                            limits.max_tracks);
-    auto envelope = data_for_versions(value, "pulp.timeline.track", 1, 2, path);
+    auto envelope = data_for_versions(value, detail::track_schema_policy.type_name,
+                                      detail::track_schema_policy.oldest_readable_version,
+                                      detail::track_schema_policy.current_version, path);
     if (!envelope)
         return fail<Track>(envelope.error().code, envelope.error().path,
                            envelope.error().byte_offset);
@@ -547,9 +550,11 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto name = string_field(data, "name", path + "/data");
     auto clips = required(data, "clips", path + "/data");
     const auto* devices = data.find("device_chain");
+    const auto requires_devices =
+        detail::track_schema_policy.requires_device_chain(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
-        (envelope.value().version == 1 && devices) ||
-        (envelope.value().version == 2 && (!devices || devices->kind != JsonValue::Kind::Array)))
+        (!requires_devices && devices) ||
+        (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -724,6 +729,7 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             auto sequence_value = required(value, "sequence_id", path);
             auto track_value = required(value, "track_id", path);
             auto clip_value = required(value, "clip_id", path);
+            const auto* parent_value = value.find("parent_id");
             auto active_value = required(value, "active", path);
             if (!id_value || !kind_value || !sequence_value || !track_value || !clip_value ||
                 !active_value || active_value.value()->kind != JsonValue::Kind::Boolean)
@@ -736,8 +742,21 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             auto clip_id = parse_canonical_u64_string(*clip_value.value(), path + "/clip_id");
             if (!item || !kind || !sequence_id || !track_id || !clip_id)
                 return fail<Project>(PersistenceErrorCode::InvalidNumber, path);
+            ItemId parent_id;
+            if (parent_value) {
+                auto parent = parse_canonical_u64_string(*parent_value, path + "/parent_id");
+                if (!parent)
+                    return fail<Project>(PersistenceErrorCode::InvalidNumber,
+                                         path + "/parent_id");
+                parent_id = {parent.value()};
+            } else {
+                parent_id = immediate_parent_id(kind.value(), {decoded_id.value()},
+                                                {sequence_id.value()}, {track_id.value()},
+                                                {clip_id.value()});
+            }
             decoded_identities.push_back({{item.value()},
                                           {kind.value(),
+                                           parent_id,
                                            {sequence_id.value()},
                                            {track_id.value()},
                                            {clip_id.value()},

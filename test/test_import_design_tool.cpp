@@ -1441,8 +1441,87 @@ TEST_CASE("pulp-import-design persists .pulp.zip assets beside generated output"
 
     const auto js = read_text(output);
     REQUIRE(js.find("setImageSource('Hero") != std::string::npos);
-    REQUIRE(js.find("ui.js.assets") != std::string::npos);
-    REQUIRE(js.find("assets/tiny.png") != std::string::npos);
+    // The emitted JS references the asset output-relative (self-contained
+    // export), never through a quoted absolute sidecar path. The unquoted
+    // `// Source:` provenance comment may still name the sidecar.
+    REQUIRE(js.find("'assets/tiny.png'") != std::string::npos);
+    REQUIRE(js.find("'" + sidecar.generic_string()) == std::string::npos);
+    REQUIRE(fs::exists(output.parent_path() / "assets" / "tiny.png"));
+}
+
+TEST_CASE("pulp-import-design emits a self-contained artifact (relative asset paths)",
+          "[cli][import-design][tool][figma-plugin][assets]") {
+    // The decode scratch dir an import reads its envelope from is deleted when
+    // the run exits (the .fig lane) or may simply move later (any lane). The
+    // emitted ui.js must therefore reference copies of its assets placed NEXT
+    // TO the output, by output-relative path — never the decode-time absolute
+    // location, which silently loses every image on a later render.
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+
+    TempDir tmp("pulp-import-design-tool-selfcontained");
+    const auto envelope_dir = tmp.path / "decode-scratch";
+    const auto output = tmp.path / "export" / "ui.js";
+
+    const std::string envelope = R"JSON({
+        "format_version": "2026.05-figma-plugin-v1",
+        "parser_version": "0.1.0",
+        "compat_schema_version": "0.3",
+        "provenance": { "adapter": "figma-plugin", "version": "0.1.0" },
+        "asset_manifest": { "version": 1, "assets": [
+            { "asset_id": "hero", "local_path": "assets/tiny.png", "mime": "image/png" }
+        ] },
+        "diagnostics": [],
+        "root": {
+            "type": "frame",
+            "name": "TestRoot",
+            "figma_node_id": "1:1",
+            "style": { "width": 64, "height": 64 },
+            "children": [
+                {
+                    "type": "image",
+                    "name": "Hero",
+                    "figma_node_id": "1:2",
+                    "asset_ref": "hero",
+                    "style": { "width": 32, "height": 32 },
+                    "children": []
+                }
+            ]
+        }
+    })JSON";
+    write_text(envelope_dir / "scene.pulp.json", envelope);
+    {
+        const auto png = tiny_png_bytes();
+        fs::create_directories(envelope_dir / "assets");
+        std::ofstream f(envelope_dir / "assets" / "tiny.png", std::ios::binary);
+        REQUIRE(f.is_open());
+        f.write(reinterpret_cast<const char*>(png.data()),
+                static_cast<std::streamsize>(png.size()));
+    }
+
+    auto r = run_import_design({"--from", "figma-plugin",
+                                "--file", (envelope_dir / "scene.pulp.json").string(),
+                                "--output", output.string()});
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+
+    // The asset traveled with the output...
+    REQUIRE(fs::exists(output.parent_path() / "assets" / "tiny.png"));
+    // ...and the JS references it relatively — no trace of the decode dir.
+    const auto js = read_text(output);
+    REQUIRE(js.find("setImageSource('Hero") != std::string::npos);
+    REQUIRE(js.find("'assets/tiny.png'") != std::string::npos);
+    // No RUNTIME reference (quoted path argument) may point into the decode
+    // dir. The unquoted `// Source:` provenance comment is allowed — it
+    // documents where the import came from, it is never loaded.
+    REQUIRE(js.find("'" + envelope_dir.string()) == std::string::npos);
+    REQUIRE(js.find("'" + (envelope_dir / "assets").generic_string()) == std::string::npos);
+
+    // Simulate the decode scratch dir's deletion: the export must still be
+    // complete on disk with the source gone.
+    fs::remove_all(envelope_dir);
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::exists(output.parent_path() / "assets" / "tiny.png"));
 }
 
 TEST_CASE("pulp-import-design replaces only marked .pulp.zip asset sidecars on success",
@@ -2630,6 +2709,54 @@ TEST_CASE("pulp-import-design --from fig decodes a local .fig offline",
         REQUIRE(r.exit_code == 1);
         REQUIRE(r.stderr_output.find("only supported with --from fig") != std::string::npos);
     }
+}
+
+TEST_CASE("pulp-import-design cleans its .fig scratch dir and sweeps stale ones",
+          "[cli][import-design][tool][fig][assets]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp-import-design not built"); return; }
+    if (!node_available()) { SUCCEED("skipped: node not on PATH"); return; }
+    static FigDecodeEnv fig_env;
+    const std::string fixture = PULP_FIG_FIXTURE;
+    REQUIRE_FALSE(fixture.empty());
+
+    const auto tmp_root = fs::temp_directory_path();
+
+    // A stale sibling (mtime 48h back) models a run killed before its cleanup
+    // destructor could fire; a fresh sibling models a concurrent live import.
+    const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto stale = tmp_root / ("pulp-fig-staletest-" + std::to_string(tick));
+    const auto fresh = tmp_root / ("pulp-fig-freshtest-" + std::to_string(tick));
+    fs::create_directories(stale);
+    fs::create_directories(fresh);
+    std::error_code ec;
+    fs::last_write_time(stale,
+                        fs::file_time_type::clock::now() - std::chrono::hours(48), ec);
+    REQUIRE_FALSE(ec);
+
+    auto count_scratch = [&] {
+        int n = 0;
+        for (const auto& e : fs::directory_iterator(tmp_root)) {
+            if (e.path().filename().string().rfind("pulp-fig-synthetic-", 0) == 0) ++n;
+        }
+        return n;
+    };
+    const int before = count_scratch();
+
+    TempDir tmp("fig-scratch-clean");
+    auto r = run_import_design(
+        {"--from", "fig", "--file", fixture, "--frame", "Plugin UI",
+         "--output", (tmp.path / "ui.js").string()});
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+
+    // The run's own scratch dir is gone (no per-run leak). `<=` not `==`:
+    // the run may additionally have swept stale synthetic dirs left by
+    // long-past runs on this machine.
+    REQUIRE(count_scratch() <= before);
+    // ...the stale sibling was swept, and the fresh one was left alone.
+    REQUIRE_FALSE(fs::exists(stale));
+    REQUIRE(fs::exists(fresh));
+    fs::remove_all(fresh, ec);
 }
 
 // In-process coverage of the fig lane orchestration (fig_lane.cpp). The CLI
