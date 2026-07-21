@@ -22,6 +22,13 @@ pulp_add_test_suite(pulp-test-canvas-widget-sanitize LIBRARIES pulp::view)
 # state.
 pulp_add_test_suite(pulp-test-canvas-widget-shadow LIBRARIES pulp::view)
 
+# Curated named GPU post-effects (crt / grain / vignette / noise / brushed /
+# bloom) applied via CanvasWidget::set_shader_effect ->
+# SkiaCanvas::save_layer_with_shader_effect. Skia-gated headless raster proof
+# that each named effect measurably changes pixels and an unknown name is a
+# graceful no-op (the Forge safety contract).
+pulp_add_test_suite(pulp-test-canvas-shader-effects LIBRARIES pulp::view)
+
 # Canvas2D JS-shim coverage. Drives the full
 # web-compat-canvas.js → bridge → CanvasWidget path so a regression
 # that drops a save/restore/setTransform/createLinearGradient method

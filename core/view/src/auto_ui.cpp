@@ -2,6 +2,8 @@
 #include <pulp/view/ui_components.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <sstream>
 #include <iomanip>
 #include <vector>
@@ -14,6 +16,54 @@ constexpr float kTileWidth = 82.0f;
 constexpr float kTileHeight = 112.0f;
 constexpr float kTileGap = 14.0f;
 constexpr float kMaxGridWidth = 760.0f;
+
+// Shared chrome metrics — kept here so build()'s layout, the scroll body's
+// content-extent math, and preferred_size()'s fit math never drift apart.
+constexpr float kRootPadding = 14.0f;   ///< root column padding on every edge
+constexpr float kTitleHeight = 24.0f;   ///< "Parameters" title row
+constexpr float kRootGap = 12.0f;       ///< gap between title and body
+constexpr float kBodyContentInset = 10.0f;  ///< body viewport → grid width slack
+// Grouped-layout metrics (mirror update_content_extent()).
+constexpr float kGroupOuterPadding = 6.0f;
+constexpr float kGroupGap = 10.0f;
+constexpr float kGroupSidePadding = 8.0f;
+constexpr float kGroupBottomPadding = 8.0f;
+constexpr float kGroupHeaderExtra = 6.0f;  ///< gap below the header before the grid
+
+// Widest column count AutoUi will wrap to before it starts a new row, derived
+// from the same tile+gap math the grid uses so the fit stays under kMaxGridWidth.
+constexpr std::size_t kMaxColumns = static_cast<std::size_t>(
+    (kMaxGridWidth + kTileGap) / (kTileWidth + kTileGap));
+
+// Sensible floor so a one- or two-knob plugin doesn't open as a tiny sliver.
+constexpr std::uint32_t kMinPreferredWidth = 320;
+constexpr std::uint32_t kMinPreferredHeight = 240;
+
+/// Columns AutoUi wraps @p count tiles into: roughly square, clamped to a
+/// single row's worth and to kMaxColumns. 7 params → 3 columns (a 3x3-ish
+/// block), 4 → 2, 16 → 4.
+std::size_t columns_for(std::size_t count) {
+    if (count <= 1) return count;  // 0 → 0, 1 → 1
+    const auto square = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(count))));
+    return std::clamp<std::size_t>(square, 1, kMaxColumns);
+}
+
+/// Pixel size of a grid holding @p count tiles at @p columns wide.
+struct GridExtent {
+    float width = 0.0f;
+    float height = 0.0f;
+};
+GridExtent grid_extent(std::size_t count, std::size_t columns) {
+    if (count == 0 || columns == 0) return {};
+    const auto rows = (count + columns - 1) / columns;
+    return {
+        static_cast<float>(columns) * kTileWidth +
+            static_cast<float>(columns - 1) * kTileGap,
+        static_cast<float>(rows) * kTileHeight +
+            static_cast<float>(rows - 1) * kTileGap,
+    };
+}
 
 std::string format_parameter_value(const state::ParamInfo& param, float norm) {
     float val = param.range.denormalize(norm);
@@ -63,29 +113,24 @@ private:
         const auto viewport = local_bounds();
         const float viewport_width = std::max(1.0f, viewport.width);
         const float content_width = std::min(
-            kMaxGridWidth, std::max(kTileWidth, viewport_width - 10.0f));
+            kMaxGridWidth, std::max(kTileWidth, viewport_width - kBodyContentInset));
 
         if (grouped_content_) {
-            constexpr float outer_padding = 6.0f;
-            constexpr float group_gap = 10.0f;
-            constexpr float group_side_padding = 8.0f;
-            constexpr float group_bottom_padding = 8.0f;
-
-            float content_height = 2.0f * outer_padding;
+            float content_height = 2.0f * kGroupOuterPadding;
             for (std::size_t i = 0; i < groups_.size(); ++i) {
                 auto& group = groups_[i];
                 const float grid_width = std::max(
-                    kTileWidth, content_width - 2.0f * group_side_padding);
+                    kTileWidth, content_width - 2.0f * kGroupSidePadding);
                 const float grid_height = wrapped_height(group.parameter_count,
                                                          grid_width);
                 group.grid->flex().preferred_width = grid_width;
                 group.grid->flex().preferred_height = grid_height;
                 group.box->flex().preferred_width = content_width;
                 group.box->flex().preferred_height =
-                    GroupBox::header_height + 6.0f + grid_height +
-                    group_bottom_padding;
+                    GroupBox::header_height + kGroupHeaderExtra + grid_height +
+                    kGroupBottomPadding;
                 content_height += group.box->flex().preferred_height;
-                if (i + 1 < groups_.size()) content_height += group_gap;
+                if (i + 1 < groups_.size()) content_height += kGroupGap;
             }
 
             grouped_content_->flex().preferred_width = viewport_width;
@@ -96,6 +141,17 @@ private:
             const float grid_height = wrapped_height(parameter_count_, content_width);
             grid_->flex().preferred_width = content_width;
             grid_->flex().preferred_height = grid_height;
+            // The single wrapped grid IS the scroll content. Yoga lays it out at
+            // the viewport height (not its taller content height), so its
+            // wrapped rows fill a box shorter than they need. `align_content:
+            // center` then centers those rows, pushing the first row ABOVE the
+            // box top — and scroll_y is clamped to [0, content-viewport], so the
+            // top row becomes unreachable (the clip-and-can't-scroll-up bug).
+            // Top-align the rows once they overflow so the first row sits at the
+            // scroll origin; keep centering the small clusters that fit.
+            grid_->flex().align_content = grid_height > viewport.height
+                                              ? FlexAlign::start
+                                              : FlexAlign::center;
             set_content_size({viewport_width, std::max(viewport.height, grid_height)});
         }
     }
@@ -172,10 +228,12 @@ private:
 //   - 32+ params → wraps and scrolls vertically instead of truncating
 //   - named StateStore groups → titled, wrapping sections in store order
 //
-// Caveat: editor_size() is intentionally NOT auto-overridden by AutoUi.
-// That virtual is processor-owned and has no StateStore input. Layout
-// must look correct at the host's chosen size; an AutoUi-aware size
-// hint is a separate feature if Pulp wants smarter defaults later.
+// Size: preferred_size() computes a design size that fits the generated
+// grid, and the format adapters adopt it (via view_size_from_design()) when
+// the processor declares no explicit size — so the default editor OPENS large
+// enough to show every knob and then scales proportionally on resize. A
+// processor that overrides view_size()/editor_size() or sets DESIGN_WIDTH/
+// HEIGHT still wins; AutoUi only fills the otherwise-unset default.
 
 std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
     auto root = std::make_unique<AutoUiRoot>();
@@ -345,6 +403,68 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
 
     root->add_child(std::move(body));
     return root;
+}
+
+AutoUi::SizeHint AutoUi::preferred_size(state::StateStore& store) {
+    const auto params = store.all_params();
+    const auto groups = store.all_groups();
+
+    // Mirror build()'s group selection: count params per registered group, plus
+    // an "Other" bucket for params that belong to no registered group. Only
+    // groups that actually own params contribute a box (empty groups are
+    // dropped, exactly as add_group() skips an empty selection).
+    std::vector<std::size_t> group_counts;
+    if (!groups.empty()) {
+        for (const auto& group : groups) {
+            std::size_t count = 0;
+            for (const auto& param : params)
+                if (param.group_id == group.id) ++count;
+            if (count > 0) group_counts.push_back(count);
+        }
+        std::size_t other = 0;
+        for (const auto& param : params) {
+            const bool registered = std::any_of(
+                groups.begin(), groups.end(),
+                [&](const auto& g) { return param.group_id == g.id; });
+            if (!registered) ++other;
+        }
+        if (other > 0) group_counts.push_back(other);
+    }
+
+    float width = 0.0f;
+    float height = 0.0f;
+    if (!group_counts.empty()) {
+        // Grouped: stack the group boxes and take the widest grid, matching
+        // update_content_extent()'s grouped branch.
+        float widest_grid = 0.0f;
+        float content_height = 2.0f * kGroupOuterPadding;
+        for (std::size_t i = 0; i < group_counts.size(); ++i) {
+            const auto ext =
+                grid_extent(group_counts[i], columns_for(group_counts[i]));
+            widest_grid = std::max(widest_grid, ext.width);
+            content_height += GroupBox::header_height + kGroupHeaderExtra +
+                              ext.height + kGroupBottomPadding;
+            if (i + 1 < group_counts.size()) content_height += kGroupGap;
+        }
+        const float content_w = widest_grid + 2.0f * kGroupSidePadding;
+        width = content_w + kBodyContentInset + 2.0f * kRootPadding;
+        height = content_height + kTitleHeight + kRootGap + 2.0f * kRootPadding;
+    } else {
+        // Ungrouped: one wrapped grid. Sizing the body content width to exactly
+        // the grid width makes wrapped_height() settle on the intended column
+        // count, so the reported height matches the rendered row count.
+        const std::size_t n = params.size();
+        const auto ext = grid_extent(n, columns_for(n));
+        width = ext.width + kBodyContentInset + 2.0f * kRootPadding;
+        height = ext.height + kTitleHeight + kRootGap + 2.0f * kRootPadding;
+    }
+
+    return {
+        std::max(kMinPreferredWidth,
+                 static_cast<std::uint32_t>(std::ceil(width))),
+        std::max(kMinPreferredHeight,
+                 static_cast<std::uint32_t>(std::ceil(height))),
+    };
 }
 
 void AutoUi::sync(View& root, state::StateStore& store) {

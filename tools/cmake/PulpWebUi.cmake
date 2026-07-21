@@ -177,6 +177,9 @@ set(_PULP_WEBUI_CANVAS_SOURCES
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_box_shadow.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_opacity.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/skia_canvas_shaders.cpp
+    # Curated named GPU post-effects — provides make_named_shader_effect(),
+    # called by skia_canvas_opacity.cpp's save_layer_with_shader_effect.
+    ${_PULP_WEBUI_ROOT}/core/canvas/src/named_shader_effects.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/box_shadow_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/svg_dom_cache.cpp
     ${_PULP_WEBUI_ROOT}/core/canvas/src/lottie_animation.cpp

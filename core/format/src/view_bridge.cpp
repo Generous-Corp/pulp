@@ -105,6 +105,10 @@ bool ViewBridge::open(std::string* error) {
         view_ = std::move(instance.root);
         scripted_ui_ = std::move(instance.scripted_ui);
         uses_script_ui_ = instance.uses_script_ui;
+        // Neither a custom create_view() nor a scripted UI supplied the tree, so
+        // build_editor_ui() fell through to AutoUi. That's the one editor whose
+        // fitting size we can derive from the store (see below).
+        uses_auto_ui_ = !instance.uses_script_ui;
     }
     view_raw_ = view_.get();
 
@@ -119,14 +123,37 @@ bool ViewBridge::open(std::string* error) {
     view_raw_->set_host_actions(host_actions_);
 
     size_hints_ = safe_view_size(processor_);
-    // A NATIVE create_view() already computed its own layout bounds; make the
-    // host window match them exactly so the editor's own edge padding is never
-    // clipped (otherwise a plugin that doesn't declare DESIGN_WIDTH/HEIGHT gets
-    // the default window size, which can be narrower than the laid-out editor —
-    // the right column + padding then fall off the right/bottom edge). Scripted
-    // UIs keep the processor-declared view_size(). This is SDK-level: every
-    // native editor is sized correctly without per-plugin hardcoding.
-    if (view_ && !uses_script_ui_) {
+    // Has the processor declared its OWN size? Three ways it can:
+    //   - a DESIGN_WIDTH/HEIGHT import or a view_size() override → min/aspect set;
+    //   - an editor_size() override → preferred differs from the SDK default.
+    // Only when none of those hold (bare {400,300}, no bounds) is the size the
+    // untouched default that AutoUi should fill in. This deliberately leaves any
+    // explicit editor_size() choice — even one that would clip — to the plugin.
+    constexpr uint32_t kDefaultPreferredWidth = 400;   // Processor::editor_size()
+    constexpr uint32_t kDefaultPreferredHeight = 300;  // default, in processor.hpp
+    const bool size_unset = size_hints_.min_width == 0 &&
+                            size_hints_.min_height == 0 &&
+                            size_hints_.aspect_ratio <= 0.0 &&
+                            size_hints_.preferred_width == kDefaultPreferredWidth &&
+                            size_hints_.preferred_height == kDefaultPreferredHeight;
+    if (uses_auto_ui_ && size_unset) {
+        // The AutoUi default editor is the one tree whose fitting size we can
+        // compute from the store. Adopt it and derive resizable min/max +
+        // aspect via view_size_from_design(), so should_pin_design_viewport()
+        // engages the pin + aspect lock: the generated knob grid opens large
+        // enough to show every parameter and then scales uniformly (min-clamped
+        // so nothing truncates) instead of clipping its top row. A processor
+        // that declared any explicit size keeps it — this only fills the default.
+        const auto fit = view::AutoUi::preferred_size(store_);
+        size_hints_ = view_size_from_design(fit.width, fit.height);
+    } else if (view_ && !uses_script_ui_) {
+        // A NATIVE create_view() already computed its own layout bounds; make the
+        // host window match them exactly so the editor's own edge padding is never
+        // clipped (otherwise a plugin that doesn't declare DESIGN_WIDTH/HEIGHT gets
+        // the default window size, which can be narrower than the laid-out editor —
+        // the right column + padding then fall off the right/bottom edge). Scripted
+        // UIs keep the processor-declared view_size(). This is SDK-level: every
+        // native editor is sized correctly without per-plugin hardcoding.
         const auto b = view_->bounds();
         if (b.width > 0.0f && b.height > 0.0f) {
             size_hints_.preferred_width = static_cast<uint32_t>(b.width + 0.5f);
@@ -270,6 +297,7 @@ void ViewBridge::close() {
     host_param_surface_.reset();
     view_raw_ = nullptr;
     uses_script_ui_ = false;
+    uses_auto_ui_ = false;
     released_ = false;
     secondaries_.clear();
 }

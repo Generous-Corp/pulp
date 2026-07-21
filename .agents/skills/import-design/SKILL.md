@@ -1161,6 +1161,27 @@ diagnostics instead of throwing. Keep image assets routed through
 `IRAssetManifest::resolve(asset_id)`; never interpolate raw filesystem paths
 from IR attributes.
 
+**Self-contained JS export (relative asset paths).** The emitted `ui.js`
+never references decode-time locations: after `resolve_sprite_skins` stamps
+absolute paths, `localize_ir_assets` (`sprite_skins.cpp`) copies every
+referenced image/font into `assets/` NEXT TO the `--output` file and rewrites
+`attributes["asset_path"]` / `font.resolved_path` to output-relative
+`assets/<file>` before codegen. This is load-bearing for the `.fig` lane,
+whose scratch dir (`$TMPDIR/pulp-fig-*`) is deleted when the run exits — an
+export that kept absolute paths would silently lose all images on any later
+render. Renderers resolve the relative form via
+`WidgetBridge::set_script_base_dir(<script dir>)` (set by `--validate`,
+`pulp-screenshot`, and `pulp-design-tool`; unset base = historical
+CWD resolution). It resolves `setImageSource` / `setKnobSpriteStrip` /
+`registerFont` / `loadFont` only, and unlike `set_asset_roots()` it never
+restricts `loadAsset`. Skipped for `--dry-run` (must not write files) and
+baked emits (cpp codegen takes no asset paths). `make_scratch_dir` also
+sweeps stale (>24h) `pulp-<tag>-*` siblings — runs killed mid-decode leak
+their scratch dirs, and hundreds had accumulated before the sweep existed.
+When testing emitted JS, note the unquoted `// Source:` header comment still
+names the decode-time input; assert on QUOTED paths (`'assets/...'`) when
+pinning "no absolute references".
+
 **Windows path-separator gotcha (asset/font paths baked into generated JS):**
 when the CLI's asset pass (`resolve_sprite_skins` in `sprite_skins.cpp`) resolves an `asset_ref`/font `asset_id` to a path
 that is stamped into `attributes["asset_path"]` / `font.resolved_path` (and from

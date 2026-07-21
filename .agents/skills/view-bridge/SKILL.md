@@ -1151,6 +1151,41 @@ window-sized layout would briefly flash before the next paint reset.
 
 See `test_plugin_view_host_design_viewport.mm` for the wiring proof.
 
+### AutoUi default editors now ride this path automatically (2026-07)
+
+The auto-generated editor (`AutoUi`, for any plugin with no custom
+`create_view()` and no scripted UI) used to open at the bare
+`editor_size()` default of 400x300 — too small for even a 7-knob synth,
+so the top row clipped and the ScrollView couldn't reach it. Now
+`ViewBridge::open()` derives a fitting size from the store:
+
+- `pulp::view::AutoUi::preferred_size(store)` returns a design size that
+  fits the generated knob grid (tiles wrapped to a roughly-square column
+  count + the "Parameters" title + padding; grouped stores stack their
+  boxes). It shares the tile/padding constants with `AutoUi::build()`.
+- The bridge adopts it **only when the processor left the size unset** —
+  `uses_auto_ui_` is true AND `size_hints_` is the untouched default
+  (`min==0 && aspect==0 && preferred=={400,300}`). It then runs the fit
+  through `format::view_size_from_design(w, h)`, so min/max/aspect get
+  derived and `should_pin_design_viewport()` engages the pin + aspect
+  lock. The whole grid scales uniformly (min-clamped, nothing truncates).
+- Any explicit size still wins: a `view_size()` override, a
+  `DESIGN_WIDTH/HEIGHT` import, or even an `editor_size()` override (which
+  surfaces as a non-default preferred) all bypass the fit.
+
+Two seams to know: `uses_auto_ui_` is set in the `build_editor_ui`
+fallback branch (custom `create_view()` keeps it false, so a native
+editor still reports its own laid-out bounds instead of a store-derived
+size); and the fit is applied in `open()`, not the constructor, because
+"is this AutoUi?" isn't known until `create_view()` returns null. The
+`RemoteViewSession` path reads `processor.view_size()` directly and does
+NOT get the fit — out-of-process editors are effectively always custom.
+
+Separately, the AutoUi scroll body top-aligns its grid's wrapped rows
+once they overflow the viewport (`align_content: start`) instead of
+centering them into negative, unreachable scroll offsets — that was the
+"can't scroll to the top row" half of the same bug.
+
 ## GpuSurface Plumbing Into WidgetBridge
 
 Adapter editor-attach paths that wire a scripted UI (`ScriptedUiSession`)

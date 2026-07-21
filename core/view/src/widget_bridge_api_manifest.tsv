@@ -341,6 +341,7 @@ canvasSetMiterLimit	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.c
 canvasSetImageSmoothing	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasSetDirection	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasSetFilter	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
+canvasSetShaderEffect	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasArc	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasSetTextAlign	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp
 canvasSetTextBaseline	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

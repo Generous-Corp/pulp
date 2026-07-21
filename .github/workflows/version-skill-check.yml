@@ -29,7 +29,13 @@ on:
 
 concurrency:
   group: version-skill-check-${{ github.ref }}
-  cancel-in-progress: true
+  # cancel-in-progress FALSE for a REQUIRED gate: this workflow posts the
+  # required `Enforce version & skill sync` check. Under a churning main a
+  # cancelled in-flight run leaves that required check stuck at `cancelled` —
+  # never a stable `success` — silently blocking merge on PRs whose code is fine
+  # (observed 2026-07-21). Letting superseded runs complete is cheap (fast python
+  # on github-hosted) and guarantees the gate reaches a terminal state.
+  cancel-in-progress: false
 
 jobs:
   version-skill-check:

@@ -112,6 +112,38 @@ public:
     }
     const std::vector<std::filesystem::path>& asset_roots() const noexcept { return asset_roots_; }
 
+    /// Base directory for resolving RELATIVE filesystem paths handed to the
+    /// path-taking bridge APIs (setImageSource, setKnobSpriteStrip,
+    /// registerFont, loadFont). Import codegen emits `assets/<file>` relative
+    /// to the generated script so the artifact is self-contained; a host that
+    /// knows where the script lives sets this so those paths resolve
+    /// regardless of the process working directory. Unset (the default)
+    /// leaves relative paths untouched — the historical CWD resolution.
+    /// Unlike set_asset_roots() this never RESTRICTS loading; it is purely a
+    /// resolution base.
+    void set_script_base_dir(std::filesystem::path dir) {
+        if (dir.empty()) { script_base_dir_.clear(); return; }
+        std::error_code ec;
+        auto abs = std::filesystem::absolute(dir, ec).lexically_normal();
+        script_base_dir_ = ec ? dir.lexically_normal() : abs;
+    }
+    const std::filesystem::path& script_base_dir() const noexcept { return script_base_dir_; }
+
+    /// Resolve `path` against script_base_dir(): relative fs paths (no
+    /// `scheme://` prefix) that exist under the base resolve to the joined
+    /// absolute path; everything else — absolute paths, URIs, an unset base,
+    /// or a join that names no existing file — passes through unchanged.
+    std::string resolve_script_relative(const std::string& path) const {
+        if (path.empty() || script_base_dir_.empty()) return path;
+        if (path.find("://") != std::string::npos) return path;
+        std::filesystem::path p(path);
+        if (p.is_absolute()) return path;
+        auto joined = (script_base_dir_ / p).lexically_normal();
+        std::error_code ec;
+        if (!std::filesystem::exists(joined, ec) || ec) return path;
+        return joined.generic_string();
+    }
+
     /// load_script overload that retains a script identifier. `script_id` is
     /// recorded as `active_script_id_` and threaded into every rAF callback
     /// registered while the script is active so `motion.publishValue(...)` calls
@@ -274,6 +306,7 @@ private:
     render::GpuSurface* gpu_surface_ = nullptr;
     std::unique_ptr<NativeGpuBridgeState> native_gpu_bridge_state_;
     std::vector<std::filesystem::path> asset_roots_;
+    std::filesystem::path script_base_dir_;
 
     // Per-id cache entry: the resolved View plus the tree structure generation
     // at which that View was last CONFIRMED to live under `root_`. A fresh entry

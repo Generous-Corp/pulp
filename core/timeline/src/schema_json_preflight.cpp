@@ -1,5 +1,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
+#include "track_schema_policy.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <limits>
@@ -587,11 +589,13 @@ class StructuralScanner {
         Span data;
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape)) return false;
-        if (type != "pulp.timeline.track") {
+        if (type != detail::track_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin, 1, 2)) return false;
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::track_schema_policy.oldest_readable_version,
+                                      detail::track_schema_policy.current_version)) return false;
         const auto data_path = path + "/data";
         if (!require_member(data, "id", StringShape, data_path) ||
             !require_member(data, "name", StringShape, data_path)) return false;
@@ -601,8 +605,8 @@ class StructuralScanner {
         bool has_devices = false;
         if (!member(data, "clips", clips, has_clips) ||
             !member(data, "device_chain", devices, has_devices)) return false;
-        if (!has_clips || (version == 1 && has_devices) ||
-            (version == 2 && !has_devices)) {
+        const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
+        if (!has_clips || requires_devices != has_devices) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + (has_clips ? "/data/device_chain" : "/data/clips"));
             return false;

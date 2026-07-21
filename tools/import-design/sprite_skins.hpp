@@ -29,4 +29,17 @@ void resolve_sprite_skins(pulp::view::DesignIR& ir,
                           bool skin_faders,
                           bool skin_meters);
 
+/// Make the generated artifact self-contained: copy every filesystem asset
+/// the IR references (image/sprite `asset_path` attributes and bundled-font
+/// `resolved_path`) into `<output dir>/assets/` and rewrite the references to
+/// output-relative `assets/<file>` paths, in-place on `ir`.
+///
+/// The absolute paths stamped by resolve_sprite_skins point into the import's
+/// decode scratch directory, which is deleted when the CLI exits — an export
+/// that kept them would silently lose its images on any later render.
+/// Renderers resolve the relative form against the script's own directory
+/// (WidgetBridge::set_script_base_dir). Assets that cannot be copied keep
+/// their absolute path (with a warning) rather than failing the import.
+void localize_ir_assets(pulp::view::DesignIR& ir, const std::string& output_file);
+
 }  // namespace pulp::import_design
