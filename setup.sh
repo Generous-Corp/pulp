@@ -196,23 +196,62 @@ find_local_git_seed() {
     return 1
 }
 
+# Whether a real (non-symlink) dependency checkout sits on the same commit as
+# the shared cache for the CURRENT pin. Answers "yes" whenever it cannot tell —
+# a tree with no .git (an unpacked release), or a cache not provisioned yet — so
+# an honest unknown never fails the setup.
+git_checkout_matches_cache() {
+    local local_dir="$1"
+    local shared_dir="$2"
+
+    git -C "$local_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    [ -d "$shared_dir/.git" ] || return 0
+
+    local have want
+    have="$(git -C "$local_dir" rev-parse HEAD 2>/dev/null || true)"
+    want="$(git -C "$shared_dir" rev-parse HEAD 2>/dev/null || true)"
+    [ -n "$have" ] && [ -n "$want" ] || return 0
+    [ "$have" = "$want" ]
+}
+
 reuse_shared_git_source() {
     local label="$1"
     local shared_dir="$2"
     local local_dir="$3"
     local marker_path="$4"
 
-    if [ -e "$local_dir" ] && [ ! -L "$local_dir" ] && [ -e "$local_dir/$marker_path" ]; then
-        info "$label present"
-        return 0
-    fi
-
+    # A symlink is only current if it points at the shared cache for the ref
+    # pinned RIGHT NOW. The cache directory name embeds the ref, so a re-pin
+    # leaves the old link intact and every later run reports "linked from shared
+    # cache" while the tree stays a version behind — which is how a GPL-era VST3
+    # checkout outlived the move to the MIT v3.8.0 pin, with the build, the
+    # tests, and the plug-ins all silently using it. Repointing a symlink
+    # destroys nothing, so repair it rather than report it.
     if [ -L "$local_dir" ]; then
-        if [ -e "$local_dir/$marker_path" ]; then
+        local link_target
+        link_target="$(readlink "$local_dir" 2>/dev/null || true)"
+        if [ "$link_target" = "$shared_dir" ] && [ -e "$local_dir/$marker_path" ]; then
             info "$label linked from shared cache"
             return 0
         fi
+        if [ -n "$link_target" ] && [ "$link_target" != "$shared_dir" ]; then
+            info "$label link is stale ($link_target); re-pointing at $shared_dir"
+        fi
         rm "$local_dir"
+    elif [ -e "$local_dir" ]; then
+        # A real directory is developer-managed (a hand clone, an unpacked
+        # release), so never delete it — but say so loudly, because a stale one
+        # builds everything against the wrong version in silence.
+        if [ ! -e "$local_dir/$marker_path" ]; then
+            fail "$label at $local_dir is missing $marker_path — remove the directory and re-run ./setup.sh"
+            return 1
+        fi
+        if ! git_checkout_matches_cache "$local_dir" "$shared_dir"; then
+            fail "$label at $local_dir is not at the pinned ref (pin: $shared_dir) — remove the directory and re-run ./setup.sh"
+            return 1
+        fi
+        info "$label present"
+        return 0
     fi
 
     if [ ! -d "$shared_dir/.git" ]; then
