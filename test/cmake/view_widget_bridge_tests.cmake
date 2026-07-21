@@ -193,6 +193,12 @@ pulp_add_test_suite(pulp-test-widget-bridge-runtime-import LIBRARIES pulp::view)
 # (bindWidgetToParam / bindMeter / unbindWidget + gesture precedence).
 pulp_add_test_suite(pulp-test-widget-bridge-param-binding LIBRARIES pulp::view pulp::state)
 
+# Widget bridge — live audio metering + per-frame tick for scripted CUSTOM draws
+# (the Forge live-visuals enabler). getMeterLevel / getMeterPeak /
+# getMeterChannelCount read an AudioBridge's published MeterData; onFrame /
+# cancelFrame drive a persistent per-vsync repaint tick.
+pulp_add_test_suite(pulp-test-widget-bridge-audio-meter LIBRARIES pulp::view)
+
 # Widget bridge — Canvas2D surface. Covers canvasSetTransform /
 # canvasClip / canvasGlobalCompositeOperation, canvasMeasureText /
 # canvasSetLineDash / canvasDrawImage, canvasGetImageData /

@@ -8,6 +8,8 @@
 #endif
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/format/reload/scripted_ui_swap_unit.hpp>
+#include <pulp/view/audio_bridge.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/widgets.hpp>
 #include <algorithm>
@@ -267,6 +269,88 @@ TEST_CASE("ScriptedUiSession applies an explicit kit token theme path", "[view][
     REQUIRE(accent->r8() == 0x4b);
     REQUIRE(accent->g8() == 0x8a);
     REQUIRE(accent->b8() == 0xef);
+
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("ScriptedUiSession bridges live audio meters into an onFrame canvas draw",
+          "[view][scripted-ui][audio-meter]") {
+    // The Forge integration surface: a ui.js registers onFrame + getMeterLevel,
+    // the host attaches the plugin's AudioBridge, and each poll() tick reads the
+    // live meter and repaints. Also proves the meter source reattaches across an
+    // in-place reload (the hot-reload rebuild path).
+    const auto temp_dir = make_temp_dir("pulp-scripted-meter");
+    const auto script_path = temp_dir / "main.js";
+    write_text(script_path, R"JS(
+        createCanvas('vu', '');
+        onFrame(function () {
+            canvasClear('vu');
+            canvasFillRect('vu', 0, 0, 10, getMeterLevel(0) * 100);
+        });
+    )JS");
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+    root.set_theme(Theme::dark());
+
+    StateStore store;
+    ScriptedUiSession session(root, store, {
+        .script_path = script_path,
+        .enable_hot_reload = false,
+        .enable_theme_reload = false,
+    });
+
+    AudioBridge audio;
+    MeterData data;
+    data.num_channels = 1;
+    data.rms[0] = 0.6f;
+    data.peak[0] = 0.9f;
+    audio.push_meter(data);
+
+    std::string error;
+    REQUIRE(session.load(&error));
+    REQUIRE(error.empty());
+
+    // Attach after load (mirrors the format-adapter lifecycle: the session
+    // opens before the audio source is wired in).
+    REQUIRE(session.audio_bridge() == nullptr);
+    session.attach_audio_bridge(&audio);
+    REQUIRE(session.audio_bridge() == &audio);
+
+    // Drive the host idle pump: onFrame reads the live meter and repaints.
+    for (int i = 0; i < 3; ++i) session.poll(&error);
+
+    auto* canvas = dynamic_cast<CanvasWidget*>(session.bridge()->widget("vu"));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() >= 1);
+    // The bar height == getMeterLevel(0) * 100 == 0.6 * 100.
+    REQUIRE_THAT(canvas->commands().back().h, WithinAbs(60.0f, 0.5f));
+
+    // A new publication flows through on the next pump.
+    MeterData quieter;
+    quieter.num_channels = 1;
+    quieter.rms[0] = 0.2f;
+    audio.push_meter(quieter);
+    session.poll(&error);
+    REQUIRE_THAT(canvas->commands().back().h, WithinAbs(20.0f, 0.5f));
+
+    // In-place reload rebuilds the bridge; the meter source must reattach so the
+    // freshly-built UI keeps reading live audio without a re-attach call.
+    REQUIRE(session.reload(&error));
+    REQUIRE(session.audio_bridge() == &audio);
+    MeterData louder;
+    louder.num_channels = 1;
+    louder.rms[0] = 0.4f;
+    audio.push_meter(louder);
+    session.poll(&error);
+    auto* canvas_after_reload = dynamic_cast<CanvasWidget*>(session.bridge()->widget("vu"));
+    REQUIRE(canvas_after_reload != nullptr);
+    REQUIRE(canvas_after_reload->command_count() >= 1);
+    REQUIRE_THAT(canvas_after_reload->commands().back().h, WithinAbs(40.0f, 0.5f));
+
+    // Detach before the source is destroyed (teardown contract).
+    session.attach_audio_bridge(nullptr);
+    REQUIRE(session.audio_bridge() == nullptr);
 
     fs::remove_all(temp_dir);
 }

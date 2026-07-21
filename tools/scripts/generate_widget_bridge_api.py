@@ -41,6 +41,7 @@ MOCK_ONLY_FUNCTIONS = [
 CATEGORY_LABELS = {
     "accessibility": "Accessibility",
     "animation": "Animation",
+    "audio_meter": "Audio Metering",
     "canvas2d": "Canvas 2D",
     "css_style": "CSS Style",
     "dom": "DOM Compatibility",
@@ -86,6 +87,19 @@ class ManifestRow:
 
 JS_PREAMBLE_ROWS = [
     ManifestRow("on", "events", "function", "core/view/src/widget_bridge.cpp", "event:names"),
+    # Public globals installed by the audio-meter registrar's JS preamble
+    # (audio_meter_api.cpp). The natives they wrap (__getMeterLevel__ etc.) live
+    # in the manifest; these are the user-facing names a ui.js calls.
+    ManifestRow("getMeterLevel", "audio_meter", "function",
+                "core/view/src/widget_bridge/audio_meter_api.cpp"),
+    ManifestRow("getMeterPeak", "audio_meter", "function",
+                "core/view/src/widget_bridge/audio_meter_api.cpp"),
+    ManifestRow("getMeterChannelCount", "audio_meter", "function",
+                "core/view/src/widget_bridge/audio_meter_api.cpp"),
+    ManifestRow("onFrame", "audio_meter", "function",
+                "core/view/src/widget_bridge/audio_meter_api.cpp"),
+    ManifestRow("cancelFrame", "audio_meter", "function",
+                "core/view/src/widget_bridge/audio_meter_api.cpp"),
 ]
 
 
@@ -155,6 +169,16 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "__cancelTimer__": "(timerId: number) => void",
     "__flushTimers__": "() => void",
     "__performanceNow__": "() => number",
+    "__getMeterLevel__": "(channel: number) => number",
+    "__getMeterPeak__": "(channel: number) => number",
+    "__getMeterChannelCount__": "() => number",
+    "__registerOnFrame__": "(callbackId: number) => number",
+    "__unregisterOnFrame__": "(callbackId: number) => void",
+    "getMeterLevel": "(channel: number) => number",
+    "getMeterPeak": "(channel: number) => number",
+    "getMeterChannelCount": "() => number",
+    "onFrame": "(callback: () => void) => number",
+    "cancelFrame": "(callbackId: number) => void",
     "animate": "(id: string, property: string, targetValue: number | string, durationMs: number, easingName?: string) => void",
     "applyTokenDiff": "(json: string) => void",
     "beginPath": "() => void",

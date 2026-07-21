@@ -97,6 +97,18 @@ public:
     void attach_gpu_surface(render::GpuSurface* gpu_surface);
     render::GpuSurface* gpu_surface() const noexcept { return gpu_surface_; }
 
+    // Attach the AudioBridge the plugin's audio thread publishes MeterData to,
+    // exposing live peak/rms to the scripted UI as getMeterLevel(ch) /
+    // getMeterPeak(ch) / getMeterChannelCount() so a ui.js canvas draw can paint
+    // reactive visuals (VU needles, scopes, glow) from the real signal. Pair with
+    // the JS onFrame(fn) tick. Like attach_gpu_surface, the pointer is stashed so
+    // a hot-reload rebuild re-attaches the same source to the fresh bridge; pass
+    // nullptr to detach before the source is destroyed. The AudioBridge (owned by
+    // the Processor) MUST outlive this session. See widget_bridge.hpp's
+    // set_meter_source for the thread model.
+    void attach_audio_bridge(AudioBridge* audio_bridge);
+    AudioBridge* audio_bridge() const noexcept { return audio_bridge_; }
+
     const std::filesystem::path& script_path() const { return script_path_; }
     const std::filesystem::path& theme_path() const { return theme_path_; }
     bool hot_reload_enabled() const { return hot_reload_enabled_; }
@@ -119,6 +131,7 @@ private:
     std::unique_ptr<HotReloader> reloader_;
     std::function<void()> repaint_callback_;
     render::GpuSurface* gpu_surface_ = nullptr;
+    AudioBridge* audio_bridge_ = nullptr;  // live meter source, stashed for rebuild reattach
 
     Theme base_theme_;
     ReloadMetrics last_reload_metrics_{};   // JS-axis reload timings (item 1.2)

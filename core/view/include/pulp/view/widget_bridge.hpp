@@ -42,6 +42,7 @@ struct PerfCounters;
 namespace pulp::view {
 
 class QueryService;
+class AudioBridge;
 
 // Widget value snapshot for hot reload preservation
 struct WidgetReloadSnapshot {
@@ -233,6 +234,35 @@ public:
     // Number of live param/meter bindings (diagnostics + tests).
     std::size_t param_binding_count() const noexcept { return param_bindings_.size(); }
 
+    // ── Live audio metering for scripted CUSTOM draws ─────────────────────
+    //
+    // Attach the AudioBridge the plugin's audio thread publishes MeterData to
+    // (peak/rms per channel, linear). Exposes it to the scripted UI as the JS
+    // globals `getMeterLevel(ch)` / `getMeterPeak(ch)` / `getMeterChannelCount()`
+    // so a Forge-generated `ui.js` canvas draw can paint reactive visuals — VU
+    // needles, scopes, glow — from the real signal. Pair with `onFrame(fn)` (see
+    // the audio-meter registrar) for the per-vsync repaint tick.
+    //
+    // This is the CUSTOM-draw counterpart to the declarative bindMeter path
+    // above: bindMeter drives a native Meter widget off a normalized store
+    // param with zero JS crossing; this hands the raw peak/rms to JS for
+    // bespoke canvas rendering.
+    //
+    // Thread model: the audio thread ONLY writes the AudioBridge's lock-free
+    // TripleBuffer (push_meter); the JS getters run on the UI thread and read
+    // the latest coherent snapshot via pop_latest_meter. The bridge never
+    // touches the audio thread, so there is no cross-thread race on WidgetBridge
+    // state. `getMeter*` are a no-op returning 0 until a source is attached.
+    //
+    // Lifetime: raw, non-owning pointer — the AudioBridge (typically owned by
+    // the Processor, which outlives the editor) MUST outlive this WidgetBridge.
+    // Pass `nullptr` to detach during host teardown. Idempotent.
+    void set_meter_source(AudioBridge* source) noexcept { meter_source_ = source; }
+    AudioBridge* meter_source() const noexcept { return meter_source_; }
+
+    // Number of live onFrame() callbacks (diagnostics + tests).
+    std::size_t frame_callback_count() const noexcept { return persistent_frame_ids_.size(); }
+
     // ── Runtime design import ─────────────────────────────────────
     //
     // Registers the `__pulpRuntimeImport__(html, source)` and
@@ -407,6 +437,16 @@ private:
     std::shared_ptr<QueryService> query_service_;
 
     std::vector<int> pending_frame_ids_;
+    // PERSISTENT per-frame callbacks registered from JS via onFrame(fn), keyed
+    // by the JS-side callback id. Unlike pending_frame_ids_ (one-shot rAF, drained
+    // each flush) these survive across frames until cancelFrame(id). Fired every
+    // service_frame_callbacks() tick, which then requests a repaint to keep the
+    // loop alive — so a meter/scope canvas animates at the host vsync rate. Empty
+    // by default → zero overhead when no script registered a callback.
+    std::vector<int> persistent_frame_ids_;
+    // Non-owning source of live audio meter data (see set_meter_source()). Read
+    // on the UI thread by the getMeter* JS getters via AudioBridge::pop_latest_meter.
+    AudioBridge* meter_source_ = nullptr;
     bool frame_preamble_loaded_ = false;
     // Identity of the most-recently loaded script (via
     // `load_script(code, script_id)` or `set_active_script_id`). When

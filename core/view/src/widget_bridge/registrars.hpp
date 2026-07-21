@@ -96,6 +96,7 @@ struct BridgeRegistrars {
     static void register_widget_border_radius_api(WidgetBridge& self);
     static void register_widget_border_side_api(WidgetBridge& self);
     static void register_runtime_api(WidgetBridge& self);
+    static void register_audio_meter_api(WidgetBridge& self);
     static void register_animation_api(WidgetBridge& self);
     static void register_animation_style_api(WidgetBridge& self);
     static void register_canvas2d_api(WidgetBridge& self);

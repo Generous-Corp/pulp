@@ -809,6 +809,25 @@ void WidgetBridge::service_frame_callbacks() {
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
     }
+    // Persistent per-frame callbacks registered via onFrame(fn) — the live-meter
+    // / scope tick. Snapshot the ids into a batch string BEFORE evaluating so a
+    // callback that calls onFrame/cancelFrame (mutating persistent_frame_ids_)
+    // during the flush can't invalidate this iteration; the mutation takes effect
+    // next frame. request_repaint keeps the loop alive at the host vsync rate;
+    // when the last callback is cancelled the vector empties and the loop stops,
+    // so an idle UI incurs zero cost.
+    if (!persistent_frame_ids_.empty()) {
+        std::string batch;
+        batch.reserve(persistent_frame_ids_.size() * 24);
+        for (int id : persistent_frame_ids_) {
+            batch += "__invokeOnFrame__(";
+            batch += std::to_string(id);
+            batch += ");";
+        }
+        engine_.evaluate(batch + "void 0;");
+        engine_.pump_message_loop();
+        request_repaint();
+    }
 }
 
 #ifndef PULP_BRIDGE_EXEC_ENABLED
@@ -923,6 +942,9 @@ void WidgetBridge::register_api() {
         // Native file dialogs read/choose arbitrary paths → gated by Filesystem.
         {ReloadCapability::Filesystem,     &BridgeRegistrars::register_platform_services_dialog_api},
         {std::nullopt,                     &BridgeRegistrars::register_runtime_api},
+        // Live audio metering + per-frame tick for scripted custom draws.
+        // Read-only observation of the plugin's own signal — not effectful.
+        {std::nullopt,                     &BridgeRegistrars::register_audio_meter_api},
         // Off-thread index/search — non-effectful, so no capability.
         {std::nullopt,                     &BridgeRegistrars::register_query_service_api},
         {ReloadCapability::Clipboard,      &BridgeRegistrars::register_platform_services_clipboard_api},
