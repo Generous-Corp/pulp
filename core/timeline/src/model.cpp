@@ -412,7 +412,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         const auto invalid = ItemId{};
         const auto valid_shape = [&] {
-            if (location.parent_id != immediate_parent_id(location.kind, project.id(),
+            // Parent is canonical and, for every kind but AutomationPoint,
+            // recomputable from the item's own coordinates. An AutomationPoint's
+            // parent is its lane, which is not among (sequence, track, clip); it is
+            // carried only in parent_id and is validated by ownership below, never
+            // re-derived from coordinates here (that would be circular).
+            if (location.kind != ItemKind::AutomationPoint &&
+                location.parent_id != immediate_parent_id(location.kind, project.id(),
                                                           location.sequence_id, location.track_id,
                                                           location.clip_id))
                 return false;
@@ -443,10 +449,17 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        entry.item != location.clip_id;
             case ItemKind::DevicePlacement:
+            case ItemKind::AutomationLane:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        location.clip_id == invalid;
+            case ItemKind::AutomationPoint:
+                // parent_id is the owning lane (validated by ownership below).
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.parent_id.valid() && location.clip_id == invalid &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       entry.item != location.parent_id;
             }
             return false;
         }();
@@ -480,8 +493,19 @@ detail::ProjectStateAccess::restore_identities(Project project,
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
             }
-            case ItemKind::DevicePlacement: {
+            case ItemKind::DevicePlacement:
+            case ItemKind::AutomationLane: {
                 const auto* track = find_entry(location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
+            }
+            case ItemKind::AutomationPoint: {
+                const auto* lane = find_entry(location.parent_id);
+                if (!lane || lane->location.kind != ItemKind::AutomationLane ||
+                    lane->location.sequence_id != location.sequence_id ||
+                    lane->location.track_id != location.track_id)
+                    return false;
+                const auto* track = find_entry(lane->location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&
                        track->location.parent_id == location.sequence_id;
             }
@@ -557,6 +581,14 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                 all_ids.push_back(device.id);
                 maximum_id = std::max(maximum_id, device.id.value);
             }
+            for (const auto& lane : track.automation_lanes()) {
+                all_ids.push_back(lane.id());
+                maximum_id = std::max(maximum_id, lane.id().value);
+                for (const auto& point : lane.curve().points()) {
+                    all_ids.push_back(point.id);
+                    maximum_id = std::max(maximum_id, point.id.value);
+                }
+            }
             for (const auto& clip : track.clips()) {
                 all_ids.push_back(clip.id());
                 maximum_id = std::max(maximum_id, clip.id().value);
@@ -607,8 +639,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     detail::IdentityDirectory identities;
     auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
     const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
-                              ItemId clip = {}) {
-        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip),
+                              ItemId clip = {}, ItemId lane = {}) {
+        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip, lane),
                             sequence, track, clip, true};
     };
     add_identity(input.id, location(ItemKind::Project));
@@ -621,6 +653,13 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
             for (const auto& device : track.device_chain())
                 add_identity(device.id,
                              location(ItemKind::DevicePlacement, sequence.id(), track.id()));
+            for (const auto& lane : track.automation_lanes()) {
+                add_identity(lane.id(),
+                             location(ItemKind::AutomationLane, sequence.id(), track.id()));
+                for (const auto& point : lane.curve().points())
+                    add_identity(point.id, location(ItemKind::AutomationPoint, sequence.id(),
+                                                    track.id(), {}, lane.id()));
+            }
             for (const auto& clip : track.clips()) {
                 add_identity(clip.id(),
                              location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));

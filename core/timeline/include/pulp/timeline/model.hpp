@@ -6,6 +6,7 @@
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
+#include <pulp/timeline/automation_lane.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
 
@@ -53,6 +54,8 @@ enum class ModelErrorCode : std::uint8_t {
     OpaqueContentLimitExceeded,
     OpaqueContentCannotRemap,
     InvalidClipPlaybackProperties,
+    MissingAutomationTarget,
+    DuplicateAutomationTarget,
 };
 
 struct ModelError {
@@ -282,6 +285,7 @@ struct TrackInput {
     std::string name;
     std::vector<Clip> clips;
     std::vector<DevicePlacement> device_chain;
+    std::vector<AutomationLane> automation_lanes;
 };
 
 class Track {
@@ -337,6 +341,8 @@ class Track {
     // Replaces one clip by identity with O(log n) path-copy updates. The old
     // Track remains valid and unchanged; untouched index subtrees are shared.
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
+    runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
+    runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -347,6 +353,9 @@ class Track {
     // Preserves authored processing order. Returned storage is snapshot-owned.
     std::span<const DevicePlacement> device_chain() const noexcept;
     const DevicePlacement* find_device_placement(ItemId id) const noexcept;
+    // Automation lane order is canonical by identity and carries no processing semantics.
+    std::span<const AutomationLane> automation_lanes() const noexcept;
+    const AutomationLane* find_automation_lane(ItemId id) const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -400,10 +409,18 @@ enum class ItemKind : std::uint8_t {
     Clip,
     Note,
     DevicePlacement,
+    AutomationLane,
+    AutomationPoint,
 };
 
+// Canonical immediate parent for a kind. Every parent that an item's own
+// coordinates determine is derived here, so identity construction has one
+// parent-computation path for all kinds. An AutomationPoint is the exception
+// whose parent (its lane) is not among (sequence, track, clip): the lane is
+// supplied by construction context via lane_id and is otherwise recoverable
+// only from the stored parent_id itself — never re-derive it from coordinates.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
-                                     ItemId track_id, ItemId clip_id) noexcept {
+                                     ItemId track_id, ItemId clip_id, ItemId lane_id = {}) noexcept {
     switch (kind) {
     case ItemKind::Project:
         return {};
@@ -414,9 +431,12 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
         return sequence_id;
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
+    case ItemKind::AutomationLane:
         return track_id;
     case ItemKind::Note:
         return clip_id;
+    case ItemKind::AutomationPoint:
+        return lane_id;
     }
     return {};
 }

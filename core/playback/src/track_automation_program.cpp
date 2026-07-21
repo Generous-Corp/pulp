@@ -15,8 +15,8 @@ fail(TrackAutomationProgramErrorCode code, timeline::ItemId track, timeline::Ite
 bool target_less(const AutomationProgram* lhs, const AutomationProgram* rhs) noexcept {
     const auto lhs_target = lhs->target();
     const auto rhs_target = rhs->target();
-    if (lhs_target.device_placement_id() != rhs_target.device_placement_id())
-        return lhs_target.device_placement_id() < rhs_target.device_placement_id();
+    if (lhs_target.device_placement_id != rhs_target.device_placement_id)
+        return lhs_target.device_placement_id < rhs_target.device_placement_id;
     if (lhs_target.param_id != rhs_target.param_id)
         return lhs_target.param_id < rhs_target.param_id;
     return lhs->lane_id() < rhs->lane_id();

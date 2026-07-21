@@ -16,15 +16,11 @@ namespace pulp::timeline {
 /// not a registration index, graph port, or Timeline ItemId. Timeline preserves
 /// it verbatim, while range and metadata validation belong to the delivery layer.
 struct DeviceParameterTarget {
-    ItemId device_id;
+    ItemId device_placement_id;
     std::uint32_t param_id = 0;
 
     constexpr bool valid() const noexcept {
-        return device_id.valid();
-    }
-
-    constexpr ItemId device_placement_id() const noexcept {
-        return device_id;
+        return device_placement_id.valid();
     }
 
     constexpr bool operator==(const DeviceParameterTarget&) const = default;
