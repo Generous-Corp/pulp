@@ -42,6 +42,7 @@ enum class CompileErrorCode : std::uint8_t {
     GenerationExhausted,
     CompilerAlreadyBound,
     AudioProgramInvalid,
+    AutomationProgramInvalid,
 };
 
 struct CompileError {
