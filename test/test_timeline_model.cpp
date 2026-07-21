@@ -497,8 +497,7 @@ TEST_CASE("Timeline subtree remap preflights closure-wide identity uniqueness") 
     REQUIRE(clip_result.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(allocator.next_value() == 100);
 
-    const auto colliding_track = take_value(Track::create({20}, "track", {clip({20}, 0, 10)}));
-    auto track_result = remap_ids(colliding_track, allocator);
+    auto track_result = Track::create({20}, "track", {clip({20}, 0, 10)});
     REQUIRE_FALSE(track_result.has_value());
     REQUIRE(track_result.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(allocator.next_value() == 100);

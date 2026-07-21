@@ -76,12 +76,8 @@ TEST_CASE("Timeline projects register device placement ownership globally") {
     REQUIRE(location->track_id == ItemId{10});
     REQUIRE_FALSE(location->clip_id.valid());
 
-    const auto colliding_track = take(Track::create(TrackInput{
-        .id = {10}, .name = "track", .clips = {make_clip({20})}, .device_chain = {{{20}}}}));
-    const auto colliding_sequence = take(
-        Sequence::create({3}, "sequence", pulp::timebase::TickDuration{100}, {colliding_track}));
-    auto collision =
-        Project::create(ProjectInput{{1}, "project", 21, {3}, {}, {colliding_sequence}});
+    auto collision = Track::create(TrackInput{
+        .id = {10}, .name = "track", .clips = {make_clip({20})}, .device_chain = {{{20}}}});
     REQUIRE_FALSE(collision.has_value());
     REQUIRE(collision.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(collision.error().item == ItemId{20});
