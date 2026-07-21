@@ -113,8 +113,8 @@ Two constraints shape what you can build on top of it:
   children suit full-region embeds — a detail pane, an inspector — better than a
   live GUI floating mid-canvas under other widgets. Clipping still works:
   `set_native_child_view_clip` masks a child to its scroll viewport.
-- **Coverage is per format and per platform.** CLAP editors embed on macOS
-  today. VST3, AU, and LV2 slots report no editor, and Windows/Linux have no
+- **Coverage is per format and per platform.** CLAP, VST3, and AU v2 editors
+  embed on macOS today. LV2 slots report no editor, and Windows/Linux have no
   desktop `WindowHost` implementing the native-child seam, so
   `EditorAttachment::create` returns nullptr there. Null is the honest
   "no editor" answer everywhere — branch on it rather than assuming a view.

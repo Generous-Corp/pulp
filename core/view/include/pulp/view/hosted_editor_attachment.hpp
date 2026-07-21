@@ -24,6 +24,15 @@
 // embedding on this platform, create() returns nullptr and the host can fall
 // back to a separate top-level window.
 //
+// Resize: while attached, the attachment OWNS the slot's
+// set_editor_resize_request_handler channel — it installs a handler that
+// re-bounds the child view at the same origin, and clears it on release. A
+// plug-in that asks to resize itself (CLAP gui.request_resize, VST3
+// IPlugFrame::resizeView) therefore moves the window's child view, not just the
+// slot's private container. An application that wants to observe or veto those
+// requests should wrap the attachment rather than install its own handler,
+// which the attachment would overwrite.
+//
 // Lifetime:
 //   - Slot: EditorAttachment co-owns the PluginSlot via shared_ptr. The signal
 //     graph stores nodes as shared_ptr<PluginSlot>, and a plugin editor
@@ -62,12 +71,17 @@ public:
         : slot_(std::move(other.slot_)),
           host_(other.host_),
           editor_(std::move(other.editor_)),
+          x_(other.x_),
+          y_(other.y_),
           width_(other.width_),
           height_(other.height_),
           attached_(other.attached_) {
         // slot_ was moved-from, so other.slot_ is already empty.
         other.host_ = nullptr;
         other.attached_ = false;
+        // The handler the slot holds captures `this`; the moved-from object is
+        // about to stop being the owner, so re-point it before anyone can call.
+        install_resize_handler();
     }
 
     EditorAttachment& operator=(EditorAttachment&& other) noexcept {
@@ -76,12 +90,15 @@ public:
             slot_ = std::move(other.slot_);
             host_ = other.host_;
             editor_ = std::move(other.editor_);
+            x_ = other.x_;
+            y_ = other.y_;
             width_ = other.width_;
             height_ = other.height_;
             attached_ = other.attached_;
             // slot_ was moved-from, so other.slot_ is already empty.
             other.host_ = nullptr;
             other.attached_ = false;
+            install_resize_handler();
         }
         return *this;
     }
@@ -112,8 +129,10 @@ public:
             return nullptr;
         }
         // The constructor is private; std::make_unique can't see it. Use new.
-        return std::unique_ptr<EditorAttachment>(
-            new EditorAttachment(std::move(slot), host, std::move(editor)));
+        std::unique_ptr<EditorAttachment> attachment(
+            new EditorAttachment(std::move(slot), host, std::move(editor), x, y));
+        attachment->install_resize_handler();
+        return attachment;
     }
 
     /// Underlying typed editor. Never null while the attachment is live.
@@ -130,6 +149,8 @@ public:
         const bool ok = host_->set_native_child_view_bounds(
             editor_->native_handle, x, y, width, height);
         if (ok) {
+            x_ = x;
+            y_ = y;
             width_ = width;
             height_ = height;
         }
@@ -138,6 +159,9 @@ public:
 
     /// Detach the editor from the host and destroy it. Idempotent.
     void release() {
+        // The slot outlives this object (it is shared), so a handler capturing
+        // `this` must come down before the object does.
+        if (slot_) slot_->set_editor_resize_request_handler(nullptr);
         if (!attached_) {
             // Even if we never managed to attach, we still own the editor and
             // owe the slot a destroy_hosted_editor() call.
@@ -159,23 +183,45 @@ public:
         host_ = nullptr;
     }
 
+    float x() const { return x_; }
+    float y() const { return y_; }
     float width() const { return width_; }
     float height() const { return height_; }
 
 private:
     EditorAttachment(std::shared_ptr<host::PluginSlot> slot,
                      WindowHost* host,
-                     std::unique_ptr<host::PluginSlot::HostedEditor> editor)
+                     std::unique_ptr<host::PluginSlot::HostedEditor> editor,
+                     float x,
+                     float y)
         : slot_(std::move(slot)),
           host_(host),
           editor_(std::move(editor)),
+          x_(x),
+          y_(y),
           width_(static_cast<float>(editor_ ? editor_->width : 0)),
           height_(static_cast<float>(editor_ ? editor_->height : 0)),
           attached_(true) {}
 
+    /// Take the slot's plugin-initiated resize requests and apply them to the
+    /// window. Without this the slot resizes only the container it owns and the
+    /// child view the host placed keeps its original bounds, so a plug-in that
+    /// sizes itself on open (VST3 does this from inside IPlugView::attached)
+    /// ends up clipped by, or overflowing, the rect the host gave it.
+    void install_resize_handler() {
+        if (!slot_) return;
+        slot_->set_editor_resize_request_handler(
+            [this](uint32_t width, uint32_t height) {
+                return set_bounds(x_, y_, static_cast<float>(width),
+                                  static_cast<float>(height));
+            });
+    }
+
     std::shared_ptr<host::PluginSlot> slot_;
     WindowHost* host_ = nullptr;
     std::unique_ptr<host::PluginSlot::HostedEditor> editor_;
+    float x_ = 0.0f;
+    float y_ = 0.0f;
     float width_ = 0.0f;
     float height_ = 0.0f;
     bool attached_ = false;

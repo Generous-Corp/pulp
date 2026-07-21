@@ -226,7 +226,12 @@ if (!attachment) {
 }
 ```
 
-Available for CLAP on macOS today; see Limits below.
+Available for CLAP, VST3, and AU v2 on macOS today; see Limits below.
+
+A plugin may also ask to resize itself once its editor is open. The
+attachment handles that for you: it re-bounds the child view at the same
+origin and updates `width()` / `height()`, so an editor that sizes itself on
+open lands at its real size instead of being clipped.
 
 Two things to design around:
 
@@ -296,9 +301,10 @@ These exist to smoke-test the loaders outside a full DAW context.
   Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Hosted editor embedding is wired for CLAP on macOS. VST3, AU, and LV2 slots
-  still report no editor, and Windows and Linux have no desktop `WindowHost`
-  implementing the native-child seam, so nothing can be parented there yet.
+- Hosted editor embedding is wired for CLAP, VST3, and AU v2 on macOS. LV2
+  slots still report no editor, and Windows and Linux have no desktop
+  `WindowHost` implementing the native-child seam, so nothing can be parented
+  there yet.
   Where an editor is unavailable, `has_editor()` is false and
   `EditorAttachment::create` returns nullptr — branch on that rather than
   assuming a view. A missing editor never blocks metadata, parameter, state,

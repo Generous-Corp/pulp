@@ -120,6 +120,26 @@ inline uint64_t get_u64_le(const uint8_t* p) {
 
 }  // namespace vst3_state_detail
 
+// Push the component's current state into a separated controller.
+//
+// A separately created IEditController comes up on its own defaults, which are
+// not required to match the component's. Until the host hands it the component
+// state, its parameter cache — and therefore the editor the host is about to
+// open — shows values the processor will not render. `setComponentState` is the
+// SDK's channel for that; a controller with nothing to sync may ignore it.
+//
+// Returns false only when the component cannot produce a state at all.
+inline bool vst3_push_component_state(Steinberg::Vst::IComponent* component,
+                                      Steinberg::Vst::IEditController* controller) {
+    if (!component || !controller) return false;
+    VectorStream from_component;
+    if (component->getState(&from_component) != Steinberg::kResultOk) return false;
+    std::vector<uint8_t> bytes = from_component.take();
+    VectorStream to_controller(bytes);
+    controller->setComponentState(&to_controller);
+    return true;
+}
+
 // Serialize the component's state, plus a separated controller's own state,
 // into a versioned container. `separated` must be false for a combined plugin
 // (controller == component) so its state is not written twice. Returns an

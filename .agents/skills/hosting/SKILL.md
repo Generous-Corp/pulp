@@ -63,8 +63,48 @@ vendor UI — showing stale values. The host contract is: after
 `component->setState`, push the same processor state into the controller with
 `IEditController::setComponentState`, and separately save/restore the
 controller's own `getState`/`setState`. Combined plug-ins (one object
-implementing both interfaces) skip all of this — detect the combined case by
-`FUnknown` pointer equality (`controller == component`).
+implementing both interfaces) skip all of this — see the identity trap below
+for how to detect the combined case.
+
+A separated controller also needs `setComponentState` at **load**, not only on
+restore: a factory-created controller comes up on its own defaults, so its
+parameter cache — and the editor about to open on it — shows values the
+processor will not render. `vst3_push_component_state` (in `vst3_state_sync.hpp`)
+is that push and `Vst3Slot`'s constructor calls it.
+
+### VST3: combined-vs-separated is an FUnknown QUERY, never a pointer cast
+
+`static_cast<FUnknown*>(component) == static_cast<FUnknown*>(controller)` looks
+like the identity test and is wrong. A combined plug-in inherits `IComponent`
+and `IEditController` *separately*, so each interface carries its own `FUnknown`
+base subobject at a **different address** — the cast-and-compare therefore calls
+every combined plug-in "separated". Verified against the SDK's own
+`SingleComponentEffect`. COM identity is defined by the query: ask both sides
+for `FUnknown::iid` and compare the returned pointers (`vst3_same_object` /
+`vst3_is_separated` in `vst3_connection.hpp`; release both +1s).
+
+Getting it backwards is not cosmetic — a combined plug-in misread as separated
+gets `IPluginBase::terminate()` called **twice** on unload, has its state stored
+twice, and would be connected to itself.
+
+### VST3: connect the separated halves, and give them a real IHostApplication
+
+A separated plug-in's two halves only reach each other through
+`IConnectionPoint` — the host queries both, connects each to the other, and
+disconnects before either terminates (`vst3_connection.hpp`). Everything a
+plug-in cannot express as a parameter (preset banks, meter feeds, editor
+handshakes) travels as `IMessage` over that link, so an unconnected plug-in
+opens an editor that can never talk to its own processor.
+
+Those `IMessage` / `IAttributeList` objects are allocated by the host, through
+`IHostApplication::createInstance`. A host-application stand-in that returns
+`kNotImplemented` there silently makes the connection useless, so `Vst3Slot`'s
+`HostApp` derives from the SDK's `Vst::HostApplication` (which also supplies
+`IPlugInterfaceSupport`) and only overrides `getName` plus the refcount, because
+the instance is a process-wide singleton a plug-in must not be able to delete.
+That pulls `hostclasses.cpp` + `pluginterfacesupport.cpp` + `stringconvert.cpp`
++ `commonstringconvert.cpp` into the `vst3-sdk` CMake target — the last two are
+transitive and only show up as a link error in an unrelated tool.
 
 `Vst3Slot` lives in an anonymous namespace, so this logic lives in a
 free-function seam, `pulp::host::detail::vst3_state_sync.hpp`
@@ -88,9 +128,22 @@ in the parent window), THEN `attached()`. Tear down in reverse: `removed()`
 before `release()`, and close the editor before terminating the controller it
 came from (`createView`'s view must not outlive its controller).
 
+**The host MUST install an `IPlugFrame` before `attached()`.** `IPlugView`
+documents `IPlugFrame::resizeView()` as callable from *inside* `attached()` —
+it is how a plug-in reports the size it really wants — so a view with no frame
+either mis-sizes itself or refuses to attach outright, and a refused `attached()`
+is exactly the "editor returns null, nothing embeds" symptom. `setFrame` goes on
+immediately after `createView`, before `isPlatformTypeSupported`; every release
+path clears it first (`vst3_release_editor_view` does the `setFrame(nullptr)`)
+so a plug-in can never call into a destroyed frame. Because the plug-in may
+resize during `attached()`, the slot publishes `editor_view_`/`editor_container_`
+*before* the attach call and reports the post-attach size, not the size queried
+before the view existed.
+
 The AppKit part is only the container; the VST3 negotiation (createView,
-`isPlatformTypeSupported`, `getSize`, `attached`, `onSize`/`checkSizeConstraint`,
-`removed`) is a pure-interface seam, `pulp::host::detail::vst3_editor.hpp`, which
+`setFrame`, `isPlatformTypeSupported`, `getSize`, `attached`,
+`onSize`/`checkSizeConstraint`, `removed`) is a pure-interface seam,
+`pulp::host::detail::vst3_editor.hpp`, which
 is where a headless test drives it with a fake `IEditController` / `IPlugView`
 (inherit the SDK `EditController` / `CPluginView` bases). The full container
 attach is only reachable with a real native window, so it is proven by the
@@ -1107,8 +1160,18 @@ rules:
 ## Hosted plugin editors
 
 `EditorAttachment::create(slot, window)` embeds a hosted plugin's own GUI.
-Wired for **CLAP on macOS**; VST3 / AU / LV2 slots still report no editor. The
-non-obvious parts:
+Wired for **CLAP, VST3, and AU v2 on macOS**; LV2 slots still report no editor.
+The non-obvious parts:
+
+- **The attachment owns the slot's resize-request channel while attached.** It
+  installs a `set_editor_resize_request_handler` that re-bounds the child view at
+  the same origin, and clears it on release — otherwise a plugin-driven resize
+  moves only the slot's private container and the child view the host placed
+  keeps its old bounds (clipped or overflowing editor). The handler captures
+  `this` and the slot outlives the attachment, so the move constructor /
+  assignment must re-install it and `release()` must clear it; a stale handler
+  there is a use-after-free the moment the plugin asks. An app that wants to
+  observe or veto should wrap the attachment, not install its own handler.
 
 - **The APIs are inverted from `HostedEditor`.** CLAP `set_parent` and VST3
   `IPlugView::attached` CONSUME a parent view — the plugin inserts its own view

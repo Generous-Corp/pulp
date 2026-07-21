@@ -71,6 +71,15 @@ public:
         if (ed) destroyed = true;
     }
 
+    void set_editor_resize_request_handler(EditorResizeRequestHandler h) override {
+        resize_handler = std::move(h);
+    }
+    /// Stand in for the plug-in asking its host for a different size.
+    bool plugin_requests_resize(uint32_t w, uint32_t h) {
+        return resize_handler && resize_handler(w, h);
+    }
+    EditorResizeRequestHandler resize_handler;
+
     int latency_samples() const override { return 0; }
     int tail_samples() const override { return 0; }
 
@@ -293,4 +302,57 @@ TEST_CASE("EditorAttachment keeps its slot alive after the graph drops it",
     // the test observer goes too, the slot is freed cleanly (no leak).
     observer.reset();
     REQUIRE_FALSE(weak.lock());
+}
+
+TEST_CASE("EditorAttachment re-bounds the window on a plug-in resize request",
+          "[host][hosted-editor][migration]") {
+    auto slot = std::make_shared<FakeSlot>();
+    FakeWindowHost host;
+    auto att = pulp::view::EditorAttachment::create(slot, &host, 20.0f, 40.0f);
+    REQUIRE(att);
+    REQUIRE(host.attached_w == 800.0f);
+
+    // A plug-in that sizes itself must move the child view the host placed,
+    // not just the slot's private container.
+    REQUIRE(slot->plugin_requests_resize(1024, 768));
+    REQUIRE(host.bounds_calls == 1);
+    REQUIRE(host.bounds_handle == &slot->fake_view);
+    REQUIRE(host.bounds_w == 1024.0f);
+    REQUIRE(host.bounds_h == 768.0f);
+    // The origin the host chose is preserved — only the size was requested.
+    REQUIRE(host.bounds_x == 20.0f);
+    REQUIRE(host.bounds_y == 40.0f);
+    REQUIRE(att->width() == 1024.0f);
+    REQUIRE(att->height() == 768.0f);
+}
+
+TEST_CASE("EditorAttachment stops honoring resize requests after release",
+          "[host][hosted-editor][migration]") {
+    auto slot = std::make_shared<FakeSlot>();
+    FakeWindowHost host;
+    auto att = pulp::view::EditorAttachment::create(slot, &host);
+    REQUIRE(att);
+
+    att->release();
+    // The handler captured the attachment; the slot outlives it, so a stale
+    // handler here would be a use-after-free the moment the plug-in asked.
+    REQUIRE_FALSE(slot->plugin_requests_resize(640, 480));
+    REQUIRE(host.bounds_calls == 0);
+}
+
+TEST_CASE("EditorAttachment moves its resize handler with it",
+          "[host][hosted-editor][migration]") {
+    auto slot = std::make_shared<FakeSlot>();
+    FakeWindowHost host;
+    auto att = pulp::view::EditorAttachment::create(slot, &host, 5.0f, 6.0f);
+    REQUIRE(att);
+
+    // The handler captures `this`; a move must re-point it at the new owner.
+    pulp::view::EditorAttachment moved(std::move(*att));
+    REQUIRE(slot->plugin_requests_resize(320, 240));
+    REQUIRE(host.bounds_calls == 1);
+    REQUIRE(host.bounds_w == 320.0f);
+    REQUIRE(moved.width() == 320.0f);
+    // The moved-from object no longer owns anything to resize.
+    REQUIRE_FALSE(att->is_attached());
 }
