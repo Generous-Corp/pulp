@@ -312,6 +312,19 @@ defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
 for this triad; full design in
 `planning/2026-07-06-ci-queue-saturation-watchdog.md`.
 
+**Caveat to step 3 (part 2) — a *different flaky test each re-run* is Studio
+oversubscription, not a code bug.** The Studio runs up to `macos_vm_cap` (2, the
+Apple guest limit) concurrent build VMs. RELATIVE-timing / CPU-budget / benchmark
+tests (labels `performance`, `bench`, `quality-lab` — e.g. heritage-performance's
+"Representative chain stays within the shipping CPU budget", a ratio ≤ 2.0×1.05
+vs an in-run baseline) tolerate steady load but NOT the load *variance* a sibling
+VM's bursty compile creates → they flake whenever 2 gate builds run at once. It is
+NOT a real failure and re-running makes it worse (adds load). Those labels are now
+excluded from the required PR/merge_group gate (build.yml `label_exclude`) — a
+perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
+dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
+label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
+
 ## A dead lane is only visible as queue age — never as a missing runner
 
 `.github/workflows/runner-health-check.yml` sweeps every 30 min from
