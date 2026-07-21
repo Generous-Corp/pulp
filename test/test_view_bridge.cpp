@@ -10,6 +10,7 @@
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/host_param_surface.hpp>
 #include <pulp/view/scripted_ui.hpp>
+#include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
@@ -199,6 +200,59 @@ TEST_CASE("ViewBridge keeps a processor-declared size over the AutoUi fit",
     CHECK(hints.preferred_height == 320);
     CHECK(hints.min_width == 320);
     CHECK(hints.max_width == 1024);
+    bridge.close();
+}
+
+TEST_CASE("ViewBridge re-applies the AutoUi fit on close + reopen",
+          "[view_bridge][auto_ui]") {
+    // Daniel's exact repro: the default editor fit correctly on the FIRST open,
+    // then reset/clipped on a later close + reopen. The fit is recomputed each
+    // open() (gated on the untouched-default size), so it must re-apply
+    // identically on the second open — not silently drop back to 400x300.
+    DefaultAutoUiProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+    const auto fit = view::AutoUi::preferred_size(store);
+
+    format::ViewBridge bridge(p, store);
+
+    auto assert_fitted = [&](const char* which) {
+        INFO(which);
+        const auto& h = bridge.size_hints();
+        CHECK(h.preferred_width == fit.width);
+        CHECK(h.preferred_height == fit.height);
+        CHECK(h.min_width > 0);
+        CHECK(h.min_height > 0);
+        CHECK(h.aspect_ratio > 0.0);
+        CHECK(format::should_pin_design_viewport(h));
+    };
+
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    assert_fitted("first open");
+    bridge.close();
+
+    // Second open — the failure Daniel saw was here.
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+    assert_fitted("second open");
+
+    // Layout probe on the REOPENED view: at the design size the content fits
+    // (no scroll needed → nothing clipped) and the first tile sits at the scroll
+    // origin, reachable.
+    auto* root = bridge.view();
+    REQUIRE(root != nullptr);
+    root->set_bounds({0.0f, 0.0f, static_cast<float>(fit.width),
+                      static_cast<float>(fit.height)});
+    root->layout_children();
+    auto* body = dynamic_cast<view::ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    CHECK(body->content_size().height <= body->local_bounds().height + 1.0f);
+    auto* grid = body->child_at(0);
+    REQUIRE(grid->child_count() == p.param_count);
+    CHECK(grid->child_at(0)->bounds().y >= -0.5f);
+    CHECK(grid->child_at(0)->bounds().y < 1.0f);
     bridge.close();
 }
 
