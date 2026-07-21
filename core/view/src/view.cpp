@@ -5,6 +5,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -255,33 +256,32 @@ void View::simulate_click(Point root_pos) {
     const bool gesture_up = dispatch_gesture_pointer_event(up);
     if (gesture_down || gesture_up) return;
 
-    // Convert to target's local coordinates
-    Point local = root_pos;
-    View* v = target;
-    while (v && v != this) {
-        local.x -= v->bounds().x;
-        local.y -= v->bounds().y;
-        v = v->parent();
-    }
-
-    target->on_mouse_down(local);
-    target->on_mouse_up(local);
     // DOM-style click bubbling. `hit_test` returns the deepest
     // hit-testable view, which for `<button onClick=...>Label</button>` is
     // the inner Label child. Walk up the parent chain to find the nearest
-    // ancestor with a registered handler. Mirrors the same bubble pass the
-    // mac mouseUp path performs (see core/view/platform/mac/window_host_mac.mm).
+    // ancestor with a registered handler.
     //
     // Bound the bubble walk to `this` (inclusive). Walking past the receiver
     // into ancestors outside its subtree leaks synthetic clicks across
     // component boundaries, a false-positive hazard for tests / tooling that
-    // simulate interaction on isolated subtrees.
+    // simulate interaction on isolated subtrees. `deliver_mouse_up` resolves
+    // the same handler with an UNbounded walk (the hosts always dispatch from
+    // the window root, where there is nothing above to leak into), so resolve
+    // ours here and have the fire-click hook use it instead.
     View* click_target = target;
     while (click_target && !click_target->on_click) {
         if (click_target == this) break;  // stop at receiver, even if no handler
         click_target = click_target->parent();
     }
-    if (click_target && click_target->on_click) click_target->on_click();
+    auto bounded_click = click_target ? click_target->on_click : std::function<void()>{};
+
+    if (!deliver_mouse_down(*this, target, root_pos, /*modifiers=*/0)) return;
+    MouseUpHost up_host;
+    up_host.fire_click = [&bounded_click](const std::function<void()>&,
+                                          const std::string&, uint16_t) {
+        if (bounded_click) bounded_click();
+    };
+    deliver_mouse_up(*this, target, root_pos, /*modifiers=*/0, /*click_count=*/1, up_host);
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {
@@ -330,17 +330,7 @@ void View::simulate_drag(Point start, Point end, int steps) {
         return;
     }
 
-    auto to_target_local = [this, target](Point p) {
-        View* v = target;
-        while (v && v != this) {
-            p.x -= v->bounds().x;
-            p.y -= v->bounds().y;
-            v = v->parent();
-        }
-        return p;
-    };
-
-    target->on_mouse_down(to_target_local(start));
+    if (!deliver_mouse_down(*this, target, start, /*modifiers=*/0)) return;
     for (int i = 1; i <= steps; ++i) {
         float t = static_cast<float>(i) / steps;
         Point p = {start.x + (end.x - start.x) * t,
@@ -352,7 +342,7 @@ void View::simulate_drag(Point start, Point end, int steps) {
         move.is_down = true;
         move.phase = MousePhase::drag;
         gesture_consumed = dispatch_gesture_pointer_event(move) || gesture_consumed;
-        target->on_mouse_drag(to_target_local(p));
+        deliver_mouse_drag(*this, target, p, /*modifiers=*/0);
     }
     MouseEvent up;
     up.position = end;
@@ -362,7 +352,11 @@ void View::simulate_drag(Point start, Point end, int steps) {
     up.phase = MousePhase::release;
     gesture_consumed = dispatch_gesture_pointer_event(up) || gesture_consumed;
     if (gesture_consumed) return;
-    target->on_mouse_up(to_target_local(end));
+    // Release delivery only, with no fire-click hook. The hosts DO fire a click
+    // when a release lands on the press target, even after a drag; this
+    // simulator keeps drag and click separable so a test can drive one without
+    // the other. `simulate_click` is the verb that fires a click.
+    deliver_mouse_up(*this, target, end, /*modifiers=*/0, /*click_count=*/1, MouseUpHost{});
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {

@@ -4796,3 +4796,89 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
     std::error_code ec;
     fs::remove_all(base, ec);
 }
+
+// A gesture's press/release edges and its moves travel to JS on two different
+// callbacks: `on_pointer_event` carries the edges, `on_drag` / `on_pointer_move`
+// carry the moves. `deliver_mouse_drag` — the verb both macOS hosts call for
+// every drag sample — hits BOTH, with `is_down == true` because the button is
+// genuinely still held. Classifying that by `is_down` alone reported every drag
+// sample as a fresh `pointerdown`, which re-latched the gesture origin of any
+// handler that captures one on press.
+TEST_CASE("WidgetBridge reports a drag tick as a move, not a fresh pointerdown",
+          "[view][bridge][pointer]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var downs = 0, moves = 0, ups = 0;
+        createCanvas('surface', '');
+        on('surface', 'pointerdown', function() { downs += 1; });
+        on('surface', 'pointermove', function() { moves += 1; });
+        on('surface', 'pointerup',   function() { ups += 1; });
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    surface->set_bounds({0, 0, 200, 200});
+
+    MouseEvent press;
+    press.position = {10, 10};
+    press.window_position = {10, 10};
+    press.is_down = true;
+    press.phase = MousePhase::press;
+    surface->on_pointer_event(press);
+
+    for (int i = 1; i <= 3; ++i) {
+        MouseEvent drag = press;
+        drag.position = {10, 10.0f + i};
+        drag.window_position = drag.position;
+        drag.phase = MousePhase::drag;
+        surface->on_pointer_event(drag);   // the modern channel, is_down still true
+        surface->on_drag(drag.position);   // the move channel, same tick
+    }
+
+    MouseEvent release = press;
+    release.is_down = false;
+    release.phase = MousePhase::release;
+    surface->on_pointer_event(release);
+
+    // Exactly one press edge for the whole gesture — the three drag samples must
+    // not have re-fired it.
+    CHECK(engine.evaluate("downs").getWithDefault<int>(-1) == 1);
+    CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 1);
+    // Each tick produced exactly one move: the modern channel stayed silent so
+    // it did not double-report what on_drag already delivered.
+    CHECK(engine.evaluate("moves").getWithDefault<int>(-1) == 3);
+}
+
+// A hover sample (button up, MousePhase::hover) carries is_down == false, which
+// the same inference would have reported as a phantom `pointerup`.
+TEST_CASE("WidgetBridge does not report a hover sample as a pointerup",
+          "[view][bridge][pointer]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var ups = 0;
+        createCanvas('surface', '');
+        on('surface', 'pointerup', function() { ups += 1; });
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+
+    MouseEvent hover;
+    hover.position = {10, 10};
+    hover.window_position = {10, 10};
+    hover.is_down = false;
+    hover.phase = MousePhase::hover;
+    surface->on_pointer_event(hover);
+
+    CHECK(engine.evaluate("ups").getWithDefault<int>(-1) == 0);
+}

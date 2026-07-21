@@ -186,6 +186,44 @@ function drawMeter(peak, rms) {
 }
 ```
 
+### Making a canvas control interactive
+
+A canvas is hit-testable and receives pointer events with no opt-in — subscribing
+with `on(id, "pointerdown"| "pointermove"| "pointerup", fn)` is all the wiring it
+needs. **The canvas owns its own value**: `bindWidgetToParam` drives the stock
+value widgets (knob, fader, slider, toggle, progress) and has nothing to write on
+a canvas, so a custom-drawn control reads with `getParam` and writes with
+`setParam` from its own handlers.
+
+The gesture shape is the usual one — latch the origin on press, apply the delta
+on move:
+
+```js
+const knob = createCanvas("drive-knob", "root");
+const st = { val: getParam("drive"), dragging: false, y0: 0, v0: 0 };
+
+on(knob, "pointerdown", (e) => {
+    st.dragging = true;
+    st.y0 = e.clientY;      // where the gesture started
+    st.v0 = st.val;         // and the value it started from
+});
+on(knob, "pointermove", (e) => {
+    if (!st.dragging) return;
+    // 150px of vertical travel spans the full range.
+    st.val = Math.max(0, Math.min(1, st.v0 + (st.y0 - e.clientY) / 150));
+    setParam("drive", st.val);
+    drawKnob(st.val);
+});
+on(knob, "pointerup", () => { st.dragging = false; });
+```
+
+`pointerdown` and `pointerup` are the gesture *edges* — they fire once each, so
+latching on `pointerdown` is safe. Every sample in between arrives as
+`pointermove`, whether or not a button is held.
+
+Headless tests drive this with `View::simulate_drag`, which delivers through the
+same routing the platform hosts use.
+
 ---
 
 ## Layer C: Canvas API in C++
