@@ -32,6 +32,7 @@ struct ProgramCompileRequest {
     std::vector<TrackCompilePolicy> track_policies;
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets;
     AudioRendererLimits audio_limits;
+    AutomationPlaybackLimits automation_limits = AutomationPlaybackLimits::platform_defaults();
 };
 
 enum class CompileErrorCode : std::uint8_t {

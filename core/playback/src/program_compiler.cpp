@@ -57,6 +57,7 @@ class ProgramCompilerTask final : public CompileTask {
     detail::BudgetedStableMergeState audio_merge_;
     detail::TrackAutomationCompiler automation_compiler_;
     detail::CompiledTrackAutomation current_automation_;
+    bool automation_compiler_started_ = false;
     std::uint64_t total_audio_clips_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
     std::vector<std::shared_ptr<const TrackProgram>> merge_buffer_;
@@ -157,8 +158,7 @@ struct PlaybackProgramCompilerCore
 };
 
 void ProgramCompilerTask::begin_track_automation() {
-    const auto& track = sequence_->tracks()[track_index_];
-    automation_compiler_.reset(track, request_->tempo_map, generation_);
+    automation_compiler_started_ = false;
     stage_ = Stage::CompileTrackAutomation;
 }
 
@@ -187,6 +187,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->tempo_map_owner().get() != request_->tempo_map.get() ||
                      live->audio_assets_owner().get() != request_->audio_assets.get() ||
                      live->audio_limits() != request_->audio_limits ||
+                     live->automation_limits() != request_->automation_limits ||
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         tracks_.reserve(sequence_->tracks().size());
         merge_buffer_.reserve(sequence_->tracks().size());
@@ -358,6 +359,12 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::CompileTrackAutomation) {
+            if (!automation_compiler_started_) {
+                const auto& track = sequence_->tracks()[track_index_];
+                automation_compiler_.reset(track, request_->tempo_map, generation_,
+                                           request_->automation_limits);
+                automation_compiler_started_ = true;
+            }
             auto step = automation_compiler_.step();
             ++work;
             if (!step)
@@ -406,6 +413,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             current_audio_clips_.clear();
             current_audio_ids_.clear();
             current_automation_ = {};
+            automation_compiler_started_ = false;
             clip_index_ = 0;
             note_index_ = 0;
             clip_started_ = false;
@@ -470,7 +478,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         auto program = std::shared_ptr<const PlaybackProgram>(
             new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
                                 request_->sequence_id, request_->tempo_map, request_->audio_assets,
-                                request_->audio_limits, std::move(tracks_)));
+                                request_->audio_limits, request_->automation_limits,
+                                std::move(tracks_)));
         core_->store.publish(std::move(program));
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
@@ -505,6 +514,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
     };
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
         request.document_revision == 0 ||
+        !request.automation_limits.valid() ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

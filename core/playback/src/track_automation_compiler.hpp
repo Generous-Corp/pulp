@@ -4,6 +4,7 @@
 #include "budgeted_stable_merge.hpp"
 
 #include <pulp/playback/program_identity.hpp>
+#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/track_automation_program.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -29,12 +30,15 @@ class TrackAutomationCompiler {
   public:
     void reset(const timeline::Track& track,
                std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
-               ProgramGeneration generation);
+               ProgramGeneration generation, AutomationPlaybackLimits limits);
     runtime::Result<TrackAutomationCompileStatus, TrackAutomationCompileError> step();
     CompiledTrackAutomation take_result() noexcept;
 
   private:
     enum class Stage {
+        ValidateLimits,
+        PreflightLanes,
+        PrepareStorage,
         Placements,
         Lanes,
         SortLanes,
@@ -49,6 +53,8 @@ class TrackAutomationCompiler {
     const timeline::Track* track_ = nullptr;
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map_;
     ProgramGeneration generation_ = 0;
+    AutomationPlaybackLimits limits_;
+    std::uint64_t point_count_ = 0;
     Stage stage_ = Stage::Complete;
     std::size_t index_ = 0;
     CompiledTrackAutomation compiled_;
