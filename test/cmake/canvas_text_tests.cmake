@@ -147,6 +147,12 @@ endif()
 # working adapter don't hard-fail. Vulkan + D3D backends are
 # deferred — see the PULP_VULKAN_AVAILABLE / PULP_D3D_AVAILABLE
 # scaffold blocks immediately below.
+# Every suite below creates a real Dawn/Metal device and does blocking
+# offscreen readbacks, so each carries RESOURCE_LOCK pulp_gpu — the same lock
+# the render/GPU and gpu-audio manifests use. Without it they run in parallel
+# with every other GPU test and contend for a process-global resource, which
+# surfaces as an intermittent short readback: the frame composites fewer
+# pixels than the assertion expects, on a PR that changed nothing related.
 if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     add_executable(pulp-test-font-rendering-goldens-gpu
         test_font_rendering_goldens_gpu.cpp)
@@ -158,7 +164,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         ${SKIA_INCLUDE_DIRS})
     # APPLE-gated, so the Windows webgpu DL_PATHS dance from the
     # PULP_GPU_TEST_DISCOVERY_ARGS block below isn't needed here.
-    catch_discover_tests(pulp-test-font-rendering-goldens-gpu)
+    catch_discover_tests(pulp-test-font-rendering-goldens-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # GPU view-host-in-plugins — proves a Processor::create_view() editor
     # that sets requires_gpu_host() auto-selects the GPU host, mounts a real
@@ -173,7 +180,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         PULP_HAS_SKIA=1)
     target_include_directories(pulp-test-plugin-editor-headless-gpu PRIVATE
         ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-plugin-editor-headless-gpu)
+    catch_discover_tests(pulp-test-plugin-editor-headless-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Subtree scene cache — live-GPU image-in-cache proof (FU-3). Records an
     # image draw inside a cached subtree on the miss frame (GPU-uploads the
@@ -188,7 +196,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         PULP_HAS_SKIA=1)
     target_include_directories(pulp-test-subtree-cache-gpu PRIVATE
         ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-subtree-cache-gpu)
+    catch_discover_tests(pulp-test-subtree-cache-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for
@@ -202,7 +211,8 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
         PULP_HAS_SKIA=1)
     target_include_directories(pulp-test-partial-repaint-gpu PRIVATE
         ${SKIA_INCLUDE_DIRS})
-    catch_discover_tests(pulp-test-partial-repaint-gpu)
+    catch_discover_tests(pulp-test-partial-repaint-gpu
+        PROPERTIES RESOURCE_LOCK pulp_gpu)
 
     # Embedded-host smoke (mac GPU lane): attaches the GPU host to a hidden
     # NSWindow and proves a nonblank first-frame capture, plus drives the CLAP
