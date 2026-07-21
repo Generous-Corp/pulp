@@ -481,6 +481,13 @@ private:
             local_event.phase = MousePhase::drag;
             drag_target_->on_mouse_event(local_event);
             drag_target_->on_mouse_drag(local_event.position);
+            // `on_drag` is the channel WidgetBridge::registerPointer wires to
+            // emit `pointermove` into JS. Without it a scripted UI's custom
+            // control — anything that computes a delta from a pointermove
+            // rather than overriding on_mouse_drag in C++ — sees the press and
+            // the release but nothing in between. Mirrors what the macOS hosts
+            // deliver (pulp::view::deliver_mouse_drag).
+            if (drag_target_->on_drag) drag_target_->on_drag(local_event.position);
             mark_dirty();
             return true;
         }

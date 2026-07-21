@@ -388,6 +388,13 @@ TEST_CASE("WebInputRouter routes a press/drag/release gesture", "[view][web][inp
     CHECK(router.focused_view() == spy);
     CHECK(dirty > 0);
 
+    // `on_drag` is the channel WidgetBridge::registerPointer wires to emit
+    // `pointermove` into JS, so a scripted UI's custom control sees the moves
+    // between the press and the release. Nothing else delivers it on web.
+    int js_moves = 0;
+    Point last_js_move{};
+    spy->on_drag = [&](Point p) { ++js_moves; last_js_move = p; };
+
     BrowserPointerEvent drag = down;
     drag.phase = BrowserPointerPhase::move;
     drag.css_x = 140;
@@ -396,6 +403,8 @@ TEST_CASE("WebInputRouter routes a press/drag/release gesture", "[view][web][inp
     CHECK(spy->drags == 1);
     CHECK(spy->last_event.phase == MousePhase::drag);
     CHECK_THAT(spy->last_drag.y, WithinAbs(40.0, 1e-4));
+    CHECK(js_moves == 1);
+    CHECK_THAT(last_js_move.y, WithinAbs(40.0, 1e-4));
 
     BrowserPointerEvent up = drag;
     up.phase = BrowserPointerPhase::up;

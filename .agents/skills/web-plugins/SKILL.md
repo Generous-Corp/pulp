@@ -354,6 +354,31 @@ engine (`Version/…Safari/605`), and `page.mouse.wheel(0, 600)` over the canvas
 `window.scrollY` (measured 0→209 on the SuperConvolver editor). Chromium-only "it scrolls"
 is not proof for the browser the user is actually on.
 
+## Landmine: a JS-scripted control needs `on_drag`, and only some hosts send it
+
+A gesture reaches a scripted UI on **two different View callbacks**, and a host that
+wires one but not the other produces a control that takes the press, takes the release,
+and moves for nobody:
+
+- `on_pointer_event` carries the **edges only** — `pointerdown` / `pointerup` /
+  `pointercancel`. It deliberately returns early for `MousePhase::drag` and
+  `MousePhase::hover`, because a drag sample carries `is_down == true` (the button IS
+  still held) and naming the event from `is_down` alone would report every sample as a
+  fresh `pointerdown`.
+- `on_drag` (and `on_pointer_move`, which preserves per-touch identity) carries the
+  **moves**, as `pointermove`. This is the ONLY channel a scripted control's
+  `on(id, 'pointermove', …)` handler ever hears from.
+
+So a host's drag path MUST call `on_drag` — `on_mouse_event` and the legacy
+`on_mouse_drag` are not enough. `on_mouse_drag` only reaches a C++ widget that overrides
+it; a canvas-drawn control overrides nothing. `web_event_translate.hpp`'s `pointer_move`
+missed this and every custom-drawn control was undraggable in the browser. macOS gets it
+free by routing through `pulp::view::deliver_mouse_drag`; the web translator now calls
+`on_drag` directly, pinned by the press/drag/release case in `test_window_host_web.cpp`.
+
+The symptom is specific and easy to misread as a paint bug: the control **renders
+correctly** and simply never moves.
+
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 
 A host that remembers what it last *sent* (`values.set(id, v)`) goes stale the
