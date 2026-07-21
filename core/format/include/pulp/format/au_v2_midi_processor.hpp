@@ -20,7 +20,6 @@
 #include <array>
 #include <cstdint>
 #include <memory>
-#include <vector>
 
 namespace pulp::format::au {
 
@@ -197,10 +196,6 @@ private:
     MidiOutputCallbackPublisher midi_output_callback_;
     // Pre-reserved packet-list storage so the render-path build never allocates.
     MidiOutputPacketBuilder midi_out_packet_builder_;
-
-    // Channel-pointer storage for the silent output element. Pre-reserved in
-    // Initialize() so the per-block resize is a no-op realloc.
-    std::vector<float*> output_ptrs_;
 
     // Previous-block transport snapshot used to derive playhead change flags.
     // Default-constructed so the first Render() after Initialize() reports no

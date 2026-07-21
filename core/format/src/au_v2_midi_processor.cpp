@@ -259,12 +259,6 @@ OSStatus PulpAUMidiProcessor::Initialize()
     midi_in_.set_realtime_capacity_limit(true);
     midi_out_.set_realtime_capacity_limit(true);
 
-    output_ptrs_.reserve(
-        GetOutput(0)->GetStreamFormat().mChannelsPerFrame == 0
-            ? std::size_t{2}
-            : static_cast<std::size_t>(
-                  GetOutput(0)->GetStreamFormat().mChannelsPerFrame));
-
     runtime::log_info("AU v2 MIDI processor: initialized at {} Hz",
                       GetOutput(0)->GetStreamFormat().mSampleRate);
     return noErr;
@@ -336,12 +330,9 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
     // reads uninitialised memory, and label the block silent so a host that
     // honours the flag can skip it — an `aumi` genuinely produces silence.
     AudioBufferList& out_bl = GetOutput(0)->PrepareBuffer(inNumberFrames);
-    const UInt32 out_channels = out_bl.mNumberBuffers;
-    output_ptrs_.resize(out_channels);
-    for (UInt32 c = 0; c < out_channels; ++c) {
-        output_ptrs_[c] = static_cast<float*>(out_bl.mBuffers[c].mData);
-        if (output_ptrs_[c] != nullptr)
-            std::memset(output_ptrs_[c], 0, sizeof(float) * inNumberFrames);
+    for (UInt32 c = 0; c < out_bl.mNumberBuffers; ++c) {
+        if (auto* data = static_cast<float*>(out_bl.mBuffers[c].mData))
+            std::memset(data, 0, sizeof(float) * inNumberFrames);
     }
     ioActionFlags |= kAudioUnitRenderAction_OutputIsSilence;
 
