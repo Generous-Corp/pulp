@@ -99,12 +99,31 @@ LowerabilityProof lowerability_of(
     const std::function<const CustomNodeType*(std::string_view type_id, int version)>&
         resolve_custom = {});
 
+// Per-Custom-node lifecycle hooks captured at bake() from the node's registered
+// type + live instance. prepare() runs them (control thread) so a re-prepare is a
+// real re-init boundary: the instance is re-prepared at the HOST's actual
+// rate/block (not whatever the source graph — or load_baked's nominal
+// 48k/512 — last used) and its DSP state is reset, honoring the "starts a
+// fresh stream" contract above. Either fn may be empty (type registered no
+// such hook); each closure holds the instance shared_ptr, so it is also a
+// keepalive.
+struct CustomNodeLifecycle {
+    std::function<void(double sample_rate, int max_block)> prepare;
+    std::function<void()> reset;
+};
+
 // A SignalGraph frozen into a shippable Processor. Owns the reconstructed plan
 // (nodes + connections), its own heap-stable Gain atomics, and the canonical
 // executor's serialized routing snapshot + scratch pool. process() bridges the
 // host's main in/out buffers into a ProcessBlock and runs the frozen plan via
 // GraphRuntimeExecutor::process_routed(). It must NOT define process_routed /
 // process_parallel (single-backend invariant) — only call them.
+//
+// In-place hosts: process() supports input and output views over the SAME
+// memory (Logic-style aliased buffers). process_routed zeroes the main output
+// bus before gathering AudioInput, which would destroy an aliased input — so
+// process() detects overlap and reads the input from a prepare()-sized scratch
+// copy instead (audio thread does only the memcpy; no allocation).
 class BakedGraphProcessor : public pulp::format::Processor {
 public:
     BakedGraphProcessor(std::vector<GraphNode> nodes,
@@ -119,7 +138,13 @@ public:
                         // baked Processor OWNS the instance keepalive — no external
                         // state. Empty for a custom-free graph.
                         std::unordered_map<NodeId, CustomNodeProcessFn>
-                            custom_processors = {});
+                            custom_processors = {},
+                        // Per-node lifecycle hooks (NodeId → prepare/reset) for
+                        // stateful Custom instances, run by prepare() so a
+                        // re-prepare re-inits the instance's DSP state at the
+                        // host's real rate/block. Empty for stateless nodes.
+                        std::unordered_map<NodeId, CustomNodeLifecycle>
+                            custom_lifecycles = {});
 
     pulp::format::PluginDescriptor descriptor() const override;
     void define_parameters(pulp::state::StateStore& store) override;
@@ -156,6 +181,18 @@ private:
     // custom-free graph; prepare() binds custom_ctx_ from custom_processors_.
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors_;
     std::vector<CustomBindingContext> custom_ctx_;
+    // Per-node stateful-Custom lifecycle hooks captured at bake(); prepare()
+    // runs each (prepare at the host's real rate/block, then reset) so stale
+    // instance state — e.g. a delay line's contents — never survives a
+    // re-prepare. Control-thread only, like the graph's own instance prepare.
+    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles_;
+
+    // In-place-host guard scratch: when the host's input channels alias its
+    // output channels, process() copies the input here BEFORE process_routed
+    // zeroes the output bus. Sized in prepare() (input_channels_ × max block);
+    // the audio thread only detects overlap and memcpys — no allocation.
+    std::vector<float> input_alias_scratch_;
+    std::vector<float*> input_alias_ptrs_;
 
     std::string name_;
     std::string bundle_id_;

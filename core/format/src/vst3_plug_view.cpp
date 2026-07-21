@@ -7,6 +7,9 @@
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/view/input_events.hpp>
+#include <pulp/view/text_editor.hpp>
+#include <pluginterfaces/base/keycodes.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -83,21 +86,14 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
         return result;
     }
 
-    // Resize contract (ViewSize):
-    //   - not resizable (min==0): pin the design viewport at preferred so an
-    //     off-size DAW pane letterbox-scales the content (today's behavior).
-    //   - resizable + aspect_ratio>0: pin viewport + lock aspect (design-import
-    //     path). checkSizeConstraint snaps to the design aspect.
-    //   - resizable + aspect_ratio==0: honor "free drag within [min,max]" —
-    //     NO design viewport, NO aspect lock; the root reflows via Yoga at the
-    //     host size and checkSizeConstraint only clamps min/max.
-    // `resizable` follows CLAP's shipped convention (min_width>0 && min_height>0).
+    // Resize contract: the shared should_pin_design_viewport() predicate
+    // (plugin_descriptor.hpp) — pin+lock unless the plugin opted into free
+    // drag (resizable + aspect_ratio==0), where checkSizeConstraint only
+    // clamps min/max and the root reflows via Yoga at the host size.
     //
     // Set AFTER attach succeeds so a failed attach doesn't install the
     // pointTransform block on a host that's about to be destroyed.
-    const bool resizable = hints.min_width > 0 && hints.min_height > 0;
-    const bool free_resize = resizable && hints.aspect_ratio <= 0.0;
-    if (hints.preferred_width > 0 && hints.preferred_height > 0 && !free_resize) {
+    if (should_pin_design_viewport(hints)) {
         editor_host_->set_design_viewport(
             static_cast<float>(hints.preferred_width),
             static_cast<float>(hints.preferred_height));
@@ -220,6 +216,32 @@ tresult PLUGIN_API PulpPlugView::checkSizeConstraint(ViewRect* rect) {
 
     rect->right = rect->left + w;
     rect->bottom = rect->top + h;
+    return kResultTrue;
+}
+
+tresult PLUGIN_API PulpPlugView::onKeyDown(char16 key, int16 keyCode, int16 modifiers) {
+    // REAPER with "send all keyboard input to plug-in" OFF (its default) offers
+    // keys through the IPlugView pipeline BEFORE its own accelerator table.
+    // Returning kResultFalse for Space is what hands it to transport — the
+    // NSView key path (keyDown:/performKeyEquivalent:) never sees the event at
+    // all, so no view-host-side routing can save a focused chat field. Space is
+    // also the ONLY key REAPER delivers well-formed here (host_quirks:
+    // reaper_keyboard_only_space), so the handler is deliberately scoped to it;
+    // every other key keeps its existing NSView-path behavior.
+    if (key != static_cast<char16>(u' ') && keyCode != KEY_SPACE) return kResultFalse;
+    // Cmd/Ctrl-Space is a host/system chord (e.g. Spotlight), never text.
+    if ((modifiers & (kCommandKey | kControlKey)) != 0) return kResultFalse;
+    view::View* root = bridge_.view();
+    if (!root) return kResultFalse;
+    // Per-root focus slot (never allocate from the key path). Only a focused
+    // TEXT field consumes Space; with none focused the host keeps transport.
+    auto* state = root->existing_interaction();
+    auto* te = state ? dynamic_cast<view::TextEditor*>(state->focused_input) : nullptr;
+    if (!te) return kResultFalse;
+    view::TextInputEvent ev;
+    ev.text = " ";
+    te->on_text_input(ev);
+    root->request_repaint();
     return kResultTrue;
 }
 

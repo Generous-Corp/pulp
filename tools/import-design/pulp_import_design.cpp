@@ -3155,6 +3155,14 @@ int main(int argc, char* argv[]) {
     pulp::import_design::resolve_sprite_skins(
         ir, input_file, use_silver_knobs, skin_faders, skin_meters);
 
+    // Self-contained JS export: copy referenced assets to `<outdir>/assets/`
+    // and rewrite the IR to output-relative paths BEFORE codegen, so the
+    // emitted setImageSource/registerFont calls survive the decode scratch
+    // dir's deletion. Skipped for --dry-run (must not write files) and for
+    // baked emits (cpp/swiftui codegen does not consume asset paths).
+    if (!dry_run && artifact_emit == ArtifactEmit::js)
+        pulp::import_design::localize_ir_assets(ir, output_file);
+
     std::vector<pulp::view::FidelityIssue> fidelity_issues;
     opts.fidelity_report = &fidelity_issues;
     auto js = generate_pulp_js(ir, opts);
@@ -3418,6 +3426,8 @@ int main(int argc, char* argv[]) {
         StateStore render_store;
         ScriptEngine render_engine;
         WidgetBridge render_bridge(render_engine, render_root, render_store);
+        // The generated JS references its assets relative to the output file.
+        render_bridge.set_script_base_dir(fs::path(output_file).parent_path());
         try {
             render_bridge.load_script(js);
         } catch (const std::exception& e) {

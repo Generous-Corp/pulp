@@ -53,6 +53,46 @@ TEST_CASE("AU v2 advertises a unique, resolvable Cocoa view factory",
     CFRelease(info.mCocoaAUViewClass[0]);
 }
 
+TEST_CASE("AU v2 editor pins the design viewport per the shared resize contract",
+          "[auv2][cocoa][editor][resize]") {
+    // Regression coverage for the Logic-clipping bug: the AU v2 Cocoa view
+    // never called set_design_viewport, so a DAW resize clipped the fixed-size
+    // tree while VST3/AUv3 scaled it. The pin decision is the shared
+    // should_pin_design_viewport() predicate (also used by PulpPlugView), so
+    // the formats cannot drift again; assert its full three-way contract here.
+    // The set_design_viewport call itself cannot be exercised headlessly —
+    // uiViewForAudioUnit: refuses to build an editor in CI/test environments
+    // (editor_launch_blocked_by_environment) — so the windowed behavior rides
+    // the VST3 resize tests (test_vst3_editor.cpp) as the cross-format
+    // contract, plus manual Logic/auval verification.
+    using pulp::format::ViewSize;
+    using pulp::format::should_pin_design_viewport;
+
+    // Not resizable (min==0): pin at preferred (letterbox scaling).
+    ViewSize fixed{};
+    fixed.preferred_width = 640;
+    fixed.preferred_height = 400;
+    CHECK(should_pin_design_viewport(fixed));
+
+    // Resizable + aspect-locked: pin viewport + aspect (design-import path).
+    ViewSize locked = fixed;
+    locked.min_width = 640;
+    locked.min_height = 400;
+    locked.aspect_ratio = 1.6;
+    CHECK(should_pin_design_viewport(locked));
+
+    // Resizable + aspect==0: free drag — NO pin, the root reflows via Yoga.
+    ViewSize free_drag = locked;
+    free_drag.aspect_ratio = 0.0;
+    CHECK_FALSE(should_pin_design_viewport(free_drag));
+
+    // Degenerate preferred size: never pin (avoids a 0-aspect viewport).
+    ViewSize degenerate{};
+    degenerate.preferred_width = 0;
+    degenerate.preferred_height = 0;
+    CHECK_FALSE(should_pin_design_viewport(degenerate));
+}
+
 #else
 
 TEST_CASE("AU v2 Cocoa view advertisement is mac-only", "[auv2][cocoa]") {

@@ -65,6 +65,7 @@
 #include <pulp/state/store.hpp>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -117,41 +118,31 @@ inline void zero_f64(double* dst, std::uint32_t count) noexcept {
 // ---------------------------------------------------------------------------
 
 /// Format-neutral transport snapshot, already decoded from a host playhead into
-/// canonical units (quarter-note beats, samples, real BPM). Each `has_*` flag
-/// says whether the host actually supplied that field this block; an unset
-/// field leaves the corresponding `ProcessContext` value at its default so an
-/// adapter that never populates it keeps the pre-extension behavior exactly.
-///
-/// `valid == false` means "the host provided no transport at all" (e.g. CLAP's
-/// `process->transport == nullptr`): the mapper leaves every transport field at
-/// its `ProcessContext` default and only runs the change-flag diff.
+/// canonical units (quarter-note beats, samples, real BPM). `validity` says
+/// which values the host actually supplied this block; an unavailable field
+/// leaves the corresponding `ProcessContext` value at its compatibility
+/// default. An empty mask represents a host that supplied no transport.
 struct HostTransport {
-    bool valid = false;
+    TransportValidity validity{};
 
     bool is_playing = false;
     bool is_recording = false;
     bool is_looping = false;
 
-    bool has_tempo = false;
     double tempo_bpm = 120.0;
 
-    bool has_beats = false;
     double position_beats = 0.0;  ///< quarter notes
 
-    bool has_samples = false;
     std::int64_t position_samples = 0;
 
-    bool has_time_sig = false;
     int time_sig_numerator = 4;
     int time_sig_denominator = 4;
 
     double loop_start_beats = 0.0;  ///< meaningful only when is_looping
     double loop_end_beats = 0.0;
 
-    /// A host that publishes a precomputed bar (VST3 `barPositionMusic`, CLAP
-    /// `bar_number`) sets `has_host_bar` and `host_bar`; otherwise the mapper
-    /// derives the bar from beats + time signature.
-    bool has_host_bar = false;
+    /// A host that publishes a precomputed bar sets `TransportField::Bar`;
+    /// otherwise the mapper derives it from valid beats and time signature.
     std::int64_t host_bar = 0;
 
     std::int64_t host_time_ns = 0;
@@ -170,30 +161,42 @@ struct HostTransport {
 /// uses them to tell a continuous beat advance from a seek.
 inline void apply_host_transport(ProcessContext& ctx, const HostTransport& transport,
                                  detail::PlayheadSnapshot& snapshot) noexcept {
-    if (transport.valid) {
+    ctx.transport_validity = transport.validity;
+    if (transport.validity.has(TransportField::Playing))
         ctx.is_playing = transport.is_playing;
+    if (transport.validity.has(TransportField::Recording))
         ctx.is_recording = transport.is_recording;
+    if (transport.validity.has(TransportField::Looping))
         ctx.is_looping = transport.is_looping;
-        if (transport.has_tempo) ctx.tempo_bpm = transport.tempo_bpm;
-        if (transport.has_beats) ctx.position_beats = transport.position_beats;
-        if (transport.has_samples) ctx.position_samples = transport.position_samples;
-        if (transport.has_time_sig) {
-            ctx.time_sig_numerator = transport.time_sig_numerator;
-            ctx.time_sig_denominator = transport.time_sig_denominator;
-        }
-        if (transport.is_looping) {
-            ctx.loop_start_beats = transport.loop_start_beats;
-            ctx.loop_end_beats = transport.loop_end_beats;
-        }
-        ctx.host_time_ns = transport.host_time_ns;
-        ctx.frame_rate = transport.frame_rate;
-        if (transport.has_host_bar) {
-            ctx.bar = transport.host_bar;
-        } else {
-            detail::derive_bar_from_beats(ctx);
-        }
+    if (transport.validity.has(TransportField::Tempo))
+        ctx.tempo_bpm = transport.tempo_bpm;
+    if (transport.validity.has(TransportField::BeatPosition))
+        ctx.position_beats = transport.position_beats;
+    if (transport.validity.has(TransportField::SamplePosition))
+        ctx.position_samples = transport.position_samples;
+    if (transport.validity.has(TransportField::TimeSignature)) {
+        ctx.time_sig_numerator = transport.time_sig_numerator;
+        ctx.time_sig_denominator = transport.time_sig_denominator;
     }
-    detail::compute_playhead_changes(ctx, snapshot);
+    if (transport.validity.has(TransportField::LoopRange)) {
+        ctx.loop_start_beats = transport.loop_start_beats;
+        ctx.loop_end_beats = transport.loop_end_beats;
+    }
+    if (transport.validity.has(TransportField::HostTime))
+        ctx.host_time_ns = transport.host_time_ns;
+    if (transport.validity.has(TransportField::FrameRate))
+        ctx.frame_rate = transport.frame_rate;
+    if (transport.validity.has(TransportField::Bar)) {
+        ctx.bar = transport.host_bar;
+    } else if (transport.validity.has(TransportField::BeatPosition) &&
+               transport.validity.has(TransportField::TimeSignature) &&
+               std::isfinite(ctx.position_beats) &&
+               ctx.time_sig_numerator > 0 && ctx.time_sig_denominator > 0) {
+        detail::derive_bar_from_beats(ctx);
+        ctx.transport_validity.set(TransportField::Bar);
+    }
+    detail::compute_playhead_changes(
+        ctx, snapshot, detail::TransportDiffMode::FieldValidity);
 }
 
 // ---------------------------------------------------------------------------

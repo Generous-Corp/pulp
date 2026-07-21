@@ -1,7 +1,10 @@
-// W3C Design Tokens (DTCG) emitter for IRTokens
+// W3C Design Tokens (DTCG) emitter + validator for IRTokens
 // (core/view/src/design_tokens_w3c.cpp). Every case round-trips the emitted
 // text through choc::json::parse, so shape assertions double as
-// valid-JSON proof.
+// valid-JSON proof. String policy under test: confident font-family names
+// promote to $type "fontFamily"; every other string is parked losslessly
+// under the document-root $extensions["dev.pulp.nonStandardTokens"]; no
+// token ever carries a non-standard $type.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -10,13 +13,24 @@
 
 #include <choc/text/choc_JSON.h>
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 using pulp::view::IRTokenIdentity;
 using pulp::view::IRTokens;
 using pulp::view::to_w3c_tokens_json;
+using pulp::view::validate_dtcg;
 
 static choc::value::Value emit_and_parse(const IRTokens& tokens, bool pretty = true) {
     auto json = to_w3c_tokens_json(tokens, pretty);
     return choc::json::parse(json);  // throws on invalid JSON
+}
+
+static bool mentions(const std::vector<std::string>& violations, const std::string& needle) {
+    return std::any_of(violations.begin(), violations.end(), [&](const std::string& v) {
+        return v.find(needle) != std::string::npos;
+    });
 }
 
 TEST_CASE("color token emits DTCG $type/$value", "[design-tokens][w3c][import-design]") {
@@ -43,15 +57,74 @@ TEST_CASE("dimension token emits the DTCG value/unit object", "[design-tokens][w
     CHECK(std::string(token["$value"]["unit"].toString()) == "px");
 }
 
-TEST_CASE("string token emits $type string", "[design-tokens][w3c][import-design]") {
+TEST_CASE("font-family names promote to $type fontFamily", "[design-tokens][w3c][import-design]") {
     IRTokens tokens;
     tokens.strings["font-family"] = "Inter \"Display\"\n";
+    tokens.strings["typography/body/fontFamily"] = "Plus Jakarta Sans";
+    tokens.strings["font.mono"] = "JetBrains Mono";  // "." segments count too
+    tokens.strings["heading/typeface"] = "Georgia";
 
     auto root = emit_and_parse(tokens);
-    auto token = root["strings"]["font-family"];
-    CHECK(std::string(token["$type"].toString()) == "string");
+    auto direct = root["strings"]["font-family"];
+    CHECK(std::string(direct["$type"].toString()) == "fontFamily");
     // Quotes and the newline must survive escaping + reparse byte-for-byte.
-    CHECK(std::string(token["$value"].toString()) == "Inter \"Display\"\n");
+    CHECK(std::string(direct["$value"].toString()) == "Inter \"Display\"\n");
+    CHECK(std::string(root["strings"]["typography"]["body"]["fontFamily"]["$type"].toString())
+          == "fontFamily");
+    CHECK(std::string(root["strings"]["font.mono"]["$value"].toString()) == "JetBrains Mono");
+    CHECK(std::string(root["strings"]["heading"]["typeface"]["$value"].toString()) == "Georgia");
+    // Nothing here was parked.
+    CHECK_FALSE(root.hasObjectMember("$extensions"));
+}
+
+TEST_CASE("comma-separated font stack emits the DTCG array form", "[design-tokens][w3c][import-design]") {
+    IRTokens tokens;
+    tokens.strings["font/family"] = "Inter, SF Pro Text ,sans-serif";
+
+    auto root = emit_and_parse(tokens);
+    auto value = root["strings"]["font"]["family"]["$value"];
+    REQUIRE(value.isArray());
+    REQUIRE(value.size() == 3);
+    CHECK(std::string(value[0].toString()) == "Inter");
+    CHECK(std::string(value[1].toString()) == "SF Pro Text");  // trimmed
+    CHECK(std::string(value[2].toString()) == "sans-serif");
+}
+
+TEST_CASE("non-font strings park under root $extensions, never dropped",
+          "[design-tokens][w3c][import-design]") {
+    IRTokens tokens;
+    tokens.strings["motion.easing.enter"] = "ease_out_quad";
+    tokens.strings["hero/title"] = "Welcome";
+    IRTokenIdentity id;
+    id.source_id = "VariableID:7:7";
+    id.source_adapter = "figma-plugin";
+    tokens.source_identity["strings.motion.easing.enter"] = id;
+
+    auto root = emit_and_parse(tokens);
+    // No fake token groups: nothing promoted, so no "strings" group at all.
+    CHECK_FALSE(root.hasObjectMember("strings"));
+    auto bucket = root["$extensions"]["dev.pulp.nonStandardTokens"];
+    REQUIRE(bucket.isObject());
+    auto easing = bucket["motion.easing.enter"];
+    CHECK(std::string(easing["value"].toString()) == "ease_out_quad");
+    CHECK(std::string(easing["id"].toString()) == "VariableID:7:7");
+    CHECK(std::string(easing["adapter"].toString()) == "figma-plugin");
+    CHECK_FALSE(easing.hasObjectMember("collection"));  // empty subfields omitted
+    CHECK(std::string(bucket["hero/title"]["value"].toString()) == "Welcome");
+}
+
+TEST_CASE("mixed strings split into fontFamily tokens and parked extras",
+          "[design-tokens][w3c][import-design]") {
+    IRTokens tokens;
+    tokens.strings["font.family"] = "Inter";
+    tokens.strings["motion.easing.exit"] = "ease_in_quad";
+
+    auto root = emit_and_parse(tokens);
+    CHECK(std::string(root["strings"]["font.family"]["$type"].toString()) == "fontFamily");
+    CHECK_FALSE(root["strings"].hasObjectMember("motion.easing.exit"));
+    CHECK(std::string(root["$extensions"]["dev.pulp.nonStandardTokens"]
+                          ["motion.easing.exit"]["value"].toString())
+          == "ease_in_quad");
 }
 
 TEST_CASE("slash-separated names nest into DTCG groups", "[design-tokens][w3c][import-design]") {
@@ -152,4 +225,94 @@ TEST_CASE("output parses as JSON in both pretty and compact modes", "[design-tok
 
     // Deterministic output across calls despite unordered_map sources.
     CHECK(to_w3c_tokens_json(tokens) == to_w3c_tokens_json(tokens));
+}
+
+// ── validate_dtcg ───────────────────────────────────────────────────────
+
+TEST_CASE("validate_dtcg passes all emitter output", "[design-tokens][w3c][import-design]") {
+    IRTokens tokens;
+    tokens.colors["brand"] = "#101010";           // merge: token + group prefix
+    tokens.colors["brand/primary"] = "#112233";
+    tokens.dimensions["spacing/sm"] = 4.0f;
+    tokens.strings["font/family"] = "Inter, sans-serif";  // fontFamily array form
+    tokens.strings["font.mono"] = "JetBrains Mono";       // fontFamily plain
+    tokens.strings["motion.easing.enter"] = "ease_out_quad";  // parked
+    tokens.strings["hero/title"] = "Welcome";                 // parked
+    IRTokenIdentity id;
+    id.source_id = "VariableID:1:1";
+    id.source_adapter = "figma-plugin";
+    tokens.source_identity["colors.brand/primary"] = id;
+    tokens.source_identity["strings.motion.easing.enter"] = id;
+
+    auto violations = validate_dtcg(to_w3c_tokens_json(tokens));
+    for (const auto& v : violations) UNSCOPED_INFO(v);
+    CHECK(violations.empty());
+
+    CHECK(validate_dtcg(to_w3c_tokens_json(IRTokens{})).empty());
+    CHECK(validate_dtcg(to_w3c_tokens_json(tokens, false)).empty());
+}
+
+TEST_CASE("validate_dtcg accepts inherited group $type", "[design-tokens][w3c][import-design]") {
+    auto violations = validate_dtcg(R"({
+      "palette": {"$type": "color", "primary": {"$value": "#112233"}}
+    })");
+    for (const auto& v : violations) UNSCOPED_INFO(v);
+    CHECK(violations.empty());
+}
+
+TEST_CASE("validate_dtcg reports a token with no resolvable $type", "[design-tokens][w3c][import-design]") {
+    auto violations = validate_dtcg(R"({"a": {"$value": "#ffffff"}})");
+    REQUIRE_FALSE(violations.empty());
+    CHECK(mentions(violations, "no resolvable $type"));
+    CHECK(mentions(violations, "'a'"));
+}
+
+TEST_CASE("validate_dtcg reports a non-standard $type", "[design-tokens][w3c][import-design]") {
+    auto violations = validate_dtcg(R"({"a": {"$type": "string", "$value": "x"}})");
+    REQUIRE_FALSE(violations.empty());
+    CHECK(mentions(violations, "non-standard $type 'string'"));
+}
+
+TEST_CASE("validate_dtcg reports unknown reserved $-keys", "[design-tokens][w3c][import-design]") {
+    auto violations = validate_dtcg(R"({
+      "g": {"$foo": 1, "a": {"$type": "color", "$value": "#ffffff"}}
+    })");
+    REQUIRE_FALSE(violations.empty());
+    CHECK(mentions(violations, "unknown reserved key '$foo'"));
+}
+
+TEST_CASE("validate_dtcg reports a dimension $value that is a bare string", "[design-tokens][w3c][import-design]") {
+    auto violations = validate_dtcg(R"({"d": {"$type": "dimension", "$value": "12px"}})");
+    REQUIRE_FALSE(violations.empty());
+    CHECK(mentions(violations, "dimension $value must be an object"));
+
+    auto partial = validate_dtcg(R"({"d": {"$type": "dimension", "$value": {"value": "12", "unit": 4}}})");
+    CHECK(mentions(partial, "$value.value must be a number"));
+    CHECK(mentions(partial, "$value.unit must be a string"));
+}
+
+TEST_CASE("validate_dtcg checks color and fontFamily value shapes", "[design-tokens][w3c][import-design]") {
+    CHECK(mentions(validate_dtcg(R"({"c": {"$type": "color", "$value": 7}})"),
+                   "color $value must be a string"));
+    CHECK(mentions(validate_dtcg(R"({"f": {"$type": "fontFamily", "$value": 7}})"),
+                   "fontFamily $value must be a string or array of strings"));
+    CHECK(mentions(validate_dtcg(R"({"f": {"$type": "fontFamily", "$value": ["Inter", 3]}})"),
+                   "fontFamily $value array must contain only strings"));
+    CHECK(validate_dtcg(R"({"f": {"$type": "fontFamily", "$value": ["Inter", "sans-serif"]}})")
+              .empty());
+}
+
+TEST_CASE("validate_dtcg checks $extensions shape and namespacing", "[design-tokens][w3c][import-design]") {
+    CHECK(mentions(validate_dtcg(R"({"g": {"$extensions": 4}})"),
+                   "$extensions must be an object"));
+    CHECK(mentions(validate_dtcg(R"({"g": {"$extensions": {"pulp": {}}}})"),
+                   "not namespaced"));
+    CHECK(validate_dtcg(R"({"g": {"$extensions": {"dev.pulp.source": {}}}})").empty());
+}
+
+TEST_CASE("validate_dtcg reports non-object members and bad input", "[design-tokens][w3c][import-design]") {
+    CHECK(mentions(validate_dtcg(R"({"g": {"a": 5}})"),
+                   "neither a token nor a group"));
+    CHECK(mentions(validate_dtcg("not json at all"), "invalid JSON"));
+    CHECK(mentions(validate_dtcg(R"([1, 2, 3])"), "root must be an object"));
 }

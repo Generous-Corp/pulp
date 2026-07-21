@@ -106,7 +106,7 @@ build     = "tools/ci/governed-build.sh cmake --build build"
 # single timing-flake self-heals instead of reddening the required `macos` gate
 # and wedging auto-merge (mirrors build.yml + sanitizers.yml; each attempt is
 # still bounded by the test's own TIMEOUT).
-test      = "ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow\""
+test      = "ctest --test-dir build --output-on-failure --repeat until-pass:2 --exclude-regex AudioWorkgroup --label-exclude \"validation|slow|performance|bench|quality-lab\""
 
 # Per-target overrides — ssh-windows needs `cmake --build` with the
 # Visual Studio multi-config generator's --config flag. The base

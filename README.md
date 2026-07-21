@@ -1,8 +1,8 @@
 # Pulp
 
-[![SDK](https://img.shields.io/github/v/release/danielraffel/pulp?label=SDK%20%2F%20CLI)](https://github.com/danielraffel/pulp/releases)
-[![Claude plugin](https://img.shields.io/github/v/tag/danielraffel/pulp?filter=plugin-v*&label=Claude%20plugin)](https://github.com/danielraffel/pulp/tags)
-[![Coverage](https://codecov.io/gh/danielraffel/pulp/branch/main/graph/badge.svg)](https://app.codecov.io/gh/danielraffel/pulp)
+[![SDK](https://img.shields.io/github/v/release/Generous-Corp/pulp?label=SDK%20%2F%20CLI)](https://github.com/Generous-Corp/pulp/releases)
+[![Claude plugin](https://img.shields.io/github/v/tag/Generous-Corp/pulp?filter=plugin-v*&label=Claude%20plugin)](https://github.com/Generous-Corp/pulp/tags)
+[![Coverage](https://codecov.io/gh/Generous-Corp/pulp/branch/main/graph/badge.svg)](https://app.codecov.io/gh/Generous-Corp/pulp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
 A cross-platform audio plugin and application framework. MIT licensed, C++20 core, Swift on Apple, JS-scripted GPU UIs.
@@ -32,7 +32,7 @@ For an additional layer of security, you can download the installer and verify i
 (
   set -e
   curl -fLso install.sh https://www.generouscorp.com/pulp/install.sh
-  curl -fLso SHA256SUMS https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS
+  curl -fLso SHA256SUMS https://raw.githubusercontent.com/Generous-Corp/pulp/main/tools/install/SHA256SUMS
   if command -v sha256sum >/dev/null; then
     sha256sum -c SHA256SUMS --ignore-missing
   else
@@ -46,7 +46,7 @@ For an additional layer of security, you can download the installer and verify i
 
 ```powershell
 Invoke-WebRequest https://www.generouscorp.com/pulp/install.ps1 -OutFile install.ps1
-Invoke-WebRequest https://raw.githubusercontent.com/danielraffel/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
+Invoke-WebRequest https://raw.githubusercontent.com/Generous-Corp/pulp/main/tools/install/SHA256SUMS -OutFile SHA256SUMS
 $expected = (Select-String -Path .\SHA256SUMS -Pattern ' install\.ps1$').Line.Split()[0]
 $actual = (Get-FileHash .\install.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "Checksum mismatch for install.ps1" }
@@ -66,9 +66,9 @@ release assets. This path requires the GitHub CLI:
 ```bash
 version=0.614.0
 asset=pulp-darwin-arm64.tar.gz
-gh release download "v${version}" -R danielraffel/pulp -p "$asset"
-gh release verify "v${version}" -R danielraffel/pulp
-gh release verify-asset "v${version}" "$asset" -R danielraffel/pulp
+gh release download "v${version}" -R Generous-Corp/pulp -p "$asset"
+gh release verify "v${version}" -R Generous-Corp/pulp
+gh release verify-asset "v${version}" "$asset" -R Generous-Corp/pulp
 ```
 
 These layers answer different questions. A verified commit or tag means GitHub
@@ -83,7 +83,7 @@ clearer.
 ### Optional: install the Claude Code plugin
 
 ```bash
-claude plugin marketplace add danielraffel/pulp && claude plugin install pulp
+claude plugin marketplace add Generous-Corp/pulp && claude plugin install pulp
 ```
 
 <details>
@@ -147,7 +147,7 @@ Three commands from zero to a working native plugin for your platform.
 <summary><strong>Build from source</strong> (contributors)</summary>
 
 ```bash
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 ./setup.sh                                    # macOS / Linux bootstrap
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release  # configure
@@ -158,7 +158,7 @@ ctest --test-dir build --output-on-failure    # test
 On Windows, use the supported PowerShell bootstrap before configuring/building:
 
 ```powershell
-git clone https://github.com/danielraffel/pulp.git
+git clone https://github.com/Generous-Corp/pulp.git
 cd pulp
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```

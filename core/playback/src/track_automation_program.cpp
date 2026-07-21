@@ -7,17 +7,16 @@ namespace pulp::playback {
 namespace {
 
 runtime::Result<std::shared_ptr<const TrackAutomationProgram>, TrackAutomationProgramError>
-fail(TrackAutomationProgramErrorCode code, timeline::ItemId track,
-     timeline::ItemId lane = {}, timeline::ItemId related_lane = {},
-     timeline::DeviceParameterTarget target = {}) {
+fail(TrackAutomationProgramErrorCode code, timeline::ItemId track, timeline::ItemId lane = {},
+     timeline::ItemId related_lane = {}, timeline::DeviceParameterTarget target = {}) {
     return runtime::Err(TrackAutomationProgramError{code, track, lane, related_lane, target});
 }
 
 bool target_less(const AutomationProgram* lhs, const AutomationProgram* rhs) noexcept {
     const auto lhs_target = lhs->target();
     const auto rhs_target = rhs->target();
-    if (lhs_target.device_id != rhs_target.device_id)
-        return lhs_target.device_id < rhs_target.device_id;
+    if (lhs_target.device_placement_id != rhs_target.device_placement_id)
+        return lhs_target.device_placement_id < rhs_target.device_placement_id;
     if (lhs_target.param_id != rhs_target.param_id)
         return lhs_target.param_id < rhs_target.param_id;
     return lhs->lane_id() < rhs->lane_id();
@@ -38,9 +37,9 @@ TrackAutomationProgram::TrackAutomationProgram(
     : track_id_(track_id), tempo_map_(std::move(tempo_map)), programs_(std::move(programs)) {}
 
 runtime::Result<std::shared_ptr<const TrackAutomationProgram>, TrackAutomationProgramError>
-TrackAutomationProgram::create(
-    timeline::ItemId track_id, std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
-    std::vector<std::shared_ptr<const AutomationProgram>> programs) {
+TrackAutomationProgram::create(timeline::ItemId track_id,
+                               std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
+                               std::vector<std::shared_ptr<const AutomationProgram>> programs) {
     if (!track_id.valid())
         return fail(TrackAutomationProgramErrorCode::InvalidTrackId, track_id);
     if (!tempo_map)
@@ -82,11 +81,12 @@ TrackAutomationProgram::create(
                         by_target[index]->target());
     }
 
-    return runtime::Ok(std::shared_ptr<const TrackAutomationProgram>(new TrackAutomationProgram(
-        track_id, std::move(tempo_map), std::move(programs))));
+    return runtime::Ok(std::shared_ptr<const TrackAutomationProgram>(
+        new TrackAutomationProgram(track_id, std::move(tempo_map), std::move(programs))));
 }
 
-const AutomationProgram* TrackAutomationProgram::find_lane(timeline::ItemId lane_id) const noexcept {
+const AutomationProgram*
+TrackAutomationProgram::find_lane(timeline::ItemId lane_id) const noexcept {
     const auto found = std::lower_bound(
         programs_.begin(), programs_.end(), lane_id,
         [](const auto& program, timeline::ItemId id) { return program->lane_id() < id; });

@@ -304,6 +304,9 @@ int main(int argc, char* argv[]) {
 
     auto engine = make_engine();
     auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
+    // Import artifacts reference their assets relative to the script file
+    // (assets/<file> next to the .js); resolve against its directory.
+    bridge->set_script_base_dir(js_path.parent_path());
     if (!automation.ai_cli.empty()) {
         bridge->set_ai_cli_command(automation.ai_cli);
     } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {

@@ -176,8 +176,14 @@ LowerResult bake(const SignalGraph& graph) {
     // For each lowerable Custom node, capture a COPY of the live resolved process
     // callback — it captured the custom instance shared_ptr by value, so the copy
     // carries the instance keepalive into the baked Processor (self-contained, no
-    // reference back into the source graph).
+    // reference back into the source graph). For a STATEFUL node (live instance),
+    // also capture the type's prepare/reset hooks bound to that instance, so the
+    // baked Processor's prepare() can re-init the instance's DSP state at the
+    // host's real rate/block — otherwise stale state (e.g. a delay line's
+    // contents) would survive into the baked stream, breaking the fresh-stream
+    // contract documented in the header.
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles;
     const auto [input_channels, output_channels] = derive_bus_arity(graph);
     for (const auto& src : graph.nodes()) {
         GraphNode n;
@@ -192,6 +198,24 @@ LowerResult bake(const SignalGraph& graph) {
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
                 custom_processors[src.id] = *fn;
             }
+            if (src.custom_instance) {
+                const CustomNodeType* type =
+                    graph.custom_node_type(src.custom_type_id, src.custom_type_version);
+                if (type != nullptr && (type->prepare || type->reset)) {
+                    CustomNodeLifecycle lc;
+                    auto inst = src.custom_instance;  // shared keepalive per closure
+                    if (type->prepare) {
+                        lc.prepare = [inst, fn = type->prepare](double sample_rate,
+                                                                int max_block) {
+                            fn(inst.get(), sample_rate, max_block);
+                        };
+                    }
+                    if (type->reset) {
+                        lc.reset = [inst, fn = type->reset]() { fn(inst.get()); };
+                    }
+                    custom_lifecycles[src.id] = std::move(lc);
+                }
+            }
         }
         nodes.push_back(std::move(n));
     }
@@ -201,7 +225,8 @@ LowerResult bake(const SignalGraph& graph) {
         std::move(nodes), std::move(conns),
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
-        "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors));
+        "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors),
+        std::move(custom_lifecycles));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
@@ -353,10 +378,12 @@ BakedGraphProcessor::BakedGraphProcessor(
     int output_channels,
     std::string name,
     std::string bundle_id,
-    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors)
+    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors,
+    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       custom_processors_(std::move(custom_processors)),
+      custom_lifecycles_(std::move(custom_lifecycles)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
       input_channels_(input_channels),
@@ -393,6 +420,21 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
         gains_.push_back(std::make_unique<std::atomic<float>>(node.gain));
     }
 
+    const int max_block = context.max_buffer_size;
+    if (max_block <= 0) return;
+
+    // Re-init each stateful Custom instance BEFORE the snapshot goes live,
+    // mirroring SignalGraph::prepare()'s own instance step: re-run the type's
+    // prepare at the host's REAL rate/block (bake / load_baked may have prepared
+    // at a different or nominal rate), then reset so no stale DSP state — e.g. a
+    // delay line still holding the source graph's audio — leaks into the baked
+    // stream. prepare() is a re-init boundary; the header documents that a baked
+    // Processor starts from zero. Control-thread only, never on the audio path.
+    for (auto& [id, lc] : custom_lifecycles_) {
+        if (lc.prepare) lc.prepare(context.sample_rate, max_block);
+        if (lc.reset) lc.reset();
+    }
+
     // Build the canonical executor's serialized routing snapshot for the frozen
     // plan, resolving each Gain node to its owned atomic and each lowerable Custom
     // node to its captured process callback. No Plugin nodes exist in the lowerable
@@ -416,12 +458,24 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     // Size the scratch pool from the snapshot exactly as
     // build_signal_graph_executor_routing() does (slot count × max block, plus
     // per-connection PDC rings), so process_routed() is allocation-free.
-    const int max_block = context.max_buffer_size;
-    if (max_block <= 0) return;
     if (!pool_.reset(snapshot_.buffer_slot_count(),
                      static_cast<std::uint32_t>(max_block),
                      snapshot_.buffer_assignment().connection_delay_samples)) {
         return;
+    }
+
+    // Size the in-place-host input scratch (one contiguous block, per-channel
+    // pointers into it) so process() can rescue an aliased input with only a
+    // copy_n on the audio thread. Sized for the descriptor's input bus — the
+    // AudioInput gather never reads channels beyond input_channels_.
+    input_alias_scratch_.assign(static_cast<std::size_t>(input_channels_) *
+                                    static_cast<std::size_t>(max_block),
+                                0.0f);
+    input_alias_ptrs_.resize(static_cast<std::size_t>(input_channels_));
+    for (int c = 0; c < input_channels_; ++c) {
+        input_alias_ptrs_[static_cast<std::size_t>(c)] =
+            input_alias_scratch_.data() +
+            static_cast<std::size_t>(c) * static_cast<std::size_t>(max_block);
     }
 
     prepared_max_block_ = max_block;
@@ -445,12 +499,49 @@ void BakedGraphProcessor::process(
         return;
     }
 
+    // In-place hosts (Logic AUv2, some AUv3) hand process() input and output
+    // views over the SAME memory. process_routed zeroes the main output bus
+    // BEFORE its AudioInput gather reads the input bus, which would destroy an
+    // aliased input and emit silence — so detect any input channel overlapping
+    // any output channel and, when found, read the input from the scratch copy
+    // sized in prepare(). Audio thread does only the pointer compares and the
+    // copy_n: no allocation. Handles mono, multi-channel, and differing in/out
+    // channel counts (the gather never reads past input_channels_, and channels
+    // the view doesn't carry are zero-filled by the gather exactly as before).
+    const std::size_t in_channels = audio_input.num_channels();
+    const std::size_t out_channels = audio_output.num_channels();
+    bool aliased = false;
+    for (std::size_t i = 0; i < in_channels && !aliased; ++i) {
+        const auto in_begin =
+            reinterpret_cast<std::uintptr_t>(audio_input.channel_ptr(i));
+        const auto in_end = in_begin + frames * sizeof(float);
+        for (std::size_t o = 0; o < out_channels; ++o) {
+            const auto out_begin =
+                reinterpret_cast<std::uintptr_t>(audio_output.channel_ptr(o));
+            const auto out_end = out_begin + frames * sizeof(float);
+            if (in_begin < out_end && out_begin < in_end) {
+                aliased = true;
+                break;
+            }
+        }
+    }
+    pulp::audio::BufferView<const float> input_view = audio_input;
+    if (aliased) {
+        const std::size_t copy_channels =
+            std::min(in_channels, input_alias_ptrs_.size());
+        for (std::size_t c = 0; c < copy_channels; ++c) {
+            std::copy_n(audio_input.channel_ptr(c), frames, input_alias_ptrs_[c]);
+        }
+        input_view = pulp::audio::BufferView<const float>(
+            input_alias_ptrs_.data(), copy_channels, frames);
+    }
+
     // Bridge the host's main in/out buffers into a ProcessBlock and run the
     // frozen plan through the canonical executor. The bus set + block are
     // stack-built (no allocation); process_routed gathers AudioInput from the
     // main input bus and writes AudioOutput to the main output bus.
     fmt::BusBufferSet buses;
-    buses.add_input("main", audio_input, fmt::BusRole::Main);
+    buses.add_input("main", input_view, fmt::BusRole::Main);
     buses.add_output("main", audio_output, fmt::BusRole::Main);
 
     fmt::ProcessBlock block;

@@ -11,8 +11,8 @@ We welcome contributions. Here's how to get started.
 
 Two high-impact ways to contribute that don't require digging into the framework:
 
-- **[#3040 — Run PulpHostBench in your DAW](https://github.com/danielraffel/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
-- **[#3042 — AAX support: Avid SDK access](https://github.com/danielraffel/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
+- **[#3040 — Run PulpHostBench in your DAW](https://github.com/Generous-Corp/pulp/issues/3040)** — ~30 min per DAW. Install a small plugin, follow a numbered script, attach the resulting log. Graduates DAW-quirk rows from `Speculative` → `Validated`. Priority hosts: Logic, Reaper (CLAP), Live, Bitwig.
+- **[#3042 — AAX support: Avid SDK access](https://github.com/Generous-Corp/pulp/issues/3042)** — Pulp's AAX/ProTools lane is blocked on Avid Developer Program approval. If you have access (or are willing to apply), comment so we can coordinate adapter validation.
 
 ## Contributor expectations
 
@@ -45,7 +45,7 @@ If you're interested in the rationale behind these rules, see [Astral's open-sou
    reads like your bug. It isn't; it's the diff base.
 
    ```bash
-   git remote add upstream https://github.com/danielraffel/pulp.git   # once
+   git remote add upstream https://github.com/Generous-Corp/pulp.git   # once
    git fetch upstream
    git checkout main && git merge --ff-only upstream/main
    git push origin main                    # move your fork's main forward too

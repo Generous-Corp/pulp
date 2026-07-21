@@ -17,6 +17,7 @@ enum class DirtyFlags : std::uint16_t {
     Notes = 1 << 3,
     Added = 1 << 4,
     Removed = 1 << 5,
+    Automation = 1 << 6,
 };
 
 constexpr DirtyFlags operator|(DirtyFlags lhs, DirtyFlags rhs) noexcept {

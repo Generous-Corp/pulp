@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-$Repo = "danielraffel/pulp"
+$Repo = "Generous-Corp/pulp"
 $InstallDir = if ($env:PULP_INSTALL_DIR) { $env:PULP_INSTALL_DIR } else { "$env:USERPROFILE\.pulp\bin" }
 $Version = if ($env:PULP_VERSION) { $env:PULP_VERSION } else { "latest" }
 

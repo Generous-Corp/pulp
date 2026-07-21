@@ -2,6 +2,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
 #include "identity_directory.hpp"
+#include "identity_transition.hpp"
 #include "project_state_access.hpp"
 
 #include <algorithm>
@@ -9,7 +10,6 @@
 #include <limits>
 
 namespace pulp::timeline {
-
 
 namespace {
 
@@ -32,7 +32,6 @@ std::optional<ItemId> first_duplicate(const std::vector<T>& values, IdFn&& id_of
     const auto duplicate = std::adjacent_find(ids.begin(), ids.end());
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
-
 
 } // namespace
 
@@ -254,7 +253,6 @@ Clip::with_playback_properties(ClipPlaybackProperties playback) const {
                            absolute_sample_rate(), content(), playback);
 }
 
-
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -407,12 +405,23 @@ detail::ProjectStateAccess::restore_identities(Project project,
             return !id.valid() || id.value < next;
         };
         if (!entry.item.valid() || entry.item.value >= project.next_item_id() ||
+            !valid_owner(location.parent_id, project.next_item_id()) ||
             !valid_owner(location.sequence_id, project.next_item_id()) ||
             !valid_owner(location.track_id, project.next_item_id()) ||
             !valid_owner(location.clip_id, project.next_item_id()))
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         const auto invalid = ItemId{};
         const auto valid_shape = [&] {
+            // Parent is canonical and, for every kind but AutomationPoint,
+            // recomputable from the item's own coordinates. An AutomationPoint's
+            // parent is its lane, which is not among (sequence, track, clip); it is
+            // carried only in parent_id and is validated by ownership below, never
+            // re-derived from coordinates here (that would be circular).
+            if (location.kind != ItemKind::AutomationPoint &&
+                location.parent_id != immediate_parent_id(location.kind, project.id(),
+                                                          location.sequence_id, location.track_id,
+                                                          location.clip_id))
+                return false;
             switch (location.kind) {
             case ItemKind::Project:
                 return entry.item == project.id() && location.sequence_id == invalid &&
@@ -433,11 +442,24 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.clip_id == entry.item;
             case ItemKind::Note:
                 return location.sequence_id.valid() && location.track_id.valid() &&
-                       location.clip_id.valid() && location.sequence_id != location.track_id &&
+                       location.clip_id.valid() &&
+                       location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
                        entry.item != location.clip_id;
+            case ItemKind::DevicePlacement:
+            case ItemKind::AutomationLane:
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.sequence_id != location.track_id &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       location.clip_id == invalid;
+            case ItemKind::AutomationPoint:
+                // parent_id is the owning lane (validated by ownership below).
+                return location.sequence_id.valid() && location.track_id.valid() &&
+                       location.parent_id.valid() && location.clip_id == invalid &&
+                       entry.item != location.sequence_id && entry.item != location.track_id &&
+                       entry.item != location.parent_id;
             }
             return false;
         }();
@@ -450,26 +472,42 @@ detail::ProjectStateAccess::restore_identities(Project project,
         const auto valid_owners = [&] {
             switch (location.kind) {
             case ItemKind::Project:
+                return true;
             case ItemKind::Asset:
             case ItemKind::Sequence:
-                return true;
+                return owner_is(location.parent_id, ItemKind::Project);
             case ItemKind::Track:
-                return owner_is(location.sequence_id, ItemKind::Sequence);
+                return owner_is(location.parent_id, ItemKind::Sequence);
             case ItemKind::Clip: {
-                const auto* track = find_entry(location.track_id);
-                return owner_is(location.sequence_id, ItemKind::Sequence) && track &&
-                       track->location.kind == ItemKind::Track &&
-                       track->location.sequence_id == location.sequence_id;
+                const auto* track = find_entry(location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
             }
             case ItemKind::Note: {
-                const auto* track = find_entry(location.track_id);
-                const auto* clip = find_entry(location.clip_id);
-                return owner_is(location.sequence_id, ItemKind::Sequence) && track && clip &&
-                       track->location.kind == ItemKind::Track &&
-                       track->location.sequence_id == location.sequence_id &&
-                       clip->location.kind == ItemKind::Clip &&
-                       clip->location.sequence_id == location.sequence_id &&
-                       clip->location.track_id == location.track_id;
+                const auto* clip = find_entry(location.parent_id);
+                if (!clip || clip->location.kind != ItemKind::Clip ||
+                    clip->location.parent_id != location.track_id ||
+                    clip->location.sequence_id != location.sequence_id)
+                    return false;
+                const auto* track = find_entry(clip->location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
+            }
+            case ItemKind::DevicePlacement:
+            case ItemKind::AutomationLane: {
+                const auto* track = find_entry(location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
+            }
+            case ItemKind::AutomationPoint: {
+                const auto* lane = find_entry(location.parent_id);
+                if (!lane || lane->location.kind != ItemKind::AutomationLane ||
+                    lane->location.sequence_id != location.sequence_id ||
+                    lane->location.track_id != location.track_id)
+                    return false;
+                const auto* track = find_entry(lane->location.parent_id);
+                return track && track->location.kind == ItemKind::Track &&
+                       track->location.parent_id == location.sequence_id;
             }
             }
             return false;
@@ -479,10 +517,7 @@ detail::ProjectStateAccess::restore_identities(Project project,
         if (location.active) {
             if (active_index >= active_entries.size() ||
                 active_entries[active_index].item != entry.item ||
-                active_entries[active_index].location.kind != location.kind ||
-                active_entries[active_index].location.sequence_id != location.sequence_id ||
-                active_entries[active_index].location.track_id != location.track_id ||
-                active_entries[active_index].location.clip_id != location.clip_id)
+                active_entries[active_index].location != location)
                 return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
             ++active_index;
         } else if (project.data_->identities.locate(entry.item)) {
@@ -492,11 +527,10 @@ detail::ProjectStateAccess::restore_identities(Project project,
     }
     if (active_index != active_entries.size())
         return fail<Project>(ModelErrorCode::InvalidSchemaIdentity);
-    project.data_ = std::make_shared<const Project::Data>(
-        Project::Data{project.data_->id, project.data_->name, project.data_->next_item_id,
-                      project.data_->root_sequence_id, project.data_->assets,
-                      project.data_->sequences, project.data_->tempo_map,
-                      project.data_->meter_map, std::move(restored)});
+    project.data_ = std::make_shared<const Project::Data>(Project::Data{
+        project.data_->id, project.data_->name, project.data_->next_item_id,
+        project.data_->root_sequence_id, project.data_->assets, project.data_->sequences,
+        project.data_->tempo_map, project.data_->meter_map, std::move(restored)});
     return runtime::Ok(std::move(project));
 }
 
@@ -543,6 +577,18 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
         for (const auto& track : sequence.tracks()) {
             all_ids.push_back(track.id());
             maximum_id = std::max(maximum_id, track.id().value);
+            for (const auto& device : track.device_chain()) {
+                all_ids.push_back(device.id);
+                maximum_id = std::max(maximum_id, device.id.value);
+            }
+            for (const auto& lane : track.automation_lanes()) {
+                all_ids.push_back(lane.id());
+                maximum_id = std::max(maximum_id, lane.id().value);
+                for (const auto& point : lane.curve().points()) {
+                    all_ids.push_back(point.id);
+                    maximum_id = std::max(maximum_id, point.id.value);
+                }
+            }
             for (const auto& clip : track.clips()) {
                 all_ids.push_back(clip.id());
                 maximum_id = std::max(maximum_id, clip.id().value);
@@ -592,20 +638,35 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     }
     detail::IdentityDirectory identities;
     auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
-    add_identity(input.id, {ItemKind::Project, {}, {}, {}, true});
+    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
+                              ItemId clip = {}, ItemId lane = {}) {
+        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip, lane),
+                            sequence, track, clip, true};
+    };
+    add_identity(input.id, location(ItemKind::Project));
     for (const auto& asset : input.assets)
-        add_identity(asset.id, {ItemKind::Asset, {}, {}, {}, true});
+        add_identity(asset.id, location(ItemKind::Asset));
     for (const auto& sequence : input.sequences) {
-        add_identity(sequence.id(), {ItemKind::Sequence, sequence.id(), {}, {}, true});
+        add_identity(sequence.id(), location(ItemKind::Sequence, sequence.id()));
         for (const auto& track : sequence.tracks()) {
-            add_identity(track.id(), {ItemKind::Track, sequence.id(), track.id(), {}, true});
+            add_identity(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
+            for (const auto& device : track.device_chain())
+                add_identity(device.id,
+                             location(ItemKind::DevicePlacement, sequence.id(), track.id()));
+            for (const auto& lane : track.automation_lanes()) {
+                add_identity(lane.id(),
+                             location(ItemKind::AutomationLane, sequence.id(), track.id()));
+                for (const auto& point : lane.curve().points())
+                    add_identity(point.id, location(ItemKind::AutomationPoint, sequence.id(),
+                                                    track.id(), {}, lane.id()));
+            }
             for (const auto& clip : track.clips()) {
                 add_identity(clip.id(),
-                             {ItemKind::Clip, sequence.id(), track.id(), clip.id(), true});
+                             location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
                 if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
                     for (const auto& note : notes->notes())
                         add_identity(note.id,
-                                     {ItemKind::Note, sequence.id(), track.id(), clip.id(), true});
+                                     location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
                 }
             }
         }
@@ -680,10 +741,8 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
             break;
         }
         case IdentityMutationKind::Deactivate: {
-            if (!existing || !existing->active || existing->kind != change.location.kind ||
-                existing->sequence_id != change.location.sequence_id ||
-                existing->track_id != change.location.track_id ||
-                existing->clip_id != change.location.clip_id)
+            if (!existing || !existing->active ||
+                !existing->has_same_owner(change.location))
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
             auto location = *existing;
             location.active = false;
@@ -691,14 +750,10 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
             break;
         }
         case IdentityMutationKind::Reactivate: {
-            if (!existing || existing->active || existing->kind != change.location.kind ||
-                existing->sequence_id != change.location.sequence_id ||
-                existing->track_id != change.location.track_id ||
-                existing->clip_id != change.location.clip_id)
+            auto location = detail::reactivated_location(existing, change.location);
+            if (!location)
                 return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
-            auto location = *existing;
-            location.active = true;
-            identities.replace(change.item, location);
+            identities.replace(change.item, *location);
             break;
         }
         }
@@ -710,22 +765,19 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     sequences[static_cast<std::size_t>(found - data_->sequences.begin())] = std::move(sequence);
     return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
         Data{data_->id, data_->name, next, data_->root_sequence_id, data_->assets,
-             std::move(sequences), data_->tempo_map, data_->meter_map,
-             std::move(identities)}))));
+             std::move(sequences), data_->tempo_map, data_->meter_map, std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {
     return Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             data_->assets, data_->sequences, std::move(tempo_map), data_->meter_map,
-             data_->identities}));
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, data_->assets,
+             data_->sequences, std::move(tempo_map), data_->meter_map, data_->identities}));
 }
 
 Project Project::replace_meter_map(timebase::MeterMap meter_map) const {
     return Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             data_->assets, data_->sequences, data_->tempo_map, std::move(meter_map),
-             data_->identities}));
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, data_->assets,
+             data_->sequences, data_->tempo_map, std::move(meter_map), data_->identities}));
 }
 
 std::size_t Project::shared_identity_nodes_with(const Project& other) const {
@@ -739,6 +791,5 @@ bool Project::shares_storage_with(const Project& other) const noexcept {
 ProjectIdentityStats Project::identity_stats() noexcept {
     return detail::IdentityDirectory::stats();
 }
-
 
 } // namespace pulp::timeline

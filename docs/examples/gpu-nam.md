@@ -43,7 +43,7 @@ README and `docs/nam-support.md`.
 The one framework capability GPU NAM relies on remains part of the Pulp SDK: a
 fused, block-parallel, **conditioned-WaveNet GPU forward** —
 `pulp::render::GpuCompute::prepare_wavenet` / `wavenet_forward` (see
-[`core/render/include/pulp/render/gpu_compute.hpp`](https://github.com/danielraffel/pulp/blob/main/core/render/include/pulp/render/gpu_compute.hpp)).
+[`core/render/include/pulp/render/gpu_compute.hpp`](https://github.com/Generous-Corp/pulp/blob/main/core/render/include/pulp/render/gpu_compute.hpp)).
 It is a general neural-inference primitive — a sequence of gated, dilated, causal
 1-D conv layer-arrays computed GPU-resident with the CPU↔GPU round-trip paid once
 per block — not specific to any capture format. GPU NAM's repo owns the `.nam`

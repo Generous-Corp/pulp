@@ -414,6 +414,8 @@ pulp_add_test_suite(pulp-test-processor-layout-latency LIBRARIES pulp::format)
 # and the three change flags (tempo_changed / time_sig_changed /
 # transport_changed) once per block.
 pulp_add_test_suite(pulp-test-playhead-diff LIBRARIES pulp::format)
+# Field-validity mapping is format-neutral and does not require a platform SDK.
+pulp_add_test_suite(pulp-test-host-transport-validity LIBRARIES pulp::format)
 # VST3 SMPTE → FrameRate mapping (pure helper, no Steinberg SDK
 # dependency). Covers the 59.94 vs 60 fps mapping edge case.
 pulp_add_test_suite(pulp-test-vst3-frame-rate LIBRARIES pulp::format)

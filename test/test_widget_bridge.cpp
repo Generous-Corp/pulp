@@ -4742,3 +4742,57 @@ TEST_CASE("WidgetBridge re-wires a recycled widget id after its subtree is forgo
     second->on_mouse_event(down);
     REQUIRE(engine.evaluate("String(globalThis.hits)").toString() == "2");
 }
+
+TEST_CASE("WidgetBridge resolves script-relative asset paths against the script base dir",
+          "[view][bridge][assets]") {
+    namespace fs = std::filesystem;
+
+    // A self-contained import artifact references its images as
+    // `assets/<file>` next to the ui.js; hosts publish the script's directory
+    // via set_script_base_dir so those references resolve regardless of the
+    // process CWD.
+    const auto base = fs::temp_directory_path()
+        / ("pulp-bridge-script-base-"
+           + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(base / "assets");
+    { std::ofstream f(base / "assets" / "hero.png", std::ios::binary); f << "png"; }
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    SECTION("relative path that exists under the base resolves absolute") {
+        bridge.set_script_base_dir(base);
+        bridge.load_script(R"(
+            createImage('img', '');
+            setImageSource('img', 'assets/hero.png');
+        )");
+        auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_path()
+                == "file://" + (base / "assets" / "hero.png").lexically_normal().generic_string());
+    }
+
+    SECTION("unset base leaves relative paths untouched (historical CWD behavior)") {
+        bridge.load_script(R"(
+            createImage('img', '');
+            setImageSource('img', 'assets/hero.png');
+        )");
+        auto* image = dynamic_cast<ImageView*>(bridge.widget("img"));
+        REQUIRE(image != nullptr);
+        REQUIRE(image->image_path() == "file://assets/hero.png");
+    }
+
+    SECTION("absolute paths and misses pass through unchanged") {
+        bridge.set_script_base_dir(base);
+        REQUIRE(bridge.resolve_script_relative("/abs/elsewhere.png") == "/abs/elsewhere.png");
+        REQUIRE(bridge.resolve_script_relative("assets/nope.png") == "assets/nope.png");
+        REQUIRE(bridge.resolve_script_relative("memory://sha256=aa") == "memory://sha256=aa");
+        REQUIRE(bridge.resolve_script_relative("") == "");
+    }
+
+    std::error_code ec;
+    fs::remove_all(base, ec);
+}

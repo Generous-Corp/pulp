@@ -43,6 +43,20 @@ Project make_durable_media_project(ContentHash source_hash = hash_of('a')) {
     return std::move(project).value();
 }
 
+Project make_device_chain_project(std::vector<DevicePlacement> device_chain) {
+    auto track = Track::create(TrackInput{.id = {4},
+                                          .name = "track",
+                                          .clips = {make_note_clip({5}, {6}, 0)},
+                                          .device_chain = std::move(device_chain)});
+    REQUIRE(track);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(track).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 9, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+    return std::move(project).value();
+}
+
 } // namespace
 
 TEST_CASE("Timeline journal replay reproduces the committed document") {
@@ -64,6 +78,19 @@ TEST_CASE("Timeline journal replay reproduces the committed document") {
     auto replayed = journal.replay(*revision_one, {1});
     REQUIRE(replayed);
     REQUIRE(same_project(replayed.value(), *session->snapshot()));
+}
+
+TEST_CASE("Timeline journal checkpoint equality includes device-chain order") {
+    const auto checkpoint = make_device_chain_project({{{7}}, {{8}}});
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    const auto reordered = make_device_chain_project({{{8}}, {{7}}});
+    auto rejected = session->journal().replay(reordered, {});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
 }
 
 TEST_CASE("Timeline commands and replay preserve durable asset metadata") {
@@ -244,9 +271,9 @@ TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactiv
 
     auto malformed = encoded->json;
     const std::string valid_tombstone =
-        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","parent_id":"4","sequence_id":"3","track_id":"4"})";
     const std::string malformed_tombstone =
-        R"({"active":false,"clip_id":"0","id":"5","kind":"clip","sequence_id":"3","track_id":"4"})";
+        R"({"active":false,"clip_id":"0","id":"5","kind":"clip","parent_id":"4","sequence_id":"3","track_id":"4"})";
     const auto tombstone_position = malformed.find(valid_tombstone);
     REQUIRE(tombstone_position != std::string::npos);
     malformed.replace(tombstone_position, valid_tombstone.size(), malformed_tombstone);
@@ -258,7 +285,7 @@ TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactiv
 
     malformed = encoded->json;
     const std::string orphaned_tombstone =
-        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","sequence_id":"2","track_id":"4"})";
+        R"({"active":false,"clip_id":"5","id":"5","kind":"clip","parent_id":"4","sequence_id":"2","track_id":"4"})";
     const auto orphan_position = malformed.find(valid_tombstone);
     REQUIRE(orphan_position != std::string::npos);
     malformed.replace(orphan_position, valid_tombstone.size(), orphaned_tombstone);

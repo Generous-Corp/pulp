@@ -221,12 +221,10 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-test-clap-latency-quirk PRIVATE PULP_CLAP_GUI=1)
     catch_discover_tests(pulp-test-clap-latency-quirk)
 
-    # SF-1 adapter-boundary parity matrix: drives ONE processor's boundary
-    # through every format (as neutral matrix columns) AND through the real
-    # CLAP adapter, asserting identical param decode, f64 marshalling, bypass
-    # latency, and transport decode. Link-only against pulp::format (drives the
-    # adapter via its public header surface — same single-TU-attribution
-    # rationale as the MIDI / constant-mask tests above).
+    # Shared boundary-helper normalization plus production CLAP anchors.
+    # Format-shaped transport fixtures do not stand in for other adapters.
+    # Link-only against pulp::format so adapter coverage is attributed to the
+    # library's single translation unit.
     add_executable(pulp-test-adapter-boundary-parity test_adapter_boundary_parity.cpp)
     target_link_libraries(pulp-test-adapter-boundary-parity PRIVATE pulp::format clap Catch2::Catch2WithMain)
     target_compile_definitions(pulp-test-adapter-boundary-parity PRIVATE PULP_CLAP_GUI=1)

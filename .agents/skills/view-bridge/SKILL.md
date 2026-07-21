@@ -89,6 +89,38 @@ against the AAX parameter manager (the value authority). Do not "fix" that into
 a shared instance by analogy with AU v2 — there, a second `Processor` was a real
 bug; here it is the format's structure. See the `aax` skill.
 
+### Host keyboard routing can bypass the NSView key path entirely — the DAW-spacebar trap
+
+**Searchable keywords**: spacebar dropped in plugin, space not typed in text field,
+REAPER eats spacebar, transport key stolen, letters type but spaces don't,
+IPlugView::onKeyDown, performKeyEquivalent, chat box drops spaces.
+
+A focused `TextEditor` in a plugin editor can silently drop the **spacebar** (and
+only the spacebar) in some hosts. Symptom: letters type, spaces don't. Root cause
+is the format-level key pipeline, NOT the NSView layer:
+
+- **REAPER** with *"send all keyboard input to plug-in"* OFF (its default) offers
+  keys to the VST3 view through `IPlugView::onKeyDown` **before** its own transport
+  accelerator. If the view returns `kResultFalse`, REAPER claims Space for
+  play/stop and the event **never reaches the NSView** (`keyDown:` /
+  `performKeyEquivalent:`) — so no view-host-side routing can save the field.
+  Letters aren't host-bound, so they fall through to the NSView path and type
+  normally, which is exactly the "letters work, spaces don't" signature.
+  `PulpPlugView::onKeyDown` (core/format/src/vst3_plug_view.cpp) handles this:
+  consume Space **only** when a `TextEditor` in this editor's tree holds focus,
+  excluding Cmd/Ctrl chords; every other key returns `kResultFalse` so transport,
+  Musical Typing, and host shortcuts stay with the host. Scoped to Space because
+  it is the only key REAPER delivers well-formed here (`host_quirks:
+  reaper_keyboard_only_space`).
+- The **NSView `performKeyEquivalent:`** fix (plugin_view_host_mac.mm) is a
+  *different* layer, for hosts that DO route plain keys through the responder
+  chain (plausibly Logic's AU hosting). Both layers exist because different hosts
+  deliver keys differently — a fix at one layer does not cover the other.
+
+Debugging rule: if a plugin's text field drops a key, first determine **whether
+the key even reaches the NSView** (log in `keyDown:`). If it never arrives, the
+fix belongs at the format layer (`onKeyDown`), not the view host.
+
 ## `release_view()` — for containers that own the view
 
 `TabPanel::add_tab` and similar widgets take `std::unique_ptr<view::View>`.
@@ -1119,6 +1151,41 @@ window-sized layout would briefly flash before the next paint reset.
 
 See `test_plugin_view_host_design_viewport.mm` for the wiring proof.
 
+### AutoUi default editors now ride this path automatically (2026-07)
+
+The auto-generated editor (`AutoUi`, for any plugin with no custom
+`create_view()` and no scripted UI) used to open at the bare
+`editor_size()` default of 400x300 — too small for even a 7-knob synth,
+so the top row clipped and the ScrollView couldn't reach it. Now
+`ViewBridge::open()` derives a fitting size from the store:
+
+- `pulp::view::AutoUi::preferred_size(store)` returns a design size that
+  fits the generated knob grid (tiles wrapped to a roughly-square column
+  count + the "Parameters" title + padding; grouped stores stack their
+  boxes). It shares the tile/padding constants with `AutoUi::build()`.
+- The bridge adopts it **only when the processor left the size unset** —
+  `uses_auto_ui_` is true AND `size_hints_` is the untouched default
+  (`min==0 && aspect==0 && preferred=={400,300}`). It then runs the fit
+  through `format::view_size_from_design(w, h)`, so min/max/aspect get
+  derived and `should_pin_design_viewport()` engages the pin + aspect
+  lock. The whole grid scales uniformly (min-clamped, nothing truncates).
+- Any explicit size still wins: a `view_size()` override, a
+  `DESIGN_WIDTH/HEIGHT` import, or even an `editor_size()` override (which
+  surfaces as a non-default preferred) all bypass the fit.
+
+Two seams to know: `uses_auto_ui_` is set in the `build_editor_ui`
+fallback branch (custom `create_view()` keeps it false, so a native
+editor still reports its own laid-out bounds instead of a store-derived
+size); and the fit is applied in `open()`, not the constructor, because
+"is this AutoUi?" isn't known until `create_view()` returns null. The
+`RemoteViewSession` path reads `processor.view_size()` directly and does
+NOT get the fit — out-of-process editors are effectively always custom.
+
+Separately, the AutoUi scroll body top-aligns its grid's wrapped rows
+once they overflow the viewport (`align_content: start`) instead of
+centering them into negative, unreachable scroll offsets — that was the
+"can't scroll to the top row" half of the same bug.
+
 ## GpuSurface Plumbing Into WidgetBridge
 
 Adapter editor-attach paths that wire a scripted UI (`ScriptedUiSession`)
@@ -1539,7 +1606,13 @@ today's viewport pin (and VST3 `canResize()` now returns false there, aligning w
 resizable+aspect>0 is unchanged (viewport+lock+snap); free ⇒ no viewport/lock, clamp
 min/max only, no aspect snap. Tests live in `test/test_vst3_plugin_state.cpp` and
 `test/test_clap_entry.cpp` (`[resize]`), plus fake-host viewport-transform cases in
-`test/test_native_view_host.cpp` (`[viewport]`).
+`test/test_native_view_host.cpp` (`[viewport]`). The pin decision itself is the shared
+`should_pin_design_viewport(ViewSize)` predicate in `plugin_descriptor.hpp` — used by
+VST3 (`vst3_plug_view.cpp`) AND the AU v2 Cocoa view (`au_v2_cocoa_view.mm`), so the
+formats cannot drift. AU v2 historically skipped the pin entirely and a resized editor
+CLIPPED in Logic; any new editor host must route through the predicate, not re-derive
+the three-way rule inline (contract test:
+`test/test_au_v2_cocoa_ui.mm` `[resize]`).
 
 ## Two ways to reach the host's parameters — wiring both DOUBLE-WRITES
 

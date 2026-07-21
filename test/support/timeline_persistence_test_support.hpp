@@ -202,11 +202,14 @@ SchemaRegistry registry_with_hostile_encoder(std::shared_ptr<EncodeSpy> spy) {
 }
 
 enum class FieldMutation { Required, Kind, Reference };
+enum class MigrationMutation { None, RemoveUpgrade, RemoveDowngrade };
 
 SchemaRegistry structurally_modified_registry(std::string_view omitted,
                                               std::string_view version_changed = {},
                                               std::string_view field_changed = {},
-                                              FieldMutation mutation = FieldMutation::Required) {
+                                              FieldMutation mutation = FieldMutation::Required,
+                                              MigrationMutation migration_mutation =
+                                                  MigrationMutation::None) {
     const auto source = builtins();
     SchemaRegistryBuilder builder;
     for (const auto& original : source.types()) {
@@ -214,7 +217,7 @@ SchemaRegistry structurally_modified_registry(std::string_view omitted,
             continue;
         auto copy = original;
         if (copy.type_name == version_changed)
-            copy.current_version = 2;
+            ++copy.current_version;
         if (copy.type_name == field_changed) {
             if (copy.fields.empty())
                 copy.fields.emplace_back("unexpected", SchemaValueKind::String);
@@ -226,6 +229,12 @@ SchemaRegistry structurally_modified_registry(std::string_view omitted,
                                                : SchemaValueKind::String;
             else
                 copy.fields.front().referenced_type = "vendor.unexpected";
+        }
+        if (copy.type_name == "pulp.timeline.track") {
+            if (migration_mutation == MigrationMutation::RemoveUpgrade)
+                copy.upgrades.clear();
+            else if (migration_mutation == MigrationMutation::RemoveDowngrade)
+                copy.downgrades.clear();
         }
         REQUIRE(builder.register_type(std::move(copy)).has_value());
     }

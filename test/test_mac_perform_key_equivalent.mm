@@ -41,6 +41,14 @@
 @property (nonatomic, assign) pulp::view::View* rootView;
 @end
 
+// The embedded plugin editor view (what AU/VST3/CLAP hosts instantiate) — distinct
+// from PulpView (the standalone window host). This is the class whose
+// performKeyEquivalent: must win the spacebar for a focused text field so REAPER /
+// Logic don't steal it for transport.
+@interface PulpPluginView : NSView
+@property (nonatomic, assign) pulp::view::View* rootView;
+@end
+
 namespace {
 
 class TestRoot : public pulp::view::View {
@@ -108,6 +116,30 @@ PulpView* make_pulp_view(pulp::view::View* root) {
     if (cls == nil) return nil;
     PulpView* view =
         [[(PulpView*)[cls alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
+    view.rootView = root;
+    return view;
+}
+
+// keyCode 49 == kVK_Space — the key hosts bind to transport (play/stop), so it
+// arrives via performKeyEquivalent: before keyDown:.
+NSEvent* make_space_event() {
+    return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                            location:NSZeroPoint
+                       modifierFlags:0
+                           timestamp:0
+                        windowNumber:0
+                             context:nil
+                          characters:@" "
+         charactersIgnoringModifiers:@" "
+                           isARepeat:NO
+                             keyCode:49];
+}
+
+PulpPluginView* make_pulp_plugin_view(pulp::view::View* root) {
+    Class cls = NSClassFromString(@"PulpPluginView");
+    if (cls == nil) return nil;
+    PulpPluginView* view =
+        [[(PulpPluginView*)[cls alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
     view.rootView = root;
     return view;
 }
@@ -319,4 +351,67 @@ TEST_CASE("PulpView keyDown still traverses focus when TextEditor leaves Tab unh
     REQUIRE_FALSE(first->has_focus());
     REQUIRE(second->has_focus());
     REQUIRE(pulp::view::View::focused_input_ == second);
+}
+
+// The DAW-spacebar fix, on the EMBEDDED plugin view (what REAPER/Logic/Live host).
+// A host binds the spacebar to transport (play/stop), and macOS routes it through
+// performKeyEquivalent: BEFORE keyDown:. With a text field focused, the plugin view
+// must consume it there and return YES, or the host steals it and the typed space
+// never reaches the field. Pre-fix, PulpPluginView::performKeyEquivalent only
+// handled Cmd-chords and returned NO for a plain space — this pins the fix.
+TEST_CASE("PulpPluginView performKeyEquivalent: focused TextEditor consumes the spacebar",
+          "[mac][platform][keyboard][plugin][text][daw-transport]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+    int global_hits = 0;
+    root.on_global_key = [&](const KeyEvent&) { ++global_hits; return false; };
+
+    auto editor_owned = std::make_unique<TextEditor>();
+    auto* editor = editor_owned.get();
+    editor->set_bounds({0, 0, 160, 32});
+    editor->set_text("hi");
+    editor->set_caret_pos(static_cast<int>(editor->text().size()));
+    root.add_child(std::move(editor_owned));
+    editor->on_focus_changed(true);
+    editor->claim_input_focus();
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) {
+        editor->release_input_focus();
+        WARN("PulpPluginView class not registered — skipping platform test");
+        return;
+    }
+
+    BOOL handled = [view performKeyEquivalent:make_space_event()];
+    editor->release_input_focus();
+
+    // Consumed here → AppKit stops, so the host's transport shortcut never fires
+    // and the space stayed inside the plugin instead of leaking to a global.
+    REQUIRE(handled == YES);
+    REQUIRE(global_hits == 0);
+}
+
+// The other half: with NO text field focused, performKeyEquivalent: must NOT eat
+// the spacebar, so the host keeps transport (play/stop) whenever you aren't typing.
+TEST_CASE("PulpPluginView performKeyEquivalent: spacebar passes through with no focused field",
+          "[mac][platform][keyboard][plugin][text][daw-transport]") {
+    using namespace pulp::view;
+
+    TestRoot root;
+    root.set_bounds({0, 0, 320, 120});
+
+    // A TextEditor exists but is deliberately NOT focused — pulp_focus_under_root
+    // re-validates by identity against this root, so any stale process-global focus
+    // from a prior test does not match here.
+    auto editor_owned = std::make_unique<TextEditor>();
+    editor_owned->set_bounds({0, 0, 160, 32});
+    root.add_child(std::move(editor_owned));
+
+    PulpPluginView* view = make_pulp_plugin_view(&root);
+    if (view == nil) return;
+
+    BOOL handled = [view performKeyEquivalent:make_space_event()];
+    REQUIRE(handled == NO);  // host still gets the spacebar for transport
 }

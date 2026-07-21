@@ -180,9 +180,23 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     const int saved_depth = canvas.save_count();
     const auto& widget_bounds = bounds();
     const bool open_layer = (widget_bounds.width > 0.0f && widget_bounds.height > 0.0f);
+    // Curated named GPU post-effect (Forge scripted UIs): when an effect is
+    // active, open the SAME per-canvas layer through the shader-effect path so
+    // the whole canvas content is post-processed at restore — no extra layer,
+    // no extra cost. Unknown names / non-Skia backends fall back to a plain
+    // layer inside save_layer_with_shader_effect, so the effect is simply
+    // skipped and save/restore stays balanced.
+    const bool has_shader_effect =
+        !shader_effect_name_.empty() && shader_effect_name_ != "none";
     if (open_layer) {
-        canvas.save_layer(0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
-                          /*opacity=*/1.0f, /*blur_radius=*/0.0f);
+        if (has_shader_effect) {
+            canvas.save_layer_with_shader_effect(
+                0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
+                shader_effect_name_, shader_effect_intensity_);
+        } else {
+            canvas.save_layer(0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
+                              /*opacity=*/1.0f, /*blur_radius=*/0.0f);
+        }
     }
 
     // Canvas widget paint contract:

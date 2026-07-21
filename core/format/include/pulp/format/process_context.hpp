@@ -6,6 +6,7 @@
 // include it directly.
 
 #include <pulp/format/process_block.hpp>
+#include <pulp/format/transport_fields.hpp>
 #include <cstdint>
 
 namespace pulp::format {
@@ -45,8 +46,9 @@ enum class RenderSpeedHint {
 
 /// Process context — passed every audio callback with transport state.
 ///
-/// Fields are populated by the host. Not all hosts provide all fields —
-/// check is_playing before using position data.
+/// Fields are populated by the host. Not all hosts provide all fields; when an
+/// adapter publishes `transport_validity`, it distinguishes unavailable values
+/// from valid defaults.
 ///
 /// Adapter sourcing:
 ///
@@ -213,6 +215,16 @@ struct ProcessContext {
     /// outright; then a start, a seek, and a loop wrap are all the same
     /// case and none of them can produce a burst.
     bool transport_started = false;
+
+    /// Identifies which transport values were supplied for this block. A clear
+    /// bit means the corresponding value is only its compatibility default.
+    /// CLAP publishes this mask; adapters awaiting migration leave it empty.
+    /// Kept at the end of the data members so existing field offsets do not move.
+    TransportValidity transport_validity{};
+
+    constexpr bool has_transport(TransportField field) const noexcept {
+        return transport_validity.has(field);
+    }
 
     bool is_realtime() const noexcept {
         return process_mode == ProcessMode::Realtime;

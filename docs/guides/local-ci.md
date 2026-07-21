@@ -13,10 +13,15 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 
 The required `macos` gate runs the shipyard `mac` target
 (`.shipyard/config.toml`, `[validation.default]`). Its `test` step is
-`ctest ... --repeat until-pass:2 --label-exclude "validation|slow"` — it excludes
-the long `slow` tests and the example plugins' `validation` format-validators
-(these gate on the path-filtered `example-validation` lane instead), and retries a
-single flake once so timing-flakes don't redden the gate. The full lane model —
+`ctest ... --repeat until-pass:2 --label-exclude "validation|slow|performance|bench|quality-lab"`
+— it excludes the long `slow` tests, the example plugins' `validation`
+format-validators (these gate on the path-filtered `example-validation` lane
+instead), and the relative-timing / CPU-budget / benchmark tests
+(`performance|bench|quality-lab`), and retries a single flake once so timing-flakes
+don't redden the gate. The perf/ratio tests are excluded (2026-07-21, mirrors
+build.yml) because they tolerate steady load but flake under the load *variance*
+of the Studio's 2 concurrent build VMs (cap=2) — a perf gate can't live on a
+cap=2 runner; it belongs in a dedicated cap=1 nightly/perf lane. The full lane model —
 what runs where, the label taxonomy, and how to route a new test — is
 [docs/guides/test-lanes.md](test-lanes.md).
 
@@ -63,12 +68,12 @@ export TARTCI_RUNTIME_MEASURE=1
 export TARTCI_RUNTIME_GH_ENRICH=1
 
 # Inspect tartci's local VM timing records.
-tartci runtime recent --repo danielraffel/pulp --limit 20 --json
-tartci runtime summary --repo danielraffel/pulp --json
+tartci runtime recent --repo Generous-Corp/pulp --limit 20 --json
+tartci runtime summary --repo Generous-Corp/pulp --json
 
 # Import both GitHub Actions and tartci VM timing into Shipyard's metrics store.
-shipyard metrics import github --repo danielraffel/pulp --limit 50 --json
-tartci runtime export --repo danielraffel/pulp --since-days 14 \
+shipyard metrics import github --repo Generous-Corp/pulp --limit 50 --json
+tartci runtime export --repo Generous-Corp/pulp --since-days 14 \
   | shipyard metrics import tartci --json
 
 # Agent-friendly queries.
@@ -539,7 +544,7 @@ The two disagree: `build.yml` defaults macOS overflow to GitHub-hosted
 before reasoning about a route:
 
 ```bash
-gh variable list -R danielraffel/pulp | grep RUNS_ON_JSON
+gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
 ```
 
 ### Live routing state (verified 2026-07-16)
@@ -580,7 +585,7 @@ reviewed by `/codex` 2026-05-13).
 **Disabling overflow** (revert to local-only):
 
 ```bash
-gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo danielraffel/pulp
+gh variable delete PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --repo Generous-Corp/pulp
 ```
 
 The next PR's `resolve-provider` falls through to local since condition #2 fails.
@@ -588,7 +593,7 @@ The next PR's `resolve-provider` falls through to local since condition #2 fails
 **Inspecting routing decisions:** `resolve-provider`'s stderr prints a one-line summary, e.g. `resolve-provider: macOS route = overflow (BUSY=2 >= 2); selector = "namespace-profile-generouscorp-macos"`. Find it via the GitHub Actions UI under the `resolve-provider` job's log, or:
 
 ```bash
-gh run view <run-id> --log --repo danielraffel/pulp | grep "macOS route"
+gh run view <run-id> --log --repo Generous-Corp/pulp | grep "macOS route"
 ```
 
 **Manual overflow / rescue** is still available via `shipyard rescue <PR>` and remains useful for in-flight PRs that queued before the overflow logic kicked in. With Plan B in place, manual rescue should be needed much less frequently.
@@ -1400,7 +1405,7 @@ tar xzf actions-runner.tar.gz
 
 # 2. Register with labels that match the JSON you set in the repo var.
 #    Example for the TSan / sanitizer lane:
-./config.sh --url https://github.com/danielraffel/pulp \
+./config.sh --url https://github.com/Generous-Corp/pulp \
             --token <REGISTRATION_TOKEN> \
             --name "$(hostname)-sanitizer" \
             --labels "self-hosted,macos,arm64,sanitizer" \

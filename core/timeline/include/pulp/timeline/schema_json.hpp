@@ -64,6 +64,7 @@ struct DecodeLimits {
     std::size_t max_notes = 5'000'000;
     std::size_t max_locators = 1'000'000;
     std::size_t max_representations = 1'000'000;
+    std::size_t max_device_placements = 100'000;
 
     static DecodeLimits web_defaults() noexcept;
 };
@@ -84,8 +85,12 @@ struct JsonValue {
 
 class ParsedJson {
   public:
-    const JsonValue& root() const noexcept { return root_; }
-    std::string_view source() const noexcept { return *source_; }
+    const JsonValue& root() const noexcept {
+        return root_;
+    }
+    std::string_view source() const noexcept {
+        return *source_;
+    }
     std::string_view raw(const JsonValue& value) const noexcept;
 
   private:
@@ -103,11 +108,10 @@ parse_json(std::string_view json, const DecodeLimits& limits = {});
 runtime::Result<const JsonValue*, PersistenceError>
 validate_exact_envelope(const JsonValue& value, std::string_view expected_type,
                         std::uint32_t expected_version, std::string path = {},
-                        PersistenceErrorCode failure_code =
-                            PersistenceErrorCode::InvalidSchema);
+                        PersistenceErrorCode failure_code = PersistenceErrorCode::InvalidSchema);
 
 // Allocation-light schema-aware quota pass used before the generic DOM parser.
-// Only arrays reached through known v1 structural envelopes are counted.
+// Only arrays reached through supported structural envelopes are counted.
 struct StructuralPreflightSuccess {};
 runtime::Result<StructuralPreflightSuccess, PersistenceError>
 preflight_timeline_structure(std::string_view json, const DecodeLimits& limits);
@@ -116,11 +120,11 @@ runtime::Result<std::string, PersistenceError> canonicalize_json(const JsonValue
 std::string quote_json_string(std::string_view value);
 bool is_valid_utf8(std::string_view value) noexcept;
 
-runtime::Result<std::uint64_t, PersistenceError>
-parse_canonical_u64_string(const JsonValue& value, std::string path = {});
-runtime::Result<std::int64_t, PersistenceError>
-parse_canonical_i64_string(const JsonValue& value, std::string path = {});
-runtime::Result<std::uint32_t, PersistenceError>
-parse_u32_number(const JsonValue& value, std::string path = {});
+runtime::Result<std::uint64_t, PersistenceError> parse_canonical_u64_string(const JsonValue& value,
+                                                                            std::string path = {});
+runtime::Result<std::int64_t, PersistenceError> parse_canonical_i64_string(const JsonValue& value,
+                                                                           std::string path = {});
+runtime::Result<std::uint32_t, PersistenceError> parse_u32_number(const JsonValue& value,
+                                                                  std::string path = {});
 
 } // namespace pulp::timeline

@@ -179,6 +179,22 @@ static const char kOwnershipKey = 0;
     }
     format::warn_if_unexpected_cpu_fallback(gpu, host.get());
 
+    // Viewport pin + aspect lock — parity with VST3 (PulpPlugView::attached)
+    // and mac AUv3 (PulpAUViewController), via the shared
+    // should_pin_design_viewport() predicate. Without this, a DAW resize of
+    // the returned NSView (Logic resizes it directly; AU v2 has no size
+    // negotiation) CLIPS the fixed-size tree instead of scaling it. The
+    // free-drag case (resizable + aspect_ratio==0) stays unpinned — the root
+    // reflows via Yoga through the frame-change forwarding below.
+    // Top-align like mac AUv3: AU cannot negotiate the pane aspect (no
+    // checkSizeConstraint / gui_adjust_size), so slack collects as a single
+    // bottom strip instead of floating the content between two bands.
+    if (format::should_pin_design_viewport(bridge->size_hints())) {
+        host->set_design_viewport(static_cast<float>(w), static_cast<float>(h));
+        host->set_fixed_aspect_ratio(static_cast<float>(w) / static_cast<float>(h));
+        host->set_design_viewport_top_align(true);
+    }
+
     // Pump the scripted UI session per vsync. Captures the ViewBridge object
     // by address (stable across the unique_ptr move into the ownership wrapper
     // below); the wrapper destroys host (stops the display link) before bridge.

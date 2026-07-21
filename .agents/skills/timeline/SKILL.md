@@ -20,9 +20,21 @@ invariants.
   allocator's explicit exhausted sentinel. A project may store that sentinel
   after owning `UINT64_MAX - 1`; otherwise `next_item_id` is strictly larger
   than every owned ID. Allocation is monotonic and IDs are never reused.
+- `ItemLocation` ownership is exactly `(kind, parent_id)`, where `parent_id` is
+  the immediate owner. `sequence_id`, `track_id`, and `clip_id` are retained
+  ancestor-navigation caches and must not become additional ownership keys.
+  Add new item kinds by extending `immediate_parent_id()` rather than adding a
+  new owner-specific field. Legacy identity records without `parent_id` derive
+  it from their validated navigation fields during decode.
 - Tracks are sparse non-overlapping lanes. Their canonical clip order is
   `(anchor, start, ItemId)`. Timeline and ID indexes are persistent AVL trees;
   `replace_clip()` path-copies only search paths and shares untouched subtrees.
+- A Track owns an ordered `DevicePlacement` chain. Placements contain only a
+  durable `ItemId`; chain order is semantic, and clip edits retain the exact
+  immutable chain storage. Runtime instances, graph nodes, plugin formats,
+  paths, and platform metadata do not belong in Timeline. Durable device
+  definition and configuration will be future document-owned state keyed by
+  placement identity.
 - `ClipTimeAnchor::Musical` follows tempo in ticks. `Absolute` uses
   `SamplePosition`, an integer sample count, and a normalized `RationalRate`,
   remaining fixed as tempo changes. Phase 1 rejects mixed anchors within one
@@ -34,12 +46,21 @@ invariants.
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
   segments retain the left value until the next point. `value_at()` is for
   control-thread or compile-time queries, never the audio-thread scheduler.
-- `AutomationLane` is an unattached immutable value that binds one curve to a
-  format-neutral device `ItemId` and opaque 32-bit parameter ID. It validates
-  the two value identities only; the device need not exist in a Project, and
-  the lane is not registered, persisted, command-addressable, or attached to a
-  playable Project yet. Playback can compile and exercise the standalone value;
-  document ownership and host delivery remain separate later contracts.
+- `AutomationLane` is an immutable value that binds one curve to a
+  format-neutral device-placement `ItemId` and opaque 32-bit parameter ID. Its
+  standalone factory validates only the value identities. Once attached, Track
+  owns lanes in canonical identity order, requires their target placements to
+  exist in its device chain, and permits only one lane per placement/parameter
+  pair. Lane and point IDs are Project identities owned by that Track; host
+  delivery remains a separate contract.
+- Automation lanes are command-addressable: `InsertAutomationLane` /
+  `RemoveAutomationLane` reduce through the shared transaction pipeline
+  (`transaction_reduction_support` + `transaction_automation_internal`),
+  validating the target sequence/track/placement, allocating lane and point
+  identities as owned Project identities, and emitting inverse commands so undo,
+  redo, and journal replay restore the lane and its tombstone ownership exactly.
+  Command equivalence compares lane payloads bit-exactly (float bits), so a
+  re-authored point differing only in a signed zero is not treated as equal.
 - Keep automation responsibilities separated: curve data belongs in
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
@@ -56,6 +77,10 @@ invariants.
 - Schema-v1 project persistence writes canonical `tempo_map` and `meter_map`
   arrays. BPM is stored by exact IEEE-754 bits; older v1 snapshots without map
   fields remain readable as 120 BPM and 4/4, then canonicalize on save.
+- Track schema v2 owns the required device-chain field. Its v1 upgrade adds an
+  empty chain; its downgrade succeeds only for an empty chain and fails rather
+  than discard placement identity. Each placement remains a separately versioned
+  structural envelope.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
@@ -78,7 +103,9 @@ invariants.
   Clip/Track/Sequence remaps and is translated by `ExternalIdFixup`; failure is
   atomic and does not advance the caller's allocator. Preflight the complete
   owned subtree for duplicate IDs before allocating; this includes parent IDs,
-  cross-track collisions, clips, and note events.
+  cross-track collisions, clips, note events, automation lanes, and automation
+  points. Lane and point IDs remap as owned identities, target placement IDs
+  remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
 ## Editing contracts
@@ -116,11 +143,11 @@ invariants.
 
 ## Scope boundary
 
-This slice does not own a durable `JournalSink`, package/container I/O,
-publication, playback, document-attached automation lanes or delivery, launch
-slots, takes, nesting, devices, routing, audio, format adapters, or UI. Add
-those in their scheduled slices instead of widening the command and persistence
-core opportunistically.
+This subsystem does not own a durable `JournalSink`, package/container I/O,
+publication, playback or automation delivery, launch
+slots, takes, nesting, device implementations, routing, audio, format adapters,
+or UI. Add those in their owning modules instead of widening the command and
+persistence core opportunistically.
 
 ## Validation
 

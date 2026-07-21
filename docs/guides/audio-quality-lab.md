@@ -312,7 +312,7 @@ Each fires on its own artifact and stays quiet on the others and on an identity 
 They're validated **non-circularly** — against synthetic degradations, an independent
 textbook phase vocoder, *and* the real Pulp stretch engine — which is why they're trusted
 to gate. (`stereo_width` operates on `(N,2)` arrays directly; the rest run through the mono
-pipeline. Full list + module map: [`README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).)
+pipeline. Full list + module map: [`README.md`](https://github.com/Generous-Corp/pulp/blob/main/tools/audio/quality-lab/README.md).)
 
 ## Oscillator validation (reference-free)
 
@@ -440,4 +440,4 @@ This builds on — does not replace — the offline audio-observability harness 
 [testing.md](testing.md) (presence / level / THD / response). The Quality Lab adds the
 *reference-vs-candidate perceptual artifact* layer for fine-tuning. Module map, full
 detector status, and the contributor guide:
-[`tools/audio/quality-lab/README.md`](https://github.com/danielraffel/pulp/blob/main/tools/audio/quality-lab/README.md).
+[`tools/audio/quality-lab/README.md`](https://github.com/Generous-Corp/pulp/blob/main/tools/audio/quality-lab/README.md).

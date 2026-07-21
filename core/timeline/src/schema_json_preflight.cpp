@@ -1,5 +1,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
+#include "track_schema_policy.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <limits>
@@ -50,6 +52,7 @@ class StructuralScanner {
     std::size_t tracks_ = 0;
     std::size_t clips_ = 0;
     std::size_t notes_ = 0;
+    std::size_t device_placements_ = 0;
     std::size_t locators_ = 0;
     std::size_t representations_ = 0;
 
@@ -366,9 +369,16 @@ class StructuralScanner {
     }
 
     bool require_structural_shape(bool valid_shape, std::uint32_t version,
-                                  const std::string& path, std::size_t offset) {
-        if (valid_shape && version == 1) return true;
-        set_error(PersistenceErrorCode::InvalidSchema, offset, 0, 0, path);
+                                  const std::string& path, std::size_t offset,
+                                  std::uint32_t minimum_version = 1,
+                                  std::uint32_t maximum_version = 1) {
+        if (!valid_shape) {
+            set_error(PersistenceErrorCode::InvalidSchema, offset, 0, 0, path);
+            return false;
+        }
+        if (version >= minimum_version && version <= maximum_version) return true;
+        set_error(PersistenceErrorCode::UnsupportedSchemaVersion, offset, version,
+                  maximum_version, path);
         return false;
     }
 
@@ -579,28 +589,54 @@ class StructuralScanner {
         Span data;
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape)) return false;
-        if (type != "pulp.timeline.track") {
+        if (type != detail::track_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin)) return false;
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::track_schema_policy.oldest_readable_version,
+                                      detail::track_schema_policy.current_version)) return false;
         const auto data_path = path + "/data";
         if (!require_member(data, "id", StringShape, data_path) ||
             !require_member(data, "name", StringShape, data_path)) return false;
         Span clips;
-        bool found = false;
-        if (!member(data, "clips", clips, found)) return false;
-        if (!found) {
+        Span devices;
+        bool has_clips = false;
+        bool has_devices = false;
+        if (!member(data, "clips", clips, has_clips) ||
+            !member(data, "device_chain", devices, has_devices)) return false;
+        const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
+        if (!has_clips || requires_devices != has_devices) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
-                      path + "/data/clips");
+                      path + (has_clips ? "/data/device_chain" : "/data/clips"));
             return false;
         }
-        return governed_array(
+        if (!governed_array(
             clips, clips_, limits_.max_clips, path + "/data/clips",
             [&](Span element, std::size_t index) {
                 return walk_clip(element,
                                  path + "/data/clips/" + std::to_string(index));
+            })) return false;
+        return !has_devices || governed_array(
+            devices, device_placements_, limits_.max_device_placements,
+            path + "/data/device_chain", [&](Span element, std::size_t index) {
+                return walk_device_placement(
+                    element, path + "/data/device_chain/" + std::to_string(index));
             });
+    }
+
+    bool walk_device_placement(Span value, const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape)) return false;
+        if (type != "pulp.timeline.device_placement") {
+            set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        if (!require_structural_shape(valid_shape, version, path, value.begin)) return false;
+        return require_member(data, "id", StringShape, path + "/data");
     }
 
     bool walk_clip(Span value, const std::string& path) {

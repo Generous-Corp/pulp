@@ -55,7 +55,7 @@ Install Pulp CLI first (above), then add the plugin for slash-command
 shortcuts and the native MCP server:
 
 ```bash
-claude plugin marketplace add danielraffel/pulp
+claude plugin marketplace add Generous-Corp/pulp
 claude plugin install pulp
 ```
 
