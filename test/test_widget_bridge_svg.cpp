@@ -80,6 +80,44 @@ TEST_CASE("WidgetBridge createSvgPath produces an SvgPathWidget the bridge can a
     REQUIRE(w->fill_color().b8() == 0);
 }
 
+TEST_CASE("WidgetBridge setSvgStrokeGradient round-trips onto SvgPathWidget",
+          "[view][bridge][stroke-gradient]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgPath('rim', '')");
+    bridge.load_script("setSvgPath('rim', 'M0 5 L10 5')");
+    // Codegen emission order: solid fallback first, gradient second — the
+    // gradient must win (setSvgStroke clears any stale gradient, so order
+    // matters and is pinned here).
+    bridge.load_script("setSvgStroke('rim', '#00ff00')");
+    bridge.load_script(
+        "setSvgStrokeGradient('rim', 'linear-gradient(to right, #ff0000, #0000ff)')");
+    bridge.load_script("setSvgStrokeWidth('rim', 1.88)");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("rim"));
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_stroke());
+    REQUIRE(w->stroke_gradient() == "linear-gradient(to right, #ff0000, #0000ff)");
+    REQUIRE_THAT(w->stroke_width(), WithinAbs(1.88f, 1e-4f));
+    // The solid fallback survives beside the gradient.
+    REQUIRE(w->stroke_color().g8() == 255);
+
+    // A LATER solid stroke clears the gradient slot (stale-slot rule).
+    bridge.load_script("setSvgStroke('rim', '#123456')");
+    REQUIRE(w->stroke_gradient().empty());
+
+    // Empty string clears the gradient without disabling the stroke.
+    bridge.load_script(
+        "setSvgStrokeGradient('rim', 'linear-gradient(to right, red, blue)')");
+    REQUIRE_FALSE(w->stroke_gradient().empty());
+    bridge.load_script("setSvgStrokeGradient('rim', '')");
+    REQUIRE(w->stroke_gradient().empty());
+    REQUIRE(w->has_stroke());
+}
+
 TEST_CASE("WidgetBridge setSvgFill 'none' disables fill",
           "[view][bridge][issue-965]") {
     ScriptEngine engine;

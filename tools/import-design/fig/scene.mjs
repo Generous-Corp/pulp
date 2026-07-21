@@ -1212,7 +1212,13 @@ export function materializeFrame(scene, frame, ctx) {
   function pushDiag(code, node, detail) {
     diagnostics.push({
       code,
-      node_id: guidKey(node.guid),
+      // The instance-path key when the node is a symbol-expansion clone, the
+      // plain guid otherwise. The guid alone attached every expanded knob's
+      // diagnostic to the MASTER ("1:57"), while the envelope and materials
+      // sidecar name the clone ("1:278/1:57") — so the material audit's
+      // per-node join never saw the diagnostic and scored an honest,
+      // out-loud degradation as a SILENT drop.
+      node_id: node.__key || guidKey(node.guid),
       node_name: node.name || null,
       detail: detail || null,
       severity: DIAGNOSTIC_SEVERITY[code] || 'info',
@@ -1933,6 +1939,49 @@ export function materializeFrame(scene, frame, ctx) {
     return merged;
   }
 
+  // Lower a node's stroke paints onto its emitted path as REAL stroke
+  // channels (`stroke` / `strokeGradient` / `strokeWidth`), for paths that
+  // carry the shape's BOUNDARY rather than a pre-expanded band: the baked
+  // fill outline, a vector-network centerline, or a primitive whose path is
+  // synthesized downstream. Mirrors the fill contract — gradient preferred,
+  // the solid composite kept beside it as the parse-failure fallback, and
+  // every flatten stated. Returns true when a stroke was emitted.
+  function lowerStrokeChannels(out, node, w, h) {
+    const visible = (node.strokePaints || []).filter((p) => p.visible !== false);
+    if (!visible.length) return false;
+    const weight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
+    if (!(weight > 0)) return false;
+    if (visible.length > 1) {
+      pushDiag('multi-paint-stroke', node,
+        `${visible.length} visible stroke paints; a stroked path carries one — flattened to their composite`);
+    }
+    if (node.dynamicStrokeSettings || node.scatterStrokeSettings || node.stretchStrokeSettings) {
+      pushDiag('complex-stroke-flattened', node,
+        'variable-width (brush) stroke flattened to a uniform-weight stroke');
+    }
+    const grad = firstGradient(visible);
+    const css = gradientPaintToCss(grad, w, h);
+    const hex = approximatePaintColor(visible);
+    if (css) {
+      out.strokeGradient = css;
+      if (hex) out.stroke = hex;  // the widget's parse-failure fallback
+    } else if (hex) {
+      out.stroke = hex;
+      if (grad) {
+        pushDiag('gradient-approximated', node,
+          `${grad.type} stroke flattened to its mean stop color`);
+      }
+    } else {
+      return false;
+    }
+    out.strokeWidth = round2(weight);
+    if (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE') {
+      pushDiag('stroke-align-approximated', node,
+        `${node.strokeAlign} stroke painted centered on the outline; the band sits half the stroke weight off the aligned position`);
+    }
+    return true;
+  }
+
   const walked = new Set();
   function walk(node, parent, parentAbs, parentId) {
     // Hidden layers do not render in Figma; emitting them would paint hidden
@@ -2085,12 +2134,14 @@ export function materializeFrame(scene, frame, ctx) {
     // carrying path-data to a native SvgPathWidget), so resolving the shape here
     // is the whole fix — nothing downstream needs to change.
     let vectorResolved = false;
-    // A vector whose geometry came from `strokeGeometry` IS the stroke, already
-    // expanded into a filled band and painted as a fill below. Emitting the
-    // node's stroke a second time as a CSS border strokes that band's outline —
-    // two parallel lines where the design has one, the "doubled / too thick"
-    // outline seen on a triad-pad triangle and every stroked ring.
-    let vectorStrokeBand = false;
+    // Whether this node's stroke is already expressed by the emitted path —
+    // as a baked band painted below (the stroke IS the geometry), or as real
+    // stroke channels lowered onto the path. Either way the box-border branch
+    // further down must not paint it a second time: a border on top of a band
+    // strokes the band's outline — two parallel lines where the design has
+    // one, the "doubled / too thick" outline once seen on a triad-pad
+    // triangle — and a border on top of a stroke channel doubles the edge.
+    let vectorStrokeExpressed = false;
     if (VECTOR_LIKE.has(type)) {
       let resolved = null;
       let failure = null;
@@ -2103,10 +2154,28 @@ export function materializeFrame(scene, frame, ctx) {
         // sharing that blob will be missing rather than merely approximated.
         failure = `geometry unreadable: ${err.message}`;
       }
+      // Figma bakes the band of an INSIDE/OUTSIDE-aligned stroke UNCLIPPED —
+      // the boundary outlined at ±weight, DOUBLE the declared width, with the
+      // trim to the aligned side applied only at render time (verified on a
+      // real file: `Polygon 5`, weight 2 INSIDE, 4px band; see paths.mjs).
+      // Painting that band verbatim reads fat and bright. Prefer the shape's
+      // own outline with the stroke lowered as a centered stroke channel:
+      // correct width and color, off by half the weight in position — and
+      // said out loud (lowerStrokeChannels raises stroke-align-approximated).
+      if (resolved && resolved.paint === 'stroke' && !resolved.centerline
+          && (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE')) {
+        let outline = null;
+        try {
+          outline = geometryToPath(node, scene.blobs || [], /* forceFill */ true);
+        } catch { /* keep the band */ }
+        // paint === 'fill' proves a distinct fill outline was actually picked;
+        // a node with no fillGeometry hands back the same band (paint
+        // 'stroke'), which must keep its band semantics, not be re-stroked.
+        if (outline && outline.paint === 'fill' && outline.centerline) resolved = outline;
+      }
       if (failure) pushDiag('vector-simplified', node, `${type} ${failure}; emitted as a plain box`);
       if (resolved) {
         vectorResolved = true;
-        vectorStrokeBand = resolved.paint === 'stroke';
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
@@ -2163,49 +2232,61 @@ export function materializeFrame(scene, frame, ctx) {
         }
         style.width = round2(resolved.box.width);
         style.height = round2(resolved.box.height);
-        // A stroke outline is a fillable region, so it is painted as a fill in
-        // the stroke's color. Re-stroking it would outline the outline.
-        const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
-        const hex = approximatePaintColor(paints);
-        // Always emit a fill, including the explicit 'none'. SvgPathWidget
-        // defaults to opaque black, so staying silent about an unknown paint
-        // renders a black silhouette — strictly worse than the plain box this
-        // lane used to emit, and the one way this change could regress a file.
-        out.fill = hex || 'none';
-        const grad = firstGradient(paints);
-        // The gradient rides the path alongside the flattened fill rather than
-        // replacing it: SvgPathWidget prefers the gradient and only falls back
-        // to fill_color_ when the string fails to parse, so the mean stays as
-        // the safety net and neither ordering nor a stale solid can bite.
-        //
-        // The box here is the geometry's, which a stroke outline overhangs by
-        // half the stroke weight, so the axis is off by that much against
-        // Figma's node box. That is sub-pixel on these rims and far smaller
-        // than the error it replaces.
-        const css = gradientPaintToCss(grad, style.width, style.height);
-        if (css) {
-          out.fillGradient = css;
-        } else if (!hex && grad) {
-          pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
-        } else if (hex && grad) {
-          pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop color`);
+        if (resolved.centerline && resolved.paint === 'stroke') {
+          // The path is the shape's BOUNDARY (vector-network fallback on a
+          // stroke-only node), not a band: nothing fills, and the stroke
+          // paints as a real stroke channel at its declared weight.
+          out.fill = 'none';
+          vectorStrokeExpressed =
+            lowerStrokeChannels(out, node, style.width, style.height);
+        } else {
+          // A baked stroke outline is a fillable region, so it is painted as
+          // a fill in the stroke's color. Re-stroking it would outline the
+          // outline.
+          const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
+          const centerlineNoFill = resolved.centerline && resolved.paint === 'fill'
+            && !(node.fillPaints || []).some((p) => p.visible !== false);
+          const hex = centerlineNoFill ? null : approximatePaintColor(paints);
+          // Always emit a fill, including the explicit 'none'. SvgPathWidget
+          // defaults to opaque black, so staying silent about an unknown paint
+          // renders a black silhouette — strictly worse than the plain box this
+          // lane used to emit, and the one way this change could regress a file.
+          out.fill = hex || 'none';
+          const grad = centerlineNoFill ? null : firstGradient(paints);
+          // The gradient rides the path alongside the flattened fill rather than
+          // replacing it: SvgPathWidget prefers the gradient and only falls back
+          // to fill_color_ when the string fails to parse, so the mean stays as
+          // the safety net and neither ordering nor a stale solid can bite.
+          //
+          // The box here is the geometry's, which a stroke outline overhangs by
+          // half the stroke weight, so the axis is off by that much against
+          // Figma's node box. That is sub-pixel on these rims and far smaller
+          // than the error it replaces.
+          const css = gradientPaintToCss(grad, style.width, style.height);
+          if (css) {
+            out.fillGradient = css;
+          } else if (!hex && grad) {
+            pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
+          } else if (hex && grad) {
+            pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop color`);
+          }
+          if (resolved.paint === 'stroke') {
+            // The band IS the stroke — already expressed by the fill above.
+            vectorStrokeExpressed = true;
+          } else if ((node.strokePaints || []).some((p) => p.visible !== false)) {
+            // The path is the fill outline, which for Figma is also the
+            // stroke's centerline — SvgPathWidget fills and then strokes the
+            // SAME path, so the stroke lowers as a real channel here instead
+            // of being dropped (exact for CENTER align; INSIDE/OUTSIDE says
+            // stroke-align-approximated). This used to drop with "the stroke
+            // outline would need a sibling vector", which overstated the
+            // constraint: the sibling is only needed for geometry the
+            // boundary cannot express, and no observed node has that.
+            vectorStrokeExpressed =
+              lowerStrokeChannels(out, node, style.width, style.height);
+          }
         }
         delete style.background_color;
-        if (resolved.droppedStroke) {
-          // The reason is DECODER-side, not widget-side. SvgPathWidget fills and
-          // then strokes the same path (svg_path_widget.cpp:728 / :762), so
-          // "fill and stroke cannot both render on one path" — what this said
-          // until now — is false, and it sent a reader looking for a widget
-          // limit that does not exist. The real constraint: Figma's fill and
-          // stroke are two DIFFERENT outlines (strokeGeometry is the stroke
-          // already expanded into a fillable region, not the fill's path), and
-          // one emitted node carries one `path_data`. Expressing both means
-          // emitting the stroke outline as a SIBLING vector — which is exactly
-          // what a stroke-only node already does — not setting a stroke on this
-          // one. Fires for a single node in the reference design.
-          pushDiag('vector-simplified', node,
-            `${type} stroke dropped: fill and stroke are separate outlines and one node carries one path; the stroke outline would need a sibling vector`);
-        }
       }
     }
 
@@ -2338,7 +2419,7 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('gradient-approximated', node, gradient.type);
     }
 
-    if (!vectorStrokeBand && (node.strokePaints || []).length) {
+    if (!vectorStrokeExpressed && (node.strokePaints || []).length) {
       const visibleStrokes = (node.strokePaints || []).filter((p) => p.visible !== false);
       // Per-side box strokes: kiwi stores individualStrokeWeights as
       // `borderStrokeWeightsIndependent` + border{Top,Right,Bottom,Left}Weight
@@ -2355,13 +2436,40 @@ export function materializeFrame(scene, frame, ctx) {
       const hasWeight = indep
         ? Object.values(sideWeights).some((w) => w > 0)
         : uniformWeight > 0;
-      if (visibleStrokes.length && hasWeight) {
+      // A GRADIENT stroke cannot ride a box border — but an ELLIPSE lowers to
+      // a synthesized SvgPath downstream (synthesize_primitive_paths), whose
+      // stroke-gradient channel paints it for real. Route it there instead of
+      // flattening: this is the knob-base rim in the FX designs. Scoped to
+      // the uniform-weight case (per-side weights are a box-model concept)
+      // and to LINEAR gradients (the only kind the widget's stroke parser
+      // takes — gradientPaintToCss returns null otherwise and the flatten
+      // chain below still states the loss).
+      const gradTop = firstGradient(visibleStrokes);
+      const gradCss = gradTop && out.type === 'ellipse' && !sideWeights && hasWeight
+        ? gradientPaintToCss(gradTop, style.width, style.height) : null;
+      if (gradCss) {
+        if (visibleStrokes.length > 1) {
+          pushDiag('multi-paint-stroke', node,
+            `${visibleStrokes.length} visible stroke paints; a stroked path carries one — flattened to their composite`);
+        }
+        out.strokeGradient = gradCss;
+        const s0 = firstSolidStroke(node);
+        if (s0) {
+          // The widget's parse-failure fallback, mirroring the fill contract.
+          out.stroke = colorToHex({ ...s0.color, a: (s0.color?.a ?? 1) * (s0.opacity ?? 1) });
+        }
+        out.strokeWidth = round2(uniformWeight);
+        if (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE') {
+          pushDiag('stroke-align-approximated', node,
+            `${node.strokeAlign} stroke painted centered on the outline; the band sits half the stroke weight off the aligned position`);
+        }
+      } else if (visibleStrokes.length && hasWeight) {
         const s = firstSolidStroke(node);
         // A box border carries exactly one paint. More than one visible stroke
         // paint, a non-solid paint on top, or a brush (variable-width) stroke
         // cannot ride it — flatten to the first solid and SAY SO. (A vector's
-        // baked strokeGeometry band — vectorStrokeBand above — is the faithful
-        // path and never reaches this branch.)
+        // baked strokeGeometry band — vectorStrokeExpressed above — is the
+        // faithful path and never reaches this branch.)
         if (visibleStrokes.length > 1) {
           pushDiag('multi-paint-stroke', node,
             `${visibleStrokes.length} visible stroke paints; a box border carries one — flattened to the first solid`);
@@ -3079,6 +3187,12 @@ export const DIAGNOSTIC_SEVERITY = {
   // rendered edge is deliberately NOT what the design declares.
   'multi-paint-stroke': 'warning',
   'complex-stroke-flattened': 'warning',
+  // An INSIDE/OUTSIDE-aligned stroke painted centered on the shape outline:
+  // the band sits half a stroke-weight off the aligned position. Warning
+  // because the rendered edge deliberately differs from the declaration —
+  // and because the alternative (Figma's baked band) is UNCLIPPED at double
+  // the declared width, which is strictly worse (see paths.mjs).
+  'stroke-align-approximated': 'warning',
   // Node-dispatch codes. All 'warning' deliberately — including slice-skipped,
   // whose skip is CORRECT rendering — because both consumers drop 'info'
   // (see the registry contract above), and a dispatch decision written

@@ -2783,6 +2783,41 @@ TEST_CASE("native codegen keeps a synthesized primitive's gradient off its box",
     REQUIRE(js.find("setOpacity('") != std::string::npos);
 }
 
+TEST_CASE("a synthesized ellipse carries its gradient stroke onto the path",
+          "[view][import][stroke-gradient]") {
+    // The knob-base rim: an ELLIPSE with a fill and a GRADIENT_LINEAR stroke.
+    // The decoder lowers the stroke to strokeGradient/strokeWidth (captured as
+    // svg_stroke_gradient / svg_stroke_width even though the node has no path
+    // yet), synthesize_primitive_paths grows the path, and codegen must emit
+    // the stroke pair beside the fill — this stroke used to be dropped with
+    // "no solid paint to flatten to".
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode base;
+    base.type = "ellipse";
+    base.name = "Base";
+    base.style.width = 22.0f;
+    base.style.height = 22.0f;
+    base.style.background_color = "#2a2b2dcc";
+    base.attributes["svg_stroke_gradient"] =
+        "linear-gradient(180deg, #ffffff40 0%, #31313140 100%)";
+    base.attributes["svg_stroke_width"] = "0.94";
+    ir.root.children.push_back(base);
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("createSvgPath('") != std::string::npos);
+    REQUIRE(js.find("setSvgFill('") != std::string::npos);
+    REQUIRE(js.find("setSvgStrokeGradient('") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #31313140 100%)")
+            != std::string::npos);
+    REQUIRE(js.find("setSvgStrokeWidth(") != std::string::npos);
+}
+
 TEST_CASE("native codegen paints a gradient behind a transparent image",
           "[view][import][visual-overrides]") {
     DesignIR ir;

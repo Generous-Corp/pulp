@@ -1405,6 +1405,14 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
         // rim in a real design lowered to no stroke at all.
         ss << ind << "setSvgStroke('" << id << "', '"
            << js_single_quote_escape(*node.style.border_color) << "');\n";
+    // Gradient stroke rides beside the solid, same contract as the fill
+    // pair above: the widget prefers the gradient and keeps the solid as
+    // its parse-failure fallback, and the solid is emitted first so the
+    // generated JS reads the way it resolves.
+    if (auto sg = node.attributes.find("svg_stroke_gradient");
+        sg != node.attributes.end() && !sg->second.empty())
+        ss << ind << "setSvgStrokeGradient('" << id << "', '"
+           << js_single_quote_escape(sg->second) << "');\n";
     if (auto sw = node.attributes.find("svg_stroke_width");
         sw != node.attributes.end())
         ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";

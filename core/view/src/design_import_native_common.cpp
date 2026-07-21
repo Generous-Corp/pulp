@@ -1391,6 +1391,16 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
         if (*stroke == "none") path.clear_stroke();
         else if (auto color = parse_any_css_color(*stroke)) path.set_stroke_color(*color);
     }
+    // Gradient stroke — `svg_stroke_gradient` is the IR-canonical key
+    // (design_ir_json), `strokeGradient` the raw envelope/JSX spelling. The
+    // widget prefers the gradient over the solid set above and falls back to
+    // it when the CSS string won't parse, so order here doesn't matter.
+    for (const char* key : {"svg_stroke_gradient", "strokeGradient"}) {
+        if (auto grad = attr(node, key)) {
+            if (!grad->empty()) path.set_stroke_gradient(*grad);
+            break;
+        }
+    }
     if (auto stroke_width = attr_float(node, "stroke-width"))
         path.set_stroke_width(*stroke_width);
 }
