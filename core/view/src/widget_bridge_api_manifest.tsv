@@ -322,6 +322,11 @@ __scheduleTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __cancelTimer__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __flushTimers__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
 __performanceNow__	runtime	function	core/view/src/widget_bridge/runtime_api.cpp
+__getMeterLevel__	audio_meter	function	core/view/src/widget_bridge/audio_meter_api.cpp
+__getMeterPeak__	audio_meter	function	core/view/src/widget_bridge/audio_meter_api.cpp
+__getMeterChannelCount__	audio_meter	function	core/view/src/widget_bridge/audio_meter_api.cpp
+__registerOnFrame__	audio_meter	function	core/view/src/widget_bridge/audio_meter_api.cpp
+__unregisterOnFrame__	audio_meter	function	core/view/src/widget_bridge/audio_meter_api.cpp
 readClipboard	platform_services	function	core/view/src/widget_bridge/platform_services_api.cpp
 writeClipboard	platform_services	function	core/view/src/widget_bridge/platform_services_api.cpp
 canvasSetLinearGradient	canvas2d	function	core/view/src/widget_bridge/canvas2d_api.cpp

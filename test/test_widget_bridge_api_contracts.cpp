@@ -67,6 +67,7 @@ const std::set<std::string>& allowed_categories() {
     static const std::set<std::string> categories = {
         "accessibility",
         "animation",
+        "audio_meter",
         "canvas2d",
         "css_style",
         "dom",

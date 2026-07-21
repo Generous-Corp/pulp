@@ -60,6 +60,15 @@ void ScriptedUiSession::attach_gpu_surface(render::GpuSurface* gpu_surface) {
     // passes the same surface into the freshly-constructed WidgetBridge.
 }
 
+void ScriptedUiSession::attach_audio_bridge(AudioBridge* audio_bridge) {
+    audio_bridge_ = audio_bridge;
+    if (bridge_) {
+        bridge_->set_meter_source(audio_bridge);
+    }
+    // Stashed in audio_bridge_ so the next hot-reload rebuild reattaches the
+    // same meter source to the freshly-constructed WidgetBridge.
+}
+
 bool ScriptedUiSession::load(std::string* error) {
     auto code = read_text_file(script_path_);
     if (code.empty()) {
@@ -201,6 +210,11 @@ bool ScriptedUiSession::rebuild_from_code(const std::string& code, bool preserve
         next_bridge->set_asset_roots(asset_roots_);
         if (repaint_callback_) {
             next_bridge->set_repaint_callback(repaint_callback_);
+        }
+        // Re-attach the live meter source so getMeterLevel/onFrame keep working
+        // across a hot-reload rebuild (mirrors gpu_surface_ reattach).
+        if (audio_bridge_) {
+            next_bridge->set_meter_source(audio_bridge_);
         }
         next_bridge->load_script(code);
         base_theme_ = root_.theme();
