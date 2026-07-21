@@ -7,6 +7,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -689,4 +690,113 @@ TEST_CASE("AutoUi sync ignores unmatched widget identifiers",
     AutoUi::sync(*root, store);
 
     REQUIRE_THAT(orphan_ptr->value(), WithinAbs(0.25f, 0.001f));
+}
+
+// ── Host-automation record + playback ────────────────────────────────────────
+//
+// The default AutoUi editor must (1) bracket a knob drag in a begin/end host
+// gesture so a DAW records clean, undo-groupable automation, and (2) follow the
+// store when the host plays that automation back — without re-emitting a gesture
+// (a feedback loop that would corrupt the recording).
+
+TEST_CASE("AutoUi knob drag emits a bounded begin/set/end host gesture",
+          "[view][auto_ui][automation]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+
+    // A test sink standing in for the format adapter's host-notify path: gesture
+    // begin/end plus every value write, captured in call order.
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](ParamID) { events.push_back("begin"); },
+        [&](ParamID) { events.push_back("end"); });
+    auto token = store.add_listener(
+        [&](ParamID, float) { events.push_back("set"); }, ListenerThread::Audio);
+
+    auto root = AutoUi::build(store);
+    auto* knob = find_widget<Knob>(*root, "Gain");
+    REQUIRE(knob != nullptr);
+
+    // Simulate a real drag: press, move up (increase), release.
+    knob->on_mouse_down({0.0f, 100.0f});
+    knob->on_mouse_drag({0.0f, 40.0f});
+    knob->on_mouse_up({0.0f, 40.0f});
+
+    REQUIRE(events.size() >= 3);
+    // Exactly one begin, one end, in the right places.
+    CHECK(events.front() == "begin");
+    CHECK(events.back() == "end");
+    CHECK(std::count(events.begin(), events.end(), "begin") == 1);
+    CHECK(std::count(events.begin(), events.end(), "end") == 1);
+    // At least one value write, and every write is strictly inside the gesture.
+    const auto first_set = std::find(events.begin(), events.end(), "set");
+    REQUIRE(first_set != events.end());
+    CHECK(first_set > events.begin());               // after begin
+    CHECK(std::find(std::next(first_set), events.end(), "begin") == events.end());
+    for (auto it = std::next(events.begin()); it != std::prev(events.end()); ++it)
+        CHECK(*it == "set");                          // nothing but sets between
+    // The drag actually moved the parameter.
+    CHECK(store.get_normalized(1) > 0.0f);
+}
+
+TEST_CASE("AutoUi follows host automation playback without a feedback gesture",
+          "[view][auto_ui][automation]") {
+    StateStore store;
+    store.add_parameter(make_param(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+
+    int begins = 0, ends = 0, sets = 0;
+    store.set_gesture_callbacks([&](ParamID) { ++begins; },
+                               [&](ParamID) { ++ends; });
+    auto token = store.add_listener([&](ParamID, float) { ++sets; },
+                                    ListenerThread::Audio);
+
+    auto root = AutoUi::build(store);
+    auto* knob = find_widget<Knob>(*root, "Gain");
+    REQUIRE(knob != nullptr);
+    const float initial = knob->value();
+    REQUIRE_THAT(initial, !WithinAbs(0.75, 0.02));  // distinct from the target
+
+    // Host automation playback writes the store from outside the editor.
+    store.set_normalized(1, 0.75f);
+    const int sets_after_host_write = sets;
+    REQUIRE(sets_after_host_write == 1);
+
+    // The editor idle tick reflects the new value onto the knob.
+    AutoUi::sync(*root, store);
+    CHECK_THAT(knob->value(), WithinAbs(0.75, 0.001));
+
+    // Feedback guard: the poll-driven update must NOT write back to the store
+    // (no extra "set") and must NOT open/close a gesture. Otherwise the editor
+    // would echo the host's own automation back as a spurious recorded edit.
+    CHECK(sets == sets_after_host_write);
+    CHECK(begins == 0);
+    CHECK(ends == 0);
+}
+
+TEST_CASE("AutoUi toggle click emits a single bounded host gesture",
+          "[view][auto_ui][automation]") {
+    StateStore store;
+    // min 0, max 1, default 0, step 1 → AutoUi builds a Toggle for this param
+    // (ParamRange fields are {min, max, default_value, step}).
+    store.add_parameter(make_param(3, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](ParamID) { events.push_back("begin"); },
+        [&](ParamID) { events.push_back("end"); });
+    auto token = store.add_listener(
+        [&](ParamID, float) { events.push_back("set"); }, ListenerThread::Audio);
+
+    auto root = AutoUi::build(store);
+    auto* toggle = find_widget<Toggle>(*root, "Bypass");
+    REQUIRE(toggle != nullptr);
+
+    toggle->on_mouse_down({0.0f, 0.0f});  // user click flips the toggle
+
+    // One clean begin → set → end, so the host records a single undo step.
+    REQUIRE(events.size() == 3);
+    CHECK(events[0] == "begin");
+    CHECK(events[1] == "set");
+    CHECK(events[2] == "end");
+    CHECK(store.get_normalized(3) > 0.5f);
 }

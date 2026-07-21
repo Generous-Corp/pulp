@@ -4,8 +4,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <sstream>
 #include <iomanip>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::view {
@@ -277,8 +280,13 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             toggle->set_id(param.name);
             toggle->set_label(param.name);
             toggle->set_on(store.get_normalized(param.id) > 0.5f);
+            // A toggle click is a single instantaneous edit — bound it in a
+            // begin/end gesture so the host records one clean automation point
+            // (and groups it as one undo step) instead of a bare value write.
             toggle->on_toggle = [&store, id = param.id](bool on) {
+                store.begin_gesture(id);
                 store.set_normalized(id, on ? 1.0f : 0.0f);
+                store.end_gesture(id);
             };
             toggle->flex().preferred_height = 30;
             toggle->flex().preferred_width = 54;
@@ -293,8 +301,19 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             knob->set_show_label(false);
             knob->set_show_value(false);
             knob->set_value(store.get_normalized(param.id));
+            // Bracket the drag in a host gesture so DAW automation is recorded
+            // with clean begin/end boundaries (undo grouping, latch/touch modes).
+            // The Knob fires on_gesture_begin on mouse-down, on_change during the
+            // drag, and on_gesture_end on release — all on the UI/main thread,
+            // which is exactly what StateStore's gesture API requires.
+            knob->on_gesture_begin = [&store, id = param.id]() {
+                store.begin_gesture(id);
+            };
             knob->on_change = [&store, id = param.id](float norm) {
                 store.set_normalized(id, norm);
+            };
+            knob->on_gesture_end = [&store, id = param.id]() {
+                store.end_gesture(id);
             };
             // Keep the physical-unit formatter on the Knob even though AutoUi
             // paints that value in its own row. AccessibilityValueInterface uses
@@ -468,29 +487,56 @@ AutoUi::SizeHint AutoUi::preferred_size(state::StateStore& store) {
 }
 
 void AutoUi::sync(View& root, state::StateStore& store) {
-    auto params = store.all_params();
+    // Reflect the store's CURRENT value into every generated control. This runs
+    // once per editor idle tick (ViewBridge::pump_store_listeners), so host
+    // automation playback — or an edit from another editor/surface — moves the
+    // AutoUi knobs to follow it.
+    //
+    // Feedback safety: every write below goes through the Notify::none setters
+    // (Knob/Fader::set_value(v), Toggle::set_on(v)), which repaint but do NOT
+    // fire on_change / on_toggle. A poll-driven update therefore never re-enters
+    // store.set_normalized and never emits a begin/end gesture, so it can't echo
+    // back to the host as a spurious automation write. This mirrors the AU
+    // adapter's g_host_writing_param discipline on the editor side.
+    //
+    // Cost: a single tree walk with O(1) id lookups, not one walk per parameter,
+    // so the per-frame cost stays flat as the parameter count grows.
+    const auto params = store.all_params();
+    if (params.empty()) return;
 
-    for (auto& param : params) {
-        // Walk the view tree to find widget matching this param name
-        std::function<void(View&)> visit = [&](View& view) {
-            if (view.id() == param.name) {
-                float norm = store.get_normalized(param.id);
+    std::unordered_map<std::string, const state::ParamInfo*> control_by_id;
+    std::unordered_map<std::string, const state::ParamInfo*> value_label_by_id;
+    control_by_id.reserve(params.size());
+    value_label_by_id.reserve(params.size());
+    for (const auto& param : params) {
+        control_by_id.emplace(param.name, &param);
+        value_label_by_id.emplace(value_label_id(param.id), &param);
+    }
+
+    std::function<void(View&)> visit = [&](View& view) {
+        const std::string& id = view.id();
+        if (!id.empty()) {
+            if (auto it = control_by_id.find(id); it != control_by_id.end()) {
+                const auto& param = *it->second;
+                const float norm = store.get_normalized(param.id);
                 if (auto* knob = dynamic_cast<Knob*>(&view))
                     knob->set_value(norm);
                 else if (auto* toggle = dynamic_cast<Toggle*>(&view))
                     toggle->set_on(norm > 0.5f);
                 else if (auto* fader = dynamic_cast<Fader*>(&view))
                     fader->set_value(norm);
-            } else if (view.id() == value_label_id(param.id)) {
+            } else if (auto it = value_label_by_id.find(id);
+                       it != value_label_by_id.end()) {
+                const auto& param = *it->second;
                 if (auto* label = dynamic_cast<Label*>(&view))
                     label->set_text(format_parameter_value(
                         param, store.get_normalized(param.id)));
             }
-            for (size_t i = 0; i < view.child_count(); ++i)
-                visit(*view.child_at(i));
-        };
-        visit(root);
-    }
+        }
+        for (size_t i = 0; i < view.child_count(); ++i)
+            visit(*view.child_at(i));
+    };
+    visit(root);
 }
 
 } // namespace pulp::view

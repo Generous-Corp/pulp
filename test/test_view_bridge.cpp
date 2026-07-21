@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/gpu_host_select.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
@@ -14,9 +15,11 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <optional>
 #include <string>
 #include <vector>
@@ -24,6 +27,17 @@
 using namespace pulp;
 
 namespace {
+
+template <typename Widget>
+Widget* find_widget(view::View& view, std::string_view id) {
+    if (view.id() == id) {
+        if (auto* w = dynamic_cast<Widget*>(&view)) return w;
+    }
+    for (size_t i = 0; i < view.child_count(); ++i) {
+        if (auto* w = find_widget<Widget>(*view.child_at(i), id)) return w;
+    }
+    return nullptr;
+}
 
 int set_env_var(const char* name, const char* value) {
 #if defined(_WIN32)
@@ -179,6 +193,52 @@ TEST_CASE("ViewBridge sizes the AutoUi default editor to fit its parameters",
     CHECK(hints.min_height > 0);
     CHECK(hints.aspect_ratio > 0.0);
     CHECK(format::should_pin_design_viewport(hints));
+
+    bridge.close();
+}
+
+TEST_CASE("ViewBridge idle pump moves AutoUi knobs to follow host automation",
+          "[view_bridge][auto_ui][automation]") {
+    // End-to-end proof of the record/playback loop for the default editor: the
+    // idle pump (make_scripted_idle_pump — the exact callback every adapter's
+    // display link runs) must pull the store's current values into the AutoUi
+    // tree so a knob follows automation the host writes on the audio thread.
+    DefaultAutoUiProcessor p;
+    p.param_count = 1;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    // A gesture sink stands in for the adapter's host-notify path so we can prove
+    // the poll-driven update does NOT emit a spurious gesture.
+    int begins = 0, ends = 0;
+    store.set_gesture_callbacks([&](state::ParamID) { ++begins; },
+                               [&](state::ParamID) { ++ends; });
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+    bridge.notify_attached();
+
+    auto* knob = find_widget<view::Knob>(*bridge.view(), "P1");
+    REQUIRE(knob != nullptr);
+    const float before = knob->value();
+
+    // Host automation playback writes the store from "the audio thread".
+    store.set_normalized(1, before > 0.5f ? 0.1f : 0.9f);
+    const float target = store.get_normalized(1);
+    REQUIRE(std::abs(target - before) > 0.1f);
+
+    // The knob has not moved yet — nothing has pumped the tree.
+    CHECK_THAT(knob->value(), Catch::Matchers::WithinAbs(before, 1e-4));
+
+    // Run the real production idle pump once.
+    auto pump = format::make_scripted_idle_pump(bridge);
+    pump();
+
+    // The knob now reflects the automation value, with no gesture echoed back.
+    CHECK_THAT(knob->value(), Catch::Matchers::WithinAbs(target, 1e-4));
+    CHECK(begins == 0);
+    CHECK(ends == 0);
 
     bridge.close();
 }
