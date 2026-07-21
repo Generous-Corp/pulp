@@ -39,6 +39,8 @@
 #  pragma clang diagnostic pop
 #endif
 
+#include "plugin_slot_vst3_internal.hpp"
+
 #include <pulp/host/dl_shim.hpp>
 #include <pulp/host/detail/vst3_connection.hpp>
 #include <pulp/host/detail/vst3_state_sync.hpp>
@@ -862,6 +864,18 @@ std::unique_ptr<PluginSlot> load_vst3_plugin(const PluginInfo& info) {
 
     return std::make_unique<Vst3Slot>(std::move(filled), handle, factory,
                                       component, processor, controller);
+}
+
+std::unique_ptr<PluginSlot> make_vst3_slot(PluginInfo info,
+                                           Vst::IComponent* component,
+                                           Vst::IAudioProcessor* processor,
+                                           Vst::IEditController* controller) {
+    if (!component) return nullptr;
+    // No module handle and no factory: nothing to dlclose, nothing to release
+    // beyond the interfaces the caller handed over.
+    return std::make_unique<Vst3Slot>(std::move(info), /*handle=*/nullptr,
+                                      /*factory=*/nullptr, component, processor,
+                                      controller);
 }
 
 } // namespace pulp::host

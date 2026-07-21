@@ -363,6 +363,24 @@ if(PULP_HAS_VST3)
     catch_discover_tests(pulp-test-vst3-editor)
 endif()
 
+if(PULP_HAS_VST3 AND APPLE)
+    # The real Vst3Slot editor path against a real NSView parent, via
+    # make_vst3_slot (core/host/src is on the include path for that internal
+    # header). Covers what no free-function seam can: a plug-in calling
+    # IPlugFrame::resizeView from inside attached(). macOS-only because
+    # create_editor_container is a stub elsewhere, so there is no parent to
+    # hand a plug-in.
+    add_executable(pulp-test-vst3-hosted-editor
+        test_vst3_hosted_editor.mm
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp
+    )
+    target_link_libraries(pulp-test-vst3-hosted-editor
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain "-framework AppKit")
+    target_include_directories(pulp-test-vst3-hosted-editor
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-vst3-hosted-editor)
+endif()
+
 if(PULP_HAS_CLAP)
     # Adapter-vs-direct audio null: renders one deterministic Processor through
     # HeadlessHost and through the real CLAP adapter and requires the bits to
