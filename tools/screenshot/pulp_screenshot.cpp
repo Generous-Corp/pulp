@@ -490,6 +490,10 @@ int main(int argc, char* argv[]) {
     } else {
         // Load library JS files from the same directory
         auto js_dir = std::filesystem::path(options.script_path).parent_path();
+        // Import artifacts reference their assets relative to the script
+        // (assets/<file> next to ui.js); resolve those against the script's
+        // own directory rather than the process CWD.
+        bridge.set_script_base_dir(js_dir);
         for (auto& lib : {"oklch.js"}) {
             auto lib_path = js_dir / lib;
             if (std::filesystem::exists(lib_path)) {

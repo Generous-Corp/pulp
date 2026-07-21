@@ -1,0 +1,36 @@
+#pragma once
+
+#include <cstdint>
+#include <string_view>
+
+namespace pulp::timeline::detail {
+
+struct TrackSchemaVersionPolicy {
+    std::string_view type_name;
+    std::uint32_t oldest_readable_version;
+    std::uint32_t current_version;
+    std::uint32_t device_chain_introduced_version;
+
+    [[nodiscard]] constexpr bool requires_device_chain(std::uint32_t version) const noexcept {
+        return version >= device_chain_introduced_version;
+    }
+};
+
+inline constexpr TrackSchemaVersionPolicy track_schema_policy{
+    "pulp.timeline.track",
+    1,
+    2,
+    2,
+};
+static_assert(track_schema_policy.oldest_readable_version > 0 &&
+              track_schema_policy.oldest_readable_version <=
+                  track_schema_policy.current_version &&
+              track_schema_policy.device_chain_introduced_version > 0 &&
+              track_schema_policy.device_chain_introduced_version <=
+                  track_schema_policy.current_version &&
+              !track_schema_policy.requires_device_chain(
+                  track_schema_policy.device_chain_introduced_version - 1) &&
+              track_schema_policy.requires_device_chain(
+                  track_schema_policy.device_chain_introduced_version));
+
+} // namespace pulp::timeline::detail

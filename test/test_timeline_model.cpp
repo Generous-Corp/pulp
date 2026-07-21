@@ -1,10 +1,12 @@
 #include "../core/timeline/src/identity_directory.hpp"
+#include "../core/timeline/src/identity_transition.hpp"
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::timeline;
@@ -14,15 +16,39 @@ TEST_CASE("Timeline private identity equality is semantic across insertion histo
     pulp::timeline::detail::IdentityDirectory ascending;
     pulp::timeline::detail::IdentityDirectory interleaved;
     const auto location = [](std::uint64_t id) {
-        return ItemLocation{ItemKind::Clip, {10}, {11}, {id}, true};
+        return ItemLocation{ItemKind::Clip, {11}, {10}, {11}, {id}, true};
     };
     for (std::uint64_t id = 1; id <= 7; ++id)
         REQUIRE(ascending.insert({id}, location(id)));
     for (const std::uint64_t id : {4, 2, 6, 1, 3, 5, 7})
         REQUIRE(interleaved.insert({id}, location(id)));
     REQUIRE(ascending.equivalent(interleaved));
-    REQUIRE(interleaved.replace({7}, {ItemKind::Clip, {10}, {11}, {7}, false}));
+    REQUIRE(interleaved.replace({7},
+                                {ItemKind::Clip, {11}, {10}, {11}, {7}, false}));
     REQUIRE_FALSE(ascending.equivalent(interleaved));
+}
+
+TEST_CASE("Timeline item ownership is kind plus immediate parent") {
+    STATIC_REQUIRE_FALSE(std::is_aggregate_v<ItemLocation>);
+    STATIC_REQUIRE_FALSE(
+        std::is_constructible_v<ItemLocation, ItemKind, ItemId, ItemId, ItemId, bool>);
+
+    const ItemLocation first{ItemKind::Note, {50}, {10}, {20}, {50}, true};
+    const ItemLocation same_owner{ItemKind::Note, {50}, {11}, {21}, {50}, false};
+    const ItemLocation other_parent{ItemKind::Note, {51}, {10}, {20}, {50}, true};
+    const ItemLocation other_kind{ItemKind::Clip, {50}, {10}, {20}, {50}, true};
+
+    REQUIRE(first.has_same_owner(same_owner));
+    REQUIRE_FALSE(first.has_same_owner(other_parent));
+    REQUIRE_FALSE(first.has_same_owner(other_kind));
+
+    REQUIRE(immediate_parent_id(ItemKind::Project, {1}, {2}, {3}, {4}) == ItemId{});
+    REQUIRE(immediate_parent_id(ItemKind::Asset, {1}, {2}, {3}, {4}) == ItemId{1});
+    REQUIRE(immediate_parent_id(ItemKind::Sequence, {1}, {2}, {3}, {4}) == ItemId{1});
+    REQUIRE(immediate_parent_id(ItemKind::Track, {1}, {2}, {3}, {4}) == ItemId{2});
+    REQUIRE(immediate_parent_id(ItemKind::Clip, {1}, {2}, {3}, {4}) == ItemId{3});
+    REQUIRE(immediate_parent_id(ItemKind::Note, {1}, {2}, {3}, {4}) == ItemId{4});
+    REQUIRE(immediate_parent_id(ItemKind::DevicePlacement, {1}, {2}, {3}, {4}) == ItemId{3});
 }
 using namespace pulp::timebase;
 
@@ -107,6 +133,19 @@ Project make_project() {
 }
 
 } // namespace
+
+TEST_CASE("Timeline reactivation policy refreshes ancestor navigation caches") {
+    const ItemLocation tombstone{ItemKind::Note, {5}, {2}, {3}, {5}, false};
+    const ItemLocation requested{ItemKind::Note, {5}, {2}, {4}, {5}, false};
+
+    const auto reactivated = pulp::timeline::detail::reactivated_location(tombstone, requested);
+    REQUIRE(reactivated == ItemLocation{ItemKind::Note, {5}, {2}, {4}, {5}, true});
+
+    REQUIRE_FALSE(pulp::timeline::detail::reactivated_location(
+        ItemLocation{ItemKind::Note, {6}, {2}, {3}, {6}, false}, requested));
+    REQUIRE_FALSE(pulp::timeline::detail::reactivated_location(
+        ItemLocation{ItemKind::Note, {5}, {2}, {3}, {5}, true}, requested));
+}
 
 TEST_CASE("Timeline snapshots retain sorted indexes and immutable note content") {
     const auto project = make_project();
@@ -458,8 +497,7 @@ TEST_CASE("Timeline subtree remap preflights closure-wide identity uniqueness") 
     REQUIRE(clip_result.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(allocator.next_value() == 100);
 
-    const auto colliding_track = take_value(Track::create({20}, "track", {clip({20}, 0, 10)}));
-    auto track_result = remap_ids(colliding_track, allocator);
+    auto track_result = Track::create({20}, "track", {clip({20}, 0, 10)});
     REQUIRE_FALSE(track_result.has_value());
     REQUIRE(track_result.error().code == ModelErrorCode::DuplicateItemId);
     REQUIRE(allocator.next_value() == 100);
