@@ -460,6 +460,37 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 
 Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. The fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
 
+### Out-of-process Logic starves the CPU editor's paint — drive it from the pump
+
+Logic hosts AU v2 **out-of-process** (`AUHostingServiceXPC`). A CPU
+(CoreGraphics) editor — `MacPluginViewHost` in
+`core/view/platform/mac/plugin_view_host_mac.mm`, chosen whenever the GPU host
+isn't backed — used to render by marking the NSView dirty (`repaint()` →
+`[view_ setNeedsDisplay:YES]`) and **relying on AppKit's own display cycle to
+call `drawRect:`**. In a foreign OOP host that display cycle does not reliably
+run for the remote-hosted view, so after the first paint every later
+`request_repaint()` marks the view dirty but it is **never drawn**: progress
+freezes mid-generation, knob drags don't move visually, and the tree only shows
+its real state on close + reopen (a fresh view gets one initial paint). REAPER
+(VST3, in-process) never hit this because AppKit services `setNeedsDisplay:`
+normally there.
+
+Fix: the CPU host now calls `[view_ displayIfNeeded]` from its CVDisplayLink pump
+tick whenever the frame should render — the CPU analogue of the GPU host
+presenting from `render_frame()`. **Never** re-mark `setNeedsDisplay:` for a
+dirty-only frame (it feeds `needs_repaint` through `-setNeedsDisplay:` forever);
+`displayIfNeeded` flushes the *pending* region without re-arming.
+
+Related: an activity-probe repaint (the Forge generation chrome rides the
+`FrameClock` activity channel, whose `poll()` calls `request_repaint()`) lands
+**inside** `begin_host_frame` — after the pump sampled its `needs_repaint`
+snapshot — so both plugin hosts now re-read the dirty flag *after*
+`begin_host_frame` and fold it into the render decision, or the frame it dirtied
+waits a whole vsync. Contract test: `test/test_host_frame_pump.cpp` "a repaint
+requested from an activity probe lands after the tick's dirty snapshot". The OOP
+present itself is not headless-testable — verify in Logic (see the retest recipe
+when touching this path).
+
 ### Editor GPU host is auto-selected — don't hardcode `use_gpu`
 
 `au_v2_cocoa_view.mm` no longer sets `Options::use_gpu` by hand; it calls
