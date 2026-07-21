@@ -463,3 +463,30 @@ TEST_CASE("a custom-drawn canvas knob drives its param through a drag",
     canvas->on_drag({40, 0});
     REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.8333f, 1e-3f));
 }
+
+TEST_CASE("binding a canvas to a param returns false instead of silently no-op'ing",
+          "[view][bridge][state-binding]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createCanvas('gain-canvas', '');");
+    // A canvas is not a value widget: the per-frame push has no way to write it,
+    // so accepting the bind would hand the caller a truthy "bound" for a push
+    // that can never happen.
+    const bool value_ok = engine.evaluate("bindWidgetToParam('gain-canvas', 'gain')")
+                              .getWithDefault<bool>(true);
+    REQUIRE_FALSE(value_ok);
+    const bool meter_ok = engine.evaluate("bindMeter('gain-canvas', 'gain')")
+                              .getWithDefault<bool>(true);
+    REQUIRE_FALSE(meter_ok);
+    REQUIRE(bridge.param_binding_count() == 0);
+
+    // A real value widget still binds — the rejection is type-scoped, not a
+    // blanket tightening.
+    bridge.load_script("createKnob('gain-knob');");
+    REQUIRE(engine.evaluate("bindWidgetToParam('gain-knob', 'gain')")
+                .getWithDefault<bool>(false));
+}

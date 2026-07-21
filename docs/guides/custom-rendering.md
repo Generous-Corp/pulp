@@ -191,8 +191,8 @@ function drawMeter(peak, rms) {
 A canvas is hit-testable and receives pointer events with no opt-in — subscribing
 with `on(id, "pointerdown"| "pointermove"| "pointerup", fn)` is all the wiring it
 needs. **The canvas owns its own value**: `bindWidgetToParam` drives the stock
-value widgets (knob, fader, slider, toggle, progress) and has nothing to write on
-a canvas, so a custom-drawn control reads with `getParam` and writes with
+value widgets (knob, fader, slider, toggle, progress) and returns `false` for a
+canvas, so a custom-drawn control reads with `getParam` and writes with
 `setParam` from its own handlers.
 
 The gesture shape is the usual one — latch the origin on press, apply the delta
