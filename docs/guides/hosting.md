@@ -66,10 +66,16 @@ name / vendor / version / unique id come back populated.
 For applications that scan arbitrary third-party installations, prefer
 `IsolatedPluginScanner` (`pulp/host/isolated_scanner.hpp`). It runs the scan in
 the `pulp-scan-worker` child process, so a crash, hang, or timeout comes back as
-a structured `ScanResult` / `ScanStatus` instead of taking down the host. That
-isolation covers discovery; a tool that performs deeper analysis by
-instantiating and processing untrusted plug-ins should run that probe in a child
-process too.
+a structured `ScanResult` / `ScanStatus` instead of taking down the host.
+
+**That isolation covers discovery only.** `PluginSlot::load()` runs in your
+process, and the crash does not wait for you to process audio — a plug-in can
+fault inside its own factory or `initialize()` and take the host down before
+`load()` ever returns. This is not hypothetical: at least one shipping
+commercial VST3 segfaults on load on a machine where its licensing prerequisites
+are absent. Any tool that loads plug-ins it did not choose — a scan-everything
+plug-in manager, a batch analyzer — should run the load in a child process, the
+same way `IsolatedPluginScanner` runs discovery.
 
 ## Analyzer-style inspection
 

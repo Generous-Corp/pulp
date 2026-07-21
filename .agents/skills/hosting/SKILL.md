@@ -1332,7 +1332,18 @@ created with null slots so connection ids stay stable. `GraphNode`
 gained a `plugin_info` member that survives a failed slot load so
 re-saving an unresolved-plugin node preserves its identity.
 
-## Crash-isolated scanning
+## Crash-isolated scanning — and the un-isolated LOAD
+
+Isolation covers **discovery**. `PluginSlot::load()` is in-process, and a
+plug-in can fault inside its own factory or `initialize()` — before `load()`
+returns and long before any audio is processed — taking the host with it.
+Observed 2026-07-21: a shipping commercial VST3 (Roland Cloud TB-303) segfaults
+four frames deep inside its own binary during `load_vst3_plugin` on a machine
+without its licensing prerequisites, with `PluginSlot::load` the only Pulp frame
+on the stack. Reproduces regardless of Pulp version, so do not go looking for a
+host-side bug when a `.ips` shows only vendor frames. Anything that loads
+plug-ins it did not choose should load them in a child process too.
+
 
 `pulp::host::IsolatedPluginScanner` (in
 `core/host/include/pulp/host/isolated_scanner.hpp`) is the high-level
