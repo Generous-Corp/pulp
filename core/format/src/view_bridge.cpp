@@ -265,6 +265,17 @@ void ViewBridge::pump_store_listeners() {
     if (!owner_is_alive()) return;
     store_.pump_listeners();
     sync_design_frames_from_host();
+    // The AutoUi default editor builds plain Knob/Toggle widgets that are not
+    // bound through the host-param surface or a DesignFrameView, so nothing above
+    // moves them. Pull the store's current values into the tree each idle tick so
+    // the stock editor follows host automation playback / edits from another
+    // surface. AutoUi::sync writes through the Notify::none setters, so it never
+    // re-fires on_change and can't echo back to the host as a spurious write.
+    if (uses_auto_ui_ && view_raw_) {
+        view::AutoUi::sync(*view_raw_, store_);
+        for (auto& s : secondaries_)
+            if (s.view) view::AutoUi::sync(*s.view, store_);
+    }
 }
 
 std::size_t ViewBridge::sync_design_frames_from_host() {

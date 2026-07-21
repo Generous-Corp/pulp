@@ -1186,6 +1186,42 @@ once they overflow the viewport (`align_content: start`) instead of
 centering them into negative, unreachable scroll offsets — that was the
 "can't scroll to the top row" half of the same bug.
 
+### AutoUi records + follows host automation (2026-07)
+
+The AutoUi editor's knobs/toggles are plain `Knob`/`Toggle` widgets — NOT
+`bind_parameter` widgets and NOT `DesignFrameView`s — so neither the
+store's Main-listener drain (`pump_listeners()`) nor the design-frame pull
+(`sync_design_frames_from_host()`) touches them. Two pieces make them
+behave like real automatable controls:
+
+- **Record (editor → host):** `AutoUi::build()` wires the knob's
+  `on_gesture_begin` / `on_gesture_end` (fired on mouse-down / mouse-up) to
+  `StateStore::begin_gesture` / `end_gesture`, and the toggle's `on_toggle`
+  wraps its write in a one-shot `begin → set_normalized → end`. That is
+  what gives the DAW clean gesture boundaries (undo grouping, latch/touch).
+  The gesture callbacks are the existing per-adapter host-notify path:
+  VST3 (`beginEdit`/`endEdit`), AU v2/v3 and AAX all wire
+  `store.set_gesture_callbacks(...)`. **CLAP is the gap** — it consumes
+  inbound gestures but never calls `set_gesture_callbacks`, so editor
+  begin/end do NOT reach the host as `CLAP_EVENT_PARAM_GESTURE_BEGIN/END`.
+  CLAP still records the VALUE (the process-loop snapshot-diff in
+  `clap_phase_emit_output` emits `CLAP_EVENT_PARAM_VALUE`), just without
+  gesture grouping. Forwarding CLAP gestures needs a main→audio handoff +
+  ordered `out_events` emission — not a small change.
+- **Playback (host → editor):** `pump_store_listeners()` (the idle pump
+  every adapter runs via `make_scripted_idle_pump`) calls
+  `AutoUi::sync(view, store)` each tick when `uses_auto_ui_`, pulling the
+  store's current values into the tree so a knob MOVES under automation
+  playback or an edit from another surface. **Feedback safety:**
+  `AutoUi::sync` writes through the `Notify::none` setters
+  (`Knob::set_value(v)`, `Toggle::set_on(v)`), which repaint but do NOT
+  fire `on_change`/`on_toggle` — so a poll-driven update never re-enters
+  `set_normalized` and never emits a gesture back to the host (the
+  editor-side mirror of the AU adapter's `g_host_writing_param`). `sync`
+  is a single tree walk with O(1) id lookups, so its per-tick cost stays
+  flat as the parameter count grows. Any future native default editor that
+  hangs off this pump must keep the same Notify::none discipline.
+
 ## GpuSurface Plumbing Into WidgetBridge
 
 Adapter editor-attach paths that wire a scripted UI (`ScriptedUiSession`)
