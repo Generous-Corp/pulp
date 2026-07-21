@@ -409,13 +409,29 @@ void SkiaCanvas::save_layer_with_shader_effect(float x, float y,
     // UNBOUNDED output — it can write at any coordinate, whether or not the
     // child drew there — so saveLayer treats its bounds argument as a hint and
     // grows the layer to the device clip. An effect that writes opaque pixels
-    // where the child is transparent (crt's scanlines + aperture mask do) then
-    // composites over everything already painted behind this canvas, which
-    // reads as the whole window going black behind one small screen. Cropping
-    // the filter makes containment structural rather than a property each
-    // curated effect has to preserve in its alpha. kDecal (Crop's default) is
-    // transparent outside the rect, so the surrounding content shows through
-    // untouched. The rect is in the same local space as the layer bounds.
+    // where the child is transparent then composites over everything already
+    // painted behind this canvas, which reads as the whole window going black
+    // behind one small screen.
+    //
+    // Today only `crt` actually does that (its scanlines and aperture mask
+    // write regardless of child alpha); the other five happen to preserve the
+    // child's transparency. That is the reason to crop rather than to fix one
+    // shader: containment must not depend on every present and future curated
+    // effect remembering to preserve alpha. Do not read this as redundant when
+    // adding effect number seven.
+    //
+    // `bloom` is the case that looks like it wants the opposite, since its
+    // purpose is to spread light past its source — but a layer cannot paint
+    // outside itself in the first place (saveLayer already clips layer CONTENT
+    // to `bounds`). Without the crop, a bright element at the widget edge threw
+    // a HARD-EDGED band of uniform colour ~8px past the boundary that stopped
+    // abruptly instead of falling off — the unbounded-output artifact again,
+    // not a glow. Cropping removes that band and changes nothing inside. So do
+    // not widen the crop for bloom; that would quietly restore the overspill.
+    //
+    // kDecal (Crop's default) is transparent outside the rect, so the
+    // surrounding content shows through untouched. The rect is in the same
+    // local space as the layer bounds.
     if (fx) fx = SkImageFilters::Crop(SkRect::MakeXYWH(x, y, w, h), std::move(fx));
     // A runtime-shader post-effect can drop coverage below opaque, so mark the
     // layer non-opaque when an effect is actually active (matches the

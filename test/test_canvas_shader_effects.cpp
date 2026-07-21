@@ -313,6 +313,75 @@ TEST_CASE("named shader effect: does not paint outside its own canvas",
     }
 }
 
+TEST_CASE("named shader effect: bloom glows to the canvas edge, not past it",
+          "[canvas_widget][shader_effect][skia]") {
+    // Bloom is the one curated effect whose PURPOSE is to spread light beyond
+    // its source, so it is the case where a layer crop could plausibly be
+    // wrong. Put a bright bar hard against the widget's right edge and read
+    // both sides of that edge.
+    //
+    // The glow must still reach the widget's own edge (the crop is not eating
+    // the effect), and must not appear outside the widget — which is not the
+    // crop being harsh, but `saveLayer(&bounds)` already clipping layer CONTENT
+    // to those bounds. A layer cannot legitimately paint outside itself; the
+    // pre-fix spread past the widget was the unbounded-filter-output bug, not a
+    // bloom feature being removed.
+    const float ox = 24, oy = 24, size = 48;
+    auto build = [&](const std::string& effect) {
+        auto surface = make_surface();
+        REQUIRE(surface != nullptr);
+        surface->getCanvas()->clear(SK_ColorBLACK);
+        SkPaint field;
+        field.setColor(SkColorSetARGB(255, 0, 200, 0));
+        surface->getCanvas()->drawRect(SkRect::MakeWH((float)kW, (float)kH), field);
+        surface->getCanvas()->save();
+        surface->getCanvas()->translate(ox, oy);
+
+        CanvasWidget cw;
+        cw.set_bounds({ox, oy, size, size});
+        if (!effect.empty()) cw.set_shader_effect(effect, 1.0f);
+        CanvasDrawCmd bg;
+        bg.type = CanvasDrawCmd::Type::fill_rect;
+        bg.x = 0; bg.y = 0; bg.w = size; bg.h = size;
+        bg.color = pulp::canvas::Color::rgba8(8, 8, 8, 255);
+        cw.add_command(bg);
+        // A bright bar occupying the widget's right-hand strip, running to the
+        // widget edge.
+        CanvasDrawCmd bar;
+        bar.type = CanvasDrawCmd::Type::fill_rect;
+        bar.x = size - 10; bar.y = 8; bar.w = 10; bar.h = size - 16;
+        bar.color = pulp::canvas::Color::rgba8(255, 255, 255, 255);
+        cw.add_command(bar);
+
+        SkiaCanvas canvas(surface->getCanvas());
+        cw.paint(canvas);
+        surface->getCanvas()->restore();
+        return surface;
+    };
+
+    auto plain = build("");
+    auto bloom = build("bloom");
+
+    // Inside the widget, a few px LEFT of the bright bar: bloom bleeds light
+    // into the dark interior, so the effect is alive right up against the edge.
+    const int inx = static_cast<int>(ox + size - 16);
+    const int iny = static_cast<int>(oy + size / 2);
+    const int plain_in = sample_pixel(plain.get(), inx, iny).r;
+    const int bloom_in = sample_pixel(bloom.get(), inx, iny).r;
+    REQUIRE(plain_in < 40);
+    REQUIRE(bloom_in > plain_in + 10);
+
+    // Immediately OUTSIDE the widget's right edge: still the green field, with
+    // no glow halo, exactly as when no effect is set.
+    const int outx = static_cast<int>(ox + size + 2);
+    Pixel plain_out = sample_pixel(plain.get(), outx, iny);
+    Pixel bloom_out = sample_pixel(bloom.get(), outx, iny);
+    REQUIRE(plain_out.g > 150);
+    CHECK(bloom_out.g == plain_out.g);
+    CHECK(bloom_out.r == plain_out.r);
+    CHECK(bloom_out.b == plain_out.b);
+}
+
 TEST_CASE("named shader effect: still renders inside an offset canvas",
           "[canvas_widget][shader_effect][skia]") {
     // The other half of the contract: cropping the effect to the widget must
