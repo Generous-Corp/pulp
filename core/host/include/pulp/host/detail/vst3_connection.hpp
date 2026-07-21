@@ -46,6 +46,13 @@ namespace pulp::host::detail {
 /// different address, and the comparison calls every combined plug-in
 /// "separated". Querying FUnknown from both sides returns one canonical
 /// pointer, which is the only reliable answer.
+///
+/// A plug-in that cannot answer the FUnknown query at all is non-conformant,
+/// and this reports "same object" for it — deliberately, because the two wrong
+/// answers are not equally bad. Treating one object as two calls
+/// IPluginBase::terminate() on it twice, which is undefined behavior in the
+/// plug-in. Treating two objects as one merely skips a terminate and leaks.
+/// Fail toward the leak.
 inline bool vst3_same_object(Steinberg::FUnknown* a, Steinberg::FUnknown* b) {
     if (a == b) return a != nullptr;
     if (!a || !b) return false;
@@ -53,12 +60,12 @@ inline bool vst3_same_object(Steinberg::FUnknown* a, Steinberg::FUnknown* b) {
     Steinberg::FUnknown* canonical_b = nullptr;
     if (a->queryInterface(Steinberg::FUnknown::iid, (void**)&canonical_a) != Steinberg::kResultOk
         || !canonical_a) {
-        return false;
+        return true;
     }
     if (b->queryInterface(Steinberg::FUnknown::iid, (void**)&canonical_b) != Steinberg::kResultOk
         || !canonical_b) {
         canonical_a->release();
-        return false;
+        return true;
     }
     const bool same = (canonical_a == canonical_b);
     canonical_a->release();

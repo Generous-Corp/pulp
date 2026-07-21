@@ -150,7 +150,60 @@ public:
     uint32 PLUGIN_API release() SMTG_OVERRIDE { return 1000; }
 };
 
+// A non-conformant half: it refuses the FUnknown query that decides identity.
+class RefusesFUnknown : public Vst::IComponent {
+public:
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) SMTG_OVERRIDE {
+        if (FUnknownPrivate::iidEqual(iid, Vst::IComponent::iid)) {
+            *obj = static_cast<Vst::IComponent*>(this);
+            return kResultTrue;
+        }
+        *obj = nullptr;   // including FUnknown::iid
+        return kNoInterface;
+    }
+    tresult PLUGIN_API getState(IBStream*) SMTG_OVERRIDE { return kResultOk; }
+    tresult PLUGIN_API setState(IBStream*) SMTG_OVERRIDE { return kResultOk; }
+    tresult PLUGIN_API initialize(FUnknown*) SMTG_OVERRIDE { return kResultOk; }
+    tresult PLUGIN_API terminate() SMTG_OVERRIDE { return kResultOk; }
+    tresult PLUGIN_API getControllerClassId(TUID) SMTG_OVERRIDE { return kNotImplemented; }
+    tresult PLUGIN_API setIoMode(Vst::IoMode) SMTG_OVERRIDE { return kNotImplemented; }
+    int32 PLUGIN_API getBusCount(Vst::MediaType, Vst::BusDirection) SMTG_OVERRIDE { return 0; }
+    tresult PLUGIN_API getBusInfo(Vst::MediaType, Vst::BusDirection, int32,
+                                  Vst::BusInfo&) SMTG_OVERRIDE {
+        return kResultFalse;
+    }
+    tresult PLUGIN_API getRoutingInfo(Vst::RoutingInfo&, Vst::RoutingInfo&) SMTG_OVERRIDE {
+        return kNotImplemented;
+    }
+    tresult PLUGIN_API activateBus(Vst::MediaType, Vst::BusDirection, int32,
+                                   TBool) SMTG_OVERRIDE {
+        return kResultOk;
+    }
+    tresult PLUGIN_API setActive(TBool) SMTG_OVERRIDE { return kResultOk; }
+    uint32 PLUGIN_API addRef() SMTG_OVERRIDE { return 1000; }
+    uint32 PLUGIN_API release() SMTG_OVERRIDE { return 1000; }
+};
+
 }  // namespace
+
+TEST_CASE("VST3 undeterminable identity fails toward the leak, not the crash",
+          "[host][vst3][connection]") {
+    RefusesFUnknown component;   // cannot answer the query identity depends on
+    FakeController controller;
+
+    // The two wrong answers are not equally bad: calling one object "two"
+    // terminates it twice (undefined behavior inside the plug-in), while
+    // calling two objects "one" only skips a terminate. Prefer the leak.
+    REQUIRE(pulp::host::detail::vst3_same_object(
+        static_cast<Vst::IComponent*>(&component),
+        static_cast<Vst::IEditController*>(&controller)));
+    REQUIRE_FALSE(pulp::host::detail::vst3_is_separated(&component, &controller));
+
+    // And nothing is connected on a guess.
+    auto conn = vst3_connect_component_controller(&component, &controller);
+    REQUIRE(conn.result == Vst3ConnectResult::NotSeparated);
+    REQUIRE(controller.point.connect_calls == 0);
+}
 
 TEST_CASE("VST3 combined plug-in is recognized as one object",
           "[host][vst3][connection]") {
