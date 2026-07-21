@@ -1172,6 +1172,13 @@ The non-obvious parts:
   assignment must re-install it and `release()` must clear it; a stale handler
   there is a use-after-free the moment the plugin asks. An app that wants to
   observe or veto should wrap the attachment, not install its own handler.
+- **The two formats' default answer to a resize request differs on purpose.**
+  With no handler installed, VST3 ACCEPTS (resizes its container and calls
+  `onSize`) and CLAP DENIES. VST3's `resizeView` is UI-thread-only and is how a
+  plug-in reports its real size from inside `attached()`, so denying it is how an
+  editor ends up mis-sized. CLAP's `request_resize` is `[thread-safe]` and can
+  arrive from a render thread, where touching a native view is illegal — denying
+  is the honest answer the spec allows. Do not "harmonize" these.
 
 - **The APIs are inverted from `HostedEditor`.** CLAP `set_parent` and VST3
   `IPlugView::attached` CONSUME a parent view — the plugin inserts its own view
