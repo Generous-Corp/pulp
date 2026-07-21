@@ -47,10 +47,12 @@ std::pair<canvas::Color, bool> parse_skin_hex(const std::string& hex) {
 void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
     BridgeApiContext api{self.engine_};
 
-    // setImageSource(id, path) - set image file path.
+    // setImageSource(id, path) - set image file path. Relative paths resolve
+    // against the bridge's script base dir when one is set (self-contained
+    // import artifacts reference `assets/<file>` next to their ui.js).
     register_bridge_function(api, "setImageSource", [&self](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
-        auto path = args.get<std::string>(1, "");
+        auto path = self.resolve_script_relative(args.get<std::string>(1, ""));
         if (auto* img = dynamic_cast<ImageView*>(self.widget(id)))
             img->set_image_path(path);
         return choc::value::Value();
@@ -67,6 +69,7 @@ void BridgeRegistrars::register_widget_assets_api(WidgetBridge& self) {
         if (!k || path.empty() || frame_count <= 0) return choc::value::Value();
 
         if (path.rfind("file://", 0) == 0) path = path.substr(7);
+        path = self.resolve_script_relative(path);
 
         std::ifstream f(path, std::ios::binary);
         if (!f.good()) {

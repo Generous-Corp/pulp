@@ -312,6 +312,19 @@ defaults to `ubuntu-latest` (no-op) until set. A tartci launchd detector watches
 for this triad; full design in
 `planning/2026-07-06-ci-queue-saturation-watchdog.md`.
 
+**Caveat to step 3 (part 2) — a *different flaky test each re-run* is Studio
+oversubscription, not a code bug.** The Studio runs up to `macos_vm_cap` (2, the
+Apple guest limit) concurrent build VMs. RELATIVE-timing / CPU-budget / benchmark
+tests (labels `performance`, `bench`, `quality-lab` — e.g. heritage-performance's
+"Representative chain stays within the shipping CPU budget", a ratio ≤ 2.0×1.05
+vs an in-run baseline) tolerate steady load but NOT the load *variance* a sibling
+VM's bursty compile creates → they flake whenever 2 gate builds run at once. It is
+NOT a real failure and re-running makes it worse (adds load). Those labels are now
+excluded from the required PR/merge_group gate (build.yml `label_exclude`) — a
+perf/ratio test cannot be a required gate on a cap=2 runner; it belongs in a
+dedicated cap=1 nightly/perf lane. If you see one flaking on the gate, add its
+label to that exclude, don't re-run. See `planning/org-flip-status.md` §A.
+
 ## A dead lane is only visible as queue age — never as a missing runner
 
 `.github/workflows/runner-health-check.yml` sweeps every 30 min from
@@ -593,17 +606,30 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   `tools/cmake/PulpDependencies.cmake`, `tools/deps/manifest.json`, plus Android
   Gradle files), and do not give `.cxx` a restore key that ignores those inputs.
 - **`version-at-land.yml` + `version_at_land.py` are the single-writer,
-  post-merge half of the version-bump intent-trailer model — and the workflow
-  ships in DRY-RUN.** They exist to kill the version-bump merge treadmill (PRs
-  editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json` re-conflict
-  every time main advances, and N parallel PRs endlessly re-bump the same
-  shared counter). The endgame: a PR declares `Version-Bump: <surface>=<level>`
-  and touches NO version files, and this bot assigns the exact number AFTER
-  merge from main's current version — so no two PRs ever contend for the same
-  number. **Today (dry-run): computes and logs what it WOULD assign; writes and
-  pushes nothing**, so it is safe to land while PRs still hand-bump. The
-  `--push` path (`apply_and_push`) is built and unit-tested but the workflow
-  does not call it yet.
+  post-merge half of the version-bump intent-trailer model, and the workflow
+  runs LIVE (`--push`).** They exist to kill the version-bump merge treadmill
+  (PRs editing `CMakeLists` VERSION / `plugin.json` / `marketplace.json`
+  re-conflict every time main advances, and N parallel PRs endlessly re-bump the
+  same shared counter). A PR declares `Version-Bump: <surface>=<level>` (or the
+  level is inferred from its paths / conventional-commit subject) and touches NO
+  version files; this bot assigns the exact number AFTER merge from main's
+  current version — so no two PRs ever contend for the same number.
+  - **Landing route — `--route {direct,pr}`, selected by the `PULP_BUMP_ROUTE`
+    repo variable (unset ⇒ `direct`).**
+    - `direct` (default, live today): `apply_and_push` pushes the
+      `chore: bump versions` commit straight to `main` with `--ff-only`. This is
+      what publishes releases now. It is INCOMPATIBLE with a "Require merge
+      queue" branch rule (the rule blocks all direct pushes to main — that
+      incompatibility caused the 2026-07-20 release drought).
+    - `pr` (dormant until flipped): `apply_via_pr` opens a `chore: bump versions`
+      PR on the fixed `release/version-bump` branch and arms
+      `gh pr merge --auto --merge`, so the bump lands THROUGH the merge queue.
+      Requires the `RELEASE_BOT_TOKEN` PAT (a GITHUB_TOKEN-created PR does not
+      trigger checks). When `PULP_BUMP_ROUTE=pr`, the workflow's `concurrency`
+      group becomes a single constant so all drains SERIALIZE (the PR-route's
+      shared-branch reclaim is only race-free without a competing drain). Plan +
+      rollout + validation evidence: `planning/2026-07-20-merge-queue-reenable-plan.md`.
+      This is the path back to the merge queue we moved to an org for.
   - **Intent is read `--no-merges`-scoped.** `version_at_land.intent_trailers`
     reads `Version-Bump:` trailers only from the range's NON-merge commits
     (`git_range_trailers(..., no_merges=True)`). A "Merge origin/main into

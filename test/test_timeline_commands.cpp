@@ -180,6 +180,38 @@ TEST_CASE("Timeline command diagnostics preserve target and media failure kinds"
     REQUIRE(invalid_result.error().related_item == ItemId{9});
 }
 
+TEST_CASE("Timeline reduction support preserves full ownership and atomic identity failures") {
+    auto first = Track::create({4}, "first", {make_note_clip({5}, {6}, 0)});
+    auto second = Track::create({7}, "second", {});
+    REQUIRE(first);
+    REQUIRE(second);
+    auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
+                                     {std::move(first).value(), std::move(second).value()});
+    REQUIRE(sequence);
+    auto project = Project::create({{1}, "project", 8, {3}, {}, {std::move(sequence).value()}});
+    REQUIRE(project);
+
+    auto wrong_parent = transaction(
+        {1}, 1, 1, {}, {SetNoteVelocity{{3}, {7}, {5}, {6}, 1000, 2000}});
+    auto parent_rejected = reduce_transaction(project.value(), wrong_parent);
+    REQUIRE_FALSE(parent_rejected);
+    REQUIRE(parent_rejected.error().code == ConflictCode::ParentMismatch);
+
+    auto notes = NoteContent::create({{{8}, {0}, {kTicksPerQuarter / 4}, 1000, 60, 0}});
+    REQUIRE(notes);
+    auto colliding = Clip::create({8}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+                                  std::move(notes).value());
+    REQUIRE(colliding);
+    auto duplicate_identity = transaction(
+        {1}, 2, 2, {}, {InsertClip{{3}, {4}, std::move(colliding).value()}});
+    auto identity_rejected = reduce_transaction(project.value(), duplicate_identity);
+    REQUIRE_FALSE(identity_rejected);
+    REQUIRE(identity_rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(identity_rejected.error().model_error);
+    REQUIRE(identity_rejected.error().model_error->code == ModelErrorCode::IdentityConflict);
+    REQUIRE_FALSE(project->locate({8}));
+}
+
 TEST_CASE("Timeline identity and clip indexes path copy at logarithmic scale") {
     std::vector<Clip> clips;
     clips.reserve(10000);

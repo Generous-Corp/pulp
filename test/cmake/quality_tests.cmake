@@ -82,6 +82,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME planning-gitlink-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_planning_gitlink_guard.py")
 
+    # Gate substrate: the trailer collection and glob matching every gate
+    # shares. test_gates.py re-exports this module's TestCase classes by name,
+    # so a class added here is invisible to CI until that import list is also
+    # updated; registering the file directly covers it either way.
+    add_test(NAME gate-common-selftest COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gate_common.py")
+
     # Runner-topology guard: pure reconciliation logic (label matching, the
     # black-hole / offline / ephemeral-idle distinction, contract drift) plus a
     # well-formedness check of the shipped routing contract. No network — the

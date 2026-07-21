@@ -312,6 +312,94 @@ TEST_CASE("AutoUi scrolls large parameter sets instead of truncating them",
     CHECK(traced_scrolled_offset);
 }
 
+TEST_CASE("AutoUi preferred_size opens large enough to fit every parameter",
+          "[view][auto_ui][fit]") {
+    // The default editor must OPEN at a size that shows all of its generated
+    // knobs — the 7-knob synth in Logic clipped its top row because AutoUi
+    // never reported a fitting size. At preferred_size the content must fit the
+    // viewport (no scroll needed, so nothing is clipped).
+    for (std::size_t n : {std::size_t{1}, std::size_t{4}, std::size_t{7},
+                          std::size_t{16}, std::size_t{32}}) {
+        StateStore store;
+        for (std::size_t i = 1; i <= n; ++i) {
+            store.add_parameter({static_cast<uint32_t>(i),
+                                 "P" + std::to_string(i), "", {0.0f, 1.0f, 0.5f}});
+        }
+
+        const auto fit = AutoUi::preferred_size(store);
+        INFO("n=" << n << " fit=" << fit.width << "x" << fit.height);
+        CHECK(fit.width >= 320);
+        CHECK(fit.height >= 240);
+
+        auto root = AutoUi::build(store);
+        root->set_bounds({0.0f, 0.0f, static_cast<float>(fit.width),
+                          static_cast<float>(fit.height)});
+        root->layout_children();
+
+        auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+        REQUIRE(body != nullptr);
+        // Content fits the viewport at the fitting size: no wheel scroll, so no
+        // clipped row.
+        CHECK(body->content_size().height <= body->local_bounds().height + 1.0f);
+        CHECK_FALSE(body->wants_wheel_scroll());
+        // Every tile made it into the tree.
+        CHECK(find_widget<Knob>(*root, "P" + std::to_string(n)) != nullptr);
+    }
+}
+
+TEST_CASE("AutoUi preferred_size fits grouped parameters",
+          "[view][auto_ui][fit][groups]") {
+    StateStore store;
+    store.add_group({1, "Oscillator", 0});
+    store.add_group({2, "Filter", 0});
+    for (std::uint32_t i = 0; i < 10; ++i) {
+        store.add_parameter({.id = i,
+                             .name = "G" + std::to_string(i),
+                             .range = {0.0f, 1.0f, 0.5f},
+                             .group_id = i < 6 ? 1 : 2});
+    }
+
+    const auto fit = AutoUi::preferred_size(store);
+    auto root = AutoUi::build(store);
+    root->set_bounds({0.0f, 0.0f, static_cast<float>(fit.width),
+                      static_cast<float>(fit.height)});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    INFO("grouped fit=" << fit.width << "x" << fit.height);
+    CHECK(body->content_size().height <= body->local_bounds().height + 1.0f);
+    CHECK_FALSE(body->wants_wheel_scroll());
+    CHECK(find_widget<Knob>(*root, "G9") != nullptr);
+}
+
+TEST_CASE("AutoUi keeps the first row reachable when content overflows",
+          "[view][auto_ui][scroll]") {
+    // A cramped window (smaller than any fitting size) must still let the user
+    // reach the TOP row. `justify_content: center` on an overflowing scroll body
+    // strands the first row above the scroll origin — the can't-scroll-to-top
+    // bug. On overflow the body top-aligns instead.
+    StateStore store;
+    for (std::uint32_t i = 0; i < 40; ++i) {
+        store.add_parameter({i, "P" + std::to_string(i), "", {0.0f, 1.0f, 0.5f}});
+    }
+
+    auto root = AutoUi::build(store);
+    root->set_bounds({0.0f, 0.0f, 300.0f, 220.0f});
+    root->layout_children();
+
+    auto* body = dynamic_cast<ScrollView*>(root->child_at(1));
+    REQUIRE(body != nullptr);
+    REQUIRE(body->wants_wheel_scroll());
+    // The overflowing grid top-aligns its wrapped rows instead of centering
+    // them into negative (unreachable) offsets.
+    auto* grid = body->child_at(0);
+    CHECK(grid->flex().align_content == FlexAlign::start);
+    // First tile sits at the scroll origin (y ~ 0), reachable at scroll_y == 0.
+    CHECK(grid->child_at(0)->bounds().y >= -0.5f);
+    CHECK(grid->child_at(0)->bounds().y < 1.0f);
+}
+
 TEST_CASE("AutoUi renders registered parameter groups as scrollable sections",
           "[view][auto_ui][groups][scroll]") {
     StateStore store;
