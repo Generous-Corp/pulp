@@ -61,11 +61,16 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             if (left_track.id() != right_track.id() || left_track.name() != right_track.name() ||
                 left_track.clips().size() != right_track.clips().size() ||
                 left_track.device_chain().size() != right_track.device_chain().size() ||
+                left_track.automation_lanes().size() != right_track.automation_lanes().size() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
                             right_track.device_chain().begin()))
                 return false;
             for (std::size_t c = 0; c < left_track.clips().size(); ++c)
                 if (!equivalent(left_track.clips()[c], right_track.clips()[c]))
+                    return false;
+            for (std::size_t a = 0; a < left_track.automation_lanes().size(); ++a)
+                if (!equivalent(left_track.automation_lanes()[a],
+                                right_track.automation_lanes()[a]))
                     return false;
         }
     }

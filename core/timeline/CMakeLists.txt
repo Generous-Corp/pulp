@@ -10,6 +10,8 @@ add_library(pulp-timeline
     src/journal.cpp
     src/model.cpp
     src/transaction.cpp
+    src/transaction_automation_internal.cpp
+    src/transaction_reduction_support.cpp
     src/undo.cpp
     src/schema_json.cpp
     src/schema_json_canonical.cpp

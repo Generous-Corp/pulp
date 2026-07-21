@@ -41,7 +41,9 @@ pulp_add_test_suite(pulp-test-playback-track-automation-program
     SOURCES test_playback_track_automation_program.cpp
     LIBRARIES pulp::playback)
 
-pulp_add_test_suite(pulp-test-timeline-commands LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-commands
+    SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
+    LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
@@ -110,6 +112,8 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
     pulp::runtime pulp::timebase)
