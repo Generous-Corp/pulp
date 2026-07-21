@@ -702,3 +702,78 @@ TEST_CASE("deliver_mouse_wheel with an empty host repaint hook is a no-op-safe",
     deliver_mouse_wheel(root, {10, 10}, 0.0f, 1.0f, /*host=*/{});
     CHECK(spy->hits == 1);                     // routing still happens; no repaint hook to call
 }
+
+// ── The headless simulator delivers what the hosts deliver ──────────────────
+//
+// View::simulate_click / simulate_drag are the idiom every headless UI test
+// uses. They route through the same deliver_mouse_down/drag/up verbs the macOS
+// window and plugin hosts call, so a test written against them exercises the
+// real dispatch. When they instead called only the virtual on_mouse_* hooks,
+// the `on_pointer_event` / `on_drag` callbacks — the ones the JS bridge
+// installs, and the only channel a scripted UI ever sees — were unreachable
+// from any headless test, so a script-driven control could be completely dead
+// to input with the suite green.
+namespace {
+
+// Records every channel a dispatch can arrive on.
+class ChannelSpy : public View {
+public:
+    ChannelSpy() {
+        on_pointer_event = [this](const MouseEvent& e) {
+            if (e.phase == MousePhase::press) ++modern_press;
+            else if (e.phase == MousePhase::drag) ++modern_drag;
+            else if (e.phase == MousePhase::release) ++modern_release;
+        };
+        on_drag = [this](Point p) { ++js_drag; last_drag = p; };
+    }
+    void on_mouse_down(Point) override { ++legacy_down; }
+    void on_mouse_drag(Point) override { ++legacy_drag; }
+    void on_mouse_up(Point) override { ++legacy_up; }
+
+    int modern_press = 0, modern_drag = 0, modern_release = 0;
+    int legacy_down = 0, legacy_drag = 0, legacy_up = 0;
+    int js_drag = 0;
+    Point last_drag{};
+};
+
+}  // namespace
+
+TEST_CASE("simulate_click delivers the modern channel, not only the legacy one",
+          "[view][input][simulate]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<ChannelSpy>();
+    ChannelSpy* spy = child.get();
+    spy->set_bounds({20, 20, 100, 100});
+    root.add_child(std::move(child));
+
+    root.simulate_click({60, 60});
+
+    CHECK(spy->modern_press == 1);
+    CHECK(spy->modern_release == 1);
+    CHECK(spy->legacy_down == 1);
+    CHECK(spy->legacy_up == 1);
+}
+
+TEST_CASE("simulate_drag delivers every drag tick on the modern and JS channels",
+          "[view][input][simulate]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto child = std::make_unique<ChannelSpy>();
+    ChannelSpy* spy = child.get();
+    spy->set_bounds({20, 20, 100, 100});
+    root.add_child(std::move(child));
+
+    root.simulate_drag({60, 100}, {60, 40}, 4);
+
+    CHECK(spy->modern_press == 1);
+    CHECK(spy->modern_drag == 4);
+    CHECK(spy->modern_release == 1);
+    CHECK(spy->legacy_drag == 4);
+    // `on_drag` is the channel WidgetBridge::registerPointer wires to emit
+    // `pointermove` into JS. Four ticks, each localized to the spy's own space
+    // (the final one at the drag end, 60,40 → 40,20 inside a 20,20 child).
+    CHECK(spy->js_drag == 4);
+    CHECK_THAT(spy->last_drag.x, WithinAbs(40.0f, 1e-3f));
+    CHECK_THAT(spy->last_drag.y, WithinAbs(20.0f, 1e-3f));
+}

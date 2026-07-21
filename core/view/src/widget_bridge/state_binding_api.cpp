@@ -70,6 +70,23 @@ bool WidgetBridge::resolve_param_id(const std::string& name, state::ParamID& out
     return false;
 }
 
+namespace {
+
+// True when `w` is a widget type `apply_param_binding` below knows how to
+// write. A binding whose widget is anything else — most often a CanvasWidget
+// holding a custom-drawn control — can never be applied, so accepting it hands
+// the caller a truthy "bound" for a push that will never happen. The check runs
+// only when the widget already exists: binding ahead of creation stays legal
+// (a hot reload rebuilds widgets under bindings that outlive them).
+bool is_bindable_target(const View* w, bool meter) {
+    if (meter) return dynamic_cast<const Meter*>(w) != nullptr;
+    return dynamic_cast<const Knob*>(w) || dynamic_cast<const Fader*>(w) ||
+           dynamic_cast<const RangeSlider*>(w) || dynamic_cast<const Toggle*>(w) ||
+           dynamic_cast<const ProgressBar*>(w);
+}
+
+} // namespace
+
 bool WidgetBridge::apply_param_binding(ParamBinding& b, View* w) {
     // dB transforms operate on the raw param value; everything else on the
     // store's already-normalized [0,1] value (the 1:1 common case).
@@ -154,6 +171,9 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
     if (widget_id.empty() || param_name.empty()) return false;
     state::ParamID id = 0;
     if (!resolve_param_id(param_name, id)) return false;
+    if (View* existing = widget(widget_id);
+        existing && !is_bindable_target(existing, target == ParamBinding::Target::meter))
+        return false;
 
     ParamBinding binding;
     binding.widget_id = widget_id;
@@ -207,6 +227,9 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     // (knob / fader / slider / toggle / progress) to a param. Registered once;
     // C++ then pushes the transformed store value every frame with no per-frame
     // JS crossing. Returns true if the param exists and the binding was set.
+    // Returns FALSE for an existing widget of any other type — a custom-drawn
+    // control on a canvas owns its own value and must drive the param itself
+    // through setParam from its pointer handlers.
     register_bridge_function(api, "bindWidgetToParam", [&self](choc::javascript::ArgumentList args) {
         return choc::value::createBool(
             self.add_param_binding(args.get<std::string>(0, ""),

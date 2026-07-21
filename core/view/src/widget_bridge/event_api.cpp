@@ -137,6 +137,24 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 if (me.is_wheel) {
                     return;
                 }
+                // This channel carries the press/release edges only. A move —
+                // `MousePhase::drag` (button held) or `hover` (button up) —
+                // reaches JS as `pointermove` through `on_drag` /
+                // `on_pointer_move` below, and the two must not both report it.
+                //
+                // The type is otherwise inferred from `is_down`, which is what
+                // `MousePhase::automatic` asks for and what every press/release
+                // caller wants. But a drag tick carries `is_down == true` (the
+                // button IS still held), so inferring from it alone reported
+                // EVERY drag sample as a fresh `pointerdown`. A handler that
+                // latches its gesture origin on press — the standard knob idiom,
+                // `y0 = e.clientY` — re-latched on every sample, so its delta
+                // was always ~0 and the control never moved under a drag. A
+                // hover sample would likewise have reported a phantom
+                // `pointerup`.
+                if (me.phase == MousePhase::drag || me.phase == MousePhase::hover) {
+                    return;
+                }
                 std::string type;
                 if (me.is_down) type = "pointerdown";
                 else type = "pointerup";
