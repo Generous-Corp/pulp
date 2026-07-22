@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <random>
 #include <tuple>
 #include <vector>
 
@@ -600,6 +601,155 @@ TEST_CASE("renderer process is allocation and lock free after prepare") {
         allocations = probe.allocation_count();
     }
     REQUIRE(allocations == 0);
+}
+
+TEST_CASE("no stuck notes under randomized seek and loop stress",
+          "[playback][rt-safety][stress]") {
+    const auto map = tempo_map();
+
+    // A document of overlapping sustained notes plus short and retriggering
+    // notes, so a randomly placed playhead almost always sits inside at least
+    // one active note. Every note stays inside its clip (compiler rejects
+    // out-of-clip ranges) and maps to distinct start/end ticks.
+    constexpr std::int64_t clip_end = 4'000;
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {
+        note(*map, 30, 0, 3'800, 60, 0),      // long, spans nearly the whole doc
+        note(*map, 31, 100, 3'700, 62, 0),    // long, offset onset
+        note(*map, 32, 200, 3'900, 64, 1),    // long, other channel
+        note(*map, 33, 50, 2'000, 60, 2),     // same pitch, different channel key
+        note(*map, 34, 400, 900, 67, 0),      // short
+        note(*map, 35, 1'000, 1'200, 69, 0),  // short
+        note(*map, 36, 500, 1'500, 72, 0),    // retrigger pair on one key: overlap
+        note(*map, 37, 1'400, 2'500, 72, 0),  // folds onto pitch 72 while active
+    }, clip_end), map, 1);
+
+    constexpr std::uint32_t max_block = 256;
+    constexpr int ops_per_seed = 600;
+
+    // A physical stream with no stuck notes is a clean per-key toggle: a note-on
+    // is only ever emitted for an idle key, a note-off only for a sounding key,
+    // so net stays in {0,1} and every on is eventually matched by an off. A
+    // leaked (stuck) note shows up as either an out-of-order toggle mid-run or a
+    // key left at net==1 after the terminal flush.
+    std::array<int, 16 * 128> net{};
+
+    // Aggregate non-vacuity witnesses across every seed. They prove the fuzz
+    // actually drove the risky paths (live notes across a seek, and loop wraps),
+    // not just a stream that was empty or already released.
+    std::uint64_t total_on_all = 0;
+    std::uint64_t total_off_all = 0;
+    std::uint64_t saw_active_blocks = 0;
+    std::uint64_t seeks_over_active_notes = 0;
+    std::uint64_t loop_wrap_blocks = 0;
+    std::uint64_t loop_wrap_over_active = 0;
+
+    // Fixed seeds only — CI must be bit-for-bit reproducible. A red here on any
+    // seed is a real stuck-note defect, not a flake.
+    constexpr std::array<std::uint32_t, 8> seeds{
+        1u, 42u, 1337u, 2024u, 0xC0FFEEu, 0xBADF00Du, 7u, 99991u};
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(4'096)); // ample: this document never overflows a block
+
+    for (const auto seed : seeds) {
+        renderer.reset();
+        net.fill(0);
+        MasterTransport transport;
+        prepare_playing_transport(transport, *map, max_block);
+        PlaybackProgramBlockLatch latch;
+
+        std::uint64_t seed_on = 0;
+        std::uint64_t seed_off = 0;
+        std::mt19937 rng{seed};
+
+        // Consume one processed block: drive the toggle invariant over every
+        // emitted physical event and fold in the per-key balance.
+        const auto consume_block = [&](std::uint32_t frames) {
+            const auto snapshot = next_block(transport, frames);
+            if (snapshot.range_count == 2) {
+                ++loop_wrap_blocks;
+                if (renderer.has_active_notes()) ++loop_wrap_over_active;
+            }
+            auto program = latch.begin_block(programs.store);
+            const auto result = renderer.process(program, snapshot);
+            REQUIRE(result.code == NoteRenderCode::Ok);
+            for (const auto& event : renderer.events()) {
+                const std::size_t key =
+                    static_cast<std::size_t>(event.channel()) * 128u + event.note();
+                if (event.is_note_on()) {
+                    REQUIRE(net[key] == 0); // never two ons without an off between
+                    net[key] = 1;
+                    ++seed_on;
+                } else if (event.is_note_off()) {
+                    REQUIRE(net[key] == 1); // never an off without a live note
+                    net[key] = 0;
+                    ++seed_off;
+                }
+            }
+            if (renderer.has_active_notes()) ++saw_active_blocks;
+        };
+
+        for (int op = 0; op < ops_per_seed; ++op) {
+            switch (rng() % 4u) {
+            case 0: { // seek to a random position across (and past) the document
+                if (renderer.has_active_notes()) ++seeks_over_active_notes;
+                const std::int64_t target = static_cast<std::int64_t>(rng() % 4'400u);
+                REQUIRE(transport.seek(tick_at_sample(*map, target)) ==
+                        TransportError::None);
+                break;
+            }
+            case 1: { // randomly (un)set a loop region; skip regions the
+                      // transport legitimately rejects (too short / inverted).
+                LoopRegion loop;
+                loop.enabled = (rng() % 2u) == 0u;
+                if (loop.enabled) {
+                    const std::int64_t start =
+                        static_cast<std::int64_t>(rng() % 2'500u);
+                    const std::int64_t length =
+                        static_cast<std::int64_t>(max_block + rng() % (max_block * 4u));
+                    loop.start = tick_at_sample(*map, start);
+                    loop.end = tick_at_sample(*map, start + length);
+                }
+                (void)transport.set_loop(loop); // rejected loops simply do not apply
+                break;
+            }
+            case 2: // toggle transport play state to exercise the stop-flush path
+                (void)transport.set_playing((rng() % 2u) == 0u);
+                break;
+            default:
+                break; // no control change this op — just advance blocks
+            }
+
+            const int blocks = 1 + static_cast<int>(rng() % 3u);
+            for (int b = 0; b < blocks; ++b)
+                consume_block(1u + rng() % max_block);
+        }
+
+        // Terminal flush: stopping releases every sounding note in one block.
+        REQUIRE(transport.set_playing(false) == TransportError::None);
+        consume_block(max_block);
+
+        // Per-seed correctness invariant: nothing left sounding, balanced stream.
+        REQUIRE_FALSE(renderer.has_active_notes());
+        REQUIRE(std::all_of(net.begin(), net.end(), [](int v) { return v == 0; }));
+        REQUIRE(seed_on == seed_off);
+        REQUIRE(seed_on > 0);
+
+        total_on_all += seed_on;
+        total_off_all += seed_off;
+    }
+
+    // Non-vacuity: the run genuinely emitted a balanced stream, held notes
+    // active, seeked out of sounding notes, and wrapped a loop while notes
+    // were live. If any of these were zero the test would be asserting nothing
+    // interesting and must be strengthened.
+    REQUIRE(total_on_all == total_off_all);
+    REQUIRE(total_on_all > 0);
+    REQUIRE(saw_active_blocks > 0);
+    REQUIRE(seeks_over_active_notes > 0);
+    REQUIRE(loop_wrap_blocks > 0);
+    REQUIRE(loop_wrap_over_active > 0);
 }
 
 TEST_CASE("compiler rejects note ranges outside their clip and sub-sample notes") {
