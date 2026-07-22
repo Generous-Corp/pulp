@@ -1706,6 +1706,9 @@ private:
                                CompiledGraph* snapshot);
     static bool inject_midi_into_snapshot_(CompiledGraph& snapshot, NodeId id,
                                            const midi::MidiBuffer& events) noexcept;
+    static bool inject_parameter_events_into_snapshot_(
+        CompiledGraph& snapshot, NodeId id,
+        const state::ParameterEventQueue& events) noexcept;
     static std::uint64_t append_parameter_mailbox_events_(
         void* runtime,
         state::ParameterEventQueue& destination) noexcept;
