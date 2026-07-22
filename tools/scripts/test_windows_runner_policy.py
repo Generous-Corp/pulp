@@ -350,6 +350,23 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         body = "\n".join(step.get("run", "") for step in steps)
         self.assertIn("github.event_name }}\" = \"pull_request\"", body)
 
+    def test_reporting_aliases_never_pin_the_shared_hosted_pool(self) -> None:
+        """No alias job may be strandable on the shared hosted pool.
+
+        An alias is the LAST job in the run. Starve it of a runner and the run
+        never reaches a terminal state, so it holds this ref's `concurrency`
+        group; with cancel-in-progress set, the next push then sits at `pending`
+        with zero jobs and never dispatches. The wedge is silent and survives
+        re-pushes. `macos` already rode the self-hosted preamble; `linux` and
+        `windows` are advisory and must not be able to strand a pull request
+        either.
+        """
+        for name in ("macos", "linux", "windows"):
+            with self.subTest(alias=name):
+                runs_on = self.workflow["jobs"][name]["runs-on"]
+                self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
+                self.assertNotEqual(runs_on.strip(), "ubuntu-latest")
+
     def test_required_macos_gate_still_runs_on_pull_request(self) -> None:
         """The required gate must keep reporting from the PR head."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())

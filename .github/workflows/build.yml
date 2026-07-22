@@ -1421,7 +1421,16 @@ jobs:
 
   linux:
     needs: [build, classify]
-    runs-on: ubuntu-latest
+    # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
+    # alias, and for a sharper reason than symmetry: an alias job pinned to the
+    # shared hosted pool can be starved of a runner indefinitely. Because it is
+    # the last job in the run, the RUN never reaches a terminal state, so it holds
+    # this ref's `concurrency` group forever — and with cancel-in-progress set, the
+    # next push's run then sits at status `pending` with ZERO jobs and never
+    # dispatches. That wedge is silent, survives re-pushes, and only clears by
+    # cancelling the older run by hand. An advisory lane must not be able to strand
+    # a pull request, so it reports from the self-hosted preamble instead.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
     if: always() && github.event_name != 'push'
@@ -1459,7 +1468,16 @@ jobs:
 
   windows:
     needs: [build, windows-msvc-release-gate, classify]
-    runs-on: ubuntu-latest
+    # Rides the same PULP_PREAMBLE_RUNS_ON_JSON toggle as the required `macos`
+    # alias, and for a sharper reason than symmetry: an alias job pinned to the
+    # shared hosted pool can be starved of a runner indefinitely. Because it is
+    # the last job in the run, the RUN never reaches a terminal state, so it holds
+    # this ref's `concurrency` group forever — and with cancel-in-progress set, the
+    # next push's run then sits at status `pending` with ZERO jobs and never
+    # dispatches. That wedge is silent, survives re-pushes, and only clears by
+    # cancelling the older run by hand. An advisory lane must not be able to strand
+    # a pull request, so it reports from the self-hosted preamble instead.
+    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
     if: always() && github.event_name != 'push'
