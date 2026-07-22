@@ -105,6 +105,56 @@ using CustomNodeProcessFn = std::function<void(audio::BufferView<float>& output,
                                               const audio::BufferView<const float>& input,
                                               int num_samples)>;
 
+// ── Bake-layer parameter injection ──────────────────────────────────────
+//
+// A separate, RT-safe path (owned by BakedGraphProcessor) that lets a control
+// thread set a BAKED custom node's parameter and have it applied sample-
+// accurately in process(), WITHOUT re-baking and without touching the live
+// graph's parameter-ingress path. It reuses pulp::state::ParameterEvent /
+// ParameterEventQueue verbatim and mirrors the live mailbox's precedence and
+// per-node exclusive-claim discipline; see baked_graph_processor.hpp.
+//
+// A lowerable custom node opts in by declaring `baked_params` and providing a
+// `process_instance_baked_param` callback. On a BAKED graph the executor calls
+// that callback instead of process_instance, handing it a BakedParamView it
+// queries for the ramped, sample-accurate value of each declared param. This
+// channel is consulted ONLY on a baked graph; on the live graph the node runs
+// via its plain process_instance/process as usual (a node that provides only
+// the baked callback runs neither live — the routed executor falls through to
+// input passthrough — so it is meant to be baked before use).
+
+// Read-only per-sample parameter accessor handed to a param-aware baked custom
+// node. `value_at(id, k)` returns the ramped, sample-accurate value of a
+// declared param at block-relative sample offset `k`; offsets must be queried
+// in non-decreasing order within a block (the backing cursor advances
+// monotonically). `value(id)` reads the value at the cursor's current position.
+class BakedParamView {
+public:
+    virtual ~BakedParamView() = default;
+    virtual float value_at(state::ParamID id, int32_t sample_offset) const = 0;
+    virtual float value(state::ParamID id) const = 0;
+};
+
+// Bound param-aware process callback (instance captured). Same audio signature
+// as CustomNodeProcessFn plus the block's BakedParamView. The baked executor
+// runs this for a param-declaring custom node.
+using CustomNodeParamProcessFn =
+    std::function<void(audio::BufferView<float>& output,
+                       const audio::BufferView<const float>& input,
+                       int num_samples,
+                       const BakedParamView& params)>;
+
+// One declared parameter of a lowerable custom node, for the bake-layer
+// injection path. `id` is node-local (the framework namespaces per node, so two
+// nodes of the same type never collide). Values are clamped to [min, max];
+// `default_value` is the held value until the first injection arrives.
+struct CustomNodeBakedParam {
+    state::ParamID id = 0;
+    float min_value = 0.0f;
+    float max_value = 1.0f;
+    float default_value = 0.0f;
+};
+
 // Transport-aware custom-node callback (additive). Identical to
 // CustomNodeProcessFn plus the host transport for the block. A custom type that
 // registers one of the transport-aware callbacks below is treated as
@@ -183,6 +233,29 @@ struct CustomNodeType {
     // security boundary (the framework cannot verify these properties), so the
     // on-disk load path must additionally require a signature before honoring it.
     bool lowerable = false;
+
+    // Bake-layer parameter injection (additive opt-in). When `baked_params` is
+    // non-empty AND `process_instance_baked_param` is set, a BAKED instance of
+    // this node can receive sample-accurate ParameterEvents from the control
+    // thread via BakedGraphProcessor::inject(); the baked executor runs
+    // `process_instance_baked_param` (leading instance pointer) instead of
+    // process_instance, handing it a BakedParamView over the injected values.
+    // Both empty == today's node, unchanged: no injection channel, runs via
+    // process_instance. This path is independent of the live-graph parameter
+    // ingress and does not require re-baking to turn a knob.
+    //
+    // Live-graph behavior: `process_instance_baked_param` is consulted ONLY on a
+    // baked graph. A node that provides ONLY this callback (no plain
+    // process/process_instance) does NOT run its baked-param DSP on the live
+    // graph — with no live callback the routed executor falls through to input
+    // passthrough (transparent; it contributes no signal of its own, but is not
+    // hard silence when fed a signal). Such a node is meant to be baked before
+    // use; provide a plain process callback too if it must also run live.
+    std::vector<CustomNodeBakedParam> baked_params;
+    std::function<void(void* /*instance*/, audio::BufferView<float>& /*output*/,
+                       const audio::BufferView<const float>& /*input*/,
+                       int /*num_samples*/, const BakedParamView& /*params*/)>
+        process_instance_baked_param;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -674,6 +747,14 @@ public:
     // GraphNode::transport_sensitive was resolved true.
     const CustomNodeTransportProcessFn* live_custom_transport_processor(
         NodeId id) const noexcept;
+    // The live compiled snapshot's bound param-aware custom callback for a Custom
+    // node whose type declared baked_params + process_instance_baked_param, or
+    // nullptr otherwise. The pointee captured the stateful instance shared_ptr by
+    // value (keepalive), so a bake() that copies it stays self-contained. Same
+    // lifetime contract as live_custom_processor. Used only by the bake-layer
+    // parameter-injection path — never by live-graph processing.
+    const CustomNodeParamProcessFn* live_custom_param_processor(
+        NodeId id) const noexcept;
     // Opaque keepalive for the live compiled snapshot so a translated routing
     // can pin the lifetime of the gain atomics + plugin slots it references.
     std::shared_ptr<const void> live_snapshot_handle() const noexcept;
@@ -1161,6 +1242,11 @@ private:
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+        // Bound param-aware custom callbacks (bake-layer injection). Populated for
+        // any Custom node whose type declared baked_params +
+        // process_instance_baked_param. Consumed only by bake(); the live routed
+        // path never reads this map.
+        std::unordered_map<NodeId, CustomNodeParamProcessFn> custom_param_processors;
         // Transport-aware custom callbacks, populated alongside custom_processors
         // for any Custom node whose type registered a transport-aware variant.
         // The presence of an entry mirrors GraphNode::transport_sensitive for
