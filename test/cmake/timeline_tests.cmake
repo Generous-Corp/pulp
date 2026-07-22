@@ -133,6 +133,19 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-schema-ts-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_ts_emit.py)
+
+    # CLI-verb surface: a pure projection of the committed schema manifest into a
+    # verb/flag JSON table, guarded by the same shared drift gate. The committed
+    # artifact must match a fresh emission from the manifest; the selftest proves
+    # the projection is complete and that the gate catches a mutated artifact.
+    add_test(NAME timeline-schema-cli-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_cli_verbs.json
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_cli_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-schema-cli-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_cli_emit.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT

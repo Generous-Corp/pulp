@@ -241,6 +241,28 @@ generator is Python (a pure JSON projection needs no build), so it sits beside
 the C++ emitter under `core/timeline/tools/` but reuses the shared gate rather
 than a bespoke drift script.
 
+The **CLI-verb surface** is the same shape:
+`core/timeline/tools/schema_cli_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_cli_verbs.json` — one verb per schema type,
+each with its domain, version, and a flag per field. The flag value type maps by
+`x-pulp-kind` (`Boolean`→`bool`; `U32`/`U64String`→`uint`; `I64String`→`int`;
+`String`→`string`; `Object`/`Array`→`json`), and a field `$ref` becomes a `json`
+flag that records the referenced schema type. Verb tokens drop the `pulp.` prefix,
+join the hierarchy with `:`, and kebab-case each segment
+(`pulp.timeline.automation_target.device_parameter` →
+`timeline:automation-target:device-parameter`). This artifact is the
+manifest-derived *definition* of the verbs; wiring them into the `pulp` CLI binary
+is a separate downstream integration. **After regenerating the manifest,
+regenerate this too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_cli_emit.py --out core/timeline/schema/timeline_cli_verbs.json
+```
+
+The `timeline-schema-cli-drift` ctest byte-checks it; `timeline-schema-cli-selftest`
+(`core/timeline/tools/test_schema_cli_emit.py`) proves determinism, complete
+projection, value-type mapping, and confirm-the-failure.
+
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,
