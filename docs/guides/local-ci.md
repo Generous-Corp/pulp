@@ -466,6 +466,37 @@ is absent on `pull_request` and present on `merge_group` / `workflow_dispatch`,
 that all three compile gates skip `pull_request`, and — as a negative control —
 that macOS and Linux still run on the PR head.
 
+## Reporting aliases never pin the shared hosted pool
+
+The `macos` / `linux` / `windows` alias jobs all resolve their runner from
+`PULP_PREAMBLE_RUNS_ON_JSON` rather than naming `ubuntu-latest` directly.
+
+For `macos` that keeps the *required* gate off a pool it can be starved on. For
+`linux` and `windows` — both advisory — the reason is sharper, and it is a
+failure mode rather than a preference.
+
+An alias is the **last job in the run**: it waits for the matrix leg and reports
+the outcome. Starve it of a runner and it never starts, so the *run* never
+reaches a terminal state. A run that never terminates holds its `concurrency`
+group, and `build.yml` sets `cancel-in-progress` on that group — so the next
+push's run sits at status `pending` with **zero jobs** and never dispatches. The
+pull request is then wedged: no checks, no failure, nothing to re-run. It
+survives further pushes and clears only by cancelling the older run by hand.
+
+The tell is a `Build and Test` run whose `status` is `pending` and whose `jobs`
+array is **empty**, while the sibling workflows from the same trigger dispatched
+normally. If you hit it:
+
+```bash
+# find the older, non-terminal run on the same ref and cancel it
+ghapp api -X POST repos/Generous-Corp/pulp/actions/runs/<old_run_id>/cancel
+```
+
+An advisory lane must never be able to strand a pull request, which is why these
+two moved off the hosted pool.
+`tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
+through the toggle and that none is pinned to a bare `ubuntu-latest`.
+
 ## Routing contract (checked)
 
 Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
