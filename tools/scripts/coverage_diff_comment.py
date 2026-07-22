@@ -126,7 +126,7 @@ def render(
     parts.append("</details>")
     parts.append("")
     parts.append(
-        "See [coverage.md](https://github.com/danielraffel/pulp/blob/main/docs/guides/coverage.md) "
+        "See [coverage.md](https://github.com/Generous-Corp/pulp/blob/main/docs/guides/coverage.md) "
         "for the current represented surface, how to interpret this number, "
         "and the full Phase 1 → Phase 3 roadmap."
     )
