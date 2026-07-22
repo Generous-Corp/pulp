@@ -98,6 +98,19 @@ pulp_add_test_suite(pulp-test-sample-heritage-record-commit
     SOURCES test_sample_heritage_record_commit.cpp
     LIBRARIES pulp::audio pulp::audio-analysis)
 include("${PROJECT_SOURCE_DIR}/examples/PulpSampler/pulp_sampler_sources.cmake")
+# ── ctest label ordering (load-bearing) ────────────────────────────────────
+# The required PR/merge_group gate excludes relative-timing tests by LABEL
+# (`ctest -LE "…|performance|quality-lab"`). But catch_discover_tests serialises a
+# multi-value LABELS list UNQUOTED into the generated set_tests_properties call —
+#   set_tests_properties(t PROPERTIES LABELS a b c … RUN_SERIAL TRUE …)
+# so ctest parses it as name/value PAIRS: LABELS=a, then b=c, … Only the FIRST
+# label survives; the rest (and RUN_SERIAL/TIMEOUT) are silently mis-bound.
+# (Verified against the generated *_tests.cmake.) So an exclusion label only takes
+# effect if it is FIRST — hence quality-lab leads here, which is what keeps the
+# CPU-budget "Representative chain" ratio test OFF the shared-runner required gate
+# (it still runs on push, event-gated). This is a repo-wide bug: any test whose
+# slow/bench/performance/quality-lab label is not first is silently NOT excluded —
+# see the handoff. Do not reorder these back.
 pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
     SOURCES test_sample_heritage_shipping_gates.cpp
             ${PROJECT_SOURCE_DIR}/examples/PulpSampler/test_pulp_sampler_heritage_render_clock.cpp
@@ -107,7 +120,8 @@ pulp_add_test_suite(pulp-test-sample-heritage-shipping-gates
                  ${PROJECT_SOURCE_DIR}/test/harness
     COMPILE_DEFINITIONS PULP_SAMPLER_TEST_HOOKS=1
     TEST_SPEC "[shipping-gate]~[g1]~[performance],[heritage][typed][pitch][polyphony],[heritage][typed][mip],[heritage][typed][pitch][stream][mip],[heritage][typed][failure],[heritage][latency]"
-    LABELS "audio;sampler;heritage;quality-lab;shipping-gate"
+    # quality-lab FIRST — see the label-order note below.
+    LABELS "quality-lab;audio;sampler;heritage;shipping-gate"
     TIMEOUT 30)
 catch_discover_tests(pulp-test-sample-heritage-shipping-gates
     TEST_SPEC "[shipping-gate][g1]"
@@ -119,7 +133,8 @@ catch_discover_tests(pulp-test-sample-heritage-shipping-gates
     TEST_SPEC "[shipping-gate][performance]"
     TEST_PREFIX "heritage-performance::"
     PROPERTIES
-        LABELS "audio;sampler;heritage;quality-lab;shipping-gate;performance"
+        # quality-lab FIRST — see the label-order note below.
+        LABELS "quality-lab;performance;audio;sampler;heritage;shipping-gate"
         RUN_SERIAL TRUE
         TIMEOUT 30)
 include("${CMAKE_CURRENT_LIST_DIR}/heritage_calibration_tests.cmake")
