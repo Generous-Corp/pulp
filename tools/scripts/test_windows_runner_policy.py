@@ -17,8 +17,12 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
+
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -211,13 +215,13 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
 
     def test_shipyard_mirror_preserves_runtime_and_latest_targets(self) -> None:
         pr_windows = self.profile.split(
-            '[repo."danielraffel/pulp".pr.windows]', 1
+            '[repo."Generous-Corp/pulp".pr.windows]', 1
         )[1].split("\n[", 1)[0]
         coverage_windows = self.profile.split(
-            '[repo."danielraffel/pulp".coverage.windows]', 1
+            '[repo."Generous-Corp/pulp".coverage.windows]', 1
         )[1].split("\n[", 1)[0]
         scheduled = self.profile.split(
-            '[repo."danielraffel/pulp".scheduled.nightly_intel]', 1
+            '[repo."Generous-Corp/pulp".scheduled.nightly_intel]', 1
         )[1].split("\n[", 1)[0]
         runtime = self.profile.split(
             '[targets."github.windows-x64-runtime"]', 1
@@ -231,6 +235,126 @@ class WindowsRunnerPolicyTests(unittest.TestCase):
         self.assertIn('"github.windows-x64"', scheduled)
         self.assertIn('runs_on_json = "windows-2022"', runtime)
         self.assertIn('runs_on_json = "windows-latest"', latest)
+
+
+class WindowsMergeQueueGatingTests(unittest.TestCase):
+    """Windows is gated by the merge queue, never by the PR head.
+
+    Every run carries four hosted Windows jobs (the matrix leg plus the three
+    latest-toolchain compile gates). The repo draws them from a fixed pool of
+    concurrent GitHub-hosted jobs, so a handful of simultaneously open PRs
+    fills nearly every slot with advisory Windows work and starves the one
+    REQUIRED hosted check the merge queue waits on
+    (``Build + prove + (owner-gated) deploy``, ubuntu-latest). Queue entries
+    then expire in AWAITING_CHECKS and nothing lands. Windows keeps full
+    coverage in the serial ``merge_group`` validation, which builds PR ∪ main.
+    """
+
+    WINDOWS_GATE_JOBS = (
+        "windows-msvc-release-gate",
+        "windows-midi2-gate",
+        "windows-ble-gate",
+    )
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(read(WORKFLOWS / "build.yml"))
+        cls.resolver_script = cls._resolver_script()
+
+    @staticmethod
+    def _resolver_script() -> str:
+        """The inline Python that builds the build-matrix, lifted out of the YAML."""
+        for step in yaml.safe_load(read(WORKFLOWS / "build.yml"))["jobs"][
+            "resolve-provider"
+        ]["steps"]:
+            body = step.get("run", "")
+            if "matrix_json=" in body:
+                return textwrap.dedent(
+                    body.split("python3 - <<'PY'", 1)[1].rsplit("PY", 1)[0]
+                )
+        raise AssertionError("resolve-provider matrix step not found")
+
+    def _matrix_keys(self, event_name: str) -> list[str]:
+        """Run the real resolver for one event and return its matrix leg keys."""
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("GITHUB_", "PULP_", "EXPLICIT_", "NAMESPACE_"))
+        }
+        env.update(
+            {
+                "REQUESTED_PROVIDER": "github-hosted",
+                "GITHUB_EVENT_NAME": event_name,
+                "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+                "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "",
+                "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
+                "WORKFLOW_DISPATCH_MACOS_SELECTOR": "",
+                "LOCAL_MACOS_RUNS_ON_JSON": json.dumps(
+                    ["self-hosted", "macOS", "ARM64", "pulp-build"]
+                ),
+                # Sentinel: keeps macOS local so the resolver never reaches the
+                # overflow branch, which would shell out to `gh` for a live
+                # runner probe. This test must stay offline.
+                "OVERFLOW_MACOS_RUNS_ON_JSON": "local-only",
+                "NAMESPACE_LINUX_RUNS_ON_JSON": "",
+                "NAMESPACE_WINDOWS_RUNS_ON_JSON": "",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "github_output"
+            output.write_text("", encoding="utf-8")
+            env["GITHUB_OUTPUT"] = str(output)
+            result = subprocess.run(
+                [sys.executable, "-c", self.resolver_script],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                result.returncode, 0, f"resolver failed:\n{result.stderr}"
+            )
+            for line in output.read_text(encoding="utf-8").splitlines():
+                if line.startswith("matrix_json="):
+                    matrix = json.loads(line.split("=", 1)[1])
+                    return [leg["key"] for leg in matrix["include"]]
+        raise AssertionError("resolver emitted no matrix_json")
+
+    def test_pull_request_matrix_drops_windows_but_keeps_macos_and_linux(self) -> None:
+        keys = self._matrix_keys("pull_request")
+        self.assertNotIn("windows", keys)
+        # Negative control: the saving must come from Windows alone. macOS runs
+        # on the self-hosted Macs and Linux on the local Linux VMs, so neither
+        # competes for the hosted pool — dropping either would cost PR-head
+        # signal for nothing.
+        self.assertIn("macos", keys)
+        self.assertIn("linux", keys)
+
+    def test_merge_group_matrix_keeps_windows(self) -> None:
+        self.assertIn("windows", self._matrix_keys("merge_group"))
+
+    def test_workflow_dispatch_matrix_keeps_windows(self) -> None:
+        self.assertIn("windows", self._matrix_keys("workflow_dispatch"))
+
+    def test_latest_toolchain_gates_skip_pull_request(self) -> None:
+        for name in self.WINDOWS_GATE_JOBS:
+            with self.subTest(job=name):
+                condition = " ".join(self.workflow["jobs"][name]["if"].split())
+                self.assertIn("github.event_name != 'pull_request'", condition)
+                self.assertIn("github.event_name != 'push'", condition)
+
+    def test_windows_alias_short_circuits_on_pull_request(self) -> None:
+        """Without this the advisory alias fails closed once the leg is absent."""
+        steps = self.workflow["jobs"]["windows"]["steps"]
+        body = "\n".join(step.get("run", "") for step in steps)
+        self.assertIn("github.event_name }}\" = \"pull_request\"", body)
+
+    def test_required_macos_gate_still_runs_on_pull_request(self) -> None:
+        """The required gate must keep reporting from the PR head."""
+        condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
+        self.assertNotIn("pull_request", condition)
+
 
 
 if __name__ == "__main__":

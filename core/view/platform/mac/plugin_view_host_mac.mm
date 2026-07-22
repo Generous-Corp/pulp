@@ -1254,18 +1254,45 @@ public:
                 const auto tick = pulp::view::begin_host_frame(
                     &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
                     dirty);
+                // begin_host_frame() runs the FrameClock activity channel
+                // (clock.pump_activity) BEFORE `dirty` could reflect it. An
+                // activity probe can call request_repaint() from there — the Forge
+                // generation chrome rides that channel to drain build progress into
+                // the tree (its poll() is the one driver that provably ticks in an
+                // embedded editor). That dirty was sampled too late for `tick`, so
+                // fold it in here or the frame it dirtied would wait a whole vsync.
+                const bool dirtied_during_tick =
+                    state->needs_repaint.exchange(false, std::memory_order_relaxed);
                 // Publish the tree's liveness for the next vsync's gate.
                 state->continuous.store(tick.continuous, std::memory_order_relaxed);
-                if (tick.should_render) {
-                    pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
-                    // Repaint only for an ANIMATING tree. A dirty-only frame was
-                    // already marked dirty by whatever set the flag (AppKit will
-                    // paint it), and re-marking it here would re-arm needs_repaint
-                    // through -setNeedsDisplay: forever — a dirty flag that feeds
-                    // itself is an ungated link with extra steps. When the tree IS
-                    // animating the re-arm is exactly right: it keeps the gate open
-                    // for the settling frame after the last animation frame.
-                    if (tick.continuous && self->view_) [self->view_ setNeedsDisplay:YES];
+                if (tick.should_render || dirtied_during_tick) {
+                    if (tick.should_render)
+                        pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    if (self->view_) {
+                        // An ANIMATING tree re-arms the dirty flag so the gate stays
+                        // open for the settling frame after the last animation one.
+                        // A dirty-ONLY frame must NOT re-mark here — that would feed
+                        // needs_repaint through -setNeedsDisplay: forever (an ungated
+                        // link with extra steps).
+                        if (tick.continuous) [self->view_ setNeedsDisplay:YES];
+                        // DRIVE the paint from the display-link tick — the CPU
+                        // analogue of the GPU host presenting from render_frame().
+                        // AppKit only services a pending -setNeedsDisplay: on its
+                        // OWN display pass, and Logic's OUT-OF-PROCESS AU host
+                        // (AUHostingServiceXPC) does not reliably run that pass for a
+                        // remote-hosted view: after the first paint, every later
+                        // request_repaint() marks the view dirty but it is never
+                        // drawn — progress freezes mid-generation, knob drags don't
+                        // move, and the tree only shows its real state on close +
+                        // reopen (a fresh view gets one initial paint). displayIfNeeded
+                        // flushes any pending needs-display region NOW, on the pump's
+                        // cadence, closing that gap. In-process hosts (REAPER,
+                        // standalone) are unaffected: the region was already going to
+                        // paint; this just paints it a few ms earlier on the same
+                        // frame. Safe when the view is windowless (AppKit no-ops) and
+                        // guarded by the alive checks above.
+                        [self->view_ displayIfNeeded];
+                    }
                 }
                 state->queued.store(false, std::memory_order_release);
             }
@@ -2229,12 +2256,24 @@ private:
                     const auto tick = pulp::view::begin_host_frame(
                         &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
                         self->needs_repaint_.load(std::memory_order_relaxed));
-                    if (!tick.should_render) {
+                    // begin_host_frame() runs the FrameClock activity channel
+                    // (clock.pump_activity) AFTER the needs_repaint_ snapshot above.
+                    // An activity probe can dirty the tree from there — the Forge
+                    // generation chrome rides that channel to drain build progress
+                    // into the view (request_repaint → repaint() → needs_repaint_).
+                    // That set is too late for `tick`, so fold it in or the frame it
+                    // dirtied waits a whole vsync (mid-generation progress lags a
+                    // frame behind every state change). render_frame() below resets
+                    // the flag, so it is not double-counted next tick.
+                    const bool dirtied_during_tick =
+                        self->needs_repaint_.load(std::memory_order_relaxed);
+                    if (!tick.should_render && !dirtied_during_tick) {
                         self->continuous_frames_.store(false, std::memory_order_relaxed);
                         self->render_dispatch_queued_.store(false, std::memory_order_release);
                         return;
                     }
-                    pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
+                    if (tick.should_render)
+                        pulp::view::advance_host_frame(&self->root_, self->frame_clock_, tick.dt);
                     if (tick.continuous) {
                         self->needs_repaint_.store(true, std::memory_order_relaxed);
                     }

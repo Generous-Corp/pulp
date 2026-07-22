@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { auditMaterials, auditCodegen, parseAnchors, parseCalls } from './material_audit.mjs';
+import { auditMaterials, auditCodegen, dedupFindings, parseAnchors, parseCalls } from './material_audit.mjs';
 
 const materials = (nodes) => ({ nodes });
 const envelope = (children) => ({ root: { node_id: 'root', name: 'Root', children } });
@@ -450,4 +450,32 @@ test('the anchor and call parsers read the shapes codegen actually emits', () =>
     + "setSvgFill('knob_base23', 'none');");
   assert.equal(calls.get('knob_base23').get('setBoxShadow'), 2, 'repeat calls are counted, not deduped');
   assert.equal(calls.get('knob_base23').get('setSvgFill'), 1);
+});
+
+test('a repeated declared property does not print the same finding twice', () => {
+  // The checks iterate declared occurrences, so a node declaring the same
+  // unsupported effect type twice yields two byte-identical findings — which
+  // print as a doubled line. The report boundary dedups them; the COUNT tables
+  // keep tallying occurrences, so nothing is hidden, only un-repeated.
+  const m = materials([
+    { node_id: '0:1', name: 'Grainy', type: 'RECTANGLE',
+      declared: { effects: ['NOISE', 'NOISE'] } },
+  ]);
+  const { findings } = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'Grainy', style: {} },
+  ]), []);
+  assert.equal(findings.length, 2, 'both declared occurrences are found');
+  const deduped = dedupFindings(findings);
+  assert.equal(deduped.length, 1, 'identical lines collapse to one');
+  assert.equal(deduped[0].property, 'effects.NOISE');
+
+  // Negative control: findings that differ in any displayed field — node,
+  // property, stage, or the declared/emitted text — must all survive.
+  const distinct = dedupFindings([
+    { node_id: '0:1', property: 'stroke', declared: 'a', emitted: 'none' },
+    { node_id: '0:2', property: 'stroke', declared: 'a', emitted: 'none' },
+    { node_id: '0:1', property: 'blend_mode', declared: 'a', emitted: 'none' },
+    { stage: 'codegen', node_id: '0:1', property: 'stroke', declared: 'a', emitted: 'none' },
+  ]);
+  assert.equal(distinct.length, 4);
 });

@@ -1252,6 +1252,51 @@ ghapp api repos/Generous-Corp/pulp/actions/runners     # busy/idle per runner
 distinguishes "saturated" from "wedged" from "starved by a lower-priority lane."
 An offline-but-`busy=True` runner is a dead VM still holding its slot.
 
+### The merge queue starves on the hosted pool, not on the Macs
+
+When *nothing* merges — queue entries sit in `AWAITING_CHECKS` until the
+ruleset's `check_response_timeout_minutes` evicts them — the instinct is to
+blame the self-hosted Macs that serve the required `macos` gate. Check the
+GitHub-hosted pool first. macOS runs on machines outside that pool and reports
+in minutes; it is rarely the thing that is stuck.
+
+The repo draws all hosted jobs from one fixed concurrency budget shared across
+every workflow. Windows is the largest consumer by far — each build run carries
+four hosted Windows jobs (the `Windows (x64)` matrix leg plus the
+`windows-msvc-release-gate`, `windows-midi2-gate`, and `windows-ble-gate`
+compile gates), and every one of them is *advisory*. A handful of open PRs is
+enough for advisory Windows work to hold nearly the whole budget while the one
+**required** hosted check — `Build + prove + (owner-gated) deploy`, on
+`ubuntu-latest` — waits behind a queue dozens deep and never gets a runner.
+
+This is why Windows runs on `merge_group` / `push` / `workflow_dispatch` but
+**not** on `pull_request`. The queue's serial validation builds PR ∪ main, so
+coverage is preserved and at most one run's worth of Windows jobs exists at a
+time. Dispatch `build.yml` at a branch if you want Windows before enqueueing.
+
+Census the pool before theorising — a run whose *overall* status is `queued` can
+still hold running jobs, so counting runs undercounts badly. Count **jobs**:
+
+```bash
+(ghapp api 'repos/Generous-Corp/pulp/actions/runs?status=in_progress&per_page=100' --jq '.workflow_runs[].id'
+ ghapp api 'repos/Generous-Corp/pulp/actions/runs?status=queued&per_page=100'      --jq '.workflow_runs[].id') \
+| sort -u | while read -r r; do
+    ghapp api "repos/Generous-Corp/pulp/actions/runs/$r/jobs" \
+      --jq '.jobs[]|select(.status=="in_progress" or .status=="queued")
+            |[.status,(([.labels[]]|join(","))|if test("self-hosted") then "SELF" else . end)]|@tsv'
+  done | sort | uniq -c
+```
+
+A healthy repo shows hosted `in_progress` spread across runner classes. The
+failure signature is one class (Windows) holding almost every in-progress slot
+with `ubuntu-latest` pinned at one or two and a queue tens deep behind it.
+
+**Never mass-dispatch `build.yml` to unstick a backlog.** Each dispatch adds
+four more Windows jobs to the pool that is already the bottleneck, so the drain
+gets slower, not faster — and the re-dispatched runs then wedge each other. If
+the pool is already saturated with advisory work, cancel it (the macOS legs have
+usually finished, so nothing is lost) rather than adding more.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory
