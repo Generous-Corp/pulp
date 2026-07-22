@@ -6,6 +6,11 @@ pulp_add_test_suite(pulp-test-timeline-model
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
         test_timeline_automation_attachment.cpp
     LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-dawproject-import
+    SOURCES test_timeline_dawproject_import.cpp
+    LIBRARIES pulp::timeline)
+target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
+    PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport

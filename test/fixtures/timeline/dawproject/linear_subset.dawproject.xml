@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A minimal DAWproject arrangement covering the importer's documented linear
+     subset: one audio track and one note track, a single tempo and time
+     signature, beats-timed clips referencing an audio file and inline notes.
+     This is the `project.xml` entry a `.dawproject` container would carry. -->
+<Project version="1.0">
+  <Application name="Pulp Timeline" version="1.0"/>
+  <Transport>
+    <Tempo unit="bpm" value="140.0"/>
+    <TimeSignature numerator="3" denominator="4"/>
+  </Transport>
+  <Structure>
+    <Track contentType="audio" loaded="true" id="track-bass" name="Bass" color="#4aa3df">
+      <Channel role="regular" audioChannels="2"/>
+    </Track>
+    <Track contentType="notes" loaded="true" id="track-lead" name="Lead" color="#e67e22">
+      <Channel role="regular" audioChannels="2"/>
+    </Track>
+  </Structure>
+  <Arrangement id="arrangement">
+    <Lanes timeUnit="beats" id="lanes-root">
+      <Lanes track="track-bass" id="lanes-bass">
+        <Clips id="clips-bass">
+          <Clip time="0.0" duration="4.0" name="bass-hit">
+            <Audio algorithm="stretch" channels="2" duration="2.0" sampleRate="44100">
+              <File path="audio/bass.wav"/>
+            </Audio>
+          </Clip>
+          <Clip time="6.0" duration="2.0" name="bass-tail">
+            <Audio algorithm="stretch" channels="2" duration="2.0" sampleRate="44100">
+              <File path="audio/bass.wav"/>
+            </Audio>
+          </Clip>
+        </Clips>
+      </Lanes>
+      <Lanes track="track-lead" id="lanes-lead">
+        <Clips id="clips-lead">
+          <Clip time="4.0" duration="4.0" name="lead-phrase">
+            <Notes>
+              <Note time="0.0" duration="1.0" channel="0" key="60" vel="0.8"/>
+              <Note time="2.0" duration="1.0" channel="0" key="64" vel="1.0"/>
+            </Notes>
+          </Clip>
+        </Clips>
+      </Lanes>
+    </Lanes>
+  </Arrangement>
+</Project>

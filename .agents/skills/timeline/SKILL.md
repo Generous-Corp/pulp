@@ -185,3 +185,35 @@ runtime tests. That shared CMake inventory does not make profile JSON, capture
 evidence, or sampler rendering part of the timeline document schema; keep those
 contracts in `pulp::audio` unless a future version explicitly adds a document
 reference type.
+
+## Foreign-format import (interop)
+
+`import_dawproject_xml` (`core/timeline/import/dawproject_import.cpp`) builds a
+`Project` from a DAWproject `project.xml` for a documented linear subset
+(single tempo/meter, flat tracks, beats-timed `<Notes>`/`<Audio>` clips). It
+consumes only the model's public construction API — a pure consumer, it never
+changes the model layout. Gotchas for extending it or adding another importer:
+
+- **It lives in `import/`, not `src/`, on purpose.** The web
+  timeline-source-closure gate sweeps every `core/timeline/src/*.cpp` into the
+  WAM/WebCLAP wasm DSP lanes, and those lanes do NOT link `pulp-runtime`. The
+  importer needs pugixml (a runtime internal), so putting it under `src/` would
+  drag pugixml into the wasm plugin. Keep foreign-format / heavy-dependency
+  interop code out of `src/`.
+- **The whole library is `-fno-exceptions -fno-rtti`.** pugixml's DOM API
+  compiles clean under those flags; its XPath API does not (it throws). Parse
+  with DOM traversal (`node.child()/children()/attribute()`), never
+  `select_nodes`. The `runtime::XmlDocument` wrapper only exposes XPath-string
+  scraping, too weak to correlate a clip with its parent lane's `track` — use
+  pugixml directly (add `external/pugixml` as a PRIVATE include; its object code
+  already ships inside `pulp::runtime`).
+- **Fail closed, never silent-drop.** A clip/track/note the parser cannot map
+  must produce a descriptive error, not a skipped element. Out-of-subset content
+  (`<Warps>`, nested group tracks, `timeUnit="seconds"`, unknown timelines) is
+  rejected explicitly. When iterating `children()`, skip non-element nodes
+  before matching tag names.
+- **Provisional asset identity.** DAWproject references audio by package path,
+  and the bytes are inside the (not-yet-unzipped) container, so the durable
+  `ContentHash` is derived from the path via `runtime::sha256_hex` and the path
+  is preserved as a `PackageRelative` `AssetLocator` hint. Unzipping the
+  container to hash real bytes, and the `pulp import` CLI verb, are follow-ups.

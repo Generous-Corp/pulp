@@ -25,6 +25,12 @@ add_library(pulp-timeline
     src/structural_registry_validation.cpp
     src/track.cpp
     src/track_schema_migrations.cpp
+    # Foreign-format interop lives outside src/ on purpose: the web
+    # timeline-source-closure gate sweeps every core/timeline/src/*.cpp into the
+    # WAM/WebCLAP wasm DSP lanes, which do not link pulp-runtime. The DAWproject
+    # importer depends on pugixml (via runtime) and is a native authoring/import
+    # concern, so keeping it in import/ keeps pugixml out of the wasm plugin.
+    import/dawproject_import.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 
@@ -41,6 +47,13 @@ target_link_libraries(pulp-timeline
         pulp::runtime
         pulp::timebase
 )
+
+# The DAWproject importer parses project.xml with pugixml directly (its object
+# code is already linked in via pulp::runtime). The header is an internal detail
+# of runtime's XmlDocument, so the include path is added here privately rather
+# than re-exported.
+target_include_directories(pulp-timeline PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(pulp-timeline PRIVATE -fno-exceptions -fno-rtti)
