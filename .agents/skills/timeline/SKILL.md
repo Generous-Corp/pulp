@@ -157,6 +157,39 @@ invariants.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
 
+## Schema codegen & drift gate
+
+The `SchemaRegistry` is the single generative source for the timeline's agent
+surfaces (JS facade, TypeScript definitions, MCP tool definitions, CLI verbs):
+they are generated from it, never hand-maintained, so they cannot drift.
+`emit_schema_manifest()` (`schema_codegen.cpp`) projects the built-in registry
+into one canonical JSON-Schema document — a lossless view of every type's
+domain, current version, fields, required set, and migration edges — round-
+tripped through `canonicalize_json` so the same registry always yields
+byte-identical output regardless of registration order.
+
+The committed artifact is `core/timeline/schema/timeline_schema.json`; the
+`pulp-timeline-schema-emit` binary regenerates it. **After any change to
+`register_builtin_timeline_schemas` (adding/removing a type, a field, a version,
+or a migration edge), regenerate the artifact or the drift gate fails:**
+
+```
+python3 tools/scripts/schema_drift_check.py --update   # regenerate
+python3 tools/scripts/schema_drift_check.py            # verify in sync
+```
+
+`schema_drift_check.py` is the standalone gate logic (regenerate → byte-diff →
+nonzero on drift), wired as the `timeline-schema-drift` ctest; the
+`timeline-schema-drift-selftest` ctest confirms it catches a stale artifact.
+Wiring it as a standalone GitHub-workflow required check is separate and owned by
+the CI layer.
+
+Placement convention (repo-wide): a **subsystem-local generator binary** lives
+under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
+**repo-wide gate script** lives under `tools/scripts/` with the other checks
+(`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
+Don't invent a per-subsystem `tools/` dir for a gate script.
+
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,
@@ -169,8 +202,8 @@ persistence core opportunistically.
 
 Build and run `pulp-test-timeline-model`, the automation curve and lane suites,
 the commands, transactions, journal, and undo suites, plus
-`pulp-test-timeline-schema-registry` and `pulp-test-timeline-persistence` in
-Release and UBSan configurations.
+`pulp-test-timeline-schema-registry`, `pulp-test-timeline-schema-codegen`, and
+`pulp-test-timeline-persistence` in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
 Keep `pulp-test-timeline-replay-golden` green: it applies real journaled gain,

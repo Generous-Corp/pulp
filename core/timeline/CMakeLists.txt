@@ -13,6 +13,7 @@ add_library(pulp-timeline
     src/transaction_automation_internal.cpp
     src/transaction_reduction_support.cpp
     src/undo.cpp
+    src/schema_codegen.cpp
     src/schema_json.cpp
     src/schema_json_canonical.cpp
     src/schema_json_parser.cpp
@@ -58,3 +59,8 @@ target_include_directories(pulp-timeline PRIVATE
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(pulp-timeline PRIVATE -fno-exceptions -fno-rtti)
 endif()
+
+# Standalone generator for the schema-drift gate: emits the canonical
+# JSON-Schema projection of the built-in registry (see tools/schema_drift_check.py).
+add_executable(pulp-timeline-schema-emit tools/schema_emit_main.cpp)
+target_link_libraries(pulp-timeline-schema-emit PRIVATE pulp::timeline)
