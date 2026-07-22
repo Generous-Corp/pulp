@@ -46,6 +46,16 @@
 
 namespace pulp::host {
 
+namespace detail {
+struct ExactParameterIngressOwner;
+// Mints an exact-parameter ingress ownership token. The type stays defined in
+// the signal-graph translation unit so its identity is owned here, not by the
+// timeline binding that claims nodes with it.
+std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner();
+}
+
+class TimelineGraphPlaybackBinding;
+
 // ── Node types ──────────────────────────────────────────────────────────
 
 enum class NodeType {
@@ -1168,6 +1178,11 @@ private:
         // mailbox is single-writer/latest-wins like MIDI ingress; the sequence
         // is committed only after the selected processing path succeeds.
         std::shared_ptr<ParameterInputMailbox> parameter_input_mailbox;
+        // ExecutionSnapshot injection is generation-local. Unlike the live
+        // mailbox above, this mailbox is never carried across recompiles.
+        std::unique_ptr<ParameterInputMailbox> exact_parameter_input_mailbox;
+        std::weak_ptr<detail::ExactParameterIngressOwner>
+            exact_parameter_event_owner;
 
         // Audio-rate modulation scratch. Each listed param gets one
         // max-block-sized region in audio_rate_param_data, filled immediately
@@ -1434,6 +1449,8 @@ private:
     // full prepare() which rebuilds this map. Do NOT read it after a mutation that
     // could add/remove/re-instantiate a node without a matching re-prepare.
     std::unordered_map<NodeId, PreparedPluginMetadata> prepared_plugin_meta_;
+    std::unordered_map<NodeId, std::weak_ptr<detail::ExactParameterIngressOwner>>
+        exact_parameter_event_claims_;
 
     struct StagedReplacement {
         NodeId id = 0;
@@ -1709,7 +1726,13 @@ private:
     static bool inject_parameter_events_into_snapshot_(
         CompiledGraph& snapshot, NodeId id,
         const state::ParameterEventQueue& events) noexcept;
-    static std::uint64_t append_parameter_mailbox_events_(
+    // Exact-generation injection into a claimed node's exact mailbox. Fails for
+    // any node that is not currently owner-claimed for exact ingress.
+    static bool inject_exact_parameter_events_into_snapshot_(
+        CompiledGraph& snapshot, NodeId id,
+        const state::ParameterEventQueue& events) noexcept;
+    static PluginBindingContext::PendingParameterEventSequences
+    append_parameter_mailbox_events_(
         void* runtime,
         state::ParameterEventQueue& destination) noexcept;
     // Legacy serial reference walk — the hand-maintained, bit-exact inter-node

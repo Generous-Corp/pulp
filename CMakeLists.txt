@@ -481,7 +481,10 @@ if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
 endif()
 
 if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
-    foreach(_pulp_clap_host_test IN ITEMS pulp-test-host pulp-test-host-regression)
+    foreach(_pulp_clap_host_test IN ITEMS
+            pulp-test-host
+            pulp-test-host-regression
+            pulp-test-timeline-graph-binding)
         if(TARGET ${_pulp_clap_host_test})
             target_compile_definitions(${_pulp_clap_host_test} PRIVATE
                 PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")

@@ -30,6 +30,19 @@
 #include <utility>
 
 namespace pulp::host {
+
+// Identity token for exact-parameter ingress ownership. Empty by design: claims
+// are keyed on the shared_ptr's control-block identity and scoped by its
+// lifetime. Defined here so the signal graph — not the timeline binding that
+// claims nodes — owns the type.
+namespace detail {
+struct ExactParameterIngressOwner {};
+
+std::shared_ptr<ExactParameterIngressOwner> make_exact_parameter_ingress_owner() {
+    return std::make_shared<ExactParameterIngressOwner>();
+}
+} // namespace detail
+
 namespace {
 
 std::uint64_t next_nonzero_mailbox_sequence(
@@ -741,6 +754,13 @@ bool SignalGraph::inject_parameter_events(
     auto read_guard = live_slot_.read();
     auto* cg = read_guard.get();
     if (!cg) return false;
+    // A node the timeline binding owns for exact ingress rejects ad-hoc live
+    // injection, so a UI/host param write cannot race the timeline's stream.
+    const auto runtime_it = cg->runtime.find(id);
+    if (runtime_it != cg->runtime.end()
+        && !runtime_it->second.exact_parameter_event_owner.expired()) {
+        return false;
+    }
     return inject_parameter_events_into_snapshot_(*cg, id, events);
 }
 
@@ -758,6 +778,29 @@ bool SignalGraph::inject_parameter_events_into_snapshot_(
     }
 
     auto& mailbox = *runtime_it->second.parameter_input_mailbox;
+    const std::uint64_t sequence =
+        next_nonzero_mailbox_sequence(mailbox.next_sequence);
+    const bool copied_all =
+        mailbox.writer_scratch.set_from_queue(events, sequence);
+    mailbox.published.write(mailbox.writer_scratch);
+    return copied_all;
+}
+
+bool SignalGraph::inject_exact_parameter_events_into_snapshot_(
+    CompiledGraph& snapshot, NodeId id,
+    const state::ParameterEventQueue& events) noexcept {
+    auto runtime_it = snapshot.runtime.find(id);
+    if (runtime_it == snapshot.runtime.end()) return false;
+    const auto shape_it = snapshot.shapes.find(id);
+    if (shape_it == snapshot.shapes.end()
+        || shape_it->second.type != NodeType::Plugin
+        || snapshot.plugins.find(id) == snapshot.plugins.end()
+        || !runtime_it->second.exact_parameter_input_mailbox
+        || runtime_it->second.exact_parameter_event_owner.expired()) {
+        return false;
+    }
+
+    auto& mailbox = *runtime_it->second.exact_parameter_input_mailbox;
     const std::uint64_t sequence =
         next_nonzero_mailbox_sequence(mailbox.next_sequence);
     const bool copied_all =
@@ -796,23 +839,38 @@ std::uint64_t SignalGraph::midi_input_sequence_for_test(NodeId id) const noexcep
         std::memory_order_relaxed);
 }
 
-std::uint64_t SignalGraph::append_parameter_mailbox_events_(
+PluginBindingContext::PendingParameterEventSequences
+SignalGraph::append_parameter_mailbox_events_(
     void* runtime,
     state::ParameterEventQueue& destination) noexcept {
     auto* rt = static_cast<NodeRuntime*>(runtime);
-    if (rt == nullptr || !rt->parameter_input_mailbox) return 0;
-    const auto& injected = rt->parameter_input_mailbox->published.read();
-    const std::uint64_t sequence_seen =
-        rt->parameter_input_mailbox->sequence_seen.load(std::memory_order_relaxed);
-    if (injected.sequence == 0
-        || injected.sequence == sequence_seen) {
-        return 0;
-    }
-    // Existing graph automation is already in `destination`; append injection
-    // afterward so it wins stable-sort ties without displacing existing events
-    // when the fixed queue is already near capacity.
-    (void)injected.append_to(destination);
-    return injected.sequence;
+    PluginBindingContext::PendingParameterEventSequences pending;
+    if (rt == nullptr) return pending;
+    const auto append = [&destination](ParameterInputMailbox* mailbox,
+                                       bool require_complete) noexcept {
+        if (mailbox == nullptr) return std::uint64_t{0};
+        const auto& injected = mailbox->published.read();
+        const auto sequence_seen =
+            mailbox->sequence_seen.load(std::memory_order_relaxed);
+        if (injected.sequence == 0 || injected.sequence == sequence_seen) {
+            return std::uint64_t{0};
+        }
+        const bool appended_all = injected.append_to(destination);
+        return appended_all || !require_complete ? injected.sequence
+                                                 : std::uint64_t{0};
+    };
+    // Exact-generation events follow live events so they win stable-sort ties.
+    pending.live = append(rt->parameter_input_mailbox.get(), false);
+    // require_complete=true is safe because a claimed node is the SOLE writer of
+    // its exact mailbox: it is refused live injection and rejected from graph
+    // automation (DeviceNodeAutomationConflict), so the per-block exact queue is
+    // bounded by one delivery and never exceeds capacity. The complete-or-skip
+    // append therefore cannot drop events or retry-starve — a partial append
+    // would only occur if that sole-writer invariant were violated.
+    pending.exact = rt->exact_parameter_event_owner.expired()
+        ? 0
+        : append(rt->exact_parameter_input_mailbox.get(), true);
+    return pending;
 }
 
 bool SignalGraph::extract_midi(NodeId id, midi::MidiBuffer& out) const {
@@ -1428,8 +1486,12 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 return {
                     .user_data = &it->second,
                     .append = &SignalGraph::append_parameter_mailbox_events_,
-                    .sequence_seen =
+                    .live_sequence_seen =
                         &it->second.parameter_input_mailbox->sequence_seen,
+                    .exact_sequence_seen =
+                        it->second.exact_parameter_input_mailbox
+                            ? &it->second.exact_parameter_input_mailbox->sequence_seen
+                            : nullptr,
                 };
             },
     };
@@ -1544,13 +1606,24 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                 std::make_unique<MidiOutputMailbox>();
         }
         if (n.type == NodeType::Plugin && n.plugin) {
+            const auto exact_claim = exact_parameter_event_claims_.find(n.id);
+            const bool exact_claimed =
+                exact_claim != exact_parameter_event_claims_.end()
+                && !exact_claim->second.expired();
+            const auto exact_owner = exact_claimed
+                ? exact_claim->second.lock()
+                : std::shared_ptr<detail::ExactParameterIngressOwner>{};
             // Keep mailbox identity across a live snapshot recompile so a
             // batch published while prepare_swap() is building cannot fall
             // between the old and new snapshots. Normal eager prepare has no
             // live snapshot here and allocates a fresh mailbox.
             if (const auto live = live_slot_.live()) {
                 auto old_it = live->runtime.find(n.id);
-                if (old_it != live->runtime.end()) {
+                const auto old_exact_owner = old_it != live->runtime.end()
+                    ? old_it->second.exact_parameter_event_owner.lock()
+                    : std::shared_ptr<detail::ExactParameterIngressOwner>{};
+                if (old_it != live->runtime.end()
+                    && old_exact_owner == exact_owner) {
                     runtime_it->second.parameter_input_mailbox =
                         old_it->second.parameter_input_mailbox;
                 }
@@ -1558,6 +1631,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             if (!runtime_it->second.parameter_input_mailbox) {
                 runtime_it->second.parameter_input_mailbox =
                     std::make_shared<ParameterInputMailbox>();
+            }
+            if (exact_claimed) {
+                runtime_it->second.exact_parameter_input_mailbox =
+                    std::make_unique<ParameterInputMailbox>();
+                runtime_it->second.exact_parameter_event_owner =
+                    exact_claim->second;
             }
         }
 
@@ -1880,8 +1959,14 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             cg->routed.serial.valid &&
             anticipation_enabled_.load(std::memory_order_relaxed) &&
             max_block_size > 0) {
-            const auto eligibility =
-                analyze_anticipation_eligibility(nodes_, connections_);
+            std::vector<NodeId> exact_parameter_input_nodes;
+            exact_parameter_input_nodes.reserve(
+                exact_parameter_event_claims_.size());
+            for (const auto& [id, owner] : exact_parameter_event_claims_) {
+                if (!owner.expired()) exact_parameter_input_nodes.push_back(id);
+            }
+            const auto eligibility = analyze_anticipation_eligibility(
+                nodes_, connections_, exact_parameter_input_nodes);
             // Record how many transport-sensitive nodes anticipation forced
             // exterior: each such node was seeded TransportSensitive above and so
             // is excluded from the interior, running live to observe the host
@@ -1922,8 +2007,12 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                         return {
                             .user_data = &it->second,
                             .append = &SignalGraph::append_parameter_mailbox_events_,
-                            .sequence_seen =
+                            .live_sequence_seen =
                                 &it->second.parameter_input_mailbox->sequence_seen,
+                            .exact_sequence_seen =
+                                it->second.exact_parameter_input_mailbox
+                                    ? &it->second.exact_parameter_input_mailbox->sequence_seen
+                                    : nullptr,
                         };
                     });
                 if (prepared) {
@@ -2732,6 +2821,14 @@ bool SignalGraph::ExecutionSnapshot::inject_parameter_events(
     const state::ParameterEventQueue& events) const noexcept {
     return snapshot_ != nullptr &&
            SignalGraph::inject_parameter_events_into_snapshot_(
+               *snapshot_, plugin_node, events);
+}
+
+bool SignalGraph::ExecutionSnapshot::inject_exact_parameter_events(
+    NodeId plugin_node, const state::ParameterEventQueue& events,
+    SnapshotParameterIngressPasskey) const noexcept {
+    return snapshot_ != nullptr &&
+           SignalGraph::inject_exact_parameter_events_into_snapshot_(
                *snapshot_, plugin_node, events);
 }
 
