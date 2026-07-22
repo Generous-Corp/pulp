@@ -471,6 +471,14 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         # Hosting helpers used by the VST3 plugin slot scanner.
         "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/eventlist.cpp"
+        # IHostApplication for hosted plug-ins: the IMessage / IAttributeList
+        # factory that connection-point traffic is built from, plus the
+        # IPlugInterfaceSupport a plug-in queries to discover host interfaces.
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
+        # hostclasses.cpp -> stringconvert.cpp -> commonstringconvert.cpp.
+        "${VST3_SDK_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/commonstringconvert.cpp"
     )
 
     add_library(vst3-sdk STATIC

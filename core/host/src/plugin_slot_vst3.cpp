@@ -3,8 +3,8 @@
 // Loads a .vst3 bundle, resolves GetPluginFactory, creates the first audio
 // processor class, and wires the PluginSlot interface onto IComponent +
 // IAudioProcessor. The host covers audio pass-through with stereo 2-in/2-out,
-// latency reporting, bypass, parameter edits, MIDI note events, and state
-// serialization. Editor views are not exposed by this backend yet.
+// latency reporting, bypass, parameter edits, MIDI note events, state
+// serialization, and an embedded IPlugView editor.
 
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/runtime/log.hpp>
@@ -22,20 +22,38 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/base/ibstream.h>
 
-// SDK helper containers used for block-local event and parameter queues.
+// SDK helper containers used for block-local event and parameter queues, plus
+// the reference IHostApplication (IMessage / IAttributeList factory).
 #include <public.sdk/source/vst/hosting/parameterchanges.h>
 #include <public.sdk/source/vst/hosting/eventlist.h>
+// hostclasses.h declares virtual destructors on `final` classes, which newer
+// clang flags. The SDK target silences its own warnings with -w; this include
+// pulls the header into Pulp's own (warning-clean) translation unit.
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunknown-warning-option"
+#  pragma clang diagnostic ignored "-Wunnecessary-virtual-specifier"
+#endif
+#include <public.sdk/source/vst/hosting/hostclasses.h>
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
+
+#include "plugin_slot_vst3_internal.hpp"
 
 #include <pulp/host/dl_shim.hpp>
+#include <pulp/host/detail/vst3_connection.hpp>
 #include <pulp/host/detail/vst3_state_sync.hpp>
 #include <pulp/host/detail/vst3_editor.hpp>
 #include <pulp/host/hosted_editor_container.hpp>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace pulp::host {
@@ -64,24 +82,51 @@ std::string resolve_vst3_binary(const std::string& path) {
     return path;
 }
 
-// Minimal IHostApplication — only exists so IComponent::initialize() can take
-// a context. We don't proxy any useful services back to the plugin.
-class HostApp final : public Vst::IHostApplication {
+// The IHostApplication handed to IComponent / IEditController::initialize().
+//
+// The SDK's HostApplication supplies the two services a hosted plug-in actually
+// asks its host for: createInstance() for the IMessage / IAttributeList objects
+// that all connection-point traffic is built from, and IPlugInterfaceSupport so
+// the plug-in can discover which host interfaces exist. A host application whose
+// createInstance() returns kNotImplemented leaves a separated plug-in unable to
+// send its own controller a single message.
+//
+// The instance is a process-wide singleton (host_app()), so reference counting
+// is neutered: a plug-in that over-releases must not be able to delete it.
+class HostApp final : public Vst::HostApplication {
 public:
     tresult PLUGIN_API getName(Vst::String128 name) override {
-        const char* kName = "Pulp";
-        for (int i = 0; i < 127 && kName[i]; ++i) name[i] = (Vst::TChar)kName[i];
-        name[4] = 0;
+        static const char kName[] = "Pulp";
+        int i = 0;
+        for (; i < 127 && kName[i] != '\0'; ++i) name[i] = (Vst::TChar)kName[i];
+        name[i] = 0;
         return kResultTrue;
     }
-    tresult PLUGIN_API createInstance(TUID /*cid*/, TUID /*iid*/, void** obj) override {
-        if (obj) *obj = nullptr;
-        return kNotImplemented;
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+};
+
+// The host's IPlugFrame.
+//
+// IPlugView needs one to exist before attached(): the plug-in calls
+// resizeView() from inside attached() to report the size it really wants, and a
+// view with no frame either mis-sizes itself or refuses to attach outright.
+// Lifetime belongs to the slot that owns it, so reference counting is neutered;
+// vst3_release_editor_view() clears the plug-in's pointer to it before the last
+// release, so a plug-in can never call into a destroyed frame.
+class EditorFrame final : public IPlugFrame {
+public:
+    using ResizeHandler = std::function<tresult(IPlugView*, ViewRect*)>;
+
+    void set_handler(ResizeHandler handler) { handler_ = std::move(handler); }
+
+    tresult PLUGIN_API resizeView(IPlugView* view, ViewRect* new_size) override {
+        return handler_ ? handler_(view, new_size) : kResultFalse;
     }
     tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
-        if (FUnknownPrivate::iidEqual(iid, Vst::IHostApplication::iid) ||
+        if (FUnknownPrivate::iidEqual(iid, IPlugFrame::iid) ||
             FUnknownPrivate::iidEqual(iid, FUnknown::iid)) {
-            *obj = static_cast<Vst::IHostApplication*>(this);
+            *obj = static_cast<IPlugFrame*>(this);
             return kResultTrue;
         }
         *obj = nullptr;
@@ -89,6 +134,9 @@ public:
     }
     uint32 PLUGIN_API addRef() override { return 1; }
     uint32 PLUGIN_API release() override { return 1; }
+
+private:
+    ResizeHandler handler_;
 };
 
 class Vst3Slot final : public PluginSlot {
@@ -102,6 +150,10 @@ public:
           component_(component),
           processor_(processor),
           controller_(controller) {
+        editor_frame_.set_handler([this](IPlugView* view, ViewRect* new_size) {
+            return on_plugin_resize_request_(view, new_size);
+        });
+        connect_component_and_controller_();
         cache_params_();
     }
 
@@ -109,12 +161,13 @@ public:
         // Tear the editor down before terminating the controller it came from.
         close_editor_();
         release();
+        // Both halves must stop holding each other before either terminates.
+        disconnect_component_and_controller_();
         // Combined plugins implement IComponent + IEditController on the
         // same object — terminating both pointers would call IPluginBase
-        // ::terminate() twice. Detect by raw-pointer equality on the
-        // FUnknown side and only terminate once.
-        const bool combined = (controller_ != nullptr
-            && static_cast<FUnknown*>(controller_) == static_cast<FUnknown*>(component_));
+        // ::terminate() twice on it. Identity has to go through the FUnknown
+        // query (see vst3_same_object), not a cast of the two pointers.
+        const bool combined = (controller_ != nullptr && !is_separated_controller_());
         if (controller_ && !combined) {
             controller_->terminate();
             controller_->release();
@@ -407,13 +460,11 @@ public:
         return bypassed_.load(std::memory_order_relaxed);
     }
 
-    // True when the plugin exposes a *separate* edit controller (distinct
-    // object from the component). Combined plugins implement IComponent and
-    // IEditController on one object, detected by FUnknown pointer equality —
-    // see the destructor's `combined` check.
+    // True when the plugin exposes a *separate* edit controller (a distinct
+    // object from the component). Teardown, state serialization, and
+    // connection-point wiring all key off this.
     bool is_separated_controller_() const {
-        return controller_
-            && static_cast<FUnknown*>(controller_) != static_cast<FUnknown*>(component_);
+        return detail::vst3_is_separated(component_, controller_);
     }
 
     // Detach + release the editor view and destroy its container. Idempotent;
@@ -428,6 +479,66 @@ public:
             destroy_editor_container(editor_container_);
             editor_container_ = nullptr;
         }
+        editor_width_ = 0;
+        editor_height_ = 0;
+    }
+
+    // Join a separated plug-in's two halves so its editor can talk to its own
+    // processor, then hand the controller the state it would otherwise never
+    // see. Both are no-ops for a combined plug-in.
+    void connect_component_and_controller_() {
+        connection_ = detail::vst3_connect_component_controller(component_, controller_);
+        switch (connection_.result) {
+            case detail::Vst3ConnectResult::ComponentRefused:
+                runtime::log_warn(
+                    "VST3 load: component refused its controller connection for '{}'",
+                    info_.name);
+                break;
+            case detail::Vst3ConnectResult::ControllerRefused:
+                runtime::log_warn(
+                    "VST3 load: controller refused its component connection for '{}'",
+                    info_.name);
+                break;
+            default:
+                break;
+        }
+        if (is_separated_controller_()) {
+            detail::vst3_push_component_state(component_, controller_);
+        }
+    }
+
+    void disconnect_component_and_controller_() {
+        detail::vst3_disconnect_component_controller(connection_);
+    }
+
+    // Plug-in-driven resize, reached through EditorFrame. IPlugView documents
+    // the sequence: the plug-in calls resizeView(newSize), the host resizes the
+    // platform representation, then — in the same callstack — calls onSize().
+    // The container is host-owned so resizing it is always safe; an installed
+    // resize-request handler is the embedder's veto over how much room the
+    // editor may claim inside its window.
+    tresult on_plugin_resize_request_(IPlugView* view, ViewRect* new_size) {
+        if (!view || !new_size) return kInvalidArgument;
+        // A view this slot does not have open cannot be resized through it —
+        // including a view still being created, which has no container yet.
+        if (view != editor_view_ || !editor_container_) return kResultFalse;
+        const int32 w = new_size->right - new_size->left;
+        const int32 h = new_size->bottom - new_size->top;
+        if (w <= 0 || h <= 0) return kInvalidArgument;
+        if (resize_request_handler_
+            && !resize_request_handler_((uint32_t)w, (uint32_t)h)) {
+            return kResultFalse;
+        }
+        resize_editor_container(editor_container_, (uint32_t)w, (uint32_t)h);
+        editor_width_ = (uint32_t)w;
+        editor_height_ = (uint32_t)h;
+        if (!detail::vst3_commit_requested_size(view, *new_size)) {
+            runtime::log_warn(
+                "VST3 editor: '{}' rejected onSize for the size it just requested",
+                info_.name);
+            return kResultFalse;
+        }
+        return kResultTrue;
     }
 
     std::vector<uint8_t> save_state() const override {
@@ -469,8 +580,8 @@ public:
         uint32_t width = 0;
         uint32_t height = 0;
         bool resizable = false;
-        IPlugView* view =
-            detail::vst3_create_editor_view(controller_, &width, &height, &resizable);
+        IPlugView* view = detail::vst3_create_editor_view(
+            controller_, &editor_frame_, &width, &height, &resizable);
         if (!view) return nullptr;
 
         // Order mirrors the container contract (hosted_editor_container.hpp):
@@ -481,21 +592,38 @@ public:
             detail::vst3_release_editor_view(view);
             return nullptr;
         }
+
+        // Published BEFORE attached(): IPlugView documents resizeView() as
+        // callable from inside attached(), and the frame can only honor it once
+        // the view and its container are reachable from the slot.
+        editor_view_ = view;
+        editor_container_ = container;
+        editor_width_ = width;
+        editor_height_ = height;
+
         if (!detail::vst3_attach_editor_view(view, container)) {
             runtime::log_error("VST3 editor: attached() failed for '{}'", info_.name);
+            editor_view_ = nullptr;
+            editor_container_ = nullptr;
+            editor_width_ = 0;
+            editor_height_ = 0;
             destroy_editor_container(container);
             detail::vst3_release_editor_view(view);
             return nullptr;
         }
-        editor_view_ = view;
-        editor_container_ = container;
 
         auto ed = std::make_unique<HostedEditor>();
         ed->native_handle = container;
-        ed->width = width;
-        ed->height = height;
+        // attached() may have driven a resizeView, so report what the editor
+        // ended up at rather than the size queried before it existed.
+        ed->width = editor_width_;
+        ed->height = editor_height_;
         ed->resizable = resizable;
         return ed;
+    }
+
+    void set_editor_resize_request_handler(EditorResizeRequestHandler handler) override {
+        resize_request_handler_ = std::move(handler);
     }
 
     void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) override {
@@ -514,6 +642,8 @@ public:
         if (!editor_view_) return false;
         if (!detail::vst3_resize_editor_view(editor_view_, &width, &height)) return false;
         resize_editor_container(editor_container_, width, height);
+        editor_width_ = width;
+        editor_height_ = height;
         return true;
     }
 
@@ -578,10 +708,19 @@ private:
     // Hosted editor (embedded IPlugView + its host container), null unless open.
     IPlugView* editor_view_ = nullptr;
     void* editor_container_ = nullptr;
+    // Live editor size. Tracks plug-in-driven resizes, which the size queried
+    // before attached() does not.
+    uint32_t editor_width_ = 0;
+    uint32_t editor_height_ = 0;
+    EditorFrame editor_frame_;
+    EditorResizeRequestHandler resize_request_handler_;
 
     Vst::IComponent* component_ = nullptr;
     Vst::IAudioProcessor* processor_ = nullptr;
     Vst::IEditController* controller_ = nullptr;
+    // Separated-model connection points. Empty for a combined plug-in or one
+    // that exposes no connection point.
+    detail::Vst3Connection connection_;
     std::vector<HostParamInfo> params_;
     // Host set_parameter edits. Vector-backed so the audio thread's drain is
     // allocation-free: std::swap(pending, drain_scratch_) is O(1) and
@@ -700,8 +839,8 @@ std::unique_ptr<PluginSlot> load_vst3_plugin(const PluginInfo& info) {
     // Try to get IEditController. Preferred path: plugin implements both
     // IComponent and IEditController on the same object (combined). Fallback
     // path for plugins that separate component and controller: query the
-    // component for its controller class id and factory-create it; this is
-    // a minimum viable implementation (no IConnectionPoint wiring yet).
+    // component for its controller class id and factory-create it. Vst3Slot's
+    // constructor then joins the two halves over IConnectionPoint.
     Vst::IEditController* controller = nullptr;
     if (component->queryInterface(Vst::IEditController::iid, (void**)&controller) != kResultOk) {
         controller = nullptr;
@@ -725,6 +864,18 @@ std::unique_ptr<PluginSlot> load_vst3_plugin(const PluginInfo& info) {
 
     return std::make_unique<Vst3Slot>(std::move(filled), handle, factory,
                                       component, processor, controller);
+}
+
+std::unique_ptr<PluginSlot> make_vst3_slot(PluginInfo info,
+                                           Vst::IComponent* component,
+                                           Vst::IAudioProcessor* processor,
+                                           Vst::IEditController* controller) {
+    if (!component) return nullptr;
+    // No module handle and no factory: nothing to dlclose, nothing to release
+    // beyond the interfaces the caller handed over.
+    return std::make_unique<Vst3Slot>(std::move(info), /*handle=*/nullptr,
+                                      /*factory=*/nullptr, component, processor,
+                                      controller);
 }
 
 } // namespace pulp::host

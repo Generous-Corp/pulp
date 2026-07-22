@@ -204,6 +204,136 @@ echo "== git_worktree_is_complete: submodules pending update are not incompleten
     exit $((FAIL > 0))
 ) || FAIL=$((FAIL + 1))
 
+echo "== reuse_shared_git_source: a re-pin re-points a stale symlink"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    PLATFORM=macOS   # the symlink branch; Windows clones instead
+
+    # Two shared caches, as a re-pin leaves them: the directory name embeds the
+    # ref, so the OLD one survives next to the new one.
+    for ref in v1 v2; do
+        mkdir -p "$tmp/cache/dep-$ref/marker"
+        git init -q "$tmp/cache/dep-$ref"
+        git -C "$tmp/cache/dep-$ref" config user.email t@t.t
+        git -C "$tmp/cache/dep-$ref" config user.name t
+        git -C "$tmp/cache/dep-$ref" add marker 2>/dev/null || true
+        printf '%s\n' "$ref" > "$tmp/cache/dep-$ref/marker/f"
+        git -C "$tmp/cache/dep-$ref" add -A
+        git -C "$tmp/cache/dep-$ref" commit -qm "$ref"
+    done
+
+    mkdir -p "$tmp/repo/external"
+    ln -s "$tmp/cache/dep-v1" "$tmp/repo/external/dep"   # what the v1 setup left
+
+    rc=0
+    reuse_shared_git_source "Dep" "$tmp/cache/dep-v2" "$tmp/repo/external/dep" "marker" >/dev/null 2>&1 || rc=$?
+
+    check "$rc" "0" "re-pinning an existing link succeeds"
+    check "$(readlink "$tmp/repo/external/dep")" "$tmp/cache/dep-v2" \
+        "the link now points at the NEW pin's cache"
+    check "$(cat "$tmp/repo/external/dep/marker/f" 2>/dev/null)" "v2" \
+        "the tree reachable through it is the new version"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== reuse_shared_git_source: an already-correct link is left alone"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    PLATFORM=macOS
+
+    mkdir -p "$tmp/cache/dep-v2/marker" "$tmp/repo/external"
+    git init -q "$tmp/cache/dep-v2"
+    ln -s "$tmp/cache/dep-v2" "$tmp/repo/external/dep"
+    before="$(readlink "$tmp/repo/external/dep")"
+
+    rc=0
+    out="$(reuse_shared_git_source "Dep" "$tmp/cache/dep-v2" "$tmp/repo/external/dep" "marker" 2>&1)" || rc=$?
+
+    check "$rc" "0" "a current link succeeds"
+    check "$(readlink "$tmp/repo/external/dep")" "$before" "a current link is not touched"
+    check "$(printf '%s' "$out" | grep -c 'stale')" "0" "a current link is not called stale"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== reuse_shared_git_source: a drifted REAL directory is reported, never deleted"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    PLATFORM=macOS
+
+    # Shared cache at the pinned ref, and a hand-managed checkout a commit behind.
+    git init -q "$tmp/cache/dep-v2"
+    git -C "$tmp/cache/dep-v2" config user.email t@t.t
+    git -C "$tmp/cache/dep-v2" config user.name t
+    mkdir -p "$tmp/cache/dep-v2/marker"
+    printf 'v2\n' > "$tmp/cache/dep-v2/marker/f"
+    git -C "$tmp/cache/dep-v2" add -A; git -C "$tmp/cache/dep-v2" commit -qm v2
+
+    mkdir -p "$tmp/repo/external"
+    git clone -q "$tmp/cache/dep-v2" "$tmp/repo/external/dep"
+    printf 'v1\n' > "$tmp/repo/external/dep/marker/f"
+    git -C "$tmp/repo/external/dep" -c user.email=t@t.t -c user.name=t commit -qam drift
+
+    ERRORS=0
+    rc=0
+    out="$(reuse_shared_git_source "Dep" "$tmp/cache/dep-v2" "$tmp/repo/external/dep" "marker" 2>&1)" || rc=$?
+
+    check "$rc" "1" "a drifted real checkout fails rather than being used"
+    check "$(printf '%s' "$out" | grep -c 'not at the pinned ref')" "1" \
+        "the failure names the drift"
+    check "$([ -d "$tmp/repo/external/dep" ] && echo yes || echo no)" "yes" \
+        "a developer-managed directory is never deleted"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== reuse_shared_git_source: a real directory AT the pin is accepted"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+    PLATFORM=macOS
+
+    git init -q "$tmp/cache/dep-v2"
+    git -C "$tmp/cache/dep-v2" config user.email t@t.t
+    git -C "$tmp/cache/dep-v2" config user.name t
+    mkdir -p "$tmp/cache/dep-v2/marker"
+    printf 'v2\n' > "$tmp/cache/dep-v2/marker/f"
+    git -C "$tmp/cache/dep-v2" add -A; git -C "$tmp/cache/dep-v2" commit -qm v2
+
+    mkdir -p "$tmp/repo/external"
+    git clone -q "$tmp/cache/dep-v2" "$tmp/repo/external/dep"
+
+    ERRORS=0
+    rc=0
+    reuse_shared_git_source "Dep" "$tmp/cache/dep-v2" "$tmp/repo/external/dep" "marker" >/dev/null 2>&1 || rc=$?
+    check "$rc" "0" "a real checkout on the pinned commit is accepted"
+    check "$ERRORS" "0" "and is not reported as an error"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
+echo "== git_checkout_matches_cache: an unknowable tree is never called drifted"
+(
+    load_setup_lib
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+    # An unpacked release with no .git — the setup cannot tell, so it must not
+    # guess "drifted" and delete a developer's tree out from under them.
+    mkdir -p "$tmp/plain" "$tmp/cache"
+    git_checkout_matches_cache "$tmp/plain" "$tmp/cache/dep" && r=yes || r=no
+    check "$r" "yes" "a non-git tree is treated as matching"
+
+    git init -q "$tmp/real"
+    git_checkout_matches_cache "$tmp/real" "$tmp/cache/missing" && r=yes || r=no
+    check "$r" "yes" "an unprovisioned cache is treated as matching"
+
+    exit $((FAIL > 0))
+) || FAIL=$((FAIL + 1))
+
 echo
 if [ "$FAIL" -gt 0 ]; then
     echo "FAILED ($FAIL failing group(s))"

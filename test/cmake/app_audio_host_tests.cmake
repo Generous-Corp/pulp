@@ -335,6 +335,21 @@ if(PULP_HAS_VST3)
 endif()
 
 if(PULP_HAS_VST3)
+    # Host-side VST3 separated-model wiring: combined-vs-separated identity,
+    # IConnectionPoint join/unwind, and the load-time controller state push
+    # (pulp::host::detail::vst3_connection.hpp + vst3_push_component_state).
+    # The fakes inherit the SDK's EditController and the combined-plug-in case
+    # uses SingleComponentEffect; both come from the vst3-sdk library, so unlike
+    # the sibling VST3 suites this one must NOT also compile
+    # vsteditcontroller.cpp — that would duplicate every EditController symbol
+    # vstsinglecomponenteffect.cpp.o already carries.
+    add_executable(pulp-test-vst3-connection test_vst3_connection.cpp)
+    target_link_libraries(pulp-test-vst3-connection
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-vst3-connection)
+endif()
+
+if(PULP_HAS_VST3)
     # Host-side VST3 editor (IPlugView) negotiation seam
     # (pulp::host::detail::vst3_editor.hpp). The fake IPlugView inherits the SDK
     # CPluginView (in the vst3-sdk lib) and the fake controller inherits
@@ -346,6 +361,24 @@ if(PULP_HAS_VST3)
     target_link_libraries(pulp-test-vst3-editor
         PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-vst3-editor)
+endif()
+
+if(PULP_HAS_VST3 AND APPLE)
+    # The real Vst3Slot editor path against a real NSView parent, via
+    # make_vst3_slot (core/host/src is on the include path for that internal
+    # header). Covers what no free-function seam can: a plug-in calling
+    # IPlugFrame::resizeView from inside attached(). macOS-only because
+    # create_editor_container is a stub elsewhere, so there is no parent to
+    # hand a plug-in.
+    add_executable(pulp-test-vst3-hosted-editor
+        test_vst3_hosted_editor.mm
+        ${VST3_SDK_DIR}/public.sdk/source/vst/vsteditcontroller.cpp
+    )
+    target_link_libraries(pulp-test-vst3-hosted-editor
+        PRIVATE pulp::host vst3-sdk Catch2::Catch2WithMain "-framework AppKit")
+    target_include_directories(pulp-test-vst3-hosted-editor
+        PRIVATE ${PULP_ROOT_DIR}/core/host/src)
+    catch_discover_tests(pulp-test-vst3-hosted-editor)
 endif()
 
 if(PULP_HAS_CLAP)

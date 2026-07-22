@@ -66,10 +66,16 @@ name / vendor / version / unique id come back populated.
 For applications that scan arbitrary third-party installations, prefer
 `IsolatedPluginScanner` (`pulp/host/isolated_scanner.hpp`). It runs the scan in
 the `pulp-scan-worker` child process, so a crash, hang, or timeout comes back as
-a structured `ScanResult` / `ScanStatus` instead of taking down the host. That
-isolation covers discovery; a tool that performs deeper analysis by
-instantiating and processing untrusted plug-ins should run that probe in a child
-process too.
+a structured `ScanResult` / `ScanStatus` instead of taking down the host.
+
+**That isolation covers discovery only.** `PluginSlot::load()` runs in your
+process, and the crash does not wait for you to process audio — a plug-in can
+fault inside its own factory or `initialize()` and take the host down before
+`load()` ever returns. This is not hypothetical: at least one shipping
+commercial VST3 segfaults on load on a machine where its licensing prerequisites
+are absent. Any tool that loads plug-ins it did not choose — a scan-everything
+plug-in manager, a batch analyzer — should run the load in a child process, the
+same way `IsolatedPluginScanner` runs discovery.
 
 ## Analyzer-style inspection
 
@@ -226,7 +232,12 @@ if (!attachment) {
 }
 ```
 
-Available for CLAP on macOS today; see Limits below.
+Available for CLAP, VST3, and AU v2 on macOS today; see Limits below.
+
+A plugin may also ask to resize itself once its editor is open. The
+attachment handles that for you: it re-bounds the child view at the same
+origin and updates `width()` / `height()`, so an editor that sizes itself on
+open lands at its real size instead of being clipped.
 
 Two things to design around:
 
@@ -296,9 +307,10 @@ These exist to smoke-test the loaders outside a full DAW context.
   Host instruments through **AU, VST3, or CLAP**, which do route MIDI.
 - Only one factory descriptor per `.clap` is selected (first one, or one
   matching `info.unique_id`).
-- Hosted editor embedding is wired for CLAP on macOS. VST3, AU, and LV2 slots
-  still report no editor, and Windows and Linux have no desktop `WindowHost`
-  implementing the native-child seam, so nothing can be parented there yet.
+- Hosted editor embedding is wired for CLAP, VST3, and AU v2 on macOS. LV2
+  slots still report no editor, and Windows and Linux have no desktop
+  `WindowHost` implementing the native-child seam, so nothing can be parented
+  there yet.
   Where an editor is unavailable, `has_editor()` is false and
   `EditorAttachment::create` returns nullptr — branch on that rather than
   assuming a view. A missing editor never blocks metadata, parameter, state,
