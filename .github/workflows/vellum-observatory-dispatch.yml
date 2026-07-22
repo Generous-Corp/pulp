@@ -1,0 +1,77 @@
+name: Vellum observatory dispatch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-outbox:
+    name: Validate landed Vellum outbox
+    runs-on: ubuntu-latest
+    outputs:
+      dispatch_required: ${{ steps.validate.outputs.dispatch_required }}
+      outbox_b64: ${{ steps.validate.outputs.outbox_b64 }}
+    steps:
+      - name: Check out landed main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate landed events without secrets
+        id: validate
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.event.after }}
+        run: |
+          git fetch --no-tags origin "$PUSH_BASE" "$PUSH_HEAD"
+          python3 tools/scripts/vellum_freeze_check.py \
+            --base "$PUSH_BASE" \
+            --head "$PUSH_HEAD" \
+            --source-head "$PUSH_HEAD" \
+            --output "$RUNNER_TEMP/vellum-outbox.json" \
+            --github-output "$GITHUB_OUTPUT"
+
+  dispatch:
+    name: Dispatch landed Vellum event
+    needs: validate-outbox
+    if: needs.validate-outbox.outputs.dispatch_required == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # This job intentionally has one step. It neither checks out nor executes
+      # repository code before the narrowly scoped cross-repository credential
+      # is exposed.
+      - name: Send compact verified outbox record
+        env:
+          GH_TOKEN: ${{ secrets.VELLUM_OBSERVATORY_TOKEN }}
+          OUTBOX_B64: ${{ needs.validate-outbox.outputs.outbox_b64 }}
+        run: |
+          test -n "$GH_TOKEN" || {
+            echo 'VELLUM_OBSERVATORY_TOKEN is required after authority activates' >&2
+            exit 1
+          }
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          payload = base64.b64decode(os.environ["OUTBOX_B64"], validate=True)
+          event = json.loads(payload)
+          body = json.dumps(
+              {"event_type": "pulp-change-landed", "client_payload": event},
+              separators=(",", ":"),
+          ).encode()
+          request = urllib.request.Request(
+              "https://api.github.com/repos/Generous-Corp/vellum/dispatches",
+              data=body,
+              method="POST",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request) as response:
+              if response.status != 204:
+                  raise SystemExit(f"unexpected repository-dispatch status: {response.status}")
+          PY

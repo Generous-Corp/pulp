@@ -1,0 +1,4445 @@
+{
+  "schema_version": 1,
+  "purpose": "Track every current Pulp developer-tooling surface while Vellum is validated independently. This map does not transfer ownership.",
+  "inheritance": "CLI arguments and nested subcommands inherit their top-level command disposition unless a future schema records an explicit override.",
+  "cli_argument_provenance": {
+    "inventory_source": "docs/status/cli-commands.yaml",
+    "parser_guard": "Top-level command names are independently extracted from the C++ dispatch tables and Rust clap enum and must match the YAML manifest.",
+    "limitation": "Pulp has no uniform machine-readable schema for nested subcommands and arguments: their parsers are distributed across C++, Rust, delegated binaries, and scripts. Therefore argument rows are the declared CLI contract, not proof of parser acceptance; focused parser and --help shellout tests remain the behavioral authority."
+  },
+  "classification_meanings": {
+    "pulp-owned": "Pulp keeps this product/workflow surface. It may eventually wrap a Vellum primitive, but it is not transferred as framework API.",
+    "candidate-shared-later": "The independent Vellum product should evaluate an equivalent or extracted primitive before any ownership transfer is approved.",
+    "excluded": "The surface is audio-, plug-in-, or Pulp-product-specific and is outside the audio-free Vellum framework boundary."
+  },
+  "source_files": {
+    "cli": [
+      "tools/cli/pulp_cli.cpp",
+      "experimental/pulp-rs/src/main.rs",
+      "docs/status/cli-commands.yaml"
+    ],
+    "claude_commands": [
+      ".claude/commands/*.md"
+    ],
+    "agent_skills": [
+      ".agents/skills/*/SKILL.md"
+    ],
+    "mcp_tools": [
+      "tools/mcp/pulp_mcp.cpp"
+    ],
+    "plugin_registrations": [
+      ".claude-plugin/plugin.json",
+      ".claude-plugin/marketplace.json",
+      ".mcp.json"
+    ]
+  },
+  "entries": {
+    "cli": [
+      {
+        "name": "add",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "package",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--license-override",
+            "kind": "option"
+          },
+          {
+            "name": "--accept-license",
+            "kind": "option"
+          },
+          {
+            "name": "--platform-guard",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-cmake",
+            "kind": "flag"
+          },
+          {
+            "name": "--from",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "audio",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "model list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "model status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "model activate",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "excerpt-find",
+            "arguments": [
+              {
+                "name": "--text",
+                "required": true
+              },
+              {
+                "name": "--input",
+                "required": true
+              },
+              {
+                "name": "--model",
+                "required": false
+              },
+              {
+                "name": "--recursive",
+                "kind": "flag"
+              },
+              {
+                "name": "--top",
+                "kind": "option"
+              },
+              {
+                "name": "--window-ms",
+                "kind": "option"
+              },
+              {
+                "name": "--hop-ms",
+                "kind": "option"
+              },
+              {
+                "name": "--min-score",
+                "kind": "option"
+              },
+              {
+                "name": "--max-candidates-per-file",
+                "kind": "option"
+              },
+              {
+                "name": "--bundle-out",
+                "kind": "option"
+              },
+              {
+                "name": "--dry-run",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "read-bundle",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "sampler-mip build",
+            "arguments": [
+              {
+                "name": "source",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--levels",
+                "kind": "option"
+              },
+              {
+                "name": "--max-source-bytes",
+                "kind": "option"
+              },
+              {
+                "name": "--max-output-bytes",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "heritage validate",
+            "arguments": [
+              {
+                "name": "profile",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "heritage canonicalize",
+            "arguments": [
+              {
+                "name": "profile",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "heritage inspect",
+            "arguments": [
+              {
+                "name": "profile",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "heritage render",
+            "arguments": [
+              {
+                "name": "profile",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--fixture",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--report",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--frames",
+                "kind": "option"
+              },
+              {
+                "name": "--block-size",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "scope",
+            "arguments": [
+              {
+                "name": "target",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--input-wav",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--png",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--frames",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--window",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--trigger",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "validate summarize",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "validate doctor",
+            "arguments": [
+              {
+                "name": "--thd",
+                "kind": "flag"
+              },
+              {
+                "name": "--response",
+                "kind": "option"
+              },
+              {
+                "name": "--fundamental",
+                "kind": "option"
+              },
+              {
+                "name": "--channel",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "validate compare",
+            "arguments": [
+              {
+                "name": "--mode",
+                "kind": "option"
+              },
+              {
+                "name": "--tolerance",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "validate assert",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "compare",
+            "arguments": [
+              {
+                "name": "--profile",
+                "kind": "option"
+              },
+              {
+                "name": "--reference-role",
+                "kind": "option"
+              },
+              {
+                "name": "--threshold",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "plugin-inspect",
+            "arguments": [
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--format",
+                "kind": "option"
+              },
+              {
+                "name": "--id",
+                "kind": "option"
+              },
+              {
+                "name": "--sample-rate",
+                "kind": "option"
+              },
+              {
+                "name": "--block",
+                "kind": "option"
+              },
+              {
+                "name": "--warmup-ms",
+                "kind": "option"
+              },
+              {
+                "name": "--timeout-ms",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "render",
+            "arguments": [
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--duration-ms",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--duration-frames",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--id",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--sample-rate",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--block",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--in-channels",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out-channels",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--input",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--input-signal",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--warmup-ms",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--initial-param",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--settle-ms",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--timeout-ms",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--param",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--midi",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--tail-ms",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--wav-format",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--manifest",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "audit",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--packages",
+            "kind": "flag"
+          },
+          {
+            "name": "--platforms",
+            "kind": "flag"
+          },
+          {
+            "name": "--licenses",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "bake",
+        "disposition": "excluded",
+        "arguments": [
+          {
+            "name": "input",
+            "required": true
+          },
+          {
+            "name": "-o / --out",
+            "required": true
+          },
+          {
+            "name": "--sign-key",
+            "required": true
+          },
+          {
+            "name": "--sr",
+            "required": false
+          },
+          {
+            "name": "--block",
+            "required": false
+          },
+          {
+            "name": "--force",
+            "required": false
+          },
+          {
+            "name": "--no-mint",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "verify",
+            "arguments": [
+              {
+                "name": "artifact",
+                "required": true
+              },
+              {
+                "name": "--trust",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "build",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--js-engine",
+            "kind": "option"
+          },
+          {
+            "name": "--arch",
+            "kind": "option"
+          },
+          {
+            "name": "--watch",
+            "kind": "flag"
+          },
+          {
+            "name": "--test",
+            "kind": "flag"
+          },
+          {
+            "name": "--test-filter",
+            "kind": "option"
+          },
+          {
+            "name": "--validate",
+            "kind": "flag"
+          },
+          {
+            "name": "--install",
+            "kind": "flag"
+          },
+          {
+            "name": "--skip-validation",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-unsupported-sdk",
+            "kind": "flag"
+          },
+          {
+            "name": "--check-identity",
+            "kind": "flag"
+          },
+          {
+            "name": "--allow-identity-change",
+            "kind": "flag"
+          },
+          {
+            "name": "extra_args",
+            "kind": "passthrough"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "cache",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "fetch",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "clean",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "ci-host",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--class",
+            "kind": "option"
+          },
+          {
+            "name": "--copy-from",
+            "kind": "option"
+          },
+          {
+            "name": "--validate",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-agent",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "setup",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "ci-local",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "run",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "ship",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "enqueue",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "drain",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "bump",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "cloud workflows",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "cloud run",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "cloud status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "desktop",
+            "arguments": [],
+            "subcommands": [
+              {
+                "name": "install",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "doctor",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "status",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "config show",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "config set",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "recent",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "proof",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "publish",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "cleanup",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "smoke",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "click",
+                "arguments": [],
+                "subcommands": []
+              },
+              {
+                "name": "inspect",
+                "arguments": [],
+                "subcommands": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "clean",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": []
+      },
+      {
+        "name": "config",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "get",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "set",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "content",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "validate",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "preview",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--plugin-runtime",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--plugin",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "install",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--yes",
+                "kind": "flag",
+                "required": true
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "update",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--yes",
+                "kind": "flag",
+                "required": true
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "list",
+            "arguments": [
+              {
+                "name": "--plugin",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "rescan",
+            "arguments": [
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "remove",
+            "arguments": [
+              {
+                "name": "package-id",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--version",
+                "kind": "option"
+              },
+              {
+                "name": "--yes",
+                "kind": "flag",
+                "required": true
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "reveal",
+            "arguments": [
+              {
+                "name": "package-id",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--plugin",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--version",
+                "kind": "option"
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "coverage",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "diff",
+            "arguments": [
+              {
+                "name": "targets",
+                "kind": "passthrough"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "create",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "name",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--type",
+            "kind": "option"
+          },
+          {
+            "name": "--mpe",
+            "kind": "flag"
+          },
+          {
+            "name": "--manufacturer",
+            "kind": "option"
+          },
+          {
+            "name": "--template",
+            "kind": "option"
+          },
+          {
+            "name": "--output",
+            "kind": "option"
+          },
+          {
+            "name": "--targets",
+            "kind": "option"
+          },
+          {
+            "name": "--in-tree",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-build",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-interactive",
+            "kind": "flag"
+          },
+          {
+            "name": "--pin",
+            "kind": "flag"
+          },
+          {
+            "name": "--debug",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "design",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "script",
+            "kind": "positional",
+            "required": false
+          },
+          {
+            "name": "--script",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--build-dir",
+            "kind": "option",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "compile",
+            "arguments": [
+              {
+                "name": "--design-md",
+                "kind": "option"
+              },
+              {
+                "name": "--theme",
+                "kind": "option"
+              },
+              {
+                "name": "--dark",
+                "kind": "flag"
+              },
+              {
+                "name": "--out-dir",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--prompt",
+                "kind": "flag"
+              },
+              {
+                "name": "--stdout",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "lint-adherence",
+            "arguments": [
+              {
+                "name": "js",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--manifest",
+                "kind": "option"
+              },
+              {
+                "name": "--design-md",
+                "kind": "option"
+              },
+              {
+                "name": "--theme",
+                "kind": "option"
+              },
+              {
+                "name": "--dark",
+                "kind": "flag"
+              },
+              {
+                "name": "--strict",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "record",
+            "arguments": [
+              {
+                "name": "--ledger",
+                "kind": "option"
+              },
+              {
+                "name": "--name",
+                "kind": "option"
+              },
+              {
+                "name": "--asset",
+                "kind": "option"
+              },
+              {
+                "name": "--source",
+                "kind": "option"
+              },
+              {
+                "name": "--viewport",
+                "kind": "option"
+              },
+              {
+                "name": "--system",
+                "kind": "option"
+              },
+              {
+                "name": "--inherit-from",
+                "kind": "option"
+              },
+              {
+                "name": "--version",
+                "kind": "option"
+              },
+              {
+                "name": "--status",
+                "kind": "option"
+              },
+              {
+                "name": "--remove",
+                "kind": "option"
+              },
+              {
+                "name": "--reconcile",
+                "kind": "flag"
+              },
+              {
+                "name": "--list",
+                "kind": "flag"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "gallery",
+            "arguments": [
+              {
+                "name": "--root",
+                "kind": "option"
+              },
+              {
+                "name": "--out",
+                "kind": "option"
+              },
+              {
+                "name": "--backend",
+                "kind": "option"
+              },
+              {
+                "name": "--screenshot",
+                "kind": "option"
+              },
+              {
+                "name": "--no-render",
+                "kind": "flag"
+              },
+              {
+                "name": "--force",
+                "kind": "flag"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "handoff",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "variants",
+            "arguments": [
+              {
+                "name": "variants-file",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--component",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "tweak",
+            "arguments": [
+              {
+                "name": "--set",
+                "kind": "option"
+              },
+              {
+                "name": "--out",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "design-debug",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--prompt",
+            "kind": "option",
+            "required": true
+          },
+          {
+            "name": "--target",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--script",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--output-dir",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--response-file",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--capture-backend",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--design-tool-bin",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--provider",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--model",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--reasoning-effort",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--ai-cli",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--width",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--height",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--scale",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--delay-ms",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--after-delay-ms",
+            "kind": "option",
+            "required": false
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "dev",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--test",
+            "kind": "flag"
+          },
+          {
+            "name": "--test-filter",
+            "kind": "option"
+          },
+          {
+            "name": "--validate",
+            "kind": "flag"
+          },
+          {
+            "name": "--run",
+            "kind": "option"
+          },
+          {
+            "name": "--hot-dsp",
+            "kind": "flag"
+          },
+          {
+            "name": "--design",
+            "kind": "option"
+          },
+          {
+            "name": "--target",
+            "kind": "option"
+          },
+          {
+            "name": "--allow-unsupported-sdk",
+            "kind": "flag"
+          },
+          {
+            "name": "passthrough",
+            "kind": "passthrough"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "docs",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "index",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "search",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "open",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "show support",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "show command",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "show cmake",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "show style",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "build-site",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "build-api",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "doctor",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "target",
+            "kind": "positional"
+          },
+          {
+            "name": "--fix",
+            "kind": "flag"
+          },
+          {
+            "name": "--ci",
+            "kind": "flag"
+          },
+          {
+            "name": "--dry-run",
+            "kind": "flag"
+          },
+          {
+            "name": "--versions",
+            "kind": "flag"
+          },
+          {
+            "name": "--validators",
+            "kind": "flag"
+          },
+          {
+            "name": "--scan-parents",
+            "kind": "flag"
+          },
+          {
+            "name": "--caches",
+            "kind": "flag"
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          },
+          {
+            "name": "--host-quirks",
+            "kind": "flag"
+          },
+          {
+            "name": "--au-cache",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "export-tokens",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--file",
+            "kind": "option"
+          },
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--tokens",
+            "kind": "option"
+          },
+          {
+            "name": "--dry-run",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "fmt",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "paths",
+            "kind": "passthrough"
+          },
+          {
+            "name": "--dry-run",
+            "kind": "flag"
+          },
+          {
+            "name": "--check",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "harness",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "coverage",
+            "kind": "positional",
+            "required": false
+          },
+          {
+            "name": "visual",
+            "kind": "positional",
+            "required": false
+          },
+          {
+            "name": "--surface",
+            "kind": "option"
+          },
+          {
+            "name": "--all",
+            "kind": "flag"
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-docs",
+            "kind": "flag"
+          },
+          {
+            "name": "--verify",
+            "kind": "flag"
+          },
+          {
+            "name": "--generate",
+            "kind": "flag"
+          },
+          {
+            "name": "--actuals-dir",
+            "kind": "option"
+          },
+          {
+            "name": "--entry",
+            "kind": "option"
+          },
+          {
+            "name": "--binary",
+            "kind": "option"
+          },
+          {
+            "name": "--build-dir",
+            "kind": "option"
+          },
+          {
+            "name": "--repo-root",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "help",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": []
+      },
+      {
+        "name": "host",
+        "disposition": "excluded",
+        "arguments": [
+          {
+            "name": "path",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--id",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "identity",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "record",
+            "arguments": [
+              {
+                "name": "--allow-identity-change",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [
+              {
+                "name": "--allow-identity-change",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "import",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "detect",
+            "arguments": [
+              {
+                "name": "dir",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "inspect",
+            "arguments": [
+              {
+                "name": "--from",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "dir",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--framework-path",
+                "kind": "option"
+              },
+              {
+                "name": "--extra-include",
+                "kind": "option"
+              },
+              {
+                "name": "-o",
+                "kind": "option"
+              },
+              {
+                "name": "--report",
+                "kind": "option"
+              },
+              {
+                "name": "--importer-cmd",
+                "kind": "option"
+              },
+              {
+                "name": "--accept-importer-terms",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "emit",
+            "arguments": [
+              {
+                "name": "--from",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "dir",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--output",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--importer-cmd",
+                "kind": "option"
+              },
+              {
+                "name": "--accept-importer-terms",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "install",
+            "arguments": [
+              {
+                "name": "url",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--accept-importer-terms",
+                "kind": "flag"
+              },
+              {
+                "name": "--force",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "uninstall",
+            "arguments": [
+              {
+                "name": "id",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "import-design",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--from",
+            "kind": "option",
+            "required": true
+          },
+          {
+            "name": "--outline",
+            "kind": "flag"
+          },
+          {
+            "name": "--page",
+            "kind": "option"
+          },
+          {
+            "name": "--file",
+            "kind": "option"
+          },
+          {
+            "name": "--url",
+            "kind": "option"
+          },
+          {
+            "name": "--frame",
+            "kind": "option"
+          },
+          {
+            "name": "--screen",
+            "kind": "option"
+          },
+          {
+            "name": "--output",
+            "kind": "option"
+          },
+          {
+            "name": "--emit",
+            "kind": "option"
+          },
+          {
+            "name": "--mode",
+            "kind": "option"
+          },
+          {
+            "name": "--snapshot-semantics",
+            "kind": "option"
+          },
+          {
+            "name": "--allow-network-fetch",
+            "kind": "flag"
+          },
+          {
+            "name": "--asset-cache",
+            "kind": "option"
+          },
+          {
+            "name": "--asset-timeout-ms",
+            "kind": "option"
+          },
+          {
+            "name": "--asset-hash",
+            "kind": "option"
+          },
+          {
+            "name": "--tokens",
+            "kind": "option"
+          },
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--emit-w3c-tokens",
+            "kind": "option"
+          },
+          {
+            "name": "--dry-run",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-tokens",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-comments",
+            "kind": "flag"
+          },
+          {
+            "name": "--web-compat",
+            "kind": "flag"
+          },
+          {
+            "name": "--validate",
+            "kind": "flag"
+          },
+          {
+            "name": "--screenshot-backend",
+            "kind": "option"
+          },
+          {
+            "name": "--fidelity-report",
+            "kind": "option"
+          },
+          {
+            "name": "--reference",
+            "kind": "option"
+          },
+          {
+            "name": "--diff",
+            "kind": "option"
+          },
+          {
+            "name": "--render-size",
+            "kind": "option"
+          },
+          {
+            "name": "--preview",
+            "kind": "flag"
+          },
+          {
+            "name": "--debug",
+            "kind": "flag"
+          },
+          {
+            "name": "--detect-only",
+            "kind": "flag"
+          },
+          {
+            "name": "--directory",
+            "kind": "option"
+          },
+          {
+            "name": "--compat",
+            "kind": "option"
+          },
+          {
+            "name": "--report-new-format",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "inspect",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--host",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--port",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--command",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--params",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--output",
+            "kind": "option",
+            "required": false
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "kit",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "search",
+            "arguments": [
+              {
+                "name": "query",
+                "kind": "positional"
+              },
+              {
+                "name": "--root",
+                "kind": "option"
+              },
+              {
+                "name": "--kind",
+                "kind": "option"
+              },
+              {
+                "name": "--lane",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "validate",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--strict",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "inspect",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "plan",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--project",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "verify",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--project",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--execute-screenshots",
+                "kind": "flag"
+              },
+              {
+                "name": "--screenshot-backend",
+                "kind": "option"
+              },
+              {
+                "name": "--screenshot-output-dir",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "apply",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--project",
+                "kind": "option"
+              },
+              {
+                "name": "--yes",
+                "kind": "flag",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "remove",
+            "arguments": [
+              {
+                "name": "kit-id",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--project",
+                "kind": "option"
+              },
+              {
+                "name": "--yes",
+                "kind": "flag",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "pack",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--output",
+                "kind": "option"
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "publish",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--dry-run",
+                "kind": "flag",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag"
+              },
+              {
+                "name": "--registry-manifest",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "init",
+            "arguments": [
+              {
+                "name": "--kind",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--id",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--name",
+                "kind": "option"
+              },
+              {
+                "name": "--dir",
+                "kind": "option"
+              },
+              {
+                "name": "--force",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "list",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--json",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "loop",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--platform",
+            "kind": "option"
+          },
+          {
+            "name": "--off",
+            "kind": "flag"
+          },
+          {
+            "name": "--status",
+            "kind": "flag"
+          },
+          {
+            "name": "--no-watch",
+            "kind": "flag"
+          },
+          {
+            "name": "--watch-issues",
+            "kind": "option"
+          },
+          {
+            "name": "--ar-swap-from",
+            "kind": "option"
+          },
+          {
+            "name": "--test",
+            "kind": "flag"
+          },
+          {
+            "name": "--test-filter",
+            "kind": "option"
+          },
+          {
+            "name": "--validate",
+            "kind": "flag"
+          },
+          {
+            "name": "--run",
+            "kind": "option"
+          },
+          {
+            "name": "--target",
+            "kind": "option"
+          },
+          {
+            "name": "--allow-unsupported-sdk",
+            "kind": "flag"
+          },
+          {
+            "name": "passthrough",
+            "kind": "passthrough"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "macos",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "retarget",
+            "arguments": [
+              {
+                "name": "--pr",
+                "kind": "option",
+                "required": true
+              },
+              {
+                "name": "--to",
+                "kind": "option",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "status",
+            "arguments": [
+              {
+                "name": "--pr",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "minos",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "measure",
+            "arguments": [
+              {
+                "name": "binary",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "sweep",
+            "arguments": [
+              {
+                "name": "sweep-args",
+                "kind": "passthrough"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "update",
+            "arguments": [
+              {
+                "name": "update-args",
+                "kind": "passthrough"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "publish-runbook",
+            "arguments": [
+              {
+                "name": "runbook-args",
+                "kind": "passthrough"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "motion",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--host",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--port",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "record",
+            "arguments": [
+              {
+                "name": "--view",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--fps",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--metrics",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "stop",
+            "arguments": [
+              {
+                "name": "--trace-id",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "snapshot",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "list-traces",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "load-fixture",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "scrub",
+            "arguments": [
+              {
+                "name": "frame",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "play",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "pause",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "cost",
+            "arguments": [
+              {
+                "name": "mode",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "overflow",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "enable",
+            "arguments": [
+              {
+                "name": "--to",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "disable",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "threshold",
+            "arguments": [
+              {
+                "name": "N",
+                "kind": "positional",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "pr",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--base",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--title",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--workflow",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--no-ship",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--no-push",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--dry-run",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--help",
+            "kind": "flag",
+            "required": false
+          },
+          {
+            "name": "--native",
+            "kind": "flag",
+            "required": false
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "project",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "pin",
+            "arguments": [
+              {
+                "name": "version",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--to",
+                "kind": "value",
+                "required": false
+              },
+              {
+                "name": "--all",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--force-dirty",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-downgrade",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-cli-skew",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-redundant",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--verify-builds",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "bump",
+            "arguments": [
+              {
+                "name": "version",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--to",
+                "kind": "value",
+                "required": false
+              },
+              {
+                "name": "--all",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--force-dirty",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-downgrade",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-cli-skew",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--allow-redundant",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--verify-builds",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "unpin",
+            "arguments": [
+              {
+                "name": "--dry-run",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "undo",
+            "arguments": [
+              {
+                "name": "timestamp",
+                "kind": "positional",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "projects",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "add",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "remove",
+            "arguments": [
+              {
+                "name": "path",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "remove",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "package",
+            "kind": "positional",
+            "required": true
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "run",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "target",
+            "kind": "positional",
+            "required": false
+          },
+          {
+            "name": "--headless",
+            "kind": "flag"
+          },
+          {
+            "name": "--screenshot",
+            "kind": "option"
+          },
+          {
+            "name": "--frames",
+            "kind": "option"
+          },
+          {
+            "name": "--watch",
+            "kind": "flag"
+          },
+          {
+            "name": "--audio-inspector",
+            "kind": "flag"
+          },
+          {
+            "name": "--audio-probe-json",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-scope-json",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-scope-window",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-scope-trigger",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-scope-channel",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-capture-wav",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-capture-frames",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-capture-rolling",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-capture-rolling-frames",
+            "kind": "option"
+          },
+          {
+            "name": "--audio-capture-rolling-format",
+            "kind": "option"
+          },
+          {
+            "name": "PULP_RUN_AUDIO_NOTICE",
+            "kind": "environment"
+          },
+          {
+            "name": "PULP_AUDIO_INSPECTOR_TRIGGER",
+            "kind": "environment"
+          },
+          {
+            "name": "PULP_AUDIO_INSPECTOR_GRID",
+            "kind": "environment"
+          },
+          {
+            "name": "PULP_AUDIO_INSPECTOR_SCALE",
+            "kind": "environment"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "scan",
+        "disposition": "excluded",
+        "arguments": [
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--no-load",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "sdk",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "install",
+            "arguments": [
+              {
+                "name": "--version",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--local",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "available",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "status",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "clean",
+            "arguments": [],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "search",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "query",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--format",
+            "kind": "option"
+          },
+          {
+            "name": "--refresh",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "ship",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "swap-pack",
+            "arguments": [
+              {
+                "name": "--bundle",
+                "required": true
+              },
+              {
+                "name": "--plugin-id",
+                "required": true
+              },
+              {
+                "name": "--pack-version",
+                "required": false
+              },
+              {
+                "name": "--channel",
+                "required": false
+              },
+              {
+                "name": "--sign-key",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "required": false
+              },
+              {
+                "name": "--yes",
+                "required": false
+              },
+              {
+                "name": "--backup-github",
+                "required": false
+              },
+              {
+                "name": "--repo",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "sign",
+            "arguments": [
+              {
+                "name": "--identity",
+                "required": false
+              },
+              {
+                "name": "--path",
+                "required": false
+              },
+              {
+                "name": "--entitlements",
+                "required": false
+              },
+              {
+                "name": "--target",
+                "required": false
+              },
+              {
+                "name": "--keystore",
+                "required": false
+              },
+              {
+                "name": "--key-alias",
+                "required": false
+              },
+              {
+                "name": "--store-pass",
+                "required": false
+              },
+              {
+                "name": "--key-pass",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "notarize",
+            "arguments": [
+              {
+                "name": "--path",
+                "required": false
+              },
+              {
+                "name": "--api-key",
+                "required": false
+              },
+              {
+                "name": "--api-key-id",
+                "required": false
+              },
+              {
+                "name": "--api-issuer",
+                "required": false
+              },
+              {
+                "name": "--env-file",
+                "required": false
+              },
+              {
+                "name": "--apple-id",
+                "required": false
+              },
+              {
+                "name": "--team-id",
+                "required": false
+              },
+              {
+                "name": "--password",
+                "required": false
+              },
+              {
+                "name": "--staple",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "package",
+            "arguments": [
+              {
+                "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--target",
+                "required": false
+              },
+              {
+                "name": "--keystore",
+                "required": false
+              },
+              {
+                "name": "--key-alias",
+                "required": false
+              },
+              {
+                "name": "--store-pass",
+                "required": false
+              },
+              {
+                "name": "--key-pass",
+                "required": false
+              },
+              {
+                "name": "--abi",
+                "required": false
+              },
+              {
+                "name": "--installer-identity",
+                "required": false
+              },
+              {
+                "name": "--apk-only",
+                "required": false
+              },
+              {
+                "name": "--aab-only",
+                "required": false
+              },
+              {
+                "name": "--per-user",
+                "required": false
+              },
+              {
+                "name": "--format",
+                "required": false
+              },
+              {
+                "name": "--binary",
+                "required": false
+              },
+              {
+                "name": "--icon",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "release",
+            "arguments": [
+              {
+                "name": "--target",
+                "required": false
+              },
+              {
+                "name": "--identity",
+                "required": false
+              },
+              {
+                "name": "--installer-identity",
+                "required": false
+              },
+              {
+                "name": "--apple-id",
+                "required": false
+              },
+              {
+                "name": "--team-id",
+                "required": false
+              },
+              {
+                "name": "--password",
+                "required": false
+              },
+              {
+                "name": "--api-key",
+                "required": false
+              },
+              {
+                "name": "--api-key-id",
+                "required": false
+              },
+              {
+                "name": "--api-issuer",
+                "required": false
+              },
+              {
+                "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--pkg",
+                "required": false
+              },
+              {
+                "name": "--dmg",
+                "required": false
+              },
+              {
+                "name": "--skip-sign",
+                "required": false
+              },
+              {
+                "name": "--skip-package",
+                "required": false
+              },
+              {
+                "name": "--skip-notarize",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "appcast",
+            "arguments": [
+              {
+                "name": "--url",
+                "required": true
+              },
+              {
+                "name": "--download-url",
+                "required": false
+              },
+              {
+                "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--notes",
+                "required": false
+              },
+              {
+                "name": "--output",
+                "required": false
+              },
+              {
+                "name": "--title",
+                "required": false
+              },
+              {
+                "name": "--sign-key",
+                "required": false
+              },
+              {
+                "name": "--min-os",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [
+              {
+                "name": "--target",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [
+              {
+                "name": "--check-online",
+                "required": false
+              },
+              {
+                "name": "--print-env",
+                "required": false
+              },
+              {
+                "name": "--quiet",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "share",
+            "arguments": [
+              {
+                "name": "input",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--identity",
+                "required": false
+              },
+              {
+                "name": "--version",
+                "required": false
+              },
+              {
+                "name": "--output",
+                "required": false
+              },
+              {
+                "name": "--entitlements",
+                "required": false
+              },
+              {
+                "name": "--api-key",
+                "required": false
+              },
+              {
+                "name": "--api-key-id",
+                "required": false
+              },
+              {
+                "name": "--api-issuer",
+                "required": false
+              },
+              {
+                "name": "--apple-id",
+                "required": false
+              },
+              {
+                "name": "--team-id",
+                "required": false
+              },
+              {
+                "name": "--password",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "auv3-xcodeproj",
+            "arguments": [
+              {
+                "name": "target",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--sdk",
+                "required": false
+              },
+              {
+                "name": "--output",
+                "required": false
+              },
+              {
+                "name": "--open",
+                "required": false
+              },
+              {
+                "name": "--dry-run",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "status",
+        "disposition": "candidate-shared-later",
+        "arguments": [],
+        "subcommands": []
+      },
+      {
+        "name": "suggest",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--description",
+            "kind": "option"
+          },
+          {
+            "name": "--analyze",
+            "kind": "option"
+          },
+          {
+            "name": "--alternative",
+            "kind": "option"
+          },
+          {
+            "name": "--include-license-gated",
+            "kind": "flag"
+          },
+          {
+            "name": "--format",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "target",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "subcommand",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "target",
+            "kind": "positional",
+            "required": false
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "test",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "extra_args",
+            "kind": "passthrough"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "tool",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "list",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "info",
+            "arguments": [
+              {
+                "name": "tool-id",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--json",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "install",
+            "arguments": [
+              {
+                "name": "--force",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--all",
+                "kind": "flag",
+                "required": false
+              },
+              {
+                "name": "--version",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--from",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "update",
+            "arguments": [
+              {
+                "name": "tool-id",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--version",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "uninstall",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "path",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "run",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [
+              {
+                "name": "tool-id",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--run",
+                "kind": "flag",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "trace",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--port",
+            "kind": "option",
+            "required": false
+          },
+          {
+            "name": "--json",
+            "kind": "flag",
+            "required": false
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "start",
+            "arguments": [
+              {
+                "name": "--categories",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--out",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--ring-mb",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "stop",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "query",
+            "arguments": [
+              {
+                "name": "sql",
+                "kind": "positional",
+                "required": false
+              },
+              {
+                "name": "--preset",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--trace",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--format",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "slowest-frames",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "xruns",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "dsp-hotspots",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "layout-vs-paint",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "snapshot",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "explain",
+            "arguments": [
+              {
+                "name": "question",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "doctor",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "fetch",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "open",
+            "arguments": [
+              {
+                "name": "file",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "tweaks",
+        "disposition": "pulp-owned",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "diff",
+            "arguments": [
+              {
+                "name": "--tweaks",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--design",
+                "kind": "option",
+                "required": false
+              },
+              {
+                "name": "--json",
+                "kind": "option",
+                "required": false
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      },
+      {
+        "name": "update",
+        "disposition": "pulp-owned",
+        "arguments": [
+          {
+            "name": "--apply",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "upgrade",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "version",
+            "kind": "positional",
+            "required": false
+          },
+          {
+            "name": "--check-only",
+            "kind": "flag"
+          },
+          {
+            "name": "--notes",
+            "kind": "flag"
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          },
+          {
+            "name": "--from",
+            "kind": "option"
+          },
+          {
+            "name": "--to",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "validate",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--all",
+            "kind": "flag"
+          },
+          {
+            "name": "--json",
+            "kind": "flag"
+          },
+          {
+            "name": "--strict",
+            "kind": "flag"
+          },
+          {
+            "name": "--screenshot",
+            "kind": "flag"
+          },
+          {
+            "name": "--report",
+            "kind": "option"
+          },
+          {
+            "name": "--target",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
+        "name": "version",
+        "disposition": "candidate-shared-later",
+        "arguments": [
+          {
+            "name": "--json",
+            "kind": "flag"
+          }
+        ],
+        "subcommands": [
+          {
+            "name": "bump",
+            "arguments": [
+              {
+                "name": "component",
+                "kind": "positional"
+              },
+              {
+                "name": "--plugin",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "check",
+            "arguments": [
+              {
+                "name": "--with-bump-check",
+                "kind": "flag"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
+      }
+    ],
+    "claude_commands": [
+      {
+        "name": "audio-compare",
+        "disposition": "excluded"
+      },
+      {
+        "name": "audio-harness",
+        "disposition": "excluded"
+      },
+      {
+        "name": "audio-inspect",
+        "disposition": "excluded"
+      },
+      {
+        "name": "bake",
+        "disposition": "excluded"
+      },
+      {
+        "name": "ci",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "ci-host",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "codex-consult",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "content",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "coverage-diff",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "create",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "design",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "docs",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "doctor",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "import-design",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "inspect",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "kit",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "minos",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "motion",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pr",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "prototype-loop",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "run",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "ship",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "status",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "test",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "trace",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "upgrade",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "validate",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "version",
+        "disposition": "candidate-shared-later"
+      }
+    ],
+    "agent_skills": [
+      {
+        "name": "aax",
+        "disposition": "excluded"
+      },
+      {
+        "name": "android",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "ara",
+        "disposition": "excluded"
+      },
+      {
+        "name": "audio-harness",
+        "disposition": "excluded"
+      },
+      {
+        "name": "audio-headless-debug",
+        "disposition": "excluded"
+      },
+      {
+        "name": "auv2",
+        "disposition": "excluded"
+      },
+      {
+        "name": "auv3",
+        "disposition": "excluded"
+      },
+      {
+        "name": "ci",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "clap",
+        "disposition": "excluded"
+      },
+      {
+        "name": "cli-maintenance",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "cmajor-external",
+        "disposition": "excluded"
+      },
+      {
+        "name": "code-comments",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "content",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "daw-smoke",
+        "disposition": "excluded"
+      },
+      {
+        "name": "engine",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "faust",
+        "disposition": "excluded"
+      },
+      {
+        "name": "friction-report",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "handoff",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "heritage-profile",
+        "disposition": "excluded"
+      },
+      {
+        "name": "hosting",
+        "disposition": "excluded"
+      },
+      {
+        "name": "import-design",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "installable-tools",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "intel-canary",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "ios",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "jsfx-subset",
+        "disposition": "excluded"
+      },
+      {
+        "name": "kits",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "moonbase",
+        "disposition": "excluded"
+      },
+      {
+        "name": "motion",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "mpe",
+        "disposition": "excluded"
+      },
+      {
+        "name": "packages",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "playback",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pr-batching",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pr-review-sweep",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "prototype-loop",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp-web-demo",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "screenshot",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "screenshot-sync",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "sdf-text",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "ship",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "skia-gpu-build",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "streams",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "stretch",
+        "disposition": "excluded"
+      },
+      {
+        "name": "tart-ci",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "threejs-bridge",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "timebase",
+        "disposition": "excluded"
+      },
+      {
+        "name": "timeline",
+        "disposition": "excluded"
+      },
+      {
+        "name": "trace-analysis",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "trace-sql",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "update-demos",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "upgrade",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "video-proof",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "view-bridge",
+        "disposition": "excluded"
+      },
+      {
+        "name": "vst3",
+        "disposition": "excluded"
+      },
+      {
+        "name": "web-plugins",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "webview-ui",
+        "disposition": "candidate-shared-later"
+      }
+    ],
+    "mcp_tools": [
+      {
+        "name": "pulp_audio_compare",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_excerpt_find",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_model_activate",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_model_list",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_model_status",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_plugin_inspect",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_probe_json",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_read_bundle",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_render",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_audio_scope",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_build",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_compat",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_content",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_install",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_list",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_preview",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_remove",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_rescan",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_reveal",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_update",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_content_validate",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_create",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_docs_check",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_docs_search",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_get_view_tree",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_audio",
+        "disposition": "excluded"
+      },
+      {
+        "name": "pulp_inspect_dom",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_evaluate",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_params",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_pending_requests",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_performance",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_screenshot",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_inspect_set_param",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_kit",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_apply",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_init",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_inspect",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_pack",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_plan",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_publish_check",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_remove",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_search",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_validate",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_kit_verify",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_minos",
+        "disposition": "pulp-owned"
+      },
+      {
+        "name": "pulp_motion_disable_cost",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_enable_cost",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_list_traces",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_load_fixture",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_pause",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_play",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_scrub_to",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_snapshot",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_start_trace",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_motion_stop_trace",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_screenshot",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_simulate_click",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_status",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_test",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_explain",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_query",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_snapshot",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_start",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_trace_stop",
+        "disposition": "candidate-shared-later"
+      },
+      {
+        "name": "pulp_validate",
+        "disposition": "candidate-shared-later"
+      }
+    ],
+    "plugin_registrations": [
+      {
+        "name": "claude-marketplace:pulp",
+        "disposition": "pulp-owned",
+        "version": "0.388.0",
+        "source": "./",
+        "min_cli_version": "0.31.0",
+        "registration_keys": [
+          "author",
+          "description",
+          "keywords",
+          "license",
+          "min_cli_version",
+          "name",
+          "repository",
+          "source",
+          "version"
+        ],
+        "catalog_name": "pulp",
+        "catalog_version": "0.388.0",
+        "catalog_metadata_version": "1.0.0"
+      },
+      {
+        "name": "claude-plugin:pulp",
+        "disposition": "pulp-owned",
+        "version": "0.388.0",
+        "commands": "./.claude/commands",
+        "skills": "./.agents/skills",
+        "registration_keys": [
+          "author",
+          "commands",
+          "description",
+          "keywords",
+          "license",
+          "name",
+          "repository",
+          "skills",
+          "version"
+        ]
+      },
+      {
+        "name": "mcp-server:pulp",
+        "disposition": "pulp-owned",
+        "configuration": {
+          "command": "./tools/mcp/pulp-mcp-launcher"
+        },
+        "registration_keys": [
+          "command",
+          "env"
+        ],
+        "environment_keys": [],
+        "header_keys": []
+      }
+    ]
+  }
+}

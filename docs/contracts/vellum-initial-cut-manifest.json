@@ -1,0 +1,2359 @@
+{
+  "entries": [
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:required-legal-metadata",
+      "git_blob_sha": "cf1b0fe4b1511bc79e60813483876cbd5b3504a8",
+      "git_mode": "100644",
+      "selected_by": [
+        "DEPENDENCIES.md"
+      ],
+      "source_path": "DEPENDENCIES.md"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:required-legal-metadata",
+      "git_blob_sha": "ff2024e79de22b201468741fd253ed8252259434",
+      "git_mode": "100644",
+      "selected_by": [
+        "LICENSE.md"
+      ],
+      "source_path": "LICENSE.md"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:required-legal-metadata",
+      "git_blob_sha": "1fc034458dd1350350a711fa1896ff09defe1bca",
+      "git_mode": "100644",
+      "selected_by": [
+        "NOTICE.md"
+      ],
+      "source_path": "NOTICE.md"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:pulp-build-graph",
+      "git_blob_sha": "a51d81a893c6401b37eff3131357afb17027e029",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/CMakeLists.txt"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "c7d1708222f600a67ab69b8cf5b4b8e9ed260f41",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/affine_transform.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "645f7b5121019d79c36596fcd70c0b7af347a1aa",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/attributed_string.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "296bf3d80b93e45917fe66c7b810d5ea2f7e723a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/bidi.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "dce8d1319b8af876c2ffef5c7ea50d3e7eaa0795",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/box_shadow_cache.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "175fa6dd872806f0c287ef1428788101fb8ca44b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/bundled_fonts.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "5c4202c6f24c2715e8f0f6f99977ecf17f7f1e9f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/canvas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "588165f75df248c6a0d404955507b33ed04e6727",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/canvas_capability.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "c78d586235b9fd7a3be1f9e0156c93c34b59e0a7",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/cg_canvas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "3e00dca28138526ec1e1c1587ae04d1244adce89",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/emoji_segmenter.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "266df83f8d5cd99a8801771518f1e99c3f99c595",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/font_flight_recorder.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "014ecf81448da0003303efeb5e20dba41ee509ea",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/font_options.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "3656195d3fdc55c01879defabe64e291feb17fb9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/font_resolver.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "09cae829e558012ea7b4aa9e34d52fbb59c8f4d5",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/font_scope.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "ec6c9f28954bfd48410f24a6fe606ab0f29aeba0",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/image_codecs.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "5c78d0cd6891baff0ac22b58f6b9c966f66f6057",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/image_convolution.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "da3321c9e277f9db8a8092ebd6005a8b6afe8107",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/image_file_cache.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "3956a3ae1bb40f15ff0174a8313b6e2bfd6050ff",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/lottie_animation.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "c2654987f2105b08c25c67f6344a87c07c199003",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/msdf_atlas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "ff5bc5323dc16b6f77d3b892ac13c5777e7cfd1e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/path.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "1c6a976d28cfd3c303449dfd66e5204f6f4faf6f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/path_to_sdf.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "89027b2aebca674083f6291416f14b54a17d9145",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/psdf_atlas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "26437bef0ad26f71562150e8c843ce9cb902ad22",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/recording_canvas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "53d14878ea3ca630ccf36d7ca7d5288f00000df6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/rectangle_list.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "6b7e19e575feed8be64ba290a451f9d125831e5f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "a5c19703ff3c815c28b464ddff42ac6b618c93de",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_group.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "53001fd75f888917c1ca25a7e94870c239659e44",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_image.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "6592d9f882363b97bd86e1abdabb15ec9787bd1d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_node.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "619db58bde964937fe02c645a595f20f92ce4d68",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_path.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "2e023c3e42b41ab7796f268d3f6922bf2bfc46aa",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_shape.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "7056e6b6f21eb508c6c9cbff64b1a70d245d3f5a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene/scene_text.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "f14c88e441f3d4afe24f948c56652df7b3d92704",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/scene_recording.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "8de855133b0d5498ebe59c4290dd34f7e1c1018c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/sdf_atlas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "0254eb791df2ef41e9f044c5095560a0735f20a5",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/sdf_atlas_cache.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "a11c3cb7e4d365e13ccc77f498332e1e9e0a3f3c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/sdf_effects.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "46ed4ac323062f665d2c17c376c030ad2f4d593b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/sdf_software_renderer.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "1c55a126aac7e219b26f6c32f5835d3f1a7fc3e9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/sdf_text.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "9e33fdd2ca8d7cb3e99482bc7f1e49080a3dc8a9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/shaped_text.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "e76c1cfab8e7285d0959dc9c64b4fe83ae01d0f2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/skia_canvas.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "4c8d98c7990e2c7dbe843a3ee3258a2649004c0c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/svg.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "774b732f50693ef7e9b13ace88f62e842795d916",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/svg_dom_cache.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "e4c6da01301a3214c237486853e4ee7407d2a17b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/text_font_context.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "51e919e83e5eb9d09e634ee335c642072a95cc38",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/text_layout.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "87185707103d906652c5172fda6901c3883fe413",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/text_run_planner.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "2642bb3e6a7f929fe12e381223ac4978473b077a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/text_shaper.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "29f45b46abff5a0c790e0c0395548f4a15cea0cf",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/text_utf8.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "c659665b225efb11ab5f958778c4615c621be247",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/include/pulp/canvas/view_effect.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "7ef78e1f2dfbbea7d6830c53af6de146512e9b3a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/platform/mac/cg_canvas.mm"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "8660940e65718ab83e36de36f9143fb61afe31d6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/platform/mac/cg_canvas_gradients.mm"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "94a7084874edcd2a99345561536b7e1df1345bfe",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/platform/mac/cg_canvas_path.mm"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "21f0b3c3b32a9f4211e3bfa549f07649c2481a95",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/platform/mac/cg_canvas_shadow.mm"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "7e47958abd2a69a20f75f191e09ed0a37e898070",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/shaders/msdf_text.sksl"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "93c16f57d70de413615b3b51e37b9b7e68bcfa79",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/shaders/sdf_text.sksl"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "6b0f63409d5d89667559443318db0c896e3c337c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/shaders/sdf_text_effects.sksl"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "590d8c2d9cad7456eb96fd4983e9442ea780944f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/attributed_string.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "398cc746021de846f339faeacd79714685b51245",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/bidi.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "77eed3ee2036c23d82319ae2f077488f194746ac",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/box_shadow_cache.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "7bebacc2d180a2cf1019cc34917f424e106872b4",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/bundled_fonts.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "443f7bd844922096beee9950d2b8247e49ddca71",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/color.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "80b077d18b24e6875273d68601a137f196a0aa20",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/emoji_segmenter.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "518d0861024ffd996f4f0bc3840f78016a8309bc",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/font_flight_recorder.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "122e4cd6d7bfa82e5ea795db5b42472c985e1518",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/font_options.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "c141bf50e9591be22fd195a16d559bf8785b622f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/font_registry_stubs.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "d8b53746688f649fb42ae7110bd2ca0f9d79e6ad",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/font_resolver.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "02cce2104937a7c378ecb27b854fc146a2dafbf4",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/font_scope.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "888c6839a393dc637440d0517ef0a0da22962afc",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/image_codecs_gif.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "ba1e1bfe42515f904bb65ebbd28ba7242e589764",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/image_codecs_tiff.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "5646e88b9bae42ee80b1d00074b9b9f8fa37e263",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/image_file_cache.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "984d59752ad1c1bc14593caac0448fc539107675",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/lottie_animation.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "83e772ab7134d01a5c7de03f6e10aa6d408b983b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/msdf_atlas.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "30340023e46db075dd1e8bf1be5835ea29c75c35",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/named_shader_effects.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "f1b3cc161bd837913d9db90e60ec40652f4968d9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/named_shader_effects.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "90b366f465882b86fe3e6bb68ad8e74cc95fb223",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/noto_color_emoji.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "bd3c35159242eb83479bc7483ac62bb2cf1547de",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/noto_color_emoji_stub.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "418893636f49894d9261f158fada98dcd4c8f4cb",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/path.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "86b9e5392ed49d506cafeb82712f532591524d09",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/path_to_sdf.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "4b83cbae17e2865beb23a486779eb9704756bb4c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/recording_canvas.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "450f99163679cf84c18b913c0ab9342efbb803ea",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/runtime_effect_cache.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:canvas-extension",
+      "git_blob_sha": "be3462988e2316934a4d09aa76eb05d5fd19335d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/scene.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "3bae0aec186284d42307b8e2166fe35a555b1eff",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/sdf_atlas.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "04d90385d3eae9176ab59d47c2eea030b007fb59",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/sdf_atlas_cache.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "82d1942f11871558560e9e3af0a5bbd86d3d2278",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "f88bf89462b0cf2d2715278e0354dd013023c7b1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_box_shadow.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "c92e7f2b39f1c651c7aadd42ad8c95aa3f6b3a60",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_filter.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "343070841972bc7645b63a4d9dd0282d3203a7a5",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_filter.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "e0e7099fe4610ea54abbe544bf74ca6386a8caf6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_fonts.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "8f446995a78ca634126907873383f41b2887ba1d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_gradients.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "6ac07bdf6c08e1b777b6168d0edb0513a9669404",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_internal.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "41d1b783c3786a9f130b3cab944729f878f5448d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_mask.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "82d3f9edf6bc735eb8466907996b4d62c259692a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_opacity.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "bb21b3aa995c0725d27b9ae9b605b10d9bf1b258",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_path.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "301facf4e7d2fc8c3db973aa73bcbc7c487cbbb1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_shaders.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "41e639efb2c18b2970feb394a40e99e3923b1307",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_canvas_text.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "259e9d14b14b1c73547572fb573beacb7402fa3a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_chromium_raw_ptr_compat.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "00381e562dac7872d9642becd416b19e45f99f1b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_gradient_compat.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "b09b78d6b6221ac6ec8bd4c3bbfe839a778013cf",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/skia_unicode.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "71db8c2e40441c22551b007574ad4a173b9208ea",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/svg.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "72b98cd3198052856f50b8e8a7789eed671c9436",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/svg_dom_cache.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "f8215f707228b56030517c8e8976237bf6a4c701",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/text_font_context.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "22a3ddb093893d6f959ab7f6f3af7e41fa7fca91",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/text_layout.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "8257cd50abe7ee2d7aa655d9f1b0c8333f5eacce",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/text_run_planner.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/canvas",
+      "git_blob_sha": "9aac2a58ad7be463040694724526711692762e5b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/canvas"
+      ],
+      "source_path": "core/canvas/src/text_shaper.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:pulp-build-graph",
+      "git_blob_sha": "f71b9d4de903916a16d76370bc88960aadd56293",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/CMakeLists.txt"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "6f43b5adc251d8678b1f0bd8cc93b5401d044003",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/RENDERER3D_MODULE_MAP.md"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "cad3bda453c310de5b5774473f410c84130cfdaf",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/atlas_inventory.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "d197a8d6674aae8f86f83e2f0ff187ceb04a365e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/bench/perf_counters.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "29b3a463601c32c75e6b8831572d4cd754ce3c97",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/dirty_tracker.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "5d336d9c1f3b53014c825cc6257fcafe77385c4c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/draco_decoder.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "59db90aec8f370445cd562c236d84303774478b9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/draco_scene_adapter.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "f091b3f0154cc1be852aeb632a97a06d64492f91",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/gpu_compute.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "b668ecddc54b758927004169d48073bf0100d18f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/gpu_render_time.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "ac01dff7418c2a3c27a10f1c732cec8f731496af",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/gpu_surface.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "0c00b51502809ab9274917371930eaea4edfc13b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/headless_surface.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "2dbce9b200dbbb26c95f73658d4182e775e447f1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/ktx2_decoder.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "17045b68bcd51f276fa319d99f66abc04e8fd110",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/render_loop.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "66fbaf7a4dbf42d3d2d3859b3f0b0e97da90c3c4",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/render_pass.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "b56ccebe6e1b955613b688dac35a1e999d958dbe",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/renderer3d.hpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "729f457833426cd3debfc843e4794749b0dd8ae2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/sdl3_surface.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "3c9659aa9c71a0063c032968016de916f6fad1c9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/skia_surface.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "4cae6c6c0aa88e0cc94e4e2f99a8b7b4f274d0b6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/skp_capture.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "a94f5b3d44dba1a618df246fcaad98f9ca344eb9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/include/pulp/render/texture_atlas.hpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "2dcaa7c72b8c22ef5f95b1fcf10575c837beba3a",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/platform/android/choreographer_android.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "eaf14698cd3c3a8ec5e41a00d030f45ba2726bce",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/platform/android/gpu_surface_android.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "46d34bc37be1778a6790bfb134754383eae74687",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/platform/android/gpu_surface_android_internal.hpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "56af3a10f48dd8b006ef510a607d6d80ac4027d6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/platform/android/gpu_surface_android_jni.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "822904711ea273790bb9de01fc1c4005af81c517",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/platform/android/synth_ui.js.h"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "0c0cec960df97f3bd242165fb191e9a85042c6db",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/draco_decoder.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "7a0559c5dbb762f2994b8d87c96345637872ec55",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/gpu_compute.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "9683668c3777fe717569aafbcc283bfe1ec89c86",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/gpu_compute_pool.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "da0cdd1b44b16ce47aca28704a349b65be5a473c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/gpu_surface_dawn.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "77d4844175c705ccf7afa9a0b4a380e51c7a2b2c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/headless_surface.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "06512b88643ca409ef38216640015943cb794bc2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/ktx2_decoder.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "ff2eb63183119b3d3118f034c9a18188eb3710f2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/metal_surface_ios.mm"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "e6f69479422783fafab49525a30bfb4aed19117f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/metal_surface_mac.mm"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "34f9c532ee6bed84ec17b04b9f5a81a9bbf7396b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/pulp_render_objc_names.h"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "ca6123f669836b3d594457b1769b3f5687e271a6",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/render_loop.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "21413323c47514a942245b42deaf726873d92807",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/render_loop_android.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "f310e2da18d0f1d0d41d2b4d6b4aafab21979b4d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/render_loop_apple.mm"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "6b2d6ebd5d8c6a4485a171fcab9c026e06e61ce3",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/render_loop_emscripten.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "1a30fd3825275a56faa1e66e28e19785a7d65070",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/render_loop_state.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "36a80cb18a2917adc48cd980ded7a2397397a99c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/renderer3d.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "841b6f4894a1f8514e51bff6da1497e2eff4656d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/renderer3d_internal.hpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "8eef88878cbb0538484d4496ab317d1a4b4d11ec",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/renderer3d_probe.cpp"
+    },
+    {
+      "classification": "excluded",
+      "classification_source": "derived:noninitial-render-platform",
+      "git_blob_sha": "e36a49f0d34627b9ab26f9c49fed504f11fb3dd8",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/sdl3_surface.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "89d6c0fcabd2810cd7bf0f499954429b764f86a5",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/skia_surface.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/render",
+      "git_blob_sha": "93e9eae999318028ae7cda4c0821744dd6bfe080",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/skia_surface_ganesh.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "a675832a8bb40608606b9c82aa51720cc3d148d4",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/skp_capture.cpp"
+    },
+    {
+      "classification": "optional",
+      "classification_source": "derived:render-extension",
+      "git_blob_sha": "cd801ff346eba40462b62ccfe130e80664507fa9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/render"
+      ],
+      "source_path": "core/render/src/texture_atlas.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "e36e77fbcfd29fb3c49f4d36a4a26a7911f52903",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/accessibility.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/accessibility.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "7b23f0ed16183b4175f634b84bde9f1acad0a147",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/accessibility_provider.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/accessibility_provider.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "6e875576b4c9ef650342125c6038ef3ab82bbf4d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/accessibility_tree.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/accessibility_tree.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "52e601323a69aa86c1791a3f688688e2e44fa6f0",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/anchor_strategy.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/anchor_strategy.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "0d3bcf41bddae266cdbba91fc6c0a3e9379c2157",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/aria_roles.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/aria_roles.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "aac2d10f0f77644053394c9fc09cd9089ad09b04",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/asset_manager.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/asset_manager.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "feeccddb9480a51ac9a7d46612878783162413b2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/buttons.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/buttons.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "48a8cc8d8cc9494786a1c16a027b9b49b3f2c3fb",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/canvas_widget.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/canvas_widget.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "0720413a4582ea307ae09fb2dd2d20d88e580ecb",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/continuous_frames.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/continuous_frames.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d53249c5ecd210147025d087a878174b91237525",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/design_import.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/design_import.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d000c1d56795cebfba19b96a543e9301ff374b26",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/design_ir.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/design_ir.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "c844beb5c88c1edf90f4cbddf92031a8a912e200",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/design_sources.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/design_sources.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "7773625fc0d08c45a0199a99b800f476c76ac7d1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/design_tokens.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/design_tokens.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "6222d08912098e437ea81df57a28c858936cf84e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/frame_clock.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/frame_clock.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "67b8939a20b96aa225e68dad92d75641f8e752fe",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/geometry.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/geometry.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "5e2cdfded2fcd7618d305a5a4433dc95c6d654d2",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/gesture.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/gesture.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "28161d902799831daef07dd9431c4bfa945e10fb",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/image_cache.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/image_cache.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "966deaca21badcccb968ee48ef1d3714683c568b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/input_events.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/input_events.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "c64dde1149490805a8b0ba31b337fde39a1ed59c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/pointer_dispatch.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/pointer_dispatch.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "9c2150c70e962762525482e2bf7b76280a0c13c1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/repaint_damage.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/repaint_damage.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "68696420be9e0a223bf6a97107a151f9bcaca760",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/screenshot.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/screenshot.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "93ea0cf83ea778cb3a76d83ac8afb31414ddf683",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/screenshot_compare.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/screenshot_compare.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "3571353d55e5273143cfc36786a1be96d34fa81c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/svg_fragment.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/svg_fragment.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "631483f2a5c5f1247a8c1a43adeef6f2a43e831f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/svg_path_widget.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/svg_path_widget.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "068ecb90233e15e5e4d8b8f79b3f3b9a9f67a770",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/theme.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/theme.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "054d812c78f5117a3d17bb57bc2f1dad117c74ac",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/value_source.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/value_source.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "2b962ba6788d9c2a979e95ef5d5547c76d16ac2d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/view.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/view.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d56845fe31d62353511e338780b13b4641eef10e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/view_fwd.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/view_fwd.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "9e2669810a393ce81a4d726c5e2ce50535f5fc5d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/widget_painter.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/widget_painter.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "820e9b94bd4e9d29fa7b6af148ffbf5e2e9efae7",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/widgets.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/widgets.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "bba9062e1ed3ca2d3a9e7e120e2fd5397ed425d5",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/widgets/svg_line.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/widgets/svg_line.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "9032da6e33b237bb086adc803645a6583a953257",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/widgets/svg_rect.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/widgets/svg_rect.hpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/include",
+      "git_blob_sha": "e8aacaad10f420109fb1a09058c1aeaace851c2e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/include/pulp/view/window_host.hpp"
+      ],
+      "source_path": "core/view/include/pulp/view/window_host.hpp"
+    },
+    {
+      "classification": "platform-adapter",
+      "classification_source": "derived:core/view/platform",
+      "git_blob_sha": "2980f8bd05956395c32973a85aaed6163a7d8723",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/accessibility_mac.mm"
+      ],
+      "source_path": "core/view/platform/mac/accessibility_mac.mm"
+    },
+    {
+      "classification": "platform-adapter",
+      "classification_source": "derived:core/view/platform",
+      "git_blob_sha": "5425788c55932242ed4cac8314344ddd24679b53",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/screenshot_mac.mm"
+      ],
+      "source_path": "core/view/platform/mac/screenshot_mac.mm"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "b775ab06519f9567d9f62e25ae1402ad98faae95",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac.mm"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac.mm"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d0bbec2915e07be2a8d8f69722bd4d646f625196",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac_capture.h"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac_capture.h"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d776633e5f6fe2e97565f49665ed2d8e5870b906",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac_capture.mm"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac_capture.mm"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "7a9b7796219b46642ec73ce4b924005138c47702",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac_geometry.mm"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac_geometry.mm"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "c451345301d405c765807762525ca3c315103116",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac_internal.hpp"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac_internal.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "eb2353680079fb0f7366037b503f468d2b6944c3",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/platform/mac/window_host_mac_view.h"
+      ],
+      "source_path": "core/view/platform/mac/window_host_mac_view.h"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "2d41616c0c96f119424a7a0f9c0bb52d3a42009b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/accessibility.cpp"
+      ],
+      "source_path": "core/view/src/accessibility.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "cfdf26e1ad2bed6488b340c2c1b68ec50b12e35c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/accessibility_tree.cpp"
+      ],
+      "source_path": "core/view/src/accessibility_tree.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "1c994e8065f5d04caa32ce3683beed813451c1eb",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/anchor_strategy.cpp"
+      ],
+      "source_path": "core/view/src/anchor_strategy.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "0b8293edf889304221da734207ff39c8a3a6ffc1",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/asset_manager.cpp"
+      ],
+      "source_path": "core/view/src/asset_manager.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "2a39c0169d229dd8b751430a56db3fcc2fc92c76",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/buttons.cpp"
+      ],
+      "source_path": "core/view/src/buttons.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "0526939b1da14795882e083ea35c22d5ebaf2417",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/canvas_widget.cpp"
+      ],
+      "source_path": "core/view/src/canvas_widget.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "5948062cfc1c63f680bef2d0edb4db2c0197a069",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/continuous_frames.cpp"
+      ],
+      "source_path": "core/view/src/continuous_frames.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "af8bc9c8a6686e93574b43f166b5ec5fac15052e",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_import.cpp"
+      ],
+      "source_path": "core/view/src/design_import.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "34420fb0483bc54e99ee8a2836a692d48e673452",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_import_internal.hpp"
+      ],
+      "source_path": "core/view/src/design_import_internal.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "f72f7c101052e824757b66fe7f8961633a7cb1d0",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_import_native_common.cpp"
+      ],
+      "source_path": "core/view/src/design_import_native_common.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "443271f0c6c2de42ec08af638d0fad888d45e2f0",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_import_native_common.hpp"
+      ],
+      "source_path": "core/view/src/design_import_native_common.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d7a0a16668dfe213f2e89051e63a878fc5a61730",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_ir_analysis.cpp"
+      ],
+      "source_path": "core/view/src/design_ir_analysis.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "2139301702e99e1ca5067e5ce1b8bb6a462aa2b9",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_ir_helpers.hpp"
+      ],
+      "source_path": "core/view/src/design_ir_helpers.hpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "9c0ada60c0bd2fbbb0245031cdcd76e2db076fa4",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_ir_json.cpp"
+      ],
+      "source_path": "core/view/src/design_ir_json.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "64168c07f831d9d3762ff83ed5696a5cc6494371",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_ir_normalize.cpp"
+      ],
+      "source_path": "core/view/src/design_ir_normalize.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "362416f9d8191ae6fec034b7e996b7812b81f9cc",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/design_tokens.cpp"
+      ],
+      "source_path": "core/view/src/design_tokens.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "dc6b0ae39c7d2e24777920dac15f1caeb7d63f46",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/frame_clock.cpp"
+      ],
+      "source_path": "core/view/src/frame_clock.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "6862c64ace8cd98ff5fc85ed4be35b4d098bb651",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/gesture.cpp"
+      ],
+      "source_path": "core/view/src/gesture.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "e09bf73c3ac888adca41f50ef2555cedd37c96ef",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/image_cache.cpp"
+      ],
+      "source_path": "core/view/src/image_cache.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "2ee149fd0a5f72480c795604432276ae862cc1ac",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/pointer_dispatch.cpp"
+      ],
+      "source_path": "core/view/src/pointer_dispatch.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "e15c5f7ff38d3795f5c4f89df5ffaddea5311348",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/repaint_damage.cpp"
+      ],
+      "source_path": "core/view/src/repaint_damage.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "e73ab94e105018e79fbd90a4cca5c5757d9b935b",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/screenshot_compare.cpp"
+      ],
+      "source_path": "core/view/src/screenshot_compare.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "89b7eab79779d84e4fc5efcb63874cb8a78b9501",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/screenshot_gpu.cpp"
+      ],
+      "source_path": "core/view/src/screenshot_gpu.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "385a37496a3b4e47798c109e3b4663cd88e9028c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/screenshot_skia.cpp"
+      ],
+      "source_path": "core/view/src/screenshot_skia.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "cd7f55c87ac24f2a538524d490d0f436c9923903",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/screenshot_stub.cpp"
+      ],
+      "source_path": "core/view/src/screenshot_stub.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "9376f3b606e0f6acf74da9f78acfa7ebb225c893",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/svg_path_widget.cpp"
+      ],
+      "source_path": "core/view/src/svg_path_widget.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:audio-plugin-neutrality-split",
+      "git_blob_sha": "d154c1404c47093e3b6cc44fdbaf3fcb8a625570",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/theme.cpp"
+      ],
+      "source_path": "core/view/src/theme.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "26d9091f7dc026dd573ca78314a9f83312f3672d",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/view.cpp"
+      ],
+      "source_path": "core/view/src/view.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "6dc9973891c448b0643bd250eb8589f1620de38f",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/widgets.cpp"
+      ],
+      "source_path": "core/view/src/widgets.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "d0241a51ac90f91e46d59df8c74560653483a061",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/widgets/label.cpp"
+      ],
+      "source_path": "core/view/src/widgets/label.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "7807b9d87737a93877edf8744afa10ff2a1823ee",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/widgets/svg_line.cpp"
+      ],
+      "source_path": "core/view/src/widgets/svg_line.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "0035a71b912a9df30b3d0d717def0ab4b5ba0023",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/widgets/svg_rect.cpp"
+      ],
+      "source_path": "core/view/src/widgets/svg_rect.cpp"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:contaminated-view-split",
+      "git_blob_sha": "89f1ae7e0b0dd9d026c3b908e70fe68bf0ea36f3",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/widgets/visualizers.cpp"
+      ],
+      "source_path": "core/view/src/widgets/visualizers.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:core/view/src",
+      "git_blob_sha": "37179dbcbc2b07088c786e0dc50b978c5151c60c",
+      "git_mode": "100644",
+      "selected_by": [
+        "core/view/src/yoga_layout.cpp"
+      ],
+      "source_path": "core/view/src/yoga_layout.cpp"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:runtime-fonts",
+      "git_blob_sha": "b7aaca8de1fe458399e17311d35d543a1fa2f984",
+      "git_mode": "100644",
+      "selected_by": [
+        "external/fonts/Inter-Regular.ttf"
+      ],
+      "source_path": "external/fonts/Inter-Regular.ttf"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:runtime-fonts",
+      "git_blob_sha": "dff66cc50702c75abd025dcf49f62a4dcc2d72de",
+      "git_mode": "100644",
+      "selected_by": [
+        "external/fonts/JetBrainsMono-Regular.ttf"
+      ],
+      "source_path": "external/fonts/JetBrainsMono-Regular.ttf"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:nanosvg",
+      "git_blob_sha": "f5884c8f44f0904e243f7ae9aa0bc5f63c94036a",
+      "git_mode": "100644",
+      "selected_by": [
+        "external/nanosvg"
+      ],
+      "source_path": "external/nanosvg/nanosvg.h"
+    },
+    {
+      "classification": "framework-core",
+      "classification_source": "derived:nanosvg",
+      "git_blob_sha": "ba512c74e41b341ec4881e63ec11da6d5e8bb9e2",
+      "git_mode": "100644",
+      "selected_by": [
+        "external/nanosvg"
+      ],
+      "source_path": "external/nanosvg/nanosvgrast.h"
+    },
+    {
+      "classification": "authoring-only",
+      "classification_source": "derived:pulp-import-ir",
+      "git_blob_sha": "1a8429d52609fa9b2a86f841d33aedd0f6fc900b",
+      "git_mode": "100644",
+      "selected_by": [
+        "packages/pulp-import-ir/src/anchors.ts"
+      ],
+      "source_path": "packages/pulp-import-ir/src/anchors.ts"
+    },
+    {
+      "classification": "authoring-only",
+      "classification_source": "derived:pulp-import-ir",
+      "git_blob_sha": "89896cb3723656e876cb38faef8d5284a881d9c3",
+      "git_mode": "100644",
+      "selected_by": [
+        "packages/pulp-import-ir/src/diff.ts"
+      ],
+      "source_path": "packages/pulp-import-ir/src/diff.ts"
+    },
+    {
+      "classification": "authoring-only",
+      "classification_source": "derived:pulp-import-ir",
+      "git_blob_sha": "1ceca3c0f82e4870b983167568213dd76f213512",
+      "git_mode": "100644",
+      "selected_by": [
+        "packages/pulp-import-ir/src/tweaks.ts"
+      ],
+      "source_path": "packages/pulp-import-ir/src/tweaks.ts"
+    },
+    {
+      "classification": "unresolved",
+      "classification_source": "derived:pulp-import-ir-types-split",
+      "git_blob_sha": "8cd0455314abbdcd50e59543d8f26fed2a57a17a",
+      "git_mode": "100644",
+      "selected_by": [
+        "packages/pulp-import-ir/src/types.ts"
+      ],
+      "source_path": "packages/pulp-import-ir/src/types.ts"
+    },
+    {
+      "classification": "pulp-specific",
+      "classification_source": "derived:legacy-pulp-figma-schema",
+      "git_blob_sha": "b008b6c00ae24c9239d348e8d8384af98ac435a5",
+      "git_mode": "100644",
+      "selected_by": [
+        "tools/figma-plugin/schema/figma-plugin-export-v1.json"
+      ],
+      "source_path": "tools/figma-plugin/schema/figma-plugin-export-v1.json"
+    }
+  ],
+  "entry_count": 235,
+  "schema": "pulp.vellum.initial-cut-manifest.v1",
+  "selection_file": "docs/contracts/vellum-initial-cut-paths.txt",
+  "source_commit": "2ccff748f0d59da34b01ce1fbceabcf19f452731",
+  "source_repository": "https://github.com/Generous-Corp/pulp"
+}

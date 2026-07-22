@@ -1,0 +1,112 @@
+name: Vellum trusted gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  merge_group:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  trusted-gate:
+    name: Trusted base executor
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted base controls
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install inventory parser dependency without secrets
+        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+
+      - name: Validate proposed data and publish head status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VELLUM_READER_TOKEN: ${{ secrets.VELLUM_READER_TOKEN }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STATUS_REPOSITORY: ${{ github.repository }}
+          STATUS_TARGET: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          post_status() {
+            gh api --method POST \
+              "repos/$STATUS_REPOSITORY/statuses/$PR_HEAD" \
+              -f state="$1" \
+              -f context='Vellum trusted freeze' \
+              -f description="$2" \
+              -f target_url="$STATUS_TARGET" >/dev/null
+          }
+          failed() {
+            post_status failure 'Trusted Vellum authority validation failed'
+          }
+          trap failed EXIT
+          post_status pending 'Validating with base-branch controls'
+
+          trusted_root=$PWD
+          proposed_tree="$RUNNER_TEMP/vellum-proposed-$PR_NUMBER"
+          git fetch --no-tags origin \
+            "$PR_BASE" \
+            "refs/pull/$PR_NUMBER/head"
+          git cat-file -e "$PR_HEAD^{commit}"
+          git worktree add --detach "$proposed_tree" "$PR_HEAD"
+
+          python3 "$trusted_root/tools/scripts/vellum_freeze_check.py" \
+            --repo "$proposed_tree" \
+            --base "$PR_BASE" \
+            --head "$PR_HEAD" \
+            --source-head "$PR_HEAD" \
+            --verify-authority \
+            --output "$RUNNER_TEMP/vellum-trusted-outbox.json"
+          python3 "$trusted_root/tools/scripts/pulp_tooling_disposition.py" \
+            --root "$proposed_tree" \
+            --map "$proposed_tree/docs/status/pulp-tooling-disposition.json"
+          python3 "$trusted_root/tools/scripts/generate_vellum_cut_manifest.py" \
+            --repo "$proposed_tree" \
+            --source-commit 2ccff748f0d59da34b01ce1fbceabcf19f452731 \
+            --selection docs/contracts/vellum-initial-cut-paths.txt \
+            --output docs/contracts/vellum-initial-cut-manifest.json \
+            --verify
+          python3 "$trusted_root/tools/scripts/generate_vellum_ownership_projection.py" \
+            --repo "$proposed_tree" \
+            --manifest docs/contracts/vellum-initial-cut-manifest.json \
+            --output .github/vellum-ownership.json \
+            --verify
+
+          trap - EXIT
+          post_status success 'Trusted Vellum authority validation passed'
+
+  trusted-merge-group:
+    name: Vellum trusted freeze
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the already PR-gated merge group
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install inventory parser dependency
+        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+
+      - name: Revalidate durable data on the exact merge result
+        env:
+          MERGE_BASE: ${{ github.event.merge_group.base_sha }}
+          MERGE_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"
+          python3 tools/scripts/vellum_freeze_check.py \
+            --base "$MERGE_BASE" \
+            --head "$MERGE_HEAD" \
+            --source-head "$MERGE_HEAD" \
+            --output "$RUNNER_TEMP/vellum-merge-outbox.json"
+          python3 tools/scripts/generate_vellum_cut_manifest.py --verify
+          python3 tools/scripts/generate_vellum_ownership_projection.py --verify
+          python3 tools/scripts/pulp_tooling_disposition.py

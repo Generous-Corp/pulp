@@ -1,0 +1,23 @@
+# Vellum authority controls and durable outbox
+/.github/CODEOWNERS @danielraffel
+/.github/workflows/ @danielraffel
+/.github/vellum-ownership.json @danielraffel
+/.github/vellum-change-events/ @danielraffel
+/tools/scripts/vellum_freeze_check.py @danielraffel
+/tools/scripts/test_vellum_freeze_check.py @danielraffel
+/tools/scripts/generate_vellum_* @danielraffel
+/tools/scripts/test_generate_vellum_* @danielraffel
+/tools/scripts/pulp_tooling_disposition.py @danielraffel
+/tools/scripts/test_pulp_tooling_disposition.py @danielraffel
+/docs/contracts/vellum-* @danielraffel
+/docs/status/pulp-tooling-disposition.json @danielraffel
+
+# Candidate legacy slices. These reviews are operationally required before
+# authority activates; the machine-readable map decides which paths are frozen.
+/core/canvas/ @danielraffel
+/core/render/ @danielraffel
+/core/view/include/pulp/view/ @danielraffel
+/core/view/platform/mac/ @danielraffel
+/core/view/src/ @danielraffel
+/packages/pulp-import-ir/ @danielraffel
+/tools/figma-plugin/schema/ @danielraffel
