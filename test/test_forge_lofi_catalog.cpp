@@ -13,8 +13,16 @@
 //   * Noise   — level raises the noise floor of a silent input.
 //   * Bitcrush — bit_depth raises quantization error; sample_rate_reduction
 //                introduces sample-and-hold plateaus.
+//   * Compressor — a loud sine above threshold is measurably reduced, the
+//                reduction grows with ratio, and a slow release pumps (gain
+//                reduction recovers slowly over time).
+//   * Gate — signal below threshold is attenuated to near-silence, above
+//                threshold passes, and the hold time keeps it open after the
+//                key drops below threshold.
 //
-// Plus one RT-allocation probe over every node's process path.
+// Plus one RT-allocation probe over every node's process path, and a boundedness
+// check proving the dynamics nodes never expand (so the Forge output guard stays
+// transparent).
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -355,6 +363,209 @@ TEST_CASE("Forge lo-fi: injecting delay feedback changes a baked echo's tail",
     CHECK(hi > lo * 1.5);            // the injected time moved the echo
 }
 
+// ── Compressor: level reduction above threshold, growing with ratio ──────
+TEST_CASE("Forge lo-fi: compressor reduces a loud sine and reduction grows with ratio",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // Peak output level of a −6 dBFS sine (amp 0.5) after the envelope settles,
+    // at threshold −18 dB and a given ratio. The classic transfer function is
+    // out_db = threshold + (in_db − threshold)/ratio for in above threshold, so a
+    // −6 dBFS peak → −18 + (−6 − −18)/ratio. Measured at ratio 4 that is −15 dBFS.
+    auto settled_peak = [&](float ratio) {
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -18.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, ratio)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, 80.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto tone = sine(kFrames, /*freq=*/220.0, /*amp=*/0.5f);
+        // Settle well past the 80 ms release so the peak-riding envelope is steady.
+        return peak(settle(*fx.result.processor, tone, /*blocks=*/120));
+    };
+
+    const float in_peak = 0.5f;  // −6 dBFS
+    const float r1 = settled_peak(1.0f);
+    const float r2 = settled_peak(2.0f);
+    const float r4 = settled_peak(4.0f);
+    const float r20 = settled_peak(20.0f);
+    auto db = [](float x) { return 20.0f * std::log10(std::max(x, 1e-9f)); };
+    INFO("in=" << db(in_peak) << " dBFS  r1=" << db(r1) << " r2=" << db(r2)
+               << " r4=" << db(r4) << " r20=" << db(r20) << " dBFS");
+
+    // ratio 1 → bit-transparent (no reduction).
+    CHECK(db(r1) == Catch::Approx(db(in_peak)).margin(0.5));
+    // ratio 4 → the −15 dBFS claim (±2 dB for the peak-riding envelope).
+    CHECK(db(r4) == Catch::Approx(-15.0f).margin(2.0f));
+    // Reduction is monotonic in ratio — this ordering is the negative control:
+    // if the ratio knob were ignored, all four peaks would be equal and it fails.
+    CHECK(r1 > r2);
+    CHECK(r2 > r4);
+    CHECK(r4 > r20);
+    // A loud input above threshold is measurably quieter at a musical ratio.
+    CHECK(r4 < in_peak * 0.6f);  // > ~4.4 dB of gain reduction
+}
+
+// ── Compressor: a slow release pumps (gain reduction recovers over time) ──
+TEST_CASE("Forge lo-fi: compressor slow release pumps on a burst-then-quiet input",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // Drum-loop-shaped input: a loud burst opens deep gain reduction, then a quiet
+    // below-threshold probe tone reveals the gain recovering. The number of blocks
+    // the probe needs to climb back to half its recovered level measures the
+    // release-driven pump: a slow release keeps the signal ducked far longer.
+    auto recovery_blocks = [&](float release_ms) {
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -18.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, 8.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, release_ms)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        // Engage: 12 blocks of a loud sine (amp 0.9, ~−0.9 dBFS) settles the
+        // envelope deep into gain reduction.
+        const auto burst = sine(kFrames, /*freq=*/500.0, /*amp=*/0.9f);
+        settle(*fx.result.processor, burst, /*blocks=*/12);
+
+        // Probe: a quiet sine (amp 0.1, −20 dBFS, below threshold → no reduction
+        // of its own). Record its per-block RMS as the gain recovers.
+        const auto probe = sine(kFrames, /*freq=*/500.0, /*amp=*/0.1f);
+        std::vector<float> traj;
+        for (int b = 0; b < 90; ++b) traj.push_back(rms(run_block(*fx.result.processor, probe)));
+        const float recovered = traj.back();  // fully-recovered probe level
+        for (int b = 0; b < static_cast<int>(traj.size()); ++b) {
+            if (traj[static_cast<std::size_t>(b)] >= 0.5f * recovered) return b;
+        }
+        return static_cast<int>(traj.size());
+    };
+
+    const int fast = recovery_blocks(10.0f);
+    const int slow = recovery_blocks(120.0f);
+    INFO("recovery blocks: fast(10ms)=" << fast << " slow(120ms)=" << slow);
+    CHECK(fast < 8);          // a fast release recovers almost immediately
+    CHECK(slow > fast * 2);   // the slow release pumps — ducked far longer
+    CHECK(slow < 90);         // but it does recover (not a stuck gain)
+}
+
+// ── Gate: below threshold is silenced, above threshold passes ─────────────
+TEST_CASE("Forge lo-fi: gate attenuates below threshold and passes above it",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    BakedFixture fx(lofi::make_gate_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kGateThresholdDb, -40.0f)));
+    REQUIRE(q.push(immediate(lofi::kGateAttackMs, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kGateHoldMs, 5.0f)));   // short hold: closes on the quiet tone
+    REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 40.0f)));
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    // Loud tone (amp 0.5, −6 dBFS, above −40) passes.
+    const auto loud = sine(kFrames, /*freq=*/300.0, /*amp=*/0.5f);
+    const float loud_rms = rms(settle(*fx.result.processor, loud, /*blocks=*/8));
+
+    // Quiet tone (amp 0.006, ≈ −44 dBFS, below −40) is gated to near-silence.
+    const auto quiet = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+    const float quiet_in = rms(quiet);
+    const float quiet_rms = rms(settle(*fx.result.processor, quiet, /*blocks=*/80));
+
+    INFO("loud in=" << rms(loud) << " out=" << loud_rms
+                    << "  quiet in=" << quiet_in << " out=" << quiet_rms);
+    CHECK(loud_rms > rms(loud) * 0.9f);       // above threshold passes ~unattenuated
+    // Below threshold is silenced — this is the negative control: without wired
+    // attenuation, out would equal in and this fails.
+    CHECK(quiet_rms < quiet_in * 0.01f);      // > 40 dB of attenuation
+}
+
+// ── Gate: the hold time keeps the gate open after the key drops ───────────
+TEST_CASE("Forge lo-fi: gate hold keeps a baked gate open through a quiet tail",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // A loud burst opens the gate, then a quiet below-threshold tail follows. With
+    // a long hold the tail passes for the hold window; with no hold the gate closes
+    // immediately. Measure the tail RMS well inside the long-hold window.
+    auto tail_after_burst = [&](float hold_ms) {
+        BakedFixture fx(lofi::make_gate_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kGateThresholdDb, -40.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateAttackMs, 1.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateHoldMs, hold_ms)));
+        REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 40.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        // Open the gate with a loud burst (amp 0.5, above −40).
+        const auto burst = sine(kFrames, /*freq=*/300.0, /*amp=*/0.5f);
+        settle(*fx.result.processor, burst, /*blocks=*/6);
+
+        // Quiet tail (amp 0.006, below −40). Average its RMS over blocks 5..20
+        // (~13–53 ms) — inside a 200 ms hold, past a 40 ms release.
+        const auto tail = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+        double acc = 0.0;
+        int cnt = 0;
+        for (int b = 0; b < 21; ++b) {
+            const float r = rms(run_block(*fx.result.processor, tail));
+            if (b >= 5) { acc += r; ++cnt; }
+        }
+        return static_cast<float>(acc / cnt);
+    };
+
+    const auto tail = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+    const float tail_in = rms(tail);
+    const float open = tail_after_burst(200.0f);  // hold keeps it open
+    const float closed = tail_after_burst(0.0f);  // no hold → closes at once
+    INFO("tail in=" << tail_in << "  hold=200ms=" << open << "  hold=0=" << closed);
+    CHECK(open > tail_in * 0.5f);   // held open — the quiet tail passes
+    CHECK(open > closed * 5.0f);    // hold-dependent: the negative control for hold
+    CHECK(closed < tail_in * 0.2f); // with no hold the tail is gated
+}
+
+// ── Boundedness: the dynamics nodes never expand, at extreme settings ─────
+// Both nodes only ever apply a gain ≤ 1 (the compressor has no makeup; the gate
+// floors at −80 dB), so a hot input can never diverge — the property that keeps
+// the Forge runtime output guard transparent. (The guard itself lives in the
+// Forge repo; here we prove the node output it wraps stays finite and bounded.)
+TEST_CASE("Forge lo-fi: dynamics nodes keep output finite and bounded at extremes",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    const auto hot = sine(kFrames, /*freq=*/1000.0, /*amp=*/0.99f);
+    const float hot_peak = peak(hot);
+
+    {
+        // Max-ratio compressor, lowest threshold, fastest attack.
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -60.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, 20.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 0.1f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, 10.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto out = settle(*fx.result.processor, hot, /*blocks=*/40);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        CHECK(peak(out) <= hot_peak + 1e-4f);  // never expands past the input
+    }
+    {
+        // Gate at extremes: highest threshold, fastest attack, no hold.
+        BakedFixture fx(lofi::make_gate_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kGateThresholdDb, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateAttackMs, 0.1f)));
+        REQUIRE(q.push(immediate(lofi::kGateHoldMs, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 10.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto out = settle(*fx.result.processor, hot, /*blocks=*/40);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        CHECK(peak(out) <= hot_peak + 1e-4f);  // gain ≤ 1 always
+    }
+}
+
 // ── RT safety: every node's inject + process path is allocation-free ─────
 TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog node",
           "[host][baked][param-injection][forge][forge-lofi][rt]") {
@@ -371,6 +582,8 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
     cases.push_back({lofi::make_drywet_node(), 2, lofi::kDryWetMix, 0.5f});
     cases.push_back({lofi::make_noise_node(), 1, lofi::kNoiseLevel, 0.5f});
     cases.push_back({lofi::make_bitcrush_node(), 1, lofi::kBitcrushBitDepth, 6.0f});
+    cases.push_back({lofi::make_compressor_node(), 1, lofi::kCompThresholdDb, -18.0f});
+    cases.push_back({lofi::make_gate_node(), 1, lofi::kGateThresholdDb, -40.0f});
 
     for (auto& c : cases) {
         BakedFixture fx(c.type, c.input_channels);
