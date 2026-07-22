@@ -76,6 +76,41 @@ std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
         saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
 }
 
+bool equal_locators(std::span<const AssetLocator> lhs,
+                    std::span<const AssetLocator> rhs) noexcept {
+    return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool equal_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
+    if (lhs.id != rhs.id || lhs.name != rhs.name || lhs.frame_count != rhs.frame_count ||
+        lhs.sample_rate != rhs.sample_rate || lhs.content_hash != rhs.content_hash ||
+        lhs.storage_policy != rhs.storage_policy ||
+        !equal_locators(lhs.locators, rhs.locators) ||
+        lhs.representations.size() != rhs.representations.size())
+        return false;
+    for (std::size_t i = 0; i < lhs.representations.size(); ++i) {
+        const auto& left = lhs.representations[i];
+        const auto& right = rhs.representations[i];
+        if (left.role != right.role || left.content_hash != right.content_hash ||
+            left.storage_policy != right.storage_policy ||
+            !equal_locators(left.locators, right.locators))
+            return false;
+    }
+    return true;
+}
+
+std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
+    std::size_t size = asset.name.size();
+    for (const auto& locator : asset.locators)
+        size = saturated_add(size, locator.hint.size());
+    for (const auto& representation : asset.representations) {
+        size = saturated_add(size, representation.role.size());
+        for (const auto& locator : representation.locators)
+            size = saturated_add(size, locator.hint.size());
+    }
+    return size;
+}
+
 } // namespace
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
@@ -140,6 +175,10 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, SetTempoMap> ||
                                  std::is_same_v<T, SetMeterMap>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, CreateAsset>) {
+                return equal_asset(left.asset, right.asset);
+            } else if constexpr (std::is_same_v<T, RemoveAsset>) {
+                return left.asset_id == right.asset_id;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -168,6 +207,8 @@ std::size_t retained_size(const Command& command) noexcept {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, InsertClip>)
                 return saturated_add(sizeof(T), clip_retained_size(value.clip));
+            if constexpr (std::is_same_v<T, CreateAsset>)
+                return saturated_add(sizeof(T), asset_retained_size(value.asset));
             if constexpr (std::is_same_v<T, InsertAutomationLane>)
                 return saturated_add(sizeof(T), automation_lane_retained_size(value.lane));
             if constexpr (std::is_same_v<T, SetTempoMap>)

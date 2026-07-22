@@ -33,6 +33,81 @@ std::optional<ItemId> first_duplicate(const std::vector<T>& values, IdFn&& id_of
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
 
+// Validates a media asset and canonicalizes its representation order. Shared by
+// project construction and asset-append so both paths enforce the identical
+// sealed-identity invariant: an asset with an invalid or empty ContentHash is
+// rejected and never enters the document. Returns nullopt on success.
+std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
+    if (!asset.id.valid())
+        return ModelError{ModelErrorCode::InvalidItemId, asset.id, {}};
+    if (!asset.sample_rate.valid())
+        return ModelError{ModelErrorCode::InvalidSampleRate, asset.id, {}};
+    if (!asset.content_hash.valid())
+        return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+    for (const auto& locator : asset.locators)
+        if (locator.hint.empty())
+            return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
+    std::vector<std::string_view> roles;
+    roles.reserve(asset.representations.size());
+    for (const auto& representation : asset.representations) {
+        if (!representation.content_hash.valid())
+            return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+        if (representation.role.empty())
+            return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
+        roles.push_back(representation.role);
+        for (const auto& locator : representation.locators)
+            if (locator.hint.empty())
+                return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
+    }
+    std::sort(roles.begin(), roles.end());
+    if (std::adjacent_find(roles.begin(), roles.end()) != roles.end())
+        return ModelError{ModelErrorCode::DuplicateAssetRepresentation, asset.id, {}};
+    std::sort(asset.representations.begin(), asset.representations.end(),
+              [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
+                  return lhs.role < rhs.role;
+              });
+    return std::nullopt;
+}
+
+// Applies Insert / Deactivate / Reactivate identity mutations to a directory
+// copy. Shared by sequence replacement and asset mutation so identity
+// transitions have one enforcement path. Returns nullopt on success.
+std::optional<ModelError>
+apply_identity_mutations(detail::IdentityDirectory& identities,
+                         std::span<const IdentityMutation> mutations) {
+    for (const auto& change : mutations) {
+        if (!change.item.valid())
+            return ModelError{ModelErrorCode::InvalidItemId, change.item, {}};
+        const auto existing = identities.locate(change.item);
+        switch (change.mutation) {
+        case IdentityMutationKind::Insert: {
+            if (existing)
+                return ModelError{ModelErrorCode::IdentityConflict, change.item, {}};
+            auto location = change.location;
+            location.active = true;
+            identities.insert(change.item, location);
+            break;
+        }
+        case IdentityMutationKind::Deactivate: {
+            if (!existing || !existing->active || !existing->has_same_owner(change.location))
+                return ModelError{ModelErrorCode::InvalidIdentityTransition, change.item, {}};
+            auto location = *existing;
+            location.active = false;
+            identities.replace(change.item, location);
+            break;
+        }
+        case IdentityMutationKind::Reactivate: {
+            auto location = detail::reactivated_location(existing, change.location);
+            if (!location)
+                return ModelError{ModelErrorCode::InvalidIdentityTransition, change.item, {}};
+            identities.replace(change.item, *location);
+            break;
+        }
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 bool SchemaIdentity::valid() const noexcept {
@@ -540,34 +615,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     std::vector<ItemId> all_ids{input.id};
     std::uint64_t maximum_id = input.id.value;
     for (auto& asset : input.assets) {
-        if (!asset.id.valid())
-            return fail<Project>(ModelErrorCode::InvalidItemId, asset.id);
-        if (!asset.sample_rate.valid())
-            return fail<Project>(ModelErrorCode::InvalidSampleRate, asset.id);
-        if (!asset.content_hash.valid())
-            return fail<Project>(ModelErrorCode::InvalidContentHash, asset.id);
-        for (const auto& locator : asset.locators)
-            if (locator.hint.empty())
-                return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
-        std::vector<std::string_view> roles;
-        roles.reserve(asset.representations.size());
-        for (const auto& representation : asset.representations) {
-            if (!representation.content_hash.valid())
-                return fail<Project>(ModelErrorCode::InvalidContentHash, asset.id);
-            if (representation.role.empty())
-                return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
-            roles.push_back(representation.role);
-            for (const auto& locator : representation.locators)
-                if (locator.hint.empty())
-                    return fail<Project>(ModelErrorCode::InvalidAssetLocator, asset.id);
-        }
-        std::sort(roles.begin(), roles.end());
-        if (std::adjacent_find(roles.begin(), roles.end()) != roles.end())
-            return fail<Project>(ModelErrorCode::DuplicateAssetRepresentation, asset.id);
-        std::sort(asset.representations.begin(), asset.representations.end(),
-                  [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
-                      return lhs.role < rhs.role;
-                  });
+        if (const auto error = validate_media_asset(asset))
+            return runtime::Result<Project, ModelError>(runtime::Err(*error));
         all_ids.push_back(asset.id);
         maximum_id = std::max(maximum_id, asset.id.value);
     }
@@ -727,37 +776,8 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     if (found == data_->sequences.end() || found->id() != sequence.id())
         return fail<Project>(ModelErrorCode::MissingItem, sequence.id());
     auto identities = data_->identities;
-    for (const auto& change : mutations) {
-        if (!change.item.valid())
-            return fail<Project>(ModelErrorCode::InvalidItemId, change.item);
-        const auto existing = identities.locate(change.item);
-        switch (change.mutation) {
-        case IdentityMutationKind::Insert: {
-            if (existing)
-                return fail<Project>(ModelErrorCode::IdentityConflict, change.item);
-            auto location = change.location;
-            location.active = true;
-            identities.insert(change.item, location);
-            break;
-        }
-        case IdentityMutationKind::Deactivate: {
-            if (!existing || !existing->active ||
-                !existing->has_same_owner(change.location))
-                return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
-            auto location = *existing;
-            location.active = false;
-            identities.replace(change.item, location);
-            break;
-        }
-        case IdentityMutationKind::Reactivate: {
-            auto location = detail::reactivated_location(existing, change.location);
-            if (!location)
-                return fail<Project>(ModelErrorCode::InvalidIdentityTransition, change.item);
-            identities.replace(change.item, *location);
-            break;
-        }
-        }
-    }
+    if (const auto error = apply_identity_mutations(identities, mutations))
+        return runtime::Result<Project, ModelError>(runtime::Err(*error));
     const auto next = requested_next.value_or(data_->next_item_id);
     if (next < data_->next_item_id || next == 0)
         return fail<Project>(ModelErrorCode::NextItemIdNotMonotonic, {next}, {data_->next_item_id});
@@ -766,6 +786,58 @@ Project::replace_sequence(Sequence sequence, std::span<const IdentityMutation> m
     return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
         Data{data_->id, data_->name, next, data_->root_sequence_id, data_->assets,
              std::move(sequences), data_->tempo_map, data_->meter_map, std::move(identities)}))));
+}
+
+runtime::Result<Project, ModelError>
+Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutations,
+                      std::optional<std::uint64_t> requested_next) const {
+    if (const auto error = validate_media_asset(asset))
+        return runtime::Result<Project, ModelError>(runtime::Err(*error));
+    // The asset table is a set keyed by identity; a live entry with this id is a
+    // duplicate the caller must resolve before append (a tombstoned id is
+    // reactivated through the identity mutation below).
+    if (find_asset(asset.id) != nullptr)
+        return fail<Project>(ModelErrorCode::DuplicateItemId, asset.id);
+    auto identities = data_->identities;
+    if (const auto error = apply_identity_mutations(identities, mutations))
+        return runtime::Result<Project, ModelError>(runtime::Err(*error));
+    const auto next = requested_next.value_or(data_->next_item_id);
+    if (next < data_->next_item_id || next == 0)
+        return fail<Project>(ModelErrorCode::NextItemIdNotMonotonic, {next}, {data_->next_item_id});
+    auto assets = data_->assets;
+    const auto position =
+        std::lower_bound(assets.begin(), assets.end(), asset.id,
+                         [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
+    assets.insert(position, std::move(asset));
+    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
+        Data{data_->id, data_->name, next, data_->root_sequence_id, std::move(assets),
+             data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
+}
+
+runtime::Result<Project, ModelError>
+Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutations) const {
+    const auto found =
+        std::lower_bound(data_->assets.begin(), data_->assets.end(), asset_id,
+                         [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
+    if (found == data_->assets.end() || found->id != asset_id)
+        return fail<Project>(ModelErrorCode::MissingAsset, asset_id);
+    // Referential integrity: an asset that any clip still plays cannot be
+    // removed, or replay would resurrect a MediaRef pointing at a missing asset.
+    for (const auto& sequence : data_->sequences)
+        for (const auto& track : sequence.tracks())
+            for (const auto& clip : track.clips())
+                if (const auto* media = std::get_if<MediaRef>(&clip.content());
+                    media && media->asset_id == asset_id)
+                    return fail<Project>(ModelErrorCode::MissingAsset, clip.id(), asset_id);
+    auto identities = data_->identities;
+    if (const auto error = apply_identity_mutations(identities, mutations))
+        return runtime::Result<Project, ModelError>(runtime::Err(*error));
+    auto assets = data_->assets;
+    assets.erase(assets.begin() + (found - data_->assets.begin()));
+    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
+             std::move(assets), data_->sequences, data_->tempo_map, data_->meter_map,
+             std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {

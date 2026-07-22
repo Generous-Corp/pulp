@@ -112,13 +112,26 @@ invariants.
 ## Editing contracts
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
-  `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`, and
-  `SetMeterMap` are the bounded mutation vocabulary. Automation commands attach
-  or tombstone complete Track-owned lanes; map commands carry exact
-  expected/replacement document values and participate in the same transaction,
-  journal, undo, and replay machinery. `reduce_transaction()` is pure: it
-  returns a new snapshot, exact canonical dirty set, and reverse-ordered inverse
-  commands.
+  `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
+  `SetMeterMap`, `CreateAsset`, and `RemoveAsset` are the bounded mutation
+  vocabulary. Automation commands attach or tombstone complete Track-owned
+  lanes; map commands carry exact expected/replacement document values and
+  participate in the same transaction, journal, undo, and replay machinery.
+  `reduce_transaction()` is pure: it returns a new snapshot, exact canonical
+  dirty set, and reverse-ordered inverse commands.
+- `CreateAsset`/`RemoveAsset` are the asset-table mirror pair (shaped like
+  `InsertClip`/`RemoveClip`). `CreateAsset` carries the whole `MediaAsset` by
+  value — the `ContentHash` is the sealed durable identity. The reducer plans
+  the `ItemKind::Asset` identity and appends the asset by reference to that hash
+  through `Project::append_asset`; **replay never re-captures or re-hashes media
+  bytes**, so the same checkpoint plus journal reproduce a byte-identical asset
+  table (the sealed-content contract). An invalid/empty `ContentHash` is
+  rejected before the asset can enter the document. `RemoveAsset` fails closed
+  while any clip's `MediaRef` still points at the asset, tombstones the identity
+  like a clip removal, and its inverse re-creates the sealed asset — so undo/redo
+  stays whole. Asset validation and identity-mutation application live in shared
+  `model.cpp` helpers so construction, sequence replacement, and asset mutation
+  enforce one sealed-identity and one identity-transition path.
 - `DocumentSession` is the sole authoritative writer. Multiple control-thread
   callers serialize through it; readers atomically pin immutable snapshots.
   Every transaction declares its expected revision. Stale revisions and typed

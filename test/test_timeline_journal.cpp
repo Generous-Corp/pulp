@@ -301,3 +301,116 @@ TEST_CASE("Serialized checkpoints retain tombstones for replay and exact reactiv
     REQUIRE(restored->locate({5})->active);
     REQUIRE(restored->locate({6})->active);
 }
+
+namespace {
+
+MediaAsset make_recorded_asset(ItemId id, ContentHash source_hash) {
+    return MediaAsset{id,
+                      "recorded.wav",
+                      960,
+                      {48'000, 1},
+                      source_hash,
+                      AssetStoragePolicy::PreferEmbedded,
+                      {{AssetLocatorKind::PackageRelative, "media/recorded.wav"}},
+                      {{"proxy",
+                        hash_of('b'),
+                        AssetStoragePolicy::Embedded,
+                        {{AssetLocatorKind::PackageRelative, "media/recorded.proxy.wav"}}}}};
+}
+
+} // namespace
+
+TEST_CASE("CreateAsset appends a sealed asset preserving its content hash") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    REQUIRE(session->snapshot()->assets().empty());
+    const auto next_before = session->snapshot()->next_item_id();
+
+    auto created = make_recorded_asset({next_before}, hash_of('e'));
+    auto tx = session_transaction(writer, {}, {CreateAsset{created}});
+    REQUIRE(session->submit(writer, std::move(tx)));
+
+    const auto snapshot = session->snapshot();
+    REQUIRE(snapshot->assets().size() == 1);
+    const auto& asset = snapshot->assets()[0];
+    REQUIRE(asset.id == ItemId{next_before});
+    REQUIRE(asset.content_hash == hash_of('e'));
+    REQUIRE(asset.representations.size() == 1);
+    REQUIRE(asset.representations[0].content_hash == hash_of('b'));
+    // The asset is now an active, project-owned identity and consumed one id.
+    const auto located = snapshot->locate({next_before});
+    REQUIRE(located);
+    REQUIRE(located->kind == ItemKind::Asset);
+    REQUIRE(located->active);
+    REQUIRE(snapshot->next_item_id() == next_before + 1);
+}
+
+TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto next_before = session->snapshot()->next_item_id();
+
+    MediaAsset unsealed{{next_before}, "unsealed.wav", 480, {48'000, 1}, ContentHash{},
+                        AssetStoragePolicy::External, {}, {}};
+    REQUIRE_FALSE(unsealed.content_hash.valid());
+    auto tx = session_transaction(writer, {}, {CreateAsset{unsealed}});
+    auto rejected = session->submit(writer, std::move(tx));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().model_error);
+    REQUIRE(rejected.error().model_error->code == ModelErrorCode::InvalidContentHash);
+    // Fail closed: no asset, revision, or journal entry survives the rejection.
+    REQUIRE(session->snapshot()->assets().empty());
+    REQUIRE(session->snapshot()->next_item_id() == next_before);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().empty());
+}
+
+TEST_CASE("Journal replay reproduces a created asset byte-identically") {
+    const auto checkpoint = make_project();
+    auto session = std::move(DocumentSession::create(checkpoint)).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto created = make_recorded_asset({checkpoint.next_item_id()}, hash_of('e'));
+    REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{created}})));
+    const auto committed = session->snapshot();
+
+    auto replayed = session->journal().replay(checkpoint, {});
+    REQUIRE(replayed);
+    REQUIRE(replayed->assets().size() == 1);
+    REQUIRE(replayed->assets()[0].content_hash == hash_of('e'));
+    REQUIRE(replayed->next_item_id() == committed->next_item_id());
+
+    // Determinism proof: the committed and replayed documents serialize to
+    // byte-identical canonical JSON. Replay references the sealed asset by its
+    // content_hash and never re-derives it.
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto committed_json = serialize_project(*committed, registry.value());
+    auto replayed_json = serialize_project(*replayed, registry.value());
+    REQUIRE(committed_json);
+    REQUIRE(replayed_json);
+    REQUIRE(committed_json->json == replayed_json->json);
+}
+
+TEST_CASE("A created asset round-trips through the project schema") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto created = make_recorded_asset({session->snapshot()->next_item_id()}, hash_of('f'));
+    REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{created}})));
+
+    auto registry = make_builtin_timeline_registry();
+    REQUIRE(registry);
+    auto serialized = serialize_project(*session->snapshot(), registry.value());
+    REQUIRE(serialized);
+    auto decoded = deserialize_project(serialized->json, registry.value());
+    REQUIRE(decoded);
+    REQUIRE(decoded->assets().size() == 1);
+    const auto& asset = decoded->assets()[0];
+    REQUIRE(asset.content_hash == hash_of('f'));
+    REQUIRE(asset.locators.size() == 1);
+    REQUIRE(asset.representations.size() == 1);
+    REQUIRE(asset.representations[0].content_hash == hash_of('b'));
+    REQUIRE(decoded->next_item_id() == session->snapshot()->next_item_id());
+}
