@@ -65,6 +65,7 @@ pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
@@ -105,6 +106,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME web-timeline-source-closure-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/test_web_timeline_source_closure_check.py)
+
+    # Schema-drift gate: the committed manifest must match a fresh emission from
+    # the registry. The selftest proves the gate catches a stale artifact.
+    add_test(NAME timeline-schema-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json
+            --emit-cmd $<TARGET_FILE:pulp-timeline-schema-emit>)
+    add_test(NAME timeline-schema-drift-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/test_schema_drift_check.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
@@ -118,6 +130,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_codegen.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
