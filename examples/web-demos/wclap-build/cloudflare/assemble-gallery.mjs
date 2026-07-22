@@ -367,7 +367,7 @@ const UI_BUILD = resolve(HERE, arg("--ui-build", "../../super-convolver-ui/build
 const UI_SRC = resolve(REPO, "examples/web-demos/super-convolver-ui");
 const UI_MODULE = "PulpSuperConvolverUi";
 
-const SC_SRC = "https://github.com/danielraffel/pulp/tree/main/examples/super-convolver";
+const SC_SRC = "https://github.com/Generous-Corp/pulp/tree/main/examples/super-convolver";
 const SC_TITLE = "SuperConvolver";
 const SC_SUBTITLE =
   "A convolution reverb running in your browser. Size sets how long the space rings; " +

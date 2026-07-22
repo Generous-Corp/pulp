@@ -165,7 +165,7 @@ class WorkletWclapHost {
     this.setU32(h + 12, 0);
     this.setU32(h + 16, this.cstr("Pulp WebCLAP RT Host"));
     this.setU32(h + 20, this.cstr("Pulp"));
-    this.setU32(h + 24, this.cstr("https://github.com/danielraffel/pulp"));
+    this.setU32(h + 24, this.cstr("https://github.com/Generous-Corp/pulp"));
     this.setU32(h + 28, this.cstr("0.0.1"));
     this.setU32(h + 32, this._addFn("ii->i", () => 0)); // get_extension: host offers none
     const noop = this._addFn("i->", () => {});
