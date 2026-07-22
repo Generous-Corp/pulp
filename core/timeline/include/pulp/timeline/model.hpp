@@ -504,6 +504,14 @@ class Project {
     runtime::Result<Project, ModelError>
     replace_sequence(Sequence sequence, std::span<const IdentityMutation> identities = {},
                      std::optional<std::uint64_t> next_item_id = std::nullopt) const;
+    // Appends a sealed media asset as a pinned project input. The asset carries
+    // its own ContentHash identity; identity mutations register (or reactivate)
+    // the ItemKind::Asset entry the same way clip inserts do.
+    runtime::Result<Project, ModelError>
+    append_asset(MediaAsset asset, std::span<const IdentityMutation> identities = {},
+                 std::optional<std::uint64_t> next_item_id = std::nullopt) const;
+    runtime::Result<Project, ModelError>
+    remove_asset(ItemId asset_id, std::span<const IdentityMutation> identities = {}) const;
     Project replace_tempo_map(timebase::TempoMap tempo_map) const;
     Project replace_meter_map(timebase::MeterMap meter_map) const;
     explicit Project(std::shared_ptr<const Data> data) : data_(std::move(data)) {}

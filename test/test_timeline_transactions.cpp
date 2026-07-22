@@ -191,3 +191,74 @@ TEST_CASE("Document session nonce exhaustion saturates under concurrent creation
     REQUIRE_FALSE(exhausted);
     REQUIRE(exhausted.error().code == ConflictCode::SequenceExhausted);
 }
+
+TEST_CASE("CreateAsset is undoable and redoable through its RemoveAsset inverse") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto asset_id = session->snapshot()->next_item_id();
+    MediaAsset asset{{asset_id}, "take.wav", 240, {48'000, 1}, content_hash('c'),
+                     AssetStoragePolicy::External, {}, {}};
+    REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
+    REQUIRE(session->snapshot()->assets().size() == 1);
+    REQUIRE(session->can_undo());
+
+    auto undone = session->undo(writer);
+    REQUIRE(undone);
+    REQUIRE(session->snapshot()->assets().empty());
+    // Undo removes the asset but tombstones its identity rather than reusing it.
+    const auto tombstone = session->snapshot()->locate({asset_id});
+    REQUIRE(tombstone);
+    REQUIRE_FALSE(tombstone->active);
+
+    auto redone = session->redo(writer);
+    REQUIRE(redone);
+    REQUIRE(session->snapshot()->assets().size() == 1);
+    REQUIRE(session->snapshot()->assets()[0].content_hash == content_hash('c'));
+    REQUIRE(session->snapshot()->locate({asset_id})->active);
+}
+
+TEST_CASE("CreateAsset rejects an id that is already live") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto asset_id = session->snapshot()->next_item_id();
+    MediaAsset asset{{asset_id}, "first.wav", 100, {48'000, 1}, content_hash('a'),
+                     AssetStoragePolicy::External, {}, {}};
+    REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
+
+    MediaAsset again{{asset_id}, "second.wav", 100, {48'000, 1}, content_hash('b'),
+                     AssetStoragePolicy::External, {}, {}};
+    auto rejected =
+        session->submit(writer, session_transaction(writer, session->revision(),
+                                                    {CreateAsset{again}}));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::IdentityNotAvailable);
+    REQUIRE(session->snapshot()->assets().size() == 1);
+    REQUIRE(session->snapshot()->assets()[0].content_hash == content_hash('a'));
+}
+
+TEST_CASE("RemoveAsset is rejected while a clip still references the asset") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto asset_id = session->snapshot()->next_item_id();
+    MediaAsset asset{{asset_id}, "ref.wav", 480, {48'000, 1}, content_hash('a'),
+                     AssetStoragePolicy::External, {}, {}};
+    REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
+
+    const auto clip_id = session->snapshot()->next_item_id();
+    auto media_clip = Clip::create({clip_id}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+                                   MediaRef{{asset_id}, {0}, 100});
+    REQUIRE(media_clip);
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {InsertClip{{3}, {4}, std::move(media_clip).value()}})));
+
+    auto rejected = session->submit(
+        writer, session_transaction(writer, session->revision(), {RemoveAsset{{asset_id}}}));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected.error().model_error);
+    REQUIRE(rejected.error().model_error->code == ModelErrorCode::MissingAsset);
+    // Fail closed: the referenced asset stays in the document.
+    REQUIRE(session->snapshot()->assets().size() == 1);
+    REQUIRE(session->snapshot()->find_asset({asset_id}) != nullptr);
+}

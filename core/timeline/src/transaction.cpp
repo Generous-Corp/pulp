@@ -297,6 +297,49 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             project = ProjectEditAccess::replace_meter_map(project, meter->replacement);
             inverses.emplace_back(SetMeterMap{meter->replacement, meter->expected});
             dirty.push_back({project.id(), {}, {}, DirtyFlags::Timing});
+        } else if (const auto* create = std::get_if<CreateAsset>(&envelope.command)) {
+            const detail::OwnedIdentity identity{create->asset.id,
+                                                 expected_location(ItemKind::Asset, project, {})};
+            auto identity_plan = detail::plan_identity_insert(
+                project, std::span<const detail::OwnedIdentity>(&identity, 1),
+                allow_tombstone_restore, transaction, envelope.id);
+            if (!identity_plan)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(identity_plan.error()));
+            // Replay references the sealed asset by value; the model never
+            // re-derives its ContentHash, so the append is byte-deterministic.
+            auto next_project = ProjectEditAccess::append_asset(
+                project, create->asset, identity_plan->mutations, identity_plan->next_item_id);
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(
+                        detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(RemoveAsset{create->asset.id});
+            dirty.push_back(
+                {create->asset.id, {}, {}, DirtyFlags::Structure | DirtyFlags::Added});
+        } else if (const auto* drop_asset = std::get_if<RemoveAsset>(&envelope.command)) {
+            if (const auto code = detail::target_error(
+                    project, drop_asset->asset_id,
+                    expected_location(ItemKind::Asset, project, {})))
+                return fail_target(*code, drop_asset->asset_id);
+            const auto* asset = project.find_asset(drop_asset->asset_id);
+            if (!asset)
+                return fail_target(ConflictCode::TargetMissing, drop_asset->asset_id);
+            const MediaAsset removed = *asset;
+            const detail::OwnedIdentity identity{removed.id,
+                                                 expected_location(ItemKind::Asset, project, {})};
+            const auto identity_changes = detail::plan_identity_deactivate(std::span<const detail::OwnedIdentity>(&identity, 1));
+            auto next_project =
+                ProjectEditAccess::remove_asset(project, drop_asset->asset_id, identity_changes);
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(
+                        detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(CreateAsset{removed});
+            dirty.push_back(
+                {drop_asset->asset_id, {}, {}, DirtyFlags::Structure | DirtyFlags::Removed});
         } else {
             const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
             if (const auto code = detail::target_error(

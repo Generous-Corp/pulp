@@ -16,6 +16,17 @@ struct ProjectEditAccess {
                      std::optional<std::uint64_t> next_item_id = std::nullopt) {
         return project.replace_sequence(std::move(sequence), identities, next_item_id);
     }
+    static runtime::Result<Project, ModelError>
+    append_asset(const Project& project, MediaAsset asset,
+                 std::span<const IdentityMutation> identities = {},
+                 std::optional<std::uint64_t> next_item_id = std::nullopt) {
+        return project.append_asset(std::move(asset), identities, next_item_id);
+    }
+    static runtime::Result<Project, ModelError>
+    remove_asset(const Project& project, ItemId asset_id,
+                 std::span<const IdentityMutation> identities = {}) {
+        return project.remove_asset(asset_id, identities);
+    }
     static Project replace_tempo_map(const Project& project, timebase::TempoMap tempo_map) {
         return project.replace_tempo_map(std::move(tempo_map));
     }

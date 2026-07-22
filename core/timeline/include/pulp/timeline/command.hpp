@@ -111,9 +111,23 @@ struct SetMeterMap {
     timebase::MeterMap replacement;
 };
 
+// A recorded or imported media asset enters the document as a sealed input.
+// The command carries the whole MediaAsset by value, including the ContentHash
+// that is the asset's durable identity. Replay appends the sealed asset by
+// reference to that hash and never re-captures or re-hashes media bytes, so the
+// same checkpoint plus journal reproduce a byte-identical asset table.
+struct CreateAsset {
+    MediaAsset asset;
+};
+
+struct RemoveAsset {
+    ItemId asset_id;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
-                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap>;
+                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
+                 RemoveAsset>;
 
 struct CommandEnvelope {
     CommandId id;
