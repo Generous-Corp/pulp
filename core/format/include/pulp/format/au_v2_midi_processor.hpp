@@ -173,7 +173,7 @@ private:
     // realtime-capacity-limited storage so the drain and the Processor's
     // appends never grow a vector on the audio thread. Capacities match the
     // effect adapter so behavior is uniform across formats.
-    static constexpr std::size_t kMaxEventsPerBlock = 2048;
+    static constexpr std::size_t kMaxEventsPerBlock = kMaxMidiEventsPerBlock;
     static constexpr std::size_t kMaxSysexPerBlock = 64;
     static constexpr std::size_t kMaxSysexPayloadBytes = 512;
     midi::MidiBuffer midi_in_;

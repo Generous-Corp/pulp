@@ -183,6 +183,14 @@ inline Float64 tail_samples_to_seconds(int tail_samples,
 /// though they live in separate sidecars. Each packet carries the Processor's
 /// per-event `sample_offset`, clamped to the current block, as its timestamp —
 /// the offset semantics `kAudioUnitProperty_MIDIOutputCallback` documents.
+//
+// The per-block MIDI event budget shared by every AU v2 adapter's
+// `kMaxEventsPerBlock` and the output packet builder's `kMaxOutputEvents`.
+// This lives in one place on purpose: if the input bound and the output bound
+// ever drift apart, host-bound MIDI is silently truncated on a dense
+// arp/generator block. Reference this constant, never re-spell the literal.
+inline constexpr std::size_t kMaxMidiEventsPerBlock = 2048;
+
 struct MidiOutputPacketBuilder {
     // Bound the per-block output by the same event budget the MIDI input path
     // reserves, so a dense arp/generator block is delivered in full rather than
@@ -191,7 +199,7 @@ struct MidiOutputPacketBuilder {
     // (events * ~16 bytes) comfortably covers the worst case. SysEx shares the
     // same buffer and yields to the byte bound. Events past the buffer bound are
     // dropped (counted in `dropped`) rather than overflowing.
-    static constexpr std::size_t kMaxOutputEvents = 2048;
+    static constexpr std::size_t kMaxOutputEvents = kMaxMidiEventsPerBlock;
     static constexpr std::size_t kBufferBytes = kMaxOutputEvents * 16;
     alignas(MIDIPacketList) std::array<std::uint8_t, kBufferBytes> storage{};
 
