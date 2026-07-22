@@ -20,7 +20,14 @@ permissions:
   contents: write
 
 env:
-  SHIPYARD_VERSION: "0.70.0"
+  # Must stay >= the post_tag_hook push_mode floor (v0.78.0). This workflow
+  # is the ACTUAL post-tag path — it runs `shipyard release-bot hook run`,
+  # which reads `[release.post_tag_hook]` from .shipyard/config.toml. An
+  # older CLI here does not understand `push_mode = "pr"`, silently ignores
+  # it, and reverts to a direct push to main that the main-merge-queue
+  # ruleset refuses — so the changelog sync fails even though the local
+  # fleet CLI is current. Keep this in lockstep with tools/shipyard.toml.
+  SHIPYARD_VERSION: "0.78.0"
 
 jobs:
   sync:
