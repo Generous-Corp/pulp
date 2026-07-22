@@ -149,6 +149,16 @@ Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
+
+`pulp-test-playback-note-renderer` also fuzzes the no-stuck-notes property:
+fixed-seed randomized seek/loop/play sequences over overlapping notes assert
+the physical MIDI stream is a per-key on/off toggle (a note-on only for an idle
+key, a note-off only for a sounding key), and a terminal stop-flush must leave
+`has_active_notes()` false with every note-on matched by a note-off. A leaked
+note surfaces as an out-of-order toggle mid-run or a key left sounding after the
+flush. Seeds are hardcoded so a red is a real defect, not a flake; keep the
+non-vacuity witnesses (notes held live across seeks and loop wraps) asserting
+above zero so the all-clear cannot go vacuous.
 When export/install wiring changes, also run the installed SDK consumer smoke.
 Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
