@@ -154,6 +154,76 @@ TEST_CASE("MidiParameterMap learn binds the next CC", "[state][midi-map]") {
     REQUIRE_THAT(store.get_normalized(2), WithinAbs(0.0f, 1e-3f));
 }
 
+TEST_CASE("MidiParameterMap maps any parameter with zero driver code",
+          "[state][midi-map]") {
+    // The map is parameter-agnostic: it drives whatever StateStore + ParamID it
+    // is handed, so a hardware controller reaches any registered parameter
+    // without a line of per-controller or per-parameter code — only runtime
+    // learn/apply calls carrying opaque IDs. Prove that generically: register a
+    // spread of parameters, then learn and drive each one through the same loop.
+    state::StateStore store;
+    struct Target {
+        state::ParamID id;
+        uint8_t channel;
+        uint8_t cc;
+    };
+    const std::array<Target, 4> targets{{
+        {10, 0, 1},    // controller 1 on channel 0
+        {20, 3, 74},   // filter-cutoff-style CC on channel 3
+        {30, 9, 7},    // volume-style CC on channel 9
+        {40, 15, 120}, // a high CC on the top channel
+    }};
+    for (const auto& t : targets)
+        store.add_parameter(
+            {.id = t.id, .name = "P", .unit = "", .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+
+    state::MidiParameterMap map;
+    for (const auto& t : targets) {
+        // Learn: the next CC on this (channel, cc) binds to this parameter.
+        map.arm_learn(t.id);
+        map.pump();
+        map.handle_cc(store, t.channel, t.cc, 127);
+        REQUIRE_THAT(store.get_normalized(t.id), WithinAbs(1.0f, 1e-3f));
+        // The learned controller keeps driving it afterwards.
+        map.handle_cc(store, t.channel, t.cc, 0);
+        REQUIRE_THAT(store.get_normalized(t.id), WithinAbs(0.0f, 1e-3f));
+    }
+
+    // Every parameter has its own independent mapping: driving one does not
+    // disturb the others, and a CC that was never learned is ignored.
+    map.handle_cc(store, targets[1].channel, targets[1].cc, 127);
+    REQUIRE_THAT(store.get_normalized(targets[1].id), WithinAbs(1.0f, 1e-3f));
+    REQUIRE_THAT(store.get_normalized(targets[0].id), WithinAbs(0.0f, 1e-3f));
+    map.handle_cc(store, 0, 55, 127); // unmapped controller — no effect anywhere
+    REQUIRE_THAT(store.get_normalized(targets[0].id), WithinAbs(0.0f, 1e-3f));
+    REQUIRE_THAT(store.get_normalized(targets[3].id), WithinAbs(0.0f, 1e-3f));
+}
+
+TEST_CASE("MidiParameterMap re-learn replaces an existing mapping",
+          "[state][midi-map]") {
+    // Re-learning the same controller must retarget it, not stack a second
+    // binding: the old parameter goes quiet and the new one takes over.
+    state::StateStore store;
+    populate(store); // params 1 (Cutoff) and 2 (Res)
+
+    state::MidiParameterMap map;
+    map.arm_learn(1);
+    map.pump();
+    map.handle_cc(store, 0, 20, 127); // CC 20 → param 1
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0f, 1e-3f));
+
+    // Re-learn CC 20 onto param 2.
+    map.arm_learn(2);
+    map.pump();
+    map.handle_cc(store, 0, 20, 64); // CC 20 now → param 2 only
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(64.0f / 127.0f, 1e-3f));
+    // Param 1 is no longer driven by CC 20 (still at its earlier value).
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0f, 1e-3f));
+    map.handle_cc(store, 0, 20, 0);
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(1.0f, 1e-3f)); // untouched
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(0.0f, 1e-3f)); // followed
+}
+
 TEST_CASE("MidiParameterMap omni channel + clear", "[state][midi-map]") {
     state::StateStore store;
     populate(store);
