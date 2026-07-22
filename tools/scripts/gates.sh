@@ -15,6 +15,7 @@
 #   - node-ABI (Processor/PluginSlot virtual methods are append-only)
 #   - hotspot-size (known refactor hotspots must not exceed frozen LOC baselines)
 #   - planning-gitlink (no accidental `planning` submodule pointer bump)
+#   - silent-revert (no byte-exact undo of a recently-landed commit)
 #   - deps-audit (catches DEPENDENCIES.md / NOTICE.md drift, and checks the
 #     attribution text against the license files actually on disk)
 #   - deps-audit self-tests (tools/deps/test_audit.py — the coverage lane runs
@@ -72,6 +73,7 @@ NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
+SRG="$ROOT/tools/scripts/silent_revert_guard.py"
 CFG="$ROOT/tools/scripts/versioning.json"
 DEPS_AUDIT="$ROOT/tools/deps/audit.py"
 MANIFEST_MIRRORS="$ROOT/tools/scripts/check_manifest_mirrors.py"
@@ -216,6 +218,19 @@ if [ -f "$PGL" ]; then
     echo "" >&2
     echo "▸ planning-gitlink guard (no accidental submodule pointer bump)" >&2
     if ! "$PYTHON" "$PGL" --base "$BASE" --mode=report; then
+        fail=1
+    fi
+fi
+
+# ── 6c. silent-revert guard ────────────────────────────────────────────────
+# Rejects a push whose diff byte-exactly restores the pre-landing bytes of every
+# file a recent commit changed. That shape reads as ordinary work in review, so
+# no other gate catches it; it has landed on main and erased a real change.
+# Pure blob-sha comparison against local git — no build, no network.
+if [ -f "$SRG" ]; then
+    echo "" >&2
+    echo "▸ silent-revert guard (no byte-exact undo of a recent landing)" >&2
+    if ! "$PYTHON" "$SRG" --base "$BASE" --mode=report; then
         fail=1
     fi
 fi

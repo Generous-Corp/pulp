@@ -121,6 +121,7 @@ NAG="$ROOT/tools/scripts/node_abi_gate.py"
 HSG="$ROOT/tools/scripts/hotspot_size_guard.py"
 HSG_CFG="$ROOT/tools/scripts/hotspot_size_guard.json"
 PGL="$ROOT/tools/scripts/planning_gitlink_guard.py"
+SRG="$ROOT/tools/scripts/silent_revert_guard.py"
 SCC="$ROOT/tools/import-validation/check-source-contracts.py"
 SCT="$ROOT/tools/import-validation/test_source_contracts.py"
 CFG="$ROOT/tools/scripts/versioning.json"
@@ -292,6 +293,21 @@ if [ -f "$PGL" ]; then
         0) ;;
         1) fail=1 ;;
         *) echo "[pre-push] planning_gitlink_guard: internal error" >&2 ;;
+    esac
+fi
+
+# Silent-revert guard. Rejects a push whose diff byte-exactly restores the
+# pre-landing bytes of every file a recent commit changed — the shape a stale
+# worktree, a mis-resolved merge, or `git add -A` over old content produces. It
+# reads as ordinary work in review, so nothing else catches it. Pure blob-sha
+# comparison against local git; a deliberate revert passes via a `Revert "..."`
+# subject or a `Silent-Revert: skip` trailer.
+if [ -f "$SRG" ]; then
+    "$PYTHON" "$SRG" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] silent_revert_guard: internal error" >&2 ;;
     esac
 fi
 
