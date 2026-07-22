@@ -15,6 +15,7 @@
 
 #include <pulp/view/host_frame_pump.hpp>
 #include <pulp/view/view.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/gap_widgets.hpp>
@@ -444,6 +445,70 @@ TEST_CASE("a scripted host is pumped every vsync and never skips",
     REQUIRE(host.rendered == 1);  // dispatched every vsync, painted only once
     REQUIRE_FALSE(host.pump.suspended());
     REQUIRE(host.pump.resumes() == 1);
+}
+
+// ── The Logic OOP present seam: a repaint requested from the activity pump ───
+//
+// The Forge generation chrome drives its poll() from a FrameClock ACTIVITY probe
+// (the one channel that provably ticks inside an embedded editor), and that
+// poll() calls View::request_repaint() to show new build progress. Activity
+// probes run inside begin_host_frame() — AFTER the host has already sampled its
+// own dirty flag to pass as `needs_repaint`. So a repaint requested from a probe
+// lands too late for THIS tick's `should_render`, and a host that renders only on
+// `tick.should_render` would defer it a whole vsync — or, on the CoreGraphics
+// plugin host that leans on AppKit to service -setNeedsDisplay:, never present it
+// at all in Logic's out-of-process AU host (the "frozen progress in Logic" bug).
+// The fix folds a dirty set DURING the tick back into the render decision; this
+// test pins the seam that makes the fold necessary.
+namespace {
+
+/// Minimal PluginViewHost that only records repaint() calls, so a test can prove
+/// where in the tick a View::request_repaint() lands.
+class RecordingPluginViewHost : public PluginViewHost {
+public:
+    int repaint_calls = 0;
+    NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override { ++repaint_calls; }
+    void set_size(uint32_t, uint32_t) override {}
+    Size get_size() const override { return {0, 0}; }
+};
+
+} // namespace
+
+TEST_CASE("a repaint requested from an activity probe lands after the tick's dirty snapshot",
+          "[view][frame-pump][timing][contract][plugin-host]") {
+    View root;  // static tree: nothing animating, no host dirty flag set
+    RecordingPluginViewHost host;
+    root.set_plugin_view_host(&host);
+
+    FrameClock clock;
+    HostFramePump pump;
+    // Model the Forge chrome: an activity probe that draws new state by asking the
+    // host to repaint. request_repaint() routes to host.repaint() (plugin-view-host
+    // path) because no window host is attached.
+    clock.subscribe_activity([&](float) { root.request_repaint(); });
+
+    // Host samples its own dirty flag BEFORE the tick (here: clean → false), then
+    // runs the frame. pump_activity() fires the probe mid-tick.
+    const int repaint_before = host.repaint_calls;
+    auto tick = begin_host_frame(&root, clock, pump, 100.0, /*needs_repaint=*/false);
+
+    // The probe DID request a repaint during the tick…
+    REQUIRE(host.repaint_calls == repaint_before + 1);
+    // …but the pump's own decision missed it — the dirty arrived after the snapshot
+    // and the tree is otherwise static. A host rendering only on should_render
+    // would skip the frame the chrome just dirtied.
+    REQUIRE_FALSE(tick.should_render);
+
+    // The fix: fold a dirty observed AFTER begin_host_frame into the render
+    // decision. With it, the frame the probe dirtied presents on THIS tick.
+    const bool dirtied_during_tick = host.repaint_calls > repaint_before;
+    const bool render_effective = tick.should_render || dirtied_during_tick;
+    REQUIRE(render_effective);
+
+    root.set_plugin_view_host(nullptr);  // drop the back-pointer before host dies
 }
 
 // ── FrameClock subscription lifetime across host teardown ────────────────────

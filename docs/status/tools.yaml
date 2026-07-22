@@ -60,7 +60,7 @@ tools:
     invocation: python3 tools/import-design/fidelity_diff.py --render <render.png> --scene <scene.pulp.json> [--json report.json]
     inputs: A rendered PNG + the scene export (scene.pulp.json), and any per-widget reference PNGs named by its asset_manifest.
     outputs: Named per-check pass/fail lines; a JSON report with --json.
-    caveat: Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong.
+    caveat: Only nodes lowered to RECOGNIZED Pulp widgets. A design imported as the designer's own art (audio_widget "none") is invisible to its widget heuristics — it once read that opt-out sentinel as a kind and reported a near-perfect import as 832 failures. A high skip count means it checked little, not that little was wrong; a run where NOTHING measured reports SKIPPED and exits 3 (never OK), which is what fig-lane scenes produce today.
     availability: always
     skill: import-design
     docs: guides/importing-designs.md
@@ -131,7 +131,7 @@ tools:
     use_when: An import "looks off" and you need the NODE and the exact pixel delta, not a score.
     invocation: python3 tools/import-design/layout_parity.py <layout.json> [--gate-px 16] [--json report.json]
     inputs: The --dump-layout JSON from pulp-import-design, plus the design's own solved rects (its <stem>.geometry.json sibling, which --dump-layout writes for you).
-    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra. Exit 1 on findings; --gate-px N blocks only above N px and reports the rest as advisory.
+    outputs: Per-node dx/dy/dw/dh in design px, clustered by parent so one dropped alignment reports ONCE naming the parent; unmatched ids listed as dropped/extra (the import's synthetic `/mask-scope` clip wrappers are tallied separately as synthetic_extra, never as EXTRA). Exit 1 on findings; --gate-px N blocks only above N px and reports the rest as advisory.
     caveat: BOXES only, never the ink inside them. It went GREEN on a change that displaced glyph ink within correct boxes — a clean run means the boxes are right, never that the render is. For material (colour/opacity/gradients/shadows) nothing here helps; look at pixels.
     availability: always
     skill: import-design

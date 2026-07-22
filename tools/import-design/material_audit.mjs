@@ -627,6 +627,31 @@ export function auditCodegen(materials, envelope, js) {
   return { findings, declaredCounts, emittedCounts, coverage };
 }
 
+/**
+ * Collapse byte-identical findings before they reach the report.
+ *
+ * The checks iterate DECLARED occurrences, and a node can declare the same
+ * property twice — the reference files carry knob bases with two DROP_SHADOWs,
+ * and the same shape with a repeated unsupported effect type yields two
+ * findings that render as the same line twice. A doubled line adds no
+ * information and reads like a tool bug, which is its own kind of credibility
+ * drop for an auditor. The COUNT tables are deliberately left alone: they
+ * tally occurrences (2 declared, 2 dropped), and that stays honest — only the
+ * per-line findings output is deduped.
+ */
+export function dedupFindings(findings) {
+  const seen = new Set();
+  const out = [];
+  for (const f of findings) {
+    const key = JSON.stringify(
+      [f.stage || 'envelope', f.node_id, f.property, f.declared, f.emitted]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
+}
+
 function printTable(title, declaredCounts, emittedCounts, diagnosedCounts) {
   const keys = Object.keys(declaredCounts).sort();
   process.stdout.write(`${title}\n\n`);
@@ -674,7 +699,7 @@ function main() {
 
   let cg = null;
   if (opts.js) cg = auditCodegen(materials, envelope, readFileSync(opts.js, 'utf8'));
-  const allFindings = [...envFindings, ...(cg ? cg.findings : [])];
+  const allFindings = dedupFindings([...envFindings, ...(cg ? cg.findings : [])]);
 
   if (!opts.quiet) {
     printTable(`Material audit — DECODE stage (.fig -> envelope) — `

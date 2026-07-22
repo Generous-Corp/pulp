@@ -497,20 +497,40 @@ jobs:
                   "(cache-warming run; macOS caches live on local disk)",
                   file=sys.stderr,
               )
-          include += [
-              {
+          # Windows is advisory, GitHub-hosted, and slow, and a run carries four
+          # Windows jobs (this leg plus the three compile gates below). The repo
+          # gets a fixed pool of concurrent GitHub-hosted jobs, so a handful of
+          # simultaneously open PRs fills nearly every slot with advisory Windows
+          # work and starves the one REQUIRED hosted check
+          # (`Build + prove + (owner-gated) deploy`, ubuntu-latest). A merge-queue
+          # entry then sits in AWAITING_CHECKS until its check-response timeout
+          # expires and gets evicted, so nothing lands at all.
+          #
+          # Windows therefore runs where it actually gates: the serial
+          # `merge_group` validation, which builds PR ∪ main and is strictly
+          # better coverage than the PR head. `push` keeps it for Windows
+          # ccache warming, and workflow_dispatch keeps it for explicit reruns.
+          # PR heads keep macOS (self-hosted) and Linux for fast signal.
+          if EVENT_NAME != "pull_request":
+              include.append({
                   "key": "windows",
                   "name": "Windows (x64)",
                   "runs_on_json": windows_runs_on,
                   "provider": windows_provider,
-              },
-              {
-                  "key": "linux",
-                  "name": "Linux (x64)",
-                  "runs_on_json": linux_runs_on,
-                  "provider": REQUESTED,
-              },
-          ]
+              })
+          else:
+              print(
+                  "resolve-provider: pull_request event — Windows leg omitted "
+                  "(gated in the merge queue; keeps hosted concurrency free for "
+                  "the required ubuntu check)",
+                  file=sys.stderr,
+              )
+          include.append({
+              "key": "linux",
+              "name": "Linux (x64)",
+              "runs_on_json": linux_runs_on,
+              "provider": REQUESTED,
+          })
 
           matrix = {"include": include}
 
@@ -1154,7 +1174,14 @@ jobs:
   windows-msvc-release-gate:
     needs: classify
     # Not a cache producer; skip on cache-warming push runs.
-    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
+    # Advisory Windows gate — merge-queue-gated, not PR-head-gated. See the
+    # Windows-leg note in resolve-provider: four hosted Windows jobs per run
+    # saturate the concurrent-hosted-job pool and starve the required
+    # ubuntu check that the merge queue waits on.
+    if: >-
+      needs.classify.outputs.native_build_required == 'true'
+      && github.event_name != 'push'
+      && github.event_name != 'pull_request'
     runs-on: windows-latest
     name: Windows MSVC release-path gate
     steps:
@@ -1214,7 +1241,14 @@ jobs:
   windows-midi2-gate:
     needs: classify
     # Not a cache producer; skip on cache-warming push runs.
-    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
+    # Advisory Windows gate — merge-queue-gated, not PR-head-gated. See the
+    # Windows-leg note in resolve-provider: four hosted Windows jobs per run
+    # saturate the concurrent-hosted-job pool and starve the required
+    # ubuntu check that the merge queue waits on.
+    if: >-
+      needs.classify.outputs.native_build_required == 'true'
+      && github.event_name != 'push'
+      && github.event_name != 'pull_request'
     runs-on: windows-latest
     name: Windows MIDI Services SDK compile-gate (advisory)
     continue-on-error: true
@@ -1269,7 +1303,14 @@ jobs:
   windows-ble-gate:
     needs: classify
     # Not a cache producer; skip on cache-warming push runs.
-    if: needs.classify.outputs.native_build_required == 'true' && github.event_name != 'push'
+    # Advisory Windows gate — merge-queue-gated, not PR-head-gated. See the
+    # Windows-leg note in resolve-provider: four hosted Windows jobs per run
+    # saturate the concurrent-hosted-job pool and starve the required
+    # ubuntu check that the merge queue waits on.
+    if: >-
+      needs.classify.outputs.native_build_required == 'true'
+      && github.event_name != 'push'
+      && github.event_name != 'pull_request'
     runs-on: windows-latest
     name: Windows BLE compile-gate (advisory)
     continue-on-error: true
@@ -1435,6 +1476,11 @@ jobs:
           fi
           if [ "${{ needs.classify.outputs.native_build_required }}" != "true" ]; then
             echo "Skip-safe PR — no C++/Swift build input changed. windows gate ✓ (no native build)"
+            exit 0
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Windows runs in the merge queue, not on the PR head — windows alias ✓"
+            echo "(advisory; the serial merge_group validation builds PR ∪ main on Windows before this lands)"
             exit 0
           fi
           conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
