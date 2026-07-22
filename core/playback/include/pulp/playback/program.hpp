@@ -19,6 +19,7 @@ namespace pulp::playback {
 class ProgramCompilerTask;
 class AudioTrackRendererProgram;
 class DecodedAudioAssetPool;
+class TrackAutomationProgram;
 
 enum class ProgramErrorCode : std::uint8_t {
     InvalidGeneration,
@@ -103,13 +104,24 @@ class TrackProgram {
     const AudioTrackRendererProgram* audio_program() const noexcept {
         return audio_program_.get();
     }
+    std::span<const timeline::ItemId> ordered_device_placement_ids() const noexcept {
+        return device_placement_ids_;
+    }
+    const TrackAutomationProgram* automation_program() const noexcept {
+        return automation_program_.get();
+    }
+    const std::shared_ptr<const TrackAutomationProgram>& automation_program_owner() const noexcept {
+        return automation_program_;
+    }
 
   private:
     friend class ProgramCompilerTask;
     TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                  ProviderSelectorProgram provider, RendererStatePolicy state_policy,
                  std::vector<timeline::ItemId> clip_ids, std::vector<NoteProgramEvent> note_events,
-                 std::shared_ptr<const AudioTrackRendererProgram> audio_program) noexcept;
+                 std::shared_ptr<const AudioTrackRendererProgram> audio_program,
+                 std::vector<timeline::ItemId> device_placement_ids,
+                 std::shared_ptr<const TrackAutomationProgram> automation_program) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
@@ -118,6 +130,8 @@ class TrackProgram {
     std::vector<timeline::ItemId> clip_ids_;
     std::vector<NoteProgramEvent> note_events_;
     std::shared_ptr<const AudioTrackRendererProgram> audio_program_;
+    std::vector<timeline::ItemId> device_placement_ids_;
+    std::shared_ptr<const TrackAutomationProgram> automation_program_;
 };
 
 class PlaybackProgram {

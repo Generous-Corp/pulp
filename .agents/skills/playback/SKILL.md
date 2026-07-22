@@ -83,8 +83,17 @@ requires exact tempo-map owner identity, rejects duplicate lane IDs and
 device-parameter targets, and stores programs in lane-ItemId order. Preserve
 unchanged program owners when rebuilding it: mixed child generations are
 intentional because each cursor adopts by its lane program's generation and
-instance token. This grouping is not proof of Timeline document attachment;
-authored-lane dirty tracking belongs to the future track compiler.
+instance token. This grouping is not proof of Timeline document attachment.
+
+`TrackAutomationCompiler` (with `AutomationProgramCompiler` for a single lane)
+lowers a Track's attached automation lanes into a portable `TrackAutomationProgram`
+with no runtime graph identities. It is a bounded, resumable state machine —
+one placement/lane/point/merge unit of work per `step()`, so a large automation
+set never stalls a compile slice — and it is incremental: a clean track reuses
+its portable automation while a dirty track rebuilds. Reads the model through
+stable `Track` accessors (`device_chain()`, `automation_lanes()`); the ordering
+key is `DeviceParameterTarget::device_placement_id`. This owns the authored-lane
+dirty tracking the aggregate above deliberately does not.
 
 Use this skill when changing `core/playback`, the master timeline transport, or
 the format-layer projection from playback snapshots to `ProcessContext`.

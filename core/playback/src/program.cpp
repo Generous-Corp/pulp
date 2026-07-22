@@ -1,4 +1,5 @@
 #include <pulp/playback/program.hpp>
+#include <pulp/playback/track_automation_program.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -16,10 +17,14 @@ TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                            ProviderSelectorProgram provider, RendererStatePolicy state_policy,
                            std::vector<timeline::ItemId> clip_ids,
                            std::vector<NoteProgramEvent> note_events,
-                           std::shared_ptr<const AudioTrackRendererProgram> audio_program) noexcept
+                           std::shared_ptr<const AudioTrackRendererProgram> audio_program,
+                           std::vector<timeline::ItemId> device_placement_ids,
+                           std::shared_ptr<const TrackAutomationProgram> automation_program) noexcept
     : id_(id), generation_(generation), provider_(provider), state_policy_(state_policy),
       clip_ids_(std::move(clip_ids)), note_events_(std::move(note_events)),
-      audio_program_(std::move(audio_program)) {}
+      audio_program_(std::move(audio_program)),
+      device_placement_ids_(std::move(device_placement_ids)),
+      automation_program_(std::move(automation_program)) {}
 
 PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                                  timeline::ItemId project_id, timeline::ItemId sequence_id,

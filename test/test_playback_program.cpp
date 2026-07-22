@@ -1,5 +1,6 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/stable_renderer_shell.hpp>
+#include <pulp/playback/track_automation_program.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
@@ -60,6 +61,39 @@ std::shared_ptr<const Project> make_many_track_project(std::size_t track_count) 
     input.id = {1};
     input.name = "many";
     input.next_item_id = 10 + track_count + 1;
+    input.root_sequence_id = {2};
+    input.sequences.push_back(std::move(sequence));
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+AutomationLane make_automation_lane(std::uint64_t lane_id, std::uint64_t point_id,
+                                    std::uint64_t placement_id, std::uint32_t parameter,
+                                    std::int64_t tick, float value) {
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{point_id}, {tick}, value},
+         AutomationPoint{{point_id + 10}, {tick + 480}, value + 0.1f}}));
+    return take(AutomationLane::create({lane_id},
+                                       DeviceParameterTarget{{placement_id}, parameter},
+                                       std::move(curve)));
+}
+
+std::shared_ptr<const Project> make_automation_project() {
+    TrackInput track_input;
+    track_input.id = {10};
+    track_input.name = "automated";
+    track_input.device_chain = {{{30}}, {{20}}};
+    track_input.automation_lanes = {
+        make_automation_lane(42, 52, 30, 8, 960, 0.75f),
+        make_automation_lane(41, 51, 20, 7, 0, 0.25f),
+    };
+    auto track = take(Track::create(std::move(track_input)));
+    auto other = take(Track::create({11}, "other", {}));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
+                                          std::vector<Track>{std::move(track), std::move(other)}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "automation";
+    input.next_item_id = 63;
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
@@ -177,6 +211,84 @@ TEST_CASE("program compiler coalesces snapshots and reuses clean track programs"
     REQUIRE(next->find_track({10}) != first_dirty);
     REQUIRE(next->find_track({20}) == first_clean);
     REQUIRE(compiler.status().coalesced_requests == 1);
+}
+
+TEST_CASE("program compiler lowers track automation without runtime graph identities") {
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    const auto project = make_automation_project();
+    const auto map = tempo_map();
+
+    REQUIRE(compiler.submit(request(project, map, 1, {.all = true})));
+    drain(executor, compiler);
+
+    const auto program = store.read();
+    REQUIRE(program);
+    const auto* track = program->find_track({10});
+    REQUIRE(track != nullptr);
+    REQUIRE(track->ordered_device_placement_ids().size() == 2);
+    REQUIRE(track->ordered_device_placement_ids()[0] == ItemId{30});
+    REQUIRE(track->ordered_device_placement_ids()[1] == ItemId{20});
+    REQUIRE(track->automation_program() != nullptr);
+    REQUIRE(track->automation_program()->tempo_map_owner() == map);
+    REQUIRE(track->automation_program()->track_id() == ItemId{10});
+    REQUIRE(track->automation_program()->programs().size() == 2);
+    REQUIRE(track->automation_program()->programs()[0]->lane_id() == ItemId{41});
+    REQUIRE(track->automation_program()->programs()[1]->lane_id() == ItemId{42});
+    REQUIRE(track->automation_program()->find_lane({41})->generation() == 1);
+    REQUIRE(track->automation_program()->find_lane({41})->target() ==
+            DeviceParameterTarget{{20}, 7});
+}
+
+TEST_CASE("program compiler reuses clean portable automation and rebuilds dirty tracks") {
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    const auto project = make_automation_project();
+    const auto map = tempo_map();
+
+    REQUIRE(compiler.submit(request(project, map, 1, {.all = true})));
+    drain(executor, compiler);
+    const auto first = store.read();
+    const auto* first_track = first->find_track({10});
+    const auto* first_automation = first_track->automation_program();
+
+    REQUIRE(compiler.submit(request(project, map, 2, {false, {{11}}})));
+    drain(executor, compiler);
+    const auto clean = store.read();
+    REQUIRE(clean->find_track({10}) == first_track);
+    REQUIRE(clean->find_track({10})->automation_program() == first_automation);
+
+    REQUIRE(compiler.submit(request(project, map, 3, {false, {{10}}})));
+    drain(executor, compiler);
+    const auto dirty = store.read();
+    REQUIRE(dirty->find_track({10}) != first_track);
+    REQUIRE(dirty->find_track({10})->automation_program() != first_automation);
+    REQUIRE(dirty->find_track({10})->automation_program()->find_lane({41})->generation() == 3);
+}
+
+TEST_CASE("program compiler budgets track automation across executor slices") {
+    PlaybackProgramStore store;
+    HoldingExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+
+    REQUIRE(compiler.submit(request(make_automation_project(), tempo_map(), 1, {.all = true})));
+    executor.run_one_slice();
+    executor.run_one_slice();
+    executor.run_one_slice();
+
+    REQUIRE(compiler.status().busy);
+    REQUIRE(compiler.status().active_tracks_completed == 0);
+    REQUIRE_FALSE(store.has_value());
+
+    executor.drain();
+    REQUIRE_FALSE(compiler.status().busy);
+    REQUIRE(store.has_value());
+    const auto* automation = store.read()->find_track({10})->automation_program();
+    REQUIRE(automation->programs().size() == 2);
+    REQUIRE(automation->find_lane({41})->segments().size() == 2);
+    REQUIRE(automation->find_lane({42})->segments().size() == 2);
 }
 
 TEST_CASE("compiler rejects stale malformed and unknown-dirty requests") {
@@ -482,8 +594,11 @@ TEST_CASE("many-track linking and validation advance in charged work units") {
     REQUIRE(compiler.submit(request(make_many_track_project(129), tempo_map(), 1,
                                     {.all = true})));
     std::size_t slices = 0;
-    executor.run_one_slice();
-    ++slices;
+    while (compiler.status().active_tracks_completed == 0) {
+        executor.run_one_slice();
+        ++slices;
+        REQUIRE(slices < 100);
+    }
     REQUIRE(compiler.status().active_tracks_completed == 1);
     while (compiler.status().busy) {
         executor.run_one_slice();
