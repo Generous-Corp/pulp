@@ -209,6 +209,38 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
 
+### Derived surfaces are projections of the manifest, not the registry
+
+Every downstream agent surface is a **pure function of the committed
+`timeline_schema.json`**, not a second reader of the registry. Each is guarded by
+the same shared `schema_drift_check.py` (its own artifact, its own ctest), so the
+chain is `registry → manifest → surface`: the JSON gate guards the first edge, a
+per-surface gate guards the second. A surface generator never links the timeline
+library — it consumes the JSON.
+
+The **TypeScript-type surface** is the first such projection:
+`core/timeline/tools/schema_ts_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_types.d.ts` — one `export interface` per schema
+type, plus a `TimelineSchemaTypeName` union and a `TimelineSchemaTypeMap`. Kinds
+map by `x-pulp-kind` (`Boolean`→`boolean`; `U32`/`I64String`/`U64String`→
+`number | string`, the union covering both the string wire form of the 64-bit
+kinds and a numeric runtime value; `String`→`string`; `Object`→
+`Record<string, unknown>`; `Array`→`readonly unknown[]`), and a field `$ref`
+overrides its kind with the referenced interface. **After regenerating
+`timeline_schema.json`, regenerate the `.d.ts` too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_ts_emit.py --out core/timeline/schema/timeline_types.d.ts
+```
+
+The `timeline-schema-ts-drift` ctest byte-checks the committed `.d.ts` against a
+fresh emission; `timeline-schema-ts-selftest`
+(`core/timeline/tools/test_schema_ts_emit.py`) proves determinism, complete
+projection, kind mapping, and that the gate catches a mutated artifact. Note the
+generator is Python (a pure JSON projection needs no build), so it sits beside
+the C++ emitter under `core/timeline/tools/` but reuses the shared gate rather
+than a bespoke drift script.
+
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,
