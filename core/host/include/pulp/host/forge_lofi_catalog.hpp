@@ -19,12 +19,23 @@
 // Macro-knob mapping:
 //   * Delay (feedback echo)  → "Time"  = time_ms + "Feedback" = feedback
 //                                                     (time_ms per-sample, interpolated)
-//   * Filter (Svf lowpass)   → "Tone"  = cutoff_hz   (sample-accurate)
+//   * Filter (Svf)           → "Tone"  = cutoff_hz + "Resonance" = resonance
+//                                                     (sample-accurate; mode is
+//                                                      fixed per registered type)
 //   * Waveshaper (tanh)      → "Drive" = drive       (sample-accurate)
 //   * Dry/Wet (DryWetMixer)  → "Mix"   = mix         (BLOCK-rate; see note below)
 //   * Noise                  → "Hiss"  = level       (sample-accurate)
 //   * Bitcrush/decimator     → "Crush" = bit_depth + sample_rate_reduction
 //                                                     (sample-accurate)
+//   * Trim (gain stage)      → "Level" = gain_db     (sample-accurate)
+//   * Ping-pong delay        → "Time"  = time_ms + "Feedback" + "Width"
+//                                                     (TRUE STEREO: 2-in/2-out)
+//
+// Port arity: every node here is one logical mono in → one logical mono out,
+// EXCEPT the dry/wet mixer (two logical inputs, dry and wet) and the ping-pong
+// delay, whose two ports are the LEFT and RIGHT halves of one logical stereo
+// wire. A host that runs the catalog dual-mono (one instance per channel)
+// instantiates a true-stereo node once, spanning both channel rails.
 //
 // DryWetMixer is block-rate on purpose: DryWetMixerT's public API is block-oriented
 // (a scalar set_mix() plus a block mix_wet() over an internal per-channel dry
@@ -54,17 +65,33 @@ inline constexpr const char* kWaveshaperTypeId = "forge_lofi_waveshaper";
 inline constexpr const char* kDryWetTypeId     = "forge_lofi_drywet";
 inline constexpr const char* kNoiseTypeId      = "forge_lofi_noise";
 inline constexpr const char* kBitcrushTypeId   = "forge_lofi_bitcrush";
+inline constexpr const char* kTrimTypeId       = "forge_lofi_trim";
+inline constexpr const char* kPingPongTypeId   = "forge_lofi_ping_pong";
+
+// The filter's response mode is fixed when the node is REGISTERED, not injected:
+// each mode is its own registered type, so a baked build's filter character is
+// frozen in the artifact and no control-thread write can change it mid-render.
+// kFilterTypeId keeps its original identity (lowpass) so artifacts baked before
+// the other modes existed keep resolving.
+inline constexpr const char* kFilterHighpassTypeId = "forge_lofi_filter_highpass";
+inline constexpr const char* kFilterBandpassTypeId = "forge_lofi_filter_bandpass";
+inline constexpr const char* kFilterNotchTypeId    = "forge_lofi_filter_notch";
 
 // ── Injectable macro-knob param ids ──────────────────────────────────────
 // Node-local; the framework namespaces per node so two nodes never collide.
 inline constexpr state::ParamID kDelayTimeMs       = 1;  // "Time"
 inline constexpr state::ParamID kDelayFeedback     = 2;  // "Feedback"
 inline constexpr state::ParamID kFilterCutoffHz    = 1;  // "Tone"
+inline constexpr state::ParamID kFilterResonance   = 2;  // "Resonance"
 inline constexpr state::ParamID kWaveshaperDrive   = 1;  // "Drive"
 inline constexpr state::ParamID kDryWetMix         = 1;  // "Mix"
 inline constexpr state::ParamID kNoiseLevel        = 1;  // "Hiss"
 inline constexpr state::ParamID kBitcrushBitDepth  = 1;  // "Crush" (depth)
 inline constexpr state::ParamID kBitcrushRateDiv   = 2;  // "Crush" (rate reduction)
+inline constexpr state::ParamID kTrimGainDb        = 1;  // "Level"
+inline constexpr state::ParamID kPingPongTimeMs    = 1;  // "Time"
+inline constexpr state::ParamID kPingPongFeedback  = 2;  // "Feedback"
+inline constexpr state::ParamID kPingPongWidth     = 3;  // "Width"
 
 // Longest delay the node can address; sizes the bake-time buffer allocation.
 inline constexpr float kDelayMaxMs = 2000.0f;
@@ -136,15 +163,39 @@ inline CustomNodeType make_delay_node() {
     return t;
 }
 
-// ── Filter (Svf lowpass) — "Tone" ────────────────────────────────────────
+// ── Filter (Svf) — "Tone" + "Resonance" ──────────────────────────────────
+// One factory, four registered types — one per SVF response mode. The mode is
+// a REGISTRATION-time choice rather than a param because it selects which of
+// the TPT structure's simultaneous outputs is read: a build authored as a
+// bandpass is a bandpass for the artifact's life, and no injected value can
+// turn it into something else mid-render.
+//
+// Resonance (Q) is injectable alongside cutoff, which is what makes a sweep
+// sing rather than merely dim: at Q = 12 the response peaks ~25 dB above the
+// Q = 0.707 (maximally flat) reference at cutoff. Bandpass at high Q is the
+// "telephone"/formant color; notch is the phaser-adjacent hollow.
+//
+// Cost note: SvfT recomputes its coefficients (one tan()) inside EVERY setter,
+// so calling both setters per sample would double the transcendental cost of a
+// static-Q sweep. Resonance is therefore written only when the injected value
+// actually moves, and cutoff (which recomputes against the current Q) is
+// written every sample — one tan() per sample except while Q is in motion.
 struct FilterInstance {
     signal::Svf svf;
     double sample_rate = 48000.0;
+    float resonance = 0.707f;
 };
 
-inline CustomNodeType make_filter_node() {
+inline CustomNodeType make_filter_node(
+    signal::Svf::Mode mode = signal::Svf::Mode::lowpass) {
     CustomNodeType t;
-    t.type_id = kFilterTypeId;
+    switch (mode) {
+        case signal::Svf::Mode::highpass: t.type_id = kFilterHighpassTypeId; break;
+        case signal::Svf::Mode::bandpass: t.type_id = kFilterBandpassTypeId; break;
+        case signal::Svf::Mode::notch:    t.type_id = kFilterNotchTypeId;    break;
+        case signal::Svf::Mode::lowpass:
+        default:                          t.type_id = kFilterTypeId;         break;
+    }
     t.version = 1;
     t.num_input_ports = 1;
     t.num_output_ports = 1;
@@ -152,16 +203,20 @@ inline CustomNodeType make_filter_node() {
     t.lowerable = true;
     t.create = []() -> void* { return new FilterInstance{}; };
     t.destroy = [](void* p) { delete static_cast<FilterInstance*>(p); };
-    t.prepare = [](void* p, double sr, int /*max_block*/) {
+    t.prepare = [mode](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<FilterInstance*>(p);
         s->sample_rate = sr;
         s->svf.set_sample_rate(static_cast<float>(sr));
-        s->svf.set_resonance(0.707f);            // Butterworth-ish, no peak
-        s->svf.set_mode(signal::Svf::Mode::lowpass);
+        s->resonance = 0.707f;                   // Butterworth-ish, no peak
+        s->svf.set_resonance(s->resonance);
+        s->svf.set_mode(mode);
     };
     t.reset = [](void* p) { static_cast<FilterInstance*>(p)->svf.reset(); };
     // cutoff_hz: 20 Hz .. 20 kHz, default fully open (transparent until turned).
     t.baked_params.push_back({kFilterCutoffHz, 20.0f, 20000.0f, 20000.0f});
+    // resonance (Q): 0.5 (gently damped) .. 12 (a singing peak), default 0.707
+    // — maximally flat, so an un-bound Resonance is the old fixed behavior.
+    t.baked_params.push_back({kFilterResonance, 0.5f, 12.0f, 0.707f});
     t.process_instance_baked_param =
         [](void* p, audio::BufferView<float>& out,
            const audio::BufferView<const float>& in, int n,
@@ -170,8 +225,13 @@ inline CustomNodeType make_filter_node() {
             const float* i = in.channel_ptr(0);
             float* o = out.channel_ptr(0);
             for (int k = 0; k < n; ++k) {
-                const float cutoff =
-                    params.value_at(kFilterCutoffHz, static_cast<std::int32_t>(k));
+                const auto off = static_cast<std::int32_t>(k);
+                const float res = params.value_at(kFilterResonance, off);
+                if (res != s->resonance) {
+                    s->resonance = res;
+                    s->svf.set_resonance(res);
+                }
+                const float cutoff = params.value_at(kFilterCutoffHz, off);
                 s->svf.set_frequency(cutoff);  // sample-accurate retune (a tan()/sample)
                 o[static_cast<std::size_t>(k)] =
                     s->svf.process(i[static_cast<std::size_t>(k)]);
@@ -364,6 +424,158 @@ inline CustomNodeType make_bitcrush_node() {
                 // Mid-tread quantization to 2^bits levels across [-1, 1].
                 const float scale = std::exp2(bits - 1.0f);  // 2^(bits-1)
                 o[static_cast<std::size_t>(k)] = std::round(s->held * scale) / scale;
+            }
+        };
+    return t;
+}
+
+// ── Trim (gain stage) — "Level" ──────────────────────────────────────────
+// A plain injectable gain in dB. It exists because every level decision in a
+// generated chain — the boost in front of a saturator, the make-up behind it,
+// the output level of the whole plugin — otherwise has nowhere to live: the
+// graph's built-in Gain node freezes its value at build time and cannot be
+// bound to a macro. ±24 dB spans "barely nudged" to "slammed into the drive"
+// in both directions, and 0 dB is exactly unity, so an untouched Trim is
+// bit-transparent.
+//
+// exp10 is memoized against the last dB value: a Level knob is static for most
+// of its life, so the common case costs a compare instead of a pow() per sample,
+// while a moving knob still resolves per sample.
+struct TrimInstance {
+    float last_db = 0.0f;
+    float gain = 1.0f;
+};
+
+inline CustomNodeType make_trim_node() {
+    CustomNodeType t;
+    t.type_id = kTrimTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Level";
+    t.lowerable = true;
+    t.create = []() -> void* { return new TrimInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<TrimInstance*>(p); };
+    t.reset = [](void* p) {
+        auto* s = static_cast<TrimInstance*>(p);
+        s->last_db = 0.0f;
+        s->gain = 1.0f;
+    };
+    // gain_db: −24 .. +24 dB, default 0 (unity — transparent until turned).
+    t.baked_params.push_back({kTrimGainDb, -24.0f, 24.0f, 0.0f});
+    t.process_instance_baked_param =
+        [](void* p, audio::BufferView<float>& out,
+           const audio::BufferView<const float>& in, int n,
+           const BakedParamView& params) {
+            auto* s = static_cast<TrimInstance*>(p);
+            const float* i = in.channel_ptr(0);
+            float* o = out.channel_ptr(0);
+            for (int k = 0; k < n; ++k) {
+                const float db =
+                    params.value_at(kTrimGainDb, static_cast<std::int32_t>(k));
+                if (db != s->last_db) {
+                    s->last_db = db;
+                    s->gain = std::exp2(db * (1.0f / 6.020599913279624f));
+                }
+                o[static_cast<std::size_t>(k)] =
+                    i[static_cast<std::size_t>(k)] * s->gain;
+            }
+        };
+    return t;
+}
+
+// ── Ping-pong delay — TRUE STEREO, "Time" + "Feedback" + "Width" ─────────
+// The one node in this catalog whose two ports are the LEFT and RIGHT halves of
+// a single logical wire rather than two logical inputs. It cannot be expressed
+// as two independent mono instances: the effect IS the cross-coupling, each
+// channel's delay recirculating into the OTHER channel's line, so an echo
+// bounces L → R → L → R at `time_ms` intervals.
+//
+//   wet_l = line_l.read(d);            wet_r = line_r.read(d);
+//   line_l.push(in_l + fb * wet_r);    line_r.push(in_r + fb * wet_l);
+//
+// With signal in the left channel only, echo 1 leaves left, echo 2 leaves right,
+// echo 3 left … — the alternation is a property of the topology, not of a pan
+// LFO, so it holds at every delay time and feedback setting.
+//
+// Because the loop traverses BOTH lines before returning to its own channel,
+// the round-trip gain is fb², so the tail decays faster than a mono delay at
+// the same setting; feedback is still clamped below unity so a runaway is
+// structurally impossible.
+//
+// `width` collapses the bounce toward the centre: 1 keeps the taps hard L/R,
+// 0 sums both taps equally into both outputs (a plain stereo delay with no
+// bounce), values between crossfade. The dry signal is never touched, so the
+// output is dry + wet exactly like the mono delay node.
+struct PingPongInstance {
+    signal::DelayLine line_l;
+    signal::DelayLine line_r;
+    double sample_rate = 48000.0;
+    int max_delay_samples = 1;
+};
+
+inline CustomNodeType make_ping_pong_node() {
+    CustomNodeType t;
+    t.type_id = kPingPongTypeId;
+    t.version = 1;
+    t.num_input_ports = 2;   // 0 = left, 1 = right (ONE logical stereo wire)
+    t.num_output_ports = 2;
+    t.default_name = "Ping Pong";
+    t.lowerable = true;
+    t.create = []() -> void* { return new PingPongInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<PingPongInstance*>(p); };
+    t.prepare = [](void* p, double sr, int /*max_block*/) {
+        auto* s = static_cast<PingPongInstance*>(p);
+        s->sample_rate = sr;
+        s->max_delay_samples =
+            std::max(1, static_cast<int>(std::ceil(kDelayMaxMs * 0.001 * sr)));
+        s->line_l.prepare(s->max_delay_samples);
+        s->line_r.prepare(s->max_delay_samples);
+    };
+    t.reset = [](void* p) {
+        auto* s = static_cast<PingPongInstance*>(p);
+        s->line_l.reset();
+        s->line_r.reset();
+    };
+    // Same time/feedback envelope as the mono delay; width defaults to a full
+    // hard bounce (the thing the node is asked for by name).
+    t.baked_params.push_back({kPingPongTimeMs, 1.0f, kDelayMaxMs, 350.0f});
+    t.baked_params.push_back({kPingPongFeedback, 0.0f, 0.95f, 0.45f});
+    t.baked_params.push_back({kPingPongWidth, 0.0f, 1.0f, 1.0f});
+    t.process_instance_baked_param =
+        [](void* p, audio::BufferView<float>& out,
+           const audio::BufferView<const float>& in, int n,
+           const BakedParamView& params) {
+            auto* s = static_cast<PingPongInstance*>(p);
+            const float* il = in.channel_ptr(0);
+            const float* ir = in.channel_ptr(1);
+            float* ol = out.channel_ptr(0);
+            float* or_ = out.channel_ptr(1);
+            const float sr_per_ms = static_cast<float>(s->sample_rate) * 0.001f;
+            const float max_d = static_cast<float>(s->max_delay_samples);
+            for (int k = 0; k < n; ++k) {
+                const auto off = static_cast<std::int32_t>(k);
+                const float time_ms = params.value_at(kPingPongTimeMs, off);
+                const float fb = std::clamp(params.value_at(kPingPongFeedback, off),
+                                            0.0f, 0.95f);
+                const float width = std::clamp(params.value_at(kPingPongWidth, off),
+                                               0.0f, 1.0f);
+
+                float delay_samples = time_ms * sr_per_ms;
+                delay_samples = std::clamp(delay_samples, 1.0f, max_d);
+
+                const float dry_l = il[static_cast<std::size_t>(k)];
+                const float dry_r = ir[static_cast<std::size_t>(k)];
+                const float wet_l = s->line_l.read(delay_samples);
+                const float wet_r = s->line_r.read(delay_samples);
+
+                s->line_l.push(dry_l + fb * wet_r);  // right tap feeds the left line
+                s->line_r.push(dry_r + fb * wet_l);  // and vice versa — the bounce
+
+                const float same = 0.5f + 0.5f * width;
+                const float cross = 0.5f - 0.5f * width;
+                ol[static_cast<std::size_t>(k)] = dry_l + same * wet_l + cross * wet_r;
+                or_[static_cast<std::size_t>(k)] = dry_r + same * wet_r + cross * wet_l;
             }
         };
     return t;
