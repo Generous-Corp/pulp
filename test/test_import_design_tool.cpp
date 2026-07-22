@@ -90,6 +90,64 @@ public:
     fs::path path;
 };
 
+/// A private temp root for one test case, published to the environment so
+/// child processes land their scratch dirs inside it too.
+///
+/// `catch_discover_tests` registers every case in this file as its own ctest
+/// test, so `ctest -j` runs them as concurrent processes sharing one system
+/// temp root. A case that reasons about *which* scratch dirs exist there is
+/// racing every sibling that drives the same lane. Scoping the root makes that
+/// bookkeeping observe only its own run. Restores the previous values on
+/// destruction so the override cannot leak into a later case.
+class ScopedTempRoot {
+public:
+    explicit ScopedTempRoot(const std::string& prefix) {
+        const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
+        fs::create_directories(path);
+        // std::filesystem::temp_directory_path consults TMPDIR on POSIX and
+        // TMP/TEMP on Windows; set every name so both agree with `path`.
+        for (const char* name : {"TMPDIR", "TMP", "TEMP"}) {
+            if (const char* prev = std::getenv(name)) saved_.emplace_back(name, prev);
+            else saved_.emplace_back(name, std::nullopt);
+            set(name, path.string().c_str());
+        }
+    }
+
+    ~ScopedTempRoot() {
+        for (const auto& [name, value] : saved_) {
+            if (value) set(name.c_str(), value->c_str());
+            else unset(name.c_str());
+        }
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+
+    ScopedTempRoot(const ScopedTempRoot&) = delete;
+    ScopedTempRoot& operator=(const ScopedTempRoot&) = delete;
+
+    fs::path path;
+
+private:
+    static void set(const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        ::setenv(name, value, 1);
+#endif
+    }
+
+    static void unset(const char* name) {
+#ifdef _WIN32
+        _putenv_s(name, "");
+#else
+        ::unsetenv(name);
+#endif
+    }
+
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
+};
+
 void write_text(const fs::path& path, const std::string& text) {
     fs::create_directories(path.parent_path());
     std::ofstream f(path);
@@ -2719,7 +2777,20 @@ TEST_CASE("pulp-import-design cleans its .fig scratch dir and sweeps stale ones"
     const std::string fixture = PULP_FIG_FIXTURE;
     REQUIRE_FALSE(fixture.empty());
 
-    const auto tmp_root = fs::temp_directory_path();
+    // Redirect the temp root for this case — including the CLI child, which
+    // inherits the environment — so the scratch bookkeeping below observes only
+    // this test's own runs.
+    //
+    // `make_scratch_dir` names every scratch dir after the fixture stem
+    // (`pulp-fig-synthetic-<tick>`) directly in the shared temp root, and nine
+    // other cases in this file drive the same fig lane with the same fixture.
+    // `catch_discover_tests` registers each case as its own ctest test, so
+    // `ctest -j8` runs them as concurrent processes: a sibling's live scratch
+    // dir appearing between the `before` snapshot and the final count makes the
+    // count grow and fails an assertion about *this* run's cleanup. Isolating
+    // the root fixes the race outright, which serializing would only paper over.
+    ScopedTempRoot private_tmp("fig-scratch-clean-root");
+    const auto tmp_root = private_tmp.path;
 
     // A stale sibling (mtime 48h back) models a run killed before its cleanup
     // destructor could fire; a fresh sibling models a concurrent live import.

@@ -19,6 +19,7 @@ rather than errors (mirrors the SKIP_RETURN_CODE 77 contract in CMake).
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 import unittest
@@ -687,6 +688,79 @@ class TestIntegration(unittest.TestCase):
         # No declared padding -> padding heuristic skips.
         pad = [r for r in report["results"] if r["heuristic"] == "padding"]
         self.assertTrue(all(r["status"] == "skip" for r in pad))
+
+
+class TestAllSkippedIsNotAPass(unittest.TestCase):
+    """A run that measured nothing must never read as OK.
+
+    The .fig lane emits scenes where every node opts out of the widget
+    heuristics (``audio_widget: "none"``), there are no ``type == "text"``
+    nodes, and no declared root padding — so every heuristic skips. The old
+    summary printed "OK" over that (fails == 0), which made the tool a lens
+    that lies green while contributing nothing.
+    """
+
+    def _fig_lane_inputs(self) -> tuple[str, str, str]:
+        import tempfile
+
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        root = pathlib.Path(td.name)
+        scene = {
+            "root": {
+                "type": "frame",
+                "name": "Panel",
+                "style": {"width": 200, "height": 120},
+                "audio_widget": "none",
+                "children": [
+                    {"type": "frame", "name": "child", "audio_widget": "none",
+                     "style": {"width": 40, "height": 40}, "children": []},
+                ],
+            }
+        }
+        (root / "scene.pulp.json").write_text(json.dumps(scene))
+        assets = root / "assets"
+        assets.mkdir()
+        render = root / "render.png"
+        Image.new("RGBA", (200, 120), BG).save(render)
+        return str(render), str(root / "scene.pulp.json"), str(assets)
+
+    def test_summary_is_not_ok_when_nothing_was_measured(self):
+        render, scene, assets = self._fig_lane_inputs()
+        report = fd.build_report(render, scene, assets, tolerance=0.15)
+        s = report["summary"]
+        self.assertEqual(s["measured"], 0)
+        self.assertEqual(s["fail"], 0)
+        self.assertFalse(s["ok"], "zero measurements must never report ok")
+        table = fd.format_table(report)
+        self.assertIn("SKIPPED — no applicable heuristics", table)
+        self.assertNotIn("->  OK", table)
+
+    def test_cli_exits_with_the_distinct_skip_code(self):
+        import contextlib
+        import io
+
+        render, scene, assets = self._fig_lane_inputs()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = fd.main(["--render", render, "--scene", scene,
+                          "--assets-dir", assets])
+        self.assertEqual(rc, 3, "all-skipped is neither pass (0) nor fail (1)")
+        self.assertIn("SKIPPED", out.getvalue())
+
+    def test_a_measured_run_still_reports_ok(self):
+        # Control: the good fixture measures real heuristics and stays OK, so
+        # the skip verdict cannot be triggered by a scene that merely has SOME
+        # skips (which every real run does).
+        report = fd.build_report(
+            str(FIXTURES / "render_good.png"),
+            str(FIXTURES / "scene.pulp.json"),
+            str(FIXTURES / "assets"),
+            tolerance=0.15,
+        )
+        self.assertGreater(report["summary"]["measured"], 0)
+        self.assertTrue(report["summary"]["ok"])
+        self.assertIn("->  OK", fd.format_table(report))
 
 
 if __name__ == "__main__":
