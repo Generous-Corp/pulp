@@ -10,5 +10,5 @@ PULP_VST3_PLUGIN(PulpWebViewPluginUID,
                  Steinberg::Vst::PlugType::kFx,
                  "Pulp",
                  "1.0.0",
-                 "https://github.com/danielraffel/pulp",
+                 "https://github.com/Generous-Corp/pulp",
                  pulp::examples::create_pulp_webview_plugin)

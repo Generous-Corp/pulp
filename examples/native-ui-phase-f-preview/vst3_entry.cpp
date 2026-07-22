@@ -10,5 +10,5 @@ PULP_VST3_PLUGIN(PulpChainerNativeUiUID,
                  Steinberg::Vst::PlugType::kFx,
                  "Pulp",
                  "0.1.0",
-                 "https://github.com/danielraffel/pulp",
+                 "https://github.com/Generous-Corp/pulp",
                  pulp::examples::create_chainer_native_ui_processor)

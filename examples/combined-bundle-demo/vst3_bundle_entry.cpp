@@ -16,7 +16,7 @@ PULP_VST3_BUNDLE_PLUGIN(BundleGain, pulp::examples::bundle::create_gain,
 PULP_VST3_BUNDLE_PLUGIN(BundleWidth, pulp::examples::bundle::create_width,
     {.id = "com.pulp.bundle-demo.width"})
 
-PULP_VST3_FACTORY_BEGIN("Pulp", "https://github.com/danielraffel/pulp",
+PULP_VST3_FACTORY_BEGIN("Pulp", "https://github.com/Generous-Corp/pulp",
                         "mailto:support@pulp.audio")
     PULP_VST3_BUNDLE_CLASS(BundleGain, kBundleGainUID, "Bundle Gain",
                            Steinberg::Vst::PlugType::kFx, "1.0.0")

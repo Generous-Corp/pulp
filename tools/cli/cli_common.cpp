@@ -58,7 +58,7 @@
 // SDK Constants
 
 const char* PULP_SDK_VERSION = PULP_SDK_VERSION_GENERATED;
-const char* PULP_GITHUB_REPO = "danielraffel/pulp";
+const char* PULP_GITHUB_REPO = "Generous-Corp/pulp";
 
 // Color / Terminal
 

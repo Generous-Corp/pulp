@@ -81,7 +81,7 @@
         <key>TARTCI_RUNNER_LABELS</key>
         <string>self-hosted,macOS,ARM64,pulp-coverage-vm-macos</string>
         <key>TARTCI_RUNNER_REPO</key>
-        <string>danielraffel/pulp</string>
+        <string>Generous-Corp/pulp</string>
         <key>TARTCI_RUNNER_WORKFLOW_NAME</key>
         <string>Coverage</string>
         <key>TARTCI_RUNNER_QUEUE_MATCH_LABELS</key>

@@ -44,7 +44,7 @@ pub fn upgrade_url_for(version: &str, platform: &str, arch: &str) -> (String, St
         "tar.gz"
     };
     let asset = format!("pulp-{platform}-{arch}.{ext}");
-    let url = format!("https://github.com/danielraffel/pulp/releases/download/v{version}/{asset}");
+    let url = format!("https://github.com/Generous-Corp/pulp/releases/download/v{version}/{asset}");
     (asset, url)
 }
 
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(asset, "pulp-darwin-arm64.tar.gz");
         assert_eq!(
             url,
-            "https://github.com/danielraffel/pulp/releases/download/v0.50.0/pulp-darwin-arm64.tar.gz"
+            "https://github.com/Generous-Corp/pulp/releases/download/v0.50.0/pulp-darwin-arm64.tar.gz"
         );
     }
 

@@ -60,7 +60,7 @@ use crate::update::{self, is_cache_stale, is_newer, now_epoch_sec, Fetcher};
 
 /// Default GitHub owner/repo for the release feed. Matches the
 /// `PULP_GITHUB_REPO` macro in the C++ CLI.
-pub const DEFAULT_REPO: &str = "danielraffel/pulp";
+pub const DEFAULT_REPO: &str = "Generous-Corp/pulp";
 
 /// Flags parsed out of `pulp-rs upgrade …`.
 ///

@@ -34,7 +34,7 @@
   bounded by the macOS 2-VM kernel quota.
 
   Requires on this host: tart + the pulp-linux-build golden in TART_HOME,
-  gh authenticated for danielraffel/pulp (repo admin, to mint JIT configs), and
+  gh authenticated for Generous-Corp/pulp (repo admin, to mint JIT configs), and
   ~/.ssh/id_ed25519 accepted by the golden.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

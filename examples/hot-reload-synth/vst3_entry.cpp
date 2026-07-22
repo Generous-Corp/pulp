@@ -7,5 +7,5 @@ static const Steinberg::FUID HotReloadSynthUID(0x50554C50, 0x48525359, 0x0000000
 
 PULP_VST3_PLUGIN(HotReloadSynthUID, "Pulp Hot-Reload Synth",
                  Steinberg::Vst::PlugType::kInstrumentSynth,
-                 "Pulp", "1.0.0", "https://github.com/danielraffel/pulp",
+                 "Pulp", "1.0.0", "https://github.com/Generous-Corp/pulp",
                  pulp::examples::create_hot_reload_synth)

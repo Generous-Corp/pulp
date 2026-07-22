@@ -61,11 +61,17 @@ TEST_CASE("github backup refuses the core repo + malformed targets, allows a plu
     REQUIRE(github_backup_repo_allowed("git@github.com:me/my-synth.git"));
     REQUIRE(github_backup_repo_allowed("https://github.com/me/my-synth"));
 
-    // Refused: the core Pulp repo, in every form.
+    // Refused: the core Pulp repo, in every form — BOTH names. The framework
+    // moved danielraffel/pulp -> Generous-Corp/pulp and GitHub redirects the
+    // old name to the new repo, so a key targeting either lands in core.
     REQUIRE_FALSE(github_backup_repo_allowed("danielraffel/pulp"));
     REQUIRE_FALSE(github_backup_repo_allowed("DanielRaffel/Pulp"));
     REQUIRE_FALSE(github_backup_repo_allowed("git@github.com:danielraffel/pulp.git"));
     REQUIRE_FALSE(github_backup_repo_allowed("https://github.com/danielraffel/pulp"));
+    REQUIRE_FALSE(github_backup_repo_allowed("Generous-Corp/pulp"));
+    REQUIRE_FALSE(github_backup_repo_allowed("generous-corp/pulp"));
+    REQUIRE_FALSE(github_backup_repo_allowed("git@github.com:Generous-Corp/pulp.git"));
+    REQUIRE_FALSE(github_backup_repo_allowed("https://github.com/Generous-Corp/pulp"));
 
     // Refused: malformed / ambiguous targets (fail closed).
     REQUIRE_FALSE(github_backup_repo_allowed(""));

@@ -122,7 +122,7 @@ def cmd_run(
     failover_targets = submission.get("namespace_failover_targets", [])
     if failover_targets:
         ga_cfg = config.get("github_actions", {})
-        repository = ga_cfg.get("repository", "danielraffel/pulp")
+        repository = ga_cfg.get("repository", "Generous-Corp/pulp")
         print_fn(f"\n\u26a0\ufe0f  Namespace failover: dispatching {', '.join(failover_targets)} to Namespace")
         try:
             gh_workflow_dispatch_fn(repository, "build.yml", branch, {"runner_provider": "namespace"})

@@ -87,7 +87,12 @@ inline std::string normalize_github_repo(std::string_view repo) {
 /// repo.
 inline bool github_backup_repo_allowed(std::string_view repo) {
     const std::string r = normalize_github_repo(repo);
-    return !r.empty() && r != "danielraffel/pulp";
+    // Block BOTH core-repo names. The framework moved danielraffel/pulp ->
+    // Generous-Corp/pulp; GitHub still redirects the old name to the new repo,
+    // so a key targeting EITHER would land in the core repo. Blocking only one
+    // leaves a hole — the old name still resolves to core, and the new name IS
+    // core. `normalize_github_repo` lowercases, so compare lowercased.
+    return !r.empty() && r != "danielraffel/pulp" && r != "generous-corp/pulp";
 }
 
 /// A readable summary of everything the signature will cover, so the signer can

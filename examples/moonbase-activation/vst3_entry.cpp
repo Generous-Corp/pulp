@@ -8,5 +8,5 @@ static const Steinberg::FUID MoonbaseActivationUID(0x4D4F4F4E, 0x42415345, 0x414
 
 PULP_VST3_PLUGIN(MoonbaseActivationUID, "Moonbase Activation",
                  Steinberg::Vst::PlugType::kFx, "GenerousCorp", "1.0.0",
-                 "https://github.com/danielraffel/pulp",
+                 "https://github.com/Generous-Corp/pulp",
                  moonbase_pulp::create_moonbase_activation_plugin)

@@ -30,7 +30,7 @@
   are QEMU (not Tart) and uncapped; each job gets a throwaway qcow2 overlay.
 
   Requires on this host: qemu (brew install qemu) + the Windows golden qcow2,
-  gh authenticated for danielraffel/pulp (repo admin, to mint JIT configs), and
+  gh authenticated for Generous-Corp/pulp (repo admin, to mint JIT configs), and
   ~/.ssh/id_ed25519 accepted by the golden.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

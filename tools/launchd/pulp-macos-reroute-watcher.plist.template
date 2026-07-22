@@ -29,7 +29,7 @@
 
   Requires:
 
-    * `gh` CLI authenticated for danielraffel/pulp (Administration:Read or
+    * `gh` CLI authenticated for Generous-Corp/pulp (Administration:Read or
       default Actions:Read works for the gh api calls; admin scope would
       help the local-busy probe but the `ps`-based fallback works without).
     * `pulp` on PATH (the watcher invokes `pulp macos retarget`).

@@ -34,7 +34,7 @@ PluginDescriptor PitchTracker::descriptor() const {
     d.category = PluginCategory::Effect;
     d.accepts_midi = false;
     d.produces_midi = true;   // would emit notes from detected pitches
-    d.vendor_url = "https://github.com/danielraffel/pulp";
+    d.vendor_url = "https://github.com/Generous-Corp/pulp";
     return d;
 }
 

@@ -105,7 +105,7 @@ echo
 # ── 4. Open PRs from this session ─────────────────────────────────────────
 echo "${B}## 4. PR status (REST API — GraphQL skipped to avoid rate limits)${D}"
 for PR in 1897 1898 1900; do
-  STATE=$(gh api "repos/danielraffel/pulp/pulls/$PR" \
+  STATE=$(gh api "repos/Generous-Corp/pulp/pulls/$PR" \
     --jq '"state=\(.state) mergeable_state=\(.mergeable_state) updated=\(.updated_at)"' \
     2>/dev/null || echo "?? rate-limited or missing")
   echo "  #$PR: $STATE"

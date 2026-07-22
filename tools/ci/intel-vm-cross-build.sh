@@ -29,7 +29,7 @@ REF="main"
 GOLDEN="pulp-intel-build:latest"
 KEEP=0
 FULL_BUILD=0
-REPO_URL="https://github.com/danielraffel/pulp.git"
+REPO_URL="https://github.com/Generous-Corp/pulp.git"
 
 while [ $# -gt 0 ]; do
   case "$1" in

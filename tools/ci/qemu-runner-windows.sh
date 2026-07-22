@@ -20,7 +20,7 @@ set -euo pipefail
 GOLDEN="${TARTCI_WIN_GOLDEN:-${TARTCI_GOLDENS:-$HOME/VMs/goldens}/pulp-windows-build-24h2-arm64-2026-06-02.qcow2}"
 KEY="${TARTCI_WIN_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 WUSER="${TARTCI_WIN_SSH_USER:-admin}"
-REPO="${PULP_RUNNER_REPO:-danielraffel/pulp}"
+REPO="${PULP_RUNNER_REPO:-Generous-Corp/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,Windows,ARM64,pulp-build-windows}"
 RUNNER_GROUP_ID="${PULP_RUNNER_GROUP_ID:-1}"
 RUNNER_VERSION="${PULP_RUNNER_VERSION:-2.335.1}"

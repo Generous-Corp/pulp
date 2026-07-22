@@ -40,7 +40,7 @@
 
   Requires on this host:
     * tart (brew install cirruslabs/cli/tart) + the pulp-build-runner golden in TART_HOME
-    * gh authenticated for danielraffel/pulp (config-file token storage avoids
+    * gh authenticated for Generous-Corp/pulp (config-file token storage avoids
       the keychain dependency) — minting JIT runner configs needs repo admin
     * ~/.ssh/id_ed25519 injected into the golden (Tier 0)
     * macOS 2-VM/host cap: a persistent operator VM (e.g. pulp-vm) consumes one
