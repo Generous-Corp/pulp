@@ -104,6 +104,15 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME silent-revert-guard-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_silent_revert_guard.py")
 
+    # GPU resource-lock policy: a suite that stands up a real Dawn/Metal device
+    # must serialize on RESOURCE_LOCK pulp_gpu. Reads the test manifests only —
+    # no GPU, no configure — so it runs on every host, including the GPU-off
+    # builds where the guarded suites are not even registered. That matters:
+    # a missing lock shows up as an intermittent short readback on somebody
+    # else's unrelated PR, which is exactly the signal nobody attributes here.
+    add_test(NAME gpu-test-resource-locks COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_gpu_test_resource_locks.py")
+
     # PR-check triage: pure comparison logic that labels a red PR check as
     # pre-existing-on-main vs regressed-by-this-PR (the "also-red-on-main"
     # diagnostic). The CLI half is a thin gh-api wrapper (not unit-tested).
