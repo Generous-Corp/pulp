@@ -6,9 +6,12 @@
 
 #include <pulp/state/midi_parameter_map.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/timeline/automation_lane.hpp>
+#include <pulp/timeline/item_id.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
 
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -157,6 +160,51 @@ TEST_CASE("MidiParameterMap scaled mappings honor unmapped/channel/remove edges"
     map.pump();
     map.handle_cc(store, 5, 40, 0);
     CHECK_THAT(store.get_normalized(1), WithinAbs(0.75f, 1e-3f)); // unchanged
+}
+
+TEST_CASE("A hardware CC maps to any engine parameter with zero driver code",
+          "[state][midi-map][scaling][timeline]") {
+    // The Creative Timeline Engine's only automatable parameter surface is a
+    // hosted device parameter, addressed by pulp::timeline::DeviceParameterTarget
+    // whose `param_id` is the device's stable 32-bit host-facing ID — the same
+    // pulp::state::ParamID a StateStore uses and MidiParameterMap drives. So no
+    // per-controller or per-parameter driver code is needed: the engine's
+    // parameter identity flows straight into the map as an opaque id.
+    //
+    // Prove it end to end against that engine type: take the id the engine would
+    // automate, register it in the device's store, then learn a CC onto it and
+    // drive it through the generic learn/apply loop — carrying a scale window so
+    // the same call handles a controller that sweeps only part of the range.
+    struct Knob {
+        pulp::timeline::DeviceParameterTarget target;
+        uint8_t channel;
+        uint8_t cc;
+        MidiMapScale scale;
+    };
+    const std::array<Knob, 3> knobs{{
+        {{pulp::timeline::ItemId{7}, 21}, 0, 74, MidiMapScale{}},            // full range
+        {{pulp::timeline::ItemId{7}, 22}, 3, 1, MidiMapScale{0.25f, 0.75f}}, // middle half
+        {{pulp::timeline::ItemId{9}, 5}, 9, 7, MidiMapScale{1.0f, 0.0f}},    // inverted
+    }};
+
+    StateStore store;
+    for (const auto& k : knobs)
+        store.add_parameter({.id = k.target.param_id,
+                             .name = "P",
+                             .unit = "",
+                             .range = {0.0f, 1.0f, 0.0f, 0.0f}});
+
+    MidiParameterMap map;
+    for (const auto& k : knobs) {
+        map.arm_learn(k.target.param_id, k.scale);
+        map.pump();
+        map.handle_cc(store, k.channel, k.cc, 127);
+        CHECK_THAT(store.get_normalized(k.target.param_id),
+                   WithinAbs(k.scale.apply(127), 1e-3f));
+        map.handle_cc(store, k.channel, k.cc, 0);
+        CHECK_THAT(store.get_normalized(k.target.param_id),
+                   WithinAbs(k.scale.apply(0), 1e-3f));
+    }
 }
 
 TEST_CASE("MidiParameterMap scaled apply path does not allocate",
