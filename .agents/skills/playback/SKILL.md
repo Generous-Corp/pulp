@@ -172,11 +172,21 @@ negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
 fixed-seed randomized seek/loop/play sequences over overlapping notes assert
 the physical MIDI stream is a per-key on/off toggle (a note-on only for an idle
 key, a note-off only for a sounding key), and a terminal stop-flush must leave
-`has_active_notes()` false with every note-on matched by a note-off. A leaked
-note surfaces as an out-of-order toggle mid-run or a key left sounding after the
-flush. Seeds are hardcoded so a red is a real defect, not a flake; keep the
-non-vacuity witnesses (notes held live across seeks and loop wraps) asserting
-above zero so the all-clear cannot go vacuous.
+`has_active_notes()` false with every note-on matched by a note-off. Seeds are
+hardcoded so a red is a real defect, not a flake; keep the non-vacuity witnesses
+(notes held live across seeks and loop wraps) asserting above zero so the
+all-clear cannot go vacuous. The toggle invariant and terminal balance are NOT
+enough on their own — they are both structurally guaranteed regardless of the
+seek/loop flush: `emit()` folds logical overlaps so the physical stream is a
+clean per-key toggle even when a discontinuity strands a note, and the terminal
+stop-flush always rebalances the counts. A stranded note is only observable
+against an independent coverage oracle: a key may sound only while the playhead
+sits inside the union of that key's compiled note extents, so a still-sounding
+key whose playhead has moved past every extent is the stuck note. Keep that
+oracle (checked at each playing block's last played sample, stuck-direction
+only — a note whose onset precedes the new range is deliberately not chased, so
+covered-but-silent is legal) when touching this proof; without it, deleting the
+`range.discontinuity` flush in `note_renderer.cpp` leaves the fuzz green.
 When export/install wiring changes, also run the installed SDK consumer smoke.
 Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
