@@ -1310,6 +1310,29 @@ gets slower, not faster — and the re-dispatched runs then wedge each other. If
 the pool is already saturated with advisory work, cancel it (the macOS legs have
 usually finished, so nothing is lost) rather than adding more.
 
+### A step gated on `!= 'pull_request'` also fires on `merge_group`
+
+`merge_group` is not `pull_request`, so `if: github.event_name != 'pull_request'`
+is **true in a merge group**. A deploy / publish / release-side-effect step
+written that way runs on the queue's synthetic `gh-readonly-queue/...` commit —
+which has not merged and can still be evicted. `wclap-cloudflare.yml` deployed
+production Cloudflare Pages this way; it was only ever masked because merge-group
+runs starved before reaching the step, so enabling the queue's throughput
+exposed it.
+
+Gate any side-effecting step on an **allowlist** of the events that should cause
+it, never a denylist:
+
+```yaml
+# not:  if: github.event_name != 'pull_request'
+if: ${{ contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) }}
+```
+
+A denylist silently changes meaning the day a trigger is added, and
+`merge_group:` gets added to exactly the workflows a merge queue must run. When
+auditing a workflow for queue-enablement, grep it for `!= 'pull_request'` and
+confirm every hit is a reporting/validation step, not a deploy or publish.
+
 ### Advisory cross-lane workflow: `macos-cross-advisory.yml`
 
 `.github/workflows/macos-cross-advisory.yml` is a path-scoped advisory

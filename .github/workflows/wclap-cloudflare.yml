@@ -294,7 +294,16 @@ jobs:
       # (`secrets` is not a valid context in a step `if:` — actionlint — so the
       # presence check is hoisted into the job-level HAS_CF_TOKEN env var.)
       - name: Deploy to Cloudflare Pages
-        if: ${{ github.event_name != 'pull_request' && env.HAS_CF_TOKEN == 'true' }}
+        # ALLOWLIST, not a denylist. This previously read
+        # `github.event_name != 'pull_request'`, which silently became TRUE the
+        # day the `merge_group:` trigger was added — so every merge group
+        # published production from a synthetic gh-readonly-queue commit that had
+        # NOT merged and could still be evicted. The file's own comments claimed
+        # group runs "never deploy"; the condition disagreed. It only stayed
+        # invisible because merge-group runs were starving before reaching this
+        # step. Naming the events that MAY deploy fails closed when the next
+        # trigger is added.
+        if: ${{ contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -310,6 +319,15 @@ jobs:
       # The local guard checks the files on disk; only this checks the HOST. Fetch each
       # page as a crawler does, follow its og:image, and assert the bytes are a PNG.
       - name: Guard — the live site actually unfurls
-        if: ${{ github.event_name != 'pull_request' && env.HAS_CF_TOKEN == 'true' }}
+        # ALLOWLIST, not a denylist. This previously read
+        # `github.event_name != 'pull_request'`, which silently became TRUE the
+        # day the `merge_group:` trigger was added — so every merge group
+        # published production from a synthetic gh-readonly-queue commit that had
+        # NOT merged and could still be evicted. The file's own comments claimed
+        # group runs "never deploy"; the condition disagreed. It only stayed
+        # invisible because merge-group runs were starving before reaching this
+        # step. Naming the events that MAY deploy fails closed when the next
+        # trigger is added.
+        if: ${{ contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && env.HAS_CF_TOKEN == 'true' }}
         working-directory: examples/web-demos/wclap-build/cloudflare
         run: node check-unfurl.mjs --base https://pulp-wclap-demos.pages.dev
