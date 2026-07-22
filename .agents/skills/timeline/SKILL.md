@@ -65,6 +65,23 @@ invariants.
   `automation_curve.*`, logical target binding belongs in `automation_lane.*`,
   RT cursor/coalescing belongs in `core/playback`, and graph delivery belongs in
   `core/host`.
+- A `Take` is one recorded region referencing a sealed media asset, anchored to
+  absolute sample time (its timeline length is the media frame count). A
+  `TakeLane` is an immutable, identity-ordered set of takes owned by a Track,
+  and a Track carries a `record_armed` document-intent flag the capture engine
+  reads but never mutates here. A take's parent is its lane — the second
+  lane-owned exception alongside `AutomationPoint`, so `immediate_parent_id()`
+  returns the supplied `lane_id` for `ItemKind::Take` and it is excluded from
+  coordinate-based parent recompute; a lane's parent is its Track. Take
+  identities must be disjoint from every other track-owned id, and a take whose
+  `MediaRef` asset is missing or out of range is rejected at `Project::create`,
+  exactly like a clip `MediaRef`. Comp/playlist selection and comp-edit commands
+  are not part of the model yet.
+- `Project::Data` and `Track::Data` mutations rebuild by copy-and-modify
+  (`auto next = *data_; next.field = ...; make_shared<const Data>(move(next))`),
+  never positional brace-init — adding a field must not silently shift an
+  unrelated mutation site. `create()` factories build from input with designated
+  initializers.
 - `MediaRef` ranges are checked locally for overflow and against their asset at
   project construction.
 - A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
@@ -78,9 +95,11 @@ invariants.
   arrays. BPM is stored by exact IEEE-754 bits; older v1 snapshots without map
   fields remain readable as 120 BPM and 4/4, then canonicalize on save.
 - Track schema v2 introduced the required device-chain field; v3 adds required
-  attached automation lanes. Adjacent downgrades succeed only when the field
-  being removed is empty, so neither placement nor automation identity can be
-  discarded. Placements, lanes, and lane targets remain separately versioned
+  attached automation lanes; v4 adds the required `take_lanes` array and
+  `record_armed` flag. Adjacent downgrades succeed only when the field being
+  removed is empty (and, for v4→v3, only when `record_armed` is false), so
+  neither placement, automation, nor take identity can be discarded. Placements,
+  lanes, lane targets, take lanes, and takes remain separately versioned
   structural envelopes.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and

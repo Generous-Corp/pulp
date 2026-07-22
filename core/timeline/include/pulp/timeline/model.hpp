@@ -18,6 +18,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -56,6 +57,8 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidClipPlaybackProperties,
     MissingAutomationTarget,
     DuplicateAutomationTarget,
+    InvalidTake,
+    DuplicateTake,
 };
 
 struct ModelError {
@@ -280,12 +283,74 @@ struct TrackIndexStats {
     std::uint64_t nodes_created = 0;
 };
 
+// A Take is one recorded region that references a sealed media asset. It lives
+// in a TakeLane on a Track and is anchored to absolute (sample) time: raw
+// captures are sample-accurate against the transport, not musical. The take's
+// timeline length is its media frame_count. A Take owns a stable ItemId because
+// comps (a follow-up) select take segments by identity. The asset reference is
+// external (Project::create validates it exists); the take never owns the asset.
+class Take {
+  public:
+    static runtime::Result<Take, ModelError> create(ItemId id, MediaRef media,
+                                                     timebase::SamplePosition placement_start,
+                                                     timebase::RationalRate sample_rate);
+
+    ItemId id() const noexcept {
+        return id_;
+    }
+    const MediaRef& media() const noexcept {
+        return media_;
+    }
+    timebase::SamplePosition placement_start() const noexcept {
+        return placement_start_;
+    }
+    timebase::RationalRate sample_rate() const noexcept {
+        return sample_rate_;
+    }
+
+  private:
+    Take(ItemId id, MediaRef media, timebase::SamplePosition placement_start,
+         timebase::RationalRate sample_rate) noexcept
+        : id_(id), media_(media), placement_start_(placement_start), sample_rate_(sample_rate) {}
+
+    ItemId id_;
+    MediaRef media_;
+    timebase::SamplePosition placement_start_;
+    timebase::RationalRate sample_rate_;
+};
+
+static_assert(std::is_nothrow_copy_constructible_v<Take>);
+static_assert(std::is_nothrow_move_constructible_v<Take>);
+
+// Immutable ownership of one alternate recording lane on a Track: an ordered set
+// of takes keyed by identity. The lane and its takes are owned identities; a
+// take's MediaRef::asset_id is an external reference. Comp selection, capture
+// engine wiring, and playback compilation are separate concerns and absent here.
+class TakeLane {
+  public:
+    static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
+                                                         std::vector<Take> takes);
+
+    ItemId id() const noexcept;
+    const std::string& name() const noexcept;
+    // Canonical order by take identity; carries no playback semantics.
+    std::span<const Take> takes() const noexcept;
+    const Take* find_take(ItemId id) const noexcept;
+
+  private:
+    struct Data;
+    explicit TakeLane(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+    std::shared_ptr<const Data> data_;
+};
+
 struct TrackInput {
     ItemId id;
     std::string name;
     std::vector<Clip> clips;
     std::vector<DevicePlacement> device_chain;
     std::vector<AutomationLane> automation_lanes;
+    std::vector<TakeLane> take_lanes;
+    bool record_armed = false;
 };
 
 class Track {
@@ -356,6 +421,12 @@ class Track {
     // Automation lane order is canonical by identity and carries no processing semantics.
     std::span<const AutomationLane> automation_lanes() const noexcept;
     const AutomationLane* find_automation_lane(ItemId id) const noexcept;
+    // Take-lane order is canonical by identity and carries no processing semantics.
+    std::span<const TakeLane> take_lanes() const noexcept;
+    const TakeLane* find_take_lane(ItemId id) const noexcept;
+    // Whether this track is armed to capture into a take lane. Pure document
+    // intent; the capture engine reads it but never mutates it here.
+    bool record_armed() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -411,14 +482,18 @@ enum class ItemKind : std::uint8_t {
     DevicePlacement,
     AutomationLane,
     AutomationPoint,
+    TakeLane,
+    Take,
 };
 
 // Canonical immediate parent for a kind. Every parent that an item's own
 // coordinates determine is derived here, so identity construction has one
-// parent-computation path for all kinds. An AutomationPoint is the exception
-// whose parent (its lane) is not among (sequence, track, clip): the lane is
-// supplied by construction context via lane_id and is otherwise recoverable
-// only from the stored parent_id itself — never re-derive it from coordinates.
+// parent-computation path for all kinds. AutomationPoint and Take are the
+// exceptions whose parent (their owning lane) is not among (sequence, track,
+// clip): the lane is supplied by construction context via lane_id and is
+// otherwise recoverable only from the stored parent_id itself — never re-derive
+// it from coordinates. The lane_id parameter carries an AutomationLane for a
+// point and a TakeLane for a take.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
                                      ItemId track_id, ItemId clip_id, ItemId lane_id = {}) noexcept {
     switch (kind) {
@@ -432,10 +507,12 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
     case ItemKind::AutomationLane:
+    case ItemKind::TakeLane:
         return track_id;
     case ItemKind::Note:
         return clip_id;
     case ItemKind::AutomationPoint:
+    case ItemKind::Take:
         return lane_id;
     }
     return {};

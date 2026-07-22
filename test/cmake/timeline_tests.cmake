@@ -5,6 +5,7 @@
 pulp_add_test_suite(pulp-test-timeline-model
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
         test_timeline_automation_attachment.cpp
+        test_timeline_take_comp.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
@@ -72,6 +73,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
+        test_timeline_take_comp_persistence.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")

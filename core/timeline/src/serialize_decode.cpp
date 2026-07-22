@@ -50,6 +50,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::AutomationLane);
     if (value == "automation_point")
         return runtime::Ok(ItemKind::AutomationPoint);
+    if (value == "take_lane")
+        return runtime::Ok(ItemKind::TakeLane);
+    if (value == "take")
+        return runtime::Ok(ItemKind::Take);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
 
@@ -62,6 +66,8 @@ struct DecodeCounts {
     std::size_t device_placements = 0;
     std::size_t automation_lanes = 0;
     std::size_t automation_points = 0;
+    std::size_t take_lanes = 0;
+    std::size_t takes = 0;
 };
 
 runtime::Result<const JsonValue*, PersistenceError>
@@ -538,6 +544,79 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
     return runtime::Result<Clip, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+runtime::Result<Take, PersistenceError> decode_take(const JsonValue& value,
+                                                    const DecodeLimits& limits, DecodeCounts& counts,
+                                                    std::string path) {
+    if (++counts.takes > limits.max_takes)
+        return fail<Take>(PersistenceErrorCode::LimitExceeded, path, value.begin, counts.takes,
+                          limits.max_takes);
+    auto data = data_for(value, "pulp.timeline.take", path);
+    if (!data)
+        return fail<Take>(data.error().code, data.error().path, data.error().byte_offset);
+    auto asset = required(*data.value(), "asset_id", path + "/data");
+    auto frames = required(*data.value(), "frame_count", path + "/data");
+    auto id = required(*data.value(), "id", path + "/data");
+    auto placement = required(*data.value(), "placement_start", path + "/data");
+    auto rate = required(*data.value(), "sample_rate", path + "/data");
+    auto source = required(*data.value(), "source_start", path + "/data");
+    if (!asset || !frames || !id || !placement || !rate || !source)
+        return fail<Take>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_asset = parse_canonical_u64_string(*asset.value(), path + "/data/asset_id");
+    auto decoded_frames = parse_canonical_u64_string(*frames.value(), path + "/data/frame_count");
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    auto decoded_placement =
+        parse_canonical_i64_string(*placement.value(), path + "/data/placement_start");
+    auto decoded_source = parse_canonical_i64_string(*source.value(), path + "/data/source_start");
+    if (!decoded_asset || !decoded_frames || !decoded_id || !decoded_placement || !decoded_source)
+        return fail<Take>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    auto decoded_rate = decode_rate(*rate.value(), path + "/data/sample_rate");
+    if (!decoded_rate)
+        return fail<Take>(decoded_rate.error().code, decoded_rate.error().path,
+                          decoded_rate.error().byte_offset);
+    auto created = Take::create(
+        ItemId{decoded_id.value()},
+        MediaRef{ItemId{decoded_asset.value()}, timebase::SamplePosition{decoded_source.value()},
+                 decoded_frames.value()},
+        timebase::SamplePosition{decoded_placement.value()}, decoded_rate.value());
+    if (!created)
+        return model_fail<Take>(created.error(), std::move(path));
+    return runtime::Result<Take, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
+runtime::Result<TakeLane, PersistenceError>
+decode_take_lane(const JsonValue& value, const DecodeLimits& limits, DecodeCounts& counts,
+                 std::string path) {
+    if (++counts.take_lanes > limits.max_take_lanes)
+        return fail<TakeLane>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                              counts.take_lanes, limits.max_take_lanes);
+    auto data = data_for(value, "pulp.timeline.take_lane", path);
+    if (!data)
+        return fail<TakeLane>(data.error().code, data.error().path, data.error().byte_offset);
+    auto id = required(*data.value(), "id", path + "/data");
+    auto name = string_field(*data.value(), "name", path + "/data");
+    auto takes = required(*data.value(), "takes", path + "/data");
+    if (!id || !name || !takes || takes.value()->kind != JsonValue::Kind::Array)
+        return fail<TakeLane>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    if (!decoded_id)
+        return fail<TakeLane>(decoded_id.error().code, decoded_id.error().path,
+                              decoded_id.error().byte_offset);
+    std::vector<Take> decoded_takes;
+    decoded_takes.reserve(takes.value()->array.size());
+    for (std::size_t index = 0; index < takes.value()->array.size(); ++index) {
+        auto decoded = decode_take(takes.value()->array[index], limits, counts,
+                                   path + "/data/takes/" + std::to_string(index));
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_takes.push_back(std::move(decoded).value());
+    }
+    auto created = TakeLane::create(ItemId{decoded_id.value()}, std::move(name).value(),
+                                    std::move(decoded_takes));
+    if (!created)
+        return model_fail<TakeLane>(created.error(), std::move(path));
+    return runtime::Result<TakeLane, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
 runtime::Result<Track, PersistenceError>
 decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
              const SchemaRegistry& registry, const DecodeLimits& limits, DecodeCounts& counts,
@@ -557,15 +636,22 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto clips = required(data, "clips", path + "/data");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
+    const auto* take_lanes = data.find("take_lanes");
+    const auto* record = data.find("record_armed");
     const auto requires_devices =
         detail::track_schema_policy.requires_device_chain(envelope.value().version);
     const auto requires_automation =
         detail::track_schema_policy.requires_automation(envelope.value().version);
+    const auto requires_takes =
+        detail::track_schema_policy.requires_takes(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
         (!requires_automation && automation) ||
-        (requires_automation && (!automation || automation->kind != JsonValue::Kind::Array)))
+        (requires_automation && (!automation || automation->kind != JsonValue::Kind::Array)) ||
+        (!requires_takes && (take_lanes || record)) ||
+        (requires_takes && (!take_lanes || take_lanes->kind != JsonValue::Kind::Array || !record ||
+                            record->kind != JsonValue::Kind::Boolean)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -612,11 +698,25 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
             return runtime::Err(decoded.error());
         decoded_automation = std::move(decoded).value();
     }
+    std::vector<TakeLane> decoded_take_lanes;
+    if (take_lanes) {
+        decoded_take_lanes.reserve(take_lanes->array.size());
+        for (std::size_t index = 0; index < take_lanes->array.size(); ++index) {
+            auto decoded = decode_take_lane(take_lanes->array[index], limits, counts,
+                                            path + "/data/take_lanes/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_take_lanes.push_back(std::move(decoded).value());
+        }
+    }
+    const bool decoded_record_armed = record && record->boolean;
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
                                             .device_chain = std::move(decoded_devices),
-                                            .automation_lanes = std::move(decoded_automation)});
+                                            .automation_lanes = std::move(decoded_automation),
+                                            .take_lanes = std::move(decoded_take_lanes),
+                                            .record_armed = decoded_record_armed});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));

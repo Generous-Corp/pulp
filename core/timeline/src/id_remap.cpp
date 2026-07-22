@@ -75,6 +75,14 @@ void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
             ids.push_back(note.id);
 }
 
+void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
+    for (const auto& lane : track.take_lanes()) {
+        ids.push_back(lane.id());
+        for (const auto& take : lane.takes())
+            ids.push_back(take.id());
+    }
+}
+
 std::optional<ModelError> preflight(const Clip& clip) {
     if (std::holds_alternative<OpaqueContent>(clip.content()))
         return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -88,6 +96,7 @@ std::optional<ModelError> preflight(const Track& track) {
     for (const auto& device : track.device_chain())
         ids.push_back(device.id);
     detail::append_automation_owned_ids(track.automation_lanes(), ids);
+    append_take_ids(track, ids);
     for (const auto& clip : track.clips()) {
         if (std::holds_alternative<OpaqueContent>(clip.content()))
             return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -103,6 +112,7 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
         for (const auto& device : track.device_chain())
             ids.push_back(device.id);
         detail::append_automation_owned_ids(track.automation_lanes(), ids);
+        append_take_ids(track, ids);
         for (const auto& clip : track.clips()) {
             if (std::holds_alternative<OpaqueContent>(clip.content()))
                 return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
@@ -164,6 +174,45 @@ void allocate_automation_owned(const AutomationLane& lane, IdRemapTable& table,
     }
 }
 
+void allocate_take_owned(const Track& track, IdRemapTable& table, ItemIdAllocator& allocator,
+                         std::optional<ModelError>& error) {
+    for (const auto& lane : track.take_lanes()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, lane.id());
+        for (const auto& take : lane.takes()) {
+            if (error)
+                return;
+            error = allocate_owned(table, allocator, take.id());
+        }
+    }
+}
+
+// A take's identity is owned and remapped; its MediaRef::asset_id is an external
+// reference fixed up the same way a clip's MediaRef is, so a remapped project's
+// takes point at the remapped assets.
+runtime::Result<TakeLane, ModelError> rebuild_take_lane(const TakeLane& lane,
+                                                        const IdRemapTable& table,
+                                                        ExternalIdFixup external) {
+    std::vector<Take> takes;
+    takes.reserve(lane.takes().size());
+    for (const auto& take : lane.takes()) {
+        auto fixed = external.apply(take.media().asset_id);
+        if (!fixed)
+            return fail<TakeLane>(fixed.error().code, fixed.error().item,
+                                  fixed.error().related_item);
+        MediaRef media = take.media();
+        media.asset_id = fixed.value();
+        auto rebuilt = Take::create(*table.find(take.id()), media, take.placement_start(),
+                                    take.sample_rate());
+        if (!rebuilt)
+            return fail<TakeLane>(rebuilt.error().code, rebuilt.error().item,
+                                  rebuilt.error().related_item);
+        takes.push_back(std::move(rebuilt).value());
+    }
+    return TakeLane::create(*table.find(lane.id()), lane.name(), std::move(takes));
+}
+
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
                                                  ExternalIdFixup external) {
     std::vector<DevicePlacement> device_chain;
@@ -188,11 +237,22 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         automation_lanes.push_back(std::move(rebuilt).value());
     }
+    std::vector<TakeLane> take_lanes;
+    take_lanes.reserve(track.take_lanes().size());
+    for (const auto& lane : track.take_lanes()) {
+        auto rebuilt = rebuild_take_lane(lane, table, external);
+        if (!rebuilt)
+            return fail<Track>(rebuilt.error().code, rebuilt.error().item,
+                               rebuilt.error().related_item);
+        take_lanes.push_back(std::move(rebuilt).value());
+    }
     return Track::create(TrackInput{.id = *table.find(track.id()),
                                     .name = track.name(),
                                     .clips = std::move(clips),
                                     .device_chain = std::move(device_chain),
-                                    .automation_lanes = std::move(automation_lanes)});
+                                    .automation_lanes = std::move(automation_lanes),
+                                    .take_lanes = std::move(take_lanes),
+                                    .record_armed = track.record_armed()});
 }
 
 runtime::Result<Sequence, ModelError>
@@ -248,6 +308,7 @@ runtime::Result<RemappedTrack, ModelError> remap_ids(const Track& track, ItemIdA
         allocate_clip_owned(clip, table, working, error);
     for (const auto& lane : track.automation_lanes())
         allocate_automation_owned(lane, table, working, error);
+    allocate_take_owned(track, table, working, error);
     if (error)
         return fail<RemappedTrack>(error->code, error->item, error->related_item);
     if (const auto table_error = finish_table(table))
@@ -279,6 +340,7 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
             allocate_clip_owned(clip, table, working, error);
         for (const auto& lane : track.automation_lanes())
             allocate_automation_owned(lane, table, working, error);
+        allocate_take_owned(track, table, working, error);
     }
     if (error)
         return fail<RemappedSequence>(error->code, error->item, error->related_item);

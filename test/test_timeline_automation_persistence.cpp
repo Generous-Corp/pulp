@@ -26,9 +26,9 @@ Project automation_project() {
 
 } // namespace
 
-TEST_CASE("Timeline Track v3 automation is canonical and round trips") {
+TEST_CASE("Timeline Track automation is canonical and round trips") {
     const auto encoded = take(serialize_project(automation_project(), builtins()));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":3") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
             std::string::npos);
     REQUIRE(encoded.json.find("pulp.timeline.automation_target.device_parameter") !=
             std::string::npos);
@@ -76,7 +76,7 @@ TEST_CASE("Timeline automation decode reports exact fields and preserves model f
     REQUIRE(rejected.error().model_error->item == ItemId{6});
 }
 
-TEST_CASE("Timeline permanent Track v3 automation fixture re-saves byte-identically") {
+TEST_CASE("Timeline permanent v3 automation fixture upgrades and preserves lane ownership") {
     const auto original = fixture("v3/automation-lane.json");
     auto decoded_result = deserialize_project(original, builtins());
     const auto decoded_code = decoded_result ? -1 : static_cast<int>(decoded_result.error().code);
@@ -88,10 +88,18 @@ TEST_CASE("Timeline permanent Track v3 automation fixture re-saves byte-identica
     REQUIRE(track.automation_lanes().size() == 1);
     REQUIRE(track.automation_lanes()[0].curve().points()[1].interpolation ==
             AutomationInterpolation::Hold);
-    // The permanent fixture is canonical: re-saving it reproduces the exact bytes,
-    // and the automation point's lane ownership survives via parent_id.
+    // Loading a legacy v3 track adds empty take state and no record-arm, and the
+    // automation point's lane ownership survives the upgrade via parent_id.
+    REQUIRE_FALSE(track.record_armed());
+    REQUIRE(track.take_lanes().empty());
     REQUIRE(decoded.locate({6})->parent_id == ItemId{5});
-    REQUIRE(take(serialize_project(decoded, builtins())).json == original);
+    const auto upgraded = take(serialize_project(decoded, builtins()));
+    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
+            std::string::npos);
+    REQUIRE(upgraded.json.find("\"take_lanes\":[]") != std::string::npos);
+    // The upgraded snapshot is canonical: re-saving it reproduces the exact bytes.
+    const auto redecoded = take(deserialize_project(upgraded.json, builtins()));
+    REQUIRE(take(serialize_project(redecoded, builtins())).json == upgraded.json);
 }
 
 TEST_CASE("Timeline v3 decode rejects an automation point whose parent_id is stripped") {
