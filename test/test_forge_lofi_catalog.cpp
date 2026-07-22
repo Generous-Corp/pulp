@@ -371,6 +371,10 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
     cases.push_back({lofi::make_drywet_node(), 2, lofi::kDryWetMix, 0.5f});
     cases.push_back({lofi::make_noise_node(), 1, lofi::kNoiseLevel, 0.5f});
     cases.push_back({lofi::make_bitcrush_node(), 1, lofi::kBitcrushBitDepth, 6.0f});
+    cases.push_back({lofi::make_vca_node(), 2, lofi::kVcaGain, 1.0f});
+    cases.push_back({lofi::make_env_follower_node(), 1, lofi::kEnvAttackMs, 10.0f});
+    cases.push_back({lofi::make_filter_cv_node(), 2, lofi::kFilterCvBaseHz, 800.0f});
+    cases.push_back({lofi::make_delay_cv_node(), 2, lofi::kDelayCvBaseMs, 12.0f});
 
     for (auto& c : cases) {
         BakedFixture fx(c.type, c.input_channels);
@@ -413,4 +417,407 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
         CHECK(alloc_count == 0);
         CHECK(alloc_bytes == 0);
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// CV primitive pack — control-signal-as-audio-port composition proofs.
+//
+// The unlock: an lfo/env_follower emits a UNIPOLAR control signal on its audio
+// output; a vca/filter_cv/delay_cv reads that control on a dedicated CV INPUT
+// PORT. Modulation is ordinary graph topology, so tremolo/auto-wah/chorus/pump
+// are COMPOSITIONS. These tests measure the composed effect numerically and pair
+// each with a negative control that swaps the CV source for a DC constant — if
+// the CV port were not load-bearing the positive case would look identical.
+// ═════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Bake + prepare an already-wired graph; returns the LowerResult (owns the
+// baked Processor). in_ch/out_ch are the descriptor bus arity.
+LowerResult bake_and_prepare(SignalGraph& g, int in_ch, int out_ch) {
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    LowerResult r = bake(g);
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    REQUIRE(r.reason == LowerRejectReason::None);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr;
+    pc.max_buffer_size = kFrames;
+    pc.input_channels = in_ch;
+    pc.output_channels = out_ch;
+    r.processor->prepare(pc);
+    return r;
+}
+
+BakedGraphProcessor& as_baked(LowerResult& r) {
+    return *static_cast<BakedGraphProcessor*>(r.processor.get());
+}
+
+// Render `total` samples in kFrames blocks, feeding `feed` (one vector per input
+// channel, each >= total), returning the concatenated mono output.
+std::vector<float> run_stream(pulp::format::Processor& proc,
+                              const std::vector<std::vector<float>>& feed, int total) {
+    const int nch = static_cast<int>(feed.size());
+    std::vector<float> out;
+    out.reserve(static_cast<std::size_t>(total));
+    std::vector<std::vector<float>> blk(static_cast<std::size_t>(nch),
+                                        std::vector<float>(kFrames, 0.0f));
+    for (int start = 0; start < total; start += kFrames) {
+        for (int c = 0; c < nch; ++c)
+            for (int k = 0; k < kFrames; ++k) {
+                const int idx = start + k;
+                blk[static_cast<std::size_t>(c)][static_cast<std::size_t>(k)] =
+                    idx < total ? feed[static_cast<std::size_t>(c)][static_cast<std::size_t>(idx)] : 0.0f;
+            }
+        const auto o = run_block(proc, blk);
+        const int n = std::min(kFrames, total - start);
+        for (int k = 0; k < n; ++k) out.push_back(o[static_cast<std::size_t>(k)]);
+    }
+    return out;
+}
+
+std::vector<float> dc(int n, float v) { return std::vector<float>(static_cast<std::size_t>(n), v); }
+
+bool inj_ok(ParamInjector& inj, pulp::state::ParameterEventQueue& q) {
+    return inj.inject(q) == InjectStatus::Ok;
+}
+
+// Settle a stateful node fed a multi-channel block; returns the last block.
+std::vector<float> settle_multi(pulp::format::Processor& proc,
+                                const std::vector<std::vector<float>>& feed, int blocks = 8) {
+    std::vector<float> out;
+    for (int b = 0; b < blocks; ++b) out = run_block(proc, feed);
+    return out;
+}
+
+// Dominant frequency (Hz) in [fmin, fmax]: argmax of a Goertzel magnitude sweep
+// over the mean-removed signal. Accurate for a clean periodic control signal.
+float dominant_freq(const std::vector<float>& x, double sr, double fmin, double fmax,
+                    double step = 0.05) {
+    double mean = 0.0;
+    for (float v : x) mean += v;
+    mean /= static_cast<double>(x.size());
+    const int N = static_cast<int>(x.size());
+    const double kTwoPi = 6.28318530717958647692;
+    double best_f = fmin, best_mag = -1.0;
+    for (double f = fmin; f <= fmax; f += step) {
+        double re = 0.0, im = 0.0;
+        const double w = kTwoPi * f / sr;
+        for (int k = 0; k < N; ++k) {
+            const double s = x[static_cast<std::size_t>(k)] - mean;
+            re += s * std::cos(w * k);
+            im -= s * std::sin(w * k);
+        }
+        const double mag = re * re + im * im;
+        if (mag > best_mag) { best_mag = mag; best_f = f; }
+    }
+    return static_cast<float>(best_f);
+}
+
+float vmin(const std::vector<float>& x) { return *std::min_element(x.begin(), x.end()); }
+float vmax(const std::vector<float>& x) { return *std::max_element(x.begin(), x.end()); }
+
+// Goertzel magnitude of `x` at frequency `f`.
+float goertzel_mag(const std::vector<float>& x, double sr, double f) {
+    const double kTwoPi = 6.28318530717958647692;
+    const double w = kTwoPi * f / sr;
+    double re = 0.0, im = 0.0;
+    for (int k = 0; k < static_cast<int>(x.size()); ++k) {
+        re += x[static_cast<std::size_t>(k)] * std::cos(w * k);
+        im -= x[static_cast<std::size_t>(k)] * std::sin(w * k);
+    }
+    return static_cast<float>(std::sqrt(re * re + im * im));
+}
+
+// Spectral centroid (Hz) over a fixed set of partials, from their Goertzel
+// magnitudes — robust and level-independent (unlike a coarse linear-bin sweep,
+// which under-weights a sub-bin fundamental).
+float partials_centroid(const std::vector<float>& x, double sr,
+                        const std::vector<double>& partials) {
+    double num = 0.0, den = 0.0;
+    for (double f : partials) {
+        const double m = goertzel_mag(x, sr, f);
+        num += f * m;
+        den += m;
+    }
+    return den > 0.0 ? static_cast<float>(num / den) : 0.0f;
+}
+
+
+}  // namespace
+
+// ── LFO smoke: a 0-input custom source bakes and oscillates ───────────────
+// Directly answers the composition-doc's unverified item: executor behavior for
+// a 0-input custom node. Bakes `lfo → out`, renders 1 s, asserts a [0,1] control
+// signal oscillating at the injected rate.
+TEST_CASE("Forge CV: a 0-input LFO source bakes and emits a rate-accurate control signal",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    SignalGraph g;
+    const auto lfo_type = lofi::make_lfo_node();
+    REQUIRE(g.register_custom_node_type(lfo_type));
+    const auto lfo = g.add_custom_node(lofi::kLfoTypeId, 1, "LFO");
+    REQUIRE(lfo != 0);
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(lfo, 0, out, 0));
+    LowerResult r = bake_and_prepare(g, /*in_ch=*/1, /*out_ch=*/1);
+
+    ParamInjector inj = as_baked(r).claim_param_injection(lfo);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kLfoRateHz, 5.0f)));
+    REQUIRE(q.push(immediate(lofi::kLfoDepth, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kLfoShape, 0.0f)));  // sine
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    const int total = static_cast<int>(kSr);  // 1 second
+    const auto y = run_stream(*r.processor, {dc(total, 0.0f)}, total);
+    const float f = dominant_freq(y, kSr, 1.0, 12.0);
+    INFO("lfo est freq=" << f << " min=" << vmin(y) << " max=" << vmax(y));
+    CHECK(f == Catch::Approx(5.0f).margin(0.25f));  // 5 ±0.25 Hz
+    CHECK(vmin(y) >= 0.0f);                          // unipolar
+    CHECK(vmax(y) <= 1.0f);
+    CHECK(vmax(y) - vmin(y) > 0.9f);                 // full-depth swing
+}
+
+// ── Tremolo: lfo → vca produces measurable amplitude modulation ───────────
+TEST_CASE("Forge CV: tremolo (lfo → vca) amplitude-modulates at the LFO rate",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    const auto lfo_type = lofi::make_lfo_node();
+    const auto vca_type = lofi::make_vca_node();
+
+    // Populate `g` with the tremolo graph; returns the LFO node id (the CV source).
+    auto build = [&](SignalGraph& g, bool cv_wired) {
+        REQUIRE(g.register_custom_node_type(lfo_type));
+        REQUIRE(g.register_custom_node_type(vca_type));
+        const auto in = g.add_input_node(2, "In");   // ch0 = signal, ch1 = DC key
+        const auto lfo = g.add_custom_node(lofi::kLfoTypeId, 1, "LFO");
+        const auto vca = g.add_custom_node(lofi::kVcaTypeId, 1, "VCA");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, vca, 0));           // signal → VCA.0
+        if (cv_wired)
+            REQUIRE(g.connect(lfo, 0, vca, 1));      // LFO CV → VCA.1  (tremolo)
+        else
+            REQUIRE(g.connect(in, 1, vca, 1));       // DC → VCA.1      (control)
+        REQUIRE(g.connect(vca, 0, out, 0));
+        return lfo;
+    };
+
+    const int total = static_cast<int>(kSr);  // 1 s
+    // Carrier: DC 1.0 on ch0 so the VCA output IS the gain envelope; ch1 = DC 1.0.
+    const std::vector<std::vector<float>> feed{dc(total, 1.0f), dc(total, 1.0f)};
+
+    // Positive: LFO drives the CV port.
+    SignalGraph gp;
+    const auto lfo_p = build(gp, /*cv_wired=*/true);
+    LowerResult rp = bake_and_prepare(gp, 2, 1);
+    {
+        ParamInjector li = as_baked(rp).claim_param_injection(lfo_p);
+        REQUIRE(li.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kLfoRateHz, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kLfoDepth, 1.0f)));
+        REQUIRE(inj_ok(li, q));
+    }
+    const auto yp = run_stream(*rp.processor, feed, total);
+    const float fp = dominant_freq(yp, kSr, 1.0, 12.0);
+    const float depth_index = (vmax(yp) - vmin(yp)) / (vmax(yp) + vmin(yp) + 1e-9f);
+    INFO("tremolo freq=" << fp << " AM index=" << depth_index
+                         << " min=" << vmin(yp) << " max=" << vmax(yp));
+    CHECK(fp == Catch::Approx(5.0f).margin(0.25f));  // AM at the LFO rate
+    CHECK(depth_index > 0.9f);                        // deep tremolo (near 100%)
+
+    // Negative control: same graph, CV port fed a DC constant → no modulation.
+    SignalGraph gn;
+    build(gn, /*cv_wired=*/false);
+    LowerResult rn = bake_and_prepare(gn, 2, 1);
+    const auto yn = run_stream(*rn.processor, feed, total);
+    INFO("no-CV control: min=" << vmin(yn) << " max=" << vmax(yn));
+    CHECK(vmax(yn) - vmin(yn) < 0.01f);  // flat — the CV port is load-bearing
+}
+
+// ── Auto-wah: env_follower → filter_cv cutoff tracks input level ──────────
+TEST_CASE("Forge CV: auto-wah (env_follower → filter_cv) centroid tracks input level",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    const auto env_type = lofi::make_env_follower_node();
+    const auto filt_type = lofi::make_filter_cv_node();
+
+    // A bright source (broadband-ish: sum of harmonics) so the moving cutoff
+    // shifts the spectral centroid measurably.
+    auto bright = [&](int n, float amp) {
+        std::vector<float> v(static_cast<std::size_t>(n), 0.0f);
+        for (int k = 0; k < n; ++k) {
+            const double t = static_cast<double>(k) / kSr;
+            v[static_cast<std::size_t>(k)] = amp * static_cast<float>(
+                (std::sin(2 * M_PI * 200 * t) + std::sin(2 * M_PI * 1200 * t) +
+                 std::sin(2 * M_PI * 4000 * t)) / 3.0);
+        }
+        return v;
+    };
+
+    auto centroid_at = [&](float amp, bool env_wired) {
+        SignalGraph g;
+        REQUIRE(g.register_custom_node_type(env_type));
+        REQUIRE(g.register_custom_node_type(filt_type));
+        const auto in = g.add_input_node(2, "In");  // ch0 = signal, ch1 = DC-0 key
+        const auto env = g.add_custom_node(lofi::kEnvFollowerTypeId, 1, "Env");
+        const auto filt = g.add_custom_node(lofi::kFilterCvTypeId, 1, "Filt");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, filt, 0));          // signal → filter.0
+        if (env_wired) {
+            REQUIRE(g.connect(in, 0, env, 0));       // signal → env
+            REQUIRE(g.connect(env, 0, filt, 1));     // env CV → filter cutoff
+        } else {
+            REQUIRE(g.connect(in, 1, filt, 1));      // DC 0 → cutoff CV (base only)
+        }
+        REQUIRE(g.connect(filt, 0, out, 0));
+        LowerResult r = bake_and_prepare(g, 2, 1);
+        {   // A low base with a clean (near-Butterworth) lowpass: quiet sits at
+            // ~200 Hz, a loud envelope opens ~4.5 octaves above it.
+            ParamInjector fi = as_baked(r).claim_param_injection(filt);
+            REQUIRE(fi.valid());
+            pulp::state::ParameterEventQueue q;
+            REQUIRE(q.push(immediate(lofi::kFilterCvBaseHz, 400.0f)));
+            REQUIRE(q.push(immediate(lofi::kFilterCvAmountOct, 4.0f)));
+            REQUIRE(q.push(immediate(lofi::kFilterCvResonance, 1.0f)));
+            REQUIRE(inj_ok(fi, q));
+        }
+        if (env_wired) {
+            ParamInjector ei = as_baked(r).claim_param_injection(env);
+            REQUIRE(ei.valid());
+            pulp::state::ParameterEventQueue q;
+            REQUIRE(q.push(immediate(lofi::kEnvAttackMs, 5.0f)));
+            REQUIRE(q.push(immediate(lofi::kEnvReleaseMs, 60.0f)));
+            REQUIRE(q.push(immediate(lofi::kEnvSensitivity, 1.5f)));
+            REQUIRE(inj_ok(ei, q));
+        }
+        const int total = static_cast<int>(kSr / 2);  // 0.5 s, let ballistics settle
+        const std::vector<std::vector<float>> feed{bright(total, amp), dc(total, 0.0f)};
+        const auto y = run_stream(*r.processor, feed, total);
+        // Centroid over the settled tail (skip the attack transient), measured
+        // at the source's three partials — a clean, level-independent readout of
+        // where the moving cutoff sits.
+        const std::vector<float> tail(y.end() - 8192, y.end());
+        return partials_centroid(tail, kSr, {200.0, 1200.0, 4000.0});
+    };
+
+    const float quiet = centroid_at(0.04f, /*env_wired=*/true);
+    const float loud  = centroid_at(0.9f,  /*env_wired=*/true);
+    INFO("auto-wah centroid quiet=" << quiet << " loud=" << loud
+                                    << " octaves=" << std::log2(loud / quiet));
+    CHECK(loud > quiet * 2.0f);   // >= 1 octave brighter when driven loud
+
+    // Negative control: no env edge → cutoff stays at base → centroid ~level-independent.
+    const float flat_quiet = centroid_at(0.04f, /*env_wired=*/false);
+    const float flat_loud  = centroid_at(0.9f,  /*env_wired=*/false);
+    INFO("no-env control quiet=" << flat_quiet << " loud=" << flat_loud);
+    CHECK(flat_loud < flat_quiet * 1.4f);  // barely moves without the CV edge
+}
+
+// ── Node-level CV port proofs (CV fed from an input channel, deterministic) ──
+
+// VCA: gain CV on port 1 scales the signal on port 0.
+TEST_CASE("Forge CV: VCA multiplies its signal by the port-1 gain CV",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_vca_node(), /*input_channels=*/2);
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    REQUIRE(inj.inject(immediate(lofi::kVcaGain, 1.0f)) == InjectStatus::Ok);
+
+    const std::vector<float> sig(kFrames, 0.5f);
+    const std::vector<float> cv_zero(kFrames, 0.0f);
+    const std::vector<float> cv_one(kFrames, 1.0f);
+    const auto off = run_block(*fx.result.processor, {sig, cv_zero});
+    const auto on = run_block(*fx.result.processor, {sig, cv_one});
+    for (float v : off) CHECK(v == Catch::Approx(0.0f).margin(1e-6));   // CV 0 → silence
+    for (float v : on) CHECK(v == Catch::Approx(0.5f).margin(1e-6));    // CV 1 → passthrough
+}
+
+// filter_cv: cutoff CV on port 1 opens the lowpass (a high tone passes more).
+TEST_CASE("Forge CV: filter_cv cutoff CV on port 1 sweeps the lowpass",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_filter_cv_node(), /*input_channels=*/2);
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kFilterCvBaseHz, 300.0f)));
+    REQUIRE(q.push(immediate(lofi::kFilterCvAmountOct, 5.0f)));  // CV 1 → ~9.6 kHz
+    REQUIRE(q.push(immediate(lofi::kFilterCvResonance, 1.0f)));
+    REQUIRE(inj_ok(inj, q));
+
+    const auto tone = sine(kFrames, 6000.0, 0.8f);  // above the base cutoff
+    const std::vector<float> cv_lo(kFrames, 0.0f);  // cutoff = base (300 Hz)
+    const std::vector<float> cv_hi(kFrames, 1.0f);  // cutoff opens ~5 oct
+    const float closed = rms(settle_multi(*fx.result.processor, {tone, cv_lo}));
+    const float open = rms(settle_multi(*fx.result.processor, {tone, cv_hi}));
+    INFO("filter_cv closed=" << closed << " open=" << open);
+    CHECK(open > closed * 3.0f);   // the CV opens the filter for the 6 kHz tone
+}
+
+// delay_cv: time CV on port 1 moves the read tap (echo latency changes).
+TEST_CASE("Forge CV: delay_cv time CV on port 1 moves the delay tap",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    auto latency_for = [&](float cv_val) {
+        BakedFixture fx(lofi::make_delay_cv_node(), /*input_channels=*/2);
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kDelayCvBaseMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kDelayCvDepthMs, 20.0f)));  // CV 1 → +20 ms
+        REQUIRE(q.push(immediate(lofi::kDelayCvFeedback, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kDelayCvMix, 1.0f)));       // fully wet
+        REQUIRE(inj_ok(inj, q));
+
+        // Impulse on ch0; constant CV on ch1. Find the wet-tap peak sample index.
+        std::vector<float> impulse(kFrames, 0.0f);
+        impulse[0] = 1.0f;
+        const std::vector<float> cv(kFrames, cv_val);
+        // Render enough blocks to cover a 25 ms tap (~1200 samples).
+        std::vector<float> stream;
+        const std::vector<std::vector<float>> first{impulse, cv};
+        auto o = run_block(*fx.result.processor, first);
+        stream.insert(stream.end(), o.begin(), o.end());
+        for (int b = 0; b < 12; ++b) {
+            o = run_block(*fx.result.processor, {std::vector<float>(kFrames, 0.0f), cv});
+            stream.insert(stream.end(), o.begin(), o.end());
+        }
+        int peak_idx = 0;
+        float peak_v = 0.0f;
+        for (int k = 0; k < static_cast<int>(stream.size()); ++k)
+            if (std::fabs(stream[static_cast<std::size_t>(k)]) > peak_v) {
+                peak_v = std::fabs(stream[static_cast<std::size_t>(k)]);
+                peak_idx = k;
+            }
+        return peak_idx;
+    };
+
+    const int lat_lo = latency_for(0.0f);  // ~5 ms  → ~240 samples
+    const int lat_hi = latency_for(1.0f);  // ~25 ms → ~1200 samples
+    INFO("delay_cv tap lo=" << lat_lo << " hi=" << lat_hi << " samples");
+    CHECK(lat_hi > lat_lo + 500);  // the injected time CV moved the tap far later
+}
+
+// ── env_follower invert: a loud input DUCKS the CV (pump primitive) ───────
+TEST_CASE("Forge CV: env_follower invert emits a ducking CV for pumping",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_env_follower_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kEnvAttackMs, 5.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvReleaseMs, 60.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvSensitivity, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvInvert, 1.0f)));  // duck
+    REQUIRE(inj_ok(inj, q));
+
+    // Quiet first from a fresh instance (env = 0 → CV = 1); then a loud input
+    // ducks it. 60 silent blocks (160 ms) >> the 60 ms release, so the quiet
+    // measurement is fully settled regardless of order.
+    const auto quiet = settle(*fx.result.processor, dc(kFrames, 0.0f), 60);
+    const auto loud = settle(*fx.result.processor, sine(kFrames, 200.0, 0.9f), 40);
+    const float loud_cv = rms(loud);
+    const float quiet_cv = rms(quiet);
+    INFO("inverted env: loud_cv=" << loud_cv << " quiet_cv=" << quiet_cv);
+    CHECK(quiet_cv > 0.9f);          // silence → CV near 1 (full gain)
+    CHECK(loud_cv < quiet_cv * 0.5f);  // loud input ducks the CV down
 }
