@@ -5,7 +5,7 @@
       "display_name": "Audio Quality Lab",
       "category": "python_tool",
       "description": "Offline reference-vs-candidate audio artifact detection (transient smear, dulling, metallic fizz, graininess) so an agent or CI can regression-guard DSP without a human A/B listen.",
-      "upstream_url": "https://github.com/danielraffel/pulp/tree/main/tools/audio/quality-lab",
+      "upstream_url": "https://github.com/Generous-Corp/pulp/tree/main/tools/audio/quality-lab",
       "license": "MIT",
       "install_method": "python_pip",
       "source_dir": "tools/audio/quality-lab",
