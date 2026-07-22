@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A DAWproject arrangement that is well-formed XML but carries a clip whose
+     content is a <Warps> timeline — outside the importer's documented subset.
+     The importer must reject it (fail closed) rather than silently drop the
+     clip's real content and import an empty clip. -->
+<Project version="1.0">
+  <Transport>
+    <Tempo unit="bpm" value="120.0"/>
+    <TimeSignature numerator="4" denominator="4"/>
+  </Transport>
+  <Structure>
+    <Track contentType="audio" loaded="true" id="track-1" name="Audio"/>
+  </Structure>
+  <Arrangement id="arrangement">
+    <Lanes timeUnit="beats" id="lanes-root">
+      <Lanes track="track-1" id="lanes-1">
+        <Clips id="clips-1">
+          <Clip time="0.0" duration="4.0" name="warped">
+            <Warps contentTimeUnit="beats" timeUnit="beats">
+              <Audio algorithm="stretch" channels="2" duration="2.0" sampleRate="44100">
+                <File path="audio/warped.wav"/>
+              </Audio>
+              <Warp time="0.0" contentTime="0.0"/>
+              <Warp time="4.0" contentTime="2.0"/>
+            </Warps>
+          </Clip>
+        </Clips>
+      </Lanes>
+    </Lanes>
+  </Arrangement>
+</Project>

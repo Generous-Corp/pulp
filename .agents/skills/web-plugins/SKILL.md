@@ -673,3 +673,17 @@ prints the editor's CSS size and computed `touch-action`, and lists what to chec
 the two-line readout, the file picker, and scroll). Drive real interactions with CDP
 `Input.dispatchTouchEvent` (a REAL touch), not synthetic `new TouchEvent` (which does not
 drive scrolling and gives a false negative). Fix what the screenshots show, redeploy, re-run.
+
+### The wasm DSP lanes compile a hand-picked source subset — not `pulp-runtime`
+
+`PulpWam.cmake` / `PulpWclap.cmake` build `pulp-wam-dsp` / `pulp-wclap-dsp` from an
+explicit `_PULP_WAM_CORE_SOURCES` / `_PULP_WCLAP_CORE_SOURCES` list, deliberately
+NOT linking `pulp-runtime` (it drags in mbedTLS + http, too heavy for wasm). The
+`web-timeline-source-closure` gate then requires that EVERY
+`core/{timebase,timeline,playback}/src/*.cpp` appear in those lists — so adding a
+new production TU under `core/timeline/src/` forces it into the wasm plugin. Keep
+native-only or heavy-dependency code (e.g. the DAWproject importer, which needs
+pugixml from `pulp-runtime`) OUT of `core/timeline/src/` — put it in a sibling
+dir like `core/timeline/import/` so the closure does not sweep it into the wasm
+DSP binary. If a timeline source genuinely belongs in the web plugin, add it to
+BOTH lane lists (and provide any dependency the lanes don't already compile).
