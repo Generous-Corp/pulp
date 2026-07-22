@@ -129,6 +129,13 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
     LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
+# MIDI controller -> parameter value scaling. The routing/learn foundation lives
+# in core/state (pulp::state); the scaling window it drives is the engine's
+# control-surface obligation for mapping a hardware controller to any parameter.
+pulp_add_test_suite(pulp-test-midi-parameter-map-scaling
+    SOURCES test_midi_parameter_map_scaling.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::state)
+
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not
     # include or link back upward. The selftest proves every forbidden layer is
