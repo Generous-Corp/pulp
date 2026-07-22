@@ -50,6 +50,40 @@ stage + `prepare_swap` commit through `process()` and asserts sample continuity
 across the swap block for every hosted format (VST3/AU/CLAP/LV2). This REAPER
 mode is the local-only in-host proof.
 
+### `sequence-loop-seek` — loop + seek the transport under an embedded sequence
+Loads a Pulp plugin that embeds a sequence, sets a loop region on the REAPER
+timeline, starts playback, and performs a scripted series of seeks (into/out of
+the loop and across the loop wrap). The plugin emits a per-block transport marker
+carrying BOTH the host playhead and its own sequence read position; the harness
+asserts the sequence **followed the host** across every wrap/seek with no
+dropout. A free-running counter that ignores the host jump is caught as position
+**drift** → FAIL.
+```bash
+python3 tools/testing/daw-smoke/reaper_smoke.py \
+  --mode sequence-loop-seek \
+  --plugin-name "Pulp Sequence" \
+  --format vst3 \
+  --plugin-path "build/VST3/Pulp Sequence.vst3" \
+  --loop-start 1.0 --loop-end 3.0
+```
+The plugin must emit these markers to stdout (the scraper's contract):
+```
+[seq-loop] loaded events=<int> len_qn=<float>
+[seq-loop] play
+[seq-loop] blk host_qn=<float> seq_qn=<float> active=<int> jump=<0|1> dropout=<0|1>
+```
+`host_qn` is the host playhead and `seq_qn` the plugin's sequence read position,
+both in quarter notes; `jump=1` flags a block where the host playhead was NOT a
+smooth continuation (a wrap or a seek). PASS requires `|host_qn - seq_qn| <=
+--pos-tolerance-qn` on **every** block (wrap/seek blocks included), at least one
+loop wrap AND one seek, observed note activity, and no dropout.
+
+> This is the **harness half** of Phase-2 DoD Proof #2. Completing the proof also
+> needs the embedded-sequence plugin (Gate-5/6 work) and a real REAPER run; until
+> both exist this mode degrades to SKIP (REAPER absent) or INCONCLUSIVE (no
+> plugin markers). The scraper/dispatch logic is unit-tested (no REAPER) in
+> `test_reaper_smoke.py`, including a negative drift/dropout case.
+
 Add `--check-config` to honor the opt-in toggle (SKIP unless enabled) — CI/gate use.
 
 ## Audio etiquette
