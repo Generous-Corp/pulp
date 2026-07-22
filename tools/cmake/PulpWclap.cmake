@@ -118,6 +118,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/id_remap.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/journal.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/model.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_codegen.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_canonical.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_parser.cpp

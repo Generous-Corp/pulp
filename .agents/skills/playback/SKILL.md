@@ -151,7 +151,11 @@ the format-layer projection from playback snapshots to `ProcessContext`.
 - `core/playback` must not include `pulp/format`, `pulp/host`, or `pulp/view`.
   `<pulp/format/playback_context_projection.hpp>` owns the one-way adapter.
   Keep `timeline-engine-dependency-floor` green; it allowlists source includes
-  and CMake links for timebase, timeline (when present), and playback.
+  and CMake links for timebase, timeline (when present), and playback. The link
+  check reads `target_link_libraries` dependencies and skips the configured
+  target plus target-defining commands, so a subsystem-local helper executable
+  whose own name shares the module prefix (e.g. `pulp-timeline-schema-emit`) may
+  link `pulp::timeline` without tripping the floor.
 - `ArrangementAudioRenderer::process()` clears output, validates the complete
   zero/one-wrap snapshot, and mixes arrangement-selected tracks in stable
   PlaybackProgram order. It is immutable-input RT safe, wraps `ScopedNoAlloc`,
