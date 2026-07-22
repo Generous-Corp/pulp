@@ -48,6 +48,7 @@
 
 #include <pulp/signal/delay_line.hpp>
 #include <pulp/signal/dry_wet_mixer.hpp>
+#include <pulp/signal/reverb.hpp>
 #include <pulp/signal/svf.hpp>
 #include <pulp/signal/waveshaper.hpp>
 
@@ -67,6 +68,7 @@ inline constexpr const char* kNoiseTypeId      = "forge_lofi_noise";
 inline constexpr const char* kBitcrushTypeId   = "forge_lofi_bitcrush";
 inline constexpr const char* kTrimTypeId       = "forge_lofi_trim";
 inline constexpr const char* kPingPongTypeId   = "forge_lofi_ping_pong";
+inline constexpr const char* kReverbTypeId     = "forge_lofi_reverb";
 
 // The filter's response mode is fixed when the node is REGISTERED, not injected:
 // each mode is its own registered type, so a baked build's filter character is
@@ -92,6 +94,9 @@ inline constexpr state::ParamID kTrimGainDb        = 1;  // "Level"
 inline constexpr state::ParamID kPingPongTimeMs    = 1;  // "Time"
 inline constexpr state::ParamID kPingPongFeedback  = 2;  // "Feedback"
 inline constexpr state::ParamID kPingPongWidth     = 3;  // "Width"
+inline constexpr state::ParamID kReverbDecay       = 1;  // "Decay" (RT60 seconds)
+inline constexpr state::ParamID kReverbDamping     = 2;  // "Damping"
+inline constexpr state::ParamID kReverbMix         = 3;  // "Mix"
 
 // Longest delay the node can address; sizes the bake-time buffer allocation.
 inline constexpr float kDelayMaxMs = 2000.0f;
@@ -576,6 +581,87 @@ inline CustomNodeType make_ping_pong_node() {
                 const float cross = 0.5f - 0.5f * width;
                 ol[static_cast<std::size_t>(k)] = dry_l + same * wet_l + cross * wet_r;
                 or_[static_cast<std::size_t>(k)] = dry_r + same * wet_r + cross * wet_l;
+            }
+        };
+    return t;
+}
+
+// ── Reverb (FDN) — "Decay" + "Damping" + "Mix" ───────────────────────────
+// Wraps the SDK's algorithmic reverb (signal::Reverb): a 4-channel feedback
+// delay network with a Hadamard (unitary, energy-preserving) mixing matrix.
+// Honestly named — it is a good ALGORITHMIC reverb, not a plate/spring/
+// convolution emulation — and its three macros are the three controls that
+// define a reverb's character:
+//   * decay   (0.1 .. 10 s): the RT60. The FDN's per-round feedback is
+//     10^(-3·avg_delay/decay), so the tail reaches −60 dB at exactly `decay`
+//     seconds by construction — the macro reads directly as reverb time.
+//   * damping (0 .. 0.99): a one-pole lowpass in the feedback path; higher
+//     values roll the tail's highs off sooner, darkening it — a bright hall at
+//     0, a dark room near the top.
+//   * mix     (0 .. 1): dry/wet crossfade, applied inside the reverb.
+// The feedback is structurally below unity for every finite decay, so the tail
+// always decays and the node cannot run away — the verify gate's boundedness
+// check holds even at the maximum decay.
+//
+// Mono in → mono out (dual-mono in the stereo spine): the FDN's two stereo taps
+// are summed to one output, and running one instance per channel rail gives a
+// naturally decorrelated stereo tail. RT-safe: prepare() sizes the delay lines,
+// process() is pure arithmetic. signal::Reverb recomputes its feedback with one
+// pow() per sample internally; that is the SDK block's fixed cost and cannot be
+// avoided through its API — a reverb tail is not cutoff-sweep-sensitive, so it
+// is an honest, acceptable cost. decay and damping are written only when the
+// injected value actually moves (the setters are otherwise wasted work); mix is
+// a cheap store and is written every sample.
+struct ReverbInstance {
+    signal::Reverb reverb;
+    float last_decay = -1.0f;
+    float last_damping = -1.0f;
+};
+
+inline CustomNodeType make_reverb_node() {
+    CustomNodeType t;
+    t.type_id = kReverbTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Reverb";
+    t.lowerable = true;
+    t.create = []() -> void* { return new ReverbInstance{}; };
+    t.destroy = [](void* p) { delete static_cast<ReverbInstance*>(p); };
+    t.prepare = [](void* p, double sr, int /*max_block*/) {
+        auto* s = static_cast<ReverbInstance*>(p);
+        s->reverb.prepare(static_cast<float>(sr));
+        s->last_decay = -1.0f;    // force a setter write on the first sample
+        s->last_damping = -1.0f;
+    };
+    t.reset = [](void* p) { static_cast<ReverbInstance*>(p)->reverb.reset(); };
+    // decay: 0.1 .. 10 s (RT60), default 2 s. damping: 0 .. 0.99, default 0.3.
+    // mix: 0 .. 1, default 0.3 — a subtle wet blend an untouched reverb sits at.
+    t.baked_params.push_back({kReverbDecay, 0.1f, 10.0f, 2.0f});
+    t.baked_params.push_back({kReverbDamping, 0.0f, 0.99f, 0.3f});
+    t.baked_params.push_back({kReverbMix, 0.0f, 1.0f, 0.3f});
+    t.process_instance_baked_param =
+        [](void* p, audio::BufferView<float>& out,
+           const audio::BufferView<const float>& in, int n,
+           const BakedParamView& params) {
+            auto* s = static_cast<ReverbInstance*>(p);
+            const float* i = in.channel_ptr(0);
+            float* o = out.channel_ptr(0);
+            for (int k = 0; k < n; ++k) {
+                const auto off = static_cast<std::int32_t>(k);
+                const float decay = params.value_at(kReverbDecay, off);
+                if (decay != s->last_decay) {
+                    s->last_decay = decay;
+                    s->reverb.set_decay(decay);
+                }
+                const float damping = params.value_at(kReverbDamping, off);
+                if (damping != s->last_damping) {
+                    s->last_damping = damping;
+                    s->reverb.set_damping(damping);
+                }
+                s->reverb.set_mix(params.value_at(kReverbMix, off));
+                const auto st = s->reverb.process(i[static_cast<std::size_t>(k)]);
+                o[static_cast<std::size_t>(k)] = 0.5f * (st.left + st.right);
             }
         };
     return t;
