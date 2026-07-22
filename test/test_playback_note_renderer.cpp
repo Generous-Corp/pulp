@@ -634,6 +634,38 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
     // key left at net==1 after the terminal flush.
     std::array<int, 16 * 128> net{};
 
+    // Independent stuck-note oracle. The toggle invariant alone is vacuous for
+    // the seek/loop-flush contract: the renderer folds logical overlaps, so its
+    // physical stream stays a clean per-key toggle whether or not a
+    // discontinuity releases stranded notes — and a terminal stop-flush always
+    // rebalances the counts. Coverage is the missing dimension. A key may sound
+    // only while the playhead sits inside the union of that key's note extents;
+    // a discontinuity that leaves a note ON strands the playhead outside every
+    // extent for a still-sounding key. Build the folded extents from the exact
+    // compiled schedule the renderer plays, sharing none of its flush code.
+    std::array<std::vector<std::pair<std::int64_t, std::int64_t>>, 16 * 128> coverage;
+    {
+        const auto program = programs.store.read();
+        REQUIRE(program);
+        const auto events = program->find_track({10})->arrangement_note_events();
+        std::array<int, 16 * 128> depth{};
+        std::array<std::int64_t, 16 * 128> open{};
+        for (const auto& ev : events) {
+            const std::size_t key =
+                static_cast<std::size_t>(ev.channel) * 128u + ev.pitch;
+            if (ev.kind == NoteProgramEventKind::On) {
+                if (depth[key]++ == 0) open[key] = ev.sample.value;
+            } else if (depth[key] > 0 && --depth[key] == 0) {
+                coverage[key].push_back({open[key], ev.sample.value});
+            }
+        }
+    }
+    const auto covered = [&](std::size_t key, std::int64_t sample) {
+        for (const auto& extent : coverage[key])
+            if (sample >= extent.first && sample < extent.second) return true;
+        return false;
+    };
+
     // Aggregate non-vacuity witnesses across every seed. They prove the fuzz
     // actually drove the risky paths (live notes across a seek, and loop wraps),
     // not just a stream that was empty or already released.
@@ -688,6 +720,21 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
                 }
             }
             if (renderer.has_active_notes()) ++saw_active_blocks;
+
+            // Coverage oracle: every key still sounding at the end of a playing
+            // block must have a note covering the playhead's last played sample.
+            // A dropped seek/loop-wrap flush strands a note here — the playhead
+            // has moved past that note's extent yet the key is still ON. Only the
+            // stuck direction is checked: a note whose onset precedes the new
+            // range is deliberately not chased, so covered-but-silent is legal.
+            if (snapshot.is_playing) {
+                const auto& last = snapshot.ranges[snapshot.range_count - 1];
+                const std::int64_t playhead_last =
+                    last.timeline_sample_start.value +
+                    static_cast<std::int64_t>(last.frame_count) - 1;
+                for (std::size_t key = 0; key < net.size(); ++key)
+                    if (net[key] == 1) REQUIRE(covered(key, playhead_last));
+            }
         };
 
         for (int op = 0; op < ops_per_seed; ++op) {
