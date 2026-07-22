@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
 #include <pulp/playback/program_identity.hpp>
 #include <pulp/runtime/result.hpp>
@@ -160,6 +161,9 @@ class PlaybackProgram {
     const AudioRendererLimits& audio_limits() const noexcept {
         return audio_limits_;
     }
+    const AutomationPlaybackLimits& automation_limits() const noexcept {
+        return automation_limits_;
+    }
     std::span<const std::shared_ptr<const TrackProgram>> tracks() const noexcept {
         return tracks_;
     }
@@ -171,7 +175,7 @@ class PlaybackProgram {
                     timeline::ItemId project_id, timeline::ItemId sequence_id,
                     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                     std::shared_ptr<const DecodedAudioAssetPool> audio_assets,
-                    AudioRendererLimits audio_limits,
+                    AudioRendererLimits audio_limits, AutomationPlaybackLimits automation_limits,
                     std::vector<std::shared_ptr<const TrackProgram>> tracks) noexcept;
     const std::shared_ptr<const TrackProgram>* find_track_owner(timeline::ItemId id) const noexcept;
 
@@ -182,6 +186,7 @@ class PlaybackProgram {
     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map_;
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets_;
     AudioRendererLimits audio_limits_;
+    AutomationPlaybackLimits automation_limits_;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
 };
 
