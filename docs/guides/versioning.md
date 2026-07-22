@@ -356,3 +356,26 @@ macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
 and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/Generous-Corp/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
+
+### Why the pin sits at v0.78.0 — the merge queue made it load-bearing
+
+The pin moved v0.70.0 → v0.78.0 for one reason that is specific to this repo:
+**Shipyard's post-tag hook could no longer push.**
+
+`[release.post_tag_hook]` in `.shipyard/config.toml` runs
+`shipyard changelog regenerate` after every SDK tag and pushes `CHANGELOG.md`
+**straight to `main`**. That was fine until `main` gained the `main-merge-queue`
+ruleset, which has `bypass_actors: []` and `current_user_can_bypass: never` —
+so *every* non-queue merge is refused, bot pushes included. The release itself
+still ships (the tag and the platform binaries are unaffected), but the
+changelog sync fails, retries `max_push_attempts` times, and leaves a red run
+plus a silently stale CHANGELOG.
+
+Shipyard v0.78.0 adds `push_mode` to that hook. With `push_mode = "pr"` the hook
+opens a pull request instead of pushing, so the changelog lands *through* the
+queue like everything else. That is the setting Pulp uses, and it is why the pin
+cannot stay below v0.78.0 while the merge queue is enabled.
+
+Keep the three in step — the pin, the installed binary on every fleet Mac, and
+`push_mode` — because a host still on an older Shipyard silently ignores
+`push_mode` and reverts to a direct push that the ruleset then rejects.

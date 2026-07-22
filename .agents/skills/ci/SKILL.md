@@ -1635,6 +1635,46 @@ a `feat:`/`fix:` title) — expect to add those trailers too.
 
 ### Shipyard pin and behaviour notes
 
+#### Shipyard cannot merge under a merge queue — it errors, and that is expected
+
+`shipyard pr` is still the right way to create a PR: it runs the gates, applies
+version bumps, pushes the branch, and opens and tracks the PR. It **cannot land
+it**. Confirmed at tag v0.78.0, `src/wait.rs:189`:
+
+```rust
+if merge_state.contains("RULESET") || merge_state == "MERGE_QUEUED" {
+    return Err(Box::new(UnsupportedScopeError(
+        "Rulesets / merge-queue governance isn't supported by
+         `shipyard wait pr --state green` yet …")))
+}
+```
+
+So a ship that reaches the wait/merge step under the `main-merge-queue` ruleset
+fails there. **That is not a broken branch and not a Shipyard bug to work
+around** — the ruleset (`bypass_actors: []`, `current_user_can_bypass: never`)
+is what makes the queue the real merge authority rather than theatre. Do not
+admin-merge past it. Enqueue instead:
+
+```bash
+ghapp pr merge <n> --repo Generous-Corp/pulp --merge --auto
+```
+
+The PR enters the queue once its required contexts are green. Note GitHub uses
+the **latest** run for a required context, so a newly-queued re-run makes an
+already-green context pending again and delays entry — that resolves itself.
+
+#### The pin is load-bearing at v0.78.0 because of the post-tag hook
+
+`[release.post_tag_hook]` runs `shipyard changelog regenerate` after every SDK
+tag and pushes `CHANGELOG.md` directly to `main` — which the queue ruleset
+refuses. The tag and binaries still publish; the changelog sync fails, retries
+`max_push_attempts` times, and leaves a red run plus a stale CHANGELOG.
+
+v0.78.0 adds `push_mode` to that hook; `push_mode = "pr"` opens a pull request so
+the changelog lands *through* the queue. A fleet Mac still on an older Shipyard
+silently ignores `push_mode` and reverts to the direct push, so the pin, the
+installed binary on every host, and the config setting must move together.
+
 #### `shipyard update` is an updater, not a converger — it will not go backwards
 
 `shipyard update --to vX.Y.Z` silently does **nothing** when `X.Y.Z` is older

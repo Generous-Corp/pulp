@@ -310,6 +310,15 @@ header_comment = """<!-- This file is auto-regenerated after every SDK tag by Sh
 [release.post_tag_hook]
 enabled  = true
 command  = "shipyard changelog regenerate"
+# `main` carries the `main-merge-queue` ruleset with `bypass_actors = []` and
+# `current_user_can_bypass = never`, so a direct push is refused — bot pushes
+# included. Left on the default, this hook would publish the tag and binaries
+# fine and then fail the changelog sync, retry `max_push_attempts` times, and
+# leave a red run plus a silently stale CHANGELOG. `pr` opens a pull request
+# instead, so the changelog lands THROUGH the queue like every other change.
+# Requires Shipyard >= v0.78.0 (see tools/shipyard.toml): an older binary does
+# not know this key, ignores it, and silently reverts to the direct push.
+push_mode = "pr"
 watch    = ["CHANGELOG.md"]
 trailers = [
   'Version-Bump: sdk=skip reason="docs-only automated regeneration"',
