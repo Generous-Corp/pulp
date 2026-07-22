@@ -14,6 +14,9 @@ class SignalGraph::ExecutionSnapshot {
 
     bool inject_midi(NodeId midi_input_node,
                      const midi::MidiBuffer& events) const noexcept;
+    bool inject_parameter_events(
+        NodeId plugin_node,
+        const state::ParameterEventQueue& events) const noexcept;
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  int num_samples) const noexcept;
