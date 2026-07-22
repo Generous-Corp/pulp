@@ -263,6 +263,28 @@ The `timeline-schema-cli-drift` ctest byte-checks it; `timeline-schema-cli-selft
 (`core/timeline/tools/test_schema_cli_emit.py`) proves determinism, complete
 projection, value-type mapping, and confirm-the-failure.
 
+The **JS-facade surface** is the runtime-JS counterpart to the `.d.ts`:
+`core/timeline/tools/schema_js_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_facade.js` — a frozen ES module exporting
+`timelineSchema` (a descriptor per type: domain, version, and fields), a
+`timelineSchemaTypeNames` list, and `timelineSchemaManifestVersion`. The JS
+engine imports it directly (no JSON parse). Field `jsType` reports the actual
+runtime type — unlike the `.d.ts`, which widens the numeric kinds to
+`number | string`, the facade reports `U32`→`number` and the 64-bit string kinds
+(`I64String`/`U64String`)→`string` (carried as strings to keep precision);
+`Object`→`object`, `Array`→`array`, and a `$ref` field records the referenced
+type. **After regenerating the manifest, regenerate this too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_js_emit.py --out core/timeline/schema/timeline_facade.js
+```
+
+The `timeline-schema-js-drift` ctest byte-checks it; `timeline-schema-js-selftest`
+(`core/timeline/tools/test_schema_js_emit.py`) proves determinism, complete
+projection, jsType mapping, confirm-the-failure, and — when `node` is present —
+that the emitted module parses, imports, and is deeply frozen (skipped, not
+failed, without `node`).
+
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,
