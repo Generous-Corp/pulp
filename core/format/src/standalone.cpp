@@ -353,7 +353,7 @@ void StandaloneApp::render_audio_block(
         proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
         proc_ctx.is_playing = config_.transport_playing;
-        proc_ctx.is_recording = false;
+        proc_ctx.is_recording = config_.transport_recording;
         proc_ctx.tempo_bpm = config_.tempo_bpm;
         proc_ctx.time_sig_numerator = config_.time_sig_numerator;
         proc_ctx.time_sig_denominator = config_.time_sig_denominator;
@@ -1066,6 +1066,7 @@ constexpr std::string_view kKeyTempo          = "standalone.tempo_bpm";
 constexpr std::string_view kKeyTimeSigNum     = "standalone.time_sig_num";
 constexpr std::string_view kKeyTimeSigDen     = "standalone.time_sig_den";
 constexpr std::string_view kKeyPlaying        = "standalone.transport_playing";
+constexpr std::string_view kKeyRecording      = "standalone.transport_recording";
 
 }  // namespace
 
@@ -1087,6 +1088,7 @@ StandaloneConfig StandaloneApp::load_persisted_config(std::string_view app_name,
     if (auto v = user.get_int(kKeyTimeSigNum))        cfg.time_sig_numerator   = static_cast<int>(*v);
     if (auto v = user.get_int(kKeyTimeSigDen))        cfg.time_sig_denominator = static_cast<int>(*v);
     if (auto v = user.get_bool(kKeyPlaying))          cfg.transport_playing    = *v;
+    if (auto v = user.get_bool(kKeyRecording))        cfg.transport_recording  = *v;
     return cfg;
 }
 
@@ -1108,6 +1110,7 @@ bool StandaloneApp::save_persisted_config(std::string_view app_name,
     user.set_int(kKeyTimeSigNum, config.time_sig_numerator);
     user.set_int(kKeyTimeSigDen, config.time_sig_denominator);
     user.set_bool(kKeyPlaying, config.transport_playing);
+    user.set_bool(kKeyRecording, config.transport_recording);
 
     // ApplicationProperties::save() walks both user + common files and
     // returns void; check the user file's persisted path is non-empty as

@@ -27,6 +27,12 @@ pulp_add_test_suite(pulp-test-playback-capture-engine
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-standalone-recording
+    SOURCES test_standalone_recording.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::standalone pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-external-sync
     SOURCES test_playback_external_sync.cpp
     LIBRARIES pulp::playback)
@@ -85,6 +91,16 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME timeline-live-capture-verifier-self-test
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py
+            --self-test)
+    add_test(NAME timeline-live-capture-hardware
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py)
+    set_tests_properties(timeline-live-capture-hardware PROPERTIES
+        LABELS "hardware;validation"
+        SKIP_RETURN_CODE 77)
     add_test(NAME timeline-sync-soak-verifier-self-test
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_sync_soak.py
