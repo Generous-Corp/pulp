@@ -8,9 +8,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { extractTokens } from "../src/tokens";
+import { extractBoundVariableBindings } from "../src/extract-pure";
 
 type Mode = { modeId: string; name: string };
-type Coll = { name: string; defaultModeId: string; modes: Mode[]; variableIds: string[] };
+type Coll = { id?: string; name: string; defaultModeId: string; modes: Mode[]; variableIds: string[] };
 type Var = { id: string; name: string; resolvedType: string; valuesByMode: Record<string, unknown> };
 
 const white = { r: 1, g: 1, b: 1, a: 1 };
@@ -235,6 +236,7 @@ test("mode-suffix/base collisions invalidate only the owner of the overwritten p
     },
   };
   const collection = (order: string[]): Coll => ({
+    id: "CollectionID:theme",
     name: "Theme",
     defaultModeId: "light",
     modes: [
@@ -250,6 +252,17 @@ test("mode-suffix/base collisions invalidate only the owner of the overwritten p
   let tokens = await extractTokens([] as never);
   assert.equal(tokens.variableIdToName.bg, "theme.bg");
   assert.equal(tokens.variableIdToName.bgDark, "theme.bg.dark");
+  const overwrittenDarkMode = extractBoundVariableBindings(
+    { fills: [alias("bg")] },
+    tokens.variableIdToName,
+    {
+      resolvedModeByCollection: { "CollectionID:theme": "dark" },
+      variableIdToCollectionId: tokens.variableIdToCollectionId ?? {},
+      variableIdToModeName: tokens.variableIdToModeName ?? {},
+    },
+  );
+  assert.equal(overwrittenDarkMode?.bindings.fills, undefined);
+  assert.deepEqual(overwrittenDarkMode?.unresolved, ["bg"]);
 
   // In reverse order bg's non-default suffix overwrites bg/dark's DEFAULT,
   // so bg/dark must stop resolving while bg's bare default remains valid.
@@ -257,4 +270,15 @@ test("mode-suffix/base collisions invalidate only the owner of the overwritten p
   tokens = await extractTokens([] as never);
   assert.equal(tokens.variableIdToName.bg, "theme.bg");
   assert.equal(tokens.variableIdToName.bgDark, undefined);
+  const staleBinding = extractBoundVariableBindings(
+    { fills: [alias("bgDark")] },
+    tokens.variableIdToName,
+    {
+      resolvedModeByCollection: { "CollectionID:theme": "light" },
+      variableIdToCollectionId: tokens.variableIdToCollectionId ?? {},
+      variableIdToModeName: tokens.variableIdToModeName ?? {},
+    },
+  );
+  assert.equal(staleBinding?.bindings.fills, undefined);
+  assert.deepEqual(staleBinding?.unresolved, ["bgDark"]);
 });

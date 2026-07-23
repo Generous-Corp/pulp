@@ -519,6 +519,7 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
               "bound_variables": {
                 "fills": "theme.brand.primary",
                 "fills.1": "theme/secondary with spaces",
+                "slot.background_color": "theme.brand.primary",
                 "cornerRadius": "theme.radius.md",
                 "componentProperties.label#9:0": "theme.label.gain"
               }
@@ -543,6 +544,8 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
     // Token names are opaque passthrough — slashes/spaces are the producer's
     // business, this reader must not normalize them.
     CHECK(a.at("figmaBoundVariable.fills.1") == "theme/secondary with spaces");
+    CHECK(a.at("figmaBoundVariable.slot.background_color") ==
+          "theme.brand.primary");
     CHECK(a.at("figmaBoundVariable.cornerRadius") == "theme.radius.md");
     CHECK(a.at("figmaBoundVariable.componentProperties.label#9:0") ==
           "theme.label.gain");

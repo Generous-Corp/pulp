@@ -7,7 +7,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { extractBoundVariableBindings } from "../src/extract-pure";
+import {
+  correlateNormalizedColorBindings,
+  extractBoundVariableBindings,
+  stripNormalizedColorBindings,
+} from "../src/extract-pure";
 import { serializeExport, type SerializeContext } from "../src/serialize";
 import type { ExtractedFigmaNode } from "../src/extract-model";
 import { AssetCache } from "../src/assets";
@@ -48,6 +52,96 @@ test("single aliases and alias arrays resolve to token names", () => {
     "textRangeFills.0:4": "theme.brand.primary",
   });
   assert.deepEqual(out.unresolved, []);
+});
+
+test("bindings use the node's inherited effective variable mode", () => {
+  const out = extractBoundVariableBindings(
+    { fills: [alias("VariableID:1:1")] },
+    idToName,
+    {
+      resolvedModeByCollection: { "CollectionID:theme": "ModeID:dark" },
+      variableIdToCollectionId: {
+        "VariableID:1:1": "CollectionID:theme",
+      },
+      variableIdToModeName: {
+        "VariableID:1:1": {
+          "ModeID:light": "theme.brand.primary",
+          "ModeID:dark": "theme.brand.primary.dark",
+        },
+      },
+    },
+  );
+  assert.equal(out?.bindings.fills, "theme.brand.primary.dark");
+});
+
+test("normalized slot correlation is emitted only for one opaque solid paint", () => {
+  const solid = { type: "SOLID", color: { r: 1, g: 0, b: 0 } };
+  const bindings: Record<string, string> = {
+    fills: "theme.brand.primary",
+    strokes: "theme.brand.secondary",
+  };
+  correlateNormalizedColorBindings(
+    "FRAME", [solid], [solid], bindings,
+    { background_color: "#ff0000", border_color: "#00ff00" },
+  );
+  assert.equal(bindings["slot.background_color"], "theme.brand.primary");
+  assert.equal(bindings["slot.border_color"], "theme.brand.secondary");
+
+  const textBindings: Record<string, string> = { fills: "theme.brand.primary" };
+  correlateNormalizedColorBindings(
+    "TEXT", [solid], undefined, textBindings, { color: "#ff0000" },
+  );
+  assert.equal(textBindings["slot.color"], "theme.brand.primary");
+
+  const sideBindings: Record<string, string> = {
+    strokes: "theme.brand.secondary",
+  };
+  correlateNormalizedColorBindings(
+    "FRAME", undefined, [solid], sideBindings,
+    { border_color: "#00ff00", border_top_color: "#00ff00" },
+  );
+  assert.equal(sideBindings["slot.border_color"], undefined);
+});
+
+test("normalized slot correlation fails closed for composite or translucent paints", () => {
+  const solid = { type: "SOLID", color: { r: 1, g: 0, b: 0 } };
+  for (const fills of [
+    [solid, solid],
+    [{ ...solid, opacity: 0.5 }],
+    [{ ...solid, visible: false }],
+    [{ type: "GRADIENT_LINEAR" }],
+  ]) {
+    const bindings: Record<string, string> = { fills: "theme.brand.primary" };
+    correlateNormalizedColorBindings(
+      "FRAME", fills, undefined, bindings, { background_color: "#ff0000" },
+    );
+    assert.equal(bindings["slot.background_color"], undefined);
+  }
+});
+
+test("faithful asset promotion strips mutable slot correlations recursively", () => {
+  const child = baseNode({
+    name: "Child",
+    figma_node_id: "1:3",
+    bound_variables: {
+      fills: "theme.brand.primary",
+      "slot.background_color": "theme.brand.primary",
+    },
+  });
+  const root = baseNode({
+    bound_variables: {
+      fills: "theme.brand.primary",
+      "slot.background_color": "theme.brand.primary",
+    },
+    children: [child],
+  });
+
+  stripNormalizedColorBindings(root);
+
+  assert.deepEqual(root.bound_variables, { fills: "theme.brand.primary" });
+  assert.deepEqual(root.children[0].bound_variables, {
+    fills: "theme.brand.primary",
+  });
 });
 
 test("an unresolvable id is skipped and reported, never emitted dangling", () => {
@@ -116,6 +210,8 @@ function ctx(): SerializeContext {
         },
       },
       variableIdToName: idToName,
+      variableIdToModeName: {},
+      variableIdToCollectionId: {},
     },
   };
 }
