@@ -80,9 +80,24 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"device_chain", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
+        {"record_armed", SchemaValueKind::Boolean},
+        {"take_lanes", SchemaValueKind::Array},
     };
     static constexpr ExpectedField device_placement_fields[] = {
         {"id", SchemaValueKind::U64String},
+    };
+    static constexpr ExpectedField take_lane_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"takes", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField take_fields[] = {
+        {"asset_id", SchemaValueKind::U64String},
+        {"frame_count", SchemaValueKind::U64String},
+        {"id", SchemaValueKind::U64String},
+        {"placement_start", SchemaValueKind::I64String},
+        {"sample_rate", SchemaValueKind::Object},
+        {"source_start", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField automation_lane_fields[] = {
         {"id", SchemaValueKind::U64String},
@@ -121,6 +136,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_target.device_parameter",
          automation_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
+        {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields},
+        {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},

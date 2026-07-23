@@ -137,6 +137,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "automation_lane";
     case ItemKind::AutomationPoint:
         return "automation_point";
+    case ItemKind::TakeLane:
+        return "take_lane";
+    case ItemKind::Take:
+        return "take";
     }
     return "project";
 }
@@ -352,6 +356,37 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
     });
 }
 
+bool write_take(EncodeContext& context, const Take& take) {
+    return write_envelope(context, "pulp.timeline.take", 1, [&] {
+        return context.writer.append("{\"asset_id\":") &&
+               context.writer.u64(take.media().asset_id.value, true) &&
+               context.writer.append(",\"frame_count\":") &&
+               context.writer.u64(take.media().frame_count, true) &&
+               context.writer.append(",\"id\":") && context.writer.u64(take.id().value, true) &&
+               context.writer.append(",\"placement_start\":") &&
+               context.writer.i64(take.placement_start().value, true) &&
+               context.writer.append(",\"sample_rate\":") &&
+               write_rate(context, take.sample_rate()) &&
+               context.writer.append(",\"source_start\":") &&
+               context.writer.i64(take.media().source_start.value, true) &&
+               context.writer.character('}');
+    });
+}
+
+bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
+    return write_envelope(context, "pulp.timeline.take_lane", 1, [&] {
+        if (!context.writer.append("{\"id\":") || !context.writer.u64(lane.id().value, true) ||
+            !context.writer.append(",\"name\":") || !context.writer.quoted(lane.name()) ||
+            !context.writer.append(",\"takes\":["))
+            return false;
+        for (std::size_t index = 0; index < lane.takes().size(); ++index)
+            if ((index != 0 && !context.writer.character(',')) ||
+                !write_take(context, lane.takes()[index]))
+                return false;
+        return context.writer.append("]}");
+    });
+}
+
 bool write_track(EncodeContext& context, const Track& track) {
     return write_envelope(
         context, detail::track_schema_policy.type_name, detail::track_schema_policy.current_version,
@@ -374,10 +409,18 @@ bool write_track(EncodeContext& context, const Track& track) {
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_device_placement(context, track.device_chain()[index]))
                     return false;
-            return context.writer.append("],\"id\":") &&
-                   context.writer.u64(track.id().value, true) &&
-                   context.writer.append(",\"name\":") && context.writer.quoted(track.name()) &&
-                   context.writer.character('}');
+            if (!context.writer.append("],\"id\":") ||
+                !context.writer.u64(track.id().value, true) ||
+                !context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
+                !context.writer.append(",\"record_armed\":") ||
+                !context.writer.append(track.record_armed() ? "true" : "false") ||
+                !context.writer.append(",\"take_lanes\":["))
+                return false;
+            for (std::size_t index = 0; index < track.take_lanes().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_take_lane(context, track.take_lanes()[index]))
+                    return false;
+            return context.writer.append("]}");
         });
 }
 
@@ -455,11 +498,19 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
-        for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index)
-            if (!is_valid_utf8(sequence.tracks()[track_index].name()))
+        for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index) {
+            const auto& track = sequence.tracks()[track_index];
+            const auto track_path =
+                sequence_path + "/tracks/" + std::to_string(track_index) + "/data";
+            if (!is_valid_utf8(track.name()))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
-                                                sequence_path + "/tracks/" +
-                                                    std::to_string(track_index) + "/data/name");
+                                                track_path + "/name");
+            for (std::size_t lane_index = 0; lane_index < track.take_lanes().size(); ++lane_index)
+                if (!is_valid_utf8(track.take_lanes()[lane_index].name()))
+                    return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                    track_path + "/take_lanes/" +
+                                                        std::to_string(lane_index) + "/data/name");
+        }
     }
     EncodeContext context{JsonWriter(options.max_output_bytes), registry, false, std::nullopt};
     const auto wrote = write_envelope(context, "pulp.timeline.project", 1, [&] {

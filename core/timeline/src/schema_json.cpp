@@ -43,6 +43,8 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_notes = 1'000'000;
     limits.max_automation_lanes = 25'000;
     limits.max_automation_points = 1'000'000;
+    limits.max_take_lanes = 25'000;
+    limits.max_takes = 1'000'000;
     return limits;
 }
 

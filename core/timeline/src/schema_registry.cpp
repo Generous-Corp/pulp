@@ -291,10 +291,14 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                           {"clips", SchemaValueKind::Array},
                           {"device_chain", SchemaValueKind::Array},
                           {"id", SchemaValueKind::U64String},
-                          {"name", SchemaValueKind::String}},
+                          {"name", SchemaValueKind::String},
+                          {"record_armed", SchemaValueKind::Boolean},
+                          {"take_lanes", SchemaValueKind::Array}},
                          detail::track_schema_policy.current_version);
     track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
     track.upgrades.push_back({2, 3, {}, detail::migrate_track_v2_to_v3});
+    track.upgrades.push_back({3, 4, {}, detail::migrate_track_v3_to_v4});
+    track.downgrades.push_back({4, 3, {}, detail::migrate_track_v4_to_v3});
     track.downgrades.push_back({3, 2, {}, detail::migrate_track_v3_to_v2});
     track.downgrades.push_back({2, 1, {}, detail::migrate_track_v2_to_v1});
     schemas.push_back(std::move(track));
@@ -308,6 +312,17 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"parameter_id", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.take_lane", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"takes", SchemaValueKind::Array}}));
+    schemas.push_back(builtin("pulp.timeline.take", SchemaDomain::Document,
+                              {{"asset_id", SchemaValueKind::U64String},
+                               {"frame_count", SchemaValueKind::U64String},
+                               {"id", SchemaValueKind::U64String},
+                               {"placement_start", SchemaValueKind::I64String},
+                               {"sample_rate", SchemaValueKind::Object},
+                               {"source_start", SchemaValueKind::I64String}}));
     schemas.push_back(builtin("pulp.timeline.clip", SchemaDomain::Document,
                               {{"content", SchemaValueKind::Object},
                                {"fade_in_duration", SchemaValueKind::U64String, false},
