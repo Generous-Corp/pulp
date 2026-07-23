@@ -109,8 +109,8 @@ if(WIN32)
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "[network]"
         PROPERTIES
-            LABELS "parser-import;windows-pr-quarantine"
-            RESOURCE_LOCK "design-import-network")
+            RESOURCE_LOCK "design-import-network"
+        LABELS "parser-import;windows-pr-quarantine")
 else()
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "~[network]"
@@ -118,8 +118,8 @@ else()
     catch_discover_tests(pulp-test-import-design-tool
         TEST_SPEC "[network]"
         PROPERTIES
-            LABELS "parser-import"
-            RESOURCE_LOCK "design-import-network")
+            RESOURCE_LOCK "design-import-network"
+        LABELS "parser-import")
 endif()
 
 # Offline .fig decoder unit tests (Node). Cover kiwi decode, container
@@ -182,7 +182,8 @@ if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
     target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-screenshot-compare
-        PROPERTIES LABELS "parser-import" TIMEOUT 240)
+        PROPERTIES TIMEOUT 240
+        LABELS "parser-import")
 endif()
 
 # `pulp import-design --url <figma.com scene URL>` guard. The classifier lives
