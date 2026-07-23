@@ -948,6 +948,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **UBSan is pinned to `macos-26`, not `macos-15`.** Xcode 16.4's Apple
+  Clang/libc++ combination reported invalid `std::__shared_weak_count` vptrs
+  while destroying ordinary persistent timeline trees, even though the same
+  exact tests passed under ASan and under current Apple Clang UBSan. A full
+  `macos-26` control ran every timeline model, persistence, graph-binding, and
+  example test without that signature. Keep the lane on the current hosted
+  toolchain; do not suppress `vptr` or rewrite the shared ownership model to
+  accommodate the stale runtime.
 - **Flaky-lane retry (de-flaking).** The ASan/UBSan/TSan lanes
   (`sanitizers.yml`) and the coverage lanes (`scripts/run_coverage.sh`) run
   ctest with `--repeat until-pass:2`. Timing-sensitive tests intermittently

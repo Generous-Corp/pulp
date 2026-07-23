@@ -1319,10 +1319,11 @@ For each target the resolver checks, in this order:
    provider's selector var (`PULP_NAMESPACE_*` or `PULP_LOCAL_*`).
 4. A hard-coded default label (e.g. `macos-14`, `ubuntu-24.04`, `macos-15`).
 
-**When every variable below is unset, the workflows resolve to exactly the
-hard-coded defaults they had before this mechanism was lifted into a
-shared resolver. Nothing changes by default.** Setting one variable moves
-one job. Nothing more.
+**When a variable below is unset, the workflow resolves to that target's
+reviewed hard-coded default.** Defaults may be updated when a hosted
+toolchain changes; for example, UBSan uses `macos-26` to avoid the invalid-vptr
+diagnostics produced by the Xcode 16.4 image. Setting one variable moves one
+job. Nothing more.
 
 Coverage is stricter than the build matrix. It reads explicit
 `workflow_dispatch` inputs and `PULP_COVERAGE_*_RUNS_ON_JSON`, not
@@ -1391,7 +1392,7 @@ exactly that sanitizer; the others stay on their defaults.
 |---|---|---|
 | `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
 | `PULP_SANITIZER_TSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
-| `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
+| `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-26` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
 | `PULP_SANITIZER_RTSAN_RUNS_ON_JSON` | `ubuntu-24.04` | `gh variable set PULP_SANITIZER_RTSAN_RUNS_ON_JSON --body '["self-hosted","linux","x64","sanitizer"]'` |
 
 The three macOS sanitizers (ASan/TSan/UBSan) carry a `--deny-labels
@@ -1410,12 +1411,12 @@ queued/in-progress work — it can never starve the required check the way
 the coverage lane did. Pick **TSan**: it is the longest sanitizer (scoped
 `-j1` serial, ~45 min on the 3 vCPU `macos-14`) and the highest value for a
 real-time audio framework, and being single-core-bound it gains most from a
-local M-series runner. The other three stay on `macos-15`: the four run in
-**parallel** on GitHub but would **serialize** (~4×) on one cap=1 local lane,
-which is slower than hosted except during a hosted backlog. Full parallel
-local sanitizers would need a third macOS host. Roll out one sanitizer at a
-time, each behind a measured go/no-go (gate queue latency + matrix
-wall-clock).
+local M-series runner. ASan stays on `macos-15`, UBSan stays on `macos-26`,
+and RTSan stays on Linux: the four run in **parallel** on GitHub but would
+**serialize** (~4×) on one cap=1 local lane, which is slower than hosted
+except during a hosted backlog. Full parallel local sanitizers would need a
+third macOS host. Roll out one sanitizer at a time, each behind a measured
+go/no-go (gate queue latency + matrix wall-clock).
 
 ### One-off overrides via `workflow_dispatch`
 
