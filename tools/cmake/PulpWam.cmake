@@ -93,6 +93,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_canonical.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_parser.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_preflight.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/schema_json_summary.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_registry.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_automation_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_decode_support.cpp

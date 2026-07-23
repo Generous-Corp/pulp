@@ -1,3 +1,4 @@
+#include <pulp/audio/analysis/audio_spectrum.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timeline/transaction.hpp>
@@ -11,6 +12,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -20,8 +22,16 @@ using namespace pulp::playback;
 using namespace pulp::timeline;
 using namespace pulp::timebase;
 using Catch::Matchers::WithinAbs;
+using pulp::test::audio::tone_gain_db;
+using pulp::test::audio::tone_residual_db;
 
 namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kSrcPassbandGainToleranceDb = 0.1;
+constexpr double kSrcPassbandPurityDb = -70.0;
+constexpr double kSrcStopbandRejectionDb = -60.0;
+constexpr double kLinearNegativeControlAliasDb = -1.0;
 
 template <typename T, typename E> T take(runtime::Result<T, E> result) {
     REQUIRE(result);
@@ -166,6 +176,35 @@ TransportSnapshot snapshot(const PlaybackProgram& program, std::uint32_t frames,
     value.ranges[0].frame_count = frames;
     value.ranges[0].timeline_sample_start = {sample_start};
     return value;
+}
+
+std::vector<double> render_resampled_tone(std::uint32_t source_rate, std::uint32_t target_rate,
+                                          double frequency_hz, double amplitude,
+                                          std::size_t source_frames, std::size_t trim_frames) {
+    std::vector<float> source(source_frames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = static_cast<float>(
+            amplitude * std::sin(2.0 * kPi * frequency_hz * static_cast<double>(frame) /
+                                 static_cast<double>(source_rate)));
+    const auto data = audio_data({source}, source_rate);
+    auto clip = take(Clip::create_absolute({100}, {0}, source_frames, {source_rate, 1},
+                                           MediaRef{{3}, {0}, source_frames}));
+    auto track = take(Track::create({10}, "sample-rate conversion", {clip}));
+    auto project = project_with_tracks({track}, {{3, "tone", source_frames, {source_rate, 1}}});
+    const std::array points{TempoPoint{{0}, 120.0}};
+    auto map = shared_compiled_tempo_map(points, RationalRate{target_rate, 1});
+    CompiledFixture compiled(project, map, pool({{3, data}}));
+    auto program = compiled.store.read();
+    const auto target_frames = static_cast<std::size_t>(
+        std::llround(static_cast<long double>(source_frames) * target_rate / source_rate));
+    REQUIRE(target_frames <= std::numeric_limits<std::uint32_t>::max());
+    REQUIRE(trim_frames * 2u < target_frames);
+    Output output(1, target_frames);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *program, snapshot(*program, static_cast<std::uint32_t>(target_frames)),
+                output.view()) == AudioRenderStatus::Rendered);
+    return {output.storage[0].begin() + static_cast<std::ptrdiff_t>(trim_frames),
+            output.storage[0].end() - static_cast<std::ptrdiff_t>(trim_frames)};
 }
 
 std::vector<std::uint8_t> mono_pcm16_wav(std::span<const std::int16_t> samples) {
@@ -574,7 +613,7 @@ TEST_CASE("audio renderer projects absolute anchors and source rates on reprepar
     REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 480, 480),
                                               converted.view()) == AudioRenderStatus::Rendered);
     REQUIRE_THAT(converted.storage[0].front(), WithinAbs(0.75f, 1e-7f));
-    REQUIRE_THAT(converted.storage[0].back(), WithinAbs(0.75f, 1e-7f));
+    REQUIRE_THAT(converted.storage[0].back(), WithinAbs(0.75f, 5e-7f));
 
     const std::array points{TempoPoint{{0}, 120.0}};
     auto map_96 = shared_compiled_tempo_map(points, RationalRate{96'000, 1});
@@ -584,7 +623,7 @@ TEST_CASE("audio renderer projects absolute anchors and source rates on reprepar
     REQUIRE(next->find_track({10})->audio_program()->clips()[0].timeline_frame_count == 960);
 }
 
-TEST_CASE("audio renderer linearly interpolates a 44k ramp across split blocks") {
+TEST_CASE("audio renderer resamples a 44k ramp identically across split blocks") {
     std::vector<float> ramp(441);
     for (std::size_t frame = 0; frame < ramp.size(); ++frame)
         ramp[frame] = static_cast<float>(frame);
@@ -599,10 +638,8 @@ TEST_CASE("audio renderer linearly interpolates a 44k ramp across split blocks")
     REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 480), whole.view()) ==
             AudioRenderStatus::Rendered);
     REQUIRE_THAT(whole.storage[0][0], WithinAbs(0.0f, 1e-6f));
-    REQUIRE_THAT(whole.storage[0][1], WithinAbs(0.91875f, 1e-6f));
-    REQUIRE_THAT(whole.storage[0][2], WithinAbs(1.8375f, 1e-6f));
-    REQUIRE_THAT(whole.storage[0][137], WithinAbs(125.86875f, 1e-5f));
-    REQUIRE_THAT(whole.storage[0][479], WithinAbs(440.0f, 1e-6f));
+    REQUIRE_THAT(whole.storage[0][240], WithinAbs(220.5f, 1e-3f));
+    REQUIRE_THAT(whole.storage[0][479], WithinAbs(440.0f, 0.05f));
 
     Output first(1, 137);
     Output second(1, 343);
@@ -615,18 +652,52 @@ TEST_CASE("audio renderer linearly interpolates a 44k ramp across split blocks")
     REQUIRE(split == whole.storage[0]);
 }
 
-TEST_CASE("audio renderer downsamples a 96k impulse at exact source indices") {
-    const auto data = audio_data({{0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f}}, 96'000);
-    auto clip = take(Clip::create_absolute({100}, {0}, 6, {96'000, 1}, MediaRef{{3}, {0}, 6}));
-    auto track = take(Track::create({10}, "impulse", {clip}));
-    auto project = project_with_tracks({track}, {{3, "impulse", 6, {96'000, 1}}});
-    CompiledFixture compiled(project, map_120(), pool({{3, data}}));
-    auto program = compiled.store.read();
-    Output output(1, 3);
+TEST_CASE("audio renderer sample-rate conversion preserves passband and rejects aliases") {
+    constexpr std::uint32_t source_rate = 96'000;
+    constexpr std::uint32_t target_rate = 48'000;
+    constexpr std::size_t source_frames = source_rate;
+    constexpr std::size_t trim_frames = 2'048;
+    constexpr double amplitude = 0.5;
+    constexpr double passband_hz = 20'000.0;
+    constexpr double stopband_hz = 30'000.0;
+    constexpr double folded_stopband_hz = 18'000.0;
 
-    REQUIRE(ArrangementAudioRenderer::process(*program, snapshot(*program, 3), output.view()) ==
-            AudioRenderStatus::Rendered);
-    REQUIRE(output.storage[0] == std::vector<float>{0.0f, 1.0f, 0.0f});
+    const auto passband = render_resampled_tone(source_rate, target_rate, passband_hz, amplitude,
+                                                source_frames, trim_frames);
+    const auto passband_gain = tone_gain_db(passband, passband_hz / target_rate, amplitude);
+    CAPTURE(passband_gain);
+    REQUIRE(std::abs(passband_gain) <= kSrcPassbandGainToleranceDb);
+
+    const auto stopband = render_resampled_tone(source_rate, target_rate, stopband_hz, amplitude,
+                                                source_frames, trim_frames);
+    const auto alias_gain = tone_gain_db(stopband, folded_stopband_hz / target_rate, amplitude);
+    CAPTURE(alias_gain);
+    REQUIRE(alias_gain <= kSrcStopbandRejectionDb);
+
+    std::vector<double> linear_negative_control;
+    linear_negative_control.reserve(stopband.size());
+    for (std::size_t output_frame = trim_frames; output_frame < source_frames / 2u - trim_frames;
+         ++output_frame) {
+        const auto source_frame = output_frame * 2u;
+        linear_negative_control.push_back(
+            amplitude * std::sin(2.0 * kPi * stopband_hz * source_frame / source_rate));
+    }
+    const auto linear_alias_gain =
+        tone_gain_db(linear_negative_control, folded_stopband_hz / target_rate, amplitude);
+    CAPTURE(linear_alias_gain);
+    REQUIRE(linear_alias_gain >= kLinearNegativeControlAliasDb);
+
+    constexpr std::uint32_t upsample_source_rate = 44'100;
+    constexpr double upsample_passband_hz = 18'000.0;
+    const auto upsampled =
+        render_resampled_tone(upsample_source_rate, target_rate, upsample_passband_hz, amplitude,
+                              upsample_source_rate, trim_frames);
+    const auto upsample_gain =
+        tone_gain_db(upsampled, upsample_passband_hz / target_rate, amplitude);
+    const auto upsample_residual = tone_residual_db(upsampled, upsample_passband_hz / target_rate);
+    CAPTURE(upsample_gain, upsample_residual);
+    REQUIRE(std::abs(upsample_gain) <= kSrcPassbandGainToleranceDb);
+    REQUIRE(upsample_residual <= kSrcPassbandPurityDb);
 }
 
 TEST_CASE("absolute sample-rate projection preserves adjacent clip boundaries") {
@@ -639,6 +710,8 @@ TEST_CASE("absolute sample-rate projection preserves adjacent clip boundaries") 
     auto program = compiled.store.read();
     const auto clips = program->find_track({10})->audio_program()->clips();
     REQUIRE(clips.size() == 2);
+    REQUIRE(clips[0].sample_rate_converter);
+    REQUIRE(clips[0].sample_rate_converter == clips[1].sample_rate_converter);
     REQUIRE(clips[0].timeline_end() == clips[1].timeline_start);
 
     Output output(1, 2);
@@ -657,6 +730,7 @@ TEST_CASE("audio renderer requires exact transport and program tempo map identit
     const auto foreign = shared_compiled_tempo_map(foreign_points, RationalRate{48'000, 1});
     CompiledFixture compiled(project, baseline, pool({{3, data}}));
     auto program = compiled.store.read();
+    REQUIRE_FALSE(program->find_track({10})->audio_program()->clips()[0].sample_rate_converter);
     auto mismatched = snapshot(*program, 8);
     mismatched.tempo_map = foreign.get();
     Output rejected(1, 8);
@@ -677,10 +751,10 @@ TEST_CASE("audio renderer follows transport loop splits and seeks without stale 
     std::vector<float> ramp(256);
     for (std::size_t i = 0; i < ramp.size(); ++i)
         ramp[i] = static_cast<float>(i);
-    const auto data = audio_data({ramp}, 44'100);
-    auto clip = take(Clip::create_absolute({100}, {0}, 256, {44'100, 1}, MediaRef{{3}, {0}, 256}));
+    const auto data = audio_data({ramp}, 48'000);
+    auto clip = take(Clip::create_absolute({100}, {0}, 256, {48'000, 1}, MediaRef{{3}, {0}, 256}));
     auto track = take(Track::create({10}, "loop", {clip}));
-    auto project = project_with_tracks({track}, {{3, "ramp", 256, {44'100, 1}}});
+    auto project = project_with_tracks({track}, {{3, "ramp", 256, {48'000, 1}}});
     const auto map = map_120();
     CompiledFixture compiled(project, map, pool({{3, data}}));
     auto program = compiled.store.read();
@@ -697,10 +771,10 @@ TEST_CASE("audio renderer follows transport loop splits and seeks without stale 
     Output looped(1, 32);
     REQUIRE(ArrangementAudioRenderer::process(*program, state, looped.view()) ==
             AudioRenderStatus::Rendered);
-    REQUIRE_THAT(looped.storage[0][0], WithinAbs(44.1f, 1e-5f));
-    REQUIRE_THAT(looped.storage[0][15], WithinAbs(57.88125f, 1e-5f));
+    REQUIRE(looped.storage[0][0] == 48.0f);
+    REQUIRE(looped.storage[0][15] == 63.0f);
     REQUIRE(looped.storage[0][16] == 0.0f);
-    REQUIRE_THAT(looped.storage[0][31], WithinAbs(13.78125f, 1e-5f));
+    REQUIRE(looped.storage[0][31] == 15.0f);
 
     REQUIRE(transport.seek(map->samples_to_ticks({32})) == TransportError::None);
     REQUIRE(transport.begin_block(16, state) == TransportError::None);
@@ -708,7 +782,7 @@ TEST_CASE("audio renderer follows transport loop splits and seeks without stale 
     Output seeked(1, 16);
     REQUIRE(ArrangementAudioRenderer::process(*program, state, seeked.view()) ==
             AudioRenderStatus::Rendered);
-    REQUIRE_THAT(seeked.storage[0][0], WithinAbs(29.4f, 1e-5f));
+    REQUIRE(seeked.storage[0][0] == 32.0f);
 }
 
 TEST_CASE("audio renderer mixes tracks and maps mono and stereo deterministically") {
@@ -842,6 +916,33 @@ TEST_CASE("audio compiler enforces whole program track capacity") {
     request.dirty.all = true;
     request.audio_assets = pool({{3, data}});
     request.audio_limits.max_tracks = 1;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE_FALSE(store.has_value());
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
+    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+}
+
+TEST_CASE("audio compiler bounds distinct sample-rate conversion kernels") {
+    const auto data_44 = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
+    const auto data_96 = audio_data({std::vector<float>(8, 1.0f)}, 96'000);
+    auto first = absolute_media_clip(100, 0, 8, 3, 0, 8);
+    auto second = absolute_media_clip(101, 8, 8, 4, 0, 8);
+    auto track = take(Track::create({10}, "rates", {first, second}));
+    auto project =
+        project_with_tracks({track}, {{3, "44k", 8, {44'100, 1}}, {4, "96k", 8, {96'000, 1}}});
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = pool({{3, data_44}, {4, data_96}});
+    request.audio_limits.max_sample_rate_converters = 1;
+
     REQUIRE(compiler.submit(std::move(request)));
     REQUIRE_FALSE(store.has_value());
     REQUIRE(compiler.status().has_error);

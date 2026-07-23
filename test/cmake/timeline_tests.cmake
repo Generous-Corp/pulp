@@ -50,7 +50,8 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
 pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp test_playback_track_freeze.cpp
         harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::timebase pulp::runtime)
+    LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
+        pulp::runtime)
 pulp_add_test_suite(pulp-test-playback-automation-cursor
     SOURCES test_playback_automation_cursor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -194,6 +195,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_summary.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp

@@ -1,5 +1,8 @@
 #include <pulp/playback/audio_renderer.hpp>
 
+#include "audio_renderer_internal.hpp"
+
+#include <pulp/audio/sample_rate_conversion.hpp>
 #include <pulp/playback/program.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 
@@ -10,6 +13,57 @@
 #include <tuple>
 
 namespace pulp::playback {
+
+struct detail::AudioSampleRateConverterCache::Impl {
+    struct Entry {
+        timebase::RationalRate source;
+        timebase::RationalRate target;
+        std::shared_ptr<const audio::PreparedSampleRateConversion> converter;
+    };
+
+    runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
+    get(timebase::RationalRate source, timebase::RationalRate target, timeline::ItemId item,
+        timeline::ItemId related_item, const AudioRendererLimits& limits) {
+        source = source.normalized();
+        target = target.normalized();
+        if (source == target)
+            return runtime::Ok(std::shared_ptr<const audio::PreparedSampleRateConversion>{});
+        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
+            return entry.source == source && entry.target == target;
+        });
+        if (found != entries.end())
+            return runtime::Ok(found->converter);
+        if (entries.size() >= limits.max_sample_rate_converters) {
+            return runtime::Err(AudioRendererError{
+                AudioRendererErrorCode::CapacityExceeded,
+                item,
+                related_item,
+                entries.size() + 1u,
+                limits.max_sample_rate_converters,
+            });
+        }
+
+        // Scale the reconstruction cutoff to the target Nyquist when
+        // decimating. The 64-tap Kaiser kernel supplies the transition band
+        // before frequencies far above that boundary can fold into output.
+        const auto ratio = static_cast<double>(target.as_long_double() / source.as_long_double());
+        const auto cutoff = std::min(1.0, ratio);
+        auto converter = std::make_shared<const audio::PreparedSampleRateConversion>(cutoff);
+        entries.push_back({source, target, converter});
+        return runtime::Ok(std::move(converter));
+    }
+
+    std::vector<Entry> entries;
+};
+
+detail::AudioSampleRateConverterCache::AudioSampleRateConverterCache()
+    : impl_(std::make_unique<Impl>()) {}
+detail::AudioSampleRateConverterCache::~AudioSampleRateConverterCache() = default;
+detail::AudioSampleRateConverterCache::AudioSampleRateConverterCache(
+    AudioSampleRateConverterCache&&) noexcept = default;
+detail::AudioSampleRateConverterCache& detail::AudioSampleRateConverterCache::operator=(
+    AudioSampleRateConverterCache&&) noexcept = default;
+
 namespace {
 
 template <typename T>
@@ -85,23 +139,30 @@ float envelope(const AudioClipRendererProgram& clip, std::uint64_t relative) noe
     return value;
 }
 
-float source_sample(const audio::AudioFileData& source, std::size_t output_channel,
+float source_sample(const AudioClipRendererProgram& clip, std::size_t output_channel,
                     std::size_t output_channels, std::uint64_t frame, std::uint64_t next_frame,
-                    float fraction) noexcept {
+                    float fraction, double source_position) noexcept {
+    const auto& source = *clip.audio;
     const auto source_channels = source.channels.size();
-    auto interpolate = [&](std::size_t channel) {
+    auto sample = [&](std::size_t channel) {
+        if (clip.sample_rate_converter) {
+            const auto segment = std::span<const float>(source.channels[channel])
+                                     .subspan(static_cast<std::size_t>(clip.source_start),
+                                              static_cast<std::size_t>(clip.source_frame_count));
+            return clip.sample_rate_converter->read(segment, source_position);
+        }
         const auto first = source.channels[channel][frame];
         return first + (source.channels[channel][next_frame] - first) * fraction;
     };
     if (source_channels == 1)
-        return interpolate(0);
+        return sample(0);
     if (output_channels == 1) {
         float sum = 0.0f;
         for (std::size_t channel = 0; channel < source_channels; ++channel)
-            sum += interpolate(channel);
+            sum += sample(channel);
         return sum / static_cast<float>(source_channels);
     }
-    return output_channel < source_channels ? interpolate(output_channel) : 0.0f;
+    return output_channel < source_channels ? sample(output_channel) : 0.0f;
 }
 
 std::optional<std::int64_t> scale_position(std::int64_t value, timebase::RationalRate from,
@@ -278,8 +339,8 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
                                              static_cast<long double>(source_offset))
                         : 0.0f;
                 destination[output_start + frame] +=
-                    source_sample(*clip->audio, channel, output.num_channels(), source_frame,
-                                  next_frame, fraction) *
+                    source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
+                                  fraction, static_cast<double>(source_position)) *
                     envelope(*clip, relative);
             }
         }
@@ -335,9 +396,12 @@ std::int64_t AudioClipRendererProgram::timeline_end() const noexcept {
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
-compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& project,
-                           const timebase::CompiledTempoMap& tempo_map,
-                           const DecodedAudioAssetPool& assets, const AudioRendererLimits& limits) {
+detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
+                                          const timeline::Project& project,
+                                          const timebase::CompiledTempoMap& tempo_map,
+                                          const DecodedAudioAssetPool& assets,
+                                          const AudioRendererLimits& limits,
+                                          AudioSampleRateConverterCache& cache) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
@@ -355,6 +419,10 @@ compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& 
     std::uint64_t fade_out_frames = 0;
     const auto source_rate = resolved->source_rate;
     const auto timeline_rate = tempo_map.sample_rate().normalized();
+    auto converter =
+        cache.impl_->get(source_rate, timeline_rate, clip.id(), media->asset_id, limits);
+    if (!converter)
+        return runtime::Err(converter.error());
     const auto renderable_frames =
         scale_duration_ceil(media->frame_count, source_rate, timeline_rate);
     if (!renderable_frames ||
@@ -411,13 +479,32 @@ compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& 
         clip.id(), media->asset_id, resolved->decoded->audio, timeline_start, timeline_frames,
         resolved->source_start, media->frame_count, *renderable_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
-        playback.gain_linear, fade_in_frames, fade_out_frames});
+        std::move(converter).value(), playback.gain_linear, fade_in_frames, fade_out_frames});
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_segment_program(
     const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits) {
+    detail::AudioSampleRateConverterCache cache;
+    return detail::compile_take_comp_segment_program_cached(lane, segment_index, project, tempo_map,
+                                                            assets, limits, cache);
+}
+
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& project,
+                           const timebase::CompiledTempoMap& tempo_map,
+                           const DecodedAudioAssetPool& assets, const AudioRendererLimits& limits) {
+    detail::AudioSampleRateConverterCache cache;
+    return detail::compile_audio_clip_program_cached(clip, project, tempo_map, assets, limits,
+                                                     cache);
+}
+
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+detail::compile_take_comp_segment_program_cached(
+    const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits, AudioSampleRateConverterCache& cache) {
     const auto segments = lane.comp_segments();
     if (segment_index >= segments.size() ||
         segment_index >= std::numeric_limits<std::uint32_t>::max())
@@ -437,6 +524,10 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_
         timeline_rate.as_long_double() > 768'000.0L)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               take->id(), take->media().asset_id);
+    auto converter =
+        cache.impl_->get(source_rate, timeline_rate, take->id(), take->media().asset_id, limits);
+    if (!converter)
+        return runtime::Err(converter.error());
     const auto offset =
         static_cast<std::uint64_t>(segment.range.start.value - take->placement_start().value);
     if (offset > take->media().frame_count ||
@@ -465,6 +556,7 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_
         segment.range.sample_count,
         timeline_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
+        std::move(converter).value(),
         1.0f,
         0,
         0,
@@ -474,10 +566,12 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_
 }
 
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
-compile_track_freeze_program(const timeline::Track& track, const timeline::Project& project,
-                             const timebase::CompiledTempoMap& tempo_map,
-                             const DecodedAudioAssetPool& assets,
-                             const AudioRendererLimits& limits) {
+detail::compile_track_freeze_program_cached(const timeline::Track& track,
+                                            const timeline::Project& project,
+                                            const timebase::CompiledTempoMap& tempo_map,
+                                            const DecodedAudioAssetPool& assets,
+                                            const AudioRendererLimits& limits,
+                                            AudioSampleRateConverterCache& cache) {
     if (!track.freeze())
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id());
     const auto& freeze = *track.freeze();
@@ -490,6 +584,10 @@ compile_track_freeze_program(const timeline::Track& track, const timeline::Proje
         timeline_rate.as_long_double() > 768'000.0L)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               track.id(), freeze.media.asset_id);
+    auto converter =
+        cache.impl_->get(source_rate, timeline_rate, track.id(), freeze.media.asset_id, limits);
+    if (!converter)
+        return runtime::Err(converter.error());
     if (freeze.media.frame_count >
         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id(),
@@ -519,12 +617,23 @@ compile_track_freeze_program(const timeline::Track& track, const timeline::Proje
         freeze.media.frame_count,
         timeline_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
+        std::move(converter).value(),
         1.0f,
         0,
         0,
         AudioClipRendererProgram::SourceKind::FrozenTrack,
         0,
     });
+}
+
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+compile_track_freeze_program(const timeline::Track& track, const timeline::Project& project,
+                             const timebase::CompiledTempoMap& tempo_map,
+                             const DecodedAudioAssetPool& assets,
+                             const AudioRendererLimits& limits) {
+    detail::AudioSampleRateConverterCache cache;
+    return detail::compile_track_freeze_program_cached(track, project, tempo_map, assets, limits,
+                                                       cache);
 }
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>

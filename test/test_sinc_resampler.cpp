@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/sinc_resampler.hpp>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -91,4 +92,14 @@ TEST_CASE("SincResampler stays bounded at buffer edges", "[signal][sinc]") {
         REQUIRE(std::isfinite(y));
         REQUIRE(std::abs(y) < 2.0f);
     }
+}
+
+TEST_CASE("SincResampler clamps invalid reconstruction cutoffs", "[signal][sinc]") {
+    SincResampler rs;
+    rs.build(16, 512, 9.0, 2.0);
+    REQUIRE(rs.cutoff() == 1.0);
+    rs.build(16, 512, 9.0, 0.0);
+    REQUIRE(rs.cutoff() == 1.0e-6);
+    rs.build(16, 512, 9.0, std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(rs.cutoff() == 1.0);
 }

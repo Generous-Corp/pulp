@@ -1,5 +1,6 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timeline/schema_json.hpp>
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/timeline/transaction.hpp>
 
@@ -211,6 +212,11 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
     {
         const auto registry = take(make_builtin_timeline_registry());
         const auto snapshot = take(serialize_project(*project, registry));
+        const auto before_summary_nodes = Project::identity_stats().nodes_created;
+        const auto summary = take(peek_project_summary(snapshot.json));
+        REQUIRE(summary.track_count == kTrackCount);
+        REQUIRE(summary.clip_count == kTrackCount * kClipsPerTrack);
+        REQUIRE(Project::identity_stats().nodes_created == before_summary_nodes);
         const auto before_restore_nodes = Project::identity_stats().nodes_created;
         const auto load_started = std::chrono::steady_clock::now();
         const auto restored = take(deserialize_project(snapshot.json, registry));

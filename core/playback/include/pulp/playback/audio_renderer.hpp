@@ -16,6 +16,10 @@
 #include <span>
 #include <vector>
 
+namespace pulp::audio {
+class PreparedSampleRateConversion;
+}
+
 namespace pulp::playback {
 
 class PlaybackProgram;
@@ -80,6 +84,7 @@ struct AudioClipRendererProgram {
     std::uint64_t source_frame_count = 0;
     std::uint64_t renderable_timeline_frames = 0;
     double source_frames_per_timeline_frame = 1.0;
+    std::shared_ptr<const audio::PreparedSampleRateConversion> sample_rate_converter;
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
@@ -180,7 +185,9 @@ class ArrangementAudioTrackRenderer {
     RendererCarryState state_snapshot() const noexcept {
         return shell_.state_snapshot();
     }
-    void reset() noexcept { shell_.reset(); }
+    void reset() noexcept {
+        shell_.reset();
+    }
 
   private:
     StableRendererShell shell_;

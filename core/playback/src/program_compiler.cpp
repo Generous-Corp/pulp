@@ -1,5 +1,6 @@
 #include <pulp/playback/program_compiler.hpp>
 
+#include "audio_renderer_internal.hpp"
 #include "budgeted_stable_merge.hpp"
 #include "track_automation_compiler.hpp"
 
@@ -52,6 +53,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<NoteProgramEvent> note_merge_buffer_;
     detail::BudgetedStableMergeState note_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
+    detail::AudioSampleRateConverterCache sample_rate_converters_;
     std::vector<timeline::ItemId> current_audio_ids_;
     std::vector<timeline::ItemId> audio_id_merge_buffer_;
     detail::BudgetedStableMergeState audio_id_merge_;
@@ -284,9 +286,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
-                    auto compiled = compile_track_freeze_program(
+                    auto compiled = detail::compile_track_freeze_program_cached(
                         track, *request_->project, *request_->tempo_map, *request_->audio_assets,
-                        request_->audio_limits);
+                        request_->audio_limits, sample_rate_converters_);
                     if (!compiled)
                         return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
                                      request_->document_revision, compiled.error().code});
@@ -320,9 +322,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
-                    auto compiled =
-                        compile_audio_clip_program(clip, *request_->project, *request_->tempo_map,
-                                                   *request_->audio_assets, request_->audio_limits);
+                    auto compiled = detail::compile_audio_clip_program_cached(
+                        clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
                     if (!compiled)
                         return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
                                      request_->document_revision, compiled.error().code});
@@ -383,9 +385,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail({CompileErrorCode::AudioProgramInvalid, current_take_lane_->id(),
                              request_->document_revision,
                              AudioRendererErrorCode::CapacityExceeded});
-            auto compiled = compile_take_comp_segment_program(
+            auto compiled = detail::compile_take_comp_segment_program_cached(
                 *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
-                *request_->audio_assets, request_->audio_limits);
+                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
             if (!compiled)
                 return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
                              request_->document_revision, compiled.error().code});
@@ -396,8 +398,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::SortTrackNotes) {
-            const auto step = note_merge_.step(
-                current_note_events_, note_merge_buffer_, note_program_event_less);
+            const auto step =
+                note_merge_.step(current_note_events_, note_merge_buffer_, note_program_event_less);
             work += step.work_units;
             if (step.complete)
                 begin_track_audio_link();
@@ -512,8 +514,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::Link) {
-            const auto step = track_merge_.step(
-                tracks_, merge_buffer_, [](const auto& lhs, const auto& rhs) {
+            const auto step =
+                track_merge_.step(tracks_, merge_buffer_, [](const auto& lhs, const auto& rhs) {
                     return lhs->id() < rhs->id();
                 });
             work += step.work_units;
@@ -564,11 +566,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             continue;
         }
-        auto program = std::shared_ptr<const PlaybackProgram>(
-            new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
-                                request_->sequence_id, request_->tempo_map, request_->audio_assets,
-                                request_->audio_limits, request_->automation_limits,
-                                std::move(tracks_)));
+        auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
+            generation_, request_->document_revision, request_->project->id(),
+            request_->sequence_id, request_->tempo_map, request_->audio_assets,
+            request_->audio_limits, request_->automation_limits, std::move(tracks_)));
         core_->store.publish(std::move(program));
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
@@ -602,8 +603,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         return runtime::Err(error);
     };
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
-        request.document_revision == 0 ||
-        !request.automation_limits.valid() ||
+        request.document_revision == 0 || !request.automation_limits.valid() ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

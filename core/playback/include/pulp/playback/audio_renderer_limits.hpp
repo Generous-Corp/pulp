@@ -13,6 +13,7 @@ struct AudioRendererLimits {
     std::uint64_t max_asset_frames = 100'000'000u;
     std::uint64_t max_tracks = 4'096u;
     std::uint64_t max_clips = 1'000'000u;
+    std::uint32_t max_sample_rate_converters = 64u;
     constexpr auto operator<=>(const AudioRendererLimits&) const = default;
 };
 

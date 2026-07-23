@@ -957,10 +957,12 @@ MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
 be decoded into this pool through the bounded no-file-I/O decoder, then the
 ordinary incremental compiler lowers source ranges, musical or absolute clip
 placement, gain, and fades into each `TrackProgram`. The renderer uses bounded
-stateless linear sample-rate conversion so media retains its native wall-clock
-speed; musical anchoring uses the tempo map for placement and extent but does
-not silently introduce warp or time-stretch. A later quality pass decides
-whether linear SRC should be upgraded. Missing media, metadata mismatches,
+64-tap, 512-phase Kaiser-windowed sinc sample-rate conversion so media retains
+its native wall-clock speed while strongly suppressing out-of-band content
+before downsampling. Program compilation builds and shares one immutable
+kernel per source/target rate pair; equal-rate media keeps an exact bypass.
+Musical anchoring uses the tempo map for placement and extent but does not
+silently introduce warp or time-stretch. Missing media, metadata mismatches,
 invalid ranges, and capacity excesses reject compilation.
 
 `ArrangementAudioRenderer::process()` consumes the same pinned
