@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -165,9 +166,27 @@ class ReaperSession:
         """Put the plugin where REAPER finds it without touching real folders.
         Returns an EXIT_* code on failure, else None."""
         plugin = Path(os.path.expanduser(self.args.plugin_path))
+        machine = platform.machine().lower()
+        arch_lines: list[str] = []
+        if sys.platform == "darwin":
+            # Mark plugin-path preferences initialized. Without this, a fresh
+            # cfgfile appends every system VST3 directory and can spend the
+            # entire bounded pre-warm rescanning unrelated installed plugins.
+            arch_lines.append("vstfullstate=33605")
+            if machine in ("arm64", "aarch64"):
+                arch_lines.extend([
+                    "vstpath_arm64=" + str(self.scan_dir),
+                    "clap_path_macos-aarch64=" + str(self.scan_dir),
+                ])
+            elif machine in ("x86_64", "amd64"):
+                arch_lines.extend([
+                    "vstpath64=" + str(self.scan_dir),
+                    "clap_path_macos-x86_64=" + str(self.scan_dir),
+                ])
         (self.portable / "reaper.ini").write_text(
             "[REAPER]\nsplashscreen=0\nvstpath=" + str(self.scan_dir)
             + "\nclap_path=" + str(self.scan_dir) + "\n"
+            + "\n".join(arch_lines) + "\n"
         )
         if self.args.format in ("vst3", "clap"):
             shutil.copytree(plugin, self.scan_dir / plugin.name)
@@ -194,7 +213,30 @@ class ReaperSession:
             warm = subprocess.Popen(
                 [str(self.reaper), "-cfgfile", str(self.portable / "reaper.ini")],
                 stdout=out, stderr=subprocess.STDOUT, env=env)
-        time.sleep(min(20, self.args.timeout))
+        # A fixed warm-up sleep can repeatedly kill a fresh REAPER instance
+        # while it is still scanning a large bundle, before its cache is
+        # durable. The scripted launch then starts the same scan from scratch
+        # and never reaches the startup Lua. Wait until the target is visible
+        # in a plugin cache (bounded by the ordinary mode timeout) instead.
+        warm_deadline = time.time() + self.args.timeout
+        target = self.args.plugin_name.casefold()
+        cache_ready = False
+        while time.time() < warm_deadline:
+            time.sleep(0.5)
+            caches = list(self.portable.glob("reaper-*clap*.ini"))
+            caches.extend(self.portable.glob("reaper-*vst*.ini"))
+            for cache in caches:
+                try:
+                    if target in cache.read_text(errors="replace").casefold():
+                        cache_ready = True
+                        break
+                except OSError:
+                    continue
+            if cache_ready:
+                break
+        if not cache_ready:
+            log("pre-warm scan did not publish the target into REAPER's plugin "
+                "cache before timeout; scripted launch may remain inconclusive.")
         warm.terminate(); time.sleep(2); warm.kill(); kill_reaper(); time.sleep(2)
 
         with open(self.reaper_out, "a") as out:
@@ -212,6 +254,13 @@ class ReaperSession:
                     log("REAPER could not find/insert the FX (scan issue) — INCONCLUSIVE.")
                     return EXIT_INCONCLUSIVE
         log("REAPER did not open the FX within timeout (flaky launch) — INCONCLUSIVE.")
+        captured = self.captured_log().splitlines()
+        if captured:
+            log("last captured REAPER output lines:")
+            for line in captured[-12:]:
+                log("  " + line)
+        else:
+            log("REAPER produced no captured stdout/stderr.")
         return EXIT_INCONCLUSIVE
 
     def captured_log(self) -> str:
