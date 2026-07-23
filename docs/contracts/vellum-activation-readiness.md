@@ -11,20 +11,27 @@ Authority activation is blocked until all of the following are true:
   as `superseded-frozen`, mechanically disjoint, or the chosen extraction seed;
 - the private Vellum repository can enforce required checks (the current
   Generous-Corp GitHub Free plan cannot enforce rulesets on private repos);
-- dedicated, least-privilege GitHub App credentials back
-  `VELLUM_READER_TOKEN` and `VELLUM_OBSERVATORY_TOKEN`; a personal broad token
-  is not an acceptable standing credential, and the dedicated reader App ID
-  must replace the deliberately null fail-closed pin in the trusted validator;
+- the pinned Vellum reader App (`3878000`) is installed on only Vellum and its
+  private key is stored as `VELLUM_READER_APP_PRIVATE_KEY`; the trusted gate
+  mints a short-lived one-repository read token and an independently verified
+  App JWT instead of accepting a standing token;
+- the Vellum dispatcher App ID is stored in `VELLUM_DISPATCHER_APP_ID`, is
+  installed on only Vellum, and its private key is stored as
+  `VELLUM_DISPATCHER_APP_PRIVATE_KEY`; the post-merge dispatcher mints a
+  one-repository token with only the Contents write permission needed for
+  `repository_dispatch`; personal or standing broad tokens are not acceptable;
 - Pulp requires code-owner review with stale-review dismissal for the control
   and candidate paths in `.github/CODEOWNERS`;
 - Pulp requires both `Vellum freeze` and the head commit status
   `Vellum trusted freeze` without removing its existing required checks;
 - the filtered Vellum history seed has a pending immutable authority commit
   containing the exact counterpart record verified by the trusted gate;
-- that exact Vellum authority-record commit has strict protected-ref checks
-  named `forbidden-deps`, `provenance-verify`, and `sterile-consumer`, each
-  produced by its pinned GitHub App; the current workflows do not yet expose
-  all three checks on an authority ref;
+- that exact Vellum authority-record commit is the target of a signed annotated
+  `refs/tags/authority/*` tag with a published immutable GitHub Release and has
+  successful checks named `forbidden-deps`, `provenance-verify`, and
+  `sterile-consumer`, each produced by the pinned GitHub Actions App
+  (`15368`); the Vellum workflows must expose all three checks on that exact
+  commit before activation;
 - the selected Vellum commit has zero unclassified/forbidden dependency debt
   and its exact transferred paths match Pulp's generated ownership projection;
 - the activation generator and schema-v2 freeze controls receive review

@@ -23,10 +23,11 @@ python3 tools/scripts/generate_vellum_ownership_projection.py \
 
 The generator copies the event ID, record commit and path, approver, and
 timestamp into the activation metadata and each transferred slice. The freeze
-check independently binds those values to the Vellum record, its protected
-authority ref, the prepared Pulp candidate blob, and the unchanged selected
-source paths. The event and generated projection must land in the same Pulp
-commit; neither one is activation evidence on its own.
+check independently binds those values to the Vellum record, a signed annotated
+`refs/tags/authority/*` tag targeting that exact commit, its published immutable
+GitHub Release, exact App-bound checks, the prepared Pulp candidate blob, and
+the unchanged selected source paths. The event and generated projection must
+land in the same Pulp commit; neither one is activation evidence on its own.
 
 After activation, a pull request that touches a transferred path must add one
 or more immutable records under `.github/vellum-change-events/`. The union of
