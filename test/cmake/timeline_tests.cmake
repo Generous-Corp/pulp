@@ -89,6 +89,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
+        test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
@@ -196,11 +197,13 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_summary.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_release.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp

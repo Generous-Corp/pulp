@@ -3,6 +3,7 @@
 #include <pulp/runtime/result.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
+#include <pulp/timeline/schema_release.hpp>
 
 #include <cstddef>
 #include <string>
@@ -23,8 +24,13 @@ runtime::Result<SerializedSnapshot, PersistenceError>
 serialize_project(const Project& project, const SchemaRegistry& registry,
                   const SerializeOptions& options = {});
 
-runtime::Result<Project, PersistenceError>
-deserialize_project(std::string_view json, const SchemaRegistry& registry,
-                    const DecodeLimits& limits = {});
+runtime::Result<SerializedSnapshot, PersistenceError>
+serialize_project_for_release(const Project& project, const SchemaRegistry& registry,
+                              const SchemaReleaseMap& release,
+                              const SerializeOptions& options = {});
+
+runtime::Result<Project, PersistenceError> deserialize_project(std::string_view json,
+                                                               const SchemaRegistry& registry,
+                                                               const DecodeLimits& limits = {});
 
 } // namespace pulp::timeline

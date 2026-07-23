@@ -21,11 +21,13 @@ add_library(pulp-timeline
     src/schema_json_parser.cpp
     src/schema_json_preflight.cpp
     src/schema_json_summary.cpp
+    src/schema_release.cpp
     src/schema_registry.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode_support.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
+    src/serialize_release.cpp
     src/snapshot_equivalence.cpp
     src/structural_registry_validation.cpp
     src/track.cpp
