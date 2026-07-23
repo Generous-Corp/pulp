@@ -78,6 +78,7 @@ class MtcChaser {
     std::array<std::uint8_t, 8> pieces_{};
     std::uint8_t received_mask_ = 0;
     std::uint8_t last_piece_ = 0;
+    MtcDirection cycle_direction_ = MtcDirection::Unknown;
     bool have_last_piece_ = false;
 };
 

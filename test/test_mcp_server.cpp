@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -244,7 +245,11 @@ std::string make_timeline_project_json(const std::filesystem::path& source) {
     auto sequence = require_timeline_result(
         Sequence::create({2}, "root", std::nullopt,
                          AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
-    auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    std::ifstream stream(source, std::ios::binary);
+    REQUIRE(stream);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
     REQUIRE(hash);
     MediaAsset asset{{5},
                      "source.wav",
@@ -907,8 +912,9 @@ TEST_CASE("timeline MCP operations edit and render inline projects",
         handle_request(tool_call("101", "pulp_timeline_validate", project_only));
     require_contains(validated, R"JSON("diagnostics":[])JSON");
 
-    const auto explained =
-        handle_request(tool_call("102", "pulp_timeline_explain", project_only));
+    const auto explained = handle_request(tool_call(
+        "102", "pulp_timeline_explain",
+        "{\"project\":" + project_argument + ",\"sample_rate\":44100}"));
     require_contains(explained, R"JSON("audio_regions":1)JSON");
     require_contains(explained, R"JSON("pdc_offset_samples":null)JSON");
 

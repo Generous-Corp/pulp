@@ -54,6 +54,15 @@ def _project_property() -> dict:
     }
 
 
+def _sample_rate_property() -> dict:
+    return {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 4_294_967_295,
+        "description": "Render sample rate in Hz. Defaults to 48000.",
+    }
+
+
 def _command_envelope(command_types: list[str]) -> dict:
     type_name_schema = {"type": "string", "not": {}}
     if command_types:
@@ -135,7 +144,13 @@ def generate(manifest: dict) -> str:
                 "Compile a project and dump the playback program "
                 "(renderers, cursors, arbitration, PDC offsets) as structured JSON."
             ),
-            "inputSchema": _input_schema({"project": _project_property()}, ["project"]),
+            "inputSchema": _input_schema(
+                {
+                    "project": _project_property(),
+                    "sample_rate": _sample_rate_property(),
+                },
+                ["project"],
+            ),
             "x-pulp-operation": "project.explain",
         },
         {
@@ -148,7 +163,7 @@ def generate(manifest: dict) -> str:
                         "type": "string",
                         "description": "Destination audio file path.",
                     },
-                    "sample_rate": {"type": "integer", "minimum": 1},
+                    "sample_rate": _sample_rate_property(),
                 },
                 ["output", "project"],
             ),

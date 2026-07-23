@@ -5,6 +5,7 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/transport.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_codegen.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -17,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -27,6 +29,9 @@ namespace {
 namespace fs = std::filesystem;
 using namespace pulp::playback;
 using namespace pulp::timebase;
+
+constexpr std::uint64_t kMaxAssetWorkingSetBytes = 512ull * 1024 * 1024;
+constexpr std::uint64_t kMaxRenderPcmBytes = 512ull * 1024 * 1024;
 
 struct LoadedProject {
     pulp::timeline::Project value;
@@ -52,11 +57,26 @@ OperationResult failure(std::string_view stage, std::string_view message,
     return {exit_code, error_json(stage, message, path)};
 }
 
-std::optional<std::string> read_file(const fs::path& path) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream)
+std::optional<std::string> read_file(const fs::path& path,
+                                     std::uint64_t max_bytes = kMaxAssetWorkingSetBytes) {
+    std::error_code error;
+    const auto size = fs::file_size(path, error);
+    if (error || size > max_bytes || size > std::numeric_limits<std::size_t>::max())
         return std::nullopt;
-    return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+    try {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            return std::nullopt;
+        std::string bytes(static_cast<std::size_t>(size), '\0');
+        if (size != 0 &&
+            !stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
+            return std::nullopt;
+        if (stream.peek() != std::ifstream::traits_type::eof())
+            return std::nullopt;
+        return bytes;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
@@ -95,8 +115,10 @@ runtime::Result<std::shared_ptr<const DecodedAudioAssetPool>, AudioRendererError
 load_assets(const LoadedProject& project) {
     std::vector<DecodedAudioAsset> decoded;
     decoded.reserve(project.value.assets().size());
+    std::uint64_t decoded_pcm_bytes = 0;
     for (const auto& asset : project.value.assets()) {
         fs::path resolved;
+        std::string resolved_hint;
         for (const auto& locator : asset.locators) {
             if (locator.hint.empty())
                 continue;
@@ -107,6 +129,7 @@ load_assets(const LoadedProject& project) {
             std::error_code error;
             if (fs::is_regular_file(candidate, error)) {
                 resolved = std::move(candidate);
+                resolved_hint = locator.hint;
                 break;
             }
         }
@@ -116,15 +139,43 @@ load_assets(const LoadedProject& project) {
             error.item = asset.id;
             return runtime::Err(error);
         }
-        auto audio = pulp::audio::read_audio_file(resolved.string());
-        if (!audio) {
+        const auto remaining_bytes = kMaxAssetWorkingSetBytes - decoded_pcm_bytes;
+        const auto bytes = read_file(resolved, remaining_bytes);
+        if (!bytes) {
+            AudioRendererError error;
+            error.code = AudioRendererErrorCode::CapacityExceeded;
+            error.item = asset.id;
+            return runtime::Err(error);
+        }
+        const auto expected_hash = asset.content_hash.to_hex();
+        const auto actual_hash = pulp::runtime::sha256_hex(*bytes);
+        // DAWproject XML import cannot seal media until its package is
+        // extracted, so that importer uses the package path hash as an explicit
+        // provisional identity. Every other identity must match the bytes.
+        const auto provisional_hash = pulp::runtime::sha256_hex(resolved_hint);
+        if (actual_hash != expected_hash && provisional_hash != expected_hash) {
             AudioRendererError error;
             error.code = AudioRendererErrorCode::InvalidAsset;
             error.item = asset.id;
             return runtime::Err(error);
         }
-        decoded.push_back(
-            {asset.id, std::make_shared<const pulp::audio::AudioFileData>(std::move(*audio))});
+        if (bytes->size() >= remaining_bytes) {
+            AudioRendererError error;
+            error.code = AudioRendererErrorCode::CapacityExceeded;
+            error.item = asset.id;
+            return runtime::Err(error);
+        }
+        pulp::audio::WavDecodeLimits limits;
+        limits.max_output_bytes = remaining_bytes - bytes->size();
+        const auto byte_span = std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(bytes->data()), bytes->size());
+        auto audio = DecodedAudioAssetPool::decode_wav(asset.id, byte_span, limits);
+        if (!audio)
+            return runtime::Err(audio.error());
+        const auto& data = *audio.value().audio;
+        decoded_pcm_bytes += static_cast<std::uint64_t>(data.num_channels()) *
+                             static_cast<std::uint64_t>(data.num_frames()) * sizeof(float);
+        decoded.push_back(std::move(audio).value());
     }
     return DecodedAudioAssetPool::create(std::move(decoded));
 }
@@ -335,6 +386,10 @@ OperationResult render(std::string_view project, std::string_view output,
             for (const auto& asset : assets->assets())
                 channels = std::max(channels, asset.audio->num_channels());
     }
+    const auto bytes_per_frame = static_cast<std::uint64_t>(channels) * sizeof(float);
+    if (frames > kMaxRenderPcmBytes / bytes_per_frame)
+        return failure("render", "sequence exceeds the in-memory render budget");
+
     pulp::audio::AudioFileData rendered;
     rendered.sample_rate = sample_rate;
     rendered.channels.assign(channels, std::vector<float>(static_cast<std::size_t>(frames)));

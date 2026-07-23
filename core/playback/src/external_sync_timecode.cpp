@@ -182,11 +182,20 @@ MtcChaseUpdate MtcChaser::consume(const midi::MidiEvent& event,
             direction = MtcDirection::Reverse;
         else {
             received_mask_ = 0;
+            cycle_direction_ = MtcDirection::Unknown;
             pieces_[piece] = data & 0x0f;
             received_mask_ = static_cast<std::uint8_t>(1u << piece);
             last_piece_ = piece;
             return {MtcChaseCode::Discontinuity};
         }
+        if (cycle_direction_ != MtcDirection::Unknown && direction != cycle_direction_) {
+            received_mask_ = static_cast<std::uint8_t>(1u << piece);
+            pieces_[piece] = data & 0x0f;
+            last_piece_ = piece;
+            cycle_direction_ = direction;
+            return {MtcChaseCode::Discontinuity, direction};
+        }
+        cycle_direction_ = direction;
     }
 
     pieces_[piece] = data & 0x0f;
@@ -226,6 +235,7 @@ void MtcChaser::reset() noexcept {
     pieces_ = {};
     received_mask_ = 0;
     last_piece_ = 0;
+    cycle_direction_ = MtcDirection::Unknown;
     have_last_piece_ = false;
 }
 

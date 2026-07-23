@@ -1,4 +1,5 @@
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -47,14 +48,18 @@ class TempDirectory {
     std::filesystem::path path_;
 };
 
-ContentHash test_hash() {
-    auto hash = ContentHash::from_hex(std::string(64, 'a'));
+ContentHash file_hash(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    REQUIRE(stream);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto hash = ContentHash::from_hex(runtime::sha256_hex(bytes));
     REQUIRE(hash);
     return *hash;
 }
 
-std::string project_json(const std::filesystem::path& source) {
-    constexpr std::uint64_t frame_count = 32;
+std::string project_json(const std::filesystem::path& source,
+                         std::uint64_t frame_count = 32, ContentHash content_hash = {}) {
     auto clip = take(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
                                            MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
     auto track = take(Track::create({3}, "audio", {clip}));
@@ -64,7 +69,7 @@ std::string project_json(const std::filesystem::path& source) {
                      "source.wav",
                      frame_count,
                      {48'000, 1},
-                     test_hash(),
+                     content_hash.valid() ? content_hash : file_hash(source),
                      AssetStoragePolicy::External,
                      {{AssetLocatorKind::ExternalUri, source.string()}},
                      {},
@@ -74,9 +79,10 @@ std::string project_json(const std::filesystem::path& source) {
     return take(serialize_project(project, registry)).json;
 }
 
-std::string empty_project_json() {
+std::string empty_project_json(std::uint64_t frame_count = 32) {
     auto sequence = take(
-        Sequence::create({2}, "root", std::nullopt, AbsoluteTimelineDuration{32, {48'000, 1}}, {}));
+        Sequence::create({2}, "root", std::nullopt,
+                         AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {}));
     auto project = take(Project::create(ProjectInput{{1}, "empty", 3, {2}, {}, {sequence}}));
     auto registry = take(make_builtin_timeline_registry());
     return take(serialize_project(project, registry)).json;
@@ -162,4 +168,44 @@ TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     REQUIRE_FALSE(invalid_rate);
     REQUIRE(invalid_rate.exit_code == 2);
     REQUIRE(invalid_rate.json.find(R"("stage":"explain")") != std::string::npos);
+
+    TempDirectory temp;
+    const auto oversized = tools::timeline::render(empty_project_json(200'000'000),
+                                                    (temp.path() / "large.wav").string());
+    REQUIRE_FALSE(oversized);
+    REQUIRE(oversized.json.find("in-memory render budget") != std::string::npos);
+}
+
+TEST_CASE("timeline agent refuses media whose bytes do not match its durable identity") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto project = project_json(source_path);
+
+    source.channels[0][0] = 0.25f;
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto result = tools::timeline::render(project, (temp.path() / "output.wav").string());
+    REQUIRE_FALSE(result);
+    REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+}
+
+TEST_CASE("timeline agent resolves provisionally identified DAWproject media") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    auto provisional =
+        ContentHash::from_hex(runtime::sha256_hex(source_path.string()));
+    REQUIRE(provisional);
+
+    const auto output_path = temp.path() / "output.wav";
+    const auto result =
+        tools::timeline::render(project_json(source_path, 32, *provisional), output_path.string());
+    REQUIRE(result);
+    REQUIRE(audio::read_audio_file(output_path.string()));
 }

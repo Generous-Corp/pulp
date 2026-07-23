@@ -126,6 +126,31 @@ TEST_CASE("MTC chaser reports broken cycles and accepts full-frame locate",
     REQUIRE(update.timecode == MtcTimecode{1, 2, 3, 4, MtcFrameRate::Fps2997Drop});
 }
 
+TEST_CASE("MTC chaser rejects a quarter-frame cycle assembled across a direction change",
+          "[playback][external-sync]") {
+    MtcChaser chaser;
+    constexpr RationalRate sample_rate{48'000, 1};
+    const std::array nibbles{
+        std::uint8_t{12}, std::uint8_t{0}, std::uint8_t{14}, std::uint8_t{1},
+        std::uint8_t{2},  std::uint8_t{0}, std::uint8_t{1},  std::uint8_t{6},
+    };
+
+    for (std::uint8_t piece = 0; piece < 5; ++piece)
+        REQUIRE(chaser.consume(quarter_frame(piece, nibbles[piece]), sample_rate).code ==
+                MtcChaseCode::Incomplete);
+
+    const auto changed =
+        chaser.consume(quarter_frame(3, static_cast<std::uint8_t>(nibbles[3] ^ 1)), sample_rate);
+    REQUIRE(changed.code == MtcChaseCode::Discontinuity);
+    REQUIRE(changed.direction == MtcDirection::Reverse);
+
+    for (std::uint8_t piece = 2; piece > 0; --piece)
+        REQUIRE(chaser.consume(quarter_frame(piece, nibbles[piece]), sample_rate).code ==
+                MtcChaseCode::Incomplete);
+    REQUIRE(chaser.consume(quarter_frame(0, nibbles[0]), sample_rate).code ==
+            MtcChaseCode::Incomplete);
+}
+
 TEST_CASE("external sync emits sample-accurate clock and MTC", "[playback][external-sync]") {
     const auto map = constant_map();
     MasterTransportConfig config;

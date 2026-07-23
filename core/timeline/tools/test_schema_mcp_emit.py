@@ -87,6 +87,18 @@ def main() -> int:
             for tool in document["tools"]
         ),
     )
+    explain_rate = _tool(document, "pulp_timeline_explain")["inputSchema"]["properties"][
+        "sample_rate"
+    ]
+    render_rate = _tool(document, "pulp_timeline_render")["inputSchema"]["properties"][
+        "sample_rate"
+    ]
+    check(
+        "explain and render expose the same uint32 sample-rate override",
+        explain_rate == render_rate
+        and explain_rate["minimum"] == 1
+        and explain_rate["maximum"] == 4_294_967_295,
+    )
 
     defs = manifest["$defs"]
     expected_documents = sorted(
