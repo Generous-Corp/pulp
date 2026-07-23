@@ -197,6 +197,17 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-schema-js-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_js_emit.py)
+
+    # MCP tool-defs drift gate: same shared drift check, pointed at the MCP
+    # projection's emitter + committed artifact.
+    add_test(NAME timeline-mcp-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_mcp_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-mcp-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_mcp_emit.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT

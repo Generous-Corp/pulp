@@ -378,6 +378,31 @@ projection, jsType mapping, confirm-the-failure, and — when `node` is present 
 that the emitted module parses, imports, and is deeply frozen (skipped, not
 failed, without `node`).
 
+The **MCP tool-definition surface** is another manifest projection:
+`core/timeline/tools/schema_mcp_emit.py` emits the fixed five engine operations
+(project open, command apply, validate, explain, and render) into
+`core/timeline/schema/timeline_mcp_tools.json`. The operation set is an API
+decision rather than a copy of the schema CLI-verb table. Its type vocabularies
+remain manifest-derived: project open lists every Document type, command apply
+constrains its envelope to the Command types, and validate lists the Diagnostic
+types. An empty Command domain emits the object-valued reject-all schema
+`{"type":"string","not":{}}` for `type_name`, rejecting every command name until
+the registry defines one. JSON Schema forbids an empty `enum`, and the released
+MCP Tool wire contract requires property schemas to be objects rather than
+boolean schemas; omitting the enum would accidentally accept an unbounded
+string. Registering these definitions in the live MCP server is a separate
+integration step.
+
+```
+python3 core/timeline/tools/schema_mcp_emit.py \
+    --out core/timeline/schema/timeline_mcp_tools.json
+```
+
+The `timeline-mcp-drift` ctest byte-checks the artifact;
+`timeline-mcp-selftest` (`core/timeline/tools/test_schema_mcp_emit.py`) proves
+determinism, exact operation membership, complete domain projection,
+fail-closed empty command behavior, and confirm-the-failure.
+
 ## Scope boundary
 
 This subsystem owns the durable `JournalSink` ordering seam and native
