@@ -611,3 +611,113 @@ TEST_CASE("SvgPathWidget clear_fill_gradient returns to solid-fill mode",
     REQUIRE(c.r < 0.1f);
     REQUIRE(c.b < 0.1f);
 }
+
+
+// ── Gradient STROKE — the stroke mirror of the fill-gradient block above ─────
+//
+// set_stroke_gradient() carries a CSS linear-gradient string; paint() parses
+// it per-frame and routes through Canvas::set_stroke_gradient_linear, keeping
+// the solid stroke_color_ as the parse-failure fallback. This is the channel
+// a Figma knob rim's GRADIENT_LINEAR stroke renders through
+// (setSvgStrokeGradient) instead of being dropped.
+
+TEST_CASE("SvgPathWidget strokes with the gradient rather than the solid color",
+          "[view][svg-path][stroke-gradient]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 5 L 10 5");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    w.clear_fill();
+    // Solid color is "should not be used" — bright green so a fall-through
+    // to solid would be obvious.
+    w.set_stroke_color(Color::rgba8(0, 255, 0));
+    w.set_stroke_width(2.0f);
+    w.set_stroke_gradient("linear-gradient(to right, red, blue)");
+    REQUIRE(w.has_stroke());
+    REQUIRE(w.stroke_gradient() == "linear-gradient(to right, red, blue)");
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    std::optional<Color> gradient_first_stop;
+    bool fell_back_to_solid = false;
+    bool stroked = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear
+            && !gradient_first_stop.has_value()) {
+            gradient_first_stop = cmd.color;
+        }
+        if (cmd.type == DrawCommand::Type::set_stroke_color) fell_back_to_solid = true;
+        if (cmd.type == DrawCommand::Type::stroke_current_path) stroked = true;
+    }
+
+    REQUIRE(stroked);
+    REQUIRE(gradient_first_stop.has_value());
+    REQUIRE(gradient_first_stop->r > 0.9f);  // red is the first stop
+    REQUIRE(gradient_first_stop->g < 0.1f);
+    REQUIRE(gradient_first_stop->b < 0.1f);
+    REQUIRE_FALSE(fell_back_to_solid);
+}
+
+TEST_CASE("SvgPathWidget unparseable stroke gradient falls back to the solid stroke",
+          "[view][svg-path][stroke-gradient]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 5 L 10 5");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    w.clear_fill();
+    w.set_stroke_color(Color::rgba8(255, 0, 0));  // red — the fallback we expect
+    w.set_stroke_width(1.0f);
+    w.set_stroke_gradient("not-a-real-gradient(...)");
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    std::optional<Color> first_stroke;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_color) {
+            first_stroke = cmd.color;
+            break;
+        }
+    }
+    REQUIRE(first_stroke.has_value());
+    REQUIRE(first_stroke->r > 0.9f);
+    REQUIRE(first_stroke->g < 0.1f);
+}
+
+TEST_CASE("SvgPathWidget clear_stroke_gradient returns to solid-stroke mode",
+          "[view][svg-path][stroke-gradient]") {
+    using namespace pulp::view;
+    using namespace pulp::canvas;
+
+    SvgPathWidget w;
+    w.set_path("M 0 5 L 10 5");
+    w.set_viewbox(10, 10);
+    w.set_bounds({0, 0, 10, 10});
+    w.clear_fill();
+    w.set_stroke_color(Color::rgba8(0, 255, 0));  // green — the post-clear fallback
+    w.set_stroke_width(1.0f);
+    w.set_stroke_gradient("linear-gradient(to bottom, black, white)");
+    w.clear_stroke_gradient();
+
+    RecordingCanvas canvas;
+    w.paint(canvas);
+
+    std::optional<Color> first_stroke;
+    bool gradient_ran = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_color && !first_stroke)
+            first_stroke = cmd.color;
+        if (cmd.type == DrawCommand::Type::set_stroke_gradient_linear)
+            gradient_ran = true;
+    }
+    REQUIRE_FALSE(gradient_ran);
+    REQUIRE(first_stroke.has_value());
+    REQUIRE(first_stroke->g > 0.9f);  // green — gradient was cleared
+}

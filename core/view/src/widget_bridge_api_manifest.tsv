@@ -145,6 +145,7 @@ setSvgFill	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fil
 setSvgFillGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillGradient
 setSvgFillRule	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.fillRule
 setSvgStroke	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.stroke
+setSvgStrokeGradient	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.strokeGradient
 setSvgStrokeWidth	svg	function	core/view/src/widget_bridge/svg_api.cpp	prop:SvgPath.strokeWidth
 createSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	factory:SvgRect
 setSvgRect	svg	function	core/view/src/widget_bridge/svg_api.cpp	geometry:SvgRect.x,y,width,height

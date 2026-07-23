@@ -74,8 +74,11 @@ test('a gradient stroke carried onto the path as fillGradient is emitted, not dr
     { node_id: '0:1', name: 'Oval', type: 'VECTOR',
       declared: { stroke: [{ type: 'GRADIENT_LINEAR', opacity: 1, color_alpha: 1 }] } },
   ]);
-  // Same node, but its stroke gradient reached the path as fillGradient.
+  // Same node, but its stroke gradient reached the path as fillGradient. The
+  // band is a real emitted path — the check requires path_data so a non-path
+  // node's fill gradient can never masquerade as a stroke.
   const env = envelope([{ node_id: '0:1', name: 'Oval', style: {},
+                          path_data: 'M0 0 L2 0 L2 20 L0 20 Z',
                           fillGradient: 'linear-gradient(0deg, #ffffff3d, #00000000)' }]);
 
   const out = auditMaterials(m, env, []);

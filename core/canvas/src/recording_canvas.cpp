@@ -680,6 +680,9 @@ void RecordingCanvas::set_stroke_gradient_linear(float x0, float y0,
     DrawCommand cmd{DrawCommand::Type::set_stroke_gradient_linear};
     cmd.f[0] = x0; cmd.f[1] = y0; cmd.f[2] = x1; cmd.f[3] = y1;
     pack_stops(colors, positions, count, cmd.floats);
+    // First stop on cmd.color, mirroring set_fill_gradient_linear: test spies
+    // identify a gradient by its first stop without unpacking the stop array.
+    if (count > 0) cmd.color = colors[0];
     commands_.push_back(std::move(cmd));
 }
 
