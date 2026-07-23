@@ -2,6 +2,7 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timeline/transaction.hpp>
 
+#include "harness/rt_allocation_probe.hpp"
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
 
@@ -287,6 +288,124 @@ TEST_CASE("one bounded compiler pass publishes note and audio payloads for a mix
     REQUIRE(compiled_track->audio_program()->clips()[0].gain_linear == 0.5f);
 }
 
+TEST_CASE("active take comp lowers to a derived artifact and renders exact selections") {
+    std::vector<float> source(32);
+    for (std::size_t index = 0; index < source.size(); ++index)
+        source[index] = static_cast<float>(index);
+    const auto first =
+        take(Take::create({20}, MediaRef{{3}, {0}, 16}, {0}, RationalRate{48'000, 1}));
+    const auto second =
+        take(Take::create({21}, MediaRef{{3}, {16}, 16}, {0}, RationalRate{48'000, 1}));
+    auto lane = take(TakeLane::create({30}, "active", {first, second},
+                                      {{.take_id = {20}, .range = {{0}, 2, {48'000, 1}}},
+                                       {.take_id = {21}, .range = {{2}, 2, {48'000, 1}}},
+                                       {.take_id = {20}, .range = {{4}, 2, {48'000, 1}}}}));
+    auto track = take(Track::create(TrackInput{.id = {10},
+                                               .name = "comp",
+                                               .clips = {absolute_media_clip(100, 0, 6, 3, 0, 6)},
+                                               .take_lanes = {lane},
+                                               .active_take_lane_id = {30}}));
+    auto project = project_with_tracks({track}, {{3, "takes", 32, {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({source})}}));
+    auto program = compiled.store.read();
+    const auto regions = program->find_track({10})->audio_program()->clips();
+    REQUIRE(program->find_track({10})->ordered_clip_ids().empty());
+    REQUIRE(regions.size() == 3);
+    REQUIRE(regions[0].source_kind == AudioClipRendererProgram::SourceKind::TakeCompSegment);
+    REQUIRE(regions[0].source_ordinal == 1);
+    REQUIRE(regions[1].source_ordinal == 2);
+    REQUIRE(regions[2].source_ordinal == 3);
+    REQUIRE(regions[0].id == ItemId{20});
+    REQUIRE(regions[1].id == ItemId{21});
+    REQUIRE(regions[2].id == ItemId{20});
+
+    Output output(1, 6);
+    AudioRenderStatus status = AudioRenderStatus::InvalidProgram;
+    std::size_t allocations = 1;
+    {
+        test::ScopedRtProcessProbe probe;
+        status = ArrangementAudioRenderer::process(*program, snapshot(*program, 6), output.view());
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(status == AudioRenderStatus::Rendered);
+    REQUIRE(allocations == 0);
+    REQUIRE(output.storage[0] == std::vector<float>{0, 1, 18, 19, 4, 5});
+}
+
+TEST_CASE("inactive take comp is document data but not a playback source") {
+    const auto recorded =
+        take(Take::create({20}, MediaRef{{3}, {0}, 4}, {0}, RationalRate{48'000, 1}));
+    auto lane = take(TakeLane::create({30}, "inactive", {recorded},
+                                      {{.take_id = {20}, .range = {{0}, 4, {48'000, 1}}}}));
+    auto track = take(Track::create(TrackInput{.id = {10},
+                                               .name = "comp",
+                                               .clips = {absolute_media_clip(100, 0, 4, 3, 0, 4)},
+                                               .take_lanes = {lane}}));
+    auto project = project_with_tracks({track}, {{3, "take", 4, {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(),
+                             pool({{3, audio_data({{1.0f, 2.0f, 3.0f, 4.0f}})}}));
+    const auto* compiled_track = compiled.store.read()->find_track({10});
+    REQUIRE(compiled_track->ordered_clip_ids().size() == 1);
+    REQUIRE(compiled_track->ordered_clip_ids()[0] == ItemId{100});
+    REQUIRE(compiled_track->audio_program()->clips()[0].source_kind ==
+            AudioClipRendererProgram::SourceKind::ArrangementClip);
+}
+
+TEST_CASE("take comp compilation validates asset rate and whole program capacity") {
+    const auto recorded =
+        take(Take::create({20}, MediaRef{{3}, {0}, 4}, {0}, RationalRate{44'100, 1}));
+    auto lane = take(TakeLane::create({30}, "rate", {recorded},
+                                      {{.take_id = {20}, .range = {{0}, 4, {44'100, 1}}}}));
+    auto track = take(Track::create(
+        TrackInput{.id = {10}, .name = "comp", .take_lanes = {lane}, .active_take_lane_id = {30}}));
+    auto project = project_with_tracks({track}, {{3, "take", 4, {48'000, 1}}});
+    auto compiled = compile_take_comp_segment_program(
+        lane, 0, *project, *map_120(), *pool({{3, audio_data({{1.0f, 2.0f, 3.0f, 4.0f}})}}), {});
+    REQUIRE_FALSE(compiled);
+    REQUIRE(compiled.error().code == AudioRendererErrorCode::UnsupportedSampleRate);
+
+    const auto matching =
+        take(Take::create({20}, MediaRef{{3}, {0}, 4}, {0}, RationalRate{48'000, 1}));
+    lane = take(TakeLane::create({30}, "capacity", {matching},
+                                 {{.take_id = {20}, .range = {{0}, 2, {48'000, 1}}},
+                                  {.take_id = {20}, .range = {{2}, 2, {48'000, 1}}}}));
+    track = take(Track::create(
+        TrackInput{.id = {10}, .name = "comp", .take_lanes = {lane}, .active_take_lane_id = {30}}));
+    auto earlier = take(Track::create({9}, "earlier", {absolute_media_clip(100, 0, 1, 3, 0, 1)}));
+    project = project_with_tracks({earlier, track}, {{3, "take", 4, {48'000, 1}}});
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = pool({{3, audio_data({{1.0f, 2.0f, 3.0f, 4.0f}})}});
+    request.audio_limits.max_clips = 2;
+    REQUIRE(compiler.submit(std::move(request)));
+    REQUIRE_FALSE(store.has_value());
+    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+}
+
+TEST_CASE("take comp boundary projection is exact beyond floating point integer precision") {
+    constexpr std::int64_t start = (std::int64_t{1} << 53u) + 1;
+    const auto recorded =
+        take(Take::create({20}, MediaRef{{3}, {0}, 1}, {start}, RationalRate{48'000, 1}));
+    auto lane = take(TakeLane::create({30}, "large position", {recorded},
+                                      {{.take_id = {20}, .range = {{start}, 1, {48'000, 1}}}}));
+    auto track = take(Track::create(
+        TrackInput{.id = {10}, .name = "comp", .take_lanes = {lane}, .active_take_lane_id = {30}}));
+    auto project = project_with_tracks({track}, {{3, "take", 1, {48'000, 1}}});
+    const std::array points{TempoPoint{{0}, 120.0}};
+    auto doubled_rate = shared_compiled_tempo_map(points, RationalRate{96'000, 1});
+    auto compiled = take(compile_take_comp_segment_program(lane, 0, *project, *doubled_rate,
+                                                           *pool({{3, audio_data({{1.0f}})}}), {}));
+    REQUIRE(compiled.timeline_start == start * 2);
+    REQUIRE(compiled.timeline_frame_count == 2);
+}
+
 TEST_CASE("playback property commands dirty and rebuild audible clip gain") {
     auto asset_pool = pool({{3, audio_data({std::vector<float>(8, 1.0f)})}});
     auto map = map_120();
@@ -341,6 +460,68 @@ TEST_CASE("audio track linking remains incremental under one-work-unit slices") 
     CompiledFixture compiled(project, map_120(), pool({{3, audio_data({{1.0f}})}}));
     REQUIRE(compiled.store.read()->find_track({10})->audio_program()->clips().size() == clip_count);
     REQUIRE(compiled.executor.slice_count > clip_count * 4);
+}
+
+TEST_CASE("take comp lowering remains incremental under one-work-unit slices") {
+    constexpr std::size_t segment_count = 256;
+    const auto recorded =
+        take(Take::create({20}, MediaRef{{3}, {0}, segment_count}, {0}, RationalRate{48'000, 1}));
+    std::vector<TakeCompSegment> segments;
+    segments.reserve(segment_count);
+    for (std::size_t index = 0; index < segment_count; ++index)
+        segments.push_back(
+            {.take_id = {20}, .range = {{static_cast<std::int64_t>(index)}, 1, {48'000, 1}}});
+    auto lane = take(TakeLane::create({30}, "many selections", {recorded}, std::move(segments)));
+    auto track = take(Track::create(
+        TrackInput{.id = {10}, .name = "comp", .take_lanes = {lane}, .active_take_lane_id = {30}}));
+    auto project = project_with_tracks({track}, {{3, "take", segment_count, {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(),
+                             pool({{3, audio_data({std::vector<float>(segment_count, 1.0f)})}}));
+    REQUIRE(compiled.store.read()->find_track({10})->audio_program()->clips().size() ==
+            segment_count);
+    REQUIRE(compiled.executor.slice_count > segment_count);
+}
+
+TEST_CASE("active take comp compile cost is independent of the hidden arrangement") {
+    constexpr std::size_t hidden_clip_count = 512;
+    const auto recorded =
+        take(Take::create({20}, MediaRef{{3}, {0}, 1}, {0}, RationalRate{48'000, 1}));
+    auto lane = take(TakeLane::create({30}, "active", {recorded},
+                                      {{.take_id = {20}, .range = {{0}, 1, {48'000, 1}}}}));
+    auto make_project = [&](std::size_t clip_count) {
+        std::vector<Clip> clips;
+        clips.reserve(clip_count);
+        for (std::size_t index = 0; index < clip_count; ++index)
+            clips.push_back(
+                absolute_media_clip(100 + index, static_cast<std::int64_t>(index), 1, 3, 0, 1));
+        auto track = take(Track::create(TrackInput{.id = {10},
+                                                   .name = "comp",
+                                                   .clips = std::move(clips),
+                                                   .take_lanes = {lane},
+                                                   .active_take_lane_id = {30}}));
+        return project_with_tracks({track}, {{3, "take", 1, {48'000, 1}}});
+    };
+    const auto asset_pool = pool({{3, audio_data({{1.0f}})}});
+    const auto tempo_map = map_120();
+    auto compile_bytes = [&](std::shared_ptr<const Project> project) {
+        PlaybackProgramStore store;
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = std::move(project);
+        request.sequence_id = {2};
+        request.tempo_map = tempo_map;
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.audio_assets = asset_pool;
+        test::RtAllocationProbe probe;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE(store.has_value());
+        return probe.allocated_bytes();
+    };
+    const auto baseline_bytes = compile_bytes(make_project(0));
+    const auto hidden_arrangement_bytes = compile_bytes(make_project(hidden_clip_count));
+    REQUIRE(hidden_arrangement_bytes == baseline_bytes);
 }
 
 TEST_CASE("expired compile deadlines stop an in-progress audio link pass") {
@@ -596,7 +777,30 @@ TEST_CASE("audio compiler rejects invalid assets sample rates and capacities") {
 
     auto compiled_clip =
         take(compile_audio_clip_program(clip, *project, *map, *pool({{3, good}}), {}));
-    auto linked = link_audio_track_program({10}, {compiled_clip}, {.max_clips = 0});
+
+    auto malformed_arrangement = compiled_clip;
+    malformed_arrangement.source_ordinal = 1;
+    auto linked = link_audio_track_program({10}, {malformed_arrangement}, {});
+    REQUIRE_FALSE(linked);
+    REQUIRE(linked.error().code == AudioRendererErrorCode::InvalidIdentity);
+    auto first_selection = compiled_clip;
+    first_selection.source_kind = AudioClipRendererProgram::SourceKind::TakeCompSegment;
+    first_selection.source_ordinal = 1;
+    auto second_selection = first_selection;
+    second_selection.source_ordinal = 2;
+    linked = link_audio_track_program({10}, {first_selection, second_selection}, {});
+    REQUIRE(linked);
+    second_selection.id = {999};
+    second_selection.source_ordinal = 1;
+    linked = link_audio_track_program({10}, {first_selection, second_selection}, {});
+    REQUIRE_FALSE(linked);
+    REQUIRE(linked.error().code == AudioRendererErrorCode::InvalidIdentity);
+    first_selection.source_ordinal = 0;
+    linked = link_audio_track_program({10}, {first_selection}, {});
+    REQUIRE_FALSE(linked);
+    REQUIRE(linked.error().code == AudioRendererErrorCode::InvalidIdentity);
+
+    linked = link_audio_track_program({10}, {compiled_clip}, {.max_clips = 0});
     REQUIRE_FALSE(linked);
     REQUIRE(linked.error().code == AudioRendererErrorCode::CapacityExceeded);
     auto duplicate_late = compiled_clip;

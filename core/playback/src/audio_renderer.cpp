@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <tuple>
 
 namespace pulp::playback {
 namespace {
@@ -26,6 +27,37 @@ bool valid_audio(const audio::AudioFileData& value, const AudioRendererLimits& l
     const auto frames = value.channels.front().size();
     return std::all_of(value.channels.begin(), value.channels.end(),
                        [frames](const auto& channel) { return channel.size() == frames; });
+}
+
+struct ResolvedAudioMedia {
+    const DecodedAudioAsset* decoded = nullptr;
+    std::uint64_t source_start = 0;
+    timebase::RationalRate source_rate;
+};
+
+runtime::Result<ResolvedAudioMedia, AudioRendererError>
+resolve_audio_media(timeline::ItemId item, const timeline::MediaRef& media,
+                    const timeline::Project& project, const DecodedAudioAssetPool& assets,
+                    const AudioRendererLimits& limits,
+                    AudioRendererErrorCode range_error = AudioRendererErrorCode::InvalidClipRange) {
+    const auto* metadata = project.find_asset(media.asset_id);
+    const auto* decoded = assets.find(media.asset_id);
+    if (!metadata || !decoded)
+        return fail<ResolvedAudioMedia>(AudioRendererErrorCode::MissingDecodedAsset, item,
+                                        media.asset_id);
+    if (!valid_audio(*decoded->audio, limits))
+        return fail<ResolvedAudioMedia>(AudioRendererErrorCode::InvalidAsset, item, media.asset_id);
+    if (metadata->frame_count != decoded->audio->num_frames() ||
+        metadata->sample_rate.denominator != 1 ||
+        metadata->sample_rate.numerator != decoded->audio->sample_rate)
+        return fail<ResolvedAudioMedia>(AudioRendererErrorCode::AssetMetadataMismatch, item,
+                                        media.asset_id);
+    const auto source_start = static_cast<std::uint64_t>(media.source_start.value);
+    if (source_start > decoded->audio->num_frames() ||
+        media.frame_count > decoded->audio->num_frames() - source_start)
+        return fail<ResolvedAudioMedia>(range_error, item, media.asset_id);
+    return runtime::Ok(
+        ResolvedAudioMedia{decoded, source_start, metadata->sample_rate.normalized()});
 }
 
 bool same_rate(timebase::RationalRate lhs, timebase::RationalRate rhs) noexcept {
@@ -81,6 +113,99 @@ std::optional<std::int64_t> scale_position(std::int64_t value, timebase::Rationa
         scaled > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
         return std::nullopt;
     return static_cast<std::int64_t>(std::floor(scaled));
+}
+
+struct WideUnsigned {
+    std::uint64_t high = 0;
+    std::uint64_t low = 0;
+};
+
+WideUnsigned multiply_wide(std::uint64_t lhs, std::uint64_t rhs) noexcept {
+    constexpr std::uint64_t mask = std::numeric_limits<std::uint32_t>::max();
+    const auto lhs_low = lhs & mask;
+    const auto lhs_high = lhs >> 32u;
+    const auto rhs_low = rhs & mask;
+    const auto rhs_high = rhs >> 32u;
+    const auto low_product = lhs_low * rhs_low;
+    const auto middle = lhs_high * rhs_low + (low_product >> 32u);
+    const auto middle_low = (middle & mask) + lhs_low * rhs_high;
+    return {lhs_high * rhs_high + (middle >> 32u) + (middle_low >> 32u),
+            (middle_low << 32u) | (low_product & mask)};
+}
+
+bool wide_less(WideUnsigned lhs, WideUnsigned rhs) noexcept {
+    return lhs.high < rhs.high || (lhs.high == rhs.high && lhs.low < rhs.low);
+}
+
+WideUnsigned subtract_wide(WideUnsigned lhs, WideUnsigned rhs) noexcept {
+    return {lhs.high - rhs.high - (lhs.low < rhs.low), lhs.low - rhs.low};
+}
+
+struct WideDivision {
+    WideUnsigned quotient;
+    WideUnsigned remainder;
+};
+
+WideDivision divide_wide(WideUnsigned numerator, WideUnsigned denominator) noexcept {
+    WideDivision result;
+    if ((denominator.high & (std::uint64_t{1} << 63u)) != 0) {
+        if (!wide_less(numerator, denominator)) {
+            result.quotient.low = 1;
+            result.remainder = subtract_wide(numerator, denominator);
+        } else {
+            result.remainder = numerator;
+        }
+        return result;
+    }
+    for (int bit = 127; bit >= 0; --bit) {
+        const auto input_bit =
+            bit >= 64 ? (numerator.high >> (bit - 64)) & 1u : (numerator.low >> bit) & 1u;
+        result.remainder = {result.remainder.high << 1u | result.remainder.low >> 63u,
+                            result.remainder.low << 1u | input_bit};
+        if (!wide_less(result.remainder, denominator)) {
+            result.remainder = subtract_wide(result.remainder, denominator);
+            if (bit >= 64)
+                result.quotient.high |= std::uint64_t{1} << (bit - 64);
+            else
+                result.quotient.low |= std::uint64_t{1} << bit;
+        }
+    }
+    return result;
+}
+
+// Media metadata guarantees an integer source rate. Use a portable 128-bit
+// quotient here so large legal timeline positions never pass through floating
+// point before the checked floor operation.
+std::optional<std::int64_t> scale_media_position(std::int64_t value, timebase::RationalRate from,
+                                                 timebase::RationalRate to) noexcept {
+    from = from.normalized();
+    to = to.normalized();
+    if (!from.valid() || !to.valid() || from.denominator != 1)
+        return std::nullopt;
+    const bool negative = value < 0;
+    const auto magnitude = negative ? std::uint64_t{0} - static_cast<std::uint64_t>(value)
+                                    : static_cast<std::uint64_t>(value);
+    const auto numerator = multiply_wide(magnitude, to.numerator);
+    const auto denominator = multiply_wide(from.numerator, to.denominator);
+    if (denominator.high == 0 && denominator.low == 0)
+        return std::nullopt;
+    auto divided = divide_wide(numerator, denominator);
+    const bool has_remainder = divided.remainder.high != 0 || divided.remainder.low != 0;
+    if (negative && has_remainder) {
+        ++divided.quotient.low;
+        if (divided.quotient.low == 0)
+            ++divided.quotient.high;
+    }
+    const auto limit = negative
+                           ? std::uint64_t{1} << 63u
+                           : static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    if (divided.quotient.high != 0 || divided.quotient.low > limit)
+        return std::nullopt;
+    if (!negative)
+        return static_cast<std::int64_t>(divided.quotient.low);
+    if (divided.quotient.low == (std::uint64_t{1} << 63u))
+        return std::numeric_limits<std::int64_t>::min();
+    return -static_cast<std::int64_t>(divided.quotient.low);
 }
 
 std::optional<std::uint64_t> scale_duration_ceil(std::uint64_t value, timebase::RationalRate from,
@@ -216,34 +341,19 @@ compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& 
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
-    const auto* metadata = project.find_asset(media->asset_id);
-    const auto* decoded = assets.find(media->asset_id);
-    if (!metadata || !decoded)
-        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::MissingDecodedAsset,
-                                              clip.id(), media->asset_id);
-    if (!valid_audio(*decoded->audio, limits))
-        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidAsset, clip.id(),
-                                              media->asset_id);
-    if (metadata->frame_count != decoded->audio->num_frames() ||
-        metadata->sample_rate.denominator != 1 ||
-        metadata->sample_rate.numerator != decoded->audio->sample_rate)
-        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::AssetMetadataMismatch,
-                                              clip.id(), media->asset_id);
-    if (decoded->audio->sample_rate > 768'000u ||
+    auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
+    if (!resolved)
+        return runtime::Err(resolved.error());
+    if (resolved->decoded->audio->sample_rate > 768'000u ||
         tempo_map.sample_rate().as_long_double() > 768'000.0L)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               clip.id(), media->asset_id);
-    const auto source_start = static_cast<std::uint64_t>(media->source_start.value);
-    if (source_start > decoded->audio->num_frames() ||
-        media->frame_count > decoded->audio->num_frames() - source_start)
-        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id(),
-                                              media->asset_id);
 
     std::int64_t timeline_start = 0;
     std::uint64_t timeline_frames = 0;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
-    const auto source_rate = metadata->sample_rate.normalized();
+    const auto source_rate = resolved->source_rate;
     const auto timeline_rate = tempo_map.sample_rate().normalized();
     const auto renderable_frames =
         scale_duration_ceil(media->frame_count, source_rate, timeline_rate);
@@ -298,10 +408,69 @@ compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& 
         fade_in_frames > timeline_frames || fade_out_frames > timeline_frames)
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidFade, clip.id());
     return runtime::Ok(AudioClipRendererProgram{
-        clip.id(), media->asset_id, decoded->audio, timeline_start, timeline_frames, source_start,
-        media->frame_count, *renderable_frames,
+        clip.id(), media->asset_id, resolved->decoded->audio, timeline_start, timeline_frames,
+        resolved->source_start, media->frame_count, *renderable_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         playback.gain_linear, fade_in_frames, fade_out_frames});
+}
+
+runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_segment_program(
+    const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits) {
+    const auto segments = lane.comp_segments();
+    if (segment_index >= segments.size() ||
+        segment_index >= std::numeric_limits<std::uint32_t>::max())
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidTakeComp, lane.id());
+    const auto& segment = segments[segment_index];
+    const auto* take = lane.find_take(segment.take_id);
+    if (!take)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidTakeComp, lane.id(),
+                                              segment.take_id);
+    auto resolved = resolve_audio_media(take->id(), take->media(), project, assets, limits,
+                                        AudioRendererErrorCode::InvalidTakeComp);
+    if (!resolved)
+        return runtime::Err(resolved.error());
+    const auto source_rate = take->sample_rate().normalized();
+    const auto timeline_rate = tempo_map.sample_rate().normalized();
+    if (source_rate != resolved->source_rate || source_rate.as_long_double() > 768'000.0L ||
+        timeline_rate.as_long_double() > 768'000.0L)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
+                                              take->id(), take->media().asset_id);
+    const auto offset =
+        static_cast<std::uint64_t>(segment.range.start.value - take->placement_start().value);
+    if (offset > take->media().frame_count ||
+        segment.range.sample_count > take->media().frame_count - offset)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidTakeComp, lane.id(),
+                                              take->id());
+    const auto end =
+        segment.range.start.value + static_cast<std::int64_t>(segment.range.sample_count);
+    const auto projected_start =
+        scale_media_position(segment.range.start.value, source_rate, timeline_rate);
+    const auto projected_end = scale_media_position(end, source_rate, timeline_rate);
+    if (!projected_start || !projected_end || *projected_end <= *projected_start)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
+                                              take->id(), take->media().asset_id);
+    const auto timeline_frames = positive_distance(*projected_start, *projected_end);
+    if (!add_fits(*projected_start, timeline_frames))
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidTakeComp, lane.id(),
+                                              take->id());
+    return runtime::Ok(AudioClipRendererProgram{
+        take->id(),
+        take->media().asset_id,
+        resolved->decoded->audio,
+        *projected_start,
+        timeline_frames,
+        resolved->source_start + offset,
+        segment.range.sample_count,
+        timeline_frames,
+        static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
+        1.0f,
+        0,
+        0,
+        AudioClipRendererProgram::SourceKind::TakeCompSegment,
+        static_cast<std::uint32_t>(segment_index + 1),
+    });
 }
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
@@ -313,18 +482,41 @@ link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendere
     if (clips.size() > limits.max_clips)
         return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
             AudioRendererErrorCode::CapacityExceeded, track_id, {}, clips.size(), limits.max_clips);
-    std::vector<timeline::ItemId> ids;
+    using Key = std::tuple<AudioClipRendererProgram::SourceKind, std::uint64_t>;
+    std::vector<Key> ids;
     ids.reserve(clips.size());
-    for (const auto& clip : clips)
-        ids.push_back(clip.id);
+    for (const auto& clip : clips) {
+        std::uint64_t source_identity = 0;
+        switch (clip.source_kind) {
+        case AudioClipRendererProgram::SourceKind::ArrangementClip:
+            if (clip.source_ordinal != 0)
+                return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
+                    AudioRendererErrorCode::InvalidIdentity, clip.id);
+            source_identity = clip.id.value;
+            break;
+        case AudioClipRendererProgram::SourceKind::TakeCompSegment:
+            if (clip.source_ordinal == 0)
+                return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
+                    AudioRendererErrorCode::InvalidIdentity, clip.id);
+            source_identity = clip.source_ordinal;
+            break;
+        default:
+            return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
+                AudioRendererErrorCode::InvalidIdentity, clip.id);
+        }
+        ids.emplace_back(clip.source_kind, source_identity);
+    }
     std::sort(ids.begin(), ids.end());
     const auto duplicate = std::adjacent_find(ids.begin(), ids.end());
     if (duplicate != ids.end())
         return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
-            AudioRendererErrorCode::InvalidIdentity, *duplicate);
+            AudioRendererErrorCode::InvalidIdentity,
+            std::get<0>(*duplicate) == AudioClipRendererProgram::SourceKind::ArrangementClip
+                ? timeline::ItemId{std::get<1>(*duplicate)}
+                : track_id);
     std::sort(clips.begin(), clips.end(), [](const auto& lhs, const auto& rhs) {
-        return std::pair(lhs.timeline_start, lhs.id.value) <
-               std::pair(rhs.timeline_start, rhs.id.value);
+        return std::tuple(lhs.timeline_start, lhs.source_kind, lhs.id.value, lhs.source_ordinal) <
+               std::tuple(rhs.timeline_start, rhs.source_kind, rhs.id.value, rhs.source_ordinal);
     });
     return runtime::Ok(std::shared_ptr<const AudioTrackRendererProgram>(
         new AudioTrackRendererProgram(track_id, std::move(clips))));

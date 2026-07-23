@@ -33,6 +33,16 @@ Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 
+An active take lane replaces the track's arrangement source; zero
+`active_take_lane_id` selects arrangement clips. The compiler lowers each
+canonical comp selection to an `AudioClipRendererProgram` with
+`SourceKind::TakeCompSegment` and a one-based lane ordinal. The typed origin
+keeps repeated selections from one take distinct without inventing project
+identities. Lower one selection per compile work unit, count arrangement
+regions and comp selections against the same whole-program `max_clips`, and
+require the take rate, asset metadata, and decoded audio rate to agree.
+Inactive lanes remain document data and contribute no playback regions.
+
 On the audio thread, call `PlaybackProgramBlockLatch::begin_block()` exactly
 once per callback and pass that pin to every `StableRendererShell`. Never cache
 a `TrackProgram*` past the pin. Adoption accepts skipped generations

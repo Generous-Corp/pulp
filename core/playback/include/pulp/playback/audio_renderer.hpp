@@ -31,6 +31,7 @@ enum class AudioRendererErrorCode : std::uint8_t {
     InvalidClipRange,
     InvalidFade,
     CapacityExceeded,
+    InvalidTakeComp,
 };
 
 struct AudioRendererError {
@@ -68,6 +69,8 @@ class DecodedAudioAssetPool {
 };
 
 struct AudioClipRendererProgram {
+    enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment };
+
     timeline::ItemId id;
     timeline::ItemId asset_id;
     std::shared_ptr<const audio::AudioFileData> audio;
@@ -80,6 +83,8 @@ struct AudioClipRendererProgram {
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
+    SourceKind source_kind = SourceKind::ArrangementClip;
+    std::uint32_t source_ordinal = 0;
 
     std::int64_t timeline_end() const noexcept;
 };
@@ -109,6 +114,14 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError>
 compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& project,
                            const timebase::CompiledTempoMap& tempo_map,
                            const DecodedAudioAssetPool& assets, const AudioRendererLimits& limits);
+
+/// Lowers one canonical take-comp selection to the same immutable audio-region
+/// artifact used by arrangement clips. The ordinal is stable within the
+/// owning lane snapshot and distinguishes repeated selections from one take.
+runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_segment_program(
+    const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits);
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
 link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendererProgram> clips,
