@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
@@ -1574,4 +1575,42 @@ TEST_CASE("preferred-size host transaction publishes, accepts, and rolls back",
     REQUIRE(invalid_request_calls == 0);
     REQUIRE(bridge.size_hints().preferred_width == 900);
     REQUIRE(bridge.size_hints().preferred_height == 700);
+}
+
+TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
+          "[view_bridge][editor-resize][auv2]") {
+    StubProcessor p;
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+
+    int native_calls = 0;
+    int viewport_commits = 0;
+    const void* owner = &native_calls;
+    format::au::editor_resize_detail::install_editor_resize_handler(
+        p, owner, bridge,
+        [&](uint32_t w, uint32_t h) {
+            ++native_calls;
+            return w == 900 && h == 700;
+        },
+        [&](uint32_t w, uint32_t h) {
+            ++viewport_commits;
+            CHECK(w == 900);
+            CHECK(h == 700);
+        });
+
+    REQUIRE(p.request_editor_resize(900, 700));
+    CHECK(native_calls == 1);
+    CHECK(viewport_commits == 1);
+    CHECK(bridge.size_hints().preferred_width == 900);
+    CHECK(bridge.size_hints().preferred_height == 700);
+
+    // Native refusal rolls the bridge back and never re-pins the viewport.
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+    CHECK(native_calls == 2);
+    CHECK(viewport_commits == 1);
+    CHECK(bridge.size_hints().preferred_width == 900);
+    CHECK(bridge.size_hints().preferred_height == 700);
+
+    p.set_editor_resize_handler(owner, nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(900, 700));
 }

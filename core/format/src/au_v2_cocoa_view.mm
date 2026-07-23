@@ -12,9 +12,14 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 
+#include <cmath>
+
 #include <pulp/format/detail/editor_environment.hpp>
+#include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/host_quirks.hpp>
+#include <pulp/format/host_version.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -55,6 +60,19 @@ static const char* const kPulpAUCocoaViewClassName = PULP_STRINGIFY(PULP_AU_COCO
 struct PulpAUEditorOwnership {
     std::unique_ptr<pulp::format::ViewBridge> bridge;
     std::unique_ptr<pulp::view::PluginViewHost> host;
+    pulp::format::Processor* processor = nullptr;
+    pulp::runtime::AliveToken::Handle processor_alive;
+    const void* resize_owner = nullptr;
+
+    ~PulpAUEditorOwnership() {
+        // Remove the owner-scoped handler before host/bridge member teardown.
+        // The adapter can outlive the Cocoa view, but the callback captures
+        // both objects and the returned NSView.
+        if (processor && resize_owner &&
+            pulp::runtime::AliveToken::is_alive(processor_alive)) {
+            processor->set_editor_resize_handler(resize_owner, nullptr);
+        }
+    }
 };
 
 @interface PulpAUEditorOwner : NSObject {
@@ -219,18 +237,77 @@ static const char kOwnershipKey = 0;
         bridge_ptr->resize(w, h);
     });
 
-    bridge->notify_attached();
-
     runtime::log_info("AU v2 editor: created view ({}x{}, mode={}, gpu={})",
                       w, h, gpu.mode, host->is_gpu_backed());
 
     NSView* editorView = (__bridge NSView*)host->native_handle();
     [editorView setFrame:NSMakeRect(0, 0, w, h)];
 
+    // AU v2 plugin→host resize. Unlike AUv3 there is no
+    // preferredContentSize/request-resize API: the Cocoa view's frame is the
+    // plugin's editor size contract. Keep the transaction fail-closed if
+    // AppKit clamps/refuses the requested frame, and mutate the design viewport
+    // only after the exact native size sticks.
+    format::ViewBridge* resize_bridge = bridge.get();
+    view::PluginViewHost* resize_host = host.get();
+    __unsafe_unretained NSView* resize_view = editorView;
+    const auto resize_host_info = format::detect_host_info();
+    const bool resize_logic_container =
+        format::resolved_quirks(resize_host_info.type, resize_host_info.version)
+            .logic_au_v2_container_resize;
+    format::au::editor_resize_detail::install_editor_resize_handler(
+        *ctx.processor, (const void*)editorView, *resize_bridge,
+        [resize_view, resize_host,
+         resize_logic_container](uint32_t next_w, uint32_t next_h) -> bool {
+            if (![NSThread isMainThread] || !resize_view ||
+                !resize_logic_container) {
+                return false;
+            }
+            NSView* container = [resize_view superview];
+            if (!container || ![resize_view window]) return false;
+
+            const NSSize previous_view = [resize_view frame].size;
+            const NSSize previous_container = [container frame].size;
+            const NSSize requested = NSMakeSize(next_w, next_h);
+
+            [NSAnimationContext beginGrouping];
+            [[NSAnimationContext currentContext] setDuration:0.0];
+            [container setFrameSize:requested];
+            resize_host->set_size(next_w, next_h);
+            [container layoutSubtreeIfNeeded];
+            [NSAnimationContext endGrouping];
+
+            const NSSize applied_view = [resize_view frame].size;
+            const NSSize applied_container = [container frame].size;
+            const auto exact = [requested](NSSize size) {
+                return NSEqualSizes(size, requested);
+            };
+            if (exact(applied_view) && exact(applied_container)) return true;
+
+            [NSAnimationContext beginGrouping];
+            [[NSAnimationContext currentContext] setDuration:0.0];
+            [container setFrameSize:previous_container];
+            resize_host->set_size(
+                static_cast<uint32_t>(std::lround(previous_view.width)),
+                static_cast<uint32_t>(std::lround(previous_view.height)));
+            [NSAnimationContext endGrouping];
+            return false;
+        },
+        [resize_host](uint32_t next_w, uint32_t next_h) {
+            resize_host->set_design_viewport(static_cast<float>(next_w),
+                                             static_cast<float>(next_h));
+            resize_host->set_fixed_aspect_ratio(
+                static_cast<float>(next_w) / static_cast<float>(next_h));
+            resize_host->set_design_viewport_top_align(true);
+        });
+    bridge->notify_attached();
+
     // Transfer C++ ownership to an ObjC wrapper attached to the NSView.
     // When the NSView is deallocated, the wrapper's dealloc closes the
     // bridge (fires Processor::on_view_closed) and frees the host.
-    auto* ownership = new PulpAUEditorOwnership{std::move(bridge), std::move(host)};
+    auto* ownership = new PulpAUEditorOwnership{
+        std::move(bridge), std::move(host), ctx.processor, ctx.owner_alive,
+        (const void*)editorView};
     PulpAUEditorOwner* owner = [[PulpAUEditorOwner alloc] initWithOwnership:ownership];
     objc_setAssociatedObject(editorView, &kOwnershipKey, owner,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);

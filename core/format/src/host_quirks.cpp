@@ -65,6 +65,7 @@ namespace pulp::format {
     X(aax_vendor_version_unknown)                       \
     X(logic_au_channel_probe_cap)                       \
     X(logic_au_tail_time_conversion)                    \
+    X(logic_au_v2_container_resize)                     \
     X(au_v3_bypass_dual_tracking)                        \
     X(au_v3_host_id_from_wrapper)                        \
     X(reaper_auv3_in_process_preferred_size_sync)       \
@@ -90,7 +91,7 @@ constexpr int count_quirk_fields() noexcept {
     return n;
 }
 }  // namespace
-static_assert(count_quirk_fields() == 37,
+static_assert(count_quirk_fields() == 38,
               "PULP_HOST_QUIRK_FIELDS is out of sync with HostQuirks — "
               "add the new field to the X-macro list and bump this count.");
 
@@ -254,12 +255,19 @@ HostQuirks make_quirks_for(HostType type, HostVersion version) {
         case HostType::FLStudio:      host_quirks::apply_fl_studio(q, version); break;
         case HostType::Reaper:        apply_reaper_quirks(q, version); break;
         case HostType::LogicPro:
-        case HostType::GarageBand:
             // Logic + GarageBand share the AU v2 host stack (rows 19,
             // 20) and also expose an AU v3 surface (rows 21, 22). Apply
             // the per-host Logic helper first, then layer the AU v3
             // cross-host flags on top so adapters consulting either
             // surface see consistent state.
+            host_quirks::apply_logic_pro(q, version);
+            // The AU v2 immediate-container resize has only been validated
+            // against Logic. GarageBand shares other AU hosting behavior but
+            // must not inherit a mutation of its host-owned Cocoa hierarchy.
+            q.logic_au_v2_container_resize = true;
+            host_quirks::apply_auv3_cross_host(q, version);
+            break;
+        case HostType::GarageBand:
             host_quirks::apply_logic_pro(q, version);
             host_quirks::apply_auv3_cross_host(q, version);
             break;
