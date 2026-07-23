@@ -207,12 +207,14 @@ endif()
 add_executable(pulp-test-timeline-phase1-examples
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_example_engine.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_audio_player.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_multitrack_arrangement.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_pattern_content.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_sequencer.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_examples.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_codec.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_edits.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_standalone.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
     pulp::format pulp::host pulp::playback pulp::timeline pulp::timebase
