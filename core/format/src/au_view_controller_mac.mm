@@ -133,6 +133,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     std::unique_ptr<pulp::format::ViewBridge> _bridge;
     std::unique_ptr<pulp::view::View> _fallbackView;
     std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
+    // Non-owning; the audio unit owns the processor. Cached so the
+    // editor→host resize handler can be cleared on teardown.
+    pulp::format::Processor *_processor;
 }
 
 - (void)loadView {
@@ -239,7 +242,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     }
 
     // Drop the previous editor first, in destruction order (host → fallback
-    // → bridge) so we can rebuild against a fresh ViewBridge.
+    // → bridge) so we can rebuild against a fresh ViewBridge. Clear any prior
+    // editor→host resize handler before the bridge / host it captures die.
+    if (_processor) _processor->set_editor_resize_handler(nullptr);
     _viewHost.reset();
     _fallbackView.reset();
     _bridge.reset();
@@ -251,6 +256,7 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         processor = [(PulpAudioUnit *)self.audioUnit pulpProcessor];
         store = [(PulpAudioUnit *)self.audioUnit pulpStore];
     }
+    _processor = processor;
 
     pulp::view::View *root = nullptr;
     uint32_t w = 400, h = 300;
@@ -382,6 +388,30 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
         _viewHost->set_design_viewport_top_align(true);
     }
 
+    // Editor-INITIATED resize: let the editor ask the AU host to resize the
+    // plugin window (e.g. a chrome-hiding mode wanting a smaller shape). AU has
+    // no host resize-request callback; the standard path is to publish a new
+    // preferredContentSize, which the host honors. The handler re-pins the
+    // design viewport + aspect to the requested size and updates the reported
+    // hints so the new shape sticks. Captures self UNRETAINED (mirrors the
+    // onResize hook); -dealloc clears it before _viewHost is destroyed.
+    if (_processor) {
+        _processor->set_editor_resize_handler([self](uint32_t w, uint32_t h) -> bool {
+            if (w == 0 || h == 0) return false;
+            if (self->_bridge) self->_bridge->set_preferred_size(w, h);
+            if (self->_viewHost) {
+                self->_viewHost->set_design_viewport(static_cast<float>(w),
+                                                     static_cast<float>(h));
+                self->_viewHost->set_fixed_aspect_ratio(
+                    static_cast<float>(w) / static_cast<float>(h));
+            }
+            self->_designSize = NSMakeSize(w, h);
+            pulp_auv3_apply_preferred_size(self, NSMakeSize(w, h),
+                                           /*resize_view_frame=*/true);
+            return true;
+        });
+    }
+
     _viewHost->attach_to_parent((__bridge void *)self.view);
     if (_bridge) _bridge->notify_attached();
 
@@ -468,6 +498,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
         ((PulpAUMacRootView *)self.view).onResize = nil;
     }
+    // Same reasoning for the editor→host resize handler: it captures self
+    // unretained and touches _viewHost (destroyed below).
+    if (_processor) _processor->set_editor_resize_handler(nullptr);
     // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
     // queue, which dereferences the bridge. An AU v3 controller can be released
     // on the XPC connection queue (createAudioUnitWithComponentDescription and

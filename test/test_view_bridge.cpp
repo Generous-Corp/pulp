@@ -1345,3 +1345,79 @@ TEST_CASE("a discrete pull settles on the host's own value, across the range",
         }
     }
 }
+
+// ── Editor-initiated host resize (Processor::request_editor_resize) ──────────
+
+// Without a handler installed (no open editor / a host with no resize path),
+// request_editor_resize must be a safe no-op that reports refusal.
+TEST_CASE("Processor::request_editor_resize is false with no handler installed",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+    // The handler lives in a side table keyed by `this`; a prior test's
+    // Processor could have reused this stack address, so start from a clean slot.
+    p.set_editor_resize_handler(nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(640, 480));
+}
+
+// The adapter installs a handler; the plugin's editor calls
+// request_editor_resize and the request forwards (w, h) verbatim and returns
+// the host's accept/refuse result. Clearing the handler (editor close) restores
+// the no-op refusal.
+TEST_CASE("Processor::request_editor_resize forwards to the installed handler",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+
+    uint32_t seen_w = 0, seen_h = 0;
+    int calls = 0;
+    p.set_editor_resize_handler([&](uint32_t w, uint32_t h) {
+        ++calls;
+        seen_w = w;
+        seen_h = h;
+        return true;  // host accepts
+    });
+
+    REQUIRE(p.request_editor_resize(900, 800));
+    REQUIRE(calls == 1);
+    REQUIRE(seen_w == 900);
+    REQUIRE(seen_h == 800);
+
+    // A host that refuses is reported honestly (the editor keeps its size).
+    p.set_editor_resize_handler([](uint32_t, uint32_t) { return false; });
+    REQUIRE_FALSE(p.request_editor_resize(1280, 800));
+
+    // Cleared on editor close → back to a safe no-op refusal.
+    p.set_editor_resize_handler(nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(1280, 800));
+}
+
+// A mode switch that resizes the editor updates the bridge's reported preferred
+// size + aspect (so per-format resize-hint reporting tracks the new shape),
+// while preserving the min/max drag bounds.
+TEST_CASE("ViewBridge::set_preferred_size updates preferred + aspect, keeps bounds",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;  // view_size() = {480,320, 320,240, 1024,768}
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    const auto& before = bridge.size_hints();
+    REQUIRE(before.preferred_width == 480);
+    REQUIRE(before.preferred_height == 320);
+
+    bridge.set_preferred_size(900, 800);
+    const auto& after = bridge.size_hints();
+    REQUIRE(after.preferred_width == 900);
+    REQUIRE(after.preferred_height == 800);
+    // Aspect follows the new natural shape.
+    REQUIRE(after.aspect_ratio == Catch::Approx(900.0 / 800.0));
+    // Min/max drag bounds are preserved across the mode switch.
+    REQUIRE(after.min_width == before.min_width);
+    REQUIRE(after.min_height == before.min_height);
+    REQUIRE(after.max_width == before.max_width);
+    REQUIRE(after.max_height == before.max_height);
+
+    // Zero dimensions are ignored (no accidental collapse).
+    bridge.set_preferred_size(0, 500);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 800);
+}
