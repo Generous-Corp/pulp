@@ -2184,6 +2184,25 @@ export function materializeFrame(scene, frame, ctx) {
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
+        // The declared winding rule decides which regions of a multi-subpath
+        // path are HOLES, and Figma's baked geometry does not promise
+        // direction-corrected contours: a subtracted icon can arrive as five
+        // same-direction subpaths under `windingRule: 'ODD'` (the "Sub"
+        // speaker cabinet's hollow woofer). Dropping the rule fills those
+        // solid — silently, because a solid slab raises no parse error.
+        // Emitted only for evenodd: nonzero is SvgPathWidget's default, and
+        // design_ir_json reads this exact `fillRule` key into svg_fill_rule.
+        if (resolved.fillRule === 'evenodd') out.fillRule = 'evenodd';
+        if (resolved.mixedWinding) {
+          pushDiag('vector-fill-rule-approximated', node,
+            `${type} geometry regions declare different winding rules; one path carries one rule, using '${resolved.fillRule}' for all subpaths (exact unless regions overlap)`);
+        } else if (!resolved.fillRule && resolved.subpathCount > 1) {
+          // On a single contour the two rules fill identically; on a
+          // multi-subpath shape a missing rule means any hole the designer
+          // drew may render solid under the nonzero default.
+          pushDiag('vector-fill-rule-approximated', node,
+            `multi-subpath ${type} declares no winding rule; filled with the nonzero default, which can render its holes solid`);
+        }
         // A vector's INK is where its baked path is, not where its node box is,
         // so the sidecar's rect has to move with it. Figma's translation column
         // can sit far from the geometry it names — one `Bg PAnel` reports
@@ -3152,6 +3171,10 @@ function collectVariableTokens(scene, seen, pushDiag) {
 // that lives only in a comment is how this got to four.
 export const DIAGNOSTIC_SEVERITY = {
   'vector-simplified': 'warning',
+  // A multi-subpath vector whose winding rule is missing or mixed: the rule
+  // decides which regions are holes, so the nonzero fallback can fill a
+  // designed hole solid — a loss that raises no error anywhere downstream.
+  'vector-fill-rule-approximated': 'warning',
   'gradient-approximated': 'warning',
   'blend-unsupported': 'warning',
   // An isolate group (explicit NORMAL on a container whose subtree blends)

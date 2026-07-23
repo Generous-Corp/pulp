@@ -179,6 +179,54 @@ test('a filled vector prefers its fill outline and reports the dropped stroke', 
   assert.equal(r.droppedStroke, true);
 });
 
+test('the declared winding rule survives onto the resolved path', () => {
+  // The rule decides which regions of a multi-subpath path are HOLES, and
+  // Figma's baked outlines do not promise direction-corrected contours: the
+  // reference design's "Sub" speaker cabinet arrives as five same-direction
+  // subpaths whose geometry declares ODD, and filling that nonzero paints a
+  // solid slab where the design shows a hollow woofer.
+  const node = strokeOnlyNode();
+  node.fillGeometry = [{ commandsBlob: 1, windingRule: 'ODD' }];
+  node.strokeGeometry = null;
+  node.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  assert.equal(geometryToPath(node, blobs).fillRule, 'evenodd');
+
+  node.fillGeometry = [{ commandsBlob: 1, windingRule: 'NONZERO' }];
+  assert.equal(geometryToPath(node, blobs).fillRule, 'nonzero');
+
+  // Missing rule maps to null, NOT a guessed default: the caller diagnoses a
+  // multi-subpath shape whose holes it may be filling solid.
+  node.fillGeometry = [{ commandsBlob: 1 }];
+  assert.equal(geometryToPath(node, blobs).fillRule, null);
+});
+
+test('evenodd wins when geometry regions disagree about the winding rule', () => {
+  // One node's fillGeometry is a LIST of per-region entries, each with its own
+  // rule ("Sub" is [NONZERO dot, ODD ring, ODD box-with-hole]) — and one
+  // emitted path carries one rule. Figma direction-corrects its NONZERO
+  // regions' contours, which fill identically under either rule, while an ODD
+  // region's same-direction holes fill SOLID under nonzero. So evenodd is the
+  // faithful merge, and `mixedWinding` states the (overlap-only) approximation.
+  const node = strokeOnlyNode();
+  node.strokeGeometry = null;
+  node.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  node.fillGeometry = [
+    { commandsBlob: 1, windingRule: 'NONZERO' },
+    { commandsBlob: 2, windingRule: 'ODD' },
+  ];
+  const localBlobs = [...blobs, { bytes: encode([MOVE, 0, 0], [LINE, 4, 0], [LINE, 4, 4], [LINE, 0, 4], [CLOSE]) }];
+  const r = geometryToPath(node, localBlobs);
+  assert.equal(r.fillRule, 'evenodd');
+  assert.equal(r.mixedWinding, true);
+
+  // Agreement is not "mixed" — no diagnostic noise on the common case.
+  node.fillGeometry = [
+    { commandsBlob: 1, windingRule: 'ODD' },
+    { commandsBlob: 2, windingRule: 'ODD' },
+  ];
+  assert.equal(geometryToPath(node, localBlobs).mixedWinding, false);
+});
+
 test('a zero-area shape resolves to null rather than an invalid viewBox', () => {
   const node = strokeOnlyNode();
   node.strokeGeometry = null;
@@ -243,6 +291,71 @@ test('an unresolvable vector still reports vector-simplified exactly once', () =
   const { scene, frame } = sceneWith(node);
   const { diagnostics } = materializeFrame(scene, frame, CTX);
   assert.equal(diagnostics.filter((d) => d.code === 'vector-simplified').length, 1);
+});
+
+// A donut in blob space: outer square + inner square, BOTH wound clockwise.
+// Under evenodd the inner square is a hole; under the nonzero default it is
+// not — this is exactly the shape class the winding rule exists to settle.
+const donutBlob = { bytes: encode(
+  [MOVE, 0, 0], [LINE, 20, 0], [LINE, 20, 20], [LINE, 0, 20], [CLOSE],
+  [MOVE, 5, 5], [LINE, 15, 5], [LINE, 15, 15], [LINE, 5, 15], [CLOSE],
+) };
+
+function donutNode(windingExtra) {
+  return {
+    type: 'VECTOR', name: 'donut',
+    transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+    size: { x: 20, y: 20 },
+    fillGeometry: [{ commandsBlob: 2, ...windingExtra }],
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, visible: true }],
+  };
+}
+
+test('an evenodd vector reaches the envelope carrying fillRule', () => {
+  // `fillRule` is the exact key design_ir_json reads into svg_fill_rule, which
+  // codegen turns into setSvgFillRule — the bridge call SvgPathWidget already
+  // consumes. Dropping it here fills the donut's hole solid, silently.
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({ windingRule: 'ODD' }) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { envelope, diagnostics } = materializeFrame(scene, frame, CTX);
+  const v = firstVector(envelope.root);
+  assert.equal(v.fillRule, 'evenodd');
+  // Carried faithfully — nothing to confess.
+  assert.equal(diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated').length, 0);
+});
+
+test('a nonzero vector does not emit fillRule — it is the widget default', () => {
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({ windingRule: 'NONZERO' }) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { envelope } = materializeFrame(scene, frame, CTX);
+  assert.equal(firstVector(envelope.root).fillRule, undefined);
+});
+
+test('a multi-subpath vector with no winding rule is diagnosed, never silent', () => {
+  // The nonzero fallback can fill this donut's hole solid, and a solid slab
+  // raises no error anywhere downstream — the diagnostic is the only witness.
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({}) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { diagnostics } = materializeFrame(scene, frame, CTX);
+  const diags = diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated');
+  assert.equal(diags.length, 1);
+  assert.equal(diags[0].severity, 'warning', 'info is dropped by both consumers');
+
+  // A single-contour shape fills identically under either rule — a missing
+  // declaration there is not a loss and must not cry wolf.
+  const single = strokeOnlyNode();
+  single.fillGeometry = [{ commandsBlob: 1 }];
+  single.strokeGeometry = null;
+  single.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  const s2 = sceneWith(single);
+  const r2 = materializeFrame(s2.scene, s2.frame, CTX);
+  assert.equal(r2.diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated').length, 0);
 });
 
 // Figma's paint transform maps the node's box INTO gradient space, so this is
