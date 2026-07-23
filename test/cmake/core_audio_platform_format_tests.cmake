@@ -59,7 +59,10 @@ add_executable(pulp-test-mcp-server test_mcp_server.cpp)
 # matching how pulp-mcp itself consumes it.
 target_sources(pulp-test-mcp-server PRIVATE
     "${CMAKE_SOURCE_DIR}/inspect/src/agent_request_queue.cpp")
-target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-mcp-server PRIVATE
+    pulp::tool-audio
+    pulp::tool-timeline
+    Catch2::Catch2WithMain)
 target_include_directories(pulp-test-mcp-server PRIVATE
     "${CMAKE_SOURCE_DIR}/inspect/include")
 target_compile_definitions(pulp-test-mcp-server PRIVATE

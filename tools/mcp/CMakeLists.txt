@@ -8,6 +8,22 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_mcp_version.h"
     @ONLY)
 
+file(READ
+    "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json"
+    PULP_TIMELINE_MCP_TOOLS_JSON)
+string(JSON PULP_TIMELINE_MCP_TOOL_COUNT
+    LENGTH "${PULP_TIMELINE_MCP_TOOLS_JSON}" tools)
+if(NOT PULP_TIMELINE_MCP_TOOL_COUNT EQUAL 5)
+    message(FATAL_ERROR
+        "timeline_mcp_tools.json must define exactly five generated operations")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/timeline_mcp_tools.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/timeline_mcp_tools.h"
+    @ONLY)
+
 add_executable(pulp-mcp
     pulp_mcp.cpp
     mcp_compat.cpp
@@ -15,7 +31,7 @@ add_executable(pulp-mcp
 set_target_properties(pulp-mcp PROPERTIES OUTPUT_NAME "pulp-mcp")
 target_compile_features(pulp-mcp PRIVATE cxx_std_20)
 target_include_directories(pulp-mcp PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(pulp-mcp PRIVATE pulp::tool-audio)
+target_link_libraries(pulp-mcp PRIVATE pulp::tool-audio pulp::tool-timeline)
 
 # The agent-request queue is a light, choc-only unit that lives in inspect/. The
 # MCP server reads it in-process, so compile just that translation unit into

@@ -427,6 +427,13 @@ registry-derived typed command envelopes. `render` emits Float32 WAV and does
 not silently instantiate hosted devices or invent plugin delay compensation.
 The headless explain result reports unknown PDC offsets as JSON `null`.
 
+The live MCP server embeds `timeline_mcp_tools.json` at configure time and
+dispatches exactly its five operations through `pulp::tool-timeline`. Do not
+copy their input schemas into `pulp_mcp.cpp`; regenerate the artifact from the
+timeline manifest and let the server consume it. The MCP render result can be
+fed to `pulp_audio_compare` for an advisory before/after judgment when the
+opt-in Audio Quality Lab tool is installed.
+
 ## Scope boundary
 
 This subsystem owns the durable `JournalSink` ordering seam and native

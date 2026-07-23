@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string_view>
+
+namespace pulp_mcp {
+
+inline constexpr std::string_view kTimelineMcpToolsDocument =
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_JSON@)PULPTL";
+
+} // namespace pulp_mcp

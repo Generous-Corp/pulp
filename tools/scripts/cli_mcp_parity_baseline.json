@@ -97,6 +97,11 @@
     "pulp_motion_start_trace": "Sub-tool of `pulp motion` — inspector Motion.startTrace RPC, no top-level CLI peer",
     "pulp_motion_stop_trace": "Sub-tool of `pulp motion` — inspector Motion.stopTrace RPC, no top-level CLI peer",
     "pulp_screenshot": "Headless render via pulp-screenshot binary; not a top-level CLI command",
-    "pulp_simulate_click": "Headless screenshot harness; wraps pulp-screenshot binary"
+    "pulp_simulate_click": "Headless screenshot harness; wraps pulp-screenshot binary",
+    "pulp_timeline_command_apply": "Sub-tool of `pulp seq` — applies the generated typed command vocabulary, no top-level CLI peer",
+    "pulp_timeline_explain": "Sub-tool of `pulp seq` — structured playback-program explanation, no top-level CLI peer",
+    "pulp_timeline_project_open": "Sub-tool of `pulp seq` — canonical project loading, no top-level CLI peer",
+    "pulp_timeline_render": "Timeline offline-render operation under the parent `pulp render` command",
+    "pulp_timeline_validate": "Sub-tool of `pulp seq` — structured project validation, no top-level CLI peer"
   }
 }

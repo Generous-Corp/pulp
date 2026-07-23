@@ -1,4 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include <pulp/audio/audio_file.hpp>
+#include <pulp/timeline/model.hpp>
+#include <pulp/timeline/schema_registry.hpp>
+#include <pulp/timeline/serialize.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -36,6 +42,8 @@
 #include "../tools/mcp/mcp_tools.cpp"
 
 namespace {
+
+using Catch::Matchers::WithinAbs;
 
 std::atomic<unsigned long long> temp_dir_counter{0};
 
@@ -218,6 +226,50 @@ std::string tool_call(const std::string& id,
 void require_contains(const std::string& response, const std::string& needle) {
     INFO(response);
     REQUIRE(response.find(needle) != std::string::npos);
+}
+
+template <typename T, typename E>
+T require_timeline_result(pulp::runtime::Result<T, E> result) {
+    REQUIRE(result);
+    return std::move(result).value();
+}
+
+std::string make_timeline_project_json(const std::filesystem::path& source) {
+    using namespace pulp::timeline;
+    constexpr std::uint64_t frame_count = 32;
+    auto clip = require_timeline_result(
+        Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
+                              MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
+    auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
+    auto sequence = require_timeline_result(
+        Sequence::create({2}, "root", std::nullopt,
+                         AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
+    auto hash = ContentHash::from_hex(std::string(64, 'a'));
+    REQUIRE(hash);
+    MediaAsset asset{{5},
+                     "source.wav",
+                     frame_count,
+                     {48'000, 1},
+                     *hash,
+                     AssetStoragePolicy::External,
+                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     {},
+                     {}};
+    auto project = require_timeline_result(
+        Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}}));
+    auto registry = require_timeline_result(make_builtin_timeline_registry());
+    return require_timeline_result(serialize_project(project, registry)).json;
+}
+
+std::string timeline_project_from_response(const std::string& response) {
+    auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
+    const auto* result = parsed->root().find("result");
+    REQUIRE(result != nullptr);
+    const auto* structured = result->find("structuredContent");
+    REQUIRE(structured != nullptr);
+    const auto* project = structured->find("project");
+    REQUIRE(project != nullptr);
+    return std::string(parsed->raw(*project));
 }
 
 std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
@@ -682,6 +734,12 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_content_rescan")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_remove")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_reveal")JSON");
+    require_contains(tools, R"JSON("name":"pulp_timeline_project_open")JSON");
+    require_contains(tools, R"JSON("name":"pulp_timeline_command_apply")JSON");
+    require_contains(tools, R"JSON("name":"pulp_timeline_validate")JSON");
+    require_contains(tools, R"JSON("name":"pulp_timeline_explain")JSON");
+    require_contains(tools, R"JSON("name":"pulp_timeline_render")JSON");
+    require_contains(tools, "pulp.timeline.command.set_clip_playback_properties");
 
     auto unknown = handle_request(tool_call("5", "pulp_does_not_exist"));
     require_contains(unknown, R"JSON("id":5)JSON");
@@ -769,6 +827,11 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_simulate_click",
         "pulp_status",
         "pulp_test",
+        "pulp_timeline_command_apply",
+        "pulp_timeline_explain",
+        "pulp_timeline_project_open",
+        "pulp_timeline_render",
+        "pulp_timeline_validate",
         "pulp_validate",
     };
     for (const char* name : expected) {
@@ -807,6 +870,11 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         std::pair{"pulp_kit_pack", "Error: path is required"},
         std::pair{"pulp_kit_publish_check", "Error: path is required"},
         std::pair{"pulp_kit_init", "Error: kind and id are required"},
+        std::pair{"pulp_timeline_project_open", "Error: project is required"},
+        std::pair{"pulp_timeline_command_apply", "Error: project is required"},
+        std::pair{"pulp_timeline_validate", "Error: project is required"},
+        std::pair{"pulp_timeline_explain", "Error: project is required"},
+        std::pair{"pulp_timeline_render", "Error: project and output are required"},
     };
 
     int id = 10;
@@ -814,6 +882,72 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         auto response = handle_request(tool_call(std::to_string(id++), tool));
         require_contains(response, error);
     }
+}
+
+TEST_CASE("timeline MCP operations edit and render inline projects",
+          "[mcp][tools][timeline]") {
+    TempDir temp;
+    pulp::audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.8f)};
+    const auto source_path = temp.path / "source.wav";
+    REQUIRE(pulp::audio::write_wav_file(
+        source_path.string(), source, pulp::audio::WavBitDepth::Float32));
+
+    const auto project = make_timeline_project_json(source_path);
+    const auto project_argument = pulp::timeline::quote_json_string(project);
+    const auto project_only = "{\"project\":" + project_argument + "}";
+
+    const auto opened = handle_request(
+        tool_call("100", "pulp_timeline_project_open", project_only));
+    require_contains(opened, R"JSON("ok":true)JSON");
+    REQUIRE(timeline_project_from_response(opened) == project);
+
+    const auto validated =
+        handle_request(tool_call("101", "pulp_timeline_validate", project_only));
+    require_contains(validated, R"JSON("diagnostics":[])JSON");
+
+    const auto explained =
+        handle_request(tool_call("102", "pulp_timeline_explain", project_only));
+    require_contains(explained, R"JSON("audio_regions":1)JSON");
+    require_contains(explained, R"JSON("pdc_offset_samples":null)JSON");
+
+    const std::string command =
+        R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
+    const auto applied = handle_request(tool_call(
+        "103", "pulp_timeline_command_apply",
+        "{\"commands\":" + command + ",\"project\":" + project_argument + "}"));
+    require_contains(applied, R"JSON("revision":"1")JSON");
+    const auto changed_project = timeline_project_from_response(applied);
+
+    const auto original_path = temp.path / "original.wav";
+    const auto changed_path = temp.path / "changed.wav";
+    const auto render_arguments = [](const std::string& project_json,
+                                     const std::filesystem::path& output) {
+        return "{\"output\":" + pulp::timeline::quote_json_string(output.string()) +
+               ",\"project\":" + pulp::timeline::quote_json_string(project_json) +
+               ",\"sample_rate\":48000}";
+    };
+    const auto original_render = handle_request(tool_call(
+        "104", "pulp_timeline_render", render_arguments(project, original_path)));
+    const auto changed_render = handle_request(tool_call(
+        "105", "pulp_timeline_render", render_arguments(changed_project, changed_path)));
+    require_contains(original_render, R"JSON("frames":"32")JSON");
+    require_contains(changed_render, R"JSON("frames":"32")JSON");
+
+    const auto original_audio = pulp::audio::read_audio_file(original_path.string());
+    const auto changed_audio = pulp::audio::read_audio_file(changed_path.string());
+    REQUIRE(original_audio);
+    REQUIRE(changed_audio);
+    REQUIRE_THAT(original_audio->channels[0][0], WithinAbs(0.8f, 1e-7f));
+    REQUIRE_THAT(changed_audio->channels[0][0], WithinAbs(0.4f, 1e-7f));
+
+    const auto invalid_rate = handle_request(tool_call(
+        "106", "pulp_timeline_render",
+        "{\"output\":\"ignored.wav\",\"project\":" + project_argument +
+            ",\"sample_rate\":0}"));
+    require_contains(invalid_rate, R"JSON("isError":true)JSON");
+    require_contains(invalid_rate, "sample_rate must be a positive integer");
 }
 
 TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {

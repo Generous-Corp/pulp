@@ -23,6 +23,7 @@
 #include "mcp_compat.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
+#include "timeline_mcp_tools.h"
 
 namespace fs = std::filesystem;
 
@@ -84,8 +85,23 @@ using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_audio_plugin_inspect;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_timeline_project_open;
+using pulp_mcp::handle_timeline_command_apply;
+using pulp_mcp::handle_timeline_validate;
+using pulp_mcp::handle_timeline_explain;
+using pulp_mcp::handle_timeline_render;
 using pulp_mcp::handle_inspect_pending_requests;
 
+static std::string timeline_tools_array_contents() {
+    constexpr std::string_view prefix = R"JSON({"tools":[)JSON";
+    constexpr std::string_view suffix = R"JSON(],"x-pulp-generator")JSON";
+    const auto start = pulp_mcp::kTimelineMcpToolsDocument.find(prefix);
+    const auto end = pulp_mcp::kTimelineMcpToolsDocument.find(suffix);
+    if (start != 0 || end == std::string_view::npos || end < prefix.size())
+        return {};
+    return std::string(
+        pulp_mcp::kTimelineMcpToolsDocument.substr(prefix.size(), end - prefix.size()));
+}
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
@@ -93,6 +109,8 @@ static std::string tools_list_json() {
     std::string out;
     out.reserve(32 * 1024);
     out += R"JSON({"tools":[)JSON";
+    out += timeline_tools_array_contents();
+    out += ",";
     out += R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out += R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -219,10 +237,26 @@ static std::string handle_request_raw(const std::string& json) {
             auto brace = json.find('{', args_pos);
             if (brace != std::string::npos) {
                 int depth = 1;
+                bool in_string = false;
+                bool escaped = false;
                 auto end = brace + 1;
                 while (end < json.size() && depth > 0) {
-                    if (json[end] == '{') ++depth;
-                    if (json[end] == '}') --depth;
+                    const char current = json[end];
+                    if (in_string) {
+                        if (escaped) {
+                            escaped = false;
+                        } else if (current == '\\') {
+                            escaped = true;
+                        } else if (current == '"') {
+                            in_string = false;
+                        }
+                    } else if (current == '"') {
+                        in_string = true;
+                    } else if (current == '{') {
+                        ++depth;
+                    } else if (current == '}') {
+                        --depth;
+                    }
                     ++end;
                 }
                 args_json = json.substr(brace, end - brace);
@@ -289,6 +323,11 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_plugin_inspect") result = handle_audio_plugin_inspect(args_json);
         else if (name == "pulp_audio_render")         result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")        result = handle_audio_compare(args_json);
+        else if (name == "pulp_timeline_project_open") result = handle_timeline_project_open(args_json);
+        else if (name == "pulp_timeline_command_apply") result = handle_timeline_command_apply(args_json);
+        else if (name == "pulp_timeline_validate") result = handle_timeline_validate(args_json);
+        else if (name == "pulp_timeline_explain") result = handle_timeline_explain(args_json);
+        else if (name == "pulp_timeline_render") result = handle_timeline_render(args_json);
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();
