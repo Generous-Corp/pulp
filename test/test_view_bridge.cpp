@@ -1390,6 +1390,26 @@ TEST_CASE("Processor::request_editor_resize forwards to the installed handler",
     REQUIRE_FALSE(p.request_editor_resize(1280, 800));
 }
 
+// A Processor destroyed while a handler is still installed (abnormal teardown —
+// the host drops the plugin without a polite editor close, so the adapter never
+// clears the handler) must NOT leak its side-table entry. Otherwise a later
+// Processor that the allocator places at the same address would inherit the
+// stale handler and fire it into a freed editor host — a use-after-free. The
+// destructor erases the entry so the lifetime is structural, not conventional.
+TEST_CASE("Processor destructor erases its editor-resize handler side-table entry",
+          "[view_bridge][editor-resize]") {
+    const void* key = nullptr;
+    {
+        StubProcessor p;
+        key = &p;
+        p.set_editor_resize_handler([](uint32_t, uint32_t) { return true; });
+        REQUIRE(pulp::format::detail::editor_resize_handlers().count(key) == 1);
+        // p goes out of scope here with the handler still installed — no
+        // set_editor_resize_handler(nullptr) call, simulating abnormal teardown.
+    }
+    REQUIRE(pulp::format::detail::editor_resize_handlers().count(key) == 0);
+}
+
 // A mode switch that resizes the editor updates the bridge's reported preferred
 // size + aspect (so per-format resize-hint reporting tracks the new shape),
 // while preserving the min/max drag bounds.
