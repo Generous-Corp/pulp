@@ -863,12 +863,18 @@ keyed by placement identity.
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. `schema_registry.hpp` provides an explicit
 immutable registry with typed extension codecs and bounded per-version
-migrations. `serialize.hpp` reads and writes deterministic JSON snapshots:
-64-bit values are canonical decimal strings, malformed or oversized input is
-rejected under `DecodeLimits`, and unknown extension envelopes retain their
-exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
-opaque objects so callers can surface compatibility risk. This is snapshot JSON
-only; it does not read or write ZIP/package containers.
+migrations. `schema_release.hpp` exposes release-labeled structural version
+maps, and `serialize_project_for_release()` uses them to produce canonical
+snapshots for `v0.736.0`, `v0.744.0`, or `v0.748.0`. Older-release export fails
+when it would discard populated device, automation, take, or extension state.
+It removes inactive identity tombstones for kinds the target release cannot
+name while preserving `next_item_id` as the durable no-reuse boundary.
+`serialize.hpp` reads and writes deterministic JSON snapshots: 64-bit values are
+canonical decimal strings, malformed or oversized input is rejected under
+`DecodeLimits`, and unknown extension envelopes retain their exact validated
+bytes for lossless ordinary re-save. `SerializedSnapshot` flags those opaque
+objects so callers can surface compatibility risk. This is snapshot JSON only;
+it does not read or write ZIP/package containers.
 
 This surface intentionally excludes durable journal sinks, package I/O,
 playback, document-attached automation lanes and delivery, launch slots, takes,

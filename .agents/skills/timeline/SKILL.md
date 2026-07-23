@@ -101,6 +101,20 @@ invariants.
   neither placement, automation, nor take identity can be discarded. Placements,
   lanes, lane targets, take lanes, and takes remain separately versioned
   structural envelopes.
+- `schema_release.hpp` records the exact structural type/version sets first
+  shipped in `v0.736.0` (Track v1), `v0.744.0` (Track v2), and `v0.748.0`
+  (Track v3). `serialize_project_for_release()` applies the registry's
+  downgrade callbacks parent-first, then rewrites reachable child envelopes.
+  It fails closed when a removed feature is populated, an encountered
+  extension has no explicit target, or the target map names a type/version the
+  supplied registry cannot provide. Do not infer release compatibility from
+  the current schema version or preserve an opaque extension in an older
+  release export.
+- Release export also projects the project identity table. Identity kinds
+  unknown to the target release fail when active; inactive tombstones of those
+  kinds are removed only after confirming their IDs remain below
+  `next_item_id`, which preserves the no-reuse boundary an older reader will
+  carry forward.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
