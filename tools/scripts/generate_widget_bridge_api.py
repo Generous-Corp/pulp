@@ -301,6 +301,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setParam": "(name: string, value: number) => void",
     "setPanelStyle": "(id: string, backgroundToken: string, borderToken?: string, radius?: number, width?: number) => void",
     "setPosition": "(id: string, position: string) => void",
+    "setSubpixelLayout": "(id: string, enabled: boolean) => void",
     "setTop": "(id: string, value: number | string) => void",
     "setRight": "(id: string, value: number | string) => void",
     "setBottom": "(id: string, value: number | string) => void",
