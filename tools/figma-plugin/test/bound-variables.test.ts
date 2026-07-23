@@ -26,10 +26,13 @@ test("single aliases and alias arrays resolve to token names", () => {
     {
       // Array-valued property (fills/strokes carry one alias per paint).
       fills: [alias("VariableID:1:1"), alias("VariableID:1:3")],
+      strokes: [alias("VariableID:1:3")],
+      effects: [alias("VariableID:1:1")],
       // Scalar properties are single aliases.
       topLeftRadius: alias("VariableID:1:2"),
       // Nested alias map (componentProperties, textRangeFills).
       componentProperties: { "label#9:0": alias("VariableID:1:4") },
+      textRangeFills: { "0:4": alias("VariableID:1:1") },
     },
     idToName,
   );
@@ -38,8 +41,11 @@ test("single aliases and alias arrays resolve to token names", () => {
     // Index 0 keeps the bare property key; later entries are suffixed.
     fills: "theme.brand.primary",
     "fills.1": "theme.brand.secondary",
+    strokes: "theme.brand.secondary",
+    effects: "theme.brand.primary",
     topLeftRadius: "theme.radius.md",
     "componentProperties.label#9:0": "theme.label.gain",
+    "textRangeFills.0:4": "theme.brand.primary",
   });
   assert.deepEqual(out.unresolved, []);
 });
@@ -101,6 +107,14 @@ function ctx(): SerializeContext {
       colors: { "theme.brand.primary": "#ff0000" },
       dimensions: { "theme.radius.md": 8 },
       strings: {},
+      sourceIdentity: {
+        "colors.theme.brand.primary": {
+          sourceId: "VariableID:1:1",
+          sourceCollection: "Theme",
+          sourceMode: "Light",
+          sourceAdapter: "figma-plugin",
+        },
+      },
       variableIdToName: idToName,
     },
   };
@@ -113,7 +127,10 @@ test("serializeExport emits figma.bound_variables only when bindings exist", () 
     children: [baseNode({ name: "Plain", figma_node_id: "1:3" })],
   });
   const env = serializeExport([bound], [], ctx()) as {
-    tokens: { colors: Record<string, string> };
+    tokens: {
+      colors: Record<string, string>;
+    };
+    token_source_identity: Record<string, { sourceId: string }>;
     root: { figma: Record<string, unknown>; children: { figma: Record<string, unknown> }[] };
   };
   assert.deepEqual(env.root.figma.bound_variables, {
@@ -122,6 +139,28 @@ test("serializeExport emits figma.bound_variables only when bindings exist", () 
   });
   // The binding names an entry in the envelope-level tokens maps.
   assert.equal(env.tokens.colors["theme.brand.primary"], "#ff0000");
+  assert.equal(
+    env.token_source_identity["colors.theme.brand.primary"].sourceId,
+    "VariableID:1:1",
+  );
   // A node without bindings must not grow the key.
   assert.ok(!("bound_variables" in env.root.children[0].figma));
+});
+
+test("multi-root wrapper never borrows the first child's Figma identity", () => {
+  const first = baseNode({ figma_node_id: "1:2", name: "First" });
+  const second = baseNode({ figma_node_id: "1:3", name: "Second" });
+  const env = serializeExport([first, second], [], ctx()) as {
+    root: {
+      synthetic?: boolean;
+      figma_node_id?: string;
+      children: Array<{ figma_node_id: string }>;
+    };
+  };
+  assert.equal(env.root.synthetic, true);
+  assert.equal(env.root.figma_node_id, undefined);
+  assert.deepEqual(
+    env.root.children.map((child) => child.figma_node_id),
+    ["1:2", "1:3"],
+  );
 });

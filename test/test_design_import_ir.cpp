@@ -498,11 +498,20 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
         "dimensions": {"theme.radius.md": 8},
         "strings": {"theme.label.gain": "Gain"}
       },
+      "token_source_identity": {
+        "colors.theme.brand.primary": {
+          "sourceId": "VariableID:1:1",
+          "sourceCollection": "Theme",
+          "sourceMode": "Light",
+          "sourceAdapter": "figma-plugin"
+        }
+      },
       "root": {
-        "type": "frame", "name": "Root",
+        "type": "frame", "name": "Root", "figma_node_id": "1:1",
         "children": [
           {
-            "type": "frame", "name": "Bound",
+            "type": "frame", "name": "Bound", "figma_node_id": "1:2",
+            "style": {"backgroundColor": "#ff0000"},
             "figma": {
               "parent_id": "1:1", "z_order": 0,
               "absolute_transform": [[1,0,0],[0,1,0]],
@@ -516,7 +525,8 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
             }
           },
           {
-            "type": "frame", "name": "Plain",
+            "type": "frame", "name": "Plain", "figma_node_id": "1:3",
+            "style": {"backgroundColor": "#ff0000"},
             "figma": {
               "parent_id": "1:1", "z_order": 1,
               "absolute_transform": [[1,0,0],[0,1,0]],
@@ -540,11 +550,58 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
     CHECK(ir.tokens.colors.at("theme.brand.primary") == "#ff0000");
     CHECK(ir.tokens.dimensions.at("theme.radius.md") == 8.0f);
     CHECK(ir.tokens.strings.at("theme.label.gain") == "Gain");
+    const auto& identity =
+        ir.tokens.source_identity.at("colors.theme.brand.primary");
+    CHECK(identity.source_id == "VariableID:1:1");
+    CHECK(identity.source_collection == "Theme");
+    CHECK(identity.source_mode == "Light");
+    CHECK(identity.source_adapter == "figma-plugin");
+    // The resolved literal remains directly renderable while its binding and
+    // stable source-node identity stay queryable as separate provenance.
+    CHECK(ir.root.children[0].style.background_color == "#ff0000");
+    CHECK(ir.root.children[0].source_node_id == "1:2");
+    CHECK(ir.root.children[1].style.background_color == "#ff0000");
     // Negative: a node without bound_variables gains no binding attribute.
     for (const auto& [key, value] : ir.root.children[1].attributes) {
         (void)value;
         CHECK(key.rfind("figmaBoundVariable.", 0) != 0);
     }
+    // Canonical serialization sorts the unordered attribute/token maps. A
+    // frozen DesignIR can be parsed again without losing either the resolved
+    // paint or the token identity, independent of producer object-key order.
+    const auto canonical = serialize_design_ir(ir);
+    const auto reparsed = parse_design_ir_json(canonical);
+    CHECK(serialize_design_ir(reparsed) == canonical);
+    CHECK(reparsed.root.children[0].attributes.at("figmaBoundVariable.fills") ==
+          "theme.brand.primary");
+    CHECK(reparsed.root.children[0].style.background_color == "#ff0000");
+    CHECK(reparsed.tokens.source_identity.at("colors.theme.brand.primary").source_id ==
+          "VariableID:1:1");
+}
+
+TEST_CASE("figma-plugin synthetic multi-root keeps child anchors unique",
+          "[view][import][variables][anchors]") {
+    const auto ir = parse_figma_plugin_json(R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
+      "root": {
+        "type": "frame", "name": "<multi-export>",
+        "children": [
+          {"type": "frame", "name": "First", "figma_node_id": "1:2"},
+          {"type": "frame", "name": "Second", "figma_node_id": "1:3"}
+        ]
+      }
+    })json");
+    REQUIRE(ir.root.children.size() == 2);
+    CHECK_FALSE(ir.root.source_node_id.has_value());
+    REQUIRE(ir.root.stable_anchor_id.has_value());
+    CHECK(ir.root.children[0].source_node_id == "1:2");
+    CHECK(ir.root.children[1].source_node_id == "1:3");
+    CHECK(ir.root.children[0].stable_anchor_id == "figma-plugin:1:2");
+    CHECK(ir.root.children[1].stable_anchor_id == "figma-plugin:1:3");
+    CHECK(ir.root.stable_anchor_id != ir.root.children[0].stable_anchor_id);
+    CHECK(ir.root.stable_anchor_id != ir.root.children[1].stable_anchor_id);
 }
 
 TEST_CASE("figma block without component metadata preserves nothing extra",

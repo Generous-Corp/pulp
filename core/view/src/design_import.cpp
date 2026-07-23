@@ -1709,6 +1709,8 @@ DesignIR parse_figma_plugin_json(const std::string& json) {
 
     if (parsed.hasObjectMember("tokens"))
         ir.tokens = parse_ir_tokens(parsed["tokens"]);
+    if (parsed.hasObjectMember("token_source_identity"))
+        parse_ir_token_source_identity(parsed["token_source_identity"], ir.tokens);
 
     if (parsed.hasObjectMember("asset_manifest"))
         ir.asset_manifest = parse_asset_manifest(parsed["asset_manifest"]);

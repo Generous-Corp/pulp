@@ -3,6 +3,109 @@
 // Regenerate via: npm run gen-types
 
 /**
+ * An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.
+ */
+export type Node = {
+  /**
+   * Node kind. Pulp library widgets get specific kinds (knob, fader, meter, ...). Everything else is one of the generic types.
+   */
+  type:
+    | "frame"
+    | "text"
+    | "image"
+    | "vector"
+    | "button"
+    | "input"
+    | "knob"
+    | "fader"
+    | "meter"
+    | "xy_pad"
+    | "waveform"
+    | "spectrum"
+    | "label"
+    | "panel"
+    | "col"
+    | "row";
+  name: string;
+  /**
+   * True only for an exporter-created structural wrapper. Synthetic nodes have no Figma source identity.
+   */
+  synthetic?: true;
+  /**
+   * Native Figma node id. Populates IRNode.source_node_id after parsing.
+   */
+  figma_node_id?: string;
+  /**
+   * Text content (when type=text). Maps to IRNode.text_content.
+   */
+  content?: string;
+  /**
+   * Ordered mixed-style text runs (when type=text and the node carries range overrides). Each run is the style DELTA against the node's dominant style over [start,end) UTF-8 BYTE offsets into `content` (converted from Figma's UTF-16 code-unit indices). Maps to IRNode.text_runs via design_ir_json.cpp::parse_ir_text_runs; homogeneous text omits this and keeps the flat single-style path.
+   */
+  runs?: {
+    start: number;
+    end: number;
+    fontSize?: number;
+    fontWeight?: number;
+    fontStyle?: "normal" | "italic";
+    color?: string;
+    letterSpacing?: number;
+    textDecoration?: "underline" | "line-through";
+  }[];
+  /**
+   * Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
+   */
+  audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
+  /**
+   * Audio-widget label. Root-level; maps to IRNode.audio_label.
+   */
+  label?: string;
+  /**
+   * Audio-widget minimum value. Root-level; maps to IRNode.audio_min.
+   */
+  min?: number;
+  /**
+   * Audio-widget maximum value. Root-level; maps to IRNode.audio_max.
+   */
+  max?: number;
+  /**
+   * Audio-widget default value. Root-level; maps to IRNode.audio_default.
+   */
+  default?: number;
+  attributes?: Attributes;
+  style?: Style;
+  layout?: Layout;
+  /**
+   * Resize constraints in Figma's Plugin-API spelling. Passed through untranslated; design_ir_json.cpp normalizes and codegen lowers to flex within the parent. Only emitted for nodes positioned in the parent's coordinate space (not flowing auto-layout children).
+   */
+  constraints?: {
+    horizontal?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
+    vertical?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
+  };
+  figma?: FigmaMetadata;
+  /**
+   * When type=image, references asset_manifest.assets[*].asset_id
+   */
+  asset_ref?: string;
+  /**
+   * Faithful-vector lane (Plan B). 'faithful_svg' makes the C++ materializer render svg_asset_id via DesignFrameView with interactive_elements overlays, instead of widget-recognition. Maps to IRNode.render_mode.
+   */
+  render_mode?: "normal" | "faithful_svg";
+  /**
+   * When render_mode=faithful_svg, references the asset_manifest entry (mime image/svg+xml) holding this node's SVG export. Maps to IRNode.svg_asset_id.
+   */
+  svg_asset_id?: string;
+  /**
+   * Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.
+   */
+  interactive_elements?: InteractiveElement[];
+  /**
+   * Alternate states of a faithful_svg node, each itself a faithful_svg node with its own svg_asset_id and interactive_elements. Maps to IRNode.alternate_frames; the importer materializes each via DesignFrameView::add_frame. ORDER IS SIGNIFICANT: this node is frame 0 and entry i is frame i+1, which is the index a swap element's target_frame names. Omit for a single-state design.
+   */
+  alternate_frames?: Node[];
+  children?: Node[];
+} & Node1;
+/**
  * One interactive overlay on a faithful_svg node. The SVG underneath always renders; the overlay only adds interaction on top. `kind` selects the control: knob/fader/xy_pad translate or rotate `svg_patch_d`; the overlay kinds (dropdown/text_field/tab_group/stepper) and toggle position a control over [x,y,w,h]. Coordinates are in the SVG's own space.
  */
 export type InteractiveElement = {
@@ -137,6 +240,15 @@ export type InteractiveElement = {
    */
   param_key?: string;
 };
+export type Node1 =
+  | {
+      figma_node_id: string;
+      synthetic?: never;
+    }
+  | {
+      synthetic: true;
+      figma_node_id?: never;
+    };
 
 /**
  * Envelope emitted by the 'Design for Pulp' Figma plugin. Consumed by `pulp import-design --from figma-plugin --file <path>`. See planning/2026-05-28-pulp-figma-plugin-strategy.md §7.2 for the parser mapping to Pulp's DesignIR.
@@ -192,6 +304,17 @@ export interface PulpFigmaPluginExport {
     };
     strings?: {
       [k: string]: string;
+    };
+  };
+  /**
+   * Forward-compatible v1 extension carrying original Figma variable provenance keyed by canonical DesignIR token path (for example colors.theme.brand.primary). The importer normalizes it to IRTokens.source_identity.
+   */
+  token_source_identity?: {
+    [k: string]: {
+      sourceId: string;
+      sourceCollection: string;
+      sourceMode: string;
+      sourceAdapter: "figma-plugin";
     };
   };
   /**
@@ -289,105 +412,6 @@ export interface FontFamilyAsset {
   asset_id?: string;
 }
 /**
- * An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.
- */
-export interface Node {
-  /**
-   * Node kind. Pulp library widgets get specific kinds (knob, fader, meter, ...). Everything else is one of the generic types.
-   */
-  type:
-    | "frame"
-    | "text"
-    | "image"
-    | "vector"
-    | "button"
-    | "input"
-    | "knob"
-    | "fader"
-    | "meter"
-    | "xy_pad"
-    | "waveform"
-    | "spectrum"
-    | "label"
-    | "panel"
-    | "col"
-    | "row";
-  name: string;
-  /**
-   * Native Figma node id. Populates IRNode.source_node_id after parsing.
-   */
-  figma_node_id: string;
-  /**
-   * Text content (when type=text). Maps to IRNode.text_content.
-   */
-  content?: string;
-  /**
-   * Ordered mixed-style text runs (when type=text and the node carries range overrides). Each run is the style DELTA against the node's dominant style over [start,end) UTF-8 BYTE offsets into `content` (converted from Figma's UTF-16 code-unit indices). Maps to IRNode.text_runs via design_ir_json.cpp::parse_ir_text_runs; homogeneous text omits this and keeps the flat single-style path.
-   */
-  runs?: {
-    start: number;
-    end: number;
-    fontSize?: number;
-    fontWeight?: number;
-    fontStyle?: "normal" | "italic";
-    color?: string;
-    letterSpacing?: number;
-    textDecoration?: "underline" | "line-through";
-  }[];
-  /**
-   * Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
-   */
-  audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
-  /**
-   * Audio-widget label. Root-level; maps to IRNode.audio_label.
-   */
-  label?: string;
-  /**
-   * Audio-widget minimum value. Root-level; maps to IRNode.audio_min.
-   */
-  min?: number;
-  /**
-   * Audio-widget maximum value. Root-level; maps to IRNode.audio_max.
-   */
-  max?: number;
-  /**
-   * Audio-widget default value. Root-level; maps to IRNode.audio_default.
-   */
-  default?: number;
-  attributes?: Attributes;
-  style?: Style;
-  layout?: Layout;
-  /**
-   * Resize constraints in Figma's Plugin-API spelling. Passed through untranslated; design_ir_json.cpp normalizes and codegen lowers to flex within the parent. Only emitted for nodes positioned in the parent's coordinate space (not flowing auto-layout children).
-   */
-  constraints?: {
-    horizontal?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
-    vertical?: "MIN" | "MAX" | "CENTER" | "STRETCH" | "SCALE";
-  };
-  figma?: FigmaMetadata;
-  /**
-   * When type=image, references asset_manifest.assets[*].asset_id
-   */
-  asset_ref?: string;
-  /**
-   * Faithful-vector lane (Plan B). 'faithful_svg' makes the C++ materializer render svg_asset_id via DesignFrameView with interactive_elements overlays, instead of widget-recognition. Maps to IRNode.render_mode.
-   */
-  render_mode?: "normal" | "faithful_svg";
-  /**
-   * When render_mode=faithful_svg, references the asset_manifest entry (mime image/svg+xml) holding this node's SVG export. Maps to IRNode.svg_asset_id.
-   */
-  svg_asset_id?: string;
-  /**
-   * Source-identified interactive overlays for a faithful_svg render. Maps to IRNode.interactive_elements.
-   */
-  interactive_elements?: InteractiveElement[];
-  /**
-   * Alternate states of a faithful_svg node, each itself a faithful_svg node with its own svg_asset_id and interactive_elements. Maps to IRNode.alternate_frames; the importer materializes each via DesignFrameView::add_frame. ORDER IS SIGNIFICANT: this node is frame 0 and entry i is frame i+1, which is the index a swap element's target_frame names. Omit for a single-state design.
-   */
-  alternate_frames?: Node[];
-  children?: Node[];
-}
-/**
  * Free-form string passthrough map emitted at the node root by serialize.ts. Each entry becomes an IRNode.attributes[*] entry in the C++ parser. Emitted only when at least one attribute is present.
  */
 export interface Attributes {
@@ -399,7 +423,7 @@ export interface Attributes {
    * Display units for the audio-widget value (from node.audio_units).
    */
   units?: string;
-  [k: string]: string;
+  [k: string]: string | undefined;
 }
 /**
  * Snake_case keys. Parser maps to IRStyle (which uses the same snake_case in C++).
