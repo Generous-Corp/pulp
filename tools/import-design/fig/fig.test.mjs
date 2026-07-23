@@ -899,7 +899,7 @@ test('non-uniform corner radii survive as four corners, not one collapsed value'
     { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'panel',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
       size: { x: 60, y: 20 }, rectangleCornerRadiiIndependent: true,
-      rectangleBottomLeftCornerRadius: 2, rectangleBottomRightCornerRadius: 2 },
+      rectangleBottomLeftCornerRadius: 2.4, rectangleBottomRightCornerRadius: 2.4 },
     // Left-rounded chip: right corners omitted.
     { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'chip',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
@@ -908,8 +908,12 @@ test('non-uniform corner radii survive as four corners, not one collapsed value'
     // All four equal → collapses to a single border_radius, no four-corner set.
     { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'card',
       parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
-      size: { x: 40, y: 40 }, rectangleTopLeftCornerRadius: 8, rectangleTopRightCornerRadius: 8,
-      rectangleBottomLeftCornerRadius: 8, rectangleBottomRightCornerRadius: 8 },
+      size: { x: 40, y: 40 }, rectangleTopLeftCornerRadius: 8.4, rectangleTopRightCornerRadius: 8.4,
+      rectangleBottomLeftCornerRadius: 8.4, rectangleBottomRightCornerRadius: 8.4 },
+    // Direct uniform radius preserves fractions too.
+    { guid: { sessionID: 0, localID: 6 }, type: 'ROUNDED_RECTANGLE', name: 'direct',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' },
+      size: { x: 20, y: 20 }, cornerRadius: 2.4 },
   ]});
   const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), {
     images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
@@ -919,8 +923,8 @@ test('non-uniform corner radii survive as four corners, not one collapsed value'
   const p = byName.panel.style;
   assert.equal(p.border_top_left_radius, 0, 'omitted top corner is square, not inherited');
   assert.equal(p.border_top_right_radius, 0);
-  assert.equal(p.border_bottom_right_radius, 2);
-  assert.equal(p.border_bottom_left_radius, 2);
+  assert.equal(p.border_bottom_right_radius, 2.4);
+  assert.equal(p.border_bottom_left_radius, 2.4);
   assert.ok(!('border_radius' in p), 'asymmetric corners do not collapse to one value');
 
   const c = byName.chip.style;
@@ -929,8 +933,10 @@ test('non-uniform corner radii survive as four corners, not one collapsed value'
     [3, 0, 0, 3], 'left-rounded chip keeps its two rounded corners only');
 
   const card = byName.card.style;
-  assert.equal(card.border_radius, 8, 'four equal corners collapse to one value');
+  assert.equal(card.border_radius, 8.4, 'four equal corners collapse without integer quantization');
   assert.ok(!('border_top_left_radius' in card), 'no redundant four-corner emission');
+  assert.equal(byName.direct.style.border_radius, 2.4,
+    'the direct uniform radius keeps sub-pixel precision');
 });
 
 test('a null-geometry boolean-op paints nothing and emits no node', () => {

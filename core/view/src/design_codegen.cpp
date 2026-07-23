@@ -2453,18 +2453,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // instead of dropping it to an empty frame. The copy keeps the caller's
         // IR untouched; the web-compat arm (which does not own the dropped-shape
         // fall-through) is intentionally not affected.
-        IRNode native_root = ir.root;
-        // Before synthesis: synthesize_node moves border_color onto the path it
-        // builds, and it only ever sees the discrete field — so the shorthand
-        // has to be split first or a stroked primitive synthesizes a path with
-        // no stroke on it.
-        normalize_border_shorthand(native_root);
-        // Reconnect a slider's detached progress fill to its thumb before path
-        // synthesis bakes the fill rect's width into path_data — a fill that
-        // floats away from the thumb in the stored geometry would otherwise
-        // render as a broken detached bar.
-        reconnect_slider_fill(native_root);
-        synthesize_primitive_paths(native_root);
+        DesignIR native_ir = prepare_native_design_ir(ir);
 
         // Resolve widget kinds through the SHARED recognition resolver — the
         // same pass the cpp and Swift emitters run — so this default JS lane
@@ -2472,14 +2461,13 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // Resolved AFTER the tree mutations above so the resolved tree mirrors
         // exactly what the emit walk sees; the walks share order, so a node and
         // its ResolvedNativeNode travel together through the recursion.
-        DesignIR native_ir = ir;
-        native_ir.root = native_root;
         const ResolvedNativeNode resolved_root =
             resolve_design_ir_native(native_ir, native_ir.asset_manifest);
 
         int var_counter = 0;
         std::unordered_map<const IRNode*, std::string> id_map;
-        generate_native_node(ss, native_root, resolved_root, opts, 0, var_counter, "", &id_map);
+        generate_native_node(
+            ss, native_ir.root, resolved_root, opts, 0, var_counter, "", &id_map);
         ss << "void 0;\n";
 
         // Tree-level fidelity pass: catch vector/path nodes codegen dropped to
@@ -2489,7 +2477,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // lowering does not own the dropped-shape fall-through.
         if (opts.fidelity_report) {
             check_vector_renderability(
-                native_root, ir.diagnostics,
+                native_ir.root, ir.diagnostics,
                 [&id_map](const IRNode& n) -> std::string {
                     auto it = id_map.find(&n);
                     if (it != id_map.end()) return it->second;

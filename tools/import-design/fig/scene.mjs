@@ -1036,7 +1036,7 @@ function firstImageFill(node) {
 }
 
 function cornerRadius(node) {
-  if (typeof node.cornerRadius === 'number') return Math.round(node.cornerRadius);
+  if (typeof node.cornerRadius === 'number') return round2(node.cornerRadius);
   const raw = [
     node.rectangleTopLeftCornerRadius,
     node.rectangleTopRightCornerRadius,
@@ -1051,7 +1051,7 @@ function cornerRadius(node) {
   // collapse only when all four truly agree; perCornerRadii carries the
   // asymmetric case.
   const corners = raw.map((v) => (typeof v === 'number' ? v : 0));
-  if (corners.every((v) => v === corners[0])) return Math.round(corners[0]);
+  if (corners.every((v) => v === corners[0])) return round2(corners[0]);
   return null;
 }
 
@@ -1080,7 +1080,7 @@ function perCornerRadii(node) {
   if (!all.some((v) => typeof v === 'number')) return null;
   if (all.every((v) => typeof v === 'number') && all.every((v) => v === all[0])) return null;
   // A corner Figma omits is square, not inherited.
-  const n = (v) => Math.round(typeof v === 'number' ? v : 0);
+  const n = (v) => round2(typeof v === 'number' ? v : 0);
   return { tl: n(tl), tr: n(tr), br: n(br), bl: n(bl) };
 }
 
@@ -2011,6 +2011,20 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('complex-stroke-flattened', node,
         'variable-width (brush) stroke flattened to a uniform-weight stroke');
     }
+    const dashes = Array.isArray(node.dashPattern)
+      ? node.dashPattern.filter((v) => typeof v === 'number' && v > 0) : [];
+    const geometryLosses = [];
+    if (dashes.length) geometryLosses.push(`dash pattern [${dashes.map(round2).join(', ')}]`);
+    if (typeof node.strokeCap === 'string' && node.strokeCap !== 'NONE')
+      geometryLosses.push(`${node.strokeCap} caps`);
+    if (typeof node.strokeJoin === 'string' && node.strokeJoin !== 'MITER')
+      geometryLosses.push(`${node.strokeJoin} joins`);
+    if (typeof node.miterLimit === 'number' && Math.abs(node.miterLimit - 4) > 1e-6)
+      geometryLosses.push(`miter limit ${round2(node.miterLimit)}`);
+    if (geometryLosses.length) {
+      pushDiag('complex-stroke-flattened', node,
+        `${geometryLosses.join(', ')} preserved as figma:* provenance but rendered with the path widget's continuous default stroke geometry`);
+    }
     const grad = firstGradient(visible);
     const css = gradientPaintToCss(grad, w, h);
     const hex = approximatePaintColor(visible);
@@ -2257,7 +2271,8 @@ export function materializeFrame(scene, frame, ctx) {
           && (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE')) {
         let outline = null;
         try {
-          outline = geometryToPath(node, scene.blobs || [], /* forceFill */ true);
+          outline = geometryToPath(
+            node, scene.blobs || [], /* forceFill */ true, ancestorMirror);
         } catch { /* keep the band */ }
         // paint === 'fill' proves a distinct fill outline was actually picked;
         // a node with no fillGeometry hands back the same band (paint
@@ -2321,8 +2336,21 @@ export function materializeFrame(scene, frame, ctx) {
         // auto-layout parent must keep flowing — pinning it here would yank it
         // out of the flex pass that is supposed to place it.
         if (style.position === 'absolute') {
-          style.left = round2(resolved.box.minX);
-          style.top = round2(resolved.box.minY);
+          // geometryToPath mirrors the normalized ink when an ancestor's
+          // transform is dropped, but intentionally leaves its parent-space
+          // box untouched. Mirror that box inside the emitted parent as well:
+          // a [0,4] child of a 20px flipped frame belongs at [16,20], not
+          // [0,4]. This also works through a net-mirrored ancestor chain,
+          // because every emitted container keeps its visual width while the
+          // transform itself is omitted.
+          const parentWidth = parent?.size?.x;
+          const parentHeight = parent?.size?.y;
+          const placedMinX = ancestorMirror?.x && typeof parentWidth === 'number'
+            ? parentWidth - resolved.box.maxX : resolved.box.minX;
+          const placedMinY = ancestorMirror?.y && typeof parentHeight === 'number'
+            ? parentHeight - resolved.box.maxY : resolved.box.minY;
+          style.left = round2(placedMinX);
+          style.top = round2(placedMinY);
         } else if (node.size && (parent?.stackMode === 'HORIZONTAL'
                                  || parent?.stackMode === 'VERTICAL')) {
           // A FLOWING vector's flex slot must be its NODE box: Figma's
@@ -2345,10 +2373,15 @@ export function materializeFrame(scene, frame, ctx) {
             const nw = Math.abs(t.m00) * node.size.x;
             const nh = Math.abs(t.m11) * node.size.y;
             const nodeOrigin = mirrorAwareOrigin(t, node.size.x, node.size.y);
-            const overL = nodeOrigin.x - resolved.box.minX;
-            const overR = resolved.box.maxX - (nodeOrigin.x + nw);
-            const overT = nodeOrigin.y - resolved.box.minY;
-            const overB = resolved.box.maxY - (nodeOrigin.y + nh);
+            let overL = nodeOrigin.x - resolved.box.minX;
+            let overR = resolved.box.maxX - (nodeOrigin.x + nw);
+            let overT = nodeOrigin.y - resolved.box.minY;
+            let overB = resolved.box.maxY - (nodeOrigin.y + nh);
+            // A flowing item's flex slot stays in flow, but the ancestor
+            // mirror swaps which side of that slot each ink overhang occupies.
+            // Swap the reconciliation margins to match the mirrored path.
+            if (ancestorMirror?.x) [overL, overR] = [overR, overL];
+            if (ancestorMirror?.y) [overT, overB] = [overB, overT];
             const cap = (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0) + 1;
             const overhangs = [overL, overR, overT, overB];
             if (overhangs.every((v) => Math.abs(v) <= cap)

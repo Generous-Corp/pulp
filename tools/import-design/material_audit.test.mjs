@@ -115,6 +115,29 @@ test('a non-uniform corner radius collapsed to one number is a partial drop', ()
   assert.deepEqual(auditMaterials(materials([
     { node_id: '0:1', name: 'Square', type: 'FRAME', declared: { corner_radius: [0, 0, 0, 0] } },
   ]), envelope([{ node_id: '0:1', name: 'Square', style: {} }]), []).findings, []);
+
+  // Exact per-corner output is the preferred representation for asymmetric
+  // radii and must count as emitted rather than as a silent drop.
+  const exact = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'Card', style: {
+      border_top_left_radius: 8,
+      border_top_right_radius: 8,
+      border_bottom_right_radius: 0,
+      border_bottom_left_radius: 0,
+    } },
+  ]), []);
+  assert.deepEqual(exact.findings, []);
+  assert.equal(exact.emittedCounts.corner_radius, 1);
+
+  const wrong = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'Card', style: {
+      border_top_left_radius: 8,
+      border_top_right_radius: 0,
+      border_bottom_right_radius: 8,
+      border_bottom_left_radius: 0,
+    } },
+  ]), []);
+  assert.equal(wrong.findings[0].property, 'corner_radius.per_corner');
 });
 
 test('the diagnosed arm applies to EVERY property, not just the one it was wired for', () => {
