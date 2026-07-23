@@ -102,6 +102,34 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
             static_cast<float>(hints.preferred_height));
     }
 
+    // Editor-INITIATED resize: let the editor ask the DAW to resize the plugin
+    // window (e.g. a chrome-hiding mode wanting a smaller shape). The handler
+    // re-pins the design viewport + aspect to the requested size, updates the
+    // reported hints (so checkSizeConstraint / getSize follow the new aspect),
+    // then asks the host through IPlugFrame::resizeView. Cleared in removed()
+    // before the editor host it captures is destroyed.
+    processor_.set_editor_resize_handler(
+        [this](uint32_t w, uint32_t h) -> bool {
+            if (w == 0 || h == 0) return false;
+            bridge_.set_preferred_size(w, h);
+            if (editor_host_) {
+                editor_host_->set_design_viewport(
+                    static_cast<float>(w), static_cast<float>(h));
+                editor_host_->set_fixed_aspect_ratio(
+                    static_cast<float>(w) / static_cast<float>(h));
+            }
+            if (plugFrame) {
+                Steinberg::ViewRect rect;
+                rect.left = 0;
+                rect.top = 0;
+                rect.right = static_cast<Steinberg::int32>(w);
+                rect.bottom = static_cast<Steinberg::int32>(h);
+                return plugFrame->resizeView(this, &rect) ==
+                       Steinberg::kResultTrue;
+            }
+            return false;
+        });
+
     // Attach succeeded — now fire Processor::on_view_opened.
     bridge_.notify_attached();
 
@@ -116,6 +144,9 @@ tresult PLUGIN_API PulpPlugView::removed() {
     // the automation record open forever. Release everything still held before
     // tearing the editor down, so every beginEdit is balanced by an endEdit.
     store_.release_open_gestures();
+
+    // Drop the editor→host resize handler before the editor host it captures.
+    processor_.set_editor_resize_handler(nullptr);
 
     if (editor_host_) {
         editor_host_->detach();

@@ -681,6 +681,27 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         };
     }
 
+    // Editor-INITIATED resize: let the editor ask the standalone window to
+    // resize itself (e.g. a chrome-hiding mode wanting a smaller shape). Drives
+    // the SAME design-viewport + content-size path the Settings tab uses above,
+    // and updates the bridge's reported hints so the new aspect sticks. Cleared
+    // in the close callback before the window / bridge it captures die.
+    {
+        view::WindowHost* resize_host = window.get();
+        ViewBridge* resize_bridge = bridge.get();
+        processor_->set_editor_resize_handler(
+            [resize_host, resize_bridge](uint32_t w, uint32_t h) -> bool {
+                if (w == 0 || h == 0) return false;
+                if (resize_bridge) resize_bridge->set_preferred_size(w, h);
+                const float fw = static_cast<float>(w);
+                const float fh = static_cast<float>(h);
+                resize_host->set_fixed_aspect_ratio(fw / fh);
+                resize_host->set_design_viewport(fw, fh);
+                resize_host->request_content_size(fw, fh);
+                return true;
+            });
+    }
+
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
 
@@ -695,6 +716,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
     window->set_close_callback([this, bridge_raw]() {
+        // Drop the editor→host resize handler before the window / bridge it
+        // captures are torn down by stop().
+        if (processor_) processor_->set_editor_resize_handler(nullptr);
         if (bridge_raw) bridge_raw->close();
         stop();
     });

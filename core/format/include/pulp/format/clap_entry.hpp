@@ -571,6 +571,31 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
                 static_cast<float>(hints.preferred_width) /
                 static_cast<float>(hints.preferred_height));
         }
+        // Editor-INITIATED resize: let the editor ask the DAW to resize the
+        // plugin window (e.g. a chrome-hiding mode wanting a smaller shape).
+        // The handler re-pins the design viewport + aspect to the requested
+        // size (so content fills the new window without letterbox / squish),
+        // updates the bridge's reported hints, then asks the host via CLAP's
+        // gui.request_resize. Captures the plugin struct `p`; gui_destroy
+        // clears the handler before tearing the editor down.
+        p->processor->set_editor_resize_handler(
+            [p](uint32_t w, uint32_t h) -> bool {
+                if (w == 0 || h == 0) return false;
+                if (p->bridge) p->bridge->set_preferred_size(w, h);
+                if (p->editor_host) {
+                    p->editor_host->set_design_viewport(
+                        static_cast<float>(w), static_cast<float>(h));
+                    p->editor_host->set_fixed_aspect_ratio(
+                        static_cast<float>(w) / static_cast<float>(h));
+                }
+                if (p->host && p->host->get_extension) {
+                    const auto* gui = static_cast<const clap_host_gui_t*>(
+                        p->host->get_extension(p->host, CLAP_EXT_GUI));
+                    if (gui && gui->request_resize)
+                        return gui->request_resize(p->host, w, h);
+                }
+                return false;
+            });
         runtime::log_info("CLAP editor: created ({}x{}, mode={}, gpu={})",
                           hints.preferred_width, hints.preferred_height,
                           gpu.mode, p->editor_host->is_gpu_backed());
@@ -584,6 +609,9 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
 inline void gui_destroy(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    // Drop the editor→host resize handler BEFORE the bridge / editor host it
+    // captures, so a late call can never dereference freed editor state.
+    if (p->processor) p->processor->set_editor_resize_handler(nullptr);
     p->editor_host.reset();
     if (p->bridge) {
         p->bridge->close();

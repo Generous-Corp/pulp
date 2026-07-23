@@ -1723,3 +1723,52 @@ about which editor owns focus — use `view->interaction()`. Detached widgets
 block. When enqueuing overlays from host code, push onto the *painting root's*
 `interaction().overlay_queue`, not a process-global queue, or the overlay
 paints on the wrong editor (see `standalone.cpp`).
+
+## Editor-INITIATED host resize (`Processor::request_editor_resize`)
+
+`on_view_resized` is the host→plugin direction (the DAW dragged the window,
+tell the plugin). The plugin→host direction — the editor asking the host to
+resize its own window — goes through `Processor::request_editor_resize(w, h)`.
+Use it when the editor's natural size changes at runtime (e.g. a chrome-hiding
+"player" mode that wants a smaller, differently-shaped window than its full
+authoring layout).
+
+How the seam is wired:
+
+- The **adapter** installs the actual host call via
+  `Processor::set_editor_resize_handler(cb)` when the editor opens, and clears
+  it (`set_editor_resize_handler(nullptr)`) on close — BEFORE the bridge / editor
+  host the handler captures is destroyed, or a late call dereferences freed
+  state. Each adapter's handler does three things: (1)
+  `ViewBridge::set_preferred_size(w, h)` so the reported hints track the new
+  shape, (2) `editor_host->set_design_viewport(w, h)` +
+  `set_fixed_aspect_ratio(w/h)` so content fills the new window with no
+  letterbox / squish, (3) the format's host resize call — CLAP
+  `clap_host_gui->request_resize`, VST3 `IPlugFrame::resizeView`, AU v3
+  `preferredContentSize`, standalone `WindowHost::request_content_size`.
+- `request_editor_resize` returns **false** when no handler is installed (no
+  editor open, or a host with no resize path) or the host refused — the editor
+  must keep its current size then. It is main-thread only.
+- `ViewBridge::set_preferred_size(w, h)` recomputes `size_hints_` preferred +
+  aspect from (w, h) but PRESERVES the min/max drag bounds, so a mode switch
+  changes the window's aspect without snapping the resize grips.
+
+Gotcha: the adapter installs the handler AFTER `create_view()` returns (it needs
+the built editor host). An editor that wants a non-default size at OPEN (e.g. a
+reopen straight into a compact mode) must re-request on its first idle/poll tick,
+when the handler is live — the size it chose during `create_view()` predated the
+handler and was dropped.
+
+Gotcha (ABI): the handler is stored in a SIDE TABLE
+(`detail::editor_resize_handlers()`, a keyed-by-`this` map behind inline
+accessors), NOT a `Processor` data member — deliberately. `Processor` is a
+widely-inherited public base; adding a `std::function` member grows
+`sizeof(Processor)`, and a header-only SDK overlay that mixed the new
+`processor.hpp` with old prebuilt libs then crashed in `~Processor()` because
+`libpulp-host`'s `BakedGraphProcessor` was allocated at the old (smaller) size.
+The side table keeps the class layout frozen, so the capability is ABI-additive:
+a fully rebuilt SDK gets working resize; an old lib linked against the new header
+is harmless (no adapter sets a handler, so `request_editor_resize` returns
+false). Reaching a downstream SDK (e.g. Forge on M5) with WORKING resize still
+needs a full SDK rebuild + reinstall (the adapters that install the handler live
+in the libs), but it will not crash in the meantime.
