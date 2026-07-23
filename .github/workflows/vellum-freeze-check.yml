@@ -1,0 +1,66 @@
+name: Vellum freeze
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-check:
+    name: Vellum freeze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the proposed merge tree
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve exact comparison
+        id: comparison
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+          MERGE_BASE: ${{ github.event.merge_group.base_sha }}
+          MERGE_HEAD: ${{ github.event.merge_group.head_sha }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            {
+              echo "base=$PR_BASE"
+              echo "head=$GITHUB_SHA"
+              echo "source_head=$PR_SOURCE_HEAD"
+            } >> "$GITHUB_OUTPUT"
+            git fetch --no-tags origin "$PR_BASE"
+          else
+            {
+              echo "base=$MERGE_BASE"
+              echo "head=$MERGE_HEAD"
+              echo "source_head=$MERGE_HEAD"
+            } >> "$GITHUB_OUTPUT"
+            git fetch --no-tags origin "$MERGE_BASE" "$MERGE_HEAD"
+          fi
+
+      - name: Validate durable source-authority events
+        run: |
+          python3 tools/scripts/vellum_freeze_check.py \
+            --base '${{ steps.comparison.outputs.base }}' \
+            --head '${{ steps.comparison.outputs.head }}' \
+            --source-head '${{ steps.comparison.outputs.source_head }}' \
+            --output "$RUNNER_TEMP/vellum-outbox.json"
+
+      - name: Install inventory parser dependency
+        run: python3 -m pip install --quiet 'pyyaml==6.0.2'
+
+      - name: Run freeze-check negative controls
+        run: python3 tools/scripts/test_vellum_freeze_check.py
+
+      - name: Verify extraction and tooling inventories
+        run: |
+          python3 tools/scripts/generate_vellum_cut_manifest.py --verify
+          python3 tools/scripts/test_generate_vellum_cut_manifest.py
+          python3 tools/scripts/generate_vellum_ownership_projection.py --verify
+          python3 tools/scripts/test_generate_vellum_ownership_projection.py
+          python3 tools/scripts/pulp_tooling_disposition.py
+          python3 tools/scripts/test_pulp_tooling_disposition.py
