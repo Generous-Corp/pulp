@@ -183,10 +183,20 @@ struct SetTakeComp {
     std::vector<TakeCompSegment> replacement;
 };
 
-using Command = std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane,
-                             MoveClip, SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap,
-                             SetMeterMap, CreateAsset, RemoveAsset, InsertTakeLane, RemoveTakeLane,
-                             SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp>;
+// Publishes or clears a pre-rendered track artifact under an exact optimistic
+// gate. CreateAsset normally precedes this command in the same transaction.
+struct SetTrackFreeze {
+    ItemId sequence_id;
+    ItemId track_id;
+    std::optional<TrackFreeze> expected;
+    std::optional<TrackFreeze> replacement;
+};
+
+using Command =
+    std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
+                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
+                 RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
+                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze>;
 
 struct CommandEnvelope {
     CommandId id;

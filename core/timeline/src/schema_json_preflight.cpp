@@ -617,28 +617,47 @@ class StructuralScanner {
         Span devices;
         Span automation;
         Span take_lanes;
+        Span freeze;
         bool has_clips = false;
         bool has_devices = false;
         bool has_automation = false;
         bool has_take_lanes = false;
+        bool has_freeze = false;
         if (!member(data, "clips", clips, has_clips) ||
             !member(data, "device_chain", devices, has_devices) ||
             !member(data, "automation_lanes", automation, has_automation) ||
-            !member(data, "take_lanes", take_lanes, has_take_lanes)) return false;
+            !member(data, "take_lanes", take_lanes, has_take_lanes) ||
+            !member(data, "freeze", freeze, has_freeze)) return false;
         const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
         const auto requires_automation = detail::track_schema_policy.requires_automation(version);
         const auto requires_takes = detail::track_schema_policy.requires_takes(version);
+        const auto supports_freeze = detail::track_schema_policy.supports_freeze(version);
         if (!has_clips || requires_devices != has_devices ||
-            requires_automation != has_automation || requires_takes != has_take_lanes) {
+            requires_automation != has_automation || requires_takes != has_take_lanes ||
+            (!supports_freeze && has_freeze)) {
+            auto invalid_path = path + "/data/clips";
+            if (has_clips) {
+                if (!supports_freeze && has_freeze)
+                    invalid_path = path + "/data/freeze";
+                else if (requires_takes != has_take_lanes)
+                    invalid_path = path + "/data/take_lanes";
+                else if (requires_automation != has_automation)
+                    invalid_path = path + "/data/automation_lanes";
+                else
+                    invalid_path = path + "/data/device_chain";
+            }
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
-                      path + (has_clips ? (requires_takes != has_take_lanes
-                                               ? "/data/take_lanes"
-                                               : requires_automation != has_automation
-                                                     ? "/data/automation_lanes"
-                                                     : "/data/device_chain")
-                                        : "/data/clips"));
+                      std::move(invalid_path));
             return false;
         }
+        if (has_freeze &&
+            (!require_member(freeze, "asset_id", StringShape, data_path + "/freeze") ||
+             !require_member(freeze, "frame_count", StringShape, data_path + "/freeze") ||
+             !require_member(freeze, "placement_start", StringShape, data_path + "/freeze") ||
+             !require_member(freeze, "render_plan_hash", StringShape, data_path + "/freeze") ||
+             !require_member(freeze, "sample_rate", ObjectShape, data_path + "/freeze") ||
+             !require_member(freeze, "source_start", StringShape, data_path + "/freeze")))
+            return false;
         if (!governed_array(
             clips, clips_, limits_.max_clips, path + "/data/clips",
             [&](Span element, std::size_t index) {

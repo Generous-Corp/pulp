@@ -473,6 +473,60 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_
     });
 }
 
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+compile_track_freeze_program(const timeline::Track& track, const timeline::Project& project,
+                             const timebase::CompiledTempoMap& tempo_map,
+                             const DecodedAudioAssetPool& assets,
+                             const AudioRendererLimits& limits) {
+    if (!track.freeze())
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id());
+    const auto& freeze = *track.freeze();
+    auto resolved = resolve_audio_media(track.id(), freeze.media, project, assets, limits);
+    if (!resolved)
+        return runtime::Err(resolved.error());
+    const auto source_rate = freeze.sample_rate.normalized();
+    const auto timeline_rate = tempo_map.sample_rate().normalized();
+    if (source_rate != resolved->source_rate || source_rate.as_long_double() > 768'000.0L ||
+        timeline_rate.as_long_double() > 768'000.0L)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
+                                              track.id(), freeze.media.asset_id);
+    if (freeze.media.frame_count >
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id(),
+                                              freeze.media.asset_id);
+    const auto signed_frames = static_cast<std::int64_t>(freeze.media.frame_count);
+    if (freeze.placement_start.value > std::numeric_limits<std::int64_t>::max() - signed_frames)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id(),
+                                              freeze.media.asset_id);
+    const auto end = freeze.placement_start.value + signed_frames;
+    const auto projected_start =
+        scale_media_position(freeze.placement_start.value, source_rate, timeline_rate);
+    const auto projected_end = scale_media_position(end, source_rate, timeline_rate);
+    if (!projected_start || !projected_end || *projected_end <= *projected_start)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
+                                              track.id(), freeze.media.asset_id);
+    const auto timeline_frames = positive_distance(*projected_start, *projected_end);
+    if (!add_fits(*projected_start, timeline_frames))
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, track.id(),
+                                              freeze.media.asset_id);
+    return runtime::Ok(AudioClipRendererProgram{
+        track.id(),
+        freeze.media.asset_id,
+        resolved->decoded->audio,
+        *projected_start,
+        timeline_frames,
+        resolved->source_start,
+        freeze.media.frame_count,
+        timeline_frames,
+        static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
+        1.0f,
+        0,
+        0,
+        AudioClipRendererProgram::SourceKind::FrozenTrack,
+        0,
+    });
+}
+
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
 link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendererProgram> clips,
                          const AudioRendererLimits& limits) {
@@ -499,6 +553,12 @@ link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendere
                 return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
                     AudioRendererErrorCode::InvalidIdentity, clip.id);
             source_identity = clip.source_ordinal;
+            break;
+        case AudioClipRendererProgram::SourceKind::FrozenTrack:
+            if (clip.source_ordinal != 0 || clip.id != track_id)
+                return fail<std::shared_ptr<const AudioTrackRendererProgram>>(
+                    AudioRendererErrorCode::InvalidIdentity, clip.id);
+            source_identity = clip.id.value;
             break;
         default:
             return fail<std::shared_ptr<const AudioTrackRendererProgram>>(

@@ -2,6 +2,7 @@
 
 #include "project_state_access.hpp"
 #include "serialize_automation_decode.hpp"
+#include "serialize_decode_support.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -73,25 +74,12 @@ struct DecodeCounts {
 
 runtime::Result<const JsonValue*, PersistenceError>
 required(const JsonValue& object_value, std::string_view name, std::string path) {
-    if (object_value.kind != JsonValue::Kind::Object)
-        return fail<const JsonValue*>(PersistenceErrorCode::UnexpectedType, std::move(path),
-                                      object_value.begin);
-    const auto* value = object_value.find(name);
-    if (!value)
-        return fail<const JsonValue*>(PersistenceErrorCode::MissingField,
-                                      path + "/" + std::string(name), object_value.begin);
-    return runtime::Result<const JsonValue*, PersistenceError>(runtime::Ok(value));
+    return detail::required_decode_member(object_value, name, std::move(path));
 }
 
 runtime::Result<std::string, PersistenceError>
 string_field(const JsonValue& object_value, std::string_view name, std::string path) {
-    auto value = required(object_value, name, path);
-    if (!value)
-        return fail<std::string>(value.error().code, value.error().path, value.error().byte_offset);
-    if (value.value()->kind != JsonValue::Kind::String)
-        return fail<std::string>(PersistenceErrorCode::UnexpectedType,
-                                 path + "/" + std::string(name), value.value()->begin);
-    return runtime::Result<std::string, PersistenceError>(runtime::Ok(value.value()->scalar));
+    return detail::decode_string_field(object_value, name, std::move(path));
 }
 
 struct StructuralData {
@@ -137,25 +125,7 @@ data_for(const JsonValue& value, std::string_view expected_type, std::string pat
 
 runtime::Result<timebase::RationalRate, PersistenceError> decode_rate(const JsonValue& value,
                                                                       std::string path) {
-    auto numerator = required(value, "numerator", path);
-    auto denominator = required(value, "denominator", path);
-    if (!numerator)
-        return fail<timebase::RationalRate>(numerator.error().code, numerator.error().path,
-                                            numerator.error().byte_offset);
-    if (!denominator)
-        return fail<timebase::RationalRate>(denominator.error().code, denominator.error().path,
-                                            denominator.error().byte_offset);
-    auto n = parse_canonical_u64_string(*numerator.value(), path + "/numerator");
-    auto d = parse_canonical_u64_string(*denominator.value(), path + "/denominator");
-    if (!n)
-        return fail<timebase::RationalRate>(n.error().code, n.error().path, n.error().byte_offset);
-    if (!d)
-        return fail<timebase::RationalRate>(d.error().code, d.error().path, d.error().byte_offset);
-    const timebase::RationalRate rate{n.value(), d.value()};
-    if (!rate.valid() || rate.normalized() != rate)
-        return fail<timebase::RationalRate>(PersistenceErrorCode::InvalidNumber, std::move(path),
-                                            value.begin);
-    return runtime::Result<timebase::RationalRate, PersistenceError>(runtime::Ok(rate));
+    return detail::decode_rational_rate(value, std::move(path));
 }
 
 runtime::Result<timebase::TempoMap, PersistenceError> decode_tempo_map(const JsonValue& value,
@@ -678,6 +648,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto name = string_field(data, "name", path + "/data");
     auto clips = required(data, "clips", path + "/data");
     const auto* active_take_lane = data.find("active_take_lane_id");
+    const auto* freeze = data.find("freeze");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
     const auto* take_lanes = data.find("take_lanes");
@@ -690,6 +661,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.requires_takes(envelope.value().version);
     const auto requires_active_take_lane =
         detail::track_schema_policy.requires_active_take_lane(envelope.value().version);
+    const auto supports_freeze =
+        detail::track_schema_policy.supports_freeze(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -700,7 +673,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                             record->kind != JsonValue::Kind::Boolean)) ||
         (!requires_active_take_lane && active_take_lane) ||
         (requires_active_take_lane &&
-         (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)))
+         (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
+        (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -768,6 +742,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                parsed.error().byte_offset);
         decoded_active_take_lane = {parsed.value()};
     }
+    auto decoded_freeze = detail::decode_track_freeze(freeze, path);
+    if (!decoded_freeze)
+        return runtime::Err(decoded_freeze.error());
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
@@ -775,7 +752,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .automation_lanes = std::move(decoded_automation),
                                             .take_lanes = std::move(decoded_take_lanes),
                                             .record_armed = decoded_record_armed,
-                                            .active_take_lane_id = decoded_active_take_lane});
+                                            .active_take_lane_id = decoded_active_take_lane,
+                                            .freeze = std::move(decoded_freeze).value()});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));

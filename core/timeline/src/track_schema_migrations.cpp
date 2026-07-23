@@ -41,12 +41,13 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
     const auto* takes = mutable_member(data, "take_lanes");
     const auto* record = mutable_member(data, "record_armed");
     const auto* active = mutable_member(data, "active_take_lane_id");
+    const auto* freeze = mutable_member(data, "freeze");
     return id && id->kind == JsonValue::Kind::String && name &&
            name->kind == JsonValue::Kind::String && clips &&
            clips->kind == JsonValue::Kind::Array &&
            (track_schema_policy.requires_device_chain(version)
                 ? devices && devices->kind == JsonValue::Kind::Array
-                                            : !devices) &&
+                : !devices) &&
            (track_schema_policy.requires_automation(version)
                 ? automation && automation->kind == JsonValue::Kind::Array
                 : !automation) &&
@@ -56,7 +57,10 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
                 : !takes && !record) &&
            (track_schema_policy.requires_active_take_lane(version)
                 ? active && active->kind == JsonValue::Kind::String
-                : !active);
+                : !active) &&
+           (track_schema_policy.supports_freeze(version)
+                ? !freeze || freeze->kind == JsonValue::Kind::Object
+                : !freeze);
 }
 
 struct RawEdit {
@@ -65,7 +69,8 @@ struct RawEdit {
     std::string_view replacement;
 };
 
-bool valid_raw_edits(std::string_view source, std::array<RawEdit, 2>& edits) {
+template <std::size_t N>
+bool valid_raw_edits(std::string_view source, std::array<RawEdit, N>& edits) {
     std::sort(edits.begin(), edits.end(),
               [](const RawEdit& lhs, const RawEdit& rhs) { return lhs.begin < rhs.begin; });
     std::size_t cursor = 0;
@@ -77,7 +82,8 @@ bool valid_raw_edits(std::string_view source, std::array<RawEdit, 2>& edits) {
     return true;
 }
 
-void apply_raw_edits(std::string_view source, const std::array<RawEdit, 2>& edits,
+template <std::size_t N>
+void apply_raw_edits(std::string_view source, const std::array<RawEdit, N>& edits,
                      BoundedJsonSink& output) {
     std::size_t cursor = 0;
     for (const auto& edit : edits) {
@@ -341,6 +347,46 @@ migrate_track_v5_to_v4(std::string_view source, BoundedJsonSink& output, const v
     }
     std::array edits{RawEdit{erase_begin, erase_end, {}},
                      RawEdit{version->begin, version->end, "4"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v5_to_v6(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    if (!data || !version || data->kind != JsonValue::Kind::Object ||
+        !valid_version(*version, track_schema_policy.active_take_lane_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.active_take_lane_introduced_version) ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "6"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v6_to_v5(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.freeze_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.freeze_introduced_version) ||
+        mutable_member(*data, "freeze") || version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "5"}};
     if (!valid_raw_edits(source, edits))
         return migration_fail<SchemaWriteSuccess>();
     apply_raw_edits(source, edits, output);

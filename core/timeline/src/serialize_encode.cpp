@@ -427,8 +427,26 @@ bool write_track(EncodeContext& context, const Track& track) {
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_device_placement(context, track.device_chain()[index]))
                     return false;
-            if (!context.writer.append("],\"id\":") ||
-                !context.writer.u64(track.id().value, true) ||
+            if (!context.writer.character(']'))
+                return false;
+            if (track.freeze()) {
+                const auto& freeze = *track.freeze();
+                if (!context.writer.append(",\"freeze\":{\"asset_id\":") ||
+                    !context.writer.u64(freeze.media.asset_id.value, true) ||
+                    !context.writer.append(",\"frame_count\":") ||
+                    !context.writer.u64(freeze.media.frame_count, true) ||
+                    !context.writer.append(",\"placement_start\":") ||
+                    !context.writer.i64(freeze.placement_start.value, true) ||
+                    !context.writer.append(",\"render_plan_hash\":") ||
+                    !context.writer.quoted(freeze.render_plan_hash.to_hex()) ||
+                    !context.writer.append(",\"sample_rate\":") ||
+                    !write_rate(context, freeze.sample_rate) ||
+                    !context.writer.append(",\"source_start\":") ||
+                    !context.writer.i64(freeze.media.source_start.value, true) ||
+                    !context.writer.character('}'))
+                    return false;
+            }
+            if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true) ||
                 !context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
                 !context.writer.append(",\"record_armed\":") ||
                 !context.writer.append(track.record_armed() ? "true" : "false") ||

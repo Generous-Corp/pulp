@@ -35,7 +35,8 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-audio-renderer
-    SOURCES test_playback_audio_renderer.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_playback_audio_renderer.cpp test_playback_track_freeze.cpp
+        harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::timebase pulp::runtime)
 pulp_add_test_suite(pulp-test-playback-automation-cursor
     SOURCES test_playback_automation_cursor.cpp
@@ -61,7 +62,7 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
 
 pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
-        test_timeline_take_commands.cpp
+        test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
@@ -182,6 +183,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
@@ -193,6 +195,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE

@@ -337,7 +337,22 @@ struct Track::Data {
     std::shared_ptr<const std::vector<ItemId>> take_owned_ids;
     bool record_armed = false;
     ItemId active_take_lane_id;
+    std::optional<TrackFreeze> freeze;
 };
+
+std::optional<ModelErrorCode> track_freeze_error(const TrackFreeze& freeze) noexcept {
+    if (!freeze.media.asset_id.valid() || freeze.media.source_start.value < 0 ||
+        freeze.media.frame_count == 0)
+        return ModelErrorCode::InvalidMediaRange;
+    if (!freeze.sample_rate.valid() || freeze.sample_rate.normalized() != freeze.sample_rate)
+        return ModelErrorCode::InvalidSampleRate;
+    if (!freeze.render_plan_hash.valid())
+        return ModelErrorCode::InvalidContentHash;
+    const auto source_start = static_cast<std::uint64_t>(freeze.media.source_start.value);
+    if (source_start > std::numeric_limits<std::uint64_t>::max() - freeze.media.frame_count)
+        return ModelErrorCode::InvalidMediaRange;
+    return std::nullopt;
+}
 
 runtime::Result<Track, ModelError> Track::create(ItemId id, std::string name,
                                                  std::vector<Clip> clips) {
@@ -411,6 +426,11 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
         if (active == input.take_lanes.end() || active->id() != input.active_take_lane_id)
             return fail<Track>(ModelErrorCode::MissingItem, input.active_take_lane_id, input.id);
     }
+    if (input.freeze) {
+        if (const auto error = track_freeze_error(*input.freeze)) {
+            return fail<Track>(*error, input.id, input.freeze->media.asset_id);
+        }
+    }
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(
@@ -424,7 +444,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
                                           .take_lanes = std::move(take_lanes),
                                           .take_owned_ids = std::move(take_owned_ids),
                                           .record_armed = input.record_armed,
-                                          .active_take_lane_id = input.active_take_lane_id}))));
+                                          .active_take_lane_id = input.active_take_lane_id,
+                                          .freeze = std::move(input.freeze)}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -638,8 +659,8 @@ runtime::Result<Track, ModelError> Track::erase_take(ItemId lane_id, ItemId take
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
-runtime::Result<Track, ModelError>
-Track::with_take_comp(ItemId lane_id, std::vector<TakeCompSegment> comp) const {
+runtime::Result<Track, ModelError> Track::with_take_comp(ItemId lane_id,
+                                                         std::vector<TakeCompSegment> comp) const {
     auto lanes = *data_->take_lanes;
     const auto found = std::lower_bound(
         lanes.begin(), lanes.end(), lane_id,
@@ -669,6 +690,17 @@ runtime::Result<Track, ModelError> Track::with_active_take_lane(ItemId lane_id) 
         return fail<Track>(ModelErrorCode::MissingItem, lane_id, data_->id);
     auto next_data = *data_;
     next_data.active_take_lane_id = lane_id;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::with_freeze(std::optional<TrackFreeze> freeze) const {
+    if (freeze) {
+        if (const auto error = track_freeze_error(*freeze)) {
+            return fail<Track>(*error, data_->id, freeze->media.asset_id);
+        }
+    }
+    auto next_data = *data_;
+    next_data.freeze = std::move(freeze);
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
@@ -725,6 +757,9 @@ bool Track::record_armed() const noexcept {
 }
 ItemId Track::active_take_lane_id() const noexcept {
     return data_->active_take_lane_id;
+}
+const std::optional<TrackFreeze>& Track::freeze() const noexcept {
+    return data_->freeze;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

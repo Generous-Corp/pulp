@@ -65,6 +65,7 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
                 left_track.take_lanes().size() != right_track.take_lanes().size() ||
                 left_track.record_armed() != right_track.record_armed() ||
                 left_track.active_take_lane_id() != right_track.active_take_lane_id() ||
+                left_track.freeze() != right_track.freeze() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
                             right_track.device_chain().begin()))
                 return false;

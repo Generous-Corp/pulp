@@ -12,6 +12,7 @@ add_library(pulp-timeline
     src/transaction.cpp
     src/transaction_automation_internal.cpp
     src/transaction_take_internal.cpp
+    src/transaction_track_state_internal.cpp
     src/transaction_reduction_support.cpp
     src/undo.cpp
     src/schema_codegen.cpp
@@ -21,6 +22,7 @@ add_library(pulp-timeline
     src/schema_json_preflight.cpp
     src/schema_registry.cpp
     src/serialize_automation_decode.cpp
+    src/serialize_decode_support.cpp
     src/serialize_decode.cpp
     src/serialize_encode.cpp
     src/snapshot_equivalence.cpp

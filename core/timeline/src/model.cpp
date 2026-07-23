@@ -711,6 +711,17 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                 for (const auto& take : take_lane.takes())
                     if (const auto error = validate_media_ref(take.media(), take.id()))
                         return fail<Project>(error->code, error->item, error->related_item);
+            if (track.freeze()) {
+                if (const auto error = validate_media_ref(track.freeze()->media, track.id()))
+                    return fail<Project>(error->code, error->item, error->related_item);
+                const auto asset = std::lower_bound(
+                    input.assets.begin(), input.assets.end(), track.freeze()->media.asset_id,
+                    [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
+                if (asset == input.assets.end() ||
+                    asset->sample_rate.normalized() != track.freeze()->sample_rate.normalized())
+                    return fail<Project>(ModelErrorCode::IncompatibleSampleRate, track.id(),
+                                         track.freeze()->media.asset_id);
+            }
         }
     }
     detail::IdentityDirectory identities;
@@ -879,6 +890,8 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
                 for (const auto& take : lane.takes())
                     if (take.media().asset_id == asset_id)
                         return fail<Project>(ModelErrorCode::MissingAsset, take.id(), asset_id);
+            if (track.freeze() && track.freeze()->media.asset_id == asset_id)
+                return fail<Project>(ModelErrorCode::MissingAsset, track.id(), asset_id);
         }
     auto identities = data_->identities;
     if (const auto error = apply_identity_mutations(identities, mutations))

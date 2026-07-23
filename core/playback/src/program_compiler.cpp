@@ -59,6 +59,7 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<AudioClipRendererProgram> audio_merge_buffer_;
     detail::BudgetedStableMergeState audio_merge_;
     const timeline::TakeLane* current_take_lane_ = nullptr;
+    bool current_track_frozen_ = false;
     std::size_t take_comp_index_ = 0;
     detail::TrackAutomationCompiler automation_compiler_;
     detail::CompiledTrackAutomation current_automation_;
@@ -163,6 +164,11 @@ struct PlaybackProgramCompilerCore
 };
 
 void ProgramCompilerTask::begin_track_automation() {
+    if (current_track_frozen_) {
+        current_automation_ = {};
+        stage_ = Stage::FinalizeTrack;
+        return;
+    }
     automation_compiler_started_ = false;
     stage_ = Stage::CompileTrackAutomation;
 }
@@ -244,22 +250,54 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (clip_index_ == 0 && !clip_started_) {
-                current_take_lane_ = track.active_take_lane_id().valid()
+                current_track_frozen_ = track.freeze().has_value();
+                current_take_lane_ = !current_track_frozen_ && track.active_take_lane_id().valid()
                                          ? track.find_take_lane(track.active_take_lane_id())
                                          : nullptr;
-                current_clip_ids_.reserve(current_take_lane_ ? 0 : track.clips().size());
+                current_clip_ids_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : track.clips().size());
                 const auto comp_count =
                     current_take_lane_ ? current_take_lane_->comp_segments().size() : 0;
                 const auto remaining =
                     request_->audio_limits.max_clips -
                     std::min<std::uint64_t>(total_audio_clips_, request_->audio_limits.max_clips);
-                const auto source_count = current_take_lane_ ? comp_count : track.clips().size();
+                const auto source_count =
+                    current_track_frozen_
+                        ? 1
+                        : (current_take_lane_ ? comp_count : track.clips().size());
                 const auto audio_capacity =
                     static_cast<std::size_t>(std::min<std::uint64_t>(source_count, remaining));
                 current_audio_clips_.reserve(audio_capacity);
-                current_audio_ids_.reserve(current_take_lane_ ? 0 : audio_capacity);
-                audio_id_merge_buffer_.reserve(current_take_lane_ ? 0 : audio_capacity);
+                current_audio_ids_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : audio_capacity);
+                audio_id_merge_buffer_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : audio_capacity);
                 audio_merge_buffer_.reserve(audio_capacity);
+            }
+            if (current_track_frozen_) {
+                if (clip_index_ == 0) {
+                    if (!request_->audio_assets)
+                        return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::MissingDecodedAsset});
+                    if (total_audio_clips_ >= request_->audio_limits.max_clips)
+                        return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::CapacityExceeded});
+                    auto compiled = compile_track_freeze_program(
+                        track, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits);
+                    if (!compiled)
+                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
+                                     request_->document_revision, compiled.error().code});
+                    ++total_audio_clips_;
+                    current_audio_clips_.push_back(std::move(compiled).value());
+                    clip_index_ = 1;
+                    ++work;
+                    continue;
+                }
+                stage_ = Stage::CompileTrackTakeComp;
+                continue;
             }
             if (current_take_lane_) {
                 stage_ = Stage::CompileTrackTakeComp;
@@ -461,6 +499,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             current_audio_clips_.clear();
             current_audio_ids_.clear();
             current_take_lane_ = nullptr;
+            current_track_frozen_ = false;
             take_comp_index_ = 0;
             current_automation_ = {};
             automation_compiler_started_ = false;

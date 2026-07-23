@@ -43,6 +43,19 @@ regions and comp selections against the same whole-program `max_clips`, and
 require the take rate, asset metadata, and decoded audio rate to agree.
 Inactive lanes remain document data and contribute no playback regions.
 
+A selected `TrackFreeze` supersedes both the arrangement and active take comp
+with one `AudioClipRendererProgram` whose `SourceKind` is `FrozenTrack` and
+whose stable identity is the owning track. It is a sealed post-device artifact:
+the compiler emits no authored clip/note events, ordered device placements, or
+automation program for that track, while leaving all authored document state
+intact for unfreeze. Count the artifact against the same whole-program
+`max_clips`, validate its project asset, decoded audio, media range, and sample
+rate exactly, and reject coordinate/SRC overflow before publication. A dirty
+freeze/unfreeze edit must rebuild the track program; replay selects the sealed
+asset and never re-renders it. Desktop graph binding therefore accepts no
+device routes for a frozen track and rejects stale routes as unexpected,
+preventing a post-device freeze from traversing the authored chain twice.
+
 On the audio thread, call `PlaybackProgramBlockLatch::begin_block()` exactly
 once per callback and pass that pin to every `StableRendererShell`. Never cache
 a `TrackProgram*` past the pin. Adoption accepts skipped generations
@@ -181,6 +194,9 @@ Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
+Track-freeze changes also require `pulp-test-timeline-graph-binding`: prove the
+artifact routes directly after the authored chain, a stale device mapping is
+rejected, and a dirty thaw restores arrangement/device compilation.
 
 `pulp-test-playback-note-renderer` also fuzzes the no-stuck-notes property:
 fixed-seed randomized seek/loop/play sequences over overlapping notes assert

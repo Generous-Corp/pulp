@@ -107,12 +107,13 @@ export interface PulpTimelineTakeLane {
   takes: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 5. */
+/** `pulp.timeline.track` — domain Document, schema version 6. */
 export interface PulpTimelineTrack {
   active_take_lane_id: number | string;
   automation_lanes: readonly unknown[];
   clips: readonly unknown[];
   device_chain: readonly unknown[];
+  freeze?: Record<string, unknown>;
   id: number | string;
   name: string;
   record_armed: boolean;

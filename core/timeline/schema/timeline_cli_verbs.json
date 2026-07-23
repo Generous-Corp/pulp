@@ -499,6 +499,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Object",
+          "name": "freeze",
+          "required": false,
+          "schema_field": "freeze",
+          "value_type": "json"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
@@ -529,7 +536,7 @@
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 5
+      "version": 6
     }
   ],
   "x-pulp-generator": "schema-cli-emit",

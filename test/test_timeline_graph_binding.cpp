@@ -44,6 +44,38 @@ TEST_CASE("timeline graph binding matches direct audio across varied blocks") {
     REQUIRE(binding.audio_node_for({11}) == second_stable_node);
 }
 
+TEST_CASE("timeline graph binding routes frozen artifacts after the authored device chain") {
+    constexpr std::size_t kFrames = 128;
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(frozen_device_project(kFrames), map,
+                     asset_pool(std::vector<float>(kFrames, 1.0f)), 1);
+    auto pinned = programs.store.read();
+    REQUIRE(pinned);
+    const auto* track = pinned->find_track({10});
+    REQUIRE(track);
+    REQUIRE(track->ordered_device_placement_ids().empty());
+
+    SignalGraph graph;
+    const auto output_node = graph.add_output_node(1);
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    REQUIRE(binding.prepare(*pinned, routes, config(1), 48'000.0, 64));
+
+    Buffer input(1, 64);
+    Buffer output(1, 64);
+    auto output_view = output.view();
+    REQUIRE(binding.process(output_view, input.const_view(), snapshot(*pinned, 64)));
+    REQUIRE(std::all_of(output.storage[0].begin(), output.storage[0].end(),
+                        [](float sample) { return sample == 1.0f; }));
+
+    const std::array stale_devices{TimelineDeviceGraphRoute{{20}, 0}};
+    const std::array stale_routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0, stale_devices}};
+    const auto rejected = binding.preflight(*pinned, stale_routes, config(1), 64);
+    REQUIRE(rejected.code == TimelineGraphAdmissionCode::UnexpectedDevicePlacement);
+    REQUIRE(rejected.item == ItemId{10});
+}
+
 TEST_CASE("timeline graph binding uses one exact split transport snapshot") {
     const auto map = tempo_map();
     std::vector<float> ramp(256);

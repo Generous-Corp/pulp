@@ -249,17 +249,25 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         take_lanes.push_back(std::move(rebuilt).value());
     }
+    auto freeze = track.freeze();
+    if (freeze) {
+        auto fixed = external.apply(freeze->media.asset_id);
+        if (!fixed)
+            return fail<Track>(fixed.error().code, fixed.error().item, fixed.error().related_item);
+        freeze->media.asset_id = fixed.value();
+    }
     return Track::create(
         TrackInput{.id = *table.find(track.id()),
-                                    .name = track.name(),
-                                    .clips = std::move(clips),
-                                    .device_chain = std::move(device_chain),
-                                    .automation_lanes = std::move(automation_lanes),
-                                    .take_lanes = std::move(take_lanes),
+                   .name = track.name(),
+                   .clips = std::move(clips),
+                   .device_chain = std::move(device_chain),
+                   .automation_lanes = std::move(automation_lanes),
+                   .take_lanes = std::move(take_lanes),
                    .record_armed = track.record_armed(),
                    .active_take_lane_id = track.active_take_lane_id().valid()
                                               ? *table.find(track.active_take_lane_id())
-                                              : ItemId{}});
+                                              : ItemId{},
+                   .freeze = std::move(freeze)});
 }
 
 runtime::Result<Sequence, ModelError>

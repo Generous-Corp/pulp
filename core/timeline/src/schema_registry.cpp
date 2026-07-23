@@ -292,6 +292,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                           {"automation_lanes", SchemaValueKind::Array},
                           {"clips", SchemaValueKind::Array},
                           {"device_chain", SchemaValueKind::Array},
+                          {"freeze", SchemaValueKind::Object, false},
                           {"id", SchemaValueKind::U64String},
                           {"name", SchemaValueKind::String},
                           {"record_armed", SchemaValueKind::Boolean},
@@ -301,6 +302,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     track.upgrades.push_back({2, 3, {}, detail::migrate_track_v2_to_v3});
     track.upgrades.push_back({3, 4, {}, detail::migrate_track_v3_to_v4});
     track.upgrades.push_back({4, 5, {}, detail::migrate_track_v4_to_v5});
+    track.upgrades.push_back({5, 6, {}, detail::migrate_track_v5_to_v6});
+    track.downgrades.push_back({6, 5, {}, detail::migrate_track_v6_to_v5});
     track.downgrades.push_back({5, 4, {}, detail::migrate_track_v5_to_v4});
     track.downgrades.push_back({4, 3, {}, detail::migrate_track_v4_to_v3});
     track.downgrades.push_back({3, 2, {}, detail::migrate_track_v3_to_v2});

@@ -125,6 +125,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_preflight.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_automation_decode.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode_support.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_encode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/snapshot_equivalence.cpp
@@ -136,6 +137,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_automation_internal.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_take_internal.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_track_state_internal.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_reduction_support.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp
     ${_PULP_WCLAP_ROOT}/core/playback/src/audio_renderer.cpp

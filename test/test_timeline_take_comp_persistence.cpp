@@ -39,7 +39,7 @@ TEST_CASE("Take/comp snapshots round trip canonically and preserve lane parent")
             std::string::npos);
     REQUIRE(first.value().json.find("\"record_armed\":true") != std::string::npos);
     REQUIRE(first.value().json.find("\"active_take_lane_id\":\"5\"") != std::string::npos);
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.track\",\"version\":5") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.track\",\"version\":6") !=
             std::string::npos);
 
     const auto decoded = take(deserialize_project(first.value().json, registry));

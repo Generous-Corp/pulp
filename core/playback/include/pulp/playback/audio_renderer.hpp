@@ -69,7 +69,7 @@ class DecodedAudioAssetPool {
 };
 
 struct AudioClipRendererProgram {
-    enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment };
+    enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
 
     timeline::ItemId id;
     timeline::ItemId asset_id;
@@ -122,6 +122,13 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_
     const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
     const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
     const AudioRendererLimits& limits);
+
+/// Lowers a track's selected freeze artifact to one immutable audio region.
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+compile_track_freeze_program(const timeline::Track& track, const timeline::Project& project,
+                             const timebase::CompiledTempoMap& tempo_map,
+                             const DecodedAudioAssetPool& assets,
+                             const AudioRendererLimits& limits);
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
 link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendererProgram> clips,

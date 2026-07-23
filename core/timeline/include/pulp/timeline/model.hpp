@@ -338,6 +338,23 @@ struct TakeCompSegment {
     }
 };
 
+// A track freeze selects a sealed offline-rendered asset without discarding the
+// authored track. The render-plan hash identifies the exact immutable inputs
+// used to derive the artifact, so callers can detect and replace stale caches.
+struct TrackFreeze {
+    MediaRef media;
+    timebase::SamplePosition placement_start;
+    timebase::RationalRate sample_rate;
+    ContentHash render_plan_hash;
+    constexpr bool operator==(const TrackFreeze& other) const noexcept {
+        return media.asset_id == other.media.asset_id &&
+               media.source_start == other.media.source_start &&
+               media.frame_count == other.media.frame_count &&
+               placement_start == other.placement_start && sample_rate == other.sample_rate &&
+               render_plan_hash == other.render_plan_hash;
+    }
+};
+
 // Immutable ownership of one alternate recording lane on a Track: an ordered
 // set of takes keyed by identity and an optional sample-exact comp assembled
 // from non-overlapping take segments. The comp is document intent; playback can
@@ -376,6 +393,7 @@ struct TrackInput {
     bool record_armed = false;
     // Zero selects the arrangement rather than a take playlist/comp lane.
     ItemId active_take_lane_id;
+    std::optional<TrackFreeze> freeze;
 };
 
 class Track {
@@ -443,6 +461,7 @@ class Track {
     // clip, automation, and take index storage is shared with the old Track.
     Track with_record_armed(bool armed) const;
     runtime::Result<Track, ModelError> with_active_take_lane(ItemId lane_id) const;
+    runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -465,6 +484,7 @@ class Track {
     // Zero means the arrangement is active. A non-zero value always names one
     // of this track's take lanes; full segment-comp data remains a later layer.
     ItemId active_take_lane_id() const noexcept;
+    const std::optional<TrackFreeze>& freeze() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;

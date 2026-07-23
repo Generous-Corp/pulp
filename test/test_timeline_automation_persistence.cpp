@@ -28,7 +28,7 @@ Project automation_project() {
 
 TEST_CASE("Timeline Track automation is canonical and round trips") {
     const auto encoded = take(serialize_project(automation_project(), builtins()));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":5") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":6") !=
             std::string::npos);
     REQUIRE(encoded.json.find("pulp.timeline.automation_target.device_parameter") !=
             std::string::npos);
@@ -93,7 +93,7 @@ TEST_CASE("Timeline permanent v3 automation fixture upgrades and preserves lane 
     REQUIRE(track.take_lanes().empty());
     REQUIRE(decoded.locate({6})->parent_id == ItemId{5});
     const auto upgraded = take(serialize_project(decoded, builtins()));
-    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":5") !=
+    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":6") !=
             std::string::npos);
     REQUIRE(upgraded.json.find("\"take_lanes\":[]") != std::string::npos);
     // The upgraded snapshot is canonical: re-saving it reproduces the exact bytes.

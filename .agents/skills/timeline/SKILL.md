@@ -95,6 +95,19 @@ invariants.
   mixed/wrong rates, empty or overlapping ranges. Removing a take selected by
   the comp fails closed. Playback may flatten this source data into a derived
   cache, but the cache is never document truth.
+- A `TrackFreeze` is an optional immutable selection of one sealed media
+  artifact plus its absolute placement/rate and a `ContentHash` fingerprint of
+  the exact render plan. It does not remove or mutate authored clips, takes,
+  automation, or device placements. Publish with one transaction ordered as
+  `CreateAsset` then `SetTrackFreeze`; the latter is an exact
+  expected/replacement gate dispatched through
+  `transaction_track_state_internal`. Undo clears the selection before
+  removing the artifact, asset removal fails while selected, and replay selects
+  the sealed artifact without re-rendering. Construction and mutation validate
+  that the asset exists, the media range is in bounds, and the artifact rate
+  matches. ID remap fixes the external artifact reference through
+  `ExternalIdFixup`; the render-plan hash is content metadata, not an owned
+  identity.
 - `Project::Data` and `Track::Data` mutations rebuild by copy-and-modify
   (`auto next = *data_; next.field = ...; make_shared<const Data>(move(next))`),
   never positional brace-init — adding a field must not silently shift an
@@ -122,6 +135,9 @@ invariants.
   lanes, lane targets, take lanes, and takes remain separately versioned
   structural envelopes. Take-lane schema v2 adds required `comp_segments`; its
   v1 upgrade adds an empty comp, while v2→v1 succeeds only for an empty comp.
+  Track schema v6 adds optional `freeze`; v5→v6 is version-only because absence
+  means unfrozen, while v6→v5 succeeds only when `freeze` is absent. Never
+  silently discard a selected artifact during downgrade.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
@@ -155,7 +171,7 @@ invariants.
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
   `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, and `SetTakeComp` are the bounded mutation
+  `SetActiveTakeLane`, `SetTakeComp`, and `SetTrackFreeze` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.

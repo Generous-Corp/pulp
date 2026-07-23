@@ -79,6 +79,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"automation_lanes", SchemaValueKind::Array},
         {"clips", SchemaValueKind::Array},
         {"device_chain", SchemaValueKind::Array},
+        {"freeze", SchemaValueKind::Object, false},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
         {"record_armed", SchemaValueKind::Boolean},
