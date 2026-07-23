@@ -1269,7 +1269,7 @@ export function materializeFrame(scene, frame, ctx) {
   // plain frame positions every child absolutely — that is the common case for
   // hand-designed plugin UIs, and dropping those coordinates collapses the whole
   // design into the parent's content origin.
-  function styleFor(node, parent) {
+  function styleFor(node, parent, parentAbs = IDENTITY) {
     const style = {};
     if (node.size) {
       style.width = Math.round(node.size.x);
@@ -1335,8 +1335,29 @@ export function materializeFrame(scene, frame, ctx) {
           // Mirror-aware: a flipped node's box starts a full extent before its
           // stored origin (see mirrorAwareOrigin). Orthogonal rotations and
           // plain placement pass through unchanged.
-          const origin = mirrorAwareOrigin(t,
+          let origin = mirrorAwareOrigin(t,
             node.size ? node.size.x : 0, node.size ? node.size.y : 0);
+          // A container mirror is not emitted as a runtime transform, so every
+          // absolutely placed descendant must also move to the reflected side
+          // of its immediate parent. Handling only a vector leaf's ink is too
+          // late: an intermediate 8px frame at x=2 inside a flipped 20px
+          // parent belongs at x=10, and its whole subtree moves with it.
+          //
+          // Keep this to axis-aligned transforms, matching the vector mirror
+          // recovery below. Rotated ancestors need the full affine preserved,
+          // not a guessed box reflection.
+          const parentAxisAligned =
+            Math.abs(parentAbs.m01 || 0) < 1e-3 && Math.abs(parentAbs.m10 || 0) < 1e-3;
+          const nodeAxisAligned =
+            Math.abs(t.m01 || 0) < 1e-3 && Math.abs(t.m10 || 0) < 1e-3;
+          if (parentAxisAligned && nodeAxisAligned && parent?.size && node.size) {
+            const visualWidth = Math.abs(typeof t.m00 === 'number' ? t.m00 : 1) * node.size.x;
+            const visualHeight = Math.abs(typeof t.m11 === 'number' ? t.m11 : 1) * node.size.y;
+            if (parentAbs.m00 < 0)
+              origin = { ...origin, x: parent.size.x - (origin.x + visualWidth) };
+            if (parentAbs.m11 < 0)
+              origin = { ...origin, y: parent.size.y - (origin.y + visualHeight) };
+          }
           style.left = Math.round(origin.x);
           style.top = Math.round(origin.y);
         }
@@ -2007,7 +2028,7 @@ export function materializeFrame(scene, frame, ctx) {
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
-    const { style, assetRef, layout } = styleFor(node, parent);
+    const { style, assetRef, layout } = styleFor(node, parent, parentAbs);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
 
