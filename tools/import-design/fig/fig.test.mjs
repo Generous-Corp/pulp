@@ -2716,3 +2716,31 @@ test('dev metadata + export settings ride as figma:* attributes, provenance-only
   assert.ok(!('attributes' in findByName(envelope.root, 'Plain')),
     'absence stays silent — no attribute noise on plain nodes');
 });
+
+test('box-model geometry keeps sub-pixel precision alongside vector siblings', () => {
+  // The knob-ring regression: a knob's body is an ELLIPSE Figma solved at
+  // (7.51, 7.51, 22.53²) whose value-ring arc is a BOOLEAN_OPERATION baked to
+  // path_data with 2-decimal (round2) placement. Rounding the ellipse to
+  // whole pixels moved its center +0.72px down-right of the ring's circle
+  // center — every knob in "A Channel FX" rendered its ring visibly
+  // off-center. Box-model left/top/width/height must keep the same 2-decimal
+  // precision the vector lane already emits.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+      size: { x: 37.55, y: 46 } },
+    { guid: { sessionID: 0, localID: 3 }, type: 'ELLIPSE', name: 'knob base',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 22.53, y: 22.53 },
+      transform: { m00: 1, m01: 0, m02: 7.51, m10: 0, m11: 1, m12: 7.51 } },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), CTX_MIN);
+  assert.equal(envelope.root.style.width, 37.55,
+    'frame width keeps the fractional size Figma solved');
+  const base = findByName(envelope.root, 'knob base');
+  assert.equal(base.style.left, 7.51, 'ellipse left keeps sub-pixel precision');
+  assert.equal(base.style.top, 7.51, 'ellipse top keeps sub-pixel precision');
+  assert.equal(base.style.width, 22.53, 'ellipse width keeps sub-pixel precision');
+  assert.equal(base.style.height, 22.53, 'ellipse height keeps sub-pixel precision');
+});
