@@ -30,6 +30,23 @@ bool same_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
                       rhs.representations.begin(), same_representation);
 }
 
+bool same_media_ref(const MediaRef& lhs, const MediaRef& rhs) noexcept {
+    return lhs.asset_id == rhs.asset_id && lhs.source_start == rhs.source_start &&
+           lhs.frame_count == rhs.frame_count;
+}
+
+bool same_take(const Take& lhs, const Take& rhs) noexcept {
+    return lhs.id() == rhs.id() && same_media_ref(lhs.media(), rhs.media()) &&
+           lhs.placement_start() == rhs.placement_start() &&
+           lhs.sample_rate() == rhs.sample_rate();
+}
+
+bool same_take_lane(const TakeLane& lhs, const TakeLane& rhs) noexcept {
+    return lhs.id() == rhs.id() && lhs.name() == rhs.name() &&
+           lhs.takes().size() == rhs.takes().size() &&
+           std::equal(lhs.takes().begin(), lhs.takes().end(), rhs.takes().begin(), same_take);
+}
+
 } // namespace
 
 bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
@@ -67,7 +84,9 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
                 left_track.active_take_lane_id() != right_track.active_take_lane_id() ||
                 left_track.freeze() != right_track.freeze() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
-                            right_track.device_chain().begin()))
+                            right_track.device_chain().begin()) ||
+                !std::equal(left_track.take_lanes().begin(), left_track.take_lanes().end(),
+                            right_track.take_lanes().begin(), same_take_lane))
                 return false;
             for (std::size_t c = 0; c < left_track.clips().size(); ++c)
                 if (!equivalent(left_track.clips()[c], right_track.clips()[c]))

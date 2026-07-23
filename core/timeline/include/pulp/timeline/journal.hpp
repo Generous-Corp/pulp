@@ -57,6 +57,15 @@ class JournalSink {
     virtual runtime::Result<bool, JournalSinkError>
     checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept = 0;
 
+    /// Verifies that an already-durable sink exactly matches a recovered
+    /// snapshot and revision before a session attaches to it. This operation
+    /// must not mutate or truncate durable state.
+    virtual runtime::Result<bool, JournalSinkError>
+    validate_restore(const Project&, DocumentRevision) noexcept {
+        return runtime::Result<bool, JournalSinkError>(
+            runtime::Err(JournalSinkError::InvalidState));
+    }
+
   protected:
     JournalSink() = default;
 };

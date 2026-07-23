@@ -72,12 +72,14 @@ std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
 } // namespace
 
 struct DocumentSession::Impl {
-    explicit Impl(Project project, SessionLimits session_limits, std::uint64_t nonce,
-                  std::shared_ptr<JournalSink> sink)
+    explicit Impl(Project project, DocumentRevision revision, SessionLimits session_limits,
+                  std::uint64_t nonce, std::shared_ptr<JournalSink> sink)
         : published(std::make_shared<const PublishedState>(
-              PublishedState{std::make_shared<const Project>(std::move(project)), {}})),
+              PublishedState{std::make_shared<const Project>(std::move(project)), revision})),
           journal(session_limits.journal), limits(session_limits), session_nonce(nonce),
           journal_sink(std::move(sink)) {
+        if (revision != DocumentRevision{})
+            detail::JournalAccess::restore_checkpoint(journal, *published->snapshot, revision);
         cache.reserve(limits.max_cached_results);
         writers.reserve(limits.max_writers);
     }
@@ -351,6 +353,21 @@ DocumentSession::create(Project initial, SessionLimits limits) {
 runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
 DocumentSession::create(Project initial, SessionLimits limits,
                         std::shared_ptr<JournalSink> journal_sink) {
+    return create_impl(std::move(initial), {}, limits, std::move(journal_sink),
+                       SinkAttachment::Initialize);
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::restore(Project checkpoint, DocumentRevision checkpoint_revision,
+                         SessionLimits limits, std::shared_ptr<JournalSink> journal_sink) {
+    return create_impl(std::move(checkpoint), checkpoint_revision, limits,
+                       std::move(journal_sink), SinkAttachment::Restore);
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::create_impl(Project checkpoint, DocumentRevision checkpoint_revision,
+                             SessionLimits limits, std::shared_ptr<JournalSink> journal_sink,
+                             SinkAttachment attachment) {
     if (limits.max_writers == 0) {
         TransactionError value;
         value.code = ConflictCode::WriterLimit;
@@ -363,16 +380,18 @@ DocumentSession::create(Project initial, SessionLimits limits,
         return failure<std::unique_ptr<DocumentSession>>(value);
     }
     if (journal_sink) {
-        auto durable = journal_sink->checkpoint(initial, {});
-        if (!durable) {
+        auto validated = attachment == SinkAttachment::Initialize
+                             ? journal_sink->checkpoint(checkpoint, checkpoint_revision)
+                             : journal_sink->validate_restore(checkpoint, checkpoint_revision);
+        if (!validated) {
             TransactionError value;
             value.code = ConflictCode::JournalDurability;
             return failure<std::unique_ptr<DocumentSession>>(value);
         }
     }
     return runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>(
-        runtime::Ok(std::unique_ptr<DocumentSession>(new DocumentSession(
-            std::make_unique<Impl>(std::move(initial), limits, nonce, std::move(journal_sink))))));
+        runtime::Ok(std::unique_ptr<DocumentSession>(new DocumentSession(std::make_unique<Impl>(
+            std::move(checkpoint), checkpoint_revision, limits, nonce, std::move(journal_sink))))));
 }
 
 std::uint64_t detail::SessionNonceTestAccess::exchange_next(std::uint64_t value) noexcept {

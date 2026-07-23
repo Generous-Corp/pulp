@@ -882,8 +882,21 @@ and installs a checkpoint before discarding the covered in-memory entries.
 Because a failed write can have reached storage before its error is observable,
 any sink error poisons that session for subsequent durable writes. Sink
 callbacks run under the session writer lock and must not call lock-taking APIs
-on the originating `DocumentSession`. Concrete file/package storage and crash
-recovery remain outside this module surface.
+on the originating `DocumentSession`.
+
+`file_journal.hpp` provides the native crash-consistent implementation. It
+writes canonical snapshots as versioned, checksummed frames and completes each
+append only after a platform durability fence. Recovery accepts only a valid
+frame prefix, discards and reports a torn trailing frame, and fails closed on
+earlier corruption. A checkpoint at the current durable revision replaces the
+file through a synced temporary sibling and atomic rename; checkpointing an
+older prefix preserves the newer durable frames already on disk. Recovered
+sessions resume at their stored nonzero `DocumentRevision` only after the sink
+validates an exact canonical-serialization/revision match without mutating
+durable state. Symlink paths share one canonical lock identity. Multiply linked
+journal files are rejected because atomic checkpoint replacement cannot
+preserve hard-link identity. Package containers remain outside this module
+surface.
 
 This surface intentionally excludes package I/O, playback, document-attached
 automation lanes and delivery, launch slots, takes, nesting, device

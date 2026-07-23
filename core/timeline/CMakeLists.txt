@@ -40,6 +40,10 @@ add_library(pulp-timeline
     # importer depends on pugixml (via runtime) and is a native authoring/import
     # concern, so keeping it in import/ keeps pugixml out of the wasm plugin.
     import/dawproject_import.cpp
+    # Native crash-consistent storage is deliberately outside src/: browser
+    # timeline builds consume the in-memory JournalSink seam but have no native
+    # filesystem durability primitive.
+    native/file_journal.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)
 

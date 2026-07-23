@@ -27,6 +27,11 @@ class JournalAccess {
     static const Project* checkpoint_snapshot(const CommandJournal& journal) noexcept {
         return journal.base_snapshot_ ? &*journal.base_snapshot_ : nullptr;
     }
+    static void restore_checkpoint(CommandJournal& journal, const Project& checkpoint,
+                                   DocumentRevision revision) {
+        journal.base_snapshot_ = checkpoint;
+        journal.base_revision_ = revision;
+    }
 };
 
 } // namespace pulp::timeline::detail

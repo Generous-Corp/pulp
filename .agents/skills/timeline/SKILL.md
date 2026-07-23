@@ -236,6 +236,17 @@ invariants.
   session; already-cached idempotent results retain their normal semantics.
   Both callbacks run under the session writer lock and must not call
   lock-taking APIs on the originating `DocumentSession`.
+- `FileJournal` is the native crash-consistent sink. Its frames contain
+  canonical snapshots, a revision, and checksums; append success follows the
+  platform durability fence. Recovery truncates only a torn final frame and
+  fails closed on corruption earlier in the file. Checkpointing the current
+  revision uses a synced temporary sibling plus atomic rename, while
+  checkpointing an older prefix leaves newer durable frames intact. Restored
+  sessions attach only after an exact, read-only canonical-bytes/revision
+  validation; restoration never rewrites or truncates the recovered journal.
+  Symlink paths canonicalize to one lock identity; multiply linked journal
+  files are rejected because atomic checkpoint replacement cannot preserve
+  hard-link identity.
 - Journal mutation and tombstone restoration are session-internal. Public
   `reduce_transaction()` never revives tombstones, and replay rejects a
   checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
@@ -353,12 +364,11 @@ failed, without `node`).
 
 ## Scope boundary
 
-This subsystem owns the abstract durable `JournalSink` ordering seam, but not a
-concrete file journal, package/container I/O, crash-recovery policy,
-publication, playback or automation delivery, launch slots, comping, nesting,
-device implementations, routing, audio, format adapters, or UI. Add those in
-their owning modules instead of widening the command and persistence core
-opportunistically.
+This subsystem owns the durable `JournalSink` ordering seam and native
+`FileJournal`, but not package/container I/O, publication, playback or
+automation delivery, launch slots, comping, nesting, device implementations,
+routing, audio, format adapters, or UI. Add those in their owning modules
+instead of widening the command and persistence core opportunistically.
 
 ## Validation
 
