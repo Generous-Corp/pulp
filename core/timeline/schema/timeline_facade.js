@@ -126,16 +126,41 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "tracks", kind: "Array", jsType: "array", required: true }),
     ]),
   }),
+  "pulp.timeline.take": Object.freeze({
+    schemaType: "pulp.timeline.take",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "asset_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "frame_count", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "placement_start", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "sample_rate", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "source_start", kind: "I64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.take_lane": Object.freeze({
+    schemaType: "pulp.timeline.take_lane",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "takes", kind: "Array", jsType: "array", required: true }),
+    ]),
+  }),
   "pulp.timeline.track": Object.freeze({
     schemaType: "pulp.timeline.track",
     domain: "Document",
-    version: 3,
+    version: 4,
     fields: Object.freeze([
       Object.freeze({ name: "automation_lanes", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "clips", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "device_chain", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "record_armed", kind: "Boolean", jsType: "boolean", required: true }),
+      Object.freeze({ name: "take_lanes", kind: "Array", jsType: "array", required: true }),
     ]),
   }),
 });
@@ -153,5 +178,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.device_placement",
   "pulp.timeline.project",
   "pulp.timeline.sequence",
+  "pulp.timeline.take",
+  "pulp.timeline.take_lane",
   "pulp.timeline.track",
 ]);

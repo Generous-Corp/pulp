@@ -385,6 +385,85 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "asset-id",
+          "required": true,
+          "schema_field": "asset_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "frame-count",
+          "required": true,
+          "schema_field": "frame_count",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "placement-start",
+          "required": true,
+          "schema_field": "placement_start",
+          "value_type": "int"
+        },
+        {
+          "kind": "Object",
+          "name": "sample-rate",
+          "required": true,
+          "schema_field": "sample_rate",
+          "value_type": "json"
+        },
+        {
+          "kind": "I64String",
+          "name": "source-start",
+          "required": true,
+          "schema_field": "source_start",
+          "value_type": "int"
+        }
+      ],
+      "name": "timeline:take",
+      "schema_type": "pulp.timeline.take",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "takes",
+          "required": true,
+          "schema_field": "takes",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:take-lane",
+      "schema_type": "pulp.timeline.take_lane",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "Array",
           "name": "automation-lanes",
           "required": true,
@@ -418,11 +497,25 @@
           "required": true,
           "schema_field": "name",
           "value_type": "string"
+        },
+        {
+          "kind": "Boolean",
+          "name": "record-armed",
+          "required": true,
+          "schema_field": "record_armed",
+          "value_type": "bool"
+        },
+        {
+          "kind": "Array",
+          "name": "take-lanes",
+          "required": true,
+          "schema_field": "take_lanes",
+          "value_type": "json"
         }
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 3
+      "version": 4
     }
   ],
   "x-pulp-generator": "schema-cli-emit",

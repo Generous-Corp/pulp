@@ -89,13 +89,32 @@ export interface PulpTimelineSequence {
   tracks: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 3. */
+/** `pulp.timeline.take` — domain Document, schema version 1. */
+export interface PulpTimelineTake {
+  asset_id: number | string;
+  frame_count: number | string;
+  id: number | string;
+  placement_start: number | string;
+  sample_rate: Record<string, unknown>;
+  source_start: number | string;
+}
+
+/** `pulp.timeline.take_lane` — domain Document, schema version 1. */
+export interface PulpTimelineTakeLane {
+  id: number | string;
+  name: string;
+  takes: readonly unknown[];
+}
+
+/** `pulp.timeline.track` — domain Document, schema version 4. */
 export interface PulpTimelineTrack {
   automation_lanes: readonly unknown[];
   clips: readonly unknown[];
   device_chain: readonly unknown[];
   id: number | string;
   name: string;
+  record_armed: boolean;
+  take_lanes: readonly unknown[];
 }
 
 /** Every schema-type name registered in the timeline manifest. */
@@ -111,6 +130,8 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.device_placement"
   | "pulp.timeline.project"
   | "pulp.timeline.sequence"
+  | "pulp.timeline.take"
+  | "pulp.timeline.take_lane"
   | "pulp.timeline.track";
 
 /** Maps each schema-type name to its generated interface. */
@@ -126,5 +147,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.device_placement": PulpTimelineDevicePlacement;
   "pulp.timeline.project": PulpTimelineProject;
   "pulp.timeline.sequence": PulpTimelineSequence;
+  "pulp.timeline.take": PulpTimelineTake;
+  "pulp.timeline.take_lane": PulpTimelineTakeLane;
   "pulp.timeline.track": PulpTimelineTrack;
 }
