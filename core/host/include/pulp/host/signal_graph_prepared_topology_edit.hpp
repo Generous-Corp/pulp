@@ -6,6 +6,15 @@
 
 namespace pulp::host {
 
+/// Passkey authorizing exact-parameter-event node claims on a prepared edit.
+/// Only TimelineGraphPlaybackBinding can mint one, so ownership of a node's
+/// exact-generation writer stays with the timeline binding without granting it
+/// a blanket friendship over the whole prepared-edit transaction.
+class ExactParameterNodeClaimPasskey {
+    ExactParameterNodeClaimPasskey() = default;
+    friend class TimelineGraphPlaybackBinding;
+};
+
 // Isolated, fail-closed authoring transaction for topology-producing clients.
 // This exposes only nodes that SignalGraph owns and can prepare off-side.
 class SignalGraph::PreparedTopologyEdit {
@@ -77,6 +86,12 @@ class SignalGraph::PreparedTopologyEdit {
         return ExecutionSnapshot(*owner_, committed_snapshot_);
     }
     Result last_result() const noexcept { return last_result_; }
+
+    // Claims a set of plugin nodes as exact-generation parameter-event sinks
+    // owned by `owner`. Gated by a passkey only the timeline binding can mint.
+    bool set_exact_parameter_event_nodes(
+        const std::shared_ptr<detail::ExactParameterIngressOwner>& owner,
+        std::span<const NodeId> nodes, ExactParameterNodeClaimPasskey);
 
   private:
     friend class SignalGraph;

@@ -3,6 +3,7 @@
 #include <pulp/audio/rt_safety_contract.hpp>
 #include <pulp/host/signal_graph_prepared_topology_edit.hpp>
 #include <pulp/playback/audio_renderer.hpp>
+#include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/note_renderer.hpp>
 #include <pulp/runtime/slot.hpp>
 
@@ -25,17 +26,25 @@ struct TimelineGraphPreparedCandidate;
 /// `audio_destination` is required and receives `audio_channels` consecutive
 /// ports. `midi_destination == 0` keeps the separately-rendered note stream
 /// available at the track's MidiInput node without connecting it onward.
+struct TimelineDeviceGraphRoute {
+    timeline::ItemId device_placement_id;
+    NodeId plugin_node = 0;
+};
+
 struct TimelineTrackGraphRoute {
     timeline::ItemId track_id;
     NodeId audio_destination = 0;
     PortIndex audio_destination_first_port = 0;
     NodeId midi_destination = 0;
+    std::span<const TimelineDeviceGraphRoute> device_routes{};
 };
 
 struct TimelineGraphBindingConfig {
     std::uint32_t audio_channels = 2;
     std::size_t maximum_note_events_per_track_per_block = 1024;
     playback::AudioRendererLimits audio_limits{};
+    playback::AutomationPlaybackLimits automation_limits =
+        playback::AutomationPlaybackLimits::platform_defaults();
 };
 
 enum class TimelineGraphAdmissionCode : std::uint8_t {
@@ -55,6 +64,19 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     GraphPrepareFailed,
     SampleRateMismatch,
     NoteCapacityExceeded,
+    MissingDevicePlacement,
+    UnexpectedDevicePlacement,
+    DuplicateDevicePlacement,
+    MissingDeviceNode,
+    DeviceNodeNotPlugin,
+    UnresolvedDevicePlugin,
+    DuplicateDeviceNodeOwnership,
+    UnknownAutomationParameter,
+    ReadOnlyAutomationParameter,
+    NonAutomatableAutomationParameter,
+    DeviceNodeAutomationConflict,
+    AutomationRendererRejected,
+    CleanupRecoveryRequired,
 };
 
 /// Structured admission result. Capacity failures always report the exact
@@ -80,13 +102,19 @@ enum class TimelineGraphProcessCode : std::uint8_t {
     CapacityExceeded,
     InputShapeMismatch,
     TopologyChanged,
+    AutomationRenderFailed,
+    AutomationDeliveryFailed,
     RoutedDispatchFailed,
+    CleanupFailed,
 };
 
 struct TimelineGraphProcessResult {
     TimelineGraphProcessCode code = TimelineGraphProcessCode::Ok;
     std::uint32_t emitted_note_events = 0;
     std::uint32_t dropped_note_events = 0;
+    std::uint32_t candidate_automation_events = 0;
+    std::uint32_t emitted_automation_events = 0;
+    std::uint32_t coalesced_automation_events = 0;
     constexpr explicit operator bool() const noexcept {
         return code == TimelineGraphProcessCode::Ok;
     }
@@ -176,6 +204,7 @@ class TimelineGraphPlaybackBinding {
     SignalGraph& graph_;
     const playback::PlaybackProgramStore& store_;
     std::shared_ptr<detail::TimelineGraphSharedBlockState> shared_;
+    std::shared_ptr<detail::ExactParameterIngressOwner> automation_claim_owner_;
     runtime::Slot<const detail::TimelineGraphBindingState> state_;
     std::uint64_t binding_instance_id_ = 0;
     BeforeBindingPublishHookForTest before_binding_publish_hook_for_test_ = nullptr;

@@ -85,6 +85,7 @@ target_compile_definitions(pulp-test-timeline-replay-golden PRIVATE
 
 pulp_add_test_suite(pulp-test-timeline-graph-binding
     SOURCES test_timeline_graph_binding.cpp
+        test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
         test_timeline_graph_binding_publication.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

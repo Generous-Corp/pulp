@@ -70,12 +70,17 @@ struct PluginBindingContext {
     PluginSlot* slot = nullptr;
     PluginRoutingScratch* scratch = nullptr;
     std::unique_ptr<PluginRoutingScratch> owned_scratch;
-    using AppendParameterEventsFn =
-        std::uint64_t (*)(void*, state::ParameterEventQueue&) noexcept;
+    struct PendingParameterEventSequences {
+        std::uint64_t live = 0;
+        std::uint64_t exact = 0;
+    };
+    using AppendParameterEventsFn = PendingParameterEventSequences (*)(
+        void*, state::ParameterEventQueue&) noexcept;
     void* parameter_events_user_data = nullptr;
     AppendParameterEventsFn append_parameter_events = nullptr;
-    std::atomic<std::uint64_t>* parameter_events_sequence_seen = nullptr;
-    std::uint64_t parameter_events_pending_sequence = 0;
+    std::atomic<std::uint64_t>* parameter_events_live_sequence_seen = nullptr;
+    std::atomic<std::uint64_t>* parameter_events_exact_sequence_seen = nullptr;
+    PendingParameterEventSequences parameter_events_pending_sequences{};
     // Cached, prepare-stable copy of the node's transport-sensitivity capability
     // (GraphNode::transport_sensitive, resolved once at compile from
     // PluginSlot::wants_transport()). The binding reads THIS, never a live
@@ -87,7 +92,8 @@ struct PluginBindingContext {
 struct ParameterEventInjectionBinding {
     void* user_data = nullptr;
     PluginBindingContext::AppendParameterEventsFn append = nullptr;
-    std::atomic<std::uint64_t>* sequence_seen = nullptr;
+    std::atomic<std::uint64_t>* live_sequence_seen = nullptr;
+    std::atomic<std::uint64_t>* exact_sequence_seen = nullptr;
 };
 
 void reset_plugin_parameter_event_sequences(

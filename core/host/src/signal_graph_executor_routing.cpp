@@ -146,9 +146,9 @@ bool plugin_binding(fmt::ProcessBlock& block,
         // delivery just as the executor clears its per-node queue in gather.
         param_events.clear();
     }
-    pctx->parameter_events_pending_sequence = 0;
+    pctx->parameter_events_pending_sequences = {};
     if (pctx->append_parameter_events != nullptr) {
-        pctx->parameter_events_pending_sequence = pctx->append_parameter_events(
+        pctx->parameter_events_pending_sequences = pctx->append_parameter_events(
             pctx->parameter_events_user_data, param_events);
         param_events.sort();
     }
@@ -565,7 +565,10 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                     const auto injection = parameter_events_for(id);
                     ctx.parameter_events_user_data = injection.user_data;
                     ctx.append_parameter_events = injection.append;
-                    ctx.parameter_events_sequence_seen = injection.sequence_seen;
+                    ctx.parameter_events_live_sequence_seen =
+                        injection.live_sequence_seen;
+                    ctx.parameter_events_exact_sequence_seen =
+                        injection.exact_sequence_seen;
                 }
                 if (parallel_safe) {
                     try {
@@ -624,20 +627,26 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
 void reset_plugin_parameter_event_sequences(
     std::span<PluginBindingContext> contexts) noexcept {
     for (auto& context : contexts) {
-        context.parameter_events_pending_sequence = 0;
+        context.parameter_events_pending_sequences = {};
     }
 }
 
 void commit_plugin_parameter_event_sequences(
     std::span<PluginBindingContext> contexts) noexcept {
     for (auto& context : contexts) {
-        if (context.parameter_events_pending_sequence != 0
-            && context.parameter_events_sequence_seen != nullptr) {
-            context.parameter_events_sequence_seen->store(
-                context.parameter_events_pending_sequence,
+        if (context.parameter_events_pending_sequences.live != 0
+            && context.parameter_events_live_sequence_seen != nullptr) {
+            context.parameter_events_live_sequence_seen->store(
+                context.parameter_events_pending_sequences.live,
                 std::memory_order_relaxed);
         }
-        context.parameter_events_pending_sequence = 0;
+        if (context.parameter_events_pending_sequences.exact != 0
+            && context.parameter_events_exact_sequence_seen != nullptr) {
+            context.parameter_events_exact_sequence_seen->store(
+                context.parameter_events_pending_sequences.exact,
+                std::memory_order_relaxed);
+        }
+        context.parameter_events_pending_sequences = {};
     }
 }
 
