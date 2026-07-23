@@ -6,6 +6,7 @@
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/canvas.hpp>  // FillRule + Canvas path API (pulp #3656)
+#include <pulp/view/svg_path_widget.hpp>  // gradient-stroke raster proof
 
 #include <cmath>
 #include <cstdlib>
@@ -710,6 +711,45 @@ TEST_CASE("SkiaCanvas fill_path fills a closed polygon", "[render][skia]") {
     // A pixel outside the triangle (top-left corner) stays background.
     const SkColor4f outside = render_and_sample(W, H, draw, 3, 3);
     REQUIRE(outside.fG < 0.25f);
+#else
+    SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
+#endif
+}
+
+// Raster PROOF that SvgPathWidget's gradient stroke reaches painted pixels —
+// the widget-level unit tests only assert the recording-canvas command
+// stream. A thick horizontal line stroked with `to right, red → blue` must
+// sample red near its left end and blue near its right end, and must NOT be
+// the loud green solid fallback. This is the render path a Figma knob rim's
+// GRADIENT_LINEAR stroke takes (setSvgStrokeGradient → set_stroke_gradient →
+// Canvas::set_stroke_gradient_linear → SkGradientShader).
+TEST_CASE("SvgPathWidget gradient stroke rasters the gradient, not the solid",
+          "[render][skia][svg-path][stroke-gradient]") {
+#ifdef PULP_HAS_SKIA
+    constexpr int W = 48, H = 48;
+    pulp::view::SvgPathWidget w;
+    w.set_path("M 2 24 L 46 24");
+    w.set_viewbox(48, 48);
+    w.set_bounds({0, 0, 48, 48});
+    w.clear_fill();
+    w.set_stroke_color(pulp::canvas::Color{0.0f, 1.0f, 0.0f, 1.0f});  // loud fallback
+    w.set_stroke_width(10.0f);
+    w.set_stroke_gradient("linear-gradient(to right, red, blue)");
+
+    auto draw = [&](pulp::canvas::Canvas& c) { w.paint(c); };
+
+    const SkColor4f left = render_and_sample(W, H, draw, 5, 24);
+    REQUIRE(left.fR > 0.5f);
+    REQUIRE(left.fG < 0.25f);   // not the green solid fallback
+
+    const SkColor4f right = render_and_sample(W, H, draw, 43, 24);
+    REQUIRE(right.fB > 0.5f);
+    REQUIRE(right.fG < 0.25f);
+
+    // Off the stroke band, the background stays black.
+    const SkColor4f off = render_and_sample(W, H, draw, 24, 4);
+    REQUIRE(off.fR < 0.25f);
+    REQUIRE(off.fB < 0.25f);
 #else
     SKIP("Skia not compiled in (PULP_HAS_SKIA undefined) — no raster backend");
 #endif

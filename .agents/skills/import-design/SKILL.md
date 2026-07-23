@@ -626,11 +626,55 @@ it would outline the outline). But the generic stroke→`border` lowering
 so codegen filled the band AND stroked it — two parallel lines where the design
 has one (a triad-pad triangle and every stroked ring rendered doubled/too-thick;
 the button rings even read as dark filled discs). The fix tracks
-`vectorStrokeBand = resolved.paint === 'stroke'` and skips the border for those
-nodes only; a real filled vector with a separate stroke (`paint === 'fill'`)
-keeps its border. Covered by a materialize-level test in `fig/paths.test.mjs`
-(stroke band → no border; fill+stroke → border). One general fix cleared the
-triangle weight AND the transport △○□ button rings at once.
+`vectorStrokeExpressed` (band painted OR stroke channels lowered) and skips the
+border for those nodes. Covered by a materialize-level test in
+`fig/paths.test.mjs`. One general fix cleared the triangle weight AND the
+transport △○□ button rings at once.
+
+**Stroke survival — the four lanes a Figma stroke renders through** (the
+stroke-survival fix; `fig/scene.mjs` `lowerStrokeChannels` + `fig/paths.mjs`):
+
+1. **Stroke-only vector, CENTER align** — the baked `strokeGeometry` band is
+   exact (caps/joins/dashes realized in the outline); painted as a FILL in the
+   stroke color. Unchanged, still the faithful path.
+2. **Fill + stroke on one vector** — the stroke rides the SAME path as real
+   stroke channels (`stroke`/`strokeGradient`/`strokeWidth` →
+   `setSvgStroke`/`setSvgStrokeGradient`/`setSvgStrokeWidth`): SvgPathWidget
+   fills then strokes one path, and for CENTER align the fill outline IS the
+   stroke centerline, so this is exact. No CSS border (would double the edge).
+   Fractional widths survive (the border lane rounded to whole px).
+3. **INSIDE/OUTSIDE-aligned stroke bands are baked UNCLIPPED** — Figma's blob
+   holds the boundary outlined at ±weight (verified: a weight-2 INSIDE
+   `Polygon 5` carries a 4px band; render-time clipping against the fill
+   region is what trims it, and we don't clip). Filling that band verbatim
+   painted the XY-pad triangle fat and bright — a #373737 grey where Figma renders #2b2b2b. The
+   decoder now prefers the FILL outline + a centered stroke channel — right
+   width and color, half a weight off in position — and raises
+   `stroke-align-approximated`.
+4. **Gradient strokes** — `GRADIENT_LINEAR` lowers to the `strokeGradient`
+   channel end-to-end (`SvgPathWidget::set_stroke_gradient` →
+   `Canvas::set_stroke_gradient_linear`; solid composite kept beside it as the
+   parse-failure fallback). Works on vectors AND on ellipse primitives whose
+   path is synthesized later — `design_ir_json.cpp` captures the stroke
+   channels UNCONDITIONALLY (not path_data-gated) precisely so
+   `synthesize_primitive_paths` can grow the path afterwards.
+
+**Vector-network fallback.** Symbol children can carry EMPTY
+`fillGeometry`/`strokeGeometry` on the master AND every instance's derived
+data (the FX knobs' `Oval` rim), leaving only `vectorData.vectorNetworkBlob`.
+`paths.mjs` decodes that network (layout self-validated by exact byte
+consumption: 12-byte header + 12B vertices + 28B segments; tangents are
+vertex-relative control offsets) into the shape's CENTERLINE and marks the
+result `centerline: true` — the caller STROKES it via the channels above,
+never fills. Refused (→ existing plain-box diagnostic) when regions are
+present, any vertex joins 3+ segments, or the byte count is off. Never used
+for `BOOLEAN_OPERATION` (operand children are the faithful fallback).
+
+**Diagnostics carry the instance-path node id.** `pushDiag` records
+`node.__key || guidKey(node.guid)` — recording only the master guid attached
+every symbol-expanded diagnostic to the MASTER while the envelope/materials
+sidecar name the clone, so `material_audit`'s per-node join scored honest
+out-loud degradations as SILENT drops (diagnosed column read 0).
 
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 

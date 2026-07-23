@@ -10,8 +10,9 @@
     # Skia headers directly (SkPicture, SkPictureRecorder, SkSerialProcs,
     # SkPngEncoder), so this target needs SKIA_INCLUDE_DIRS even though
     # pulp::render carries Skia privately.
+    # pulp::view for the SvgPathWidget gradient-stroke raster proof.
     add_executable(pulp-test-skia-surface test_skia_surface.cpp)
-    target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render Catch2::Catch2WithMain)
+    target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render pulp::view Catch2::Catch2WithMain)
     if(PULP_HAS_SKIA)
         target_compile_definitions(pulp-test-skia-surface PRIVATE PULP_HAS_SKIA=1)
         target_include_directories(pulp-test-skia-surface PRIVATE ${SKIA_INCLUDE_DIRS})

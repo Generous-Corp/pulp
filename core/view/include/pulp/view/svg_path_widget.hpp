@@ -82,6 +82,18 @@ public:
     void set_stroke_color(canvas::Color c);
     void clear_stroke();
 
+    /// Gradient stroke as a CSS linear-gradient string — the stroke
+    /// mirror of set_fill_gradient(), same parser, same contract: wins
+    /// over `stroke_color_` while non-empty, silently falls back to the
+    /// solid stroke when the string does not parse, and
+    /// clear_stroke_gradient() returns to solid-stroke semantics.
+    /// This is how a Figma knob rim's GRADIENT_LINEAR stroke renders:
+    /// the importer lowers it to `setSvgStrokeGradient` instead of
+    /// dropping the stroke on the floor.
+    void set_stroke_gradient(std::string css_linear_gradient);
+    void clear_stroke_gradient();
+    const std::string& stroke_gradient() const { return stroke_gradient_; }
+
     /// Stroke width in SVG path-coords (i.e. viewBox space). Default 1.
     void set_stroke_width(float w);
 
@@ -128,7 +140,8 @@ private:
     std::vector<SvgPathSegment> segments_;
     canvas::Color fill_color_{0.0f, 0.0f, 0.0f, 1.0f};
     canvas::Color stroke_color_{0.0f, 0.0f, 0.0f, 1.0f};
-    std::string   fill_gradient_;  // pulp #932 — non-empty overrides solid fill
+    std::string   fill_gradient_;    // non-empty overrides solid fill
+    std::string   stroke_gradient_;  // non-empty overrides solid stroke
     float stroke_width_ = 1.0f;
     canvas::FillRule fill_rule_ = canvas::FillRule::nonzero;  // pulp #3656
     float viewbox_w_ = 0.0f;   // 0 means "use widget bounds 1:1"

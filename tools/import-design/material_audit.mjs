@@ -152,38 +152,73 @@ function indexDiagnostics(diags) {
 // declared property reach the envelope? It never judges whether the emitted
 // value is RIGHT — see the caveat at the top.
 
+// Every diagnostic code that counts as the decoder refusing a stroke OUT
+// LOUD. Shared by checkStroke and the tally so the summary can never disagree
+// with the findings about what "diagnosed" means.
+const STROKE_DIAG_CODES = [
+  'vector-simplified',
+  'gradient-approximated',
+  'complex-stroke-flattened',
+  'multi-paint-stroke',
+  'stroke-align-approximated',
+];
+
+/**
+ * The channels a declared stroke can legitimately survive through:
+ *
+ *   * `style.border` — the box-model edge (frames, rects).
+ *   * `stroke` / `strokeGradient` — REAL stroke channels on an emitted path
+ *     (setSvgStroke / setSvgStrokeGradient): a fill+stroke vector strokes its
+ *     own outline, a gradient knob rim strokes it with the gradient.
+ *   * the path's FILL, on a stroke-only node — Figma pre-expands such a
+ *     stroke into a fillable band and the band IS the stroke (possibly a
+ *     gradient). Counting only style.border scored every solid band — all 48
+ *     sequencer step-cell ticks — as a silent drop while the render was
+ *     correct: the tool's own stroke-blind spot, the class it exists to end,
+ *     aimed at itself. Gated on `!decl.fill` so a filled vector's fill can
+ *     never masquerade as its stroke.
+ *
+ * Presence only; FIDELITY (axis, flatten, alignment) belongs to the gradient
+ * audit and the pixel tools.
+ */
+function strokeSurvivalChannel(decl, emitted) {
+  if (!emitted) return false;
+  if (emitted.style && emitted.style.border) return true;
+  if (emitted.stroke || emitted.strokeGradient) return true;
+  if (!decl.fill && emitted.path_data
+      && ((emitted.fill && emitted.fill !== 'none') || emitted.fillGradient)) return true;
+  return false;
+}
+
 function checkStroke(decl, emitted, diagKinds) {
-  const border = emitted && emitted.style && emitted.style.border;
+  const survived = strokeSurvivalChannel(decl, emitted);
+  const spoken = diagKinds.some((k) => STROKE_DIAG_CODES.includes(k));
   const solid = decl.stroke.find((p) => p.type === 'SOLID');
   if (!solid) {
-    // A GRADIENT stroke on a vector does not become a `style.border` (that is a
-    // solid CSS edge). It rides onto the PATH as a fill gradient — the file's 40
-    // `Oval` rim strokes (white -> transparent) are carried as `fillGradient`
-    // and emitted via setSvgFillGradient. That is the path the earlier version
-    // of this check could not see, so it counted 40 rendered rims as silent
-    // stroke drops — the tool's OWN stroke-blind spot, the class it exists to
-    // end, aimed at itself. A gradient stroke reaching the path is accounted
-    // for here; its FIDELITY (does the gradient flatten?) is the gradient
-    // audit's job, not this presence check.
-    if (emitted && emitted.fillGradient) return null;
-    if (border) return null;
-    if (diagKinds.includes('vector-simplified') || diagKinds.includes('gradient-approximated')) return null;
+    if (survived || spoken) return null;
     return {
       property: `stroke.${decl.stroke[0].type}`,
       declared: decl.stroke.map((p) => p.type).join('+'),
       emitted: 'none',
     };
   }
-  if (!border) {
-    if (diagKinds.includes('vector-simplified')) return null;   // dropped out loud
+  if (!survived) {
+    if (spoken) return null;   // dropped out loud
     return { property: 'stroke', declared: `${decl.stroke.length} paint(s)`, emitted: 'none' };
   }
-  // Figma multiplies paint.opacity by the color's own alpha. A border emitted
+  // Figma multiplies paint.opacity by the color's own alpha. A stroke emitted
   // at full strength for a paint declared at 24% is a drop of the opacity, even
   // though the stroke itself "survived" — so the count has to look past presence
-  // to the one channel that silently disappears.
+  // to the one channel that silently disappears. Only single-solid declarations
+  // are compared: the emitted color of a multi-paint stroke is a composite, and
+  // comparing it against one paint's product would cry wolf at correct output.
+  const declaredSolids = decl.stroke.filter((p) => p.type === 'SOLID');
+  if (declaredSolids.length !== 1) return null;
+  const carrier = (emitted.style && emitted.style.border)
+    || emitted.stroke
+    || (!decl.fill ? emitted.fill : null) || '';
   const want = solid.opacity * solid.color_alpha;
-  const m = /#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?\b/.exec(border);
+  const m = /#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?\b/.exec(carrier);
   const got = m ? (m[1] === undefined ? 1 : parseInt(m[1], 16) / 255) : null;
   if (got === null) return null;
   if (Math.abs(got - want) > 1.5 / 255) {
@@ -373,15 +408,11 @@ export function auditMaterials(materials, envelope, diagnostics) {
       }
     }
     if (d.stroke) {
-      // A stroke survives as a `style.border` (solid CSS edge) OR — for a
-      // GRADIENT stroke on a vector — as a `fillGradient` on the path, which is
-      // how the knob-rim strokes render (setSvgFillGradient). Counting only
-      // style.border made the summary read 40 rendered rims as dropped: the
-      // tally has to agree with checkStroke, which already recognizes both.
-      const strokeSurvived =
-        !!style.border || !!(emitted && emitted.fillGradient);
-      tally('stroke', strokeSurvived,
-            diagKinds.includes('vector-simplified') || diagKinds.includes('gradient-approximated'));
+      // The tally uses the SAME channel set as checkStroke
+      // (strokeSurvivalChannel / STROKE_DIAG_CODES) so the summary can never
+      // disagree with the findings about what survived or what was spoken.
+      tally('stroke', strokeSurvivalChannel(d, emitted),
+            diagKinds.some((k) => STROKE_DIAG_CODES.includes(k)));
       const f = checkStroke(d, emitted, diagKinds);
       if (f) found.push(f);
     }
@@ -491,8 +522,14 @@ function splitShadowLayers(s) {
 // 106 rounded nodes are exactly this. Demanding setCornerRadius from them would
 // report 78 drops that a screenshot disproves, and a checker that cries wolf at
 // that volume gets switched off, which is how fidelity_diff's 832 died.
+// `top: true` reads the field off the envelope NODE rather than its style —
+// the path-paint channels (stroke / strokeGradient) live there, beside
+// path_data, not in the style block.
 const CODEGEN_CHECKS = [
-  { property: 'stroke', field: 'border', calls: ['setBorder', 'setSvgStroke'] },
+  { property: 'stroke', field: 'border', calls: ['setBorder', 'setSvgStroke', 'setSvgStrokeGradient'] },
+  { property: 'stroke', field: 'stroke', top: true, calls: ['setSvgStroke'] },
+  { property: 'stroke.gradient', field: 'strokeGradient', top: true,
+    calls: ['setSvgStrokeGradient'] },
   { property: 'fill', field: 'background_color',
     calls: ['setBackground', 'setSvgFill', 'setTextColor', 'setImageSource', 'setLabel'] },
   { property: 'fill.gradient', field: 'background_gradient',
@@ -552,13 +589,14 @@ export function auditCodegen(materials, envelope, js) {
     const id = node.node_id;
     if (id && anchors.has(id)) {
       for (const chk of CODEGEN_CHECKS) {
-        if (style[chk.field] == null) continue;
+        const value = chk.top ? node[chk.field] : style[chk.field];
+        if (value == null) continue;
         bump(declaredCounts, chk.property);
         if (callCount(id, chk.calls) > 0) { bump(emittedCounts, chk.property); continue; }
         findings.push({
           node_id: id, name: node.name, type: node.type, stage: 'codegen',
           property: chk.property,
-          declared: `envelope style.${chk.field} = ${JSON.stringify(style[chk.field])}`,
+          declared: `envelope ${chk.top ? '' : 'style.'}${chk.field} = ${JSON.stringify(value)}`,
           emitted: `none — no ${chk.calls.join('/')} call on this node`,
         });
       }
