@@ -165,12 +165,11 @@ const std::map<std::string, AllowlistEntry>& allowlist() {
 
         // ── IRLayout ───────────────────────────────────────────────────────
         {"margin_top",
-         {{"js", "swift"},
-          "cpp+native lower margins; the JS lane only emits auto-margins "
-          "derived from constraints, and SwiftUI margins are deferred"}},
-        {"margin_right", {{"js", "swift"}, "same as margin_top"}},
-        {"margin_bottom", {{"js", "swift"}, "same as margin_top"}},
-        {"margin_left", {{"js", "swift"}, "same as margin_top"}},
+         {{"swift"},
+          "js+cpp+native lower margins; SwiftUI margins are deferred"}},
+        {"margin_right", {{"swift"}, "same as margin_top"}},
+        {"margin_bottom", {{"swift"}, "same as margin_top"}},
+        {"margin_left", {{"swift"}, "same as margin_top"}},
         {"align_self",
          {{"swift"}, "js+cpp+native lower it; SwiftUI per-item alignment deferred"}},
         {"align_content",
