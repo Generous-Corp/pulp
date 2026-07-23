@@ -98,3 +98,71 @@ identity tree, clips, notes, or automation model.
 Use `deserialize_project()` only when the project must become editable. Media
 references may remain unresolved at that point; asset resolution belongs on a
 background path.
+
+## External MIDI synchronization
+
+`pulp/playback/external_sync.hpp` keeps MIDI device I/O outside the engine while
+providing the timing machinery needed by an integration:
+
+- `MtcChaser` decodes coherent MIDI Time Code quarter-frame cycles and
+  universal-realtime full-frame locate messages without allocating.
+- `ExternalSyncOutput` projects a `TransportSnapshot` into sample-offset MIDI
+  Clock (24 PPQN), Song Position Pointer/start/continue/stop, MTC quarter-frame,
+  and full-frame locate messages.
+- MTC conversion covers 24, 25, 29.97 drop-frame, and 30 fps. Invalid
+  drop-frame labels fail closed.
+
+Reserve the destination `MidiBuffer` for the worst-case block before entering
+the audio callback, enable its realtime capacity limit, call
+`ExternalSyncOutput::process()`, then stable-sort the combined MIDI output at
+the adapter boundary. An `OutputOverflow` result means at least one sync
+message was dropped and must be surfaced rather than hidden.
+`ExternalSyncOutputConfig::max_messages_per_block` also caps work when a caller
+forgets to capacity-limit its buffer; keep that limit sized to the integration's
+worst supported tempo, sample rate, and callback size.
+
+The deterministic software suite verifies conversion, chase lock and
+discontinuity behavior, callback-partition invariance, and exact event
+placement. A physical loopback remains opt-in because its acceptance
+tolerances must be fixed before collecting the trace. Put those user-approved
+numbers in a spec:
+
+```json
+{
+  "schema": "pulp.timeline-sync-soak-spec.v1",
+  "fixed_at": "2030-01-01T00:00:00Z",
+  "min_duration_seconds": 3600,
+  "max_abs_offset_samples": 0,
+  "max_drift_ppm": 0,
+  "min_points_per_stream": 1000
+}
+```
+
+The zero values above are placeholders and intentionally invalid; replace them
+with the agreed limits before the run. Capture reference/observed sample pairs
+as:
+
+```json
+{
+  "schema": "pulp.timeline-sync-soak-trace.v1",
+  "captured_at": "2030-01-02T00:00:00Z",
+  "sample_rate": 48000,
+  "points": [
+    {"stream": "midi_clock", "expected_sample": 0, "observed_sample": 0},
+    {"stream": "midi_clock", "expected_sample": 48000, "observed_sample": 48000},
+    {"stream": "mtc", "expected_sample": 0, "observed_sample": 0},
+    {"stream": "mtc", "expected_sample": 48000, "observed_sample": 48000}
+  ]
+}
+```
+
+Then run the non-gating hardware proof explicitly:
+
+```sh
+PULP_TIMELINE_SYNC_SOAK_SPEC=/path/to/spec.json \
+PULP_TIMELINE_SYNC_SOAK_TRACE=/path/to/trace.json \
+ctest --test-dir build -R '^timeline-sync-hardware-soak$' --output-on-failure
+```
+
+Without both files, CTest reports the hardware proof as a loud skip. Providing
+only one file or a malformed/unfixed spec is a failure, not a skip.

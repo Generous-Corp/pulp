@@ -20,6 +20,9 @@ pulp_add_test_suite(pulp-test-playback-transport
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-external-sync
+    SOURCES test_playback_external_sync.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-playback-program
     SOURCES test_playback_program.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -73,6 +76,19 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME timeline-sync-soak-verifier-self-test
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_sync_soak.py
+            --self-test)
+    add_test(NAME timeline-sync-hardware-soak
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_sync_soak.py)
+    set_tests_properties(timeline-sync-hardware-soak PROPERTIES
+        LABELS "hardware;validation"
+        SKIP_RETURN_CODE 77)
+endif()
 
 pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp

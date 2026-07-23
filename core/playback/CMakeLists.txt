@@ -4,6 +4,8 @@ add_library(pulp-playback
     src/automation_program.cpp
     src/automation_program_compiler.cpp
     src/compile_executor.cpp
+    src/external_sync_output.cpp
+    src/external_sync_timecode.cpp
     src/note_renderer.cpp
     src/program.cpp
     src/program_compiler.cpp
@@ -48,6 +50,8 @@ if(PULP_BUILD_TESTS AND NOT MSVC)
         src/automation_program.cpp
         src/automation_program_compiler.cpp
         src/compile_executor.cpp
+        src/external_sync_output.cpp
+        src/external_sync_timecode.cpp
         src/note_renderer.cpp
         src/program.cpp
         src/program_compiler.cpp
