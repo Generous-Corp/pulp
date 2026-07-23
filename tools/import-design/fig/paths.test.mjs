@@ -556,3 +556,126 @@ test('a mask child clips the siblings above it and paints nowhere', () => {
   assert.ok(!diagnostics.some((d) => d.code === 'mask-approximated'),
     'exact lowering must not raise mask-approximated');
 });
+
+// ── mirrored nodes: min-corner truth, double-flip ink, stroke-slot margins ───
+
+test('a mirrored flex child reports its VISUAL box, and its ink un-mirrors (Env chip)', () => {
+  // The Triaz "Reverse" chip: an auto-layout row whose icon frame carries
+  // m00 = -1 with m02 on the box's RIGHT edge. Reading m02 as "left" put the
+  // sidecar one full icon-width right of where Figma draws the box, so
+  // layout_parity reported dx = -10.4 against a flex pass that had placed it
+  // exactly right. And because the emitted tree drops a container's mirror,
+  // the icon frame's flip no longer cancels its child Union's own baked flip
+  // — the reverse arrow rendered pointing forwards.
+  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
+    size: { x: 70, y: 16 }, stackMode: 'HORIZONTAL', stackSpacing: 6,
+    stackHorizontalPadding: 6, stackPaddingRight: 6 };
+  const icon = { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Icon',
+    parentIndex: { guid: row.guid, position: '!' },
+    size: { x: 10.4, y: 9 },
+    transform: { m00: -1, m01: 0, m02: 16.4, m10: 0, m11: 1, m12: 3.5 } };
+  // An asymmetric triangle, so a residual mirror cannot hide.
+  const union = { guid: { sessionID: 0, localID: 3 }, type: 'VECTOR', name: 'Union',
+    parentIndex: { guid: icon.guid, position: '!' },
+    size: { x: 10.4, y: 8 },
+    transform: { m00: -1, m01: 0, m02: 10.4, m10: 0, m11: 1, m12: 0 },
+    fillGeometry: [{ commandsBlob: 0 }],
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
+  const localBlobs = [
+    { bytes: encode([MOVE, 0, 0], [LINE, 4, 0], [LINE, 0, 8], [CLOSE]) },
+  ];
+  const scene = buildScene({ nodeChanges: [row, icon, union], blobs: localBlobs });
+  const { envelope, geometry } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
+
+  // Sidecar truth is the box Figma DRAWS: [m02 - w, m02], not [m02, m02 + w].
+  const iconRect = geometry.nodes.find((n) => n.node_id === '0:2');
+  assert.equal(iconRect.x, 6, 'mirror-aware min corner: 16.4 - 10.4');
+  assert.equal(iconRect.y, 3.5, 'the unmirrored axis keeps its translation');
+
+  // The ink sidecar composes the ancestor mirror the same way. Union's placed
+  // path spans [6.4, 10.4] inside Icon; Icon's flip maps that to [6, 10].
+  const unionRect = geometry.nodes.find((n) => n.node_id === '0:3');
+  assert.equal(unionRect.x, 6, 'ink min corner under a mirrored ancestor');
+  assert.equal(unionRect.width, 4);
+
+  // Icon's flip (dropped from the emitted tree) cancels Union's own baked
+  // flip: the emitted path must be the RAW triangle again — double-flip is
+  // literal cancellation, which is how the reverse arrow points backwards.
+  const v = firstVector(envelope.root);
+  assert.equal(v.path_data, 'M0 0 L4 0 L0 8 Z');
+});
+
+test('a mirrored ABSOLUTE node is placed at its visual box, 180deg stays pinned', () => {
+  // Same min-corner contract for styleFor's plain-placement branch: a mirror
+  // moves the box to the other side of the stored origin. A 180deg rotation
+  // (BOTH axes negative) must keep raw m02/m12 placement — that behavior is
+  // pinned by the slider-fill lesson and its test in fig.test.mjs.
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 40 } };
+  const flipped = { guid: { sessionID: 0, localID: 2 }, type: 'ROUNDED_RECTANGLE', name: 'flipped',
+    parentIndex: { guid: frame.guid, position: '!' },
+    size: { x: 18, y: 6 },
+    transform: { m00: -1, m01: 0, m02: 30, m10: 0, m11: 1, m12: 3 } };
+  const scene = buildScene({ nodeChanges: [frame, flipped] });
+  const { envelope, geometry } = materializeFrame(scene, frame, CTX);
+  const child = envelope.root.children.find((n) => n.name === 'flipped');
+  assert.equal(child.style.left, 12, 'visual left = m02 - w under m00 = -1');
+  assert.equal(child.style.top, 3);
+  const rect = geometry.nodes.find((n) => n.node_id === '0:2');
+  assert.equal(rect.x, 12, 'sidecar and render must be the same quantity');
+});
+
+test('a flowing vector reconciles stroke-inflated ink to its node box with margins', () => {
+  // Figma's auto-layout never sees a stroke, but the emitted ink box includes
+  // it (a CENTER stroke band overhangs the node box by half its weight). The
+  // env chip's 12px arrow carries a 2px stroke: letting the 14px ink ride the
+  // flex row pushed the "env" label 2px right. The widget keeps the exact ink
+  // (nothing rescales); margins hand Yoga back the node box.
+  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
+    size: { x: 48, y: 16 }, stackMode: 'HORIZONTAL', stackSpacing: 6,
+    stackHorizontalPadding: 6, stackPaddingRight: 6 };
+  const vec = { guid: { sessionID: 0, localID: 2 }, type: 'VECTOR', name: 'arrow',
+    parentIndex: { guid: row.guid, position: '!' },
+    size: { x: 12, y: 6 }, strokeWeight: 2,
+    transform: { m00: 1, m01: 0, m02: 6, m10: 0, m11: 1, m12: 5 },
+    fillGeometry: [],
+    strokeGeometry: [{ commandsBlob: 0 }],
+    fillPaints: [],
+    strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
+  const localBlobs = [
+    // Stroke band overhanging the 12x6 node box by 1px on every side.
+    { bytes: encode([MOVE, -1, -1], [LINE, 13, -1], [LINE, 13, 7], [LINE, -1, 7], [CLOSE]) },
+  ];
+  const scene = buildScene({ nodeChanges: [row, vec], blobs: localBlobs });
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
+  const v = firstVector(envelope.root);
+  assert.equal(v.style.width, 14, 'the widget keeps the exact ink');
+  assert.deepEqual(
+    [v.layout.marginLeft, v.layout.marginRight, v.layout.marginTop, v.layout.marginBottom],
+    [-1, -1, -1, -1],
+    'margins hand the flex row back the 12x6 node box');
+});
+
+test('an instance-scale ink gap is NOT "corrected" by margins', () => {
+  // Through instance expansion the ink is solved at INSTANCE scale while
+  // node.size can still be the master's. That gap is a scale delta, not a
+  // stroke overhang; margins would move the child by it. The gate: overhangs
+  // beyond strokeWeight + 1 leave the layout alone.
+  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
+    size: { x: 40, y: 40 }, stackMode: 'HORIZONTAL', stackSpacing: 10,
+    stackHorizontalPadding: 10, stackPaddingRight: 10 };
+  const vec = { guid: { sessionID: 0, localID: 2 }, type: 'VECTOR', name: 'stale-box',
+    parentIndex: { guid: row.guid, position: '!' },
+    size: { x: 32, y: 20 }, strokeWeight: 1,
+    transform: { m00: 1, m01: 0, m02: 4, m10: 0, m11: 1, m12: 10 },
+    fillGeometry: [{ commandsBlob: 0 }],
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
+  const localBlobs = [
+    // Ink solved at 0.8 instance scale: 25.6 wide vs the stale 32 node box.
+    { bytes: encode([MOVE, 4, 10], [LINE, 29.6, 10], [LINE, 29.6, 26], [LINE, 4, 26], [CLOSE]) },
+  ];
+  const scene = buildScene({ nodeChanges: [row, vec], blobs: localBlobs });
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
+  const v = firstVector(envelope.root);
+  assert.ok(!v.layout || v.layout.marginLeft === undefined,
+    'a scale-delta gap must not become margins');
+});
