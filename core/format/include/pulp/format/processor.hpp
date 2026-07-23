@@ -92,7 +92,18 @@ editor_resize_handlers() {
 /// - define_parameters() is called once during construction on the host thread.
 class Processor {
 public:
-    virtual ~Processor() = default;
+    virtual ~Processor() {
+        // Belt-and-suspenders: adapters clear the editor-resize handler on
+        // editor close, but a Processor destroyed while a handler is still
+        // installed (abnormal teardown, no polite editor close) would leak a
+        // side-table entry keyed by `this` — and since allocators reuse
+        // addresses, a later Processor at the same address could fire a stale
+        // handler into a freed editor host. Erasing here makes the lifetime
+        // structural rather than convention-dependent. No-op when already
+        // cleared. Cannot be `= default` for this reason.
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        detail::editor_resize_handlers().erase(this);
+    }
 
     /// Return the plugin's metadata. Called once during initialization.
     virtual PluginDescriptor descriptor() const = 0;
