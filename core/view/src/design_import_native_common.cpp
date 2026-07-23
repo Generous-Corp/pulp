@@ -6,6 +6,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/css_gradient.hpp>
+#include <pulp/view/design_fidelity.hpp>
 #include <pulp/view/design_frame_view.hpp>
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -460,6 +461,11 @@ std::optional<NativeWidgetKind> kind_from_type(const IRNode& node,
         return NativeWidgetKind::image_view;
     if (type == "canvas")
         return NativeWidgetKind::canvas;
+    // Decoded design vectors keep their source kind and carry canonical
+    // `path_data`; route every such vector kind through SvgPathWidget before
+    // the primitive-kind fallbacks below can turn it into a box.
+    if (is_vector_kind(type) && attr(node, "path_data"))
+        return NativeWidgetKind::svg_path;
     if (type == "svg_path" || type == "path")
         return NativeWidgetKind::svg_path;
     if (type == "svg_rect" || type == "rect")
@@ -1371,9 +1377,18 @@ void apply_label_style(Label& label, const IRStyle& style) {
 }
 
 void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
-    if (auto fill = attr(node, "fill")) {
-        if (*fill == "none") path.clear_fill();
-        else if (auto color = parse_any_css_color(*fill)) path.set_fill_color(*color);
+    for (const char* key : {"svg_fill", "fill"}) {
+        if (auto fill = attr(node, key)) {
+            if (*fill == "none") path.clear_fill();
+            else if (auto color = parse_any_css_color(*fill)) path.set_fill_color(*color);
+            break;
+        }
+    }
+    for (const char* key : {"svg_fill_gradient", "fillGradient"}) {
+        if (auto gradient = attr(node, key)) {
+            if (!gradient->empty()) path.set_fill_gradient(*gradient);
+            break;
+        }
     }
     // The winding rule decides which regions of a multi-subpath path are
     // holes — a subtracted icon baked as same-direction contours fills solid
@@ -1387,9 +1402,12 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
             break;
         }
     }
-    if (auto stroke = attr(node, "stroke")) {
-        if (*stroke == "none") path.clear_stroke();
-        else if (auto color = parse_any_css_color(*stroke)) path.set_stroke_color(*color);
+    for (const char* key : {"svg_stroke", "stroke"}) {
+        if (auto stroke = attr(node, key)) {
+            if (*stroke == "none") path.clear_stroke();
+            else if (auto color = parse_any_css_color(*stroke)) path.set_stroke_color(*color);
+            break;
+        }
     }
     // Gradient stroke — `svg_stroke_gradient` is the IR-canonical key
     // (design_ir_json), `strokeGradient` the raw envelope/JSX spelling. The
@@ -1401,8 +1419,12 @@ void apply_svg_paint(SvgPathWidget& path, const IRNode& node) {
             break;
         }
     }
-    if (auto stroke_width = attr_float(node, "stroke-width"))
-        path.set_stroke_width(*stroke_width);
+    for (const char* key : {"svg_stroke_width", "stroke-width", "strokeWidth"}) {
+        if (auto stroke_width = attr_float(node, key)) {
+            path.set_stroke_width(*stroke_width);
+            break;
+        }
+    }
 }
 
 void apply_svg_paint(SvgRectWidget& rect, const IRNode& node) {
@@ -1643,12 +1665,22 @@ std::unique_ptr<View> make_widget(const IRNode& node,
             return std::make_unique<CanvasWidget>();
         case NativeWidgetKind::svg_path: {
             auto svg = std::make_unique<SvgPathWidget>();
-            if (auto path_data = attr(node, "d")) svg->set_path(*path_data);
-            if (auto viewbox = attr(node, "viewBox")) {
-                std::istringstream input(*viewbox);
-                float min_x = 0.0f, min_y = 0.0f, width = 0.0f, height = 0.0f;
-                if (input >> min_x >> min_y >> width >> height) svg->set_viewbox(width, height);
-            } else if (node.style.width && node.style.height) {
+            for (const char* key : {"path_data", "d"}) {
+                if (auto path_data = attr(node, key)) {
+                    svg->set_path(*path_data);
+                    break;
+                }
+            }
+            for (const char* key : {"svg_viewbox", "viewBox"}) {
+                if (auto viewbox = attr(node, key)) {
+                    std::istringstream input(*viewbox);
+                    float min_x = 0.0f, min_y = 0.0f, width = 0.0f, height = 0.0f;
+                    if (input >> min_x >> min_y >> width >> height)
+                        svg->set_viewbox(width, height);
+                    break;
+                }
+            }
+            if (svg->viewbox_width() <= 0.0f && node.style.width && node.style.height) {
                 svg->set_viewbox(*node.style.width, *node.style.height);
             }
             apply_svg_paint(*svg, node);
@@ -2106,16 +2138,25 @@ void NativeImportBindingContext::reset_import_binding_claims() {
     binding_claims_by_context().erase(this);
 }
 
+DesignIR prepare_native_design_ir(const DesignIR& ir) {
+    DesignIR prepared = ir;
+    normalize_border_shorthand(prepared.root);
+    reconnect_slider_fill(prepared.root);
+    synthesize_primitive_paths(prepared.root);
+    return prepared;
+}
+
 std::unique_ptr<View> build_native_view_tree(const DesignIR& ir,
                                              const IRAssetManifest& manifest,
                                              const NativeMaterializeOptions& options) {
     try {
         const auto& effective_manifest = manifest.assets.empty() ? ir.asset_manifest : manifest;
-        auto resolved = resolve_design_ir_native(ir, effective_manifest);
+        const DesignIR prepared = prepare_native_design_ir(ir);
+        auto resolved = resolve_design_ir_native(prepared, effective_manifest);
 
         std::vector<ImportDiagnostic> materialize_diagnostics;
         append_resolved_diagnostics(resolved, materialize_diagnostics);
-        auto root = materialize_node(ir.root,
+        auto root = materialize_node(prepared.root,
                                      resolved,
                                      effective_manifest,
                                      options,

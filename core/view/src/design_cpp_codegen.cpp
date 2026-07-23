@@ -868,23 +868,55 @@ void emit_svg_paint(std::ostringstream& out,
                     bool supports_fill) {
     const auto& opts = ctx.opts;
     if (supports_fill) {
-        if (auto fill = attr(node, "fill")) {
-            if (*fill == "none") {
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->clear_fill();");
-            } else if (auto expr = color_expr(ctx, *fill); !expr.empty()) {
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_fill_color(" + expr + ");");
+        for (const char* key : {"svg_fill", "fill"}) {
+            if (auto fill = attr(node, key)) {
+                if (*fill == "none") {
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->clear_fill();");
+                } else if (auto expr = color_expr(ctx, *fill); !expr.empty()) {
+                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_fill_color(" + expr + ");");
+                }
+                break;
+            }
+        }
+        for (const char* key : {"svg_fill_gradient", "fillGradient"}) {
+            if (auto gradient = attr(node, key)) {
+                if (!gradient->empty()) {
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_fill_gradient(" +
+                                  cpp_string_literal(*gradient) + ");");
+                }
+                break;
             }
         }
     }
-    if (auto stroke = attr(node, "stroke")) {
-        if (*stroke == "none") {
-            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->clear_stroke();");
-        } else if (auto expr = color_expr(ctx, *stroke); !expr.empty()) {
-            emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_stroke_color(" + expr + ");");
+    for (const char* key : {"svg_stroke", "stroke"}) {
+        if (auto stroke = attr(node, key)) {
+            if (*stroke == "none") {
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->clear_stroke();");
+            } else if (auto expr = color_expr(ctx, *stroke); !expr.empty()) {
+                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_stroke_color(" + expr + ");");
+            }
+            break;
         }
     }
-    if (auto stroke_width = attr_float(node, "stroke-width"))
-        emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_stroke_width(" + float_expr(ctx, *stroke_width) + ");");
+    for (const char* key : {"svg_stroke_gradient", "strokeGradient"}) {
+        if (auto gradient = attr(node, key)) {
+            if (!gradient->empty()) {
+                emit_line(out, depth, opts.indent_spaces,
+                          std::string(var) + "->set_stroke_gradient(" +
+                              cpp_string_literal(*gradient) + ");");
+            }
+            break;
+        }
+    }
+    for (const char* key : {"svg_stroke_width", "stroke-width", "strokeWidth"}) {
+        if (auto stroke_width = attr_float(node, key)) {
+            emit_line(out, depth, opts.indent_spaces,
+                      std::string(var) + "->set_stroke_width(" +
+                          float_expr(ctx, *stroke_width) + ");");
+            break;
+        }
+    }
 }
 
 std::string widget_make_expr(const IRNode& node,
@@ -1077,16 +1109,36 @@ void emit_widget_specific(std::ostringstream& out,
             }
             break;
         case NativeWidgetKind::svg_path:
-            if (auto path_data = attr(node, "d"))
-                emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_path(" + cpp_string_literal(*path_data) + ");");
-            if (auto viewbox = attr(node, "viewBox")) {
-                std::istringstream input(*viewbox);
-                float min_x = 0.0f, min_y = 0.0f, width = 0.0f, height = 0.0f;
-                if (input >> min_x >> min_y >> width >> height)
-                    emit_line(out, depth, opts.indent_spaces, std::string(var) + "->set_viewbox(" + float_expr(ctx, width) + ", " + float_expr(ctx, height) + ");");
-            } else if (node.style.width && node.style.height) {
-                emit_line(out, depth, opts.indent_spaces,
-                          std::string(var) + "->set_viewbox(" + float_expr(ctx, *node.style.width) + ", " + float_expr(ctx, *node.style.height) + ");");
+            for (const char* key : {"path_data", "d"}) {
+                if (auto path_data = attr(node, key)) {
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_path(" +
+                                  cpp_string_literal(*path_data) + ");");
+                    break;
+                }
+            }
+            {
+                bool emitted_viewbox = false;
+                for (const char* key : {"svg_viewbox", "viewBox"}) {
+                    if (auto viewbox = attr(node, key)) {
+                        std::istringstream input(*viewbox);
+                        float min_x = 0.0f, min_y = 0.0f, width = 0.0f, height = 0.0f;
+                        if (input >> min_x >> min_y >> width >> height) {
+                            emit_line(out, depth, opts.indent_spaces,
+                                      std::string(var) + "->set_viewbox(" +
+                                          float_expr(ctx, width) + ", " +
+                                          float_expr(ctx, height) + ");");
+                            emitted_viewbox = true;
+                        }
+                        break;
+                    }
+                }
+                if (!emitted_viewbox && node.style.width && node.style.height) {
+                    emit_line(out, depth, opts.indent_spaces,
+                              std::string(var) + "->set_viewbox(" +
+                                  float_expr(ctx, *node.style.width) + ", " +
+                                  float_expr(ctx, *node.style.height) + ");");
+                }
             }
             // Path-only (SvgRect/SvgLine have no fill rule): the winding rule
             // decides which regions of a multi-subpath path are holes, and the
@@ -1444,6 +1496,11 @@ void emit_node(std::ostringstream& out,
         emit_line(out, depth, ctx.opts.indent_spaces,
                   std::string(parent_var) + "->add_child(std::move(" + var + "));");
     } else {
+        // Imported geometry intentionally preserves fractional coordinates.
+        // Every emitted factory returns a layout root, including extracted
+        // component factories, so opt each tree out of Yoga's pixel rounding.
+        emit_line(out, depth, ctx.opts.indent_spaces,
+                  var + "->set_subpixel_layout(true);");
         emit_line(out, depth, ctx.opts.indent_spaces, "return " + var + ";");
     }
 
@@ -2103,13 +2160,14 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     const IRAssetManifest& effective_manifest = manifest.assets.empty()
         ? ir.asset_manifest
         : manifest;
-    auto resolved = resolve_design_ir_native(ir, effective_manifest);
+    const DesignIR prepared = prepare_native_design_ir(ir);
+    auto resolved = resolve_design_ir_native(prepared, effective_manifest);
 
     // Single tree traversal: parse NativeBindingMetadata once per node and
     // record both eligibility verdicts. The binding-manifest JSON and the
     // binding-context helper C++ are both rendered from this one plan.
     ResolvedBindingPlan binding_plan;
-    collect_resolved_binding_plan(binding_plan, ir.root, resolved, "root");
+    collect_resolved_binding_plan(binding_plan, prepared.root, resolved, "root");
 
     std::vector<BindingHelperRoute> binding_helper_routes;
     if (opts.emit_binding_context_helpers)
@@ -2123,7 +2181,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
     ctx.used_functions.insert(opts.function_name);
     ctx.tokens = build_token_symbols(ir, ctx);
     ctx.assets = build_asset_symbols(effective_manifest, ctx);
-    collect_components(ir.root, resolved, ctx, std::nullopt, true);
+    collect_components(prepared.root, resolved, ctx, std::nullopt, true);
 
     CppExportResult result;
     {
@@ -2183,7 +2241,7 @@ CppExportResult generate_pulp_cpp(const DesignIR& ir,
                       component.parent_direction,
                       component.rule_comment);
 
-    emit_function(source, ctx, opts.function_name, ir.root, resolved, std::nullopt);
+    emit_function(source, ctx, opts.function_name, prepared.root, resolved, std::nullopt);
     if (emit_binding_helpers)
         emit_binding_context_helpers(source, opts, binding_helper_routes);
     emit_namespace_close(source, opts.namespace_name);

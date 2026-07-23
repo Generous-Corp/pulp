@@ -2,7 +2,7 @@
 //
 // The native side exposes SvgPathWidget and the bridge handlers used here:
 // createSvgPath, setSvgPath, setSvgViewBox, setSvgFill, setSvgFillRule,
-// setSvgStroke, and setSvgStrokeWidth. React JSX such as
+// setSvgStroke, setSvgStrokeGradient, and setSvgStrokeWidth. React JSX such as
 // `<SvgPath d="..." viewBox={[w,h]} fill="#fff" fillRule="evenodd" stroke="#000" strokeWidth={1} />`
 // reaches the bridge.
 
@@ -143,6 +143,124 @@ describe('@pulp/react SvgPath intrinsic', () => {
         expect(setFG[0].args).toEqual([
             'icon7e', 'linear-gradient(to top, #333, #444)',
         ]);
+    });
+
+    it('forwards strokeGradient to setSvgStrokeGradient', () => {
+        applyAllProps(instance('icon7f', 'SvgPath', {
+            d: 'M0 0 L10 10',
+            strokeGradient: 'linear-gradient(to right, #ff0000, #0000ff)',
+        }));
+        const setSG = bridge.calls.filter((c) => c.fn === 'setSvgStrokeGradient');
+        expect(setSG.length).toBe(1);
+        expect(setSG[0].args).toEqual([
+            'icon7f', 'linear-gradient(to right, #ff0000, #0000ff)',
+        ]);
+    });
+
+    it('re-applies strokeGradient on commitUpdate when it changes', () => {
+        applyChangedProps(
+            instance('icon7g', 'SvgPath', {}),
+            { d: 'M0 0 L1 1', strokeGradient: 'linear-gradient(to top, #111, #222)' },
+            { d: 'M0 0 L1 1', strokeGradient: 'linear-gradient(to top, #333, #444)' },
+        );
+        const setSG = bridge.calls.filter((c) => c.fn === 'setSvgStrokeGradient');
+        expect(setSG.length).toBe(1);
+        expect(setSG[0].args).toEqual([
+            'icon7g', 'linear-gradient(to top, #333, #444)',
+        ]);
+    });
+
+    it('applies a solid stroke before its gradient regardless of JSX key order', () => {
+        applyAllProps(instance('icon7h', 'SvgPath', {
+            strokeGradient: 'linear-gradient(to right, #f00, #00f)',
+            stroke: '#777777',
+        }));
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.map((c) => c.fn)).toEqual([
+            'setSvgStroke', 'setSvgStrokeGradient',
+        ]);
+    });
+
+    it('applies compound stroke ordering to the lowercase path intrinsic', () => {
+        applyAllProps(instance('path7h', 'path', {
+            strokeGradient: 'linear-gradient(to right, #f00, #00f)',
+            stroke: '#777777',
+        }));
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.map((c) => c.fn)).toEqual([
+            'setSvgStroke', 'setSvgStrokeGradient',
+        ]);
+    });
+
+    it('re-applies an unchanged gradient after its solid fallback changes', () => {
+        const gradient = 'linear-gradient(to right, #f00, #00f)';
+        applyChangedProps(
+            instance('icon7i', 'SvgPath', {}),
+            { stroke: '#111111', strokeGradient: gradient },
+            { stroke: '#222222', strokeGradient: gradient },
+        );
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.map((c) => c.fn)).toEqual([
+            'setSvgStroke', 'setSvgStrokeGradient',
+        ]);
+        expect(strokeCalls[1].args).toEqual(['icon7i', gradient]);
+    });
+
+    it('re-applies an unchanged gradient after a lowercase path fallback changes', () => {
+        const gradient = 'linear-gradient(to right, #f00, #00f)';
+        applyChangedProps(
+            instance('path7i', 'path', {}),
+            { stroke: '#111111', strokeGradient: gradient },
+            { stroke: '#222222', strokeGradient: gradient },
+        );
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.map((c) => c.fn)).toEqual([
+            'setSvgStroke', 'setSvgStrokeGradient',
+        ]);
+    });
+
+    it('restores the solid fallback when strokeGradient is removed', () => {
+        applyChangedProps(
+            instance('icon7j', 'SvgPath', {}),
+            { stroke: '#777777', strokeGradient: 'linear-gradient(to right, #f00, #00f)' },
+            { stroke: '#777777' },
+        );
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.length).toBe(1);
+        expect(strokeCalls[0].fn).toBe('setSvgStroke');
+        expect(strokeCalls[0].args).toEqual(['icon7j', '#777777']);
+    });
+
+    it('disables stroking when a gradient-only stroke is removed', () => {
+        applyChangedProps(
+            instance('icon7k', 'SvgPath', {}),
+            { strokeGradient: 'linear-gradient(to right, #f00, #00f)' },
+            {},
+        );
+        const setStroke = bridge.calls.filter((c) => c.fn === 'setSvgStroke');
+        expect(setStroke.length).toBe(1);
+        expect(setStroke[0].args).toEqual(['icon7k', 'none']);
+    });
+
+    it('resets a removed solid fallback before retaining its gradient', () => {
+        const gradient = 'invalid-gradient';
+        applyChangedProps(
+            instance('icon7l', 'SvgPath', {}),
+            { stroke: '#ff0000', strokeGradient: gradient },
+            { strokeGradient: gradient },
+        );
+        const strokeCalls = bridge.calls.filter((c) =>
+            c.fn === 'setSvgStroke' || c.fn === 'setSvgStrokeGradient');
+        expect(strokeCalls.map((c) => c.fn)).toEqual([
+            'setSvgStroke', 'setSvgStrokeGradient',
+        ]);
+        expect(strokeCalls[0].args).toEqual(['icon7l', '#000000']);
+        expect(strokeCalls[1].args).toEqual(['icon7l', gradient]);
     });
 
     it('commitUpdate replaces only changed props', () => {

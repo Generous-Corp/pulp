@@ -330,8 +330,26 @@ function effectSurvived(t, emitted) {
 function checkCornerRadius(decl, emitted, diagKinds) {
   const r = decl.corner_radius;
   if (!r.some((v) => v > 0)) return null;
-  const emittedR = emitted && emitted.style && emitted.style.border_radius;
+  const style = (emitted && emitted.style) || {};
+  const emittedR = style.border_radius;
+  const emittedCorners = [
+    style.border_top_left_radius,
+    style.border_top_right_radius,
+    style.border_bottom_right_radius,
+    style.border_bottom_left_radius,
+  ];
+  const hasExactCorners = emittedCorners.every((v) => v !== undefined && v !== null);
   const uniform = r.every((v) => v === r[0]);
+  if (hasExactCorners) {
+    // The decoder rounds layout geometry to hundredths; compare at that
+    // contract rather than reporting an honest rounded value as a drop.
+    if (emittedCorners.every((v, i) => Math.abs(v - r[i]) < 0.011)) return null;
+    return {
+      property: 'corner_radius.per_corner',
+      declared: `[${r.join(', ')}]`,
+      emitted: `[${emittedCorners.join(', ')}]`,
+    };
+  }
   if (emittedR === undefined || emittedR === null) {
     if (diagKinds.includes('corner-radius-simplified')) return null;   // said aloud
     return {
@@ -426,7 +444,14 @@ export function auditMaterials(materials, envelope, diagnostics) {
       found.push(...checkEffects(d, emitted, diagKinds));
     }
     if (d.corner_radius && d.corner_radius.some((v) => v > 0)) {
-      tally('corner_radius', style.border_radius != null,
+      const emittedCorners = [
+        style.border_top_left_radius,
+        style.border_top_right_radius,
+        style.border_bottom_right_radius,
+        style.border_bottom_left_radius,
+      ];
+      tally('corner_radius', style.border_radius != null
+            || emittedCorners.every((v) => v != null),
             diagKinds.includes('corner-radius-simplified'));
       const f = checkCornerRadius(d, emitted, diagKinds);
       if (f) found.push(f);

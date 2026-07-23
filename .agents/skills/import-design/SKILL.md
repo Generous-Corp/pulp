@@ -1738,6 +1738,45 @@ The rule now flows end to end; facts to keep intact:
   two rules' renders of the same path (see the donut test in
   `test_widget_bridge_svg.cpp`).
 
+### Decoder-tail gaps: gradient-on-outline, null boolean-ops, per-corner radii
+
+Three small `.fig`-decoder gaps that each look downstream but are all in
+`scene.mjs`. The renderer/bridge/codegen already supported every one of
+them — only the decoder wasn't populating the channel. Facts to keep:
+
+- **A gradient-filled TEXT lowered to a glyph outline must set
+  `fillGradient`, not just flatten.** TEXT never takes the box branch (a text
+  fill is the glyph *color*, not a background), so when a label outlines
+  (missing/icon font) its linear gradient used to collapse to the first solid
+  — the sequencer's rainbow "GENERATE PATTERN" pill imported flat gray. The
+  glyph-outline branch now mirrors the VECTOR branch: `firstGradient(node.fillPaints)`
+  → `gradientPaintToCss` → `out.fillGradient`, with the flattened solid kept
+  as `out.fill` (the widget's parse-failure fallback). Only LINEAR lowers;
+  a radial returns null and the generic `gradient-approximated` diagnostic
+  below still fires. Same wire as the fill-gradient path:
+  `design_ir_json` reads `fillGradient`→`svg_fill_gradient` (path-gated) →
+  codegen `setSvgFillGradient`.
+- **A `BOOLEAN_OPERATION` with null geometry AND no size paints nothing —
+  skip it, don't emit a 0×0 slab.** The sequencer's two `Union` nodes
+  (`1:162`/`1:163`) carry a 0-byte geometry blob and `size:{x:null,y:null}`;
+  the box fallback emitted them as 0-sized frames still carrying their
+  `#ffffff26` fill, which `layout_parity` flagged as EXTRA. The guard in
+  `walk()` fires ONLY when `geometryToPath` resolves nothing AND width/height
+  are both non-positive, so a boolean op whose geometry *does* resolve (or
+  that has real extent) keeps its paths. Diagnostic `boolean-empty-skipped`
+  (registered 'warning', like `slice-skipped` — the skip is correct
+  rendering, but 'info' is dropped by both consumers).
+- **Omitted corner radii are SQUARE (0), not "inherit the others."** kiwi
+  drops zero fields, so a bottom-rounded panel arrives as
+  `{bottomLeft:2, bottomRight:2}` with the top corners absent. `cornerRadius()`
+  used to `.filter()` the absent corners out, which made the two present
+  corners look uniform and rounded ALL FOUR. It now NORMALIZES the four raw
+  fields (absent → 0) BEFORE collapsing, so it returns a single value only
+  when all four truly agree; otherwise `perCornerRadii()` carries the
+  asymmetric case to `border_{top,bottom}_{left,right}_radius`, which codegen
+  already lowers to `setCornerRadius(id, "TopLeft", r)`. MixerPanelFL keeps
+  `[0,0,2,2]`; Rectangle 1047 keeps `[3,0,0,3]`.
+
 ### Figma resize constraints → flex/position
 
 Figma layout **constraints** (a node's resize behavior relative to its parent)

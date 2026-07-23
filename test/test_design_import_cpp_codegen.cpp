@@ -3147,6 +3147,60 @@ TEST_CASE("baked C++ codegen emits set_fill_rule for an evenodd path",
             != std::string::npos);
 }
 
+TEST_CASE("baked C++ codegen consumes canonical imported SVG stroke channels",
+          "[view][import][cpp-codegen][svg-stroke]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("panel", "Panel", 64.0f, 64.0f, LayoutDirection::column);
+
+    IRNode path;
+    path.type = "vector";
+    path.name = "Rim";
+    path.stable_anchor_id = "rim";
+    path.attributes["path_data"] = "M0 0 L32 0";
+    path.attributes["svg_viewbox"] = "0 0 32 1";
+    path.attributes["svg_fill"] = "#11111b";
+    path.attributes["svg_fill_gradient"] =
+        "linear-gradient(to bottom, #11111b, #313244)";
+    path.attributes["svg_stroke"] = "#89b4fa";
+    path.attributes["svg_stroke_gradient"] =
+        "linear-gradient(to right, #89b4fa, #cba6f7)";
+    path.attributes["svg_stroke_width"] = "2.5";
+    ir.root.children.push_back(path);
+
+    IRNode ellipse;
+    ellipse.type = "ellipse";
+    ellipse.name = "Ellipse rim";
+    ellipse.stable_anchor_id = "ellipse-rim";
+    ellipse.style.width = 20.0f;
+    ellipse.style.height = 12.0f;
+    ellipse.attributes["svg_stroke"] = "#89b4fa";
+    ellipse.attributes["svg_stroke_gradient"] =
+        "linear-gradient(to left, #89b4fa, #cba6f7)";
+    ellipse.attributes["svg_stroke_width"] = "1.5";
+    ir.root.children.push_back(ellipse);
+
+    CppExportOptions opts;
+    opts.header_filename = "stroke_panel.hpp";
+    opts.namespace_name = "pulp::test::stroke";
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    REQUIRE(result.source.find("->set_stroke_color(") != std::string::npos);
+    REQUIRE(result.source.find("->set_path(\"M0 0 L32 0\")") != std::string::npos);
+    REQUIRE(result.source.find("->set_viewbox(32.0f, 1.0f)") != std::string::npos);
+    REQUIRE(result.source.find(
+        "->set_fill_gradient(\"linear-gradient(to bottom, #11111b, #313244)\")")
+        != std::string::npos);
+    REQUIRE(result.source.find(
+        "->set_stroke_gradient(\"linear-gradient(to right, #89b4fa, #cba6f7)\")")
+        != std::string::npos);
+    REQUIRE(result.source.find("->set_stroke_width(2.5f)") != std::string::npos);
+    REQUIRE(result.source.find(
+        "->set_stroke_gradient(\"linear-gradient(to left, #89b4fa, #cba6f7)\")")
+        != std::string::npos);
+    REQUIRE(result.source.find("->set_stroke_width(1.5f)") != std::string::npos);
+}
+
 TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
           "[view][import][cpp-codegen][native-cpp-phase-a]") {
     const auto ir = build_phase_a_typed_control_ir();
@@ -7340,6 +7394,7 @@ TEST_CASE("baked C++ exporter emits ownable C++ source artifacts",
     REQUIRE(result.source.find("->set_value(/* imported static param value */ 0.2f);") != std::string::npos);
     REQUIRE(result.source.find("->set_default_value(0.75f);") != std::string::npos);
     REQUIRE(result.source.find("std::make_unique<pulp::view::Knob>()") != std::string::npos);
+    REQUIRE(result.source.find("->set_subpixel_layout(true);") != std::string::npos);
     REQUIRE(result.source.find("build_native_view_tree") == std::string::npos);
     REQUIRE(result.source.find("serialize_design_ir") == std::string::npos);
 

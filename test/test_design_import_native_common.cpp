@@ -574,6 +574,59 @@ TEST_CASE("SVG fill and stroke accept non-hex CSS across every shape widget",
     check_color(svg_line->stroke_color(), 171.0f / 255.0f, 171.0f / 255.0f,
                 171.0f / 255.0f, 0.1f);
 }
+
+TEST_CASE("native SVG path consumes canonical imported stroke channels",
+          "[view][import][native-common][svg-stroke]") {
+    DesignIR ir;
+    ir.root.type = "frame";
+
+    IRNode path;
+    path.type = "vector";
+    path.attributes["path_data"] = "M0 0L10 10";
+    path.attributes["svg_viewbox"] = "0 0 10 10";
+    path.attributes["svg_fill"] = "#11111b";
+    path.attributes["svg_fill_gradient"] =
+        "linear-gradient(to bottom, #11111b, #313244)";
+    path.attributes["svg_stroke"] = "#89b4fa";
+    path.attributes["svg_stroke_gradient"] =
+        "linear-gradient(to right, #89b4fa, #cba6f7)";
+    path.attributes["svg_stroke_width"] = "2.5";
+    ir.root.children.push_back(path);
+
+    IRNode ellipse;
+    ellipse.type = "ellipse";
+    ellipse.style.width = 20.0f;
+    ellipse.style.height = 12.0f;
+    ellipse.attributes["svg_stroke"] = "#89b4fa";
+    ellipse.attributes["svg_stroke_gradient"] =
+        "linear-gradient(to right, #89b4fa, #cba6f7)";
+    ellipse.attributes["svg_stroke_width"] = "1.5";
+    ir.root.children.push_back(ellipse);
+
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->child_count() == 2);
+    auto* svg_path = dynamic_cast<SvgPathWidget*>(root->child_at(0));
+    REQUIRE(svg_path != nullptr);
+    REQUIRE(svg_path->path_data() == "M0 0L10 10");
+    REQUIRE(svg_path->viewbox_width() == Catch::Approx(10.0f));
+    REQUIRE(svg_path->fill_gradient() ==
+            "linear-gradient(to bottom, #11111b, #313244)");
+    check_color(svg_path->stroke_color(), 137.0f / 255.0f, 180.0f / 255.0f,
+                250.0f / 255.0f, 1.0f);
+    REQUIRE(svg_path->stroke_gradient() ==
+            "linear-gradient(to right, #89b4fa, #cba6f7)");
+    REQUIRE(svg_path->stroke_width() == Catch::Approx(2.5f));
+
+    auto* svg_ellipse = dynamic_cast<SvgPathWidget*>(root->child_at(1));
+    REQUIRE(svg_ellipse != nullptr);
+    REQUIRE_FALSE(svg_ellipse->path_data().empty());
+    REQUIRE(svg_ellipse->viewbox_width() == Catch::Approx(20.0f));
+    REQUIRE(svg_ellipse->viewbox_height() == Catch::Approx(12.0f));
+    REQUIRE(svg_ellipse->stroke_gradient() ==
+            "linear-gradient(to right, #89b4fa, #cba6f7)");
+    REQUIRE(svg_ellipse->stroke_width() == Catch::Approx(1.5f));
+}
 // ── Shared design-IR helpers ─────────────────────────────────────────────
 // design_ir_helpers.hpp holds the one definition of the accessors and parsers
 // every design lane (native materializer, C++ emitter, Swift emitter) reads the
