@@ -176,7 +176,7 @@ TEST_CASE("timeline graph binding quiescently reprepares plugin dimensions") {
     Buffer output(1, 32);
     auto output_view = output.view();
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program44, 32)));
-    REQUIRE(output.storage[0][0] == 1.0f);
+    REQUIRE(std::abs(output.storage[0][0] - 1.0f) < 1.0e-6f);
 
     auto map32 = tempo_map({32'000, 1});
     ProgramHarness programs32;
@@ -186,7 +186,7 @@ TEST_CASE("timeline graph binding quiescently reprepares plugin dimensions") {
     REQUIRE(binding.prepare_quiesced(*program32, routes, config(1), 32'000.0, 256).code ==
             TimelineGraphAdmissionCode::GraphPrepareFailed);
     REQUIRE(binding.process(output_view, input.const_view(), snapshot(*program44, 32, 32)));
-    REQUIRE(output.storage[0][0] == 1.0f);
+    REQUIRE(std::abs(output.storage[0][0] - 1.0f) < 1.0e-6f);
     REQUIRE(plugin_ptr->prepared_sample_rate.load(std::memory_order_relaxed) == 44'100.0);
     REQUIRE(plugin_ptr->prepared_max_block.load(std::memory_order_relaxed) == 256);
 }

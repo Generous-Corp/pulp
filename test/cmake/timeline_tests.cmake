@@ -124,9 +124,10 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
         test_timeline_graph_binding_publication.cpp
+        test_sequence_processor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
-    LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
+    LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 # MIDI controller -> parameter value scaling, and the DoD proof that a hardware
