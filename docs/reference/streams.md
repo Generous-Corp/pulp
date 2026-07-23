@@ -87,6 +87,32 @@ if (stream->status_code() == 200) {
 
 HTTPS is inherited from `cpp-httplib`, which ships with mbedTLS. `HttpStream` is currently read-only: calling `write()` returns `StreamError::Invalid`. Request-body streaming is not part of the shipped stream contract yet.
 
+### Incremental HTTP responses
+
+Use the lower-level request API when an HTTP protocol needs custom headers or
+must consume a response while it arrives, such as a server-sent event stream:
+
+```cpp
+HttpRequest request;
+request.url = "https://example.com/events";
+request.headers["Authorization"] = "Bearer " + access_token;
+request.on_chunk = [](std::string_view chunk) {
+    consume_events(chunk);
+    return true;
+};
+
+auto response = http_request(request);
+```
+
+`http_request()` supports GET and POST without exposing its transport library.
+The callback runs synchronously on the calling thread and returning `false`
+aborts the transfer. When a callback is supplied, bytes are delivered to it
+instead of being retained in `HttpResponse::body`; status and response headers
+remain available. Transport chunks may split or combine protocol records, so an
+SSE or line parser must retain incomplete input between callbacks. Transport
+and callback errors are intentionally generic and do not include request header
+values.
+
 ## `AsyncStream` — non-blocking with backpressure
 
 `AsyncStream` wraps any `Stream` and runs a background worker that pumps `read`/`write` calls. Events surface as callbacks:
