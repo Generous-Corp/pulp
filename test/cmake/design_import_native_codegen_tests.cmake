@@ -40,8 +40,8 @@ catch_discover_tests(pulp-test-design-import-parity PROPERTIES LABELS "parser-im
 catch_discover_tests(pulp-test-design-import
     TEST_SPEC "[network]"
     PROPERTIES
-        LABELS "parser-import"
-        RESOURCE_LOCK "design-import-network")
+        RESOURCE_LOCK "design-import-network"
+    LABELS "parser-import")
 
 # Multi-state capture: alternate_frames through the IR contract, the C++ codegen
 # (add_frame per frame), the native materializer, and the swap-target report.

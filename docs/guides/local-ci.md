@@ -1286,6 +1286,16 @@ target_link_libraries(pulp-test-my-suite PRIVATE pulp::view Catch2::Catch2WithMa
 catch_discover_tests(pulp-test-my-suite PROPERTIES LABELS slow)
 ```
 
+Multi-label lists are preserved as lists by Pulp's Catch discovery wrapper:
+
+```cmake
+catch_discover_tests(pulp-test-my-suite
+    LABELS "audio;slow;quality-lab")
+```
+
+All three labels reach CTest, so `ctest -L` and `ctest -LE` selection does not
+depend on label order.
+
 Rule of thumb for `slow`: a test consistently >5 sec on at least one
 platform, OR a sleep-bounded smoke (file-mtime, hammer race, message-loop
 bound) whose value lies in soak coverage rather than per-PR feedback.
