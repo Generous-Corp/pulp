@@ -116,12 +116,31 @@ void BridgeRegistrars::register_svg_api(WidgetBridge& self) {
         if (auto* w = dynamic_cast<SvgPathWidget*>(self.widget(id))) {
             if (clear) w->clear_stroke();
             else       w->set_stroke_color(parse_bridge_css_color(hex));
+            // Solid stroke wins over any previous gradient — same stale-slot
+            // rule as setSvgFill. Codegen emits the solid fallback BEFORE the
+            // gradient, so gradient-carrying nodes still end up on the gradient.
+            w->clear_stroke_gradient();
         } else if (auto* r = dynamic_cast<SvgRectWidget*>(self.widget(id))) {
             if (clear) r->clear_stroke();
             else       r->set_stroke_color(parse_bridge_css_color(hex));
         } else if (auto* l = dynamic_cast<SvgLineWidget*>(self.widget(id))) {
             if (clear) l->clear_stroke();
             else       l->set_stroke_color(parse_bridge_css_color(hex));
+        }
+        return choc::value::Value();
+    });
+
+    // Gradient-stroke bridge fn — the stroke mirror of setSvgFillGradient.
+    // Accepts a CSS linear-gradient string verbatim; SvgPathWidget parses it
+    // at paint time and falls back to the solid stroke when it won't parse.
+    // SvgPath-only: rect/line widgets have no gradient-stroke slot, so the fn
+    // is a deliberate no-op for them (same contract as setSvgFillGradient).
+    register_bridge_function(api, "setSvgStrokeGradient", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto value = args.get<std::string>(1, "");
+        if (auto* w = dynamic_cast<SvgPathWidget*>(self.widget(id))) {
+            if (value.empty()) w->clear_stroke_gradient();
+            else               w->set_stroke_gradient(std::move(value));
         }
         return choc::value::Value();
     });

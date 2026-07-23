@@ -165,7 +165,13 @@ test('a stroke-band vector gets no CSS border — the band is the stroke', () =>
     images: new Map(), fileKey: 'K', parserVersion: 't',
     compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
   }).envelope.root.children.find((n) => n.name === 'blob');
-  assert.ok(fv.style && fv.style.border, 'a real fill + stroke keeps its border');
+  // A FILLED vector with a separate stroke used to lower it as a CSS border;
+  // it now rides the path itself as real stroke channels (SvgPathWidget fills
+  // and then strokes the same path), so no border may double it.
+  assert.equal(fv.stroke, '#ff0000', 'a real fill + stroke strokes its own path');
+  assert.equal(fv.strokeWidth, 2);
+  assert.ok(!(fv.style && fv.style.border),
+    'no redundant CSS border beside the path stroke — it would double the edge');
 });
 
 test('a filled vector prefers its fill outline and reports the dropped stroke', () => {
@@ -821,4 +827,266 @@ test('an instance-scale ink gap is NOT "corrected" by margins', () => {
   const v = firstVector(envelope.root);
   assert.ok(!v.layout || v.layout.marginLeft === undefined,
     'a scale-delta gap must not become margins');
+});
+
+// ── vector-network fallback + stroke channels ───────────────────────────────
+
+// Encode a vector-network blob the way Figma does (see paths.mjs):
+// header [u32 v][u32 s][u32 regions], then 12-byte vertices and 28-byte
+// segments, all little-endian.
+function encodeNetwork(vertices, segments, regionCount = 0) {
+  const buf = Buffer.alloc(12 + vertices.length * 12 + segments.length * 28);
+  buf.writeUInt32LE(vertices.length, 0);
+  buf.writeUInt32LE(segments.length, 4);
+  buf.writeUInt32LE(regionCount, 8);
+  vertices.forEach(([x, y], i) => {
+    const o = 12 + i * 12;
+    buf.writeFloatLE(x, o + 4);
+    buf.writeFloatLE(y, o + 8);
+  });
+  segments.forEach(([start, tx0, ty0, end, tx1, ty1], i) => {
+    const o = 12 + vertices.length * 12 + i * 28;
+    buf.writeUInt32LE(start, o + 4);
+    buf.writeFloatLE(tx0, o + 8);
+    buf.writeFloatLE(ty0, o + 12);
+    buf.writeUInt32LE(end, o + 16);
+    buf.writeFloatLE(tx1, o + 20);
+    buf.writeFloatLE(ty1, o + 24);
+  });
+  return buf;
+}
+
+// A unit diamond as a closed 4-line loop (zero tangents = straight lines).
+const diamondNetwork = () => encodeNetwork(
+  [[1, 0.5], [0.5, 1], [0, 0.5], [0.5, 0]],
+  [
+    [0, 0, 0, 1, 0, 0],
+    [1, 0, 0, 2, 0, 0],
+    [2, 0, 0, 3, 0, 0],
+    [3, 0, 0, 0, 0, 0],
+  ],
+);
+
+test('a geometry-less vector falls back to its vector network as a centerline', () => {
+  // The FX knobs' `Oval` rim: master and every instance carry EMPTY
+  // fillGeometry/strokeGeometry, and the only shape in the file is the
+  // authored network. The decode scales normalizedSize → node size and marks
+  // the result `centerline` so the caller STROKES it rather than filling.
+  const node = {
+    type: 'VECTOR', name: 'Oval',
+    transform: { m00: 1, m01: 0, m02: 8, m10: 0, m11: 1, m12: 8 },
+    size: { x: 20, y: 20 },
+    vectorData: { vectorNetworkBlob: 0, normalizedSize: { x: 1, y: 1 } },
+    strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }],
+    strokeWeight: 2,
+  };
+  const r = geometryToPath(node, [{ bytes: diamondNetwork() }]);
+  assert.ok(r, 'network resolves');
+  assert.equal(r.centerline, true);
+  assert.equal(r.paint, 'stroke');
+  // Scaled 1x1 → 20x20 and placed by the transform.
+  assert.equal(r.box.width, 20);
+  assert.equal(r.box.height, 20);
+  assert.equal(r.box.minX, 8);
+  // The closing segment is emitted explicitly before Z — a curved closer
+  // NEEDS its cubic, and a straight one is merely redundant with Z.
+  assert.equal(r.d, 'M20 10 L10 20 L0 10 L10 0 L20 10 Z');
+});
+
+test('curved network segments decode as cubics with vertex-relative tangents', () => {
+  // One quarter-arc: tangents are OFFSETS from their vertices (the classic
+  // kappa*r circle construction), so control points = vertex + tangent.
+  const blob = encodeNetwork(
+    [[10, 0], [0, 10]],
+    [[0, 0, 5.5, 1, 5.5, 0]],
+  );
+  const node = {
+    type: 'VECTOR', name: 'arc', size: { x: 10, y: 10 },
+    vectorData: { vectorNetworkBlob: 0, normalizedSize: { x: 10, y: 10 } },
+    strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }],
+    strokeWeight: 1,
+  };
+  const r = geometryToPath(node, [{ bytes: blob }]);
+  assert.ok(r);
+  assert.match(r.d, /C10 5.5 5.5 10 0 10/);
+});
+
+test('the network decode refuses what it cannot verify', () => {
+  const node = (blobBytes) => ({
+    type: 'VECTOR', name: 'x', size: { x: 10, y: 10 },
+    vectorData: { vectorNetworkBlob: 0, normalizedSize: { x: 1, y: 1 } },
+    strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }],
+    strokeWeight: 1,
+  });
+  // Truncated / wrong length → refused (exact byte consumption is the guard).
+  assert.equal(geometryToPath(node(), [{ bytes: diamondNetwork().subarray(0, 40) }]), null);
+  // Regions present → refused (unverified layout).
+  const withRegions = encodeNetwork([[0, 0], [1, 1]], [[0, 0, 0, 1, 0, 0]], 1);
+  assert.equal(geometryToPath(node(), [{ bytes: withRegions }]), null);
+  // A branching vertex (3 segments meet) → refused; chaining it greedily
+  // would draw a plausible-looking wrong shape.
+  const branching = encodeNetwork(
+    [[0, 0], [1, 0], [1, 1], [0, 1]],
+    [
+      [0, 0, 0, 1, 0, 0],
+      [1, 0, 0, 2, 0, 0],
+      [1, 0, 0, 3, 0, 0],
+    ],
+  );
+  assert.equal(geometryToPath(node(), [{ bytes: branching }]), null);
+  // A BOOLEAN_OPERATION never takes the network fallback — its operands (the
+  // children the walk descends into) are the faithful rendering.
+  const bo = {
+    type: 'BOOLEAN_OPERATION', name: 'union', size: { x: 10, y: 10 },
+    vectorData: { vectorNetworkBlob: 0, normalizedSize: { x: 1, y: 1 } },
+  };
+  assert.equal(geometryToPath(bo, [{ bytes: diamondNetwork() }]), null);
+});
+
+test('a filled vector lowers its stroke as real stroke channels on the same path', () => {
+  // Sub-case (b) of the stroke-survival fix: SvgPathWidget fills and then
+  // strokes the SAME path, and for a CENTER-aligned stroke the fill outline
+  // IS the stroke centerline — so nothing is dropped and no border doubles it.
+  const scene = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { type: 'VECTOR', name: 'blob',
+        guid: { sessionID: 0, localID: 3 },
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+        size: { x: 20, y: 20 }, strokeWeight: 1.5, strokeAlign: 'CENTER',
+        fillGeometry: [{ commandsBlob: 0 }],
+        fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 1, a: 1 }, visible: true }],
+        strokePaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, opacity: 0.5, visible: true }] },
+    ],
+    blobs: [{ bytes: encode([MOVE, 0, 0], [LINE, 20, 0], [LINE, 20, 20], [LINE, 0, 20], [CLOSE]) }],
+  });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Panel'), CTX);
+  const v = envelope.root.children.find((n) => n.name === 'blob');
+  assert.equal(v.fill, '#0000ff');
+  // Paint opacity folds into the emitted alpha, exactly as fills do.
+  assert.equal(v.stroke, '#ff000080');
+  assert.equal(v.strokeWidth, 1.5);
+  assert.ok(!(v.style && v.style.border), 'no border beside the path stroke');
+  // CENTER align is exact — nothing to confess.
+  assert.ok(!diagnostics.some((d) => d.code === 'stroke-align-approximated'));
+});
+
+test('an INSIDE stroke band is re-lowered as a centered stroke on the shape outline', () => {
+  // Sub-case (c): Figma bakes INSIDE/OUTSIDE bands UNCLIPPED — the boundary
+  // outlined at ±weight, DOUBLE the declared width (a real file's Polygon 5,
+  // weight 2 INSIDE, carries a 4px band). Filling that band paints fat and
+  // bright. The decoder prefers the fill outline + a centered stroke channel,
+  // and says so.
+  const fillOutline = encode([MOVE, 0, 0], [LINE, 20, 0], [LINE, 20, 20], [LINE, 0, 20], [CLOSE]);
+  const fatBand = encode(
+    [MOVE, -2, -2], [LINE, 22, -2], [LINE, 22, 22], [LINE, -2, 22], [CLOSE],
+    [MOVE, 2, 2], [LINE, 18, 2], [LINE, 18, 18], [LINE, 2, 18], [CLOSE],
+  );
+  const mkScene = (strokeAlign) => buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { type: 'VECTOR', name: 'tri',
+        guid: { sessionID: 0, localID: 3 },
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+        size: { x: 20, y: 20 }, strokeWeight: 2, strokeAlign,
+        fillGeometry: [{ commandsBlob: 0 }],
+        strokeGeometry: [{ commandsBlob: 1 }],
+        fillPaints: [],
+        strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, opacity: 0.35, visible: true }] },
+    ],
+    blobs: [{ bytes: fillOutline }, { bytes: fatBand }],
+  });
+
+  const inside = materializeFrame(mkScene('INSIDE'), findFrame(mkScene('INSIDE'), 'Panel'), CTX);
+  const tri = inside.envelope.root.children.find((n) => n.name === 'tri');
+  // The path is the 20x20 shape outline, not the 24x24 unclipped band.
+  assert.equal(tri.style.width, 20);
+  assert.equal(tri.fill, 'none');
+  assert.equal(tri.stroke, '#ffffff59');
+  assert.equal(tri.strokeWidth, 2);
+  assert.ok(inside.diagnostics.some((d) => d.code === 'stroke-align-approximated'),
+    'the half-weight approximation is stated');
+
+  // CENTER keeps the exact baked band — filled, never re-stroked.
+  const center = materializeFrame(mkScene('CENTER'), findFrame(mkScene('CENTER'), 'Panel'), CTX);
+  const band = center.envelope.root.children.find((n) => n.name === 'tri');
+  assert.equal(band.style.width, 24);
+  assert.equal(band.fill, '#ffffff59');
+  assert.equal(band.stroke, undefined);
+});
+
+test('an ellipse with a gradient stroke lowers it to the strokeGradient channel', () => {
+  // The knob-base rim: an ELLIPSE (box branch — its path is synthesized
+  // downstream) whose GRADIENT_LINEAR stroke used to be dropped with "no
+  // solid paint to flatten to".
+  const scene = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { type: 'ELLIPSE', name: 'base',
+        guid: { sessionID: 0, localID: 3 },
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+        transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+        size: { x: 22, y: 22 }, strokeWeight: 0.94, strokeAlign: 'OUTSIDE',
+        fillPaints: [{ type: 'SOLID', color: { r: 0.17, g: 0.17, b: 0.18, a: 1 }, opacity: 0.8, visible: true }],
+        strokePaints: [{ type: 'GRADIENT_LINEAR', opacity: 1, visible: true,
+          transform: { m00: 0, m01: 1, m02: 0, m10: -1, m11: 0, m12: 1 },
+          stops: [
+            { color: { r: 1, g: 1, b: 1, a: 0.25 }, position: 0 },
+            { color: { r: 0.19, g: 0.19, b: 0.19, a: 0.24 }, position: 1 },
+          ] }] },
+    ],
+  });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Panel'), CTX);
+  const base = envelope.root.children.find((n) => n.name === 'base');
+  assert.equal(base.type, 'ellipse');
+  assert.match(base.strokeGradient, /^linear-gradient\(/);
+  assert.equal(base.strokeWidth, 0.94);
+  assert.ok(!(base.style && base.style.border), 'no flattened border beside the gradient channel');
+  assert.ok(diagnostics.some((d) => d.code === 'stroke-align-approximated'),
+    'OUTSIDE align approximation is stated');
+  assert.ok(!diagnostics.some((d) => d.code === 'complex-stroke-flattened'),
+    'the gradient is carried, not flattened');
+});
+
+test('diagnostics carry the instance-path node id, not the master guid', () => {
+  // pushDiag used to record guidKey(node.guid) — the MASTER's id — for
+  // symbol-expansion clones, while the envelope and materials sidecar name
+  // the clone ('<instance>/<child>'). The material audit joins per node_id,
+  // so every expanded diagnostic was invisible to it and an honest, out-loud
+  // degradation scored as a SILENT drop.
+  const scene = buildScene({
+    nodeChanges: [
+      { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+      { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Panel',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' },
+        size: { x: 100, y: 100 } },
+      { guid: { sessionID: 0, localID: 10 }, type: 'SYMBOL', name: 'Widget',
+        parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'b' },
+        size: { x: 30, y: 30 } },
+      // A vector child with NO geometry at all → 'vector-simplified'.
+      { guid: { sessionID: 0, localID: 11 }, type: 'VECTOR', name: 'ghost',
+        parentIndex: { guid: { sessionID: 0, localID: 10 }, position: 'a' },
+        size: { x: 10, y: 10 },
+        fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, visible: true }] },
+      { guid: { sessionID: 0, localID: 20 }, type: 'INSTANCE', name: 'W1',
+        parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+        symbolData: { symbolID: { sessionID: 0, localID: 10 } },
+        size: { x: 30, y: 30 } },
+    ],
+  });
+  const { diagnostics } = materializeFrame(scene, findFrame(scene, 'Panel'), CTX);
+  const diag = diagnostics.find((d) => d.code === 'vector-simplified' && d.node_name === 'ghost');
+  assert.ok(diag, 'the geometry-less clone is diagnosed');
+  assert.equal(diag.node_id, '0:20/0:11');
 });

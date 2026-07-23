@@ -313,6 +313,7 @@ SIGNATURE_OVERRIDES: dict[str, str] = {
     "setSvgPath": "(id: string, pathData: string) => void",
     "setSvgRect": "(id: string, x: number, y: number, width: number, height: number) => void",
     "setSvgStrokeWidth": "(id: string, width: number) => void",
+    "setSvgStrokeGradient": "(id: string, value: string) => void",
     "setSvgViewBox": "(id: string, width: number, height: number) => void",
     "setTextRuns": "(id: string, runsJson: string) => void",
     "setTheme": "(name: 'dark' | 'light' | 'pro_audio' | string) => void",

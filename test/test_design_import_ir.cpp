@@ -1566,6 +1566,67 @@ TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
             std::string::npos);
 }
 
+TEST_CASE("a stroke's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg][stroke-gradient]") {
+    using namespace pulp::view;
+
+    // The stroke mirror of the fill-gradient round-trip above — this is how a
+    // Figma knob rim's GRADIENT_LINEAR stroke reaches setSvgStrokeGradient.
+    // The second node is the OTHER decoder shape: an ellipse primitive with NO
+    // authored path (its path is synthesized later by synthesize_primitive_
+    // paths), whose stroke channels must be captured anyway — gating the
+    // capture on path_data dropped the knob-base rim before synthesis ran.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Rim",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "none",
+          "stroke": "#50505000",
+          "strokeGradient": "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)",
+          "strokeWidth": 1.88
+        }, {
+          "type": "ellipse", "name": "Base",
+          "strokeGradient": "linear-gradient(0deg, #ffffff40, #00000000)",
+          "strokeWidth": 0.94
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 2);
+    const auto& rim = ir.root.children[0].attributes;
+    // Carried BESIDE the solid fallback, not instead of it — the widget falls
+    // back to the solid when the gradient string won't parse.
+    REQUIRE(rim.at("svg_stroke_gradient") ==
+            "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)");
+    REQUIRE(rim.at("svg_stroke") == "#50505000");
+    REQUIRE(rim.at("svg_stroke_width").substr(0, 4) == "1.88");
+
+    const auto& base = ir.root.children[1].attributes;
+    REQUIRE(base.count("path_data") == 0);   // synthesized later, not authored
+    REQUIRE(base.at("svg_stroke_gradient") ==
+            "linear-gradient(0deg, #ffffff40, #00000000)");
+    REQUIRE(base.at("svg_stroke_width").substr(0, 4) == "0.94");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgStrokeGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #00000000 100%)") !=
+            std::string::npos);
+    // Emission order pins the resolve order: the solid fallback first, the
+    // gradient after it (setSvgStroke clears a stale gradient slot).
+    const auto solid_pos = js.find("setSvgStroke('");
+    const auto grad_pos = js.find("setSvgStrokeGradient('");
+    REQUIRE(solid_pos != std::string::npos);
+    REQUIRE(solid_pos < grad_pos);
+}
+
 TEST_CASE("a control's art layers stay art, and are not each promoted to a control",
           "[view][import][audio-widget]") {
     using namespace pulp::view;
