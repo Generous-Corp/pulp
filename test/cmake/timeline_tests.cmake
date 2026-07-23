@@ -138,6 +138,19 @@ pulp_add_test_suite(pulp-test-midi-parameter-map-scaling
     SOURCES test_midi_parameter_map_scaling.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::timeline)
 
+# The multitrack/PDC proof is also registered separately from the aggregate
+# example suite. That keeps the Phase-2 gate independent of standalone-editor
+# linkage and lets no-JS engine builds exercise the proof directly.
+pulp_add_test_suite(pulp-test-timeline-multitrack-pdc
+    SOURCES
+        ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_multitrack_arrangement.cpp
+        ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp
+        harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
+        ${CMAKE_SOURCE_DIR}/test
+    LIBRARIES pulp::format pulp::host pulp::playback pulp::timeline
+        pulp::timebase pulp::native-components ${CMAKE_DL_LIBS})
+
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not
     # include or link back upward. The selftest proves every forbidden layer is
