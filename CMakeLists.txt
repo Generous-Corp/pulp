@@ -365,6 +365,7 @@ add_subdirectory(ship)
 # tools/audio (offline Audio Doctor CLI) is a dev tool — only when top-level.
 if(PROJECT_IS_TOP_LEVEL)
     add_subdirectory(tools/audio)
+    add_subdirectory(tools/timeline)
 endif()
 
 # ── Testing ─────────────────────────────────────────────────────────────────
