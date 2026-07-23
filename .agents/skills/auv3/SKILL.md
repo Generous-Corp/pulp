@@ -720,7 +720,9 @@ needs letterboxing can call `set_design_viewport` itself; see the `ios` skill.
 
 Editor-initiated resize requests on iOS are advisory. Install the
 `Processor::request_editor_resize` handler only after the bridge and host are
-attached, require the main thread, validate the request through `ViewBridge`,
+attached but before `ViewBridge::notify_attached()` invokes
+`Processor::on_view_opened` (which may synchronously restore a mode-specific
+size), require the main thread, validate the request through `ViewBridge`,
 and publish the accepted size through `preferredContentSize`. Do not pin the
 design viewport or replace the normal pane-bounds layout: the AU host remains
 authoritative and the editor stays responsive. Register the handler under the

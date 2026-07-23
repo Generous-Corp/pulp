@@ -230,7 +230,6 @@
     // genuinely needs letterboxing can call set_design_viewport itself.
 
     _viewHost->attach_to_parent((__bridge void*)self.view);
-    if (_bridge) _bridge->notify_attached();
 
     // AUv3 publishes a preferredContentSize rather than receiving an
     // accept/refuse callback. Keep iOS responsive (no design viewport/aspect
@@ -257,6 +256,12 @@
                 return true;
             });
     }
+    // Notify only after this view has registered its owner-scoped handler.
+    // on_view_opened() may synchronously restore a mode-specific natural size;
+    // registering first prevents that request from being dropped or routed to
+    // another already-open view.
+    if (_bridge) _bridge->notify_attached();
+
     pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}, mode={}, gpu={}",
                             opts.size.width, opts.size.height, mode,
                             _viewHost->is_gpu_backed());
