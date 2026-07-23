@@ -718,6 +718,16 @@ fills edge-to-edge (aspect-locked scaling left dark letterbox bars on the
 sides and pushed header text to the edge). A fixed-aspect iOS editor that
 needs letterboxing can call `set_design_viewport` itself; see the `ios` skill.
 
+Editor-initiated resize requests on iOS are advisory. Install the
+`Processor::request_editor_resize` handler only after the bridge and host are
+attached, require the main thread, validate the request through `ViewBridge`,
+and publish the accepted size through `preferredContentSize`. Do not pin the
+design viewport or replace the normal pane-bounds layout: the AU host remains
+authoritative and the editor stays responsive. Clear the handler before
+swapping the audio unit, before rebuilding/tearing down the editor, and in
+`dealloc`; otherwise a late request can call through a stale controller or
+host.
+
 On macOS, the view controller's root view must be created at the
 compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available.
 REAPER can choose the initial AUv3 container from `loadView` /
