@@ -21,8 +21,8 @@ add_library(pulp-timeline
     src/schema_json_canonical.cpp
     src/schema_json_parser.cpp
     src/schema_json_preflight.cpp
-    src/schema_json_summary.cpp
     src/schema_release.cpp
+    src/schema_json_validation.cpp
     src/schema_registry.cpp
     src/serialize_asset_loop_decode.cpp
     src/serialize_automation_decode.cpp

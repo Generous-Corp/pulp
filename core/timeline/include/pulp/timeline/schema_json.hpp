@@ -123,34 +123,6 @@ struct StructuralPreflightSuccess {};
 runtime::Result<StructuralPreflightSuccess, PersistenceError>
 preflight_timeline_structure(std::string_view json, const DecodeLimits& limits);
 
-/// Allocation-light project metadata decoded by the structural scanner.
-///
-/// The scanner visits the complete document to enforce the same structural
-/// quotas as deserialize_project(), but it constructs neither the generic JSON
-/// DOM nor the editable Project model. This is the intended project-browser
-/// and media-resolution preflight tier for large snapshots.
-struct ProjectSummary {
-    ItemId id;
-    std::string name;
-    std::uint64_t next_item_id = 0;
-    ItemId root_sequence_id;
-    std::uint32_t project_schema_version = 0;
-    std::size_t asset_count = 0;
-    std::size_t sequence_count = 0;
-    std::size_t track_count = 0;
-    std::size_t clip_count = 0;
-    std::size_t note_count = 0;
-    std::size_t device_placement_count = 0;
-    std::size_t automation_lane_count = 0;
-    std::size_t automation_point_count = 0;
-    std::size_t take_lane_count = 0;
-    std::size_t take_count = 0;
-    std::size_t take_comp_segment_count = 0;
-};
-
-runtime::Result<ProjectSummary, PersistenceError>
-peek_project_summary(std::string_view json, const DecodeLimits& limits = {});
-
 runtime::Result<std::string, PersistenceError> canonicalize_json(const JsonValue& value);
 std::string quote_json_string(std::string_view value);
 bool is_valid_utf8(std::string_view value) noexcept;

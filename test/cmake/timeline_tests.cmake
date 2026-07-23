@@ -200,8 +200,8 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_summary.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp

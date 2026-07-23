@@ -124,8 +124,8 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_canonical.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_parser.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_preflight.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_summary.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_release.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_validation.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_automation_decode.cpp

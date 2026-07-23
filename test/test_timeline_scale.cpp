@@ -213,9 +213,9 @@ TEST_CASE("full arrangement scale sustains one hundred structural transactions u
         const auto registry = take(make_builtin_timeline_registry());
         const auto snapshot = take(serialize_project(*project, registry));
         const auto before_summary_nodes = Project::identity_stats().nodes_created;
-        const auto summary = take(peek_project_summary(snapshot.json));
-        REQUIRE(summary.track_count == kTrackCount);
-        REQUIRE(summary.clip_count == kTrackCount * kClipsPerTrack);
+        const auto summary = take(peek_project_summary(snapshot.json, registry));
+        REQUIRE(summary.counts.tracks == kTrackCount);
+        REQUIRE(summary.counts.clips == kTrackCount * kClipsPerTrack);
         REQUIRE(Project::identity_stats().nodes_created == before_summary_nodes);
         const auto before_restore_nodes = Project::identity_stats().nodes_created;
         const auto load_started = std::chrono::steady_clock::now();

@@ -29,8 +29,9 @@ int main() {
     auto snapshot = timeline::serialize_project(project.value(), registry.value());
     if (!snapshot)
         return 5;
-    auto summary = timeline::peek_project_summary(snapshot->json);
-    if (!summary || summary->id != timeline::ItemId{1} || summary->sequence_count != 1)
+    auto summary = timeline::peek_project_summary(snapshot->json, registry.value());
+    if (!summary || summary->project_id != timeline::ItemId{1} ||
+        summary->counts.sequences != 1)
         return 6;
 
     const std::array tempo_points{

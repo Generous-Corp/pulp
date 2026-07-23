@@ -82,11 +82,11 @@ Project browsers and background media resolvers should inspect a snapshot with
 ```cpp
 #include <pulp/timeline/serialize.hpp>
 
-auto summary = pulp::timeline::peek_project_summary(snapshot_json);
+auto summary = pulp::timeline::peek_project_summary(snapshot_json, registry);
 if (!summary)
     return report(summary.error());
 
-show_project(summary->name, summary->track_count, summary->clip_count);
+show_project(summary->name, summary->counts.tracks, summary->counts.clips);
 ```
 
 The peek scans the complete JSON under the same depth, input-size, and authored

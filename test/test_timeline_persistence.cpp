@@ -46,32 +46,33 @@ TEST_CASE("Timeline project summary peeks without constructing the editable docu
                          R"("name":"m\u00edxed")");
 
     const auto nodes_before = Project::identity_stats().nodes_created;
-    const auto summary = take(peek_project_summary(escaped_name));
+    const auto registry = builtins();
+    const auto summary = take(peek_project_summary(escaped_name, registry));
     const auto nodes_after = Project::identity_stats().nodes_created;
 
-    REQUIRE(summary.id == ItemId{1});
+    REQUIRE(summary.project_id == ItemId{1});
     REQUIRE(summary.name == "m\u00edxed");
     REQUIRE(summary.next_item_id == 12);
     REQUIRE(summary.root_sequence_id == ItemId{8});
-    REQUIRE(summary.project_schema_version == 1);
-    REQUIRE(summary.asset_count == 1);
-    REQUIRE(summary.sequence_count == 2);
-    REQUIRE(summary.track_count == 2);
-    REQUIRE(summary.clip_count == 3);
-    REQUIRE(summary.note_count == 2);
-    REQUIRE(summary.device_placement_count == 0);
-    REQUIRE(summary.automation_lane_count == 0);
-    REQUIRE(summary.automation_point_count == 0);
-    REQUIRE(summary.take_lane_count == 0);
-    REQUIRE(summary.take_count == 0);
-    REQUIRE(summary.take_comp_segment_count == 0);
+    REQUIRE(summary.schema_version == 1);
+    REQUIRE(summary.counts.assets == 1);
+    REQUIRE(summary.counts.sequences == 2);
+    REQUIRE(summary.counts.tracks == 2);
+    REQUIRE(summary.counts.clips == 3);
+    REQUIRE(summary.counts.notes == 2);
+    REQUIRE(summary.counts.device_placements == 0);
+    REQUIRE(summary.counts.automation_lanes == 0);
+    REQUIRE(summary.counts.automation_points == 0);
+    REQUIRE(summary.counts.take_lanes == 0);
+    REQUIRE(summary.counts.takes == 0);
+    REQUIRE(summary.counts.take_comp_segments == 0);
     REQUIRE(nodes_after == nodes_before);
 
     auto invalid_id = escaped_name;
     const auto id = invalid_id.find(R"("id":"1")");
     REQUIRE(id != std::string::npos);
     invalid_id.replace(id, std::string_view(R"("id":"1")").size(), R"("id":"01")");
-    const auto rejected = peek_project_summary(invalid_id);
+    const auto rejected = peek_project_summary(invalid_id, registry);
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidNumber);
     REQUIRE(rejected.error().path == "/data/id");
@@ -109,19 +110,20 @@ TEST_CASE("Timeline project summary counts nested authored structures") {
     auto project =
         take(Project::create(ProjectInput{{1}, "counts", 21, {5}, {asset}, {sequence}}));
 
+    const auto registry = builtins();
     const auto summary =
-        take(peek_project_summary(take(serialize_project(project, builtins())).json));
-    REQUIRE(summary.asset_count == 1);
-    REQUIRE(summary.sequence_count == 1);
-    REQUIRE(summary.track_count == 1);
-    REQUIRE(summary.clip_count == 1);
-    REQUIRE(summary.note_count == 0);
-    REQUIRE(summary.device_placement_count == 1);
-    REQUIRE(summary.automation_lane_count == 1);
-    REQUIRE(summary.automation_point_count == 2);
-    REQUIRE(summary.take_lane_count == 1);
-    REQUIRE(summary.take_count == 1);
-    REQUIRE(summary.take_comp_segment_count == 1);
+        take(peek_project_summary(take(serialize_project(project, registry)).json, registry));
+    REQUIRE(summary.counts.assets == 1);
+    REQUIRE(summary.counts.sequences == 1);
+    REQUIRE(summary.counts.tracks == 1);
+    REQUIRE(summary.counts.clips == 1);
+    REQUIRE(summary.counts.notes == 0);
+    REQUIRE(summary.counts.device_placements == 1);
+    REQUIRE(summary.counts.automation_lanes == 1);
+    REQUIRE(summary.counts.automation_points == 2);
+    REQUIRE(summary.counts.take_lanes == 1);
+    REQUIRE(summary.counts.takes == 1);
+    REQUIRE(summary.counts.take_comp_segments == 1);
 }
 
 TEST_CASE("Timeline identity persistence derives immediate parents from legacy snapshots") {

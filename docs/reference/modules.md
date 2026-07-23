@@ -881,8 +881,12 @@ name while preserving `next_item_id` as the durable no-reuse boundary.
 canonical decimal strings, malformed or oversized input is rejected under
 `DecodeLimits`, and unknown extension envelopes retain their exact validated
 bytes for lossless ordinary re-save. `SerializedSnapshot` flags those opaque
-objects so callers can surface compatibility risk. This is snapshot JSON only;
-it does not read or write ZIP/package containers.
+opaque objects so callers can surface compatibility risk.
+`peek_project_summary()` uses the caller's load `SchemaRegistry`, validates the
+complete structural envelope, and reports project identity, name, root, and
+supported-object counts without constructing a `Project` or resolving
+references; it is the bounded project-browser and load-admission tier. This is
+snapshot JSON only; it does not read or write ZIP/package containers.
 
 `journal.hpp` defines the optional `JournalSink` persistence seam. A session
 publishes a transaction only after the sink reports its complete batch durable,
@@ -906,9 +910,8 @@ journal files are rejected because atomic checkpoint replacement cannot
 preserve hard-link identity. Package containers remain outside this module
 surface.
 
-This surface intentionally excludes package I/O, playback, document-attached
-automation lanes and delivery, launch slots, takes, nesting, device
-implementation and routing, and UI.
+This surface intentionally excludes package I/O, playback delivery, launch
+slots, nesting, device implementation and routing, and UI.
 
 ## playback
 

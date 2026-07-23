@@ -181,6 +181,13 @@ invariants.
 - Decode through `DecodeLimits`. Keep input size, depth, value/member/array and
   domain object limits enforced before growth. Duplicate object keys, malformed
   UTF-8/surrogates, noncanonical wide integers, and non-normalized rates fail.
+- Use `peek_project_summary()` for project browsers and admission checks that
+  need identity, name, root, or structural counts without constructing the
+  immutable document. Pass the same `SchemaRegistry` intended for load so
+  registered content is distinguished from opaque content. The peek still
+  scans the complete structural envelope and enforces every `DecodeLimits`
+  quota, including take lanes and takes, but does not resolve item or media
+  references.
 - `serialize_project()` and `deserialize_project()` do not implement a ZIP or
   package container. Asset locators describe possible package-relative bytes,
   but container I/O belongs to a later slice.
