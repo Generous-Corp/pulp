@@ -1,6 +1,6 @@
 ---
 name: auv2
-description: Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu), wiring MIDI input, and avoiding the DAW-side component cache that silently masks repackaging.
+description: Audio Unit v2 adapter work for Pulp — picking the right AU component type (aufx/aumf/aumi/aumu) and its matching entry macro, wiring MIDI input and output (including the aumi MIDI-processor adapter), sharing the base-class-free adapter surface, and avoiding the DAW-side component cache that silently masks repackaging.
 requires:
   scripts: []
   tools: []
@@ -10,7 +10,7 @@ requires:
 
 Use this when you are:
 
-- Touching `core/format/src/au_v2_adapter.cpp` / `.hpp` or the AU v2 instrument adapter
+- Touching any AU v2 adapter — effect (`au_v2_adapter`), instrument (`au_v2_instrument`), MIDI processor (`au_v2_midi_processor`), or their shared surface (`au_v2_common`)
 - Changing how Pulp packages AU v2 plug-ins in CMake (`tools/cmake/PulpUtils.cmake`, `tools/cmake/PulpInfoPlist.au.in`)
 - Debugging "plug-in loads but never receives MIDI" reports against an AU host
 - Picking or changing a plug-in's AU component type (4-char `type` in the Info.plist)
@@ -69,13 +69,14 @@ Two independent things must both be true for an `aumf` to receive MIDI, and it i
 1. The adapter **class** must implement the MIDI methods — `PulpAUEffect` derives `AUMIDIEffectBase` and overrides `HandleMIDIEvent` / `HandleSysEx`. ✅ (always true for Pulp effects)
 2. The component **entry** must register through a factory whose *lookup table* carries the MusicDevice selectors. A factory only dispatches the selectors its lookup knows. `ausdk::AUBaseFactory` (`AUBaseLookup`) has **no** MusicDevice selectors, so even though the class implements `HandleMIDIEvent`, the host's `MusicDeviceMIDIEvent` call returns **-4 (unimpErr)** — no note ever reaches the adapter, and `auval -v aumf` fails with `-4 IN CALL MusicDeviceMIDIEvent` (often with a cascading `Bad Max Frames` line that clears once the MIDI dispatch is fixed).
 
-So the entry macro is type-specific (`core/format/include/pulp/format/au_v2_entry.hpp`):
+So the entry macro is type-specific:
 
 | Macro | Factory | Use for |
 |-------|---------|---------|
-| `PULP_AU_PLUGIN` | `ausdk::AUBaseFactory` | `aufx` (audio-only effect) |
-| `PULP_AU_MIDI_PLUGIN` | `ausdk::AUMIDIEffectFactory` (`AUMIDILookup` = MIDIEvent + SysEx) | `aumf` (MIDI-receiving effect) |
-| instrument entry (`au_v2_instrument_entry.hpp`) | `ausdk::AUMusicDeviceFactory` (`AUMusicLookup` = + StartNote/StopNote) | `aumu` (instrument) |
+| `PULP_AU_PLUGIN` (`au_v2_entry.hpp`) | `ausdk::AUBaseFactory` | `aufx` (audio-only effect) |
+| `PULP_AU_MIDI_PLUGIN` (`au_v2_entry.hpp`) | `ausdk::AUMIDIEffectFactory` (`AUMIDILookup` = MIDIEvent + SysEx) | `aumf` (MIDI-receiving effect) |
+| `PULP_AU_MIDI_EFFECT` (`au_v2_midi_effect_entry.hpp`) | `ausdk::AUMIDIEffectFactory` | `aumi` (MIDI processor) |
+| `PULP_AU_INSTRUMENT` (`au_v2_instrument_entry.hpp`) | `ausdk::AUMusicDeviceFactory` (`AUMusicLookup` = + StartNote/StopNote) | `aumu` (instrument) |
 
 **Three surfaces must agree** for an `aumf`, or the component is invalid: `descriptor().accepts_midi = true`, the `aumf` type (CMake `ACCEPTS_MIDI` or a hand-written `Info.plist.au`), **and** `PULP_AU_MIDI_PLUGIN` in the plugin's `au_v2_entry.cpp`. The dispatch contract is pinned by `test/test_au_v2_effect.cpp` (`[dispatch]` — asserts `AUMIDILookup` routes `kMusicDeviceMIDIEventSelect` and `AUBaseLookup` does not), so a regression to the base factory fails in CI instead of at auval/Logic time.
 
@@ -89,22 +90,104 @@ The adapter inherits `AUMIDIEffectBase` (`AUEffectBase` + `AUMIDIBase`) so the S
 host -> AUMIDIBase::MIDIEvent(status, data1, data2, frame)
      -> AUMIDIBase::HandleMIDIEvent(strippedStatus, channel, data1, data2, frame)
      -> PulpAUEffect::HandleMIDIEvent(...)   <-- our override
-        - lock midi_mutex_
-        - push MidiEvent into pending_midi_
+        - decode_midi_event(...) -> MidiEvent
+        - try_push onto the lock-free midi_in_queue_
 ```
 
-At the top of `ProcessBufferLists()` we drain under the same lock:
+At the top of `ProcessBufferLists()` we drain wait-free:
 
 ```
-lock midi_mutex_
-midi_in = std::move(pending_midi_)
-pending_midi_ = {}
-unlock
+while (auto ev = midi_in_queue_.try_pop())   midi_in.add(*ev);
+while (auto sx = sysex_in_queue_.try_pop())  midi_in.add_sysex_copy(...);
 midi_in.sort()    // sample-accurate ordering
 processor_->process(..., midi_in, midi_out, ctx)
 ```
 
-The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same `pending_midi_` + `midi_mutex_` pattern against the `MusicDeviceBase` base class. If you're adding a third MIDI-aware AU, mirror that shape exactly — resist the urge to share a mixin until there's a third entry to fold.
+The instrument adapter (`core/format/src/au_v2_instrument.cpp`) uses the same lock-free queue pattern against the `MusicDeviceBase` base class.
+
+## The `aumi` MIDI processor (`PulpAUMidiProcessor`)
+
+`core/format/src/au_v2_midi_processor.cpp` + `.hpp`, reached from a plugin via
+`PULP_AU_MIDI_EFFECT` in `au_v2_midi_effect_entry.hpp`. Example:
+`examples/pulp-transpose` (auval-validated `aumi`). Tests:
+`test/test_au_v2_midi_processor.cpp` — a live adapter, host MIDI in through the
+SDK entry points, a host-installed `kAudioUnitProperty_MIDIOutputCallback`, and
+`Render()` driving the block.
+
+The four decisions, each of which has a silent-failure mode if reversed:
+
+- **Base is `MusicDeviceBase`, not `AUMIDIEffectBase`.** `AUMIDIEffectBase`
+  derives `AUEffectBase`, which is `AUBase(ci, 1, 1)` and pulls input element 0
+  every render — a MIDI processor has no audio input to pull. `MusicDeviceBase`
+  is `AUBase + AUMIDIBase` with the `MIDIEvent`/`SysEx` forwarding and the
+  MIDI-mapping property delegation already wired.
+- **Element shape is 0 inputs / 1 output.** The output element carries no
+  signal (the render path zeroes it and ORs in
+  `kAudioUnitRenderAction_OutputIsSilence`) but it MUST exist: an AU v2 host
+  advances a plugin by *rendering* it, and rendering is what drains the inbound
+  MIDI queue, runs `process()`, and fires the MIDI-output callback. With zero
+  output elements there is no bus to pull and the plugin never runs. `auval -v
+  aumi` accepts this shape and reports `Input Scope Bus Count: 0`.
+- **The main OUTPUT bus handed to `process(ProcessBuffers&)` is zero-channel but
+  marked ACTIVE.** This is load-bearing. The default projection in
+  `Processor::process(ProcessBuffers&)` does `if (!main_output()) return;`, and
+  `main_output()` returns null for an inactive bus — so an inactive output bus
+  means a MIDI effect written against the classic
+  `process(out, in, midi_in, midi_out, ctx)` signature never runs at all, and
+  the plugin passes nothing through with no error anywhere.
+- **Override `HandleMIDIEvent`, not the per-message hooks.**
+  `MusicDeviceBase::HandleNoteOn`/`HandleNoteOff` route notes into `StartNote`/
+  `StopNote`, which an `aumi` does not implement — every note would be dropped.
+  Intercepting at `HandleMIDIEvent` (as the effect adapter does) takes the whole
+  stream before that dispatch.
+
+Two behavioral differences from the effect adapter, both deliberate:
+
+- **MIDI output is advertised unconditionally**, not gated on
+  `descriptor().produces_midi`. An `aumi` that cannot emit MIDI has no reason to
+  exist, and gating would turn a forgotten `produces_midi = true` into silently
+  discarded output with no diagnostic. (The effect adapter still gates, so a
+  plain `aufx` never advertises a MIDI output.)
+- **Bypass is a WIRE, not a mute.** A declared Bypass parameter makes the
+  adapter copy `midi_in` to `midi_out` untouched and skip `process()`. The
+  audio-effect adapters do the opposite for MIDI (drop it), which is right when
+  the plugin's MIDI is a *side product* — an arpeggiator on an audio track
+  should not keep emitting while bypassed. For a MIDI processor the stream *is*
+  the signal path, so dropping it would silence every instrument downstream of
+  the bypassed slot. No bypass parameter is synthesized here:
+  `kAudioUnitProperty_BypassEffect` lives on `AUEffectBase`, so on an `aumi` a
+  synthesized control would be an ordinary parameter with no host bypass
+  semantics behind it.
+
+**`auval -v aumi` is a weak gate.** It stops after the parameter surface — no
+render test, no MIDI test, no channel-config negotiation (all of which it runs
+for `aufx`/`aumu`). A green `auval` on an `aumi` proves discovery, open,
+initialize, scope formats, properties, and parameter persistence, and nothing
+about MIDI actually flowing. In-DAW MIDI-FX behavior needs a host. Corollary:
+an `aumi` built on the *effect* adapter (1 audio in / 1 audio out) also passes
+`auval -v aumi` — the validator will not tell you the element shape is wrong.
+
+## Shared adapter surface — `au_v2_common.hpp`
+
+The three adapters derive three different SDK bases, so anything that does not
+need a specific base lives in `core/format/include/pulp/format/au_v2_common.hpp`
+(+ `src/au_v2_common.cpp`) and all three call it: the parameter surface
+(`fill_parameter_list` / `fill_parameter_info` /
+`fill_parameter_value_strings` / `parameter_string_from_value` /
+`parameter_value_from_string`), the editor→host parameter bridge
+(`wire_host_parameter_bridge` + the `ScopedHostParamWrite` echo guard), preset
+state (`save_pulp_state` / `restore_pulp_state`), the MIDI-output callback
+handoff (`MidiOutputCallbackPublisher`, `make_midi_output_names`), the Cocoa-view
+hook, `decode_midi_event`, the render `ProcessContext` builders, and
+`MidiOutputPacketBuilder`. Add a fourth adapter by calling these, not by copying
+a third implementation.
+
+**Do NOT introduce a `pulp::format::au::detail` namespace.** `pulp::format::detail`
+already exists and carries `PlayheadSnapshot`, `au_output_offset`,
+`audio_buffer_list_shape_matches`, and friends; a nested `au::detail` shadows it
+for every unqualified `detail::` use inside `pulp::format::au`, and the failures
+are confusing "no type named X in namespace pulp::format::au::detail" errors far
+from the cause. The shared helpers sit directly in `pulp::format::au`.
 
 ### Decode helper: `decode_midi_event()`
 
@@ -333,7 +416,9 @@ directly—the shared helpers contain exceptions.
 
 - **AU v3 parity** for MIDI on effects is not re-audited in this pass. If you touch `core/format/src/au_adapter.mm`, confirm the AUv3 `componentType` logic in `_pulp_add_auv3` still matches the fix in `_pulp_add_au`.
 
-- **AU v2 instrument MIDI output** is still unwired: `PulpAUInstrument::Render` builds a local `midi_out` that is discarded. Mirror the effect's `kAudioUnitProperty_MIDIOutputCallback` path against `MusicDeviceBase` when an instrument needs to emit MIDI.
+- **AU v2 instrument MIDI output** is still unwired: `PulpAUInstrument::Render` builds a local `midi_out` that is discarded. The `MidiOutputCallbackPublisher` + `MidiOutputPacketBuilder` in `au_v2_common.hpp` are base-class-free, so wiring it is now the same three calls the effect and MIDI-processor adapters make.
+
+- **`aumi` MIDI 2.0 / UMP input is not wired.** `AUMIDILookup` does carry `kMusicDeviceMIDIEventListSelect`, and `AUMIDIBase::MIDIEventList` returns `kAudio_UnimplementedError` by default, so a UMP-capable host falls back to `MusicDeviceMIDIEvent` and MIDI 1.0 still flows. Implementing it means walking the `MIDIEventList` with `pulp::midi::walk_ump_packet` + `UmpSysex7Reassembler`, the way `au_adapter.mm` does for AU v3.
 
 ## Gotchas
 
@@ -593,8 +678,10 @@ note-input pattern (`HandleNoteOn`/`HandleNoteOff` → lock-free queue).
 
 ## Reference pointers
 
-- Adapter source: `core/format/src/au_v2_adapter.cpp`, `core/format/include/pulp/format/au_v2_adapter.hpp`
+- Effect adapter: `core/format/src/au_v2_adapter.cpp`, `core/format/include/pulp/format/au_v2_adapter.hpp`
 - Instrument adapter (reference pattern): `core/format/src/au_v2_instrument.cpp`, `core/format/include/pulp/format/au_v2_instrument.hpp`
+- MIDI-processor adapter (`aumi`): `core/format/src/au_v2_midi_processor.cpp`, `core/format/include/pulp/format/au_v2_midi_processor.hpp`
+- Shared, base-class-free surface: `core/format/src/au_v2_common.cpp`, `core/format/include/pulp/format/au_v2_common.hpp`
 - Cocoa view factory: `core/format/src/au_v2_cocoa_view.mm` (owned by `view-bridge` + `ios` skills)
 - CMake selector: `tools/cmake/PulpUtils.cmake` — `_pulp_add_au` and `_pulp_add_auv3`
 - Info.plist template: `tools/cmake/PulpInfoPlist.au.in`
@@ -602,6 +689,7 @@ note-input pattern (`HandleNoteOn`/`HandleNoteOff` → lock-free queue).
 - Support matrix entry: `docs/status/support-matrix.yaml` — `formats.au_v2` and `format_limitations.au_v2`
 - Tests:
     - `test/test_au_v2_effect.cpp` — decode / sysex smoke
+    - `test/test_au_v2_midi_processor.cpp` — live `aumi` adapter, MIDI in -> MIDI out
     - `test/cmake/test_au_v2_type_selection.cmake` — aumf/aufx/aumu/aumi mapping
 
 ### AU v2 Cocoa view hands GpuSurface to ScriptedUiSession

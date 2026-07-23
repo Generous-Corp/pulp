@@ -10,7 +10,6 @@
 #include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/au_v2_adapter.hpp>  // kPulpEditorContextProperty, PulpEditorContext, fill_cocoa_view_info
 #include <pulp/format/detail/playhead_diff.hpp>
-#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
@@ -21,10 +20,6 @@
 #include <span>
 
 namespace pulp::format::au {
-
-// Set while the HOST writes a parameter (SetParameter); the store's UI-push
-// listener (fires inline on the same thread) skips echoing it back.
-namespace { thread_local bool g_host_writing_param = false; }
 
 namespace {
 // Number of AU output elements to hand the MusicDeviceBase base constructor.
@@ -106,52 +101,10 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
                     param.range.default_value);
             }
 
-            // Gesture begin/end → host Begin/EndParameterChangeGesture, so the
-            // editor's drag start/stop bracket a clean automation pass (Touch/
-            // Latch). Mirrors the AU v2 effect adapter — was missing here, so the
-            // instrument recorded values without gesture boundaries.
-            store_.set_gesture_callbacks(
-                [this](state::ParamID id) {
-                    AudioUnitEvent event;
-                    std::memset(&event, 0, sizeof(event));
-                    event.mEventType = kAudioUnitEvent_BeginParameterChangeGesture;
-                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    event.mArgument.mParameter.mParameterID =
-                        static_cast<AudioUnitParameterID>(id);
-                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    event.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &event);
-                },
-                [this](state::ParamID id) {
-                    AudioUnitEvent event;
-                    std::memset(&event, 0, sizeof(event));
-                    event.mEventType = kAudioUnitEvent_EndParameterChangeGesture;
-                    event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    event.mArgument.mParameter.mParameterID =
-                        static_cast<AudioUnitParameterID>(id);
-                    event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    event.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &event);
-                });
-
-            // UI -> host parameter notification, on the editing (main) thread.
-            // An editor ParameterEdit fires this; it notifies the host so it
-            // re-reads via GetParameter and records automation. NOT
-            // AudioUnitSetParameter-on-self and NEVER from the render thread.
-            ui_push_listener_ = store_.add_listener(
-                [this](state::ParamID id, float /*value*/) {
-                    if (g_host_writing_param) return;
-                    AudioUnitEvent ev;
-                    std::memset(&ev, 0, sizeof(ev));
-                    ev.mEventType = kAudioUnitEvent_ParameterValueChange;
-                    ev.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-                    ev.mArgument.mParameter.mParameterID =
-                        static_cast<AudioUnitParameterID>(id);
-                    ev.mArgument.mParameter.mScope = kAudioUnitScope_Global;
-                    ev.mArgument.mParameter.mElement = 0;
-                    AUEventListenerNotify(nullptr, nullptr, &ev);
-                },
-                state::ListenerThread::Audio);
+            // Editor -> host parameter path: gesture brackets + value-change
+            // notification, wired once through the shared AU v2 bridge.
+            wire_host_parameter_bridge(store_, GetComponentInstance(),
+                                               ui_push_listener_);
         }
     }
 }
@@ -175,9 +128,8 @@ OSStatus PulpAUInstrument::SetParameter(AudioUnitParameterID inID,
 {
     if (inScope == kAudioUnitScope_Global &&
         store_.info(static_cast<state::ParamID>(inID)) != nullptr) {
-        g_host_writing_param = true;
+        ScopedHostParamWrite host_write;
         store_.set_value_rt(static_cast<state::ParamID>(inID), inValue);
-        g_host_writing_param = false;
         return noErr;
     }
     return MusicDeviceBase::SetParameter(inID, inScope, inElement, inValue,
@@ -188,51 +140,20 @@ OSStatus PulpAUInstrument::GetParameterList(AudioUnitScope inScope,
                                             AudioUnitParameterID* outParameterList,
                                             UInt32& outNumParameters)
 {
-    if (inScope != kAudioUnitScope_Global) {
-        outNumParameters = 0;
-        return noErr;
-    }
-    outNumParameters = static_cast<UInt32>(store_.param_count());
-    if (outParameterList) {
-        auto params = store_.all_params();
-        for (std::size_t i = 0; i < params.size(); ++i)
-            outParameterList[i] = static_cast<AudioUnitParameterID>(params[i].id);
-    }
-    return noErr;
+    return fill_parameter_list(store_, inScope, outParameterList,
+                                       outNumParameters);
 }
 
 OSStatus PulpAUInstrument::GetParameterInfo(AudioUnitScope inScope,
                                             AudioUnitParameterID inParameterID,
                                             AudioUnitParameterInfo& outParameterInfo)
 {
-    if (inScope != kAudioUnitScope_Global)
-        return kAudioUnitErr_InvalidParameter;
-
-    const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
-    if (!param) return kAudioUnitErr_InvalidParameter;
-
-    outParameterInfo.flags = kAudioUnitParameterFlag_IsWritable
-                           | kAudioUnitParameterFlag_IsReadable
-                           | kAudioUnitParameterFlag_HasCFNameString;
-
-    CFStringRef name = CFStringCreateWithCString(
-        kCFAllocatorDefault, param->name.c_str(), kCFStringEncodingUTF8);
-    outParameterInfo.cfNameString = name;
-    strlcpy(reinterpret_cast<char*>(outParameterInfo.name),
-            param->name.c_str(), sizeof(outParameterInfo.name));
-
-    outParameterInfo.minValue = param->range.min;
-    outParameterInfo.maxValue = param->range.max;
-    outParameterInfo.defaultValue = param->range.default_value;
-
-    if (param->unit == "dB")
-        outParameterInfo.unit = kAudioUnitParameterUnit_Decibels;
-    else if (param->unit == "Hz")
-        outParameterInfo.unit = kAudioUnitParameterUnit_Hertz;
-    else
-        outParameterInfo.unit = kAudioUnitParameterUnit_Generic;
-
-    return noErr;
+    // false: this adapter serves neither GetParameterValueStrings nor the
+    // ParameterStringFromValue / ...ValueFromString properties, so advertising
+    // ValuesHaveStrings would point the host at a door nobody answers.
+    return fill_parameter_info(store_, inScope, inParameterID,
+                               outParameterInfo,
+                               /*advertise_value_strings=*/false);
 }
 
 OSStatus PulpAUInstrument::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
@@ -458,58 +379,18 @@ OSStatus PulpAUInstrument::SaveState(CFPropertyListRef* outData)
 {
     auto result = MusicDeviceBase::SaveState(outData);
     if (result != noErr) return result;
-
     if (!processor_) return kAudioUnitErr_Uninitialized;
-    auto data = plugin_state_io::serialize(store_, *processor_);
-    CFDataRef cfData = CFDataCreate(kCFAllocatorDefault,
-                                    data.data(),
-                                    static_cast<CFIndex>(data.size()));
-    if (cfData) {
-        CFMutableDictionaryRef dict = nullptr;
-        if (*outData && CFGetTypeID(*outData) == CFDictionaryGetTypeID()) {
-            dict = CFDictionaryCreateMutableCopy(
-                kCFAllocatorDefault, 0,
-                static_cast<CFDictionaryRef>(*outData));
-        } else {
-            dict = CFDictionaryCreateMutable(kCFAllocatorDefault,
-                                             0,
-                                             &kCFTypeDictionaryKeyCallBacks,
-                                             &kCFTypeDictionaryValueCallBacks);
-        }
-
-        if (*outData) {
-            CFRelease(*outData);
-        }
-
-        CFDictionarySetValue(dict, CFSTR("pulp-state"), cfData);
-        *outData = dict;
-        CFRelease(cfData);
-    }
-    return noErr;
+    return save_pulp_state(store_, *processor_, outData);
 }
 
 OSStatus PulpAUInstrument::RestoreState(CFPropertyListRef plist)
 {
     auto result = MusicDeviceBase::RestoreState(plist);
     if (result != noErr) return result;
-
-    if (CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
-        auto dict = static_cast<CFDictionaryRef>(plist);
-        auto cfData = static_cast<CFDataRef>(
-            CFDictionaryGetValue(dict, CFSTR("pulp-state")));
-        if (cfData && CFGetTypeID(cfData) == CFDataGetTypeID()) {
-            auto* bytes = CFDataGetBytePtr(cfData);
-            auto length = CFDataGetLength(cfData);
-            if (!processor_) return kAudioUnitErr_Uninitialized;
-            if (!plugin_state_io::deserialize({bytes, static_cast<size_t>(length)},
-                                              store_, *processor_)) {
-                return kAudioUnitErr_InvalidPropertyValue;
-            }
-            // store_ is the source of truth (GetParameter reads it) — no Globals
-            // mirror to update.
-        }
-    }
-    return noErr;
+    if (!processor_) return kAudioUnitErr_Uninitialized;
+    // store_ is the source of truth (GetParameter reads it) — no Globals
+    // mirror to update.
+    return restore_pulp_state(store_, *processor_, plist);
 }
 
 bool PulpAUInstrument::SupportsTail()
