@@ -690,6 +690,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         view::WindowHost* resize_host = window.get();
         ViewBridge* resize_bridge = bridge.get();
         processor_->set_editor_resize_handler(
+            this,
             [resize_host, resize_bridge](uint32_t w, uint32_t h) -> bool {
                 if (!resize_bridge ||
                     !resize_bridge->set_preferred_size(w, h)) {
@@ -725,7 +726,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     window->set_close_callback([this, bridge_raw]() {
         // Drop the editor→host resize handler before the window / bridge it
         // captures are torn down by stop().
-        if (processor_) processor_->set_editor_resize_handler(nullptr);
+        if (processor_) processor_->set_editor_resize_handler(this, nullptr);
         if (bridge_raw) bridge_raw->close();
         stop();
     });

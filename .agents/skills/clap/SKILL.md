@@ -933,7 +933,8 @@ directly from a controlled `view_size()` (the `ViewBridge` ctor copies `view_siz
 The resize contract above is HOST→plugin (the DAW dragged the window). The
 opposite direction — the editor asking the DAW to resize the plugin window —
 runs through `Processor::request_editor_resize(w, h)`. `gui_create` installs the
-handler on the processor (and `gui_destroy` clears it BEFORE resetting
+handler under the CLAP editor instance's owner key (and `gui_destroy` clears
+that same owner BEFORE resetting
 `editor_host`/`bridge`, so a late call never touches freed state). The handler:
 `bridge->set_preferred_size(w,h)` (so `gui_get_size`/`gui_get_resize_hints`
 report the new shape), `editor_host->set_design_viewport(w,h)` +

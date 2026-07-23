@@ -32,8 +32,8 @@ namespace pulp::format {
 namespace detail {
 
 /// Backing store for the editor→host resize handler (see
-/// `Processor::request_editor_resize`). Kept in a side table keyed by the
-/// editor's `this` pointer (as an opaque `const void*`) rather than as a
+/// `Processor::request_editor_resize`). Kept in a side table keyed first by
+/// the processor and then by each editor's opaque owner pointer rather than as a
 /// `Processor` DATA MEMBER on purpose: `Processor` is a widely-inherited public
 /// base, and growing `sizeof(Processor)` breaks every prebuilt library that
 /// already constructs a subclass (it crashed `~Processor()` on a mixed
@@ -47,12 +47,14 @@ inline std::mutex& editor_resize_mutex() {
     static std::mutex m;
     return m;
 }
-inline std::unordered_map<const void*,
-                          std::function<bool(uint32_t, uint32_t)>>&
+using EditorResizeHandler =
+    std::function<bool(uint32_t, uint32_t)>;
+using EditorResizeHandlerSet =
+    std::unordered_map<const void*, EditorResizeHandler>;
+
+inline std::unordered_map<const void*, EditorResizeHandlerSet>&
 editor_resize_handlers() {
-    static std::unordered_map<const void*,
-                              std::function<bool(uint32_t, uint32_t)>>
-        table;
+    static std::unordered_map<const void*, EditorResizeHandlerSet> table;
     return table;
 }
 
@@ -461,11 +463,12 @@ public:
     /// `preferredContentSize`, standalone `WindowHost::request_content_size`)
     /// via set_editor_resize_handler() when the editor opens, and clears it on
     /// close. Returns true when a handler is installed AND the host accepted
-    /// the request; false when no editor is open, the host exposes no resize
-    /// path, or the host refused (the editor should keep its current size).
+    /// the request; false when no editor is open, multiple editor windows make
+    /// the target ambiguous, the host exposes no resize path, or the host
+    /// refused (the editor should keep its current size).
     /// Main-thread / UI-thread only.
     ///
-    /// The handler lives in a side table (detail::editor_resize_handlers),
+    /// The handlers live in a side table (detail::editor_resize_handlers),
     /// NOT a data member, so this capability adds nothing to `sizeof(Processor)`
     /// and stays ABI-compatible with prebuilt libraries.
     bool request_editor_resize(uint32_t width, uint32_t height) {
@@ -474,8 +477,12 @@ public:
             std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
             auto& table = detail::editor_resize_handlers();
             auto it = table.find(this);
-            if (it == table.end() || !it->second) return false;
-            handler = it->second;  // copy so the host call runs unlocked
+            // A Processor can have multiple simultaneous editor views. With
+            // no view identity in this processor-level API, selecting one
+            // would resize the wrong window. Refuse while ambiguous; once all
+            // but one view close, that remaining handler becomes active.
+            if (it == table.end() || it->second.size() != 1) return false;
+            handler = it->second.begin()->second;
         }
         return handler(width, height);
     }
@@ -766,12 +773,25 @@ public:
     /// detail::editor_resize_handlers) so `Processor`'s layout is unchanged.
     void set_editor_resize_handler(
         std::function<bool(uint32_t, uint32_t)> handler) {
+        set_editor_resize_handler(this, std::move(handler));
+    }
+
+    /// @internal Register a resize handler owned by one editor instance.
+    /// Passing a null handler removes only that owner's entry, so closing one
+    /// of several simultaneous views cannot disable another live view.
+    void set_editor_resize_handler(
+        const void* editor_owner,
+        std::function<bool(uint32_t, uint32_t)> handler) {
+        if (!editor_owner) return;
         std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
         auto& table = detail::editor_resize_handlers();
         if (handler) {
-            table[this] = std::move(handler);
+            table[this][editor_owner] = std::move(handler);
         } else {
-            table.erase(this);
+            auto it = table.find(this);
+            if (it == table.end()) return;
+            it->second.erase(editor_owner);
+            if (it->second.empty()) table.erase(it);
         }
     }
 

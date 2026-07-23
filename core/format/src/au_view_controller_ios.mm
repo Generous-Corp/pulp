@@ -60,7 +60,7 @@
 - (void)setAudioUnit:(AUAudioUnit *)audioUnit {
     if (_audioUnit == audioUnit) return;
     if (_resizeProcessor) {
-        _resizeProcessor->set_editor_resize_handler(nullptr);
+        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
         _resizeProcessor = nullptr;
     }
 #if !__has_feature(objc_arc)
@@ -131,7 +131,7 @@
     // Drop the previous editor first, in destruction order (handler → host →
     // fallback → bridge) so we can rebuild against a fresh ViewBridge.
     if (_resizeProcessor) {
-        _resizeProcessor->set_editor_resize_handler(nullptr);
+        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
         _resizeProcessor = nullptr;
     }
     _viewHost.reset();
@@ -229,6 +229,7 @@
         _resizeProcessor = processor;
         __unsafe_unretained PulpAUViewController *controller = self;
         processor->set_editor_resize_handler(
+            (const void *)self,
             [controller](uint32_t requested_width,
                          uint32_t requested_height) -> bool {
                 if (requested_width == 0 || requested_height == 0 ||
@@ -319,7 +320,7 @@
     // teardown and the idle block are mutually exclusive on one queue; its later
     // reverse-order ivar destruction is then a no-op and the contract above holds.
     if (_resizeProcessor) {
-        _resizeProcessor->set_editor_resize_handler(nullptr);
+        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
         _resizeProcessor = nullptr;
     }
 #if !__has_feature(objc_arc)

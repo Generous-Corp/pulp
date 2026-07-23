@@ -165,6 +165,13 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 
 - (void)setAudioUnit:(AUAudioUnit *)audioUnit {
     if (_audioUnit == audioUnit) return;
+    // _processor points into the currently retained unit. Unregister before
+    // replacing that unit, then clear the non-owning pointer so a queued main-
+    // thread rebuild cannot dereference the destroyed processor.
+    if (_processor) {
+        _processor->set_editor_resize_handler((const void *)self, nullptr);
+        _processor = nullptr;
+    }
 #if !__has_feature(objc_arc)
     [_audioUnit release];
     _audioUnit = [audioUnit retain];
@@ -244,7 +251,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Drop the previous editor first, in destruction order (host → fallback
     // → bridge) so we can rebuild against a fresh ViewBridge. Clear any prior
     // editor→host resize handler before the bridge / host it captures die.
-    if (_processor) _processor->set_editor_resize_handler(nullptr);
+    if (_processor) {
+        _processor->set_editor_resize_handler((const void *)self, nullptr);
+    }
     _viewHost.reset();
     _fallbackView.reset();
     _bridge.reset();
@@ -396,23 +405,29 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // hints so the new shape sticks. Captures self UNRETAINED (mirrors the
     // onResize hook); -dealloc clears it before _viewHost is destroyed.
     if (_processor) {
-        _processor->set_editor_resize_handler([self](uint32_t w, uint32_t h) -> bool {
-            if (!self->_bridge || !self->_bridge->set_preferred_size(w, h))
-                return false;
-            // AU has no accept/refuse callback. Validate and commit the hints
-            // first so any synchronous host query sees the new natural size,
-            // then publish preferredContentSize before changing the viewport.
-            self->_designSize = NSMakeSize(w, h);
-            pulp_auv3_apply_preferred_size(self, self->_designSize,
-                                           /*resize_view_frame=*/true);
-            if (self->_viewHost) {
-                self->_viewHost->set_design_viewport(static_cast<float>(w),
-                                                     static_cast<float>(h));
-                self->_viewHost->set_fixed_aspect_ratio(
-                    static_cast<float>(w) / static_cast<float>(h));
-            }
-            return true;
-        });
+        __unsafe_unretained PulpAUMacViewController *controller = self;
+        _processor->set_editor_resize_handler(
+            (const void *)self,
+            [controller](uint32_t w, uint32_t h) -> bool {
+                if (!controller->_bridge ||
+                    !controller->_bridge->set_preferred_size(w, h))
+                    return false;
+                // AU has no accept/refuse callback. Validate and commit the
+                // hints first so any synchronous host query sees the new
+                // natural size, then publish preferredContentSize before
+                // changing the viewport.
+                controller->_designSize = NSMakeSize(w, h);
+                pulp_auv3_apply_preferred_size(
+                    controller, controller->_designSize,
+                    /*resize_view_frame=*/true);
+                if (controller->_viewHost) {
+                    controller->_viewHost->set_design_viewport(
+                        static_cast<float>(w), static_cast<float>(h));
+                    controller->_viewHost->set_fixed_aspect_ratio(
+                        static_cast<float>(w) / static_cast<float>(h));
+                }
+                return true;
+            });
     }
 
     _viewHost->attach_to_parent((__bridge void *)self.view);
@@ -493,7 +508,6 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     if (_bridge) _bridge->resize(w, h);
 }
 
-#if !__has_feature(objc_arc)
 - (void)dealloc {
     // Clear the root view's resize hook FIRST: it captures self unretained and
     // touches _viewHost (destroyed below, after [super dealloc]), so a stray
@@ -503,7 +517,10 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     }
     // Same reasoning for the editor→host resize handler: it captures self
     // unretained and touches _viewHost (destroyed below).
-    if (_processor) _processor->set_editor_resize_handler(nullptr);
+    if (_processor) {
+        _processor->set_editor_resize_handler((const void *)self, nullptr);
+        _processor = nullptr;
+    }
     // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
     // queue, which dereferences the bridge. An AU v3 controller can be released
     // on the XPC connection queue (createAudioUnitWithComponentDescription and
@@ -525,10 +542,11 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     } else {
         dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
     }
+#if !__has_feature(objc_arc)
     [_audioUnit release];
     [super dealloc];
-}
 #endif
+}
 
 @end
 

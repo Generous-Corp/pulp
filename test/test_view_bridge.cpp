@@ -1390,6 +1390,43 @@ TEST_CASE("Processor::request_editor_resize forwards to the installed handler",
     REQUIRE_FALSE(p.request_editor_resize(1280, 800));
 }
 
+// A processor-level request carries no editor identity. If two host windows
+// are open, refusing is safer than resizing the wrong one. Removing either
+// owner must leave the other live rather than erasing the shared processor
+// slot.
+TEST_CASE("Processor resize handlers are isolated per editor owner",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+    int first_owner = 0;
+    int second_owner = 0;
+    int first_calls = 0;
+    int second_calls = 0;
+
+    p.set_editor_resize_handler(&first_owner,
+                                [&](uint32_t, uint32_t) {
+                                    ++first_calls;
+                                    return true;
+                                });
+    REQUIRE(p.request_editor_resize(640, 480));
+    REQUIRE(first_calls == 1);
+
+    p.set_editor_resize_handler(&second_owner,
+                                [&](uint32_t, uint32_t) {
+                                    ++second_calls;
+                                    return true;
+                                });
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+    REQUIRE(first_calls == 1);
+    REQUIRE(second_calls == 0);
+
+    p.set_editor_resize_handler(&first_owner, nullptr);
+    REQUIRE(p.request_editor_resize(800, 600));
+    REQUIRE(second_calls == 1);
+
+    p.set_editor_resize_handler(&second_owner, nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+}
+
 // If abnormal teardown skips the adapter's normal handler clear, an allocator
 // may later place a new Processor at the same address. Construction must clear
 // that stale slot before the replacement can accidentally invoke the old host.

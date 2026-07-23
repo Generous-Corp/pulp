@@ -579,6 +579,7 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
         // render against the rejected mode's aspect. Captures the plugin struct
         // `p`; gui_destroy clears the handler before tearing the editor down.
         p->processor->set_editor_resize_handler(
+            p,
             [p](uint32_t w, uint32_t h) -> bool {
                 if (!p->bridge) return false;
                 const bool accepted = detail::negotiate_preferred_size(
@@ -619,7 +620,7 @@ inline void gui_destroy(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     // Drop the editor→host resize handler BEFORE the bridge / editor host it
     // captures, so a late call can never dereference freed editor state.
-    if (p->processor) p->processor->set_editor_resize_handler(nullptr);
+    if (p->processor) p->processor->set_editor_resize_handler(p, nullptr);
     p->editor_host.reset();
     if (p->bridge) {
         p->bridge->close();

@@ -1746,10 +1746,12 @@ authoring layout).
 How the seam is wired:
 
 - The **adapter** installs the actual host call via
-  `Processor::set_editor_resize_handler(cb)` when the editor opens, and clears
-  it (`set_editor_resize_handler(nullptr)`) on close — BEFORE the bridge / editor
-  host the handler captures is destroyed, or a late call dereferences freed
-  state. Each adapter's handler does three things: (1)
+  `Processor::set_editor_resize_handler(editor_owner, cb)` when the editor
+  opens, and clears that same owner's entry on close — BEFORE the bridge /
+  editor host the handler captures is destroyed, or a late call dereferences
+  freed state. Owner-scoped removal matters when a host opens multiple views
+  for one processor: closing one must not erase another live view's handler.
+  Each adapter's handler does three things: (1)
   `ViewBridge::set_preferred_size(w, h)` so the reported hints track the new
   shape, (2) `editor_host->set_design_viewport(w, h)` +
   `set_fixed_aspect_ratio(w/h)` so content fills the new window with no
@@ -1757,8 +1759,9 @@ How the seam is wired:
   `clap_host_gui->request_resize`, VST3 `IPlugFrame::resizeView`, AU v3
   `preferredContentSize`, standalone `WindowHost::request_content_size`.
 - `request_editor_resize` returns **false** when no handler is installed (no
-  editor open, or a host with no resize path) or the host refused — the editor
-  must keep its current size then. It is main-thread only.
+  editor open, or a host with no resize path), when multiple simultaneous
+  editor windows make the processor-level target ambiguous, or when the host
+  refused — the editor must keep its current size then. It is main-thread only.
 - `ViewBridge::set_preferred_size(w, h)` recomputes `size_hints_` preferred +
   aspect from (w, h) but PRESERVES the min/max drag bounds, so a mode switch
   changes the window's aspect without snapping the resize grips.
@@ -1770,8 +1773,9 @@ when the handler is live — the size it chose during `create_view()` predated t
 handler and was dropped.
 
 Gotcha (ABI): the handler is stored in a SIDE TABLE
-(`detail::editor_resize_handlers()`, a keyed-by-`this` map behind inline
-accessors), NOT a `Processor` data member — deliberately. `Processor` is a
+(`detail::editor_resize_handlers()`, a processor-keyed map of owner-keyed
+handlers behind inline accessors), NOT a `Processor` data member —
+deliberately. `Processor` is a
 widely-inherited public base; adding a `std::function` member grows
 `sizeof(Processor)`, and a header-only SDK overlay that mixed the new
 `processor.hpp` with old prebuilt libs then crashed in `~Processor()` because

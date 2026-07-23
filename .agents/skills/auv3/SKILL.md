@@ -723,10 +723,12 @@ Editor-initiated resize requests on iOS are advisory. Install the
 attached, require the main thread, validate the request through `ViewBridge`,
 and publish the accepted size through `preferredContentSize`. Do not pin the
 design viewport or replace the normal pane-bounds layout: the AU host remains
-authoritative and the editor stays responsive. Clear the handler before
-swapping the audio unit, before rebuilding/tearing down the editor, and in
-`dealloc`; otherwise a late request can call through a stale controller or
-host.
+authoritative and the editor stays responsive. Register the handler under the
+view controller's owner key. Clear that owner before swapping the audio unit
+(before releasing the old unit's processor), before rebuilding/tearing down
+the editor, and in `dealloc`; otherwise a late request can call through a stale
+controller or host. Captures must remain unretained under both ARC and MRC, and
+the ARC `dealloc` path must clear the handler too.
 
 On macOS, the view controller's root view must be created at the
 compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available.

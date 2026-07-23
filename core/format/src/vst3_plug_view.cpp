@@ -109,6 +109,7 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     // and leaves the viewport untouched. Cleared in removed() before the editor
     // host it captures is destroyed.
     processor_.set_editor_resize_handler(
+        this,
         [this](uint32_t w, uint32_t h) -> bool {
             if (!plugFrame) return false;
             const bool accepted = detail::negotiate_preferred_size(
@@ -152,7 +153,7 @@ tresult PLUGIN_API PulpPlugView::removed() {
     store_.release_open_gestures();
 
     // Drop the editor→host resize handler before the editor host it captures.
-    processor_.set_editor_resize_handler(nullptr);
+    processor_.set_editor_resize_handler(this, nullptr);
 
     if (editor_host_) {
         editor_host_->detach();
