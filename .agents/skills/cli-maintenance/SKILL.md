@@ -142,6 +142,27 @@ entry is refused, not overwritten). The subcommand is GPU-gated only because the
 CLI target is (`if(PULP_ENABLE_GPU)` around `add_subdirectory(tools/cli)`), so its
 shell-out test `pulp-test-cli-swap-pack` runs in GPU builds.
 
+### `pulp bake` — signed graph artifacts
+
+`pulp bake <input.pulpgraph> -o <output.pulpbake> --sign-key <file>` loads and
+prepares the graph, lowers it to the bounded baked-plan format, and writes the
+Ed25519-signed artifact atomically. `pulp bake verify <artifact> --trust <file>`
+performs signature/trust and bounded-parse checks only; it never executes Custom
+code or restores state. `--no-mint` is the non-interactive guard that refuses an
+absent signing key instead of silently creating a new identity.
+
+Stateful Custom records persist the graph's authored/staged
+`custom_state_blob`, not a live instance's `save_state()` result. This is a
+load-bearing realtime boundary: bake may run while the graph processes, and the
+Custom state callback has no concurrent-process contract. Disk load verifies
+before parsing, rejects duplicate node/registry identities, requires exact
+type/version/shape plus `create` + `load_state`, and fails with the exact node
+when creation or state restore is rejected. Keep this behavior and its
+rejection text aligned across `tools/cli/cmd_bake.cpp`,
+`docs/reference/cli.md`, `docs/reference/signal-graph.md`, and the hosting
+skill. No CLI flags changed in the stateful round-trip slice, so the command
+manifest and slash-command inventory do not need a new entry.
+
 `pulp audio compare` is the shipped CLI verb over the **dev-only Python Audio Quality Lab**
 `compare` surface (`tools/audio/quality-lab/`, advisory measure→compare→judge). It is a thin
 ORCHESTRATOR: `tools/cli/cmd_audio_compare.cpp` locates the opt-in managed tool

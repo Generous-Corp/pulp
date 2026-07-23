@@ -608,6 +608,10 @@ public:
 
     // Lifecycle
     bool prepare(double sample_rate, int max_block_size);
+    // Exact Custom node whose create/load_state callback most recently caused
+    // prepare() to fail, or 0 when the last prepare had no such failure.
+    // Control-thread diagnostic; useful for signed-artifact rejection messages.
+    NodeId last_prepare_custom_failure_node() const;
 
     // Begin an isolated topology transaction. The returned edit owns a private
     // authoring graph and custom-type registry; its mutations never invalidate
@@ -1424,6 +1428,7 @@ private:
     // or lifecycle operation touches this graph. Guarded by graph_mutation_mutex_.
     std::uint64_t authoring_generation_{0};
     NodeId next_id_ = 1;
+    NodeId last_prepare_custom_failure_node_ = 0;
     GraphLimits limits_;
 
     // 2.2b prerequisite (planning/2026-07-07-signalgraph-swap-and-bake-implementation-plan.md,

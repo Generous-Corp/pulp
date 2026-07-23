@@ -462,8 +462,19 @@ its process is a pure function of its input block (no transport, no external
 state a frozen topology can't capture). Custom process code is **never** stored
 in the artifact — a `Custom` record carries only `{type_id, version, state}` and
 the code is re-resolved from the host's registered types at load, exactly like a
-node pack. v1 of the on-disk codec supports **stateless** custom nodes; a record
-carrying opaque state is refused (`StatefulCustomNotYetLoadable`).
+node pack. The on-disk codec supports both stateless and stateful custom nodes;
+a record carrying opaque state is restored only when the matching registered
+type supplies `create` + `load_state`. The signed blob is validated on the
+nominal load and reapplied after every host `prepare`/`reset`, so lifecycle
+hooks cannot silently erase authored state. A missing lifecycle or rejected
+state fails closed. State presence follows the registered lifecycle rather than
+blob length, so a type may define an empty byte span as meaningful state.
+
+`bake_to_plan()` persists the node's authored blob from
+`set_custom_node_state()`, not a live `save_state()` snapshot. A prepared graph
+may be processing on the audio thread, and custom `save_state` has no concurrent
+process contract. Temporal DSP history therefore never enters a signed artifact;
+stage the intended publish state before prepare.
 
 ## See also
 

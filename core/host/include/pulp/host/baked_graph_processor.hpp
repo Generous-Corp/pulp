@@ -75,8 +75,8 @@ enum class LowerRejectReason {
     CodecRejected,                 // load_baked: the .pulpbake bytes failed the signed
                                    // envelope (bad magic/length/manifest/trust/signature/
                                    // hash) or the bounded plan parse
-    StatefulCustomNotYetLoadable,  // load_baked v1: a Custom node carries opaque state; the
-                                   // on-disk stateful-custom path is not supported yet
+    StatefulCustomNotYetLoadable,  // load_baked: matching Custom instance could
+                                   // not be created or rejected authenticated state.
 };
 
 // Result of bake(): on success `processor` is non-null and `accepted` is true;
@@ -126,6 +126,10 @@ LowerabilityProof lowerability_of(
 struct CustomNodeLifecycle {
     std::function<void(double sample_rate, int max_block)> prepare;
     std::function<void()> reset;
+    // Present only for a processor reconstructed from a signed artifact carrying
+    // initial Custom state. Runs after prepare/reset so those hooks cannot erase
+    // the authenticated state. False leaves the processor unprepared.
+    std::function<bool()> restore_state;
 };
 
 // Outcome of a ParamInjector::inject() call. Distinguishes the two failure
@@ -329,8 +333,9 @@ LowerResult bake(const SignalGraph& graph);
 // full lowerability re-proof applies to the reconstructed topology; the file's
 // implicit claim is never trusted. Returns CodecRejected if the envelope/parse fails,
 // or bake()'s refusal reason if the reconstructed graph is not lowerable. v1 supports
-// stateless custom nodes; a Custom record carrying opaque state is refused
-// (StatefulCustomNotYetLoadable).
+// stateful custom nodes when the matching registered type supplies create +
+// load_state. The authenticated blob is restored after each host prepare/reset;
+// malformed state fails closed before a processor is returned.
 LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& trust,
                        const std::vector<CustomNodeType>& custom_types);
 
@@ -348,7 +353,10 @@ struct BakePlanResult {
 // Extract a serializable BakedPlan from a prepared, lowerable graph — the write-path
 // front door: bake_to_plan(graph).plan -> write_baked_signed(*plan, key) -> bytes.
 // Refuses (accepted=false, plan=nullopt) with a reason if the graph is not prepared
-// or not lowerable (same proof as bake()).
+// or not lowerable (same proof as bake()). Custom state is the authored blob last
+// supplied through set_custom_node_state(), not a live save_state() snapshot: a
+// prepared graph may be processing concurrently and save_state has no RT concurrency
+// contract.
 BakePlanResult bake_to_plan(const SignalGraph& graph);
 
 } // namespace pulp::host
