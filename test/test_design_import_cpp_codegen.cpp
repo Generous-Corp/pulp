@@ -3103,6 +3103,50 @@ TEST_CASE("baked C++ codegen emits a CSS background gradient call",
     REQUIRE(result.source.find("set_background_color") != std::string::npos);
 }
 
+TEST_CASE("baked C++ codegen emits set_fill_rule for an evenodd path",
+          "[view][import][cpp-codegen][fill-rule]") {
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes; a subtracted icon baked as same-direction contours fills solid
+    // without it. Emitted only for evenodd — nonzero is the widget default.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root = frame_node("panel", "Panel", 64.0f, 64.0f, LayoutDirection::column);
+
+    IRNode donut;
+    donut.type = "path";
+    donut.name = "Donut";
+    donut.stable_anchor_id = "donut";
+    donut.style.width = 32.0f;
+    donut.style.height = 32.0f;
+    donut.attributes["d"] =
+        "M2 2 L30 2 L30 30 L2 30 Z M10 10 L22 10 L22 22 L10 22 Z";
+    donut.attributes["viewBox"] = "0 0 32 32";
+    donut.attributes["fill"] = "#ff0000";
+    donut.attributes["svg_fill_rule"] = "evenodd";
+    ir.root.children.push_back(donut);
+
+    IRNode slab = donut;
+    slab.name = "Slab";
+    slab.stable_anchor_id = "slab";
+    slab.attributes["svg_fill_rule"] = "nonzero";
+    ir.root.children.push_back(slab);
+
+    CppExportOptions opts;
+    opts.header_filename = "fill_rule_panel.hpp";
+    opts.namespace_name = "pulp::test::fillrule";
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, opts);
+
+    size_t calls = 0;
+    for (auto pos = result.source.find("->set_fill_rule(");
+         pos != std::string::npos;
+         pos = result.source.find("->set_fill_rule(", pos + 1))
+        ++calls;
+    REQUIRE(calls == 1);
+    REQUIRE(result.source.find("pulp::canvas::FillRule::evenodd")
+            != std::string::npos);
+}
+
 TEST_CASE("typed DesignIR smoke emits typed baked C++ controls",
           "[view][import][cpp-codegen][native-cpp-phase-a]") {
     const auto ir = build_phase_a_typed_control_ir();

@@ -1465,6 +1465,62 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     REQUIRE_FALSE(arr.has_value());
 }
 
+TEST_CASE("a path's fill rule survives the IR JSON round-trip",
+          "[view][import][svg][fill-rule]") {
+    using namespace pulp::view;
+
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes. Figma bakes subtracted icons as SAME-direction contours under an
+    // evenodd declaration (the reference "Sub" speaker cabinet is five such
+    // subpaths), so a dropped rule fills the icon solid — silently, since a
+    // solid slab raises no error. The fig decoder writes `fillRule` and the
+    // bridge has setSvgFillRule; this asserts the middle links.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Donut",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z M5 5 L15 5 L15 15 L5 15 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#ff0000",
+          "fillRule": "evenodd"
+        }, {
+          "type": "path", "name": "Slab",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#00ff00",
+          "fillRule": "nonzero"
+        }, {
+          "type": "path", "name": "Junk",
+          "pathData": "M0 0 L20 0 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#0000ff",
+          "fillRule": "bogus"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 3);
+    REQUIRE(ir.root.children[0].attributes.at("svg_fill_rule") == "evenodd");
+    REQUIRE(ir.root.children[1].attributes.at("svg_fill_rule") == "nonzero");
+    // An unrecognized value stays unset — the widget default (nonzero) is
+    // better than propagating a token no consumer understands.
+    REQUIRE(ir.root.children[2].attributes.count("svg_fill_rule") == 0);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    // evenodd reaches the generated JS; nonzero is the widget default and is
+    // deliberately NOT emitted — one setSvgFillRule, for the donut only.
+    size_t calls = 0;
+    for (auto pos = js.find("setSvgFillRule("); pos != std::string::npos;
+         pos = js.find("setSvgFillRule(", pos + 1))
+        ++calls;
+    REQUIRE(calls == 1);
+    REQUIRE(js.find("'evenodd'") != std::string::npos);
+}
+
 TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
           "[view][import][svg]") {
     using namespace pulp::view;

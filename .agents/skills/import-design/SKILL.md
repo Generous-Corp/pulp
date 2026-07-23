@@ -1652,6 +1652,48 @@ so codegen lowers it like any other path. Key facts / gotchas:
   `codegen: handled`) + the `[object-coverage]` drift guard + the
   `[view][import][codegen][vector]` tests.
 
+### Vector fill rule (winding) — holes in multi-subpath icons
+
+A multi-subpath vector's WINDING RULE decides which regions are holes, and
+dropping it is perfectly silent: the icon fills as a solid slab, no parse
+error anywhere. The designers-pick "Sub" speaker cabinet (a box with a hollow
+woofer ring) was the sweep's worst dE2000 (~25) for exactly this reason.
+The rule now flows end to end; facts to keep intact:
+
+- **`.fig` geometry entries carry their own `windingRule` EACH.** A node's
+  `fillGeometry` is a LIST of per-region entries `{windingRule, commandsBlob,
+  styleID}` — and one node can MIX rules ("Sub" is `[NONZERO dot, ODD ring,
+  ODD box-with-hole]`). `paths.mjs` concatenates the blobs into one path, so
+  one rule must be chosen: **evenodd wins when any entry declares it.** Figma
+  direction-corrects the contours of its NONZERO regions (holes wind opposite
+  their outer — verified on real subtract bool-ops), and direction-corrected
+  nesting fills identically under either rule; an ODD region's SAME-direction
+  holes fill solid under nonzero. So evenodd is correct for both kinds. Do
+  NOT "fix" this to first-entry-wins — that re-fills the Sub woofer.
+- **Figma does NOT promise direction-corrected contours under ODD.** Never
+  assume nonzero is safe because "baked geometry reverses holes" — that holds
+  only for the NONZERO-declared entries.
+- **The wire:** decoder emits `fillRule: 'evenodd'` on the envelope node
+  (omitted for nonzero — widget default) → `design_ir_json.cpp` reads
+  `fillRule`/`fill_rule`/`fill-rule` into `attributes["svg_fill_rule"]`
+  (only `evenodd`/`nonzero` accepted) → JS codegen emits
+  `setSvgFillRule(id,'evenodd')`; baked C++ codegen emits
+  `->set_fill_rule(FillRule::evenodd)` (path case only — SvgRect/SvgLine have
+  no fill rule, and `emit_svg_paint` is shared, so the emission lives at the
+  svg_path call site); native materializer's `apply_svg_paint(SvgPathWidget&)`
+  reads `svg_fill_rule` + raw `fill-rule`/`fillRule`.
+- **Diagnostic:** `vector-fill-rule-approximated` (registered 'warning' —
+  'info' is dropped by both consumers) fires for mixed rules on one node and
+  for a MULTI-subpath vector with no declared rule (nonzero fallback may fill
+  its holes solid). Single-contour shapes stay silent — both rules fill them
+  identically.
+- **Raster-testing gotcha:** the Skia screenshot backend composites onto an
+  OPAQUE background and renders at its own pixel ratio (2x on Retina), so a
+  "hole is transparent" assertion always reads opaque, and design-space pixel
+  coords are wrong by the scale factor. Prove holes by DIFFERENCE between the
+  two rules' renders of the same path (see the donut test in
+  `test_widget_bridge_svg.cpp`).
+
 ### Figma resize constraints → flex/position
 
 Figma layout **constraints** (a node's resize behavior relative to its parent)

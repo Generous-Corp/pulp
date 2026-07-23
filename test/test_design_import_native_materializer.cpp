@@ -11,6 +11,7 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/svg_path_widget.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -621,6 +622,42 @@ TEST_CASE("baked native materializer accepts rgb()/rgba() on EVERY paint, not ju
     const auto border = root->border_color();
     CHECK(border.b == Catch::Approx(250.0f / 255.0f).margin(0.01f));
     CHECK(border.a > 0.0f);
+}
+
+TEST_CASE("baked native materializer applies the SVG fill rule to the path widget",
+          "[view][import][native-materializer][fill-rule]") {
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes; Figma bakes subtracted icons as same-direction contours under
+    // evenodd, so a rule that stops at the IR renders those solid. Both
+    // spellings must land: `svg_fill_rule` is the IR-canonical key
+    // (design_ir_json), `fill-rule` the raw SVG/JSX one this lane's other
+    // paint attributes already use.
+    auto make_path = [](const char* rule_key, const char* rule) {
+        DesignIR ir;
+        ir.root.type = "path";
+        ir.root.style.width = 32.0f;
+        ir.root.style.height = 32.0f;
+        ir.root.attributes["d"] =
+            "M2 2 L30 2 L30 30 L2 30 Z M10 10 L22 10 L22 22 L10 22 Z";
+        ir.root.attributes["viewBox"] = "0 0 32 32";
+        ir.root.attributes["fill"] = "#ff0000";
+        if (rule_key) ir.root.attributes[rule_key] = rule;
+        return build_native_view_tree(ir, {}, {});
+    };
+
+    auto canonical = make_path("svg_fill_rule", "evenodd");
+    auto* path = dynamic_cast<SvgPathWidget*>(canonical.get());
+    REQUIRE(path != nullptr);
+    REQUIRE(path->fill_rule() == pulp::canvas::FillRule::evenodd);
+
+    auto raw_svg = make_path("fill-rule", "evenodd");
+    REQUIRE(dynamic_cast<SvgPathWidget*>(raw_svg.get())->fill_rule() ==
+            pulp::canvas::FillRule::evenodd);
+
+    // Unset stays on the widget default.
+    auto unset = make_path(nullptr, "");
+    REQUIRE(dynamic_cast<SvgPathWidget*>(unset.get())->fill_rule() ==
+            pulp::canvas::FillRule::nonzero);
 }
 
 TEST_CASE("baked native materializer resolves image sources through the asset manifest",

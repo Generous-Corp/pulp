@@ -1294,6 +1294,20 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
         // instead of it: SvgPathWidget prefers the gradient and falls back to
         // the solid only when the string won't parse.
         capture_color("fillGradient", "svg_fill_gradient");
+        // The winding rule decides which regions of a multi-subpath path are
+        // holes; Figma bakes subtracted icons as same-direction contours under
+        // evenodd, so dropping this fills them solid. Only the two SVG values
+        // are meaningful — anything else stays unset (= the nonzero default).
+        if (!node.attributes.count("svg_fill_rule")) {
+            for (const char* k : {"fillRule", "fill_rule", "fill-rule"}) {
+                if (!obj.hasObjectMember(k) || !obj[k].isString()) continue;
+                auto v = std::string(obj[k].toString());
+                if (v == "evenodd" || v == "nonzero") {
+                    node.attributes["svg_fill_rule"] = std::move(v);
+                    break;
+                }
+            }
+        }
         capture_color("stroke", "svg_stroke");
         if (!node.attributes.count("svg_stroke_width")) {
             for (const char* k : {"strokeWidth", "stroke_width"}) {

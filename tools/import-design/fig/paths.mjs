@@ -157,12 +157,26 @@ export function toPathData(commands) {
  * own baked flip in Figma, and dropping the container half of that pair left
  * the arrow mirrored).
  *
- * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean }|null}
+ * `fillRule` is the geometry's declared winding rule, mapped onto the SVG
+ * vocabulary ('nonzero' | 'evenodd'), or null when the source declares none.
+ * It is NOT decorative: Figma's baked outlines do not promise direction-
+ * corrected contours. A subtracted icon can arrive as N same-direction
+ * subpaths under `windingRule: 'ODD'` (the reference design's "Sub" speaker
+ * cabinet is exactly this — five same-direction circles-in-a-box), and
+ * filling that nonzero paints a solid slab where the design shows a hollow
+ * woofer. `mixedWinding` reports geometry segments that disagree about the
+ * rule (one path can carry only one), and `subpathCount` lets the caller
+ * judge whether a missing rule can matter at all — on a single contour the
+ * two rules fill identically.
+ *
+ * @returns {{ d: string, box: object, paint: 'fill'|'stroke', droppedStroke: boolean,
+ *             fillRule: 'nonzero'|'evenodd'|null, mixedWinding: boolean,
+ *             subpathCount: number }|null}
  */
 export function geometryToPath(node, blobs, mirror = null) {
   const r = placedGeometry(node, blobs, /* preferFill */ false);
   if (!r) return null;
-  const { placed, box, useFill, hasStroke } = r;
+  const { placed, box, useFill, hasStroke, fillRule, mixedWinding } = r;
 
   // Normalize to a (0,0)-origin viewBox: codegen's setSvgViewBox consumes only
   // the width/height pair and ignores minX/minY, so a path carrying negative
@@ -180,6 +194,9 @@ export function geometryToPath(node, blobs, mirror = null) {
     box,
     paint: useFill ? 'fill' : 'stroke',
     droppedStroke: Boolean(useFill && hasStroke),
+    fillRule,
+    mixedWinding,
+    subpathCount: placed.filter((c) => c.op === 'M').length,
   };
 }
 
@@ -204,6 +221,16 @@ export function geometryToClipPath(node, blobs) {
   return { d: toPathData(r.placed), box: r.box };
 }
 
+// Figma's winding enum → the SVG fill-rule vocabulary the envelope carries.
+// Missing/unrecognized maps to null rather than a guessed default: on a
+// multi-subpath shape the guess decides which regions are holes, and the
+// caller wants to KNOW it is guessing (see the fill-rule diagnostic).
+function fillRuleOf(entry) {
+  if (entry && entry.windingRule === 'ODD') return 'evenodd';
+  if (entry && entry.windingRule === 'NONZERO') return 'nonzero';
+  return null;
+}
+
 // Decode a node's baked outline blobs and place them in the parent's
 // coordinate space. Shared by geometryToPath (emitted vectors) and
 // geometryToClipPath (mask outlines); only the fill/stroke preference differs.
@@ -211,13 +238,15 @@ function placedGeometry(node, blobs, preferFill) {
   const pick = (list) => {
     if (!Array.isArray(list) || !list.length) return null;
     const cmds = [];
+    const rules = [];
     for (const g of list) {
       if (typeof g.commandsBlob !== 'number') continue;
       const blob = blobs[g.commandsBlob];
       if (!blob || !blob.bytes) continue;
       cmds.push(...decodePathBlob(blob.bytes));
+      rules.push(fillRuleOf(g));
     }
-    return cmds.length ? cmds : null;
+    return cmds.length ? { cmds, rules } : null;
   };
 
   const fill = pick(node.fillGeometry);
@@ -231,10 +260,25 @@ function placedGeometry(node, blobs, preferFill) {
   const chosen = useFill ? fill : stroke || fill;
   if (!chosen) return null;
 
-  const placed = applyTransform(chosen, node.transform);
+  // One emitted path carries one fill-rule, but the geometry is a LIST of
+  // per-region entries each declaring its own — the "Sub" cabinet arrives as
+  // [NONZERO dot, ODD ring, ODD box-with-hole]. When they disagree, evenodd
+  // wins: Figma direction-corrects the contours of its NONZERO regions
+  // (holes wind opposite their outer), and direction-corrected nesting fills
+  // identically under either rule — while an ODD region's same-direction
+  // holes fill SOLID under nonzero. So evenodd is correct for both kinds and
+  // nonzero only for the first. `mixedWinding` still states the merge: it is
+  // an approximation the moment two entries' regions overlap.
+  const declared = chosen.rules.filter((r) => r !== null);
+  const fillRule = declared.length
+    ? (declared.includes('evenodd') ? 'evenodd' : 'nonzero')
+    : null;
+  const mixedWinding = new Set(declared).size > 1;
+
+  const placed = applyTransform(chosen.cmds, node.transform);
   const box = boundsOf(placed);
   if (!box || !(box.width > 0) || !(box.height > 0)) return null;
-  return { placed, box, useFill, hasStroke: Boolean(stroke) };
+  return { placed, box, useFill, hasStroke: Boolean(stroke), fillRule, mixedWinding };
 }
 
 /**

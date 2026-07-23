@@ -1088,6 +1088,18 @@ void emit_widget_specific(std::ostringstream& out,
                 emit_line(out, depth, opts.indent_spaces,
                           std::string(var) + "->set_viewbox(" + float_expr(ctx, *node.style.width) + ", " + float_expr(ctx, *node.style.height) + ");");
             }
+            // Path-only (SvgRect/SvgLine have no fill rule): the winding rule
+            // decides which regions of a multi-subpath path are holes, and the
+            // nonzero default fills a subtracted icon solid. Emitted only for
+            // evenodd — nonzero is already the widget default.
+            for (const char* key : {"svg_fill_rule", "fill-rule", "fillRule"}) {
+                if (auto rule = attr(node, key)) {
+                    if (*rule == "evenodd")
+                        emit_line(out, depth, opts.indent_spaces,
+                                  std::string(var) + "->set_fill_rule(pulp::canvas::FillRule::evenodd);");
+                    break;
+                }
+            }
             emit_svg_paint(out, depth, ctx, var, node, true);
             break;
         case NativeWidgetKind::svg_rect:
