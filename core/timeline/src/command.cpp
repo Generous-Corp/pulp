@@ -95,8 +95,10 @@ bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLoca
 bool equal_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
     if (lhs.id != rhs.id || lhs.name != rhs.name || lhs.frame_count != rhs.frame_count ||
         lhs.sample_rate != rhs.sample_rate || lhs.content_hash != rhs.content_hash ||
-        lhs.storage_policy != rhs.storage_policy || !equal_locators(lhs.locators, rhs.locators) ||
-        lhs.representations.size() != rhs.representations.size())
+        lhs.storage_policy != rhs.storage_policy ||
+        !equal_locators(lhs.locators, rhs.locators) ||
+        lhs.representations.size() != rhs.representations.size() ||
+        lhs.loop_info != rhs.loop_info)
         return false;
     for (std::size_t i = 0; i < lhs.representations.size(); ++i) {
         const auto& left = lhs.representations[i];
@@ -117,6 +119,14 @@ std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
         size = saturated_add(size, representation.role.size());
         for (const auto& locator : representation.locators)
             size = saturated_add(size, locator.hint.size());
+    }
+    if (asset.loop_info) {
+        size = saturated_add(
+            size, saturated_multiply(asset.loop_info->points.size(), sizeof(AudioLoopPoint)));
+        size = saturated_add(
+            size, saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
+        for (const auto& tag : asset.loop_info->tags)
+            size = saturated_add(size, tag.size());
     }
     return size;
 }

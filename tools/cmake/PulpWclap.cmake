@@ -108,6 +108,7 @@ set(_PULP_WCLAP_INCLUDES
 set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_meter_map.cpp
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_tempo_map.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/asset_schema_migrations.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/assets.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_curve.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_document_internal.cpp
@@ -126,6 +127,7 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_summary.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_release.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
+    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_automation_decode.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode_support.cpp
     ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp

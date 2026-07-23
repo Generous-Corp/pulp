@@ -124,6 +124,12 @@ invariants.
 - A media asset's SHA-256 `ContentHash` is its durable identity. Locators are
   optional late-resolution hints; representations have distinct hashes and
   unique roles. Missing local media is valid document state.
+- `AudioLoopInfo` is optional typed metadata on a sealed media asset: musical
+  length and meter, one-shot intent, MIDI root note, half-open frame markers,
+  manual or analyzer-suggested loop points, and canonical tags. Derive tempo
+  from musical length, asset frame count, and sample rate; do not persist a
+  duplicate BPM value that can disagree. This is descriptive authoring state,
+  not clip repetition, sample traversal, or a comp-selection model.
 - Persistence uses canonical JSON envelopes with `data`, `type_name`, and
   integer `version`. All 64-bit IDs, positions, counts, durations, and rate
   components are canonical decimal JSON strings; never encode them as JSON
@@ -144,6 +150,9 @@ invariants.
   Track schema v6 adds optional `freeze`; v5→v6 is version-only because absence
   means unfrozen, while v6→v5 succeeds only when `freeze` is absent. Never
   silently discard a selected artifact during downgrade.
+- Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
+  only when that field is absent, and a v1 envelope that illegally contains
+  the field is rejected rather than silently normalized.
 - `schema_release.hpp` records the exact structural type/version sets first
   shipped in `v0.736.0` (Track v1), `v0.744.0` (Track v2), and `v0.748.0`
   (Track v3). `serialize_project_for_release()` applies the registry's

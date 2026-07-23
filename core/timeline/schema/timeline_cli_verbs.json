@@ -32,6 +32,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Object",
+          "name": "loop-info",
+          "required": false,
+          "schema_field": "loop_info",
+          "value_type": "json"
+        },
+        {
           "kind": "String",
           "name": "name",
           "required": true,
@@ -62,7 +69,7 @@
       ],
       "name": "timeline:asset",
       "schema_type": "pulp.timeline.asset",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "AssetRepresentation",

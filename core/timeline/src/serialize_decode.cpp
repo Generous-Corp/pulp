@@ -1,6 +1,8 @@
 #include <pulp/timeline/serialize.hpp>
 
+#include "asset_schema_policy.hpp"
 #include "project_state_access.hpp"
+#include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_support.hpp"
 #include "serialize_internal.hpp"
@@ -60,6 +62,8 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
 
 struct DecodeCounts {
     std::size_t assets = 0;
+    std::size_t audio_loop_points = 0;
+    std::size_t audio_loop_tags = 0;
     std::size_t sequences = 0;
     std::size_t tracks = 0;
     std::size_t clips = 0;
@@ -264,17 +268,21 @@ runtime::Result<MediaAsset, PersistenceError> decode_asset(const JsonValue& valu
     if (++counts.assets > limits.max_assets)
         return fail<MediaAsset>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                                 counts.assets, limits.max_assets);
-    auto data = data_for(value, "pulp.timeline.asset", path);
-    if (!data)
-        return fail<MediaAsset>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto frame_count = required(*data.value(), "frame_count", path + "/data");
-    auto rate = required(*data.value(), "sample_rate", path + "/data");
-    auto hash = string_field(*data.value(), "content_hash", path + "/data");
-    auto policy = string_field(*data.value(), "storage_policy", path + "/data");
-    auto locators = required(*data.value(), "locators", path + "/data");
-    auto representations = required(*data.value(), "representations", path + "/data");
+    auto envelope = data_for_versions(value, detail::asset_schema_policy.type_name,
+                                      detail::asset_schema_policy.oldest_readable_version,
+                                      detail::asset_schema_policy.current_version, path);
+    if (!envelope)
+        return fail<MediaAsset>(envelope.error().code, envelope.error().path,
+                                envelope.error().byte_offset);
+    const auto* data = envelope.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto name = string_field(*data, "name", path + "/data");
+    auto frame_count = required(*data, "frame_count", path + "/data");
+    auto rate = required(*data, "sample_rate", path + "/data");
+    auto hash = string_field(*data, "content_hash", path + "/data");
+    auto policy = string_field(*data, "storage_policy", path + "/data");
+    auto locators = required(*data, "locators", path + "/data");
+    auto representations = required(*data, "representations", path + "/data");
     if (!id || !name || !frame_count || !rate || !hash || !policy || !locators || !representations)
         return fail<MediaAsset>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
@@ -296,10 +304,22 @@ runtime::Result<MediaAsset, PersistenceError> decode_asset(const JsonValue& valu
             return runtime::Err(decoded.error());
         decoded_representations.push_back(std::move(decoded).value());
     }
-    return runtime::Result<MediaAsset, PersistenceError>(runtime::Ok(
-        MediaAsset{ItemId{decoded_id.value()}, std::move(name).value(), decoded_frames.value(),
-                   decoded_rate.value(), *decoded_hash, decoded_policy.value(),
-                   std::move(decoded_locators).value(), std::move(decoded_representations)}));
+    std::optional<AudioLoopInfo> decoded_loop_info;
+    if (const auto* loop_info = data->find("loop_info")) {
+        if (!detail::asset_schema_policy.supports_loop_info(envelope.value().version))
+            return fail<MediaAsset>(PersistenceErrorCode::InvalidSchema, path + "/data/loop_info");
+        auto decoded = detail::decode_audio_loop_info(
+            *loop_info, limits, counts.audio_loop_points, counts.audio_loop_tags,
+            path + "/data/loop_info");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        decoded_loop_info = std::move(decoded).value();
+    }
+    return runtime::Result<MediaAsset, PersistenceError>(
+        runtime::Ok(MediaAsset{ItemId{decoded_id.value()}, std::move(name).value(),
+                               decoded_frames.value(), decoded_rate.value(), *decoded_hash,
+                               decoded_policy.value(), std::move(decoded_locators).value(),
+                               std::move(decoded_representations), std::move(decoded_loop_info)}));
 }
 
 runtime::Result<ClipContent, PersistenceError>

@@ -11,12 +11,13 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.asset": Object.freeze({
     schemaType: "pulp.timeline.asset",
     domain: "Document",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
       Object.freeze({ name: "content_hash", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "frame_count", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "locators", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "loop_info", kind: "Object", jsType: "object", required: false }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "representations", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "sample_rate", kind: "Object", jsType: "object", required: true }),

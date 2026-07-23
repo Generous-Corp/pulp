@@ -23,9 +23,8 @@ ContentHash audio_hash() {
 }
 
 MediaAsset audio_asset(ItemId id, std::uint64_t frame_count = 1'000) {
-    return MediaAsset{
-        id, "audio.wav", frame_count, {48'000, 1}, audio_hash(), AssetStoragePolicy::External,
-        {}, {}};
+    return MediaAsset{id,           "audio.wav", frame_count, {48'000, 1}, audio_hash(),
+                      AssetStoragePolicy::External, {}, {}, {}};
 }
 
 Take make_take(ItemId id, ItemId asset_id, std::uint64_t frames = 100,

@@ -1,3 +1,4 @@
+#include "asset_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -58,6 +59,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField asset_fields[] = {
         {"content_hash", SchemaValueKind::String}, {"frame_count", SchemaValueKind::U64String},
         {"id", SchemaValueKind::U64String},        {"locators", SchemaValueKind::Array},
+        {"loop_info", SchemaValueKind::Object, false},
         {"name", SchemaValueKind::String},         {"representations", SchemaValueKind::Array},
         {"sample_rate", SchemaValueKind::Object},  {"storage_policy", SchemaValueKind::String},
     };
@@ -126,7 +128,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     constexpr RequiredSchema required[] = {
         {SchemaDomain::Document, "pulp.timeline.project", project_fields},
-        {SchemaDomain::Document, "pulp.timeline.asset", asset_fields},
+        {SchemaDomain::Document, asset_schema_policy.type_name, asset_fields,
+         asset_schema_policy.current_version, asset_schema_policy.oldest_readable_version},
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
         {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},

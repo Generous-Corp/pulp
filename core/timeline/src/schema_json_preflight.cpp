@@ -1,6 +1,7 @@
 #include <pulp/timeline/schema_json.hpp>
 
 #include "schema_json_preflight_internal.hpp"
+#include "asset_schema_policy.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
@@ -66,6 +67,8 @@ class StructuralScanner {
     PersistenceError error_;
     bool has_error_ = false;
     std::size_t assets_ = 0;
+    std::size_t audio_loop_points_ = 0;
+    std::size_t audio_loop_tags_ = 0;
     std::size_t sequences_ = 0;
     std::size_t tracks_ = 0;
     std::size_t clips_ = 0;
@@ -612,7 +615,9 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::asset_schema_policy.oldest_readable_version,
+                                      detail::asset_schema_policy.current_version))
             return false;
         const auto data_path = path + "/data";
         if (!require_member(data, "content_hash", StringShape, data_path) ||
@@ -637,13 +642,46 @@ class StructuralScanner {
             !governed_array(locators, locators_, limits_.max_locators, path + "/data/locators",
                             [](Span, std::size_t) { return true; }))
             return false;
-        return !has_representations ||
-               governed_array(representations, representations_, limits_.max_representations,
-                              path + "/data/representations", [&](Span element, std::size_t index) {
-                                  return walk_representation(element, path +
-                                                                          "/data/representations/" +
-                                                                          std::to_string(index));
-                              });
+        if (has_representations &&
+            !governed_array(representations, representations_, limits_.max_representations,
+                            path + "/data/representations",
+                            [&](Span element, std::size_t index) {
+                                return walk_representation(
+                                    element,
+                                    path + "/data/representations/" + std::to_string(index));
+                            }))
+            return false;
+        Span loop_info;
+        bool has_loop_info = false;
+        if (!member(data, "loop_info", loop_info, has_loop_info))
+            return false;
+        if (!has_loop_info)
+            return true;
+        if (!detail::asset_schema_policy.supports_loop_info(version) ||
+            !has_shape(loop_info, ObjectShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, loop_info.begin, 0, 0,
+                      data_path + "/loop_info");
+            return false;
+        }
+        Span points;
+        Span tags;
+        bool has_points = false;
+        bool has_tags = false;
+        if (!member(loop_info, "points", points, has_points) ||
+            !member(loop_info, "tags", tags, has_tags))
+            return false;
+        if (!has_points || !has_tags) {
+            set_error(PersistenceErrorCode::InvalidSchema, loop_info.begin, 0, 0,
+                      data_path + "/loop_info");
+            return false;
+        }
+        if (!governed_array(points, audio_loop_points_, limits_.max_audio_loop_points,
+                            data_path + "/loop_info/points",
+                            [](Span, std::size_t) { return true; }))
+            return false;
+        return governed_array(tags, audio_loop_tags_, limits_.max_audio_loop_tags,
+                              data_path + "/loop_info/tags",
+                              [](Span tag, std::size_t) { return tag.begin < tag.end; });
     }
 
     bool walk_representation(Span value, const std::string& path) {

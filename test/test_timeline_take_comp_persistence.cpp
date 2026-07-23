@@ -19,8 +19,8 @@ Project project_with_takes(bool record_armed = true, ItemId active_take_lane_id 
                                                .record_armed = record_armed,
                                                .active_take_lane_id = active_take_lane_id}));
     auto sequence = take(Sequence::create({2}, "seq", TickDuration{100}, {track}));
-    MediaAsset asset{{6}, "audio.wav", 1'000, {48'000, 1}, hash('a'), AssetStoragePolicy::External,
-                     {},  {}};
+    MediaAsset asset{{6},          "audio.wav", 1'000, {48'000, 1}, hash('a'),
+                     AssetStoragePolicy::External, {}, {}, {}};
     return take(Project::create(ProjectInput{{1}, "project", 9, {2}, {asset}, {sequence}}));
 }
 

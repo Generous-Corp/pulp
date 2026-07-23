@@ -41,7 +41,8 @@ Project project_with(ClipContent content = EmptyContent{}) {
                      {{"proxy",
                        hash('b'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}},
+                     {}};
     return take(Project::create(ProjectInput{{1}, "project", 6, {2}, {asset}, {sequence}}));
 }
 
@@ -66,6 +67,7 @@ Project mixed_project() {
                      hash('c'),
                      AssetStoragePolicy::External,
                      {{AssetLocatorKind::ExternalUri, "file:///source.wav"}},
+                     {},
                      {}};
     return take(Project::create(
         ProjectInput{{1}, "mixed", 12, {8}, {asset}, {absolute_sequence, musical_sequence}}));

@@ -88,6 +88,7 @@ pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
+        test_timeline_asset_loop_info.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
@@ -183,6 +184,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/asset_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
@@ -201,6 +203,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_summary.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp

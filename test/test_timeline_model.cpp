@@ -128,6 +128,7 @@ Project make_project() {
                                                      content_hash(),
                                                      AssetStoragePolicy::External,
                                                      {},
+                                                     {},
                                                      {}}},
                                                    {sequence}}));
 }
@@ -207,6 +208,7 @@ TEST_CASE("Timeline construction rejects invalid ranges identities and reference
                                                         content_hash(),
                                                         AssetStoragePolicy::External,
                                                         {},
+                                                        {},
                                                         {}}},
                                                       {range_sequence}});
     REQUIRE_FALSE(invalid_range.has_value());
@@ -242,7 +244,8 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
                      {{"proxy",
                        content_hash('c'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}},
+                     {}};
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {}));
     auto project = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
     REQUIRE(project.has_value());

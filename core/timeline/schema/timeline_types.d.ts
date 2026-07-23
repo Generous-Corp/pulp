@@ -4,12 +4,13 @@
 // the manifest) instead of editing this file.
 // Manifest version: 1
 
-/** `pulp.timeline.asset` — domain Document, schema version 1. */
+/** `pulp.timeline.asset` — domain Document, schema version 2. */
 export interface PulpTimelineAsset {
   content_hash: string;
   frame_count: number | string;
   id: number | string;
   locators: readonly unknown[];
+  loop_info?: Record<string, unknown>;
   name: string;
   representations: readonly unknown[];
   sample_rate: Record<string, unknown>;

@@ -25,6 +25,7 @@ bool same_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
     return lhs.id == rhs.id && lhs.name == rhs.name && lhs.frame_count == rhs.frame_count &&
            lhs.sample_rate == rhs.sample_rate && lhs.content_hash == rhs.content_hash &&
            lhs.storage_policy == rhs.storage_policy && lhs.locators == rhs.locators &&
+           lhs.loop_info == rhs.loop_info &&
            lhs.representations.size() == rhs.representations.size() &&
            std::equal(lhs.representations.begin(), lhs.representations.end(),
                       rhs.representations.begin(), same_representation);

@@ -1,5 +1,7 @@
 #include <pulp/timeline/schema_registry.hpp>
 
+#include "asset_schema_migrations.hpp"
+#include "asset_schema_policy.hpp"
 #include "track_schema_migrations.hpp"
 #include "track_schema_policy.hpp"
 #include "take_lane_schema_migrations.hpp"
@@ -266,15 +268,21 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"root_sequence_id", SchemaValueKind::U64String},
                                {"sequences", SchemaValueKind::Array},
                                {"tempo_map", SchemaValueKind::Array, false}}));
-    schemas.push_back(builtin("pulp.timeline.asset", SchemaDomain::Document,
-                              {{"content_hash", SchemaValueKind::String},
-                               {"frame_count", SchemaValueKind::U64String},
-                               {"id", SchemaValueKind::U64String},
-                               {"locators", SchemaValueKind::Array},
-                               {"name", SchemaValueKind::String},
-                               {"representations", SchemaValueKind::Array},
-                               {"sample_rate", SchemaValueKind::Object},
-                               {"storage_policy", SchemaValueKind::String}}));
+    auto asset = builtin(std::string(detail::asset_schema_policy.type_name),
+                         SchemaDomain::Document,
+                         {{"content_hash", SchemaValueKind::String},
+                          {"frame_count", SchemaValueKind::U64String},
+                          {"id", SchemaValueKind::U64String},
+                          {"locators", SchemaValueKind::Array},
+                          {"loop_info", SchemaValueKind::Object, false},
+                          {"name", SchemaValueKind::String},
+                          {"representations", SchemaValueKind::Array},
+                          {"sample_rate", SchemaValueKind::Object},
+                          {"storage_policy", SchemaValueKind::String}},
+                         detail::asset_schema_policy.current_version);
+    asset.upgrades.push_back({1, 2, {}, detail::migrate_asset_v1_to_v2});
+    asset.downgrades.push_back({2, 1, {}, detail::migrate_asset_v2_to_v1});
+    schemas.push_back(std::move(asset));
     schemas.push_back(builtin("pulp.timeline.asset_representation",
                               SchemaDomain::AssetRepresentation,
                               {{"content_hash", SchemaValueKind::String},

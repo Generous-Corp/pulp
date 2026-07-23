@@ -38,7 +38,7 @@ Project project_with_takes() {
         TrackInput{.id = {3}, .name = "track", .take_lanes = {lane}, .record_armed = true}));
     auto sequence = take(Sequence::create({2}, "root", TickDuration{100}, {track}));
     MediaAsset asset{{5}, "audio.wav", 100, {48'000, 1}, hash('a'), AssetStoragePolicy::External,
-                     {},  {}};
+                     {},  {},          {}};
     return take(Project::create(ProjectInput{{1}, "takes", 7, {2}, {asset}, {sequence}}));
 }
 

@@ -266,7 +266,8 @@ TEST_CASE("Timeline extension decoys do not consume structural quotas") {
                      {{"proxy",
                        hash('d'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "proxy.wav"}}}},
+                     {}};
     auto shared = take(Project::create(ProjectInput{{1}, "shared", 6, {2}, {asset}, {sequence}}));
     auto shared_snapshot = take(serialize_project(shared, builtins())).json;
     exact.max_locators = 1;

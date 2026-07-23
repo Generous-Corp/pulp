@@ -1,4 +1,5 @@
 add_library(pulp-timeline
+    src/asset_schema_migrations.cpp
     src/assets.cpp
     src/automation_curve.cpp
     src/automation_document_internal.cpp
@@ -23,6 +24,7 @@ add_library(pulp-timeline
     src/schema_json_summary.cpp
     src/schema_release.cpp
     src/schema_registry.cpp
+    src/serialize_asset_loop_decode.cpp
     src/serialize_automation_decode.cpp
     src/serialize_decode_support.cpp
     src/serialize_decode.cpp

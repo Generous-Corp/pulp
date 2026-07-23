@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_json.hpp>
 
+#include "asset_validation.hpp"
 #include "identity_directory.hpp"
 #include "identity_transition.hpp"
 #include "project_state_access.hpp"
@@ -66,6 +67,9 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
               [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
                   return lhs.role < rhs.role;
               });
+    if (asset.loop_info &&
+        !detail::validate_and_canonicalize(*asset.loop_info, asset.frame_count))
+        return ModelError{ModelErrorCode::InvalidAudioLoopInfo, asset.id, {}};
     return std::nullopt;
 }
 

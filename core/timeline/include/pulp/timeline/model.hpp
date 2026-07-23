@@ -63,6 +63,7 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidTakeComp,
     OverlappingTakeComp,
     ActiveCompTakeRemoval,
+    InvalidAudioLoopInfo,
 };
 
 struct ModelError {
@@ -103,6 +104,7 @@ struct MediaAsset {
     AssetStoragePolicy storage_policy = AssetStoragePolicy::External;
     std::vector<AssetLocator> locators;
     std::vector<AssetRepresentation> representations;
+    std::optional<AudioLoopInfo> loop_info;
 };
 
 struct MediaRef {

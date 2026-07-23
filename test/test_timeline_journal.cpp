@@ -36,7 +36,8 @@ Project make_durable_media_project(ContentHash source_hash = hash_of('a')) {
                      {{"proxy",
                        hash_of('b'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}},
+                     {}};
     auto project = Project::create(
         {{1}, "durable", 6, {3}, {std::move(asset)}, {std::move(sequence).value()}});
     REQUIRE(project);
@@ -448,7 +449,8 @@ MediaAsset make_recorded_asset(ItemId id, ContentHash source_hash) {
                       {{"proxy",
                         hash_of('b'),
                         AssetStoragePolicy::Embedded,
-                        {{AssetLocatorKind::PackageRelative, "media/recorded.proxy.wav"}}}}};
+                        {{AssetLocatorKind::PackageRelative, "media/recorded.proxy.wav"}}}},
+                      {}};
 }
 
 } // namespace
@@ -489,6 +491,7 @@ TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
                         {48'000, 1},
                         ContentHash{},
                         AssetStoragePolicy::External,
+                        {},
                         {},
                         {}};
     REQUIRE_FALSE(unsealed.content_hash.valid());

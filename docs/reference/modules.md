@@ -861,12 +861,20 @@ configuration needed for project save/load will be future document-owned state
 keyed by placement identity.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
-hints and alternate representations. `schema_registry.hpp` provides an explicit
+hints and alternate representations. An audio asset may also carry typed
+`AudioLoopInfo`: musical length and meter, one-shot intent, MIDI root note,
+half-open in/out markers, manual or analyzer-suggested loop points, and tags.
+Tempo is intentionally derived from musical length, frame count, and sample
+rate instead of being stored as a second value that can drift. Loop metadata is
+canonicalized at project construction and remains asset-description state; it
+does not make Timeline responsible for sample traversal or rendering.
+`schema_registry.hpp` provides an explicit
 immutable registry with typed extension codecs and bounded per-version
 migrations. `schema_release.hpp` exposes release-labeled structural version
 maps, and `serialize_project_for_release()` uses them to produce canonical
 snapshots for `v0.736.0`, `v0.744.0`, or `v0.748.0`. Older-release export fails
-when it would discard populated device, automation, take, or extension state.
+when it would discard populated device, automation, take, audio-loop, or
+extension state.
 It removes inactive identity tombstones for kinds the target release cannot
 name while preserving `next_item_id` as the durable no-reuse boundary.
 `serialize.hpp` reads and writes deterministic JSON snapshots: 64-bit values are
