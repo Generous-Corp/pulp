@@ -128,6 +128,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
         test_timeline_asset_loop_info.cpp
+        test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp

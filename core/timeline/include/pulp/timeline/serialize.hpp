@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/runtime/result.hpp>
+#include <pulp/timeline/command.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/schema_release.hpp>
@@ -63,5 +64,9 @@ peek_project_summary(std::string_view json, const SchemaRegistry& registry,
 runtime::Result<Project, PersistenceError> deserialize_project(std::string_view json,
                                                                const SchemaRegistry& registry,
                                                                const DecodeLimits& limits = {});
+
+runtime::Result<std::vector<Command>, PersistenceError>
+deserialize_commands(std::string_view json, const SchemaRegistry& registry,
+                     const DecodeLimits& limits = {});
 
 } // namespace pulp::timeline
