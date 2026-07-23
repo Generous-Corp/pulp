@@ -1,0 +1,523 @@
+{
+  "verbs": [
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "content-hash",
+          "required": true,
+          "schema_field": "content_hash",
+          "value_type": "string"
+        },
+        {
+          "kind": "U64String",
+          "name": "frame-count",
+          "required": true,
+          "schema_field": "frame_count",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "locators",
+          "required": true,
+          "schema_field": "locators",
+          "value_type": "json"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "representations",
+          "required": true,
+          "schema_field": "representations",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "sample-rate",
+          "required": true,
+          "schema_field": "sample_rate",
+          "value_type": "json"
+        },
+        {
+          "kind": "String",
+          "name": "storage-policy",
+          "required": true,
+          "schema_field": "storage_policy",
+          "value_type": "string"
+        }
+      ],
+      "name": "timeline:asset",
+      "schema_type": "pulp.timeline.asset",
+      "version": 1
+    },
+    {
+      "domain": "AssetRepresentation",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "content-hash",
+          "required": true,
+          "schema_field": "content_hash",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "locators",
+          "required": true,
+          "schema_field": "locators",
+          "value_type": "json"
+        },
+        {
+          "kind": "String",
+          "name": "role",
+          "required": true,
+          "schema_field": "role",
+          "value_type": "string"
+        },
+        {
+          "kind": "String",
+          "name": "storage-policy",
+          "required": true,
+          "schema_field": "storage_policy",
+          "value_type": "string"
+        }
+      ],
+      "name": "timeline:asset-representation",
+      "schema_type": "pulp.timeline.asset_representation",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "points",
+          "required": true,
+          "schema_field": "points",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "target",
+          "required": true,
+          "schema_field": "target",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:automation-lane",
+      "schema_type": "pulp.timeline.automation_lane",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "device-placement-id",
+          "required": true,
+          "schema_field": "device_placement_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U32",
+          "name": "parameter-id",
+          "required": true,
+          "schema_field": "parameter_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:automation-target:device-parameter",
+      "schema_type": "pulp.timeline.automation_target.device_parameter",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "Object",
+          "name": "content",
+          "required": true,
+          "schema_field": "content",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "fade-in-duration",
+          "required": false,
+          "schema_field": "fade_in_duration",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "fade-out-duration",
+          "required": false,
+          "schema_field": "fade_out_duration",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "gain-linear-bits",
+          "required": false,
+          "schema_field": "gain_linear_bits",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "time-range",
+          "required": true,
+          "schema_field": "time_range",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:clip",
+      "schema_type": "pulp.timeline.clip",
+      "version": 1
+    },
+    {
+      "domain": "Content",
+      "flags": [],
+      "name": "timeline:content:empty",
+      "schema_type": "pulp.timeline.content.empty",
+      "version": 1
+    },
+    {
+      "domain": "Content",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "asset-id",
+          "required": true,
+          "schema_field": "asset_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "frame-count",
+          "required": true,
+          "schema_field": "frame_count",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "source-start",
+          "required": true,
+          "schema_field": "source_start",
+          "value_type": "int"
+        }
+      ],
+      "name": "timeline:content:media",
+      "schema_type": "pulp.timeline.content.media",
+      "version": 1
+    },
+    {
+      "domain": "Content",
+      "flags": [
+        {
+          "kind": "Array",
+          "name": "notes",
+          "required": true,
+          "schema_field": "notes",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:content:notes",
+      "schema_type": "pulp.timeline.content.notes",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:device-placement",
+      "schema_type": "pulp.timeline.device_placement",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "Array",
+          "name": "assets",
+          "required": true,
+          "schema_field": "assets",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "identities",
+          "required": false,
+          "schema_field": "identities",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "meter-map",
+          "required": false,
+          "schema_field": "meter_map",
+          "value_type": "json"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "U64String",
+          "name": "next-item-id",
+          "required": true,
+          "schema_field": "next_item_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "root-sequence-id",
+          "required": true,
+          "schema_field": "root_sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "sequences",
+          "required": true,
+          "schema_field": "sequences",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "tempo-map",
+          "required": false,
+          "schema_field": "tempo_map",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:project",
+      "schema_type": "pulp.timeline.project",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "Object",
+          "name": "absolute-duration",
+          "required": true,
+          "schema_field": "absolute_duration",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "musical-duration",
+          "required": true,
+          "schema_field": "musical_duration",
+          "value_type": "int"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "tracks",
+          "required": true,
+          "schema_field": "tracks",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:sequence",
+      "schema_type": "pulp.timeline.sequence",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "asset-id",
+          "required": true,
+          "schema_field": "asset_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "frame-count",
+          "required": true,
+          "schema_field": "frame_count",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "placement-start",
+          "required": true,
+          "schema_field": "placement_start",
+          "value_type": "int"
+        },
+        {
+          "kind": "Object",
+          "name": "sample-rate",
+          "required": true,
+          "schema_field": "sample_rate",
+          "value_type": "json"
+        },
+        {
+          "kind": "I64String",
+          "name": "source-start",
+          "required": true,
+          "schema_field": "source_start",
+          "value_type": "int"
+        }
+      ],
+      "name": "timeline:take",
+      "schema_type": "pulp.timeline.take",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "takes",
+          "required": true,
+          "schema_field": "takes",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:take-lane",
+      "schema_type": "pulp.timeline.take_lane",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "Array",
+          "name": "automation-lanes",
+          "required": true,
+          "schema_field": "automation_lanes",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "clips",
+          "required": true,
+          "schema_field": "clips",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "device-chain",
+          "required": true,
+          "schema_field": "device_chain",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Boolean",
+          "name": "record-armed",
+          "required": true,
+          "schema_field": "record_armed",
+          "value_type": "bool"
+        },
+        {
+          "kind": "Array",
+          "name": "take-lanes",
+          "required": true,
+          "schema_field": "take_lanes",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:track",
+      "schema_type": "pulp.timeline.track",
+      "version": 4
+    }
+  ],
+  "x-pulp-generator": "schema-cli-emit",
+  "x-pulp-manifest-version": 1
+}

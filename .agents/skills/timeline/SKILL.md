@@ -209,6 +209,82 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
 
+### Derived surfaces are projections of the manifest, not the registry
+
+Every downstream agent surface is a **pure function of the committed
+`timeline_schema.json`**, not a second reader of the registry. Each is guarded by
+the same shared `schema_drift_check.py` (its own artifact, its own ctest), so the
+chain is `registry → manifest → surface`: the JSON gate guards the first edge, a
+per-surface gate guards the second. A surface generator never links the timeline
+library — it consumes the JSON.
+
+The **TypeScript-type surface** is the first such projection:
+`core/timeline/tools/schema_ts_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_types.d.ts` — one `export interface` per schema
+type, plus a `TimelineSchemaTypeName` union and a `TimelineSchemaTypeMap`. Kinds
+map by `x-pulp-kind` (`Boolean`→`boolean`; `U32`/`I64String`/`U64String`→
+`number | string`, the union covering both the string wire form of the 64-bit
+kinds and a numeric runtime value; `String`→`string`; `Object`→
+`Record<string, unknown>`; `Array`→`readonly unknown[]`), and a field `$ref`
+overrides its kind with the referenced interface. **After regenerating
+`timeline_schema.json`, regenerate the `.d.ts` too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_ts_emit.py --out core/timeline/schema/timeline_types.d.ts
+```
+
+The `timeline-schema-ts-drift` ctest byte-checks the committed `.d.ts` against a
+fresh emission; `timeline-schema-ts-selftest`
+(`core/timeline/tools/test_schema_ts_emit.py`) proves determinism, complete
+projection, kind mapping, and that the gate catches a mutated artifact. Note the
+generator is Python (a pure JSON projection needs no build), so it sits beside
+the C++ emitter under `core/timeline/tools/` but reuses the shared gate rather
+than a bespoke drift script.
+
+The **CLI-verb surface** is the same shape:
+`core/timeline/tools/schema_cli_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_cli_verbs.json` — one verb per schema type,
+each with its domain, version, and a flag per field. The flag value type maps by
+`x-pulp-kind` (`Boolean`→`bool`; `U32`/`U64String`→`uint`; `I64String`→`int`;
+`String`→`string`; `Object`/`Array`→`json`), and a field `$ref` becomes a `json`
+flag that records the referenced schema type. Verb tokens drop the `pulp.` prefix,
+join the hierarchy with `:`, and kebab-case each segment
+(`pulp.timeline.automation_target.device_parameter` →
+`timeline:automation-target:device-parameter`). This artifact is the
+manifest-derived *definition* of the verbs; wiring them into the `pulp` CLI binary
+is a separate downstream integration. **After regenerating the manifest,
+regenerate this too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_cli_emit.py --out core/timeline/schema/timeline_cli_verbs.json
+```
+
+The `timeline-schema-cli-drift` ctest byte-checks it; `timeline-schema-cli-selftest`
+(`core/timeline/tools/test_schema_cli_emit.py`) proves determinism, complete
+projection, value-type mapping, and confirm-the-failure.
+
+The **JS-facade surface** is the runtime-JS counterpart to the `.d.ts`:
+`core/timeline/tools/schema_js_emit.py` reads the manifest and emits
+`core/timeline/schema/timeline_facade.js` — a frozen ES module exporting
+`timelineSchema` (a descriptor per type: domain, version, and fields), a
+`timelineSchemaTypeNames` list, and `timelineSchemaManifestVersion`. The JS
+engine imports it directly (no JSON parse). Field `jsType` reports the actual
+runtime type — unlike the `.d.ts`, which widens the numeric kinds to
+`number | string`, the facade reports `U32`→`number` and the 64-bit string kinds
+(`I64String`/`U64String`)→`string` (carried as strings to keep precision);
+`Object`→`object`, `Array`→`array`, and a `$ref` field records the referenced
+type. **After regenerating the manifest, regenerate this too or its gate fails:**
+
+```
+python3 core/timeline/tools/schema_js_emit.py --out core/timeline/schema/timeline_facade.js
+```
+
+The `timeline-schema-js-drift` ctest byte-checks it; `timeline-schema-js-selftest`
+(`core/timeline/tools/test_schema_js_emit.py`) proves determinism, complete
+projection, jsType mapping, confirm-the-failure, and — when `node` is present —
+that the emitted module parses, imports, and is deeply frozen (skipped, not
+failed, without `node`).
+
 ## Scope boundary
 
 This subsystem does not own a durable `JournalSink`, package/container I/O,

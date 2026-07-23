@@ -119,6 +119,47 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-schema-drift-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/test_schema_drift_check.py)
+
+    # TypeScript-type surface: a pure projection of the committed schema
+    # manifest into a .d.ts, guarded by the same shared drift gate. The
+    # committed .d.ts must match a fresh emission from the manifest; the
+    # selftest proves the projection is complete and that the gate catches a
+    # mutated artifact.
+    add_test(NAME timeline-schema-ts-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_types.d.ts
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_ts_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-schema-ts-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_ts_emit.py)
+
+    # CLI-verb surface: a pure projection of the committed schema manifest into a
+    # verb/flag JSON table, guarded by the same shared drift gate. The committed
+    # artifact must match a fresh emission from the manifest; the selftest proves
+    # the projection is complete and that the gate catches a mutated artifact.
+    add_test(NAME timeline-schema-cli-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_cli_verbs.json
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_cli_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-schema-cli-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_cli_emit.py)
+
+    # JS-facade surface: a pure projection of the committed schema manifest into
+    # a frozen ES module (the runtime-JS counterpart to the .d.ts), guarded by
+    # the same shared drift gate. The committed module must match a fresh
+    # emission from the manifest; the selftest proves the projection is complete
+    # and that the gate catches a mutated artifact.
+    add_test(NAME timeline-schema-js-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_facade.js
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_js_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-schema-js-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_js_emit.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
