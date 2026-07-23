@@ -391,7 +391,9 @@ bool write_track(EncodeContext& context, const Track& track) {
     return write_envelope(
         context, detail::track_schema_policy.type_name, detail::track_schema_policy.current_version,
         [&] {
-            if (!context.writer.append("{\"automation_lanes\":["))
+            if (!context.writer.append("{\"active_take_lane_id\":") ||
+                !context.writer.u64(track.active_take_lane_id().value, true) ||
+                !context.writer.append(",\"automation_lanes\":["))
                 return false;
             for (std::size_t index = 0; index < track.automation_lanes().size(); ++index)
                 if ((index != 0 && !context.writer.character(',')) ||

@@ -191,9 +191,8 @@ void allocate_take_owned(const Track& track, IdRemapTable& table, ItemIdAllocato
 // A take's identity is owned and remapped; its MediaRef::asset_id is an external
 // reference fixed up the same way a clip's MediaRef is, so a remapped project's
 // takes point at the remapped assets.
-runtime::Result<TakeLane, ModelError> rebuild_take_lane(const TakeLane& lane,
-                                                        const IdRemapTable& table,
-                                                        ExternalIdFixup external) {
+runtime::Result<TakeLane, ModelError>
+rebuild_take_lane(const TakeLane& lane, const IdRemapTable& table, ExternalIdFixup external) {
     std::vector<Take> takes;
     takes.reserve(lane.takes().size());
     for (const auto& take : lane.takes()) {
@@ -203,8 +202,8 @@ runtime::Result<TakeLane, ModelError> rebuild_take_lane(const TakeLane& lane,
                                   fixed.error().related_item);
         MediaRef media = take.media();
         media.asset_id = fixed.value();
-        auto rebuilt = Take::create(*table.find(take.id()), media, take.placement_start(),
-                                    take.sample_rate());
+        auto rebuilt =
+            Take::create(*table.find(take.id()), media, take.placement_start(), take.sample_rate());
         if (!rebuilt)
             return fail<TakeLane>(rebuilt.error().code, rebuilt.error().item,
                                   rebuilt.error().related_item);
@@ -246,13 +245,17 @@ runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRem
                                rebuilt.error().related_item);
         take_lanes.push_back(std::move(rebuilt).value());
     }
-    return Track::create(TrackInput{.id = *table.find(track.id()),
+    return Track::create(
+        TrackInput{.id = *table.find(track.id()),
                                     .name = track.name(),
                                     .clips = std::move(clips),
                                     .device_chain = std::move(device_chain),
                                     .automation_lanes = std::move(automation_lanes),
                                     .take_lanes = std::move(take_lanes),
-                                    .record_armed = track.record_armed()});
+                   .record_armed = track.record_armed(),
+                   .active_take_lane_id = track.active_take_lane_id().valid()
+                                              ? *table.find(track.active_take_lane_id())
+                                              : ItemId{}});
 }
 
 runtime::Result<Sequence, ModelError>

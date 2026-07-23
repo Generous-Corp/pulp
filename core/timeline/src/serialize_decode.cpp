@@ -545,8 +545,8 @@ decode_clip(const std::shared_ptr<const ParsedJson>& document, const JsonValue& 
 }
 
 runtime::Result<Take, PersistenceError> decode_take(const JsonValue& value,
-                                                    const DecodeLimits& limits, DecodeCounts& counts,
-                                                    std::string path) {
+                                                    const DecodeLimits& limits,
+                                                    DecodeCounts& counts, std::string path) {
     if (++counts.takes > limits.max_takes)
         return fail<Take>(PersistenceErrorCode::LimitExceeded, path, value.begin, counts.takes,
                           limits.max_takes);
@@ -583,8 +583,9 @@ runtime::Result<Take, PersistenceError> decode_take(const JsonValue& value,
     return runtime::Result<Take, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
-runtime::Result<TakeLane, PersistenceError>
-decode_take_lane(const JsonValue& value, const DecodeLimits& limits, DecodeCounts& counts,
+runtime::Result<TakeLane, PersistenceError> decode_take_lane(const JsonValue& value,
+                                                             const DecodeLimits& limits,
+                                                             DecodeCounts& counts,
                  std::string path) {
     if (++counts.take_lanes > limits.max_take_lanes)
         return fail<TakeLane>(PersistenceErrorCode::LimitExceeded, path, value.begin,
@@ -634,6 +635,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto id = required(data, "id", path + "/data");
     auto name = string_field(data, "name", path + "/data");
     auto clips = required(data, "clips", path + "/data");
+    const auto* active_take_lane = data.find("active_take_lane_id");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
     const auto* take_lanes = data.find("take_lanes");
@@ -644,6 +646,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.requires_automation(envelope.value().version);
     const auto requires_takes =
         detail::track_schema_policy.requires_takes(envelope.value().version);
+    const auto requires_active_take_lane =
+        detail::track_schema_policy.requires_active_take_lane(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -651,7 +655,10 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         (requires_automation && (!automation || automation->kind != JsonValue::Kind::Array)) ||
         (!requires_takes && (take_lanes || record)) ||
         (requires_takes && (!take_lanes || take_lanes->kind != JsonValue::Kind::Array || !record ||
-                            record->kind != JsonValue::Kind::Boolean)))
+                            record->kind != JsonValue::Kind::Boolean)) ||
+        (!requires_active_take_lane && active_take_lane) ||
+        (requires_active_take_lane &&
+         (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -710,13 +717,23 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         }
     }
     const bool decoded_record_armed = record && record->boolean;
+    ItemId decoded_active_take_lane;
+    if (active_take_lane) {
+        auto parsed =
+            parse_canonical_u64_string(*active_take_lane, path + "/data/active_take_lane_id");
+        if (!parsed)
+            return fail<Track>(parsed.error().code, parsed.error().path,
+                               parsed.error().byte_offset);
+        decoded_active_take_lane = {parsed.value()};
+    }
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
                                             .device_chain = std::move(decoded_devices),
                                             .automation_lanes = std::move(decoded_automation),
                                             .take_lanes = std::move(decoded_take_lanes),
-                                            .record_armed = decoded_record_armed});
+                                            .record_armed = decoded_record_armed,
+                                            .active_take_lane_id = decoded_active_take_lane});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
@@ -863,13 +880,12 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             if (parent_value) {
                 auto parent = parse_canonical_u64_string(*parent_value, path + "/parent_id");
                 if (!parent)
-                    return fail<Project>(PersistenceErrorCode::InvalidNumber,
-                                         path + "/parent_id");
+                    return fail<Project>(PersistenceErrorCode::InvalidNumber, path + "/parent_id");
                 parent_id = {parent.value()};
             } else {
-                parent_id = immediate_parent_id(kind.value(), {decoded_id.value()},
-                                                {sequence_id.value()}, {track_id.value()},
-                                                {clip_id.value()});
+                parent_id =
+                    immediate_parent_id(kind.value(), {decoded_id.value()}, {sequence_id.value()},
+                                        {track_id.value()}, {clip_id.value()});
             }
             decoded_identities.push_back({{item.value()},
                                           {kind.value(),

@@ -62,6 +62,9 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
                 left_track.clips().size() != right_track.clips().size() ||
                 left_track.device_chain().size() != right_track.device_chain().size() ||
                 left_track.automation_lanes().size() != right_track.automation_lanes().size() ||
+                left_track.take_lanes().size() != right_track.take_lanes().size() ||
+                left_track.record_armed() != right_track.record_armed() ||
+                left_track.active_take_lane_id() != right_track.active_take_lane_id() ||
                 !std::equal(left_track.device_chain().begin(), left_track.device_chain().end(),
                             right_track.device_chain().begin()))
                 return false;
@@ -71,6 +74,9 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             for (std::size_t a = 0; a < left_track.automation_lanes().size(); ++a)
                 if (!equivalent(left_track.automation_lanes()[a],
                                 right_track.automation_lanes()[a]))
+                    return false;
+            for (std::size_t a = 0; a < left_track.take_lanes().size(); ++a)
+                if (!equivalent(left_track.take_lanes()[a], right_track.take_lanes()[a]))
                     return false;
         }
     }

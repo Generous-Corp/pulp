@@ -59,6 +59,7 @@ enum class ModelErrorCode : std::uint8_t {
     DuplicateAutomationTarget,
     InvalidTake,
     DuplicateTake,
+    ActiveTakeLaneRemoval,
 };
 
 struct ModelError {
@@ -330,6 +331,8 @@ class TakeLane {
   public:
     static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
                                                          std::vector<Take> takes);
+    runtime::Result<TakeLane, ModelError> insert_take(Take take) const;
+    runtime::Result<TakeLane, ModelError> erase_take(ItemId id) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -351,6 +354,8 @@ struct TrackInput {
     std::vector<AutomationLane> automation_lanes;
     std::vector<TakeLane> take_lanes;
     bool record_armed = false;
+    // Zero selects the arrangement rather than a take playlist/comp lane.
+    ItemId active_take_lane_id;
 };
 
 class Track {
@@ -408,6 +413,14 @@ class Track {
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    runtime::Result<Track, ModelError> insert_take_lane(TakeLane lane) const;
+    runtime::Result<Track, ModelError> erase_take_lane(ItemId id) const;
+    runtime::Result<Track, ModelError> insert_take(ItemId lane_id, Take take) const;
+    runtime::Result<Track, ModelError> erase_take(ItemId lane_id, ItemId take_id) const;
+    // Sets the record-arm intent flag. Path-copies only the Track's own Data;
+    // clip, automation, and take index storage is shared with the old Track.
+    Track with_record_armed(bool armed) const;
+    runtime::Result<Track, ModelError> with_active_take_lane(ItemId lane_id) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -427,6 +440,9 @@ class Track {
     // Whether this track is armed to capture into a take lane. Pure document
     // intent; the capture engine reads it but never mutates it here.
     bool record_armed() const noexcept;
+    // Zero means the arrangement is active. A non-zero value always names one
+    // of this track's take lanes; full segment-comp data remains a later layer.
+    ItemId active_take_lane_id() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -495,7 +511,8 @@ enum class ItemKind : std::uint8_t {
 // it from coordinates. The lane_id parameter carries an AutomationLane for a
 // point and a TakeLane for a take.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
-                                     ItemId track_id, ItemId clip_id, ItemId lane_id = {}) noexcept {
+                                     ItemId track_id, ItemId clip_id,
+                                     ItemId lane_id = {}) noexcept {
     switch (kind) {
     case ItemKind::Project:
         return {};
@@ -530,8 +547,8 @@ struct ItemLocation {
     constexpr ItemLocation() noexcept = default;
     constexpr ItemLocation(ItemKind item_kind, ItemId parent, ItemId sequence, ItemId track,
                            ItemId clip, bool is_active) noexcept
-        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track),
-          clip_id(clip), active(is_active) {}
+        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track), clip_id(clip),
+          active(is_active) {}
 
     constexpr bool has_same_owner(const ItemLocation& other) const noexcept {
         return kind == other.kind && parent_id == other.parent_id;

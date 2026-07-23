@@ -12,6 +12,7 @@ struct TrackSchemaVersionPolicy {
     std::uint32_t device_chain_introduced_version;
     std::uint32_t automation_introduced_version;
     std::uint32_t takes_introduced_version;
+    std::uint32_t active_take_lane_introduced_version;
 
     [[nodiscard]] constexpr bool requires_device_chain(std::uint32_t version) const noexcept {
         return version >= device_chain_introduced_version;
@@ -25,38 +26,39 @@ struct TrackSchemaVersionPolicy {
     [[nodiscard]] constexpr bool requires_takes(std::uint32_t version) const noexcept {
         return version >= takes_introduced_version;
     }
+
+    [[nodiscard]] constexpr bool requires_active_take_lane(std::uint32_t version) const noexcept {
+        return version >= active_take_lane_introduced_version;
+    }
 };
 
 inline constexpr TrackSchemaVersionPolicy track_schema_policy{
-    "pulp.timeline.track",
-    1,
-    4,
-    2,
-    3,
-    4,
+    "pulp.timeline.track", 1, 5, 2, 3, 4, 5,
 };
-static_assert(track_schema_policy.oldest_readable_version > 0 &&
-              track_schema_policy.oldest_readable_version <=
-                  track_schema_policy.current_version &&
+static_assert(
+    track_schema_policy.oldest_readable_version > 0 &&
+    track_schema_policy.oldest_readable_version <= track_schema_policy.current_version &&
               track_schema_policy.device_chain_introduced_version > 0 &&
-              track_schema_policy.device_chain_introduced_version <=
-                  track_schema_policy.current_version &&
-              !track_schema_policy.requires_device_chain(
-                  track_schema_policy.device_chain_introduced_version - 1) &&
+    track_schema_policy.device_chain_introduced_version <= track_schema_policy.current_version &&
+    !track_schema_policy.requires_device_chain(track_schema_policy.device_chain_introduced_version -
+                                               1) &&
               track_schema_policy.requires_device_chain(
                   track_schema_policy.device_chain_introduced_version) &&
               track_schema_policy.automation_introduced_version > 0 &&
-              track_schema_policy.automation_introduced_version <=
-                  track_schema_policy.current_version &&
-              !track_schema_policy.requires_automation(
-                  track_schema_policy.automation_introduced_version - 1) &&
-              track_schema_policy.requires_automation(
-                  track_schema_policy.automation_introduced_version) &&
+    track_schema_policy.automation_introduced_version <= track_schema_policy.current_version &&
+    !track_schema_policy.requires_automation(track_schema_policy.automation_introduced_version -
+                                             1) &&
+    track_schema_policy.requires_automation(track_schema_policy.automation_introduced_version) &&
               track_schema_policy.takes_introduced_version > 0 &&
-              track_schema_policy.takes_introduced_version <=
+    track_schema_policy.takes_introduced_version <= track_schema_policy.current_version &&
+    !track_schema_policy.requires_takes(track_schema_policy.takes_introduced_version - 1) &&
+    track_schema_policy.requires_takes(track_schema_policy.takes_introduced_version) &&
+    track_schema_policy.active_take_lane_introduced_version > 0 &&
+    track_schema_policy.active_take_lane_introduced_version <=
                   track_schema_policy.current_version &&
-              !track_schema_policy.requires_takes(
-                  track_schema_policy.takes_introduced_version - 1) &&
-              track_schema_policy.requires_takes(track_schema_policy.takes_introduced_version));
+    !track_schema_policy.requires_active_take_lane(
+        track_schema_policy.active_take_lane_introduced_version - 1) &&
+    track_schema_policy.requires_active_take_lane(
+        track_schema_policy.active_take_lane_introduced_version));
 
 } // namespace pulp::timeline::detail

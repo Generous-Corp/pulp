@@ -28,7 +28,7 @@ Project automation_project() {
 
 TEST_CASE("Timeline Track automation is canonical and round trips") {
     const auto encoded = take(serialize_project(automation_project(), builtins()));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":5") !=
             std::string::npos);
     REQUIRE(encoded.json.find("pulp.timeline.automation_target.device_parameter") !=
             std::string::npos);
@@ -66,8 +66,7 @@ TEST_CASE("Timeline automation decode reports exact fields and preserves model f
     const auto second_id = duplicate_point.find("\"id\":\"7\"", points);
     REQUIRE(points != std::string::npos);
     REQUIRE(second_id != std::string::npos);
-    duplicate_point.replace(second_id, std::string_view("\"id\":\"7\"").size(),
-                            "\"id\":\"6\"");
+    duplicate_point.replace(second_id, std::string_view("\"id\":\"7\"").size(), "\"id\":\"6\"");
     auto rejected = deserialize_project(duplicate_point, builtins());
     REQUIRE_FALSE(rejected.has_value());
     REQUIRE(rejected.error().code == PersistenceErrorCode::ModelRejected);
@@ -94,7 +93,7 @@ TEST_CASE("Timeline permanent v3 automation fixture upgrades and preserves lane 
     REQUIRE(track.take_lanes().empty());
     REQUIRE(decoded.locate({6})->parent_id == ItemId{5});
     const auto upgraded = take(serialize_project(decoded, builtins()));
-    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
+    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":5") !=
             std::string::npos);
     REQUIRE(upgraded.json.find("\"take_lanes\":[]") != std::string::npos);
     // The upgraded snapshot is canonical: re-saving it reproduces the exact bytes.
@@ -109,7 +108,8 @@ TEST_CASE("Timeline v3 decode rejects an automation point whose parent_id is str
     // orphaned. Deserialize must reject it rather than silently load it.
     auto canonical = take(serialize_project(automation_project(), builtins())).json;
     // Point {6}'s identity entry carries "parent_id":"5"; remove exactly that pair.
-    constexpr std::string_view point_parent = R"("id":"6","kind":"automation_point","parent_id":"5",)";
+    constexpr std::string_view point_parent =
+        R"("id":"6","kind":"automation_point","parent_id":"5",)";
     const auto position = canonical.find(point_parent);
     REQUIRE(position != std::string::npos);
     const std::string_view without_parent = R"("id":"6","kind":"automation_point",)";
@@ -150,8 +150,7 @@ TEST_CASE("Timeline Track v2 and v3 migrations fail closed on lossy downgrade") 
 
     for (const std::string_view malformed_chain : {"null", "{}"}) {
         const auto malformed =
-            std::string(R"({"data":{"clips":[],"device_chain":)") +
-            std::string(malformed_chain) +
+            std::string(R"({"data":{"clips":[],"device_chain":)") + std::string(malformed_chain) +
             R"(,"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})";
         auto malformed_result =
             registry.migrate(SchemaDomain::Document, "pulp.timeline.track", 2, 3, malformed);
@@ -163,27 +162,35 @@ TEST_CASE("Timeline Track v2 and v3 migrations fail closed on lossy downgrade") 
 TEST_CASE("Timeline Track migrations validate each source version's field shape") {
     const auto registry = builtins();
     const auto reject = [&](std::uint32_t from, std::uint32_t to, std::string_view source) {
-        auto result = registry.migrate(SchemaDomain::Document, "pulp.timeline.track", from, to,
-                                       source);
+        auto result =
+            registry.migrate(SchemaDomain::Document, "pulp.timeline.track", from, to, source);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().code == PersistenceErrorCode::MigrationFailed);
     };
 
-    reject(1, 2,
+    reject(
+        1, 2,
            R"({"data":{"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":1})");
-    reject(2, 3,
+    reject(
+        2, 3,
            R"({"data":{"clips":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
-    reject(2, 3,
+    reject(
+        2, 3,
            R"({"data":{"automation_lanes":[],"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
-    reject(2, 1,
+    reject(
+        2, 1,
            R"({"data":{"automation_lanes":[],"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":2})");
-    reject(3, 2,
+    reject(
+        3, 2,
            R"({"data":{"automation_lanes":[],"clips":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
-    reject(3, 2,
+    reject(
+        3, 2,
            R"({"data":{"automation_lanes":[],"clips":[],"device_chain":null,"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
-    reject(3, 2,
+    reject(
+        3, 2,
            R"({"data":{"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
-    reject(3, 2,
+    reject(
+        3, 2,
            R"({"data":{"automation_lanes":null,"clips":[],"device_chain":[],"id":"3","name":"track"},"type_name":"pulp.timeline.track","version":3})");
 }
 
@@ -223,16 +230,14 @@ TEST_CASE("Timeline automation decode preserves exact child parse errors") {
         REQUIRE(rejected.error().path == path);
     };
 
-    reject_replacement(
-        R"("id":"5","points")", R"("id":"05","points")",
+    reject_replacement(R"("id":"5","points")", R"("id":"05","points")",
         PersistenceErrorCode::InvalidNumber,
         "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/id");
-    reject_replacement(
-        R"("device_placement_id":"4")", R"("device_placement_id":"04")",
+    reject_replacement(R"("device_placement_id":"4")", R"("device_placement_id":"04")",
         PersistenceErrorCode::InvalidNumber,
-        "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/target/data/device_placement_id");
+                       "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/target/data/"
+                       "device_placement_id");
     reject_replacement(
-        R"("parameter_id":7)", R"("parameter_id":4294967296)",
-        PersistenceErrorCode::InvalidNumber,
+        R"("parameter_id":7)", R"("parameter_id":4294967296)", PersistenceErrorCode::InvalidNumber,
         "/data/sequences/0/data/tracks/0/data/automation_lanes/0/data/target/data/parameter_id");
 }

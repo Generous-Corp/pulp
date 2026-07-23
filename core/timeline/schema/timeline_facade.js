@@ -152,8 +152,9 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.track": Object.freeze({
     schemaType: "pulp.timeline.track",
     domain: "Document",
-    version: 4,
+    version: 5,
     fields: Object.freeze([
+      Object.freeze({ name: "active_take_lane_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "automation_lanes", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "clips", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "device_chain", kind: "Array", jsType: "array", required: true }),

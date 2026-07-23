@@ -72,9 +72,8 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
 // Applies Insert / Deactivate / Reactivate identity mutations to a directory
 // copy. Shared by sequence replacement and asset mutation so identity
 // transitions have one enforcement path. Returns nullopt on success.
-std::optional<ModelError>
-apply_identity_mutations(detail::IdentityDirectory& identities,
-                         std::span<const IdentityMutation> mutations) {
+std::optional<ModelError> apply_identity_mutations(detail::IdentityDirectory& identities,
+                                                   std::span<const IdentityMutation> mutations) {
     for (const auto& change : mutations) {
         if (!change.item.valid())
             return ModelError{ModelErrorCode::InvalidItemId, change.item, {}};
@@ -207,8 +206,8 @@ runtime::Result<TakeLane, ModelError> TakeLane::create(ItemId id, std::string na
         return fail<TakeLane>(ModelErrorCode::DuplicateTake, *duplicate);
     std::sort(takes.begin(), takes.end(),
               [](const Take& lhs, const Take& rhs) { return lhs.id() < rhs.id(); });
-    return runtime::Result<TakeLane, ModelError>(runtime::Ok(
-        TakeLane(std::make_shared<const Data>(Data{id, std::move(name), std::move(takes)}))));
+    return runtime::Result<TakeLane, ModelError>(runtime::Ok(TakeLane(std::make_shared<const Data>(
+        Data{.id = id, .name = std::move(name), .takes = std::move(takes)}))));
 }
 
 ItemId TakeLane::id() const noexcept {
@@ -224,11 +223,35 @@ std::span<const Take> TakeLane::takes() const noexcept {
 }
 
 const Take* TakeLane::find_take(ItemId id) const noexcept {
-    const auto found = std::lower_bound(data_->takes.begin(), data_->takes.end(), id,
-                                        [](const Take& take, ItemId wanted) {
-                                            return take.id() < wanted;
-                                        });
+    const auto found =
+        std::lower_bound(data_->takes.begin(), data_->takes.end(), id,
+                         [](const Take& take, ItemId wanted) { return take.id() < wanted; });
     return found != data_->takes.end() && found->id() == id ? &*found : nullptr;
+}
+
+runtime::Result<TakeLane, ModelError> TakeLane::insert_take(Take take) const {
+    auto takes = data_->takes;
+    const auto found = std::lower_bound(
+        takes.begin(), takes.end(), take.id(),
+        [](const Take& candidate, ItemId wanted) { return candidate.id() < wanted; });
+    if (found != takes.end() && found->id() == take.id())
+        return fail<TakeLane>(ModelErrorCode::DuplicateTake, take.id());
+    takes.insert(found, std::move(take));
+    return runtime::Ok(TakeLane(std::make_shared<const Data>(
+        Data{.id = data_->id, .name = data_->name, .takes = std::move(takes)})));
+}
+
+runtime::Result<TakeLane, ModelError> TakeLane::erase_take(ItemId id) const {
+    auto takes = data_->takes;
+    const auto found =
+        std::lower_bound(takes.begin(), takes.end(), id, [](const Take& candidate, ItemId wanted) {
+            return candidate.id() < wanted;
+        });
+    if (found == takes.end() || found->id() != id)
+        return fail<TakeLane>(ModelErrorCode::MissingItem, id, data_->id);
+    takes.erase(found);
+    return runtime::Ok(TakeLane(std::make_shared<const Data>(
+        Data{.id = data_->id, .name = data_->name, .takes = std::move(takes)})));
 }
 
 runtime::Result<OpaqueContent, ModelError>
@@ -575,8 +598,7 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.clip_id == entry.item;
             case ItemKind::Note:
                 return location.sequence_id.valid() && location.track_id.valid() &&
-                       location.clip_id.valid() &&
-                       location.sequence_id != location.track_id &&
+                       location.clip_id.valid() && location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
@@ -744,8 +766,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                          [](const Sequence& sequence, ItemId id) { return sequence.id() < id; });
     if (root == input.sequences.end() || root->id() != input.root_sequence_id)
         return fail<Project>(ModelErrorCode::MissingRootSequence, input.root_sequence_id);
-    const auto validate_media_ref = [&](const MediaRef& media, ItemId owner)
-        -> std::optional<ModelError> {
+    const auto validate_media_ref = [&](const MediaRef& media,
+                                        ItemId owner) -> std::optional<ModelError> {
         const auto found =
             std::lower_bound(input.assets.begin(), input.assets.end(), media.asset_id,
                              [](const MediaAsset& asset, ItemId id) { return asset.id < id; });
@@ -776,8 +798,10 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
     const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
                               ItemId clip = {}, ItemId lane = {}) {
-        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip, lane),
-                            sequence, track, clip, true};
+        return ItemLocation{
+            kind,     immediate_parent_id(kind, input.id, sequence, track, clip, lane),
+            sequence, track,
+            clip,     true};
     };
     add_identity(input.id, location(ItemKind::Project));
     for (const auto& asset : input.assets)
@@ -808,22 +832,22 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                              location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
                 if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
                     for (const auto& note : notes->notes())
-                        add_identity(note.id,
-                                     location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
+                        add_identity(note.id, location(ItemKind::Note, sequence.id(), track.id(),
+                                                       clip.id()));
                 }
             }
         }
     }
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{.id = input.id,
-             .name = std::move(input.name),
-             .next_item_id = input.next_item_id,
-             .root_sequence_id = input.root_sequence_id,
-             .assets = std::move(input.assets),
-             .sequences = std::move(input.sequences),
-             .tempo_map = std::move(input.tempo_map),
-             .meter_map = std::move(input.meter_map),
-             .identities = std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = input.id,
+                                                  .name = std::move(input.name),
+                                                  .next_item_id = input.next_item_id,
+                                                  .root_sequence_id = input.root_sequence_id,
+                                                  .assets = std::move(input.assets),
+                                                  .sequences = std::move(input.sequences),
+                                                  .tempo_map = std::move(input.tempo_map),
+                                                  .meter_map = std::move(input.meter_map),
+                                                  .identities = std::move(identities)}))));
 }
 
 ItemId Project::id() const noexcept {
@@ -924,23 +948,28 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
                          [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
     if (found == data_->assets.end() || found->id != asset_id)
         return fail<Project>(ModelErrorCode::MissingAsset, asset_id);
-    // Referential integrity: an asset that any clip still plays cannot be
-    // removed, or replay would resurrect a MediaRef pointing at a missing asset.
+    // Referential integrity: an asset that any clip or take still plays cannot
+    // be removed, or replay would resurrect a MediaRef pointing at a missing asset.
     for (const auto& sequence : data_->sequences)
-        for (const auto& track : sequence.tracks())
+        for (const auto& track : sequence.tracks()) {
             for (const auto& clip : track.clips())
                 if (const auto* media = std::get_if<MediaRef>(&clip.content());
                     media && media->asset_id == asset_id)
                     return fail<Project>(ModelErrorCode::MissingAsset, clip.id(), asset_id);
+            for (const auto& lane : track.take_lanes())
+                for (const auto& take : lane.takes())
+                    if (take.media().asset_id == asset_id)
+                        return fail<Project>(ModelErrorCode::MissingAsset, take.id(), asset_id);
+        }
     auto identities = data_->identities;
     if (const auto error = apply_identity_mutations(identities, mutations))
         return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto assets = data_->assets;
     assets.erase(assets.begin() + (found - data_->assets.begin()));
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             std::move(assets), data_->sequences, data_->tempo_map, data_->meter_map,
-             std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(
+        runtime::Ok(Project(std::make_shared<const Data>(Data{
+            data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, std::move(assets),
+            data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {

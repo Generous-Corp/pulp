@@ -75,6 +75,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField track_fields[] = {
+        {"active_take_lane_id", SchemaValueKind::U64String},
         {"automation_lanes", SchemaValueKind::Array},
         {"clips", SchemaValueKind::Array},
         {"device_chain", SchemaValueKind::Array},
@@ -92,12 +93,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"takes", SchemaValueKind::Array},
     };
     static constexpr ExpectedField take_fields[] = {
-        {"asset_id", SchemaValueKind::U64String},
-        {"frame_count", SchemaValueKind::U64String},
-        {"id", SchemaValueKind::U64String},
-        {"placement_start", SchemaValueKind::I64String},
-        {"sample_rate", SchemaValueKind::Object},
-        {"source_start", SchemaValueKind::I64String},
+        {"asset_id", SchemaValueKind::U64String}, {"frame_count", SchemaValueKind::U64String},
+        {"id", SchemaValueKind::U64String},       {"placement_start", SchemaValueKind::I64String},
+        {"sample_rate", SchemaValueKind::Object}, {"source_start", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField automation_lane_fields[] = {
         {"id", SchemaValueKind::U64String},

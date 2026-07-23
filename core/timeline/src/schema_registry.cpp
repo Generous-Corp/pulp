@@ -287,7 +287,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"name", SchemaValueKind::String},
                                {"tracks", SchemaValueKind::Array}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
-                         {{"automation_lanes", SchemaValueKind::Array},
+                         {{"active_take_lane_id", SchemaValueKind::U64String},
+                          {"automation_lanes", SchemaValueKind::Array},
                           {"clips", SchemaValueKind::Array},
                           {"device_chain", SchemaValueKind::Array},
                           {"id", SchemaValueKind::U64String},
@@ -298,6 +299,8 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     track.upgrades.push_back({1, 2, {}, detail::migrate_track_v1_to_v2});
     track.upgrades.push_back({2, 3, {}, detail::migrate_track_v2_to_v3});
     track.upgrades.push_back({3, 4, {}, detail::migrate_track_v3_to_v4});
+    track.upgrades.push_back({4, 5, {}, detail::migrate_track_v4_to_v5});
+    track.downgrades.push_back({5, 4, {}, detail::migrate_track_v5_to_v4});
     track.downgrades.push_back({4, 3, {}, detail::migrate_track_v4_to_v3});
     track.downgrades.push_back({3, 2, {}, detail::migrate_track_v3_to_v2});
     track.downgrades.push_back({2, 1, {}, detail::migrate_track_v2_to_v1});

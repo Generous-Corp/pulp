@@ -11,6 +11,7 @@ add_library(pulp-timeline
     src/model.cpp
     src/transaction.cpp
     src/transaction_automation_internal.cpp
+    src/transaction_take_internal.cpp
     src/transaction_reduction_support.cpp
     src/undo.cpp
     src/schema_codegen.cpp

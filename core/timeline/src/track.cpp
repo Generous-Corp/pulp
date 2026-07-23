@@ -58,8 +58,9 @@ canonical_automation_owned_ids(std::span<const AutomationLane> lanes) {
     return std::make_shared<const std::vector<ItemId>>(std::move(ids));
 }
 
-std::optional<ItemId> automation_identity_collision(
-    const Clip& clip, std::span<const ItemId> automation_owned_ids) noexcept {
+std::optional<ItemId>
+automation_identity_collision(const Clip& clip,
+                              std::span<const ItemId> automation_owned_ids) noexcept {
     if (std::binary_search(automation_owned_ids.begin(), automation_owned_ids.end(), clip.id()))
         return clip.id();
     if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
@@ -90,7 +91,7 @@ canonical_take_owned_ids(std::span<const TakeLane> lanes) {
 // take-owned id (lanes and their takes) must be valid, unique among takes, and
 // disjoint from every other track-owned id. Fail-closed on any violation.
 std::optional<ModelError> validate_attached_takes(std::span<const TakeLane> lanes,
-                                                   std::span<const ItemId> other_ids) {
+                                                  std::span<const ItemId> other_ids) {
     std::vector<ItemId> take_ids;
     append_take_owned_ids(lanes, take_ids);
     for (const auto id : take_ids)
@@ -335,6 +336,7 @@ struct Track::Data {
     std::shared_ptr<const std::vector<TakeLane>> take_lanes;
     std::shared_ptr<const std::vector<ItemId>> take_owned_ids;
     bool record_armed = false;
+    ItemId active_take_lane_id;
 };
 
 runtime::Result<Track, ModelError> Track::create(ItemId id, std::string name,
@@ -400,19 +402,29 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
         return fail<Track>(error->code, error->item, error->related_item);
     std::sort(input.take_lanes.begin(), input.take_lanes.end(),
               [](const TakeLane& lhs, const TakeLane& rhs) { return lhs.id() < rhs.id(); });
+    if (input.active_take_lane_id.value != 0 && !input.active_take_lane_id.valid())
+        return fail<Track>(ModelErrorCode::InvalidItemId, input.active_take_lane_id, input.id);
+    if (input.active_take_lane_id.valid()) {
+        const auto active = std::lower_bound(
+            input.take_lanes.begin(), input.take_lanes.end(), input.active_take_lane_id,
+            [](const TakeLane& lane, ItemId wanted) { return lane.id() < wanted; });
+        if (active == input.take_lanes.end() || active->id() != input.active_take_lane_id)
+            return fail<Track>(ModelErrorCode::MissingItem, input.active_take_lane_id, input.id);
+    }
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
-    return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
-        Data{.id = input.id,
-             .name = std::move(input.name),
-             .clips_by_start = std::move(by_start),
-             .clips_by_id = std::move(by_id),
-             .device_chain = std::move(device_chain),
-             .automation_lanes = std::move(automation_lanes),
-             .automation_owned_ids = std::move(automation_owned_ids),
-             .take_lanes = std::move(take_lanes),
-             .take_owned_ids = std::move(take_owned_ids),
-             .record_armed = input.record_armed}))));
+    return runtime::Result<Track, ModelError>(runtime::Ok(Track(
+        std::make_shared<const Data>(Data{.id = input.id,
+                                          .name = std::move(input.name),
+                                          .clips_by_start = std::move(by_start),
+                                          .clips_by_id = std::move(by_id),
+                                          .device_chain = std::move(device_chain),
+                                          .automation_lanes = std::move(automation_lanes),
+                                          .automation_owned_ids = std::move(automation_owned_ids),
+                                          .take_lanes = std::move(take_lanes),
+                                          .take_owned_ids = std::move(take_owned_ids),
+                                          .record_armed = input.record_armed,
+                                          .active_take_lane_id = input.active_take_lane_id}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -540,6 +552,108 @@ runtime::Result<Track, ModelError> Track::erase_automation_lane(ItemId id) const
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+runtime::Result<Track, ModelError> Track::insert_take_lane(TakeLane lane) const {
+    auto lanes = *data_->take_lanes;
+    const auto found =
+        std::lower_bound(lanes.begin(), lanes.end(), lane.id(),
+                         [](const TakeLane& candidate, ItemId id) { return candidate.id() < id; });
+    if (found != lanes.end() && found->id() == lane.id())
+        return fail<Track>(ModelErrorCode::DuplicateItemId, lane.id());
+    lanes.insert(found, std::move(lane));
+    // Takes must be disjoint from every other track-owned id: the non-take id set
+    // plus the automation-owned ids computed for this track.
+    auto other_ids = non_automation_ids(data_->id, *data_->device_chain, clips());
+    other_ids.insert(other_ids.end(), data_->automation_owned_ids->begin(),
+                     data_->automation_owned_ids->end());
+    if (const auto error = validate_attached_takes(lanes, other_ids))
+        return fail<Track>(error->code, error->item, error->related_item);
+    auto storage = std::make_shared<const std::vector<TakeLane>>(std::move(lanes));
+    auto take_owned_ids = canonical_take_owned_ids(*storage);
+    auto next_data = *data_;
+    next_data.take_lanes = std::move(storage);
+    next_data.take_owned_ids = std::move(take_owned_ids);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::erase_take_lane(ItemId id) const {
+    if (data_->active_take_lane_id == id)
+        return fail<Track>(ModelErrorCode::ActiveTakeLaneRemoval, id, data_->id);
+    auto lanes = *data_->take_lanes;
+    const auto found = std::lower_bound(
+        lanes.begin(), lanes.end(), id,
+        [](const TakeLane& candidate, ItemId wanted) { return candidate.id() < wanted; });
+    if (found == lanes.end() || found->id() != id)
+        return fail<Track>(ModelErrorCode::MissingItem, id);
+    lanes.erase(found);
+    auto storage = std::make_shared<const std::vector<TakeLane>>(std::move(lanes));
+    auto take_owned_ids = canonical_take_owned_ids(*storage);
+    auto next_data = *data_;
+    next_data.take_lanes = std::move(storage);
+    next_data.take_owned_ids = std::move(take_owned_ids);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::insert_take(ItemId lane_id, Take take) const {
+    auto lanes = *data_->take_lanes;
+    const auto found = std::lower_bound(
+        lanes.begin(), lanes.end(), lane_id,
+        [](const TakeLane& candidate, ItemId wanted) { return candidate.id() < wanted; });
+    if (found == lanes.end() || found->id() != lane_id)
+        return fail<Track>(ModelErrorCode::MissingItem, lane_id, data_->id);
+    auto next_lane = found->insert_take(std::move(take));
+    if (!next_lane)
+        return fail<Track>(next_lane.error().code, next_lane.error().item,
+                           next_lane.error().related_item);
+    *found = std::move(next_lane).value();
+
+    auto other_ids = non_automation_ids(data_->id, *data_->device_chain, clips());
+    other_ids.insert(other_ids.end(), data_->automation_owned_ids->begin(),
+                     data_->automation_owned_ids->end());
+    if (const auto error = validate_attached_takes(lanes, other_ids))
+        return fail<Track>(error->code, error->item, error->related_item);
+    auto storage = std::make_shared<const std::vector<TakeLane>>(std::move(lanes));
+    auto next_data = *data_;
+    next_data.take_lanes = std::move(storage);
+    next_data.take_owned_ids = canonical_take_owned_ids(*next_data.take_lanes);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+runtime::Result<Track, ModelError> Track::erase_take(ItemId lane_id, ItemId take_id) const {
+    auto lanes = *data_->take_lanes;
+    const auto found = std::lower_bound(
+        lanes.begin(), lanes.end(), lane_id,
+        [](const TakeLane& candidate, ItemId wanted) { return candidate.id() < wanted; });
+    if (found == lanes.end() || found->id() != lane_id)
+        return fail<Track>(ModelErrorCode::MissingItem, lane_id, data_->id);
+    auto next_lane = found->erase_take(take_id);
+    if (!next_lane)
+        return fail<Track>(next_lane.error().code, next_lane.error().item,
+                           next_lane.error().related_item);
+    *found = std::move(next_lane).value();
+
+    auto storage = std::make_shared<const std::vector<TakeLane>>(std::move(lanes));
+    auto next_data = *data_;
+    next_data.take_lanes = std::move(storage);
+    next_data.take_owned_ids = canonical_take_owned_ids(*next_data.take_lanes);
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
+Track Track::with_record_armed(bool armed) const {
+    auto next_data = *data_;
+    next_data.record_armed = armed;
+    return Track(std::make_shared<const Data>(std::move(next_data)));
+}
+
+runtime::Result<Track, ModelError> Track::with_active_take_lane(ItemId lane_id) const {
+    if (lane_id.value != 0 && !lane_id.valid())
+        return fail<Track>(ModelErrorCode::InvalidItemId, lane_id, data_->id);
+    if (lane_id.valid() && !find_take_lane(lane_id))
+        return fail<Track>(ModelErrorCode::MissingItem, lane_id, data_->id);
+    auto next_data = *data_;
+    next_data.active_take_lane_id = lane_id;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
 ItemId Track::id() const noexcept {
     return data_->id;
 }
@@ -590,6 +704,9 @@ const TakeLane* Track::find_take_lane(ItemId id) const noexcept {
 }
 bool Track::record_armed() const noexcept {
     return data_->record_armed;
+}
+ItemId Track::active_take_lane_id() const noexcept {
+    return data_->active_take_lane_id;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

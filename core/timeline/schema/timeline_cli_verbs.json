@@ -464,6 +464,13 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "active-take-lane-id",
+          "required": true,
+          "schema_field": "active_take_lane_id",
+          "value_type": "uint"
+        },
+        {
           "kind": "Array",
           "name": "automation-lanes",
           "required": true,
@@ -515,7 +522,7 @@
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 4
+      "version": 5
     }
   ],
   "x-pulp-generator": "schema-cli-emit",

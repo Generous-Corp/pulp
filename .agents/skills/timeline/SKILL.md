@@ -75,8 +75,22 @@ invariants.
   coordinate-based parent recompute; a lane's parent is its Track. Take
   identities must be disjoint from every other track-owned id, and a take whose
   `MediaRef` asset is missing or out of range is rejected at `Project::create`,
-  exactly like a clip `MediaRef`. Comp/playlist selection and comp-edit commands
-  are not part of the model yet.
+  exactly like a clip `MediaRef`.
+- Take lanes and record-arm are command-addressable: `InsertTakeLane` /
+  `RemoveTakeLane` / `SetRecordArm` reduce through the shared pipeline
+  (`transaction_reduction_support` + `transaction_take_internal`, dispatched like
+  automation), allocating lane+take identities as owned Project identities and
+  emitting inverse commands so undo/redo/journal-replay restore lane and
+  tombstone ownership exactly. `InsertTakeLane` re-validates each take's asset
+  reference against the project (the recorder emits `CreateAsset` first, so the
+  asset already exists when the take command reduces); `SetRecordArm` is an
+  optimistic expected/replacement gate on a non-identity flag. `InsertTake` /
+  `RemoveTake` edit one lane-owned take and preserve its tombstone parent.
+  `SetActiveTakeLane` optimistically selects one existing lane as the active
+  playlist/comp; zero selects the arrangement. Removing an active lane is
+  rejected, so clearing selection and removing the lane must be one explicit
+  transaction. Segment-comp selections and derived-artifact rendering extend
+  `TakeLane` later without overloading the Track selector.
 - `Project::Data` and `Track::Data` mutations rebuild by copy-and-modify
   (`auto next = *data_; next.field = ...; make_shared<const Data>(move(next))`),
   never positional brace-init — adding a field must not silently shift an
@@ -96,8 +110,10 @@ invariants.
   fields remain readable as 120 BPM and 4/4, then canonicalize on save.
 - Track schema v2 introduced the required device-chain field; v3 adds required
   attached automation lanes; v4 adds the required `take_lanes` array and
-  `record_armed` flag. Adjacent downgrades succeed only when the field being
-  removed is empty (and, for v4→v3, only when `record_armed` is false), so
+  `record_armed` flag; v5 adds the required `active_take_lane_id` (`"0"` means
+  arrangement). Adjacent downgrades succeed only when the field being removed
+  is empty/default (v5→v4 requires zero selection; v4→v3 requires empty takes
+  and `record_armed` false), so
   neither placement, automation, nor take identity can be discarded. Placements,
   lanes, lane targets, take lanes, and takes remain separately versioned
   structural envelopes.
@@ -132,7 +148,9 @@ invariants.
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
-  `SetMeterMap`, `CreateAsset`, and `RemoveAsset` are the bounded mutation
+  `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
+  `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`, and
+  `SetActiveTakeLane` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.

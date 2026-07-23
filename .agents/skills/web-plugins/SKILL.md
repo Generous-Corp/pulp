@@ -286,7 +286,11 @@ per-ABI entry point for it.** Go through the plugin's own state:
   belongs in the native timeline target, the no-exceptions target, and both web
   ABI lists. This proves that snapshots containing automation can compile into
   the browser runtimes; it does not prove scheduling or parameter delivery until
-  the playback/host binding consumes those lanes.
+  the playback/host binding consumes those lanes. Take-lane editing follows the
+  same rule: a dedicated reducer such as `transaction_take_internal.cpp` is not
+  pulled in transitively just because `transaction.cpp` is already listed, so it
+  must be mirrored into both web ABI source lists with the native and
+  no-exceptions targets.
 
 - A new `core/timeline` translation unit belongs in four source lists:
   `core/timeline/CMakeLists.txt`, the `pulp-test-timeline-no-exceptions` OBJECT
