@@ -417,16 +417,23 @@ export function decodeVectorNetworkBlob(bytes) {
   }
   if (degree.some((d) => d > 2)) return null;
 
-  // Chain segments into runs. Each run starts at any unused segment and
-  // extends by matching the current endpoint; a segment may be traversed
+  // Chain segments into runs. Open components start at a degree-1 endpoint;
+  // otherwise an arbitrary middle segment can split one connected chain into
+  // two subpaths, changing joins, caps, and dash phase. Closed cycles may
+  // start anywhere. Each run extends by matching the current endpoint; a
+  // segment may be traversed
   // reversed (swap vertices AND tangents). A run that returns to its first
   // vertex closes with Z.
   const out = [];
   let unused = segmentCount;
   const isZero = (t) => t.x === 0 && t.y === 0;
   while (unused > 0) {
-    const first = segs.find((s) => !s.used);
-    let current = first.start;
+    const first = segs.find((s) => !s.used
+      && (degree[s.start] === 1 || degree[s.end] === 1))
+      || segs.find((s) => !s.used);
+    let current = degree[first.start] === 1 ? first.start
+      : degree[first.end] === 1 ? first.end
+      : first.start;
     const runStart = current;
     out.push({ op: 'M', coords: [verts[current].x, verts[current].y] });
     for (;;) {

@@ -766,6 +766,209 @@ test('icon-font text lowers to a glyph outline; real text stays a live label', (
     'text whose font is missing is outlined rather than mis-measured');
 });
 
+test('a gradient-filled outlined label keeps its gradient, not a flat solid', () => {
+  // The sequencer's "GENERATE PATTERN" pill is a linear-gradient TEXT lowered
+  // to a glyph outline (its font is unavailable, so it outlines). TEXT never
+  // takes the box branch, so the outline used to flatten to the first solid —
+  // flat gray instead of the rainbow ramp. The decoder must lower the linear
+  // gradient onto the path's fillGradient channel; a radial keeps flattening
+  // and stays diagnosed.
+  const encode = (...cmds) => Buffer.concat(cmds.map(([tag, ...args]) => {
+    const b = Buffer.alloc(1 + args.length * 4);
+    b.writeUInt8(tag, 0);
+    args.forEach((v, i) => b.writeFloatLE(v, 1 + i * 4));
+    return b;
+  }));
+  const em = encode([1, 0, 0], [2, 1, 0], [2, 1, 1], [0]);  // MOVE LINE LINE CLOSE
+  const linear = {
+    type: 'GRADIENT_LINEAR',
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    stops: [
+      { position: 0, color: { r: 1, g: 0.8, b: 0.2, a: 1 } },
+      { position: 1, color: { r: 0.2, g: 0.8, b: 0.5, a: 1 } },
+    ],
+  };
+  const radial = { ...linear, type: 'GRADIENT_RADIAL' };
+  const mk = (name, localID, pos, fill) => ({
+    guid: { sessionID: 0, localID }, type: 'TEXT', name,
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position: pos },
+    size: { x: 40, y: 12 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    fontName: { family: 'Some Missing Face' },
+    textData: { characters: 'GO' },
+    fillPaints: [fill],
+    derivedTextData: { characters: 'GO',
+      glyphs: [{ commandsBlob: 0, position: { x: 0, y: 12 }, fontSize: 12 }] },
+  });
+  const nodeChanges = [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 40 } },
+    mk('pill', 3, 'a', linear),
+    mk('blob', 4, 'b', radial),
+  ];
+  const scene = buildScene({ nodeChanges, blobs: [{ bytes: em }] });
+  // The face is missing, so both outline. isFontAvailable(false) forces it
+  // independent of the machine's font book.
+  const ctx = { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z', isFontAvailable: () => false };
+  const f = materializeFrame(scene, findFrame(scene, 'Root'), ctx);
+  const [pill, blob] = f.envelope.root.children;
+
+  assert.equal(pill.type, 'vector', 'the label lowers to its glyph outline');
+  assert.match(pill.fillGradient || '', /^linear-gradient\(/,
+    'a linear gradient rides the outline as fillGradient, not a flat solid');
+  assert.ok(pill.fill, 'the flattened solid stays as the parse-failure fallback');
+
+  // A radial has no linear lowering: it stays flattened AND says so.
+  assert.equal(blob.type, 'vector');
+  assert.ok(!('fillGradient' in blob), 'a radial is not lowered to fillGradient');
+  assert.ok(f.diagnostics.some((d) => d.code === 'gradient-approximated' && d.node_name === 'blob'),
+    'the radial flatten is diagnosed, not silent');
+});
+
+test('the icon-font warning reflects that baked glyph outlines rendered', () => {
+  // When every icon glyph is lowered from the file's baked outline, the icons
+  // render correctly WITHOUT the font — so the frame-level warning must not
+  // claim they "read as words". A font whose outlines are unreadable keeps the
+  // old degradation copy.
+  const encode = (...cmds) => Buffer.concat(cmds.map(([tag, ...args]) => {
+    const b = Buffer.alloc(1 + args.length * 4);
+    b.writeUInt8(tag, 0);
+    args.forEach((v, i) => b.writeFloatLE(v, 1 + i * 4));
+    return b;
+  }));
+  const em = encode([1, 0, 0], [2, 1, 0], [2, 1, 1], [0]);
+  const iconNode = (name, localID, pos, glyphBlob) => ({
+    guid: { sessionID: 0, localID }, type: 'TEXT', name,
+    parentIndex: { guid: { sessionID: 0, localID: 2 }, position: pos },
+    size: { x: 12, y: 12 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+    fontName: { family: 'Font Awesome 6 Pro' },
+    textData: { characters: 'lock' },
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 } }],
+    derivedTextData: { characters: 'lock',
+      glyphs: [{ commandsBlob: glyphBlob, position: { x: 0, y: 12 }, fontSize: 12 }] },
+  });
+  const baseCtx = { images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z', isFontAvailable: () => false };
+
+  // Baked: the glyph blob resolves, the icon renders, the warning is honest.
+  const okScene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 40, y: 40 } },
+    iconNode('icon', 3, 'a', 0),
+  ], blobs: [{ bytes: em }] });
+  const okF = materializeFrame(okScene, findFrame(okScene, 'Root'), baseCtx);
+  const okWarn = okF.diagnostics.find(
+    (d) => d.code === 'icon-font-required' && d.node_name === '<frame>');
+  assert.ok(okWarn, 'the frame-level icon font is still reported');
+  assert.match(okWarn.detail, /render correctly without the font/,
+    'the copy states the icons rendered from baked outlines');
+  assert.doesNotMatch(okWarn.detail, /read as words/,
+    'it does NOT claim the icons broke');
+  assert.equal(okF.envelope.root.children[0].type, 'vector', 'the icon really did outline');
+
+  // Unreadable glyph blob: outlining fails, the icon degrades to text, and the
+  // old warning copy (accurately) says the icons read as words.
+  const badScene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page 1' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 40, y: 40 } },
+    iconNode('icon', 3, 'a', 5),  // no blob at index 5
+  ], blobs: [{ bytes: em }] });
+  const badF = materializeFrame(badScene, findFrame(badScene, 'Root'), baseCtx);
+  const badWarn = badF.diagnostics.find(
+    (d) => d.code === 'icon-font-required' && d.node_name === '<frame>');
+  assert.ok(badWarn, 'a font whose glyphs cannot be baked is still reported');
+  assert.match(badWarn.detail, /read as words/,
+    'when outlining fails, the honest copy is that icons read as words');
+});
+
+test('non-uniform corner radii survive as four corners, not one collapsed value', () => {
+  // Figma drops zero corner fields, so a bottom-rounded panel arrives as
+  // {bottomLeft: 2, bottomRight: 2} with the top corners absent. Treating the
+  // absent corners as "inherit" collapsed all four to 2 and rounded the top;
+  // they are SQUARE (0). The decoder must carry [0, 0, 2, 2] as four corners.
+  const scene = buildScene({ nodeChanges: [
+    { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS', name: 'Page' },
+    { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Root',
+      parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' }, size: { x: 100, y: 100 } },
+    // Bottom-rounded panel: top corners omitted (= square).
+    { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'panel',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'a' },
+      size: { x: 60, y: 20 }, rectangleCornerRadiiIndependent: true,
+      rectangleBottomLeftCornerRadius: 2.4, rectangleBottomRightCornerRadius: 2.4 },
+    // Left-rounded chip: right corners omitted.
+    { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'chip',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'b' },
+      size: { x: 18, y: 6 }, rectangleCornerRadiiIndependent: true,
+      rectangleTopLeftCornerRadius: 3, rectangleBottomLeftCornerRadius: 3 },
+    // All four equal → collapses to a single border_radius, no four-corner set.
+    { guid: { sessionID: 0, localID: 5 }, type: 'ROUNDED_RECTANGLE', name: 'card',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'c' },
+      size: { x: 40, y: 40 }, rectangleTopLeftCornerRadius: 8.4, rectangleTopRightCornerRadius: 8.4,
+      rectangleBottomLeftCornerRadius: 8.4, rectangleBottomRightCornerRadius: 8.4 },
+    // Direct uniform radius preserves fractions too.
+    { guid: { sessionID: 0, localID: 6 }, type: 'ROUNDED_RECTANGLE', name: 'direct',
+      parentIndex: { guid: { sessionID: 0, localID: 2 }, position: 'd' },
+      size: { x: 20, y: 20 }, cornerRadius: 2.4 },
+  ]});
+  const { envelope } = materializeFrame(scene, findFrame(scene, 'Root'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z' });
+  const byName = Object.fromEntries(envelope.root.children.map((c) => [c.name, c]));
+
+  const p = byName.panel.style;
+  assert.equal(p.border_top_left_radius, 0, 'omitted top corner is square, not inherited');
+  assert.equal(p.border_top_right_radius, 0);
+  assert.equal(p.border_bottom_right_radius, 2.4);
+  assert.equal(p.border_bottom_left_radius, 2.4);
+  assert.ok(!('border_radius' in p), 'asymmetric corners do not collapse to one value');
+
+  const c = byName.chip.style;
+  assert.deepEqual(
+    [c.border_top_left_radius, c.border_top_right_radius, c.border_bottom_right_radius, c.border_bottom_left_radius],
+    [3, 0, 0, 3], 'left-rounded chip keeps its two rounded corners only');
+
+  const card = byName.card.style;
+  assert.equal(card.border_radius, 8.4, 'four equal corners collapse without integer quantization');
+  assert.ok(!('border_top_left_radius' in card), 'no redundant four-corner emission');
+  assert.equal(byName.direct.style.border_radius, 2.4,
+    'the direct uniform radius keeps sub-pixel precision');
+});
+
+test('a null-geometry boolean-op paints nothing and emits no node', () => {
+  // A BOOLEAN_OPERATION whose combined geometry is a 0-byte blob, with no size,
+  // paints nothing in Figma. The box fallback used to emit it as a 0-sized
+  // frame carrying its fill as a stray background slab — an EXTRA node layout
+  // parity rightly flagged. Skipping is the correct rendering.
+  const g = (l) => ({ sessionID: 0, localID: l });
+  const scene = buildScene({ nodeChanges: [
+    { guid: g(1), type: 'CANVAS', name: 'Page' },
+    { guid: g(2), type: 'FRAME', name: 'Root',
+      parentIndex: { guid: g(1), position: 'a' }, size: { x: 100, y: 100 } },
+    // Empty boolean op: null size, geometry blob is 0 bytes.
+    { guid: g(3), type: 'BOOLEAN_OPERATION', name: 'Union', booleanOperation: 'UNION',
+      parentIndex: { guid: g(2), position: 'a' }, size: { x: null, y: null },
+      fillGeometry: [{ windingRule: 'NONZERO', commandsBlob: 0, styleID: 0 }],
+      fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, opacity: 0.15 }] },
+    // A real sibling proves the frame still emits its other content.
+    { guid: g(4), type: 'ROUNDED_RECTANGLE', name: 'keep',
+      parentIndex: { guid: g(2), position: 'b' }, size: { x: 10, y: 10 },
+      fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }] },
+  ], blobs: [{ bytes: Buffer.alloc(0) }] });
+  const { envelope, diagnostics } = materializeFrame(scene, findFrame(scene, 'Root'), {
+    images: new Map(), fileKey: 'K', parserVersion: 't', compatSchemaVersion: '1',
+    exportedAt: '1970-01-01T00:00:00Z' });
+  const names = envelope.root.children.map((c) => c.name);
+  assert.ok(!names.includes('Union'), 'the empty boolean op emits no node');
+  assert.ok(names.includes('keep'), 'sibling content still renders');
+  assert.ok(diagnostics.some((d) => d.code === 'boolean-empty-skipped' && d.node_name === 'Union'),
+    'the skip is stated, not silent');
+});
+
 test('a style-referenced fill resolves to the style, not the master default', () => {
   // Shared styles are the design's tokens, and Figma caches the resolved color
   // on the referencing node only sometimes. In one real design only the FOLEY
