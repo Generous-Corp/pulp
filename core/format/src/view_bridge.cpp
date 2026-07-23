@@ -311,12 +311,19 @@ void ViewBridge::resize(uint32_t width, uint32_t height) {
     }
 }
 
-void ViewBridge::set_preferred_size(uint32_t width, uint32_t height) {
-    if (width == 0 || height == 0) return;
+bool ViewBridge::set_preferred_size(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) return false;
+    if ((size_hints_.min_width > 0 && width < size_hints_.min_width) ||
+        (size_hints_.min_height > 0 && height < size_hints_.min_height) ||
+        (size_hints_.max_width > 0 && width > size_hints_.max_width) ||
+        (size_hints_.max_height > 0 && height > size_hints_.max_height)) {
+        return false;
+    }
     size_hints_.preferred_width = width;
     size_hints_.preferred_height = height;
     size_hints_.aspect_ratio =
         static_cast<double>(width) / static_cast<double>(height);
+    return true;
 }
 
 view::View* ViewBridge::attach_secondary_view(std::unique_ptr<view::View> v, ViewRole role) {

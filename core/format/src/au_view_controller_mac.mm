@@ -397,17 +397,20 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // onResize hook); -dealloc clears it before _viewHost is destroyed.
     if (_processor) {
         _processor->set_editor_resize_handler([self](uint32_t w, uint32_t h) -> bool {
-            if (w == 0 || h == 0) return false;
-            if (self->_bridge) self->_bridge->set_preferred_size(w, h);
+            if (!self->_bridge || !self->_bridge->set_preferred_size(w, h))
+                return false;
+            // AU has no accept/refuse callback. Validate and commit the hints
+            // first so any synchronous host query sees the new natural size,
+            // then publish preferredContentSize before changing the viewport.
+            self->_designSize = NSMakeSize(w, h);
+            pulp_auv3_apply_preferred_size(self, self->_designSize,
+                                           /*resize_view_frame=*/true);
             if (self->_viewHost) {
                 self->_viewHost->set_design_viewport(static_cast<float>(w),
                                                      static_cast<float>(h));
                 self->_viewHost->set_fixed_aspect_ratio(
                     static_cast<float>(w) / static_cast<float>(h));
             }
-            self->_designSize = NSMakeSize(w, h);
-            pulp_auv3_apply_preferred_size(self, NSMakeSize(w, h),
-                                           /*resize_view_frame=*/true);
             return true;
         });
     }

@@ -104,30 +104,36 @@ tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
 
     // Editor-INITIATED resize: let the editor ask the DAW to resize the plugin
     // window (e.g. a chrome-hiding mode wanting a smaller shape). The handler
-    // re-pins the design viewport + aspect to the requested size, updates the
-    // reported hints (so checkSizeConstraint / getSize follow the new aspect),
-    // then asks the host through IPlugFrame::resizeView. Cleared in removed()
-    // before the editor host it captures is destroyed.
+    // publishes the new hints optimistically because a host may synchronously
+    // query them from inside IPlugFrame::resizeView. A refusal rolls them back
+    // and leaves the viewport untouched. Cleared in removed() before the editor
+    // host it captures is destroyed.
     processor_.set_editor_resize_handler(
         [this](uint32_t w, uint32_t h) -> bool {
-            if (w == 0 || h == 0) return false;
-            bridge_.set_preferred_size(w, h);
+            if (!plugFrame) return false;
+            const bool accepted = detail::negotiate_preferred_size(
+                bridge_, w, h,
+                [this](uint32_t requested_width,
+                       uint32_t requested_height) -> bool {
+                    Steinberg::ViewRect rect;
+                    rect.left = 0;
+                    rect.top = 0;
+                    rect.right =
+                        static_cast<Steinberg::int32>(requested_width);
+                    rect.bottom =
+                        static_cast<Steinberg::int32>(requested_height);
+                    return plugFrame->resizeView(this, &rect) ==
+                           Steinberg::kResultTrue;
+                });
+            if (!accepted) return false;
+
             if (editor_host_) {
                 editor_host_->set_design_viewport(
                     static_cast<float>(w), static_cast<float>(h));
                 editor_host_->set_fixed_aspect_ratio(
                     static_cast<float>(w) / static_cast<float>(h));
             }
-            if (plugFrame) {
-                Steinberg::ViewRect rect;
-                rect.left = 0;
-                rect.top = 0;
-                rect.right = static_cast<Steinberg::int32>(w);
-                rect.bottom = static_cast<Steinberg::int32>(h);
-                return plugFrame->resizeView(this, &rect) ==
-                       Steinberg::kResultTrue;
-            }
-            return false;
+            return true;
         });
 
     // Attach succeeded — now fire Processor::on_view_opened.

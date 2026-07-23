@@ -1412,10 +1412,9 @@ TEST_CASE("Processor construction clears a stale editor-resize handler at a reus
     replacement->~StubProcessor();
 }
 
-// A mode switch that resizes the editor updates the bridge's reported preferred
-// size + aspect (so per-format resize-hint reporting tracks the new shape),
-// while preserving the min/max drag bounds.
-TEST_CASE("ViewBridge::set_preferred_size updates preferred + aspect, keeps bounds",
+// A mode switch updates the reported preferred size + aspect while preserving
+// the processor's declared drag envelope.
+TEST_CASE("ViewBridge::set_preferred_size updates an in-bounds mode size",
           "[view_bridge][editor-resize]") {
     StubProcessor p;  // view_size() = {480,320, 320,240, 1024,768}
     state::StateStore store;
@@ -1426,20 +1425,116 @@ TEST_CASE("ViewBridge::set_preferred_size updates preferred + aspect, keeps boun
     REQUIRE(before.preferred_width == 480);
     REQUIRE(before.preferred_height == 320);
 
-    bridge.set_preferred_size(900, 800);
+    REQUIRE(bridge.set_preferred_size(900, 700));
     const auto& after = bridge.size_hints();
     REQUIRE(after.preferred_width == 900);
-    REQUIRE(after.preferred_height == 800);
+    REQUIRE(after.preferred_height == 700);
     // Aspect follows the new natural shape.
-    REQUIRE(after.aspect_ratio == Catch::Approx(900.0 / 800.0));
-    // Min/max drag bounds are preserved across the mode switch.
+    REQUIRE(after.aspect_ratio == Catch::Approx(900.0 / 700.0));
     REQUIRE(after.min_width == before.min_width);
     REQUIRE(after.min_height == before.min_height);
     REQUIRE(after.max_width == before.max_width);
     REQUIRE(after.max_height == before.max_height);
+    REQUIRE(after.preferred_width >= after.min_width);
+    REQUIRE(after.preferred_height >= after.min_height);
+    REQUIRE(after.preferred_width <= after.max_width);
+    REQUIRE(after.preferred_height <= after.max_height);
+
+    // Out-of-envelope modes are rejected without partial mutation.
+    REQUIRE_FALSE(bridge.set_preferred_size(900, 800));
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+    REQUIRE(bridge.size_hints().aspect_ratio ==
+            Catch::Approx(900.0 / 700.0));
 
     // Zero dimensions are ignored (no accidental collapse).
-    bridge.set_preferred_size(0, 500);
+    REQUIRE_FALSE(bridge.set_preferred_size(0, 500));
     REQUIRE(bridge.size_hints().preferred_width == 900);
-    REQUIRE(bridge.size_hints().preferred_height == 800);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+}
+
+TEST_CASE("design-derived Forge bounds contain the 900x800 mode exactly",
+          "[view_bridge][editor-resize][forge]") {
+    const auto base = format::view_size_from_design(1280, 800, 640, 400);
+    REQUIRE(base.min_width == 640);
+    REQUIRE(base.min_height == 400);
+    REQUIRE(base.max_width == 2560);
+    REQUIRE(base.max_height == 1600);
+
+    class ForgeSizeProcessor final : public format::Processor {
+    public:
+        format::PluginDescriptor descriptor() const override {
+            return {"Forge", "Acme", "com.acme.forge", "1.0.0",
+                    format::PluginCategory::Effect};
+        }
+        void define_parameters(state::StateStore&) override {}
+        void prepare(const format::PrepareContext&) override {}
+        void process(audio::BufferView<float>&,
+                     const audio::BufferView<const float>&,
+                     midi::MidiBuffer&, midi::MidiBuffer&,
+                     const format::ProcessContext&) override {}
+        format::ViewSize view_size() const override {
+            return format::view_size_from_design(1280, 800, 640, 400);
+        }
+    } processor;
+    state::StateStore store;
+    format::ViewBridge bridge(processor, store);
+    REQUIRE(bridge.set_preferred_size(900, 800));
+    const auto& mode = bridge.size_hints();
+    REQUIRE(mode.preferred_width == 900);
+    REQUIRE(mode.preferred_height == 800);
+    REQUIRE(mode.min_width == base.min_width);
+    REQUIRE(mode.min_height == base.min_height);
+    REQUIRE(mode.max_width == base.max_width);
+    REQUIRE(mode.max_height == base.max_height);
+    REQUIRE(mode.aspect_ratio == Catch::Approx(900.0 / 800.0));
+}
+
+TEST_CASE("preferred-size host transaction publishes, accepts, and rolls back",
+          "[view_bridge][editor-resize][transaction]") {
+    StubProcessor p;
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+
+    bool callback_saw_proposed_hints = false;
+    REQUIRE(format::detail::negotiate_preferred_size(
+        bridge, 900, 700,
+        [&](uint32_t w, uint32_t h) {
+            callback_saw_proposed_hints =
+                w == 900 && h == 700 &&
+                bridge.size_hints().preferred_width == 900 &&
+                bridge.size_hints().preferred_height == 700 &&
+                bridge.size_hints().aspect_ratio ==
+                    Catch::Approx(900.0 / 700.0);
+            return true;
+        }));
+    REQUIRE(callback_saw_proposed_hints);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+
+    callback_saw_proposed_hints = false;
+    REQUIRE_FALSE(format::detail::negotiate_preferred_size(
+        bridge, 800, 600,
+        [&](uint32_t, uint32_t) {
+            callback_saw_proposed_hints =
+                bridge.size_hints().preferred_width == 800 &&
+                bridge.size_hints().preferred_height == 600;
+            return false;
+        }));
+    REQUIRE(callback_saw_proposed_hints);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+    REQUIRE(bridge.size_hints().aspect_ratio ==
+            Catch::Approx(900.0 / 700.0));
+
+    int invalid_request_calls = 0;
+    REQUIRE_FALSE(format::detail::negotiate_preferred_size(
+        bridge, 900, 800,
+        [&](uint32_t, uint32_t) {
+            ++invalid_request_calls;
+            return true;
+        }));
+    REQUIRE(invalid_request_calls == 0);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
 }

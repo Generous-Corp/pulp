@@ -141,13 +141,16 @@ public:
     /// Update the editor's PREFERRED size (and derived aspect ratio) after the
     /// plugin requested an editor-initiated resize to a new natural size (see
     /// `Processor::request_editor_resize`). Recomputes `size_hints_`'s
-    /// preferred_width/height and aspect_ratio from (w, h) while preserving the
-    /// existing min/max resize bounds, so per-format resize-hint reporting
-    /// (CLAP `gui_get_resize_hints` / `gui_get_size`, VST3 `checkSizeConstraint`)
-    /// tracks the new aspect instead of snapping the window back to the old one.
+    /// preferred_width/height and aspect_ratio from (w, h), preserving the
+    /// declared min/max resize envelope. Returns false (without mutation) when
+    /// either dimension is zero or falls outside a non-zero bound. Per-format
+    /// resize-hint reporting (CLAP `gui_get_resize_hints` / `gui_get_size`,
+    /// VST3 `checkSizeConstraint`) then tracks the new aspect instead of
+    /// snapping the window back to the old one. Zero min/max values retain
+    /// their special meanings (fixed/unbounded).
     /// No-op when either dimension is zero. Does NOT fire `on_view_resized`
     /// (that is the host→plugin direction, dispatched by `resize()`).
-    void set_preferred_size(uint32_t width, uint32_t height);
+    bool set_preferred_size(uint32_t width, uint32_t height);
 
     /// Live editor reload (live-swap 1.9). When the processor supports editor
     /// reload (`Processor::supports_editor_reload()`), the editor idle tick calls
@@ -338,5 +341,29 @@ private:
     uint32_t height_ = 0;
     std::string last_error_;
 };
+
+namespace detail {
+
+/// Internal transaction shared by the CLAP and VST3 adapters. The bridge is
+/// updated before `request` because hosts may synchronously query the plugin's
+/// new size constraints while handling the request. Refusal restores the prior
+/// preferred size and aspect. Live viewport mutation belongs after this
+/// function returns true.
+template <typename HostRequest>
+bool negotiate_preferred_size(ViewBridge& bridge,
+                              uint32_t width, uint32_t height,
+                              HostRequest&& request) {
+    const auto previous = bridge.size_hints();
+    if (!bridge.set_preferred_size(width, height)) return false;
+    if (request(width, height)) return true;
+
+    // The declared bounds never change in set_preferred_size(), so a preferred
+    // size that was valid before the transaction remains valid for rollback.
+    bridge.set_preferred_size(previous.preferred_width,
+                              previous.preferred_height);
+    return false;
+}
+
+} // namespace detail
 
 } // namespace pulp::format

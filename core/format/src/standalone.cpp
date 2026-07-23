@@ -691,13 +691,20 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         ViewBridge* resize_bridge = bridge.get();
         processor_->set_editor_resize_handler(
             [resize_host, resize_bridge](uint32_t w, uint32_t h) -> bool {
-                if (w == 0 || h == 0) return false;
-                if (resize_bridge) resize_bridge->set_preferred_size(w, h);
+                if (!resize_bridge ||
+                    !resize_bridge->set_preferred_size(w, h)) {
+                    return false;
+                }
                 const float fw = static_cast<float>(w);
                 const float fh = static_cast<float>(h);
+                // This is an owned native window rather than a negotiated
+                // plugin-host pane. request_content_size is synchronous on the
+                // supported window hosts. The bridge validation above cannot
+                // fail after this point; publish the window request before
+                // committing the new live viewport state.
+                resize_host->request_content_size(fw, fh);
                 resize_host->set_fixed_aspect_ratio(fw / fh);
                 resize_host->set_design_viewport(fw, fh);
-                resize_host->request_content_size(fw, fh);
                 return true;
             });
     }
