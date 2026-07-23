@@ -224,6 +224,7 @@ setTextDecorationStyle	typography	function	core/view/src/widget_bridge/typograph
 setLineClamp	typography	function	core/view/src/widget_bridge/typography_api.cpp
 setBackgroundRepeat	css_style	function	core/view/src/widget_bridge/style_storage_api.cpp
 setPosition	layout	function	core/view/src/widget_bridge/layout_api.cpp
+setSubpixelLayout	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setTop	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setRight	layout	function	core/view/src/widget_bridge/layout_api.cpp
 setBottom	layout	function	core/view/src/widget_bridge/layout_api.cpp

@@ -752,6 +752,21 @@ void BridgeRegistrars::register_layout_position_api(WidgetBridge& self) {
     });
 
 
+    // setSubpixelLayout(id, enabled) — opt the layout pass containing this
+    // view out of Yoga's whole-pixel grid rounding. Design-import codegen
+    // emits it on the imported root: the script replays geometry Figma
+    // already solved at fractional coordinates, and per-node rounding
+    // visibly de-centers concentric siblings (a knob's value-ring arc vs
+    // its body ellipse). Pass-wide by design — one Yoga pass has one
+    // config — so hand-authored flowed UIs keep the pixel-grid default
+    // unless a design subtree is present.
+    register_bridge_function(api, "setSubpixelLayout", [&self](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &self.root_ : self.widget(id);
+        if (v) v->set_subpixel_layout(args.get<bool>(1, true));
+        return choc::value::Value();
+    });
+
     // setTop/setRight/setBottom/setLeft(id, px-or-percent) — CSS positioning
     // offsets. Accept either a number ("50" -> px) or a percentage string
     // ("50%" -> percent of parent). The CSS translator and @pulp/react

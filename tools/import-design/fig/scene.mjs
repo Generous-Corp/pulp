@@ -1271,9 +1271,17 @@ export function materializeFrame(scene, frame, ctx) {
   // design into the parent's content origin.
   function styleFor(node, parent) {
     const style = {};
+    // Geometry keeps 2-decimal sub-pixel precision, matching the VECTOR_LIKE
+    // lane (round2 of the baked path bounds). Rounding box-model nodes to
+    // whole pixels while their sibling vectors keep fractions moves the two
+    // RELATIVE to each other by up to ~0.7px per axis — a knob's ELLIPSE body
+    // (7.51, 7.51, 22.53²) landed at (8, 8, 23²), shifting its center +0.72px
+    // down-right of the value-ring arc whose path center stayed fractional.
+    // On concentric geometry with a ~3.6px groove that misregistration is
+    // plainly visible; every ring in "A Channel FX" read as off-center.
     if (node.size) {
-      style.width = Math.round(node.size.x);
-      style.height = Math.round(node.size.y);
+      style.width = round2(node.size.x);
+      style.height = round2(node.size.y);
     }
 
     // Absolute placement from the node's affine transform. m02/m12 are the
@@ -1325,8 +1333,8 @@ export function materializeFrame(scene, frame, ctx) {
           const c = Math.cos(angle), s = Math.sin(angle);
           const cx = c * (w / 2) - s * (h / 2);   // R(theta)*(w/2,h/2)
           const cy = s * (w / 2) + c * (h / 2);
-          style.left = Math.round(x + cx - w / 2);
-          style.top = Math.round(y + cy - h / 2);
+          style.left = round2(x + cx - w / 2);
+          style.top = round2(y + cy - h / 2);
           // CSS-compatible rotate() the native codegen lowers to setRotation();
           // the renderer's default center transform-origin matches the
           // compensation above.
@@ -1337,8 +1345,8 @@ export function materializeFrame(scene, frame, ctx) {
           // plain placement pass through unchanged.
           const origin = mirrorAwareOrigin(t,
             node.size ? node.size.x : 0, node.size ? node.size.y : 0);
-          style.left = Math.round(origin.x);
-          style.top = Math.round(origin.y);
+          style.left = round2(origin.x);
+          style.top = round2(origin.y);
         }
       }
     }
