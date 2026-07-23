@@ -240,7 +240,7 @@ const ARADocumentControllerInstance* ARA_CALL pulp_create_doc_controller(
 const ARAFactory* build_factory() {
     static std::string plugin_name   = "Pulp Plug-in";
     static std::string manufacturer  = "Pulp Audio Framework";
-    static std::string info_url      = "https://github.com/danielraffel/pulp";
+    static std::string info_url      = "https://github.com/Generous-Corp/pulp";
     static std::string version       = "0.12.0";
     static std::string factory_id    = "io.pulp.ara.factory.v1";
     static std::string archive_id    = "io.pulp.ara.archive.v1";

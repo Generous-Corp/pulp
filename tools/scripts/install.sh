@@ -11,7 +11,7 @@ set -e
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-GITHUB_REPO="danielraffel/pulp"
+GITHUB_REPO="Generous-Corp/pulp"
 INSTALL_DIR="${PULP_INSTALL_DIR:-$HOME/.pulp/bin}"
 VERSION="${PULP_VERSION:-latest}"
 NO_MODIFY_PATH="${PULP_NO_MODIFY_PATH:-0}"

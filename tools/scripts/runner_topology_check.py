@@ -59,7 +59,7 @@ from typing import Any
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_CONTRACT = HERE / "runner_topology.json"
-DEFAULT_REPO = "danielraffel/pulp"
+DEFAULT_REPO = "Generous-Corp/pulp"
 
 SELF_HOSTED = "self-hosted"
 

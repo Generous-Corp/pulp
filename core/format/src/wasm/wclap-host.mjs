@@ -75,7 +75,7 @@ const TRAMPOLINES = {
 
 export class WebClapHost {
   constructor({ name = "Pulp WebCLAP Host", vendor = "Pulp",
-                url = "https://github.com/danielraffel/pulp", version = "0.0.1",
+                url = "https://github.com/Generous-Corp/pulp", version = "0.0.1",
                 onLog = null, hooks = {} } = {}) {
     this.meta = { name, vendor, url, version };
     this.onLog = onLog;            // (fd, text) => void

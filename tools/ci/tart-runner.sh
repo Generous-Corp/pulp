@@ -33,7 +33,7 @@
 #   tart-runner.sh --loop              # keep spinning a fresh VM after each job
 #   tart-runner.sh --labels self-hosted,macos,arm64,pulp-build   # promote
 #   tart-runner.sh --workflow-name Coverage --labels self-hosted,macos,arm64,pulp-coverage-vm-macos
-#   tart-runner.sh --golden pulp-build-runner:latest --repo danielraffel/pulp
+#   tart-runner.sh --golden pulp-build-runner:latest --repo Generous-Corp/pulp
 set -euo pipefail
 
 # TART_HOME is resolved from the host (env, else its tartci profile) just before
@@ -45,7 +45,7 @@ SSH_KEY_PRIV="${PULP_VM_SSH_KEY:-$HOME/.ssh/id_ed25519}"
 VM_USER="${PULP_VM_USER:-admin}"
 CACHE_ROOT="${PULP_CI_CACHE:-$HOME/.cache/pulp-ci}"
 GOLDEN="${PULP_RUNNER_GOLDEN:-pulp-build-runner:latest}"
-REPO="${PULP_RUNNER_REPO:-danielraffel/pulp}"
+REPO="${PULP_RUNNER_REPO:-Generous-Corp/pulp}"
 LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build-vm}"
 WORKFLOW_NAME="${PULP_RUNNER_WORKFLOW_NAME:-Build and Test}"
 MATCH_LABELS="${PULP_RUNNER_QUEUE_MATCH_LABELS:-0}"

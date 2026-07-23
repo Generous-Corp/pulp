@@ -79,7 +79,7 @@ public:
         host_.host_data = this;
         host_.name = "Pulp";
         host_.vendor = "Pulp";
-        host_.url = "https://github.com/danielraffel/pulp";
+        host_.url = "https://github.com/Generous-Corp/pulp";
         host_.version = "0.1";
         host_.get_extension = &ClapSlot::host_get_extension;
         host_.request_restart = &ClapSlot::host_request_noop;

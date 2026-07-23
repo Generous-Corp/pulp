@@ -55,7 +55,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/danielraffel/pulp",
+    "url": "https://github.com/Generous-Corp/pulp",
     "directory": "packages/pulp-react"
   }
 }

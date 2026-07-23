@@ -136,7 +136,7 @@
         <key>TARTCI_RUNNER_LABELS</key>
         <string>self-hosted,macOS,ARM64,pulp-sanitizer-vm-macos</string>
         <key>TARTCI_RUNNER_REPO</key>
-        <string>danielraffel/pulp</string>
+        <string>Generous-Corp/pulp</string>
         <key>TARTCI_RUNNER_WORKFLOW_NAME</key>
         <string>Sanitizer Tests</string>
         <key>TARTCI_YIELD_TO_WORKFLOW_NAME</key>

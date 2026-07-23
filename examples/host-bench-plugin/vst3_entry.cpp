@@ -15,5 +15,5 @@ static const Steinberg::FUID PulpHostBenchUID(
 PULP_VST3_PLUGIN(PulpHostBenchUID, "PulpHostBench",
                   Steinberg::Vst::PlugType::kFx,
                   "Pulp", "1.0.0",
-                  "https://github.com/danielraffel/pulp",
+                  "https://github.com/Generous-Corp/pulp",
                   pulp::examples::create_host_bench_vst3)

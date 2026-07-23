@@ -37,7 +37,7 @@
 namespace {
 
 const std::string kBuildMacosWorkflow = "build-macos.yml";
-const std::string kRepo = "danielraffel/pulp";
+const std::string kRepo = "Generous-Corp/pulp";
 
 void print_macos_usage() {
     std::cout << "pulp macos — per-PR macOS-runner retargeting\n\n";

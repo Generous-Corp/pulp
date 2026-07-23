@@ -30,7 +30,7 @@ inline UpgradeUrlPair pulp_upgrade_url_for(const std::string& version,
     const std::string ext = (platform == "windows") ? "zip" : "tar.gz";
     const std::string asset = "pulp-" + platform + "-" + arch + "." + ext;
     const std::string url =
-        "https://github.com/danielraffel/pulp/releases/download/v"
+        "https://github.com/Generous-Corp/pulp/releases/download/v"
         + version + "/" + asset;
     return {asset, url};
 }

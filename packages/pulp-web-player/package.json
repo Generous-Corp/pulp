@@ -41,7 +41,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/danielraffel/pulp.git",
+    "url": "git+https://github.com/Generous-Corp/pulp.git",
     "directory": "packages/pulp-web-player"
   },
   "publishConfig": {

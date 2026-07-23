@@ -237,7 +237,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     std::string self_path = current_executable_path().string();
     if (self_path.empty()) {
         std::cerr << "Error: could not determine current binary path.\n";
-        std::cerr << "  Download manually from: https://github.com/danielraffel/pulp/releases\n";
+        std::cerr << "  Download manually from: https://github.com/Generous-Corp/pulp/releases\n";
         return 1;
     }
 
@@ -247,7 +247,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     std::string tmp_dir = "/tmp/pulp-upgrade-" + version;
     int rc = run("mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url);
     if (rc != 0) {
-        std::cerr << "Download failed. Check: https://github.com/danielraffel/pulp/releases/tag/v" << version << "\n";
+        std::cerr << "Download failed. Check: https://github.com/Generous-Corp/pulp/releases/tag/v" << version << "\n";
         run("rm -rf " + tmp_dir);
         return 1;
     }

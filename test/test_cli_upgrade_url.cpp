@@ -18,7 +18,7 @@ TEST_CASE("pulp upgrade URL: darwin arm64 asset name matches release workflow",
     auto r = pulp_upgrade_url_for("0.14.0", "darwin", "arm64");
     REQUIRE(r.asset == "pulp-darwin-arm64.tar.gz");
     REQUIRE(r.url ==
-            "https://github.com/danielraffel/pulp/releases/download/"
+            "https://github.com/Generous-Corp/pulp/releases/download/"
             "v0.14.0/pulp-darwin-arm64.tar.gz");
 }
 

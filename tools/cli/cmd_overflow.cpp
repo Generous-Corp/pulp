@@ -38,7 +38,7 @@
 
 namespace {
 
-const std::string kRepo = "danielraffel/pulp";
+const std::string kRepo = "Generous-Corp/pulp";
 const std::string kVarLocal = "PULP_LOCAL_MACOS_RUNS_ON_JSON";
 const std::string kVarOverflow = "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON";
 const std::string kVarThreshold = "PULP_LOCAL_MAC_OVERFLOW_THRESHOLD";

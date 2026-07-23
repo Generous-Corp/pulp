@@ -142,7 +142,7 @@ def _required_contexts(gh: str, repo: str, branch: str = "main") -> set[str]:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("pr", type=int, help="PR number.")
-    ap.add_argument("--repo", default="danielraffel/pulp", help="owner/name.")
+    ap.add_argument("--repo", default="Generous-Corp/pulp", help="owner/name.")
     ap.add_argument("--gh", default="ghapp",
                     help="gh CLI to use (default: ghapp — App token, higher rate limit).")
     args = ap.parse_args(argv)

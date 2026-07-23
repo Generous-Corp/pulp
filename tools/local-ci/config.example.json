@@ -30,7 +30,7 @@
     }
   },
   "github_actions": {
-    "repository": "danielraffel/pulp",
+    "repository": "Generous-Corp/pulp",
     "defaults": {
       "workflow": "build",
       "provider": "github-hosted",

@@ -19,7 +19,7 @@ set -euo pipefail
 PINNED_XCODE_VERSION="${PULP_PINNED_XCODE:-26.5}"   # Xcode 26.5 (17F42)
 CI_ROOT="${PULP_CI_ROOT:-/Users/Shared/pulp-ci}"
 CCACHE_MAX_SIZE="${PULP_CCACHE_MAX_SIZE:-200G}"
-REPO_SLUG="${PULP_REPO_SLUG:-danielraffel/pulp}"
+REPO_SLUG="${PULP_REPO_SLUG:-Generous-Corp/pulp}"
 RUNNER_LABELS="${PULP_RUNNER_LABELS:-self-hosted,macos,arm64,pulp-build}"
 # Runner name prefix; instances are named "<prefix>-NN". Use a machine
 # tag (pulp-m1, pulp-m5, ...) so runners on different hosts stay

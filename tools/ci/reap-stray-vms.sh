@@ -42,7 +42,7 @@ KEEP_EXACT="pulp-vm rosetta-probe choc-dnd-linux macos-build-base macos-apple-xc
 REAP_RE='(-ephr-|^ephr-|scratch|-xbuild-|cleanbuild|-wip-|-tmp-)'
 
 # VMs currently backing an ONLINE runner (actively serving a job) — keep.
-ACTIVE="$(gh api "repos/danielraffel/pulp/actions/runners?per_page=100" \
+ACTIVE="$(gh api "repos/Generous-Corp/pulp/actions/runners?per_page=100" \
   --jq '.runners[] | select(.status=="online") | .name' 2>/dev/null || true)"
 
 echo "reap-stray-vms: TART_HOME=$TART_HOME fix=$FIX include_running=$INCLUDE_RUNNING"

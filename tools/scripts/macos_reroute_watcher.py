@@ -56,7 +56,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
-REPO = "danielraffel/pulp"
+REPO = "Generous-Corp/pulp"
 ACTIONS_RUNNER_WORKSPACE_MARKER = "actions-runner/_work/pulp"
 
 # Tart VM capacity model (#3299). The macOS kernel caps 2 running macOS VMs
@@ -92,7 +92,7 @@ def local_is_busy() -> Optional[bool]:
 
     Detection: look for Runner.Worker processes (or their build/test
     children) whose cwd includes the local runner's actions-runner
-    workspace for danielraffel/pulp.
+    workspace for Generous-Corp/pulp.
     """
     try:
         result = subprocess.run(
