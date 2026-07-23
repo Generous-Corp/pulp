@@ -65,6 +65,7 @@ public:
     float design_width_ = 0.0f;
     float design_height_ = 0.0f;
     float aspect_ratio_ = 0.0f;
+    std::vector<ContentSize> content_size_requests_;
     int repaint_calls_ = 0;
 
     void show() override {}
@@ -84,6 +85,12 @@ public:
     }
     void set_fixed_aspect_ratio(float ratio) override {
         aspect_ratio_ = ratio;
+    }
+    void request_content_size(float width, float height) override {
+        content_size_requests_.push_back({
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height),
+        });
     }
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
@@ -1126,6 +1133,91 @@ TEST_CASE("Standalone design viewport includes settings chrome height",
     REQUIRE(window.design_width_ == Catch::Approx(900.0f));
     REQUIRE(window.design_height_ == Catch::Approx(520.0f));  // no outer-chrome height
     REQUIRE(window.aspect_ratio_ == Catch::Approx(900.0f / 520.0f));
+}
+
+namespace {
+
+class ResizeProcessor final : public Processor {
+public:
+    PluginDescriptor descriptor() const override { return {}; }
+    void define_parameters(pulp::state::StateStore&) override {}
+    void prepare(const PrepareContext&) override {}
+    void process(
+        pulp::audio::BufferView<float>&,
+        const pulp::audio::BufferView<const float>&,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const ProcessContext&) override {}
+    ViewSize view_size() const override {
+        return {900, 520, 320, 240, 1800, 1040, 900.0 / 520.0};
+    }
+};
+
+}  // namespace
+
+TEST_CASE("Standalone editor resize drives bridge and owned window",
+          "[standalone][chrome][resize][editor-request]") {
+    ResizeProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    StubWindowHost window;
+    int owner = 0;
+
+    install_standalone_editor_resize_handler(
+        processor, &owner, window, bridge);
+
+    REQUIRE(processor.request_editor_resize(720, 480));
+    REQUIRE(bridge.size_hints().preferred_width == 720);
+    REQUIRE(bridge.size_hints().preferred_height == 480);
+    REQUIRE(window.content_size_requests_.size() == 1);
+    REQUIRE(window.content_size_requests_[0].width == 720);
+    REQUIRE(window.content_size_requests_[0].height == 480);
+    REQUIRE(window.design_width_ == Catch::Approx(720.0f));
+    REQUIRE(window.design_height_ == Catch::Approx(480.0f));
+    REQUIRE(window.aspect_ratio_ == Catch::Approx(1.5f));
+
+    // Invalid requests fail before changing either the bridge or native host.
+    REQUIRE_FALSE(processor.request_editor_resize(0, 480));
+    REQUIRE(bridge.size_hints().preferred_width == 720);
+    REQUIRE(window.content_size_requests_.size() == 1);
+
+    processor.set_editor_resize_handler(&owner, nullptr);
+    REQUIRE_FALSE(processor.request_editor_resize(800, 600));
+}
+
+TEST_CASE("Standalone tab resizing follows the bridge's current preferred size",
+          "[standalone][chrome][resize][editor-request]") {
+    ResizeProcessor processor;
+    pulp::state::StateStore store;
+    ViewBridge bridge(processor, store);
+    StubWindowHost window;
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+
+    configure_standalone_tab_resizing(window, chrome, bridge);
+    REQUIRE(chrome.tab_panel());
+
+    REQUIRE(bridge.set_preferred_size(720, 480));
+    const int editor = chrome.tab_panel()->find_tab("Editor");
+    const int settings = chrome.tab_panel()->find_tab("Settings");
+    REQUIRE(editor >= 0);
+    REQUIRE(settings >= 0);
+
+    chrome.tab_panel()->on_tab_change(editor);
+    REQUIRE(window.content_size_requests_.back().width == 720);
+    REQUIRE(window.content_size_requests_.back().height == 480);
+
+    chrome.tab_panel()->on_tab_change(settings);
+    REQUIRE(window.content_size_requests_.back().width == 720);
+    REQUIRE(window.content_size_requests_.back().height ==
+            static_cast<uint32_t>(SettingsPanel::preferred_height()));
+
+    auto editor_only = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr, nullptr, nullptr, {});
+    configure_standalone_tab_resizing(window, editor_only, bridge);
+    REQUIRE_FALSE(editor_only.tab_panel());
 }
 
 TEST_CASE("Standalone log helper formats the chrome mode",

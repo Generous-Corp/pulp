@@ -669,28 +669,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // so paint scale and the OS aspect lock track each tab. Editor stays pinned
     // at its declared size (no letterbox); Settings reflows to fill its taller
     // window. Framework-level so every standalone settings chrome benefits.
-    if (auto* tab_panel = chrome.tab_panel()) {
-        view::WindowHost* host = window.get();
-        ViewBridge* settings_bridge = bridge.get();
-        tab_panel->on_tab_change = [host, tab_panel, settings_bridge](int index) {
-            const auto& current_hints = settings_bridge->size_hints();
-            const float editor_w =
-                static_cast<float>(current_hints.preferred_width);
-            const float editor_h =
-                static_cast<float>(current_hints.preferred_height);
-            const bool settings = index == tab_panel->find_tab("Settings");
-            const float w = editor_w;
-            const float h =
-                settings
-                    ? std::max(
-                          editor_h,
-                          static_cast<float>(SettingsPanel::preferred_height()))
-                    : editor_h;
-            host->set_fixed_aspect_ratio(w / h);
-            host->set_design_viewport(w, h);
-            host->request_content_size(w, h);
-        };
-    }
+    detail::configure_standalone_tab_resizing(*window, chrome, *bridge);
 
     // Editor-INITIATED resize: let the editor ask the standalone window to
     // resize itself (e.g. a chrome-hiding mode wanting a smaller shape). Drives
@@ -698,29 +677,8 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // and updates the bridge's reported hints so the new aspect sticks. Cleared
     // in the close callback before the window / bridge it captures die.
 #if defined(__APPLE__) && TARGET_OS_OSX
-    {
-        view::WindowHost* resize_host = window.get();
-        ViewBridge* resize_bridge = bridge.get();
-        processor_->set_editor_resize_handler(
-            this,
-            [resize_host, resize_bridge](uint32_t w, uint32_t h) -> bool {
-                if (!resize_bridge ||
-                    !resize_bridge->set_preferred_size(w, h)) {
-                    return false;
-                }
-                const float fw = static_cast<float>(w);
-                const float fh = static_cast<float>(h);
-                // This is an owned native window rather than a negotiated
-                // plugin-host pane. request_content_size is synchronous on the
-                // supported window hosts. The bridge validation above cannot
-                // fail after this point; publish the window request before
-                // committing the new live viewport state.
-                resize_host->request_content_size(fw, fh);
-                resize_host->set_fixed_aspect_ratio(fw / fh);
-                resize_host->set_design_viewport(fw, fh);
-                return true;
-            });
-    }
+    detail::install_standalone_editor_resize_handler(
+        *processor_, this, *window, *bridge);
 #endif
 
     // Window host is live — fire Processor::on_view_opened now.
