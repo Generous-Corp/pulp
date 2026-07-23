@@ -2,9 +2,9 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "take_lane_schema_migrations.hpp"
 #include "track_schema_migrations.hpp"
 #include "track_schema_policy.hpp"
-#include "take_lane_schema_migrations.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -268,8 +268,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"root_sequence_id", SchemaValueKind::U64String},
                                {"sequences", SchemaValueKind::Array},
                                {"tempo_map", SchemaValueKind::Array, false}}));
-    auto asset = builtin(std::string(detail::asset_schema_policy.type_name),
-                         SchemaDomain::Document,
+    auto asset = builtin(std::string(detail::asset_schema_policy.type_name), SchemaDomain::Document,
                          {{"content_hash", SchemaValueKind::String},
                           {"frame_count", SchemaValueKind::U64String},
                           {"id", SchemaValueKind::U64String},
@@ -357,6 +356,92 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"source_start", SchemaValueKind::I64String}}));
     schemas.push_back(builtin("pulp.timeline.content.notes", SchemaDomain::Content,
                               {{"notes", SchemaValueKind::Array}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_clip", SchemaDomain::Command,
+                              {{"clip", SchemaValueKind::Object, true, "pulp.timeline.clip"},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_clip", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.insert_automation_lane", SchemaDomain::Command,
+                {{"lane", SchemaValueKind::Object, true, "pulp.timeline.automation_lane"},
+                 {"sequence_id", SchemaValueKind::U64String},
+                 {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_automation_lane", SchemaDomain::Command,
+                              {{"lane_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.move_clip", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected_range", SchemaValueKind::Object},
+                               {"replacement_range", SchemaValueKind::Object},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_note_velocity", SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected_velocity", SchemaValueKind::U32},
+                               {"note_id", SchemaValueKind::U64String},
+                               {"replacement_velocity", SchemaValueKind::U32},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_clip_playback_properties",
+                              SchemaDomain::Command,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"expected", SchemaValueKind::Object},
+                               {"replacement", SchemaValueKind::Object},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_tempo_map", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Array}, {"replacement", SchemaValueKind::Array}}));
+    schemas.push_back(
+        builtin("pulp.timeline.command.set_meter_map", SchemaDomain::Command,
+                {{"expected", SchemaValueKind::Array}, {"replacement", SchemaValueKind::Array}}));
+    schemas.push_back(builtin("pulp.timeline.command.create_asset", SchemaDomain::Command,
+                              {{"asset", SchemaValueKind::Object, true, "pulp.timeline.asset"}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_asset", SchemaDomain::Command,
+                              {{"asset_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_take_lane", SchemaDomain::Command,
+                              {{"lane", SchemaValueKind::Object, true, "pulp.timeline.take_lane"},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_take_lane", SchemaDomain::Command,
+                              {{"lane_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_take", SchemaDomain::Command,
+                              {{"lane_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"take", SchemaValueKind::Object, true, "pulp.timeline.take"},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_take", SchemaDomain::Command,
+                              {{"lane_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"take_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_record_arm", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Boolean},
+                               {"replacement", SchemaValueKind::Boolean},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_active_take_lane", SchemaDomain::Command,
+                              {{"expected_lane_id", SchemaValueKind::U64String},
+                               {"replacement_lane_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_take_comp", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Array},
+                               {"lane_id", SchemaValueKind::U64String},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_track_freeze", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Object, false},
+                               {"replacement", SchemaValueKind::Object, false},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"track_id", SchemaValueKind::U64String}}));
     for (auto& schema : schemas) {
         auto result = builder.register_type(std::move(schema));
         if (!result)
