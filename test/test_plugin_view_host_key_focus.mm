@@ -332,7 +332,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a programmatic focus clear (no event) "
             [window close];
             return;
         }
-        REQUIRE(window.firstResponder != pulp_view);
+        REQUIRE(window.firstResponder == host_field);
         REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
 
         host->detach();
