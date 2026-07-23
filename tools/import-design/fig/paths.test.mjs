@@ -743,6 +743,36 @@ test('a mirrored ABSOLUTE node is placed at its visual box, 180deg stays pinned'
   assert.equal(rect.x, 12, 'sidecar and render must be the same quantity');
 });
 
+test('a mirrored ancestor reflects intermediate containers and their descendants', () => {
+  const root = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Root',
+    size: { x: 20, y: 20 } };
+  const flipped = { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Flipped',
+    parentIndex: { guid: root.guid, position: '!' },
+    size: { x: 20, y: 20 },
+    transform: { m00: -1, m01: 0, m02: 20, m10: 0, m11: 1, m12: 0 } };
+  const middle = { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Middle',
+    parentIndex: { guid: flipped.guid, position: '!' },
+    size: { x: 8, y: 8 },
+    transform: { m00: 1, m01: 0, m02: 2, m10: 0, m11: 1, m12: 3 } };
+  const leaf = { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'Leaf',
+    parentIndex: { guid: middle.guid, position: '!' },
+    size: { x: 2, y: 2 },
+    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 1 } };
+  const scene = buildScene({ nodeChanges: [root, flipped, middle, leaf] });
+  const { envelope } = materializeFrame(scene, root, CTX);
+  const emittedFlipped = envelope.root.children[0];
+  const emittedMiddle = emittedFlipped.children[0];
+  const emittedLeaf = emittedMiddle.children[0];
+
+  assert.equal(emittedFlipped.style.left, 0);
+  assert.equal(emittedMiddle.style.left, 10,
+    'the 8px container at x=2 reflects to 20-(2+8)');
+  assert.equal(emittedMiddle.style.top, 3);
+  assert.equal(emittedLeaf.style.left, 6,
+    'the descendant reflects within its emitted 8px parent');
+  assert.equal(emittedLeaf.style.top, 1);
+});
+
 test('a flowing vector reconciles stroke-inflated ink to its node box with margins', () => {
   // Figma's auto-layout never sees a stroke, but the emitted ink box includes
   // it (a CENTER stroke band overhangs the node box by half its weight). The
