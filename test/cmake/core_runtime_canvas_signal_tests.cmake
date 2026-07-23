@@ -100,6 +100,9 @@ pulp_add_test_suite(pulp-test-animator-set LIBRARIES pulp::view)
 # Runtime utility tests (mmap, temp file, dynlib, base64, range, child process)
 pulp_add_test_suite(pulp-test-runtime-utils LIBRARIES pulp::runtime pulp-cpp-httplib)
 
+# HTTP headers, incremental response delivery, cancellation, and compatibility.
+pulp_add_test_suite(pulp-test-http LIBRARIES pulp::runtime pulp-cpp-httplib)
+
 # MAC address parser/formatter.
 pulp_add_test_suite(pulp-test-mac-address LIBRARIES pulp::runtime)
 

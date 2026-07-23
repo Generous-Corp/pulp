@@ -1,24 +1,44 @@
 #pragma once
 
-// HTTP client — wraps cpp-httplib for GET/POST with timeout and TLS.
+// HTTP client — wraps cpp-httplib without exposing it through the public API.
 
+#include <functional>
+#include <map>
 #include <string>
 #include <string_view>
-#include <vector>
-#include <map>
-#include <optional>
-#include <cstdint>
 
 namespace pulp::runtime {
+
+using HttpHeaders = std::map<std::string, std::string>;
+using HttpChunkCallback = std::function<bool(std::string_view)>;
+
+struct HttpRequest {
+    std::string url;
+    std::string method = "GET";
+    std::string body;
+    std::string content_type = "application/json";
+    HttpHeaders headers;
+    int timeout_seconds = 30;
+
+    // Returning false stops the transfer. Chunk boundaries do not imply protocol
+    // record boundaries. When set, response bytes are delivered here instead of
+    // being retained in HttpResponse::body.
+    HttpChunkCallback on_chunk;
+};
 
 struct HttpResponse {
     int status_code = 0;
     std::string body;
-    std::map<std::string, std::string> headers;
+    HttpHeaders headers;
     std::string error;
 
-    bool ok() const { return status_code >= 200 && status_code < 300; }
+    bool ok() const {
+        return error.empty() && status_code >= 200 && status_code < 300;
+    }
 };
+
+/// Perform an HTTP request. GET and POST are supported.
+HttpResponse http_request(const HttpRequest& request);
 
 /// Perform an HTTP GET request.
 HttpResponse http_get(std::string_view url,
