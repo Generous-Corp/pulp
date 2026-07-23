@@ -82,8 +82,10 @@ bool equal_take(const Take& lhs, const Take& rhs) noexcept {
 }
 
 std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
-    return saturated_add(saturated_add(sizeof(TakeLane), lane.name().size()),
-                         saturated_multiply(lane.takes().size(), sizeof(Take)));
+    auto size = saturated_add(saturated_add(sizeof(TakeLane), lane.name().size()),
+                              saturated_multiply(lane.takes().size(), sizeof(Take)));
+    return saturated_add(
+        size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
 }
 
 bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {
@@ -151,7 +153,8 @@ bool equivalent(const TakeLane& lhs, const TakeLane& rhs) noexcept {
     const auto left = lhs.takes();
     const auto right = rhs.takes();
     return lhs.id() == rhs.id() && lhs.name() == rhs.name() && left.size() == right.size() &&
-           std::equal(left.begin(), left.end(), right.begin(), equal_take);
+           std::equal(left.begin(), left.end(), right.begin(), equal_take) &&
+           std::ranges::equal(lhs.comp_segments(), rhs.comp_segments());
 }
 
 bool equivalent(const Command& lhs, const Command& rhs) noexcept {
@@ -212,6 +215,10 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected_lane_id == right.expected_lane_id &&
                        left.replacement_lane_id == right.replacement_lane_id;
+            } else if constexpr (std::is_same_v<T, SetTakeComp>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -248,6 +255,12 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), take_lane_retained_size(value.lane));
             if constexpr (std::is_same_v<T, InsertTake>)
                 return sizeof(T);
+            if constexpr (std::is_same_v<T, SetTakeComp>) {
+                const auto segment_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                return saturated_add(
+                    sizeof(T), saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+            }
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),

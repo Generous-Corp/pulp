@@ -89,8 +89,12 @@ invariants.
   `SetActiveTakeLane` optimistically selects one existing lane as the active
   playlist/comp; zero selects the arrangement. Removing an active lane is
   rejected, so clearing selection and removing the lane must be one explicit
-  transaction. Segment-comp selections and derived-artifact rendering extend
-  `TakeLane` later without overloading the Track selector.
+  transaction. `SetTakeComp` carries exact expected/replacement segment lists.
+  Each segment names a take and an in-bounds, normalized absolute sample range;
+  lane construction canonicalizes by timeline start and rejects missing takes,
+  mixed/wrong rates, empty or overlapping ranges. Removing a take selected by
+  the comp fails closed. Playback may flatten this source data into a derived
+  cache, but the cache is never document truth.
 - `Project::Data` and `Track::Data` mutations rebuild by copy-and-modify
   (`auto next = *data_; next.field = ...; make_shared<const Data>(move(next))`),
   never positional brace-init — adding a field must not silently shift an
@@ -116,7 +120,8 @@ invariants.
   and `record_armed` false), so
   neither placement, automation, nor take identity can be discarded. Placements,
   lanes, lane targets, take lanes, and takes remain separately versioned
-  structural envelopes.
+  structural envelopes. Take-lane schema v2 adds required `comp_segments`; its
+  v1 upgrade adds an empty comp, while v2→v1 succeeds only for an empty comp.
 - Build a `SchemaRegistry` explicitly with `SchemaRegistryBuilder`; there is no
   global mutable registry. Registered content codecs are typed, `noexcept`, and
   own no hidden `ItemId`s in Phase 1. Migration callbacks must return and verify
@@ -149,8 +154,8 @@ invariants.
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
   `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
-  `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`, and
-  `SetActiveTakeLane` are the bounded mutation
+  `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
+  `SetActiveTakeLane`, and `SetTakeComp` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.

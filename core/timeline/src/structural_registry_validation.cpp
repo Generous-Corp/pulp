@@ -88,6 +88,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"id", SchemaValueKind::U64String},
     };
     static constexpr ExpectedField take_lane_fields[] = {
+        {"comp_segments", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
         {"takes", SchemaValueKind::Array},
@@ -134,7 +135,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_target.device_parameter",
          automation_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
-        {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields},
+        {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},

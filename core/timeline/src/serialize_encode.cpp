@@ -374,8 +374,24 @@ bool write_take(EncodeContext& context, const Take& take) {
 }
 
 bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
-    return write_envelope(context, "pulp.timeline.take_lane", 1, [&] {
-        if (!context.writer.append("{\"id\":") || !context.writer.u64(lane.id().value, true) ||
+    return write_envelope(context, "pulp.timeline.take_lane", 2, [&] {
+        if (!context.writer.append("{\"comp_segments\":["))
+            return false;
+        for (std::size_t index = 0; index < lane.comp_segments().size(); ++index) {
+            const auto& segment = lane.comp_segments()[index];
+            if ((index != 0 && !context.writer.character(',')) ||
+                !context.writer.append("{\"sample_count\":") ||
+                !context.writer.u64(segment.range.sample_count, true) ||
+                !context.writer.append(",\"sample_rate\":") ||
+                !write_rate(context, segment.range.sample_rate) ||
+                !context.writer.append(",\"start\":") ||
+                !context.writer.i64(segment.range.start.value, true) ||
+                !context.writer.append(",\"take_id\":") ||
+                !context.writer.u64(segment.take_id.value, true) ||
+                !context.writer.character('}'))
+                return false;
+        }
+        if (!context.writer.append("],\"id\":") || !context.writer.u64(lane.id().value, true) ||
             !context.writer.append(",\"name\":") || !context.writer.quoted(lane.name()) ||
             !context.writer.append(",\"takes\":["))
             return false;

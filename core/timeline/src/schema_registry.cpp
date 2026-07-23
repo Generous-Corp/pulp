@@ -2,6 +2,7 @@
 
 #include "track_schema_migrations.hpp"
 #include "track_schema_policy.hpp"
+#include "take_lane_schema_migrations.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -315,10 +316,15 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"parameter_id", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.device_placement", SchemaDomain::Document,
                               {{"id", SchemaValueKind::U64String}}));
-    schemas.push_back(builtin("pulp.timeline.take_lane", SchemaDomain::Document,
-                              {{"id", SchemaValueKind::U64String},
-                               {"name", SchemaValueKind::String},
-                               {"takes", SchemaValueKind::Array}}));
+    auto take_lane = builtin("pulp.timeline.take_lane", SchemaDomain::Document,
+                             {{"comp_segments", SchemaValueKind::Array},
+                              {"id", SchemaValueKind::U64String},
+                              {"name", SchemaValueKind::String},
+                              {"takes", SchemaValueKind::Array}},
+                             2);
+    take_lane.upgrades.push_back({1, 2, {}, detail::migrate_take_lane_v1_to_v2});
+    take_lane.downgrades.push_back({2, 1, {}, detail::migrate_take_lane_v2_to_v1});
+    schemas.push_back(std::move(take_lane));
     schemas.push_back(builtin("pulp.timeline.take", SchemaDomain::Document,
                               {{"asset_id", SchemaValueKind::U64String},
                                {"frame_count", SchemaValueKind::U64String},

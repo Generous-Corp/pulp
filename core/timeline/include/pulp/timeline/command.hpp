@@ -173,10 +173,20 @@ struct SetActiveTakeLane {
     ItemId replacement_lane_id;
 };
 
+// Replaces one lane's canonical segment comp under an exact optimistic gate.
+// Both values make undo and deterministic journal replay self-contained.
+struct SetTakeComp {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+    std::vector<TakeCompSegment> expected;
+    std::vector<TakeCompSegment> replacement;
+};
+
 using Command = std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane,
                              MoveClip, SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap,
                              SetMeterMap, CreateAsset, RemoveAsset, InsertTakeLane, RemoveTakeLane,
-                             SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane>;
+                             SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp>;
 
 struct CommandEnvelope {
     CommandId id;

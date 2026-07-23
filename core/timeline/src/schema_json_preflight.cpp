@@ -62,6 +62,9 @@ class StructuralScanner {
     std::size_t device_placements_ = 0;
     std::size_t automation_lanes_ = 0;
     std::size_t automation_points_ = 0;
+    std::size_t take_lanes_ = 0;
+    std::size_t takes_ = 0;
+    std::size_t take_comp_segments_ = 0;
     std::size_t locators_ = 0;
     std::size_t representations_ = 0;
 
@@ -613,20 +616,26 @@ class StructuralScanner {
         Span clips;
         Span devices;
         Span automation;
+        Span take_lanes;
         bool has_clips = false;
         bool has_devices = false;
         bool has_automation = false;
+        bool has_take_lanes = false;
         if (!member(data, "clips", clips, has_clips) ||
             !member(data, "device_chain", devices, has_devices) ||
-            !member(data, "automation_lanes", automation, has_automation)) return false;
+            !member(data, "automation_lanes", automation, has_automation) ||
+            !member(data, "take_lanes", take_lanes, has_take_lanes)) return false;
         const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
         const auto requires_automation = detail::track_schema_policy.requires_automation(version);
+        const auto requires_takes = detail::track_schema_policy.requires_takes(version);
         if (!has_clips || requires_devices != has_devices ||
-            requires_automation != has_automation) {
+            requires_automation != has_automation || requires_takes != has_take_lanes) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
-                      path + (has_clips ? (requires_automation != has_automation
-                                               ? "/data/automation_lanes"
-                                               : "/data/device_chain")
+                      path + (has_clips ? (requires_takes != has_take_lanes
+                                               ? "/data/take_lanes"
+                                               : requires_automation != has_automation
+                                                     ? "/data/automation_lanes"
+                                                     : "/data/device_chain")
                                         : "/data/clips"));
             return false;
         }
@@ -642,12 +651,95 @@ class StructuralScanner {
                 return walk_automation_lane(
                     element, path + "/data/automation_lanes/" + std::to_string(index));
             })) return false;
+        if (has_take_lanes &&
+            !governed_array(
+                take_lanes, take_lanes_, limits_.max_take_lanes, path + "/data/take_lanes",
+                [&](Span element, std::size_t index) {
+                    return walk_take_lane(
+                        element, path + "/data/take_lanes/" + std::to_string(index));
+                }))
+            return false;
         return !has_devices || governed_array(
             devices, device_placements_, limits_.max_device_placements,
             path + "/data/device_chain", [&](Span element, std::size_t index) {
                 return walk_device_placement(
                     element, path + "/data/device_chain/" + std::to_string(index));
             });
+    }
+
+    bool walk_take_lane(Span value, const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape))
+            return false;
+        if (type != "pulp.timeline.take_lane" ||
+            !require_structural_shape(valid_shape, version, path, value.begin, 1, 2)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        const auto data_path = path + "/data";
+        if (!require_member(data, "id", StringShape, data_path) ||
+            !require_member(data, "name", StringShape, data_path) ||
+            !require_member(data, "takes", ArrayShape, data_path))
+            return false;
+        Span takes;
+        bool has_takes = false;
+        if (!member(data, "takes", takes, has_takes) || !has_takes)
+            return false;
+        if (!governed_array(
+                takes, takes_, limits_.max_takes, data_path + "/takes",
+                [&](Span element, std::size_t index) {
+                    return walk_take(element,
+                                     data_path + "/takes/" + std::to_string(index));
+                }))
+            return false;
+        Span comp;
+        bool has_comp = false;
+        if (!member(data, "comp_segments", comp, has_comp))
+            return false;
+        if ((version == 2) != has_comp) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/comp_segments");
+            return false;
+        }
+        return !has_comp ||
+               governed_array(
+                   comp, take_comp_segments_, limits_.max_take_comp_segments,
+                   data_path + "/comp_segments", [&](Span segment, std::size_t index) {
+                       const auto segment_path =
+                           data_path + "/comp_segments/" + std::to_string(index);
+                       return require_member(segment, "sample_count", StringShape,
+                                             segment_path) &&
+                              require_member(segment, "sample_rate", ObjectShape,
+                                             segment_path) &&
+                              require_member(segment, "start", StringShape, segment_path) &&
+                              require_member(segment, "take_id", StringShape, segment_path);
+                   });
+    }
+
+    bool walk_take(Span value, const std::string& path) {
+        std::string type;
+        std::uint32_t version = 0;
+        Span data;
+        bool valid_shape = false;
+        if (!envelope(value, type, version, data, valid_shape))
+            return false;
+        if (type != "pulp.timeline.take" ||
+            !require_structural_shape(valid_shape, version, path, value.begin)) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
+            return false;
+        }
+        const auto data_path = path + "/data";
+        return require_member(data, "asset_id", StringShape, data_path) &&
+               require_member(data, "frame_count", StringShape, data_path) &&
+               require_member(data, "id", StringShape, data_path) &&
+               require_member(data, "placement_start", StringShape, data_path) &&
+               require_member(data, "sample_rate", ObjectShape, data_path) &&
+               require_member(data, "source_start", StringShape, data_path);
     }
 
     bool walk_automation_lane(Span value, const std::string& path) {

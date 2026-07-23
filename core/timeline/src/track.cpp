@@ -638,6 +638,24 @@ runtime::Result<Track, ModelError> Track::erase_take(ItemId lane_id, ItemId take
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+runtime::Result<Track, ModelError>
+Track::with_take_comp(ItemId lane_id, std::vector<TakeCompSegment> comp) const {
+    auto lanes = *data_->take_lanes;
+    const auto found = std::lower_bound(
+        lanes.begin(), lanes.end(), lane_id,
+        [](const TakeLane& candidate, ItemId wanted) { return candidate.id() < wanted; });
+    if (found == lanes.end() || found->id() != lane_id)
+        return fail<Track>(ModelErrorCode::MissingItem, lane_id, data_->id);
+    auto next_lane = found->with_comp_segments(std::move(comp));
+    if (!next_lane)
+        return fail<Track>(next_lane.error().code, next_lane.error().item,
+                           next_lane.error().related_item);
+    *found = std::move(next_lane).value();
+    auto next_data = *data_;
+    next_data.take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(lanes));
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
 Track Track::with_record_armed(bool armed) const {
     auto next_data = *data_;
     next_data.record_armed = armed;

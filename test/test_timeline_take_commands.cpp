@@ -36,6 +36,11 @@ TakeLane take_lane(ItemId lane_id = {31}, ItemId take_id = {32}, std::string nam
     return take(TakeLane::create(lane_id, std::move(name), {recorded_take(take_id)}));
 }
 
+std::vector<TakeCompSegment> comp(ItemId take_id = {32}, std::int64_t start = 0,
+                                  std::uint64_t count = 50) {
+    return {{.take_id = take_id, .range = {{start}, count, {48'000, 1}}}};
+}
+
 // Ids: project 1, sequence 3, track 10, asset 20. next_item_id 31 leaves the
 // lane/take ids (31, 32) available for InsertTakeLane to allocate.
 Project record_project(bool armed = false) {
@@ -87,6 +92,12 @@ TEST_CASE("Take commands compare and retain complete lane payloads") {
                        Command{SetActiveTakeLane{{3}, {10}, {}, {31}}}));
     REQUIRE_FALSE(equivalent(Command{SetActiveTakeLane{{3}, {10}, {}, {31}}},
                              Command{SetActiveTakeLane{{3}, {10}, {31}, {}}}));
+    REQUIRE(equivalent(Command{SetTakeComp{{3}, {10}, {31}, {}, comp()}},
+                       Command{SetTakeComp{{3}, {10}, {31}, {}, comp()}}));
+    REQUIRE_FALSE(equivalent(Command{SetTakeComp{{3}, {10}, {31}, {}, comp()}},
+                             Command{SetTakeComp{{3}, {10}, {31}, {}, comp({32}, 1)}}));
+    REQUIRE(retained_size(Command{SetTakeComp{{3}, {10}, {31}, comp(), comp()}}) >=
+            sizeof(SetTakeComp) + 2 * sizeof(TakeCompSegment));
 }
 
 TEST_CASE("Take-lane insert is atomic and publishes owned identities") {
@@ -409,4 +420,80 @@ TEST_CASE("Journal checkpoint equivalence includes takes and active selection") 
     auto selection_mismatch = session->journal().replay(selected->project, {});
     REQUIRE_FALSE(selection_mismatch);
     REQUIRE(selection_mismatch.error().code == ConflictCode::ModelInvariant);
+}
+
+TEST_CASE("Segment comp gates, validates, undoes, redoes, and replays exactly") {
+    const auto original = record_project();
+    auto inserted = reduce_transaction(
+        original, transaction({1}, 1, 1, {}, {InsertTakeLane{{3}, {10}, take_lane()}}));
+    REQUIRE(inserted);
+    const auto seeded = inserted->project;
+    auto session = std::move(DocumentSession::create(seeded)).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto stale = session->submit(
+        writer, session_transaction(writer, {}, {SetTakeComp{{3}, {10}, {31}, comp(), {}}}));
+    REQUIRE_FALSE(stale);
+    REQUIRE(stale.error().code == ConflictCode::ExpectedValueMismatch);
+
+    auto invalid = session->submit(
+        writer,
+        session_transaction(writer, {}, {SetTakeComp{{3}, {10}, {31}, {}, comp({99})}}));
+    REQUIRE_FALSE(invalid);
+    REQUIRE(invalid.error().model_error);
+    REQUIRE(invalid.error().model_error->code == ModelErrorCode::InvalidTakeComp);
+
+    const auto selection = comp();
+    REQUIRE(session->submit(
+        writer,
+        session_transaction(writer, {}, {SetTakeComp{{3}, {10}, {31}, {}, selection}})));
+    const auto selected =
+        record_track(*session->snapshot()).find_take_lane({31})->comp_segments();
+    REQUIRE(std::vector<TakeCompSegment>(selected.begin(), selected.end()) == selection);
+
+    auto referenced_remove =
+        session_transaction(writer, session->revision(), {RemoveTake{{3}, {10}, {31}, {32}}});
+    auto remove_result = session->submit(writer, std::move(referenced_remove));
+    REQUIRE_FALSE(remove_result);
+    REQUIRE(remove_result.error().model_error);
+    REQUIRE(remove_result.error().model_error->code == ModelErrorCode::ActiveCompTakeRemoval);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(record_track(*session->snapshot()).find_take_lane({31})->comp_segments().empty());
+    REQUIRE(session->redo(writer));
+    const auto redone = record_track(*session->snapshot()).find_take_lane({31})->comp_segments();
+    REQUIRE(std::vector<TakeCompSegment>(redone.begin(), redone.end()) == selection);
+
+    auto replayed = session->journal().replay(seeded, {});
+    REQUIRE(replayed);
+    const auto replayed_comp = record_track(*replayed).find_take_lane({31})->comp_segments();
+    REQUIRE(std::vector<TakeCompSegment>(replayed_comp.begin(), replayed_comp.end()) == selection);
+}
+
+TEST_CASE("Segment comp undo gates against the canonical replacement") {
+    const auto original = record_project();
+    auto lane_inserted = reduce_transaction(
+        original, transaction({1}, 1, 1, {}, {InsertTakeLane{{3}, {10}, take_lane()}}));
+    REQUIRE(lane_inserted);
+    auto take_inserted =
+        reduce_transaction(lane_inserted->project,
+                           transaction({1}, 2, 2, {},
+                                       {InsertTake{{3}, {10}, {31}, recorded_take({33})}}));
+    REQUIRE(take_inserted);
+
+    auto session = std::move(DocumentSession::create(take_inserted->project)).value();
+    auto writer = std::move(session->register_writer()).value();
+    const std::vector<TakeCompSegment> unordered{
+        {.take_id = {33}, .range = {{25}, 25, {48'000, 1}}},
+        {.take_id = {32}, .range = {{0}, 25, {48'000, 1}}},
+    };
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, {}, {SetTakeComp{{3}, {10}, {31}, {}, unordered}})));
+    const auto stored = record_track(*session->snapshot()).find_take_lane({31})->comp_segments();
+    REQUIRE(stored[0].take_id == ItemId{32});
+    REQUIRE(stored[1].take_id == ItemId{33});
+    REQUIRE(session->undo(writer));
+    REQUIRE(record_track(*session->snapshot()).find_take_lane({31})->comp_segments().empty());
+    REQUIRE(session->redo(writer));
+    REQUIRE(record_track(*session->snapshot()).find_take_lane({31})->comp_segments().size() == 2);
 }

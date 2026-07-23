@@ -27,6 +27,8 @@ add_library(pulp-timeline
     src/structural_registry_validation.cpp
     src/track.cpp
     src/track_schema_migrations.cpp
+    src/take_lane_schema_migrations.cpp
+    src/take_lane.cpp
     # Foreign-format interop lives outside src/ on purpose: the web
     # timeline-source-closure gate sweeps every core/timeline/src/*.cpp into the
     # WAM/WebCLAP wasm DSP lanes, which do not link pulp-runtime. The DAWproject

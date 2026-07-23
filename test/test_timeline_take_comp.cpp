@@ -80,6 +80,70 @@ TEST_CASE("Take lane orders takes by identity and rejects duplicates") {
     REQUIRE_FALSE(TakeLane::create({0}, "bad", {}));
 }
 
+TEST_CASE("Take comp canonicalizes exact in-bounds non-overlapping segments") {
+    const auto take_a = make_take({5}, {6}, 100, 0, 100);
+    const auto take_b = make_take({7}, {6}, 100, 100, 100);
+    auto lane = ok(TakeLane::create(
+        {4}, "comp", {take_b, take_a},
+        {{.take_id = {7}, .range = {{150}, 25, {48'000, 1}}},
+         {.take_id = {5}, .range = {{100}, 50, {48'000, 1}}}}));
+    REQUIRE(lane.comp_segments().size() == 2);
+    REQUIRE(lane.comp_segments()[0].take_id == ItemId{5});
+    REQUIRE(lane.comp_segments()[1].take_id == ItemId{7});
+
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "missing", {take_a},
+        {{.take_id = {99}, .range = {{100}, 10, {48'000, 1}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "before", {take_a},
+        {{.take_id = {5}, .range = {{99}, 10, {48'000, 1}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "past-end", {take_a},
+        {{.take_id = {5}, .range = {{190}, 11, {48'000, 1}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "empty", {take_a},
+        {{.take_id = {5}, .range = {{100}, 0, {48'000, 1}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "noncanonical-rate", {take_a},
+        {{.take_id = {5}, .range = {{100}, 10, {96'000, 2}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "wrong-rate", {take_a},
+        {{.take_id = {5}, .range = {{100}, 10, {44'100, 1}}}}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "overlap", {take_a, take_b},
+        {{.take_id = {5}, .range = {{100}, 60, {48'000, 1}}},
+         {.take_id = {7}, .range = {{150}, 25, {48'000, 1}}}}));
+
+    const auto other_rate =
+        ok(Take::create({8}, MediaRef{{6}, {0}, 100}, {200}, RationalRate{44'100, 1}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "mixed-rate", {take_a, other_rate},
+        {{.take_id = {5}, .range = {{100}, 50, {48'000, 1}}},
+         {.take_id = {8}, .range = {{200}, 50, {44'100, 1}}}}));
+
+    const auto near_limit =
+        ok(Take::create({9}, MediaRef{{6}, {0}, 10},
+                        {std::numeric_limits<std::int64_t>::max() - 5},
+                        RationalRate{48'000, 1}));
+    REQUIRE_FALSE(TakeLane::create(
+        {4}, "unrepresentable-end", {near_limit},
+        {{.take_id = {9},
+          .range = {{std::numeric_limits<std::int64_t>::max() - 5}, 10, {48'000, 1}}}}));
+}
+
+TEST_CASE("Take comp replacement is immutable and referenced take deletion fails closed") {
+    auto lane = ok(TakeLane::create({4}, "comp", {make_take({5}, {6}, 100, 0, 100)}));
+    auto selected = ok(lane.with_comp_segments(
+        {{.take_id = {5}, .range = {{120}, 40, {48'000, 1}}}}));
+    REQUIRE(lane.comp_segments().empty());
+    REQUIRE(selected.comp_segments().size() == 1);
+    auto rejected = selected.erase_take({5});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ModelErrorCode::ActiveCompTakeRemoval);
+    REQUIRE(rejected.error().item == ItemId{5});
+    REQUIRE(ok(selected.with_comp_segments({})).erase_take({5}));
+}
+
 TEST_CASE("Track owns take lanes, record-arm intent, and active playlist selection") {
     const auto project = project_with_take(true, {4});
     const auto* sequence = project.find_sequence({2});
@@ -199,4 +263,24 @@ TEST_CASE("Remap threads take and take-lane identities and fixes the asset refer
     REQUIRE(take_loc.has_value());
     REQUIRE(take_loc->parent_id == lane_id);
     REQUIRE(take_loc->track_id == track_id);
+}
+
+TEST_CASE("Remap fixes take identities embedded in comp selections") {
+    auto lane = ok(TakeLane::create(
+        {4}, "comp", {make_take({5}, {6})},
+        {{.take_id = {5}, .range = {{0}, 50, {48'000, 1}}}}));
+    auto track = ok(Track::create(
+        TrackInput{.id = {3}, .name = "track", .take_lanes = {lane}}));
+    auto sequence = ok(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    auto project = ok(
+        Project::create(ProjectInput{{1}, "project", 7, {2}, {audio_asset({6})}, {sequence}}));
+    const auto remapped = ok(remap_ids(project, 100));
+    const auto lane_id = *remapped.ids.find({4});
+    const auto take_id = *remapped.ids.find({5});
+    const auto* comp_lane =
+        remapped.project.find_sequence(*remapped.ids.find({2}))
+            ->find_track(*remapped.ids.find({3}))
+            ->find_take_lane(lane_id);
+    REQUIRE(comp_lane->comp_segments().size() == 1);
+    REQUIRE(comp_lane->comp_segments()[0].take_id == take_id);
 }

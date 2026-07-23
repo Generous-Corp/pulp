@@ -99,8 +99,9 @@ export interface PulpTimelineTake {
   source_start: number | string;
 }
 
-/** `pulp.timeline.take_lane` — domain Document, schema version 1. */
+/** `pulp.timeline.take_lane` — domain Document, schema version 2. */
 export interface PulpTimelineTakeLane {
+  comp_segments: readonly unknown[];
   id: number | string;
   name: string;
   takes: readonly unknown[];

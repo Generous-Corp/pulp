@@ -68,6 +68,7 @@ struct DecodeCounts {
     std::size_t automation_points = 0;
     std::size_t take_lanes = 0;
     std::size_t takes = 0;
+    std::size_t take_comp_segments = 0;
 };
 
 runtime::Result<const JsonValue*, PersistenceError>
@@ -590,12 +591,14 @@ runtime::Result<TakeLane, PersistenceError> decode_take_lane(const JsonValue& va
     if (++counts.take_lanes > limits.max_take_lanes)
         return fail<TakeLane>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                               counts.take_lanes, limits.max_take_lanes);
-    auto data = data_for(value, "pulp.timeline.take_lane", path);
-    if (!data)
-        return fail<TakeLane>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto takes = required(*data.value(), "takes", path + "/data");
+    auto structural = data_for_versions(value, "pulp.timeline.take_lane", 1, 2, path);
+    if (!structural)
+        return fail<TakeLane>(structural.error().code, structural.error().path,
+                              structural.error().byte_offset);
+    const auto* data = structural.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto name = string_field(*data, "name", path + "/data");
+    auto takes = required(*data, "takes", path + "/data");
     if (!id || !name || !takes || takes.value()->kind != JsonValue::Kind::Array)
         return fail<TakeLane>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
@@ -611,8 +614,47 @@ runtime::Result<TakeLane, PersistenceError> decode_take_lane(const JsonValue& va
             return runtime::Err(decoded.error());
         decoded_takes.push_back(std::move(decoded).value());
     }
+    std::vector<TakeCompSegment> decoded_comp;
+    if (structural.value().version == 2) {
+        auto comp = required(*data, "comp_segments", path + "/data");
+        if (!comp || comp.value()->kind != JsonValue::Kind::Array)
+            return fail<TakeLane>(PersistenceErrorCode::MissingField,
+                                  path + "/data/comp_segments");
+        if (comp.value()->array.size() >
+            limits.max_take_comp_segments - std::min(counts.take_comp_segments,
+                                                     limits.max_take_comp_segments))
+            return fail<TakeLane>(PersistenceErrorCode::LimitExceeded,
+                                  path + "/data/comp_segments", comp.value()->begin,
+                                  counts.take_comp_segments + comp.value()->array.size(),
+                                  limits.max_take_comp_segments);
+        counts.take_comp_segments += comp.value()->array.size();
+        decoded_comp.reserve(comp.value()->array.size());
+        for (std::size_t index = 0; index < comp.value()->array.size(); ++index) {
+            const auto& encoded = comp.value()->array[index];
+            const auto item_path = path + "/data/comp_segments/" + std::to_string(index);
+            auto count = required(encoded, "sample_count", item_path);
+            auto rate = required(encoded, "sample_rate", item_path);
+            auto start = required(encoded, "start", item_path);
+            auto take_id = required(encoded, "take_id", item_path);
+            if (!count || !rate || !start || !take_id)
+                return fail<TakeLane>(PersistenceErrorCode::MissingField, item_path);
+            auto decoded_count =
+                parse_canonical_u64_string(*count.value(), item_path + "/sample_count");
+            auto decoded_rate = decode_rate(*rate.value(), item_path + "/sample_rate");
+            auto decoded_start =
+                parse_canonical_i64_string(*start.value(), item_path + "/start");
+            auto decoded_take_id =
+                parse_canonical_u64_string(*take_id.value(), item_path + "/take_id");
+            if (!decoded_count || !decoded_rate || !decoded_start || !decoded_take_id)
+                return fail<TakeLane>(PersistenceErrorCode::InvalidNumber, item_path);
+            decoded_comp.push_back(
+                {.take_id = ItemId{decoded_take_id.value()},
+                 .range = {timebase::SamplePosition{decoded_start.value()},
+                           decoded_count.value(), decoded_rate.value()}});
+        }
+    }
     auto created = TakeLane::create(ItemId{decoded_id.value()}, std::move(name).value(),
-                                    std::move(decoded_takes));
+                                    std::move(decoded_takes), std::move(decoded_comp));
     if (!created)
         return model_fail<TakeLane>(created.error(), std::move(path));
     return runtime::Result<TakeLane, PersistenceError>(runtime::Ok(std::move(created).value()));

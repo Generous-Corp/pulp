@@ -2,6 +2,7 @@
 
 #include "transaction_reduction_support.hpp"
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <utility>
@@ -343,6 +344,51 @@ reduce_set_active_take_lane(const Project& project, const SetActiveTakeLane& set
                              {set.track_id, set.track_id, set.sequence_id, DirtyFlags::Take}});
 }
 
+runtime::Result<TakeCommandReduction, TransactionError>
+reduce_set_take_comp(const Project& project, const SetTakeComp& set,
+                     const Transaction& transaction, CommandId command) {
+    if (const auto code =
+            target_error(project, set.lane_id,
+                         ItemLocation{ItemKind::TakeLane,
+                                      immediate_parent_id(ItemKind::TakeLane, project.id(),
+                                                          set.sequence_id, set.track_id, {}),
+                                      set.sequence_id,
+                                      set.track_id,
+                                      {},
+                                      true}))
+        return reject_reduction<TakeCommandReduction>(*code, transaction, command, set.lane_id,
+                                                      set.track_id);
+    const auto* sequence = project.find_sequence(set.sequence_id);
+    const auto* track = sequence ? sequence->find_track(set.track_id) : nullptr;
+    const auto* lane = track ? track->find_take_lane(set.lane_id) : nullptr;
+    if (!lane)
+        return reject_reduction<TakeCommandReduction>(ConflictCode::TargetMissing, transaction,
+                                                      command, set.lane_id, set.track_id);
+    const auto current = lane->comp_segments();
+    if (current.size() != set.expected.size() ||
+        !std::equal(current.begin(), current.end(), set.expected.begin()))
+        return reject_reduction<TakeCommandReduction>(ConflictCode::ExpectedValueMismatch,
+                                                      transaction, command, set.lane_id);
+
+    auto next_track = track->with_take_comp(set.lane_id, set.replacement);
+    if (!next_track)
+        return runtime::Err(model_failure(transaction, command, next_track.error()));
+    const auto canonical_comp = next_track.value().find_take_lane(set.lane_id)->comp_segments();
+    std::vector<TakeCompSegment> inverse_expected(canonical_comp.begin(), canonical_comp.end());
+    auto next_sequence = sequence->replace_track(std::move(next_track).value());
+    if (!next_sequence)
+        return runtime::Err(model_failure(transaction, command, next_sequence.error()));
+    auto next_project =
+        ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
+    if (!next_project)
+        return runtime::Err(model_failure(transaction, command, next_project.error()));
+    return runtime::Ok(TakeCommandReduction{
+        std::move(next_project).value(),
+        SetTakeComp{set.sequence_id, set.track_id, set.lane_id, std::move(inverse_expected),
+                    set.expected},
+        {set.lane_id, set.track_id, set.sequence_id, DirtyFlags::Take}});
+}
+
 } // namespace
 
 bool is_take_command(const Command& command) noexcept {
@@ -351,7 +397,8 @@ bool is_take_command(const Command& command) noexcept {
            std::holds_alternative<SetRecordArm>(command) ||
            std::holds_alternative<InsertTake>(command) ||
            std::holds_alternative<RemoveTake>(command) ||
-           std::holds_alternative<SetActiveTakeLane>(command);
+           std::holds_alternative<SetActiveTakeLane>(command) ||
+           std::holds_alternative<SetTakeComp>(command);
 }
 
 runtime::Result<TakeCommandReduction, TransactionError>
@@ -370,6 +417,8 @@ reduce_take_command(const Project& project, const Command& command, const Transa
         return reduce_remove_take(project, *remove, transaction, command_id);
     if (const auto* selection = std::get_if<SetActiveTakeLane>(&command))
         return reduce_set_active_take_lane(project, *selection, transaction, command_id);
+    if (const auto* comp = std::get_if<SetTakeComp>(&command))
+        return reduce_set_take_comp(project, *comp, transaction, command_id);
     return reject_reduction<TakeCommandReduction>(ConflictCode::ModelInvariant, transaction,
                                                   command_id);
 }

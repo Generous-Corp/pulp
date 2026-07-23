@@ -69,6 +69,7 @@ struct DecodeLimits {
     std::size_t max_automation_points = 5'000'000;
     std::size_t max_take_lanes = 100'000;
     std::size_t max_takes = 5'000'000;
+    std::size_t max_take_comp_segments = 5'000'000;
 
     static DecodeLimits web_defaults() noexcept;
 };

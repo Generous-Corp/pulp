@@ -435,6 +435,13 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "Array",
+          "name": "comp-segments",
+          "required": true,
+          "schema_field": "comp_segments",
+          "value_type": "json"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
@@ -458,7 +465,7 @@
       ],
       "name": "timeline:take-lane",
       "schema_type": "pulp.timeline.take_lane",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Document",

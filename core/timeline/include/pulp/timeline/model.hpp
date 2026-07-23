@@ -60,6 +60,9 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidTake,
     DuplicateTake,
     ActiveTakeLaneRemoval,
+    InvalidTakeComp,
+    OverlappingTakeComp,
+    ActiveCompTakeRemoval,
 };
 
 struct ModelError {
@@ -323,21 +326,38 @@ class Take {
 static_assert(std::is_nothrow_copy_constructible_v<Take>);
 static_assert(std::is_nothrow_move_constructible_v<Take>);
 
-// Immutable ownership of one alternate recording lane on a Track: an ordered set
-// of takes keyed by identity. The lane and its takes are owned identities; a
-// take's MediaRef::asset_id is an external reference. Comp selection, capture
-// engine wiring, and playback compilation are separate concerns and absent here.
+// One exact absolute-time selection in a take comp. The selected timeline range
+// must lie inside the referenced take and use its normalized sample rate.
+struct TakeCompSegment {
+    ItemId take_id;
+    AbsoluteTimeRange range;
+    constexpr bool operator==(const TakeCompSegment& other) const noexcept {
+        return take_id == other.take_id && range.start == other.range.start &&
+               range.sample_count == other.range.sample_count &&
+               range.sample_rate == other.range.sample_rate;
+    }
+};
+
+// Immutable ownership of one alternate recording lane on a Track: an ordered
+// set of takes keyed by identity and an optional sample-exact comp assembled
+// from non-overlapping take segments. The comp is document intent; playback can
+// derive and cache a flattened artifact without changing this source data.
 class TakeLane {
   public:
     static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
-                                                         std::vector<Take> takes);
+                                                         std::vector<Take> takes,
+                                                         std::vector<TakeCompSegment> comp = {});
     runtime::Result<TakeLane, ModelError> insert_take(Take take) const;
     runtime::Result<TakeLane, ModelError> erase_take(ItemId id) const;
+    runtime::Result<TakeLane, ModelError>
+    with_comp_segments(std::vector<TakeCompSegment> comp) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
     // Canonical order by take identity; carries no playback semantics.
     std::span<const Take> takes() const noexcept;
+    // Canonical order by timeline start, then take identity.
+    std::span<const TakeCompSegment> comp_segments() const noexcept;
     const Take* find_take(ItemId id) const noexcept;
 
   private:
@@ -417,6 +437,8 @@ class Track {
     runtime::Result<Track, ModelError> erase_take_lane(ItemId id) const;
     runtime::Result<Track, ModelError> insert_take(ItemId lane_id, Take take) const;
     runtime::Result<Track, ModelError> erase_take(ItemId lane_id, ItemId take_id) const;
+    runtime::Result<Track, ModelError>
+    with_take_comp(ItemId lane_id, std::vector<TakeCompSegment> comp) const;
     // Sets the record-arm intent flag. Path-copies only the Track's own Data;
     // clip, automation, and take index storage is shared with the old Track.
     Track with_record_armed(bool armed) const;

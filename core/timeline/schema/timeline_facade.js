@@ -142,8 +142,9 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.take_lane": Object.freeze({
     schemaType: "pulp.timeline.take_lane",
     domain: "Document",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
+      Object.freeze({ name: "comp_segments", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "takes", kind: "Array", jsType: "array", required: true }),

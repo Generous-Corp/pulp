@@ -101,6 +101,8 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/structural_registry_validation.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/track.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/track_schema_migrations.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/take_lane_schema_migrations.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/take_lane.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_automation_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_take_internal.cpp

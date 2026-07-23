@@ -209,7 +209,11 @@ rebuild_take_lane(const TakeLane& lane, const IdRemapTable& table, ExternalIdFix
                                   rebuilt.error().related_item);
         takes.push_back(std::move(rebuilt).value());
     }
-    return TakeLane::create(*table.find(lane.id()), lane.name(), std::move(takes));
+    std::vector<TakeCompSegment> comp(lane.comp_segments().begin(), lane.comp_segments().end());
+    for (auto& segment : comp)
+        segment.take_id = *table.find(segment.take_id);
+    return TakeLane::create(*table.find(lane.id()), lane.name(), std::move(takes),
+                            std::move(comp));
 }
 
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
