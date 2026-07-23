@@ -21,7 +21,7 @@ pulp_add_test_suite(pulp-test-playback-transport
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-capture-engine
-    SOURCES test_playback_capture_engine.cpp
+    SOURCES test_playback_capture_engine.cpp test_playback_recording_commit.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
