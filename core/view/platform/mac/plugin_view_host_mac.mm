@@ -95,6 +95,11 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
 @property (nonatomic, assign) BOOL designTopAlign;
+// Reconcile first-responder with the pulp text-input focus slot. Declared here
+// so the host's frame-tick block (below the @implementation) can call it every
+// vsync — the event-independent cadence that hands the DAW keyboard back the
+// instant focus clears without a following key/mouse event.
+- (void)syncKeyFocus;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -1246,6 +1251,19 @@ public:
                 // shared state, so leaving it set after teardown is harmless
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
+                // Frame-tick focus reconciliation — the event-independent cadence.
+                // syncKeyFocus is only called on discrete key/mouse events, so a
+                // focus slot that clears WITHOUT a following event (a failed/rejected
+                // generation, a programmatic blur) would leave the editor NSView
+                // first responder, swallowing the DAW's Musical Typing letter keys
+                // until close/reopen. Running it every tick hands the keyboard back
+                // on the next vsync. Cheap + idempotent: syncKeyFocus only touches
+                // first responder on a transition (makeFirstResponder:nil when no
+                // pulp text field is focused and we still hold it; makeFirstResponder:
+                // self when one is focused and we don't), guarded so a steady state
+                // is a no-op. Runs after idle() so a focus change the JS pump made
+                // this frame is reflected immediately.
+                if (self->view_) [self->view_ syncKeyFocus];
                 // Consume the dirty flag AFTER the idle callback, so a repaint it
                 // requested lands in THIS frame; anything that dirties the view
                 // later (during the advance below) re-arms it for the next one.
@@ -1476,6 +1494,9 @@ private:
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
 @property (nonatomic, assign) BOOL designTopAlign;
+// See PulpPluginView::syncKeyFocus — declared so the GPU host's display-link
+// frame-tick block can reconcile first-responder every vsync.
+- (void)syncKeyFocus;
 @end
 
 @implementation PulpGpuPluginView {
@@ -2252,6 +2273,14 @@ private:
                     // alive=false and frees `self`. Re-check before touching ANY
                     // self member (parity with the CPU host's render_link_callback).
                     if (!alive->load(std::memory_order_acquire)) return;
+
+                    // Frame-tick focus reconciliation — the event-independent cadence
+                    // (see the identical note in MacPluginViewHost::render_link_callback).
+                    // Hands the DAW keyboard back the instant the pulp text-input slot
+                    // clears without a following key/mouse event (a failed/rejected
+                    // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
+                    // only touches first responder on a transition.
+                    if (self->metal_view_) [self->metal_view_ syncKeyFocus];
 
                     const auto tick = pulp::view::begin_host_frame(
                         &self->root_, self->frame_clock_, self->frame_pump_, frame_time,
