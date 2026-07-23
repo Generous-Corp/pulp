@@ -4525,6 +4525,26 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
 
+- **Sub-pixel geometry survives end-to-end, through TWO former rounding
+  layers.** Concentric compositions (knob body ellipse + value-ring arc)
+  are aligned only at fractional coordinates: "A Channel FX" solves the
+  body at (7.51, 7.51, 22.53²) against ring arcs placed at 2-decimal
+  precision, and whole-pixel rounding moves siblings RELATIVE to each
+  other by up to ~0.7px/axis — every knob ring rendered visibly
+  off-center. The two layers that used to round: (1) the .fig decoder's
+  `styleFor` (scene.mjs) emitted `Math.round`ed left/top/width/height for
+  box-model nodes while the VECTOR_LIKE lane kept `round2` — both now use
+  `round2`; (2) Yoga's default pointScaleFactor of 1.0 re-rounded the
+  laid-out boxes — imported roots opt out via
+  `View::set_subpixel_layout(true)` (set by `build_native_view_tree` and
+  by the emitted `setSubpixelLayout('', true)` bridge call in generated
+  JS; discovered pass-wide in yoga_layout.cpp). When diagnosing a
+  "shape misregistered by <1px" report, check BOTH layers before touching
+  paint code — `--dump-layout` shows the post-Yoga truth, and integer-only
+  x/y/width/height there means the opt-out is not reaching the pass.
+  Fixing this also halved thumb_parity's bad-block count on
+  designers-pick (77 → 39).
+
 - **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
   (design_import_native_common.cpp), a node's incidental display text
   (`text_content` — often a folded label/heading) must NOT become a text

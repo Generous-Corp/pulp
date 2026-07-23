@@ -506,8 +506,10 @@ void     yoga_layout_reset_stats() {
     g_layout_max_nodes.store(0, std::memory_order_relaxed);
 }
 
-static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally) {
+static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally,
+                               YGConfigRef config, bool& wants_subpixel) {
     ++node_tally;
+    if (view.subpixel_layout()) wants_subpixel = true;
     // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
     // any flex-flow attributes are applied, so flex_grow/flex_shrink/
     // flex_basis can be gated on absolute-ness in apply_flex_style and
@@ -588,8 +590,8 @@ static void build_yoga_subtree(View& view, YGNodeRef node, uint32_t& node_tally)
 
     for (size_t i = 0; i < children.size(); ++i) {
         auto* child = children[i];
-        YGNodeRef ygChild = YGNodeNew();
-        build_yoga_subtree(*child, ygChild, node_tally);
+        YGNodeRef ygChild = YGNodeNewWithConfig(config);
+        build_yoga_subtree(*child, ygChild, node_tally, config, wants_subpixel);
         YGNodeInsertChild(node, ygChild, static_cast<uint32_t>(i));
     }
 }
@@ -629,10 +631,22 @@ void yoga_layout(View& root) {
     const auto stats_t0 = std::chrono::steady_clock::now();
     uint32_t node_tally = 0;
 
-    YGNodeRef ygRoot = YGNodeNew();
+    // One config per pass. Nodes hold a pointer to it, so its
+    // pointScaleFactor can be decided AFTER the build walk has seen every
+    // view's subpixel_layout() flag — Yoga reads the factor at the
+    // round-to-pixel-grid step at the end of YGNodeCalculateLayout.
+    YGConfigRef ygConfig = YGConfigNew();
+    bool wants_subpixel = root.subpixel_layout();
+
+    YGNodeRef ygRoot = YGNodeNewWithConfig(ygConfig);
     YGNodeStyleSetWidth(ygRoot, rootBounds.width);
     YGNodeStyleSetHeight(ygRoot, rootBounds.height);
-    build_yoga_subtree(root, ygRoot, node_tally);
+    build_yoga_subtree(root, ygRoot, node_tally, ygConfig, wants_subpixel);
+    // 0 disables the pixel-grid pass entirely, preserving the fractional
+    // solved geometry (see View::set_subpixel_layout for why imported
+    // designs need this). Default 1.0f keeps Yoga's stock whole-pixel
+    // rounding for everything else.
+    if (wants_subpixel) YGConfigSetPointScaleFactor(ygConfig, 0.0f);
 
     // Root direction follows the View's own writing_direction. When `inherit`
     // (the default), Yoga falls back to LTR at the root, matching CSS / RN
@@ -658,6 +672,7 @@ void yoga_layout(View& root) {
     }
 
     YGNodeFreeRecursive(ygRoot);
+    YGConfigFree(ygConfig);
 
     const uint64_t pass = g_layout_pass_count.fetch_add(1, std::memory_order_relaxed) + 1;
     g_layout_last_nodes.store(node_tally, std::memory_order_relaxed);

@@ -701,3 +701,18 @@ TEST_CASE("shared parse_hex_color_rgba covers every hex shape", "[design-ir-help
     CHECK_FALSE(parse_hex_color_rgba("rgb(1,2,3)").has_value());
     CHECK_FALSE(parse_hex_color_rgba("rebeccapurple").has_value());
 }
+
+TEST_CASE("build_native_view_tree opts the imported root into sub-pixel layout",
+          "[view][import][native][subpixel]") {
+    // Imported geometry is already solved at fractional coordinates; the
+    // materialized root must carry the subpixel_layout flag so the layout
+    // pass skips Yoga's whole-pixel grid rounding (the knob-ring
+    // off-center regression). Pass-wide discovery means the flag works
+    // even when a host embeds this tree under its own layout root.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    auto root = build_native_view_tree(ir, {}, {});
+    REQUIRE(root != nullptr);
+    REQUIRE(root->subpixel_layout());
+}
