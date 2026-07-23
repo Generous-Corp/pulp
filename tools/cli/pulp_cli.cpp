@@ -46,6 +46,8 @@ static const Command commands[] = {
     {"fmt",      "Run clang-format on the source tree",   cmd_fmt},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},
     {"audio",    "Repo-level audio model and bundle tooling", cmd_audio},
+    {"seq",      "Inspect and edit timeline projects",    cmd_seq},
+    {"render",   "Render a timeline project to WAV",      cmd_render},
     {"sdk",      "Manage the Pulp SDK installation",      cmd_sdk},
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
     {"version",  "Show, bump, or check version info",     cmd_version},

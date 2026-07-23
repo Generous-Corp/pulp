@@ -403,6 +403,30 @@ The `timeline-mcp-drift` ctest byte-checks the artifact;
 determinism, exact operation membership, complete domain projection,
 fail-closed empty command behavior, and confirm-the-failure.
 
+### Headless operations and CLI
+
+`pulp::tool-timeline` is the shared headless implementation for agent-facing
+project operations. It loads either canonical inline JSON or a project path,
+uses the built-in registry for persistence and command decoding, submits edits
+through `DocumentSession`, compiles the root sequence through
+`PlaybackProgramCompiler`, and renders arrangement audio through
+`ArrangementAudioRenderer`.
+
+The installed CLI keeps this operational layer thin:
+
+```
+pulp seq schema
+pulp seq validate <project.json>
+pulp seq explain <project.json> [--sample-rate <hz>]
+pulp seq apply <project.json> <commands.json> [--out <project.json>]
+pulp render <project.json> --out <file.wav> [--sample-rate <hz>]
+```
+
+Do not add hand-authored mutation verbs to `cmd_seq.cpp`; `apply` consumes the
+registry-derived typed command envelopes. `render` emits Float32 WAV and does
+not silently instantiate hosted devices or invent plugin delay compensation.
+The headless explain result reports unknown PDC offsets as JSON `null`.
+
 ## Scope boundary
 
 This subsystem owns the durable `JournalSink` ordering seam and native

@@ -69,6 +69,7 @@ add_executable(pulp-cli
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
+    cmd_seq.cpp
     cmd_audio_plugin_common.cpp
     cmd_audio_render.cpp
     cmd_audio_render_parse.cpp
@@ -132,7 +133,7 @@ add_executable(pulp-cli
 # all ctest entries below keep working.
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
+target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::tool-timeline pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 
 # Keep `libskia.a` before fontconfig on Linux+GNU ld.
 #
@@ -216,6 +217,14 @@ if(PULP_BUILD_TESTS)
         pulp::host pulp::format pulp::runtime Catch2::Catch2WithMain)
     add_dependencies(pulp-test-cli-bake pulp-cli)
     add_test(NAME pulp-test-cli-bake COMMAND pulp-test-cli-bake)
+
+    add_executable(pulp-test-cli-timeline ${CMAKE_SOURCE_DIR}/test/test_cli_timeline.cpp)
+    target_compile_definitions(pulp-test-cli-timeline PRIVATE
+        PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>")
+    target_link_libraries(pulp-test-cli-timeline PRIVATE
+        pulp::audio pulp::timeline Catch2::Catch2WithMain)
+    add_dependencies(pulp-test-cli-timeline pulp-cli)
+    add_test(NAME pulp-test-cli-timeline COMMAND pulp-test-cli-timeline)
 
     set(_pulp_cli_doctor_ctest_env
         "PULP_UPDATE_CHECK_DISABLED=1"
