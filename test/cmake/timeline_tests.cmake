@@ -9,7 +9,7 @@ pulp_add_test_suite(pulp-test-timeline-model
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
-    LIBRARIES pulp::timeline)
+    LIBRARIES pulp::playback)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)

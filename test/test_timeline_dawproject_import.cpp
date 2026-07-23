@@ -1,14 +1,26 @@
+#include <pulp/playback/audio_renderer.hpp>
+#include <pulp/playback/note_renderer.hpp>
+#include <pulp/playback/program_compiler.hpp>
 #include <pulp/timeline/dawproject_import.hpp>
 #include <pulp/timeline/model.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <memory>
+#include <span>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <variant>
+#include <vector>
 
+using namespace pulp;
+using namespace pulp::playback;
 using namespace pulp::timeline;
 using namespace pulp::timebase;
 
@@ -24,6 +36,93 @@ std::string read_fixture(const std::string& relative) {
     std::ostringstream ss;
     ss << in.rdbuf();
     return ss.str();
+}
+
+template <typename T, typename E> T take(runtime::Result<T, E> result) {
+    REQUIRE(result);
+    return std::move(result).value();
+}
+
+struct PlaybackTrace {
+    std::vector<float> audio;
+    std::vector<std::tuple<std::uint64_t, std::uint8_t, std::uint8_t, std::uint8_t>> midi;
+};
+
+PlaybackTrace play_imported_project(std::shared_ptr<const Project> project,
+                                    std::span<const std::uint32_t> block_schedule) {
+    auto tempo_map = std::make_shared<const CompiledTempoMap>(
+        take(CompiledTempoMap::compile(project->tempo_map().points(), {44'100, 1})));
+
+    auto decoded = std::make_shared<audio::AudioFileData>();
+    decoded->sample_rate = 44'100;
+    decoded->channels.emplace_back(88'200, 0.25f);
+    REQUIRE(project->assets().size() == 1);
+    auto assets =
+        take(DecodedAudioAssetPool::create({{project->assets()[0].id, std::move(decoded)}}));
+
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = project->root_sequence_id();
+    request.tempo_map = tempo_map;
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = std::move(assets);
+    REQUIRE(compiler.submit(std::move(request)));
+    while (compiler.status().busy)
+        executor.run_for(std::chrono::seconds(1), 64);
+    REQUIRE_FALSE(compiler.status().has_error);
+
+    MasterTransport transport;
+    REQUIRE(transport.prepare(*tempo_map, {.max_buffer_size = 512, .initially_playing = true}) ==
+            TransportError::None);
+    const auto* sequence = project->find_sequence(project->root_sequence_id());
+    REQUIRE(sequence != nullptr);
+    const auto note_track =
+        std::find_if(sequence->tracks().begin(), sequence->tracks().end(), [](const Track& track) {
+            const auto clips = track.clips();
+            return !clips.empty() && std::holds_alternative<NoteContent>(clips[0].content());
+        });
+    REQUIRE(note_track != sequence->tracks().end());
+    ArrangementNoteRenderer notes(note_track->id());
+    REQUIRE(notes.prepare(8));
+    PlaybackProgramBlockLatch latch;
+
+    REQUIRE(sequence->duration().has_value());
+    const auto total_frames = static_cast<std::uint64_t>(
+        tempo_map->ticks_to_samples({sequence->duration()->value}).value);
+
+    PlaybackTrace trace;
+    trace.audio.reserve(total_frames);
+    std::uint64_t rendered = 0;
+    std::size_t schedule_index = 0;
+    while (rendered < total_frames) {
+        const auto requested = block_schedule[schedule_index++ % block_schedule.size()];
+        const auto frames =
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, total_frames - rendered));
+        TransportSnapshot snapshot;
+        REQUIRE(transport.begin_block(frames, snapshot) == TransportError::None);
+        auto block = latch.begin_block(store);
+        REQUIRE(block);
+
+        std::vector<float> block_audio(frames);
+        float* channel = block_audio.data();
+        audio::BufferView<float> output(&channel, 1, frames);
+        REQUIRE(ArrangementAudioRenderer::process(*block.program(), snapshot, output) ==
+                AudioRenderStatus::Rendered);
+        const auto note_result = notes.process(block, snapshot);
+        REQUIRE(note_result.code == NoteRenderCode::Ok);
+        trace.audio.insert(trace.audio.end(), block_audio.begin(), block_audio.end());
+        for (const auto& event : notes.events()) {
+            REQUIRE(event.size() == 3);
+            trace.midi.emplace_back(rendered + event.sample_offset, event.data()[0],
+                                    event.data()[1], event.data()[2]);
+        }
+        rendered += frames;
+    }
+    return trace;
 }
 
 } // namespace
@@ -187,4 +286,22 @@ TEST_CASE("DAWproject import accepts an empty project with defaults") {
     REQUIRE(project.sequences()[0].tracks().empty());
     REQUIRE(project.tempo_map().points()[0].bpm == 120.0);
     REQUIRE(project.meter_map().points()[0].signature.numerator == 4);
+}
+
+TEST_CASE("DAWproject imported arrangement plays identically across block schedules") {
+    auto imported = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"));
+    REQUIRE(imported);
+    auto project = std::make_shared<const Project>(std::move(imported).value());
+
+    constexpr std::array regular{512u};
+    constexpr std::array varying{17u, 251u, 64u, 509u, 3u, 128u};
+    const auto regular_trace = play_imported_project(project, regular);
+    const auto varying_trace = play_imported_project(project, varying);
+
+    REQUIRE(regular_trace.audio == varying_trace.audio);
+    REQUIRE(regular_trace.midi == varying_trace.midi);
+    REQUIRE(regular_trace.audio.size() == 151'200);
+    REQUIRE(std::any_of(regular_trace.audio.begin(), regular_trace.audio.end(),
+                        [](float sample) { return sample != 0.0f; }));
+    REQUIRE(regular_trace.midi.size() == 4);
 }
