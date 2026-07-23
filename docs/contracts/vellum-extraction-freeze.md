@@ -11,8 +11,22 @@ prepared control plane is not source-authority activation.
 `.github/vellum-ownership.json` is Pulp's pinned projection of the source
 authority map. While its activation state is `prepared`, it transfers no
 authority. The transfer becomes operational only when a reviewed change sets
-the state to `active`, records an immutable Vellum authority commit, and lists
-the exact transferred slices.
+the state to `active`, references an immutable schema-v2 Vellum authority
+record, and lists the exact transferred slices. The active projection is
+generated from the one append-only `authority-transition` event:
+
+```sh
+python3 tools/scripts/generate_vellum_ownership_projection.py \
+  --activation-event \
+  .github/vellum-change-events/20260723-authority-activation.json
+```
+
+The generator copies the event ID, record commit and path, approver, and
+timestamp into the activation metadata and each transferred slice. The freeze
+check independently binds those values to the Vellum record, its protected
+authority ref, the prepared Pulp candidate blob, and the unchanged selected
+source paths. The event and generated projection must land in the same Pulp
+commit; neither one is activation evidence on its own.
 
 After activation, a pull request that touches a transferred path must add one
 or more immutable records under `.github/vellum-change-events/`. The union of
