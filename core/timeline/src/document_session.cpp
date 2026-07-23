@@ -72,10 +72,12 @@ std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
 } // namespace
 
 struct DocumentSession::Impl {
-    explicit Impl(Project project, SessionLimits session_limits, std::uint64_t nonce)
+    explicit Impl(Project project, SessionLimits session_limits, std::uint64_t nonce,
+                  std::shared_ptr<JournalSink> sink)
         : published(std::make_shared<const PublishedState>(
               PublishedState{std::make_shared<const Project>(std::move(project)), {}})),
-          journal(session_limits.journal), limits(session_limits), session_nonce(nonce) {
+          journal(session_limits.journal), limits(session_limits), session_nonce(nonce),
+          journal_sink(std::move(sink)) {
         cache.reserve(limits.max_cached_results);
         writers.reserve(limits.max_writers);
     }
@@ -85,6 +87,8 @@ struct DocumentSession::Impl {
     CommandJournal journal;
     SessionLimits limits;
     std::uint64_t session_nonce = 0;
+    std::shared_ptr<JournalSink> journal_sink;
+    bool journal_sink_failed = false;
     std::uint64_t next_writer = 1;
     std::vector<WriterState> writers;
     std::vector<CachedCommit> cache;
@@ -121,6 +125,9 @@ struct DocumentSession::Impl {
         if (transaction.id.sequence <= writer->transaction_watermark)
             return failure<CommitResult>(
                 error(ConflictCode::AlreadyAppliedResultExpired, transaction, current_revision));
+        if (journal_sink_failed)
+            return failure<CommitResult>(
+                error(ConflictCode::JournalDurability, transaction, current_revision));
         if (transaction.expected_revision != current_revision)
             return failure<CommitResult>(
                 error(ConflictCode::StaleRevision, transaction, current_revision));
@@ -214,12 +221,20 @@ struct DocumentSession::Impl {
         if (!journal_preflight)
             return failure<CommitResult>(journal_preflight.error());
 
-        // In-memory journal append is the commit point. Publication follows it,
-        // so the future durable sink can preserve the same recovery ordering.
         auto published = std::make_shared<const Project>(std::move(reduced).value().project);
-        detail::JournalAccess::append(journal, std::move(journal_entry), *current->snapshot);
         auto published_state =
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
+        auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
+        if (journal_sink) {
+            auto durable = journal_sink->append_batch(journal_entry);
+            if (!durable) {
+                journal_sink_failed = true;
+                return failure<CommitResult>(
+                    error(ConflictCode::JournalDurability, transaction, current_revision));
+            }
+        }
+        detail::JournalAccess::append_prepared(journal, std::move(journal_entry),
+                                               std::move(initial_snapshot));
         std::atomic_store_explicit(&this->published, std::move(published_state),
                                    std::memory_order_release);
         writer->transaction_watermark = transaction.id.sequence;
@@ -330,6 +345,12 @@ WriterToken& WriterToken::operator=(WriterToken&& other) noexcept {
 
 runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
 DocumentSession::create(Project initial, SessionLimits limits) {
+    return create(std::move(initial), limits, {});
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::create(Project initial, SessionLimits limits,
+                        std::shared_ptr<JournalSink> journal_sink) {
     if (limits.max_writers == 0) {
         TransactionError value;
         value.code = ConflictCode::WriterLimit;
@@ -341,9 +362,17 @@ DocumentSession::create(Project initial, SessionLimits limits) {
         value.code = ConflictCode::SequenceExhausted;
         return failure<std::unique_ptr<DocumentSession>>(value);
     }
+    if (journal_sink) {
+        auto durable = journal_sink->checkpoint(initial, {});
+        if (!durable) {
+            TransactionError value;
+            value.code = ConflictCode::JournalDurability;
+            return failure<std::unique_ptr<DocumentSession>>(value);
+        }
+    }
     return runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>(
-        runtime::Ok(std::unique_ptr<DocumentSession>(
-            new DocumentSession(std::make_unique<Impl>(std::move(initial), limits, nonce)))));
+        runtime::Ok(std::unique_ptr<DocumentSession>(new DocumentSession(
+            std::make_unique<Impl>(std::move(initial), limits, nonce, std::move(journal_sink))))));
 }
 
 std::uint64_t detail::SessionNonceTestAccess::exchange_next(std::uint64_t value) noexcept {
@@ -471,7 +500,25 @@ CommandJournal DocumentSession::journal() const {
 
 bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     std::lock_guard lock(impl_->mutex);
-    return detail::JournalAccess::checkpoint(impl_->journal, durable_revision);
+    if (impl_->journal_sink_failed)
+        return false;
+    if (durable_revision == impl_->journal.base_revision())
+        return true;
+    if (!impl_->journal_sink)
+        return detail::JournalAccess::checkpoint(impl_->journal, durable_revision);
+    auto checkpointed = impl_->journal;
+    if (!detail::JournalAccess::checkpoint(checkpointed, durable_revision))
+        return false;
+    const auto* snapshot = detail::JournalAccess::checkpoint_snapshot(checkpointed);
+    if (!snapshot)
+        return false;
+    auto durable = impl_->journal_sink->checkpoint(*snapshot, durable_revision);
+    if (!durable) {
+        impl_->journal_sink_failed = true;
+        return false;
+    }
+    impl_->journal = std::move(checkpointed);
+    return true;
 }
 
 } // namespace pulp::timeline

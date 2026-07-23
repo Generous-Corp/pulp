@@ -57,7 +57,140 @@ Project make_device_chain_project(std::vector<DevicePlacement> device_chain) {
     return std::move(project).value();
 }
 
+class ProbeJournalSink final : public JournalSink {
+  public:
+    pulp::runtime::Result<bool, JournalSinkError>
+    append_batch(const JournalEntry& entry) noexcept override {
+        ++append_calls;
+        if (session)
+            revision_observed_during_append = session->revision();
+        if (fail_append) {
+            if (append_before_failure)
+                entries.push_back(entry);
+            return pulp::runtime::Result<bool, JournalSinkError>(
+                pulp::runtime::Err(JournalSinkError::IoError));
+        }
+        entries.push_back(entry);
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept override {
+        ++checkpoint_calls;
+        if (fail_checkpoint)
+            return pulp::runtime::Result<bool, JournalSinkError>(
+                pulp::runtime::Err(JournalSinkError::IoError));
+        checkpoints.push_back(durable_revision);
+        checkpoint_snapshots.push_back(snapshot);
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    DocumentSession* session = nullptr;
+    bool fail_append = false;
+    bool append_before_failure = false;
+    bool fail_checkpoint = false;
+    std::size_t append_calls = 0;
+    std::size_t checkpoint_calls = 0;
+    DocumentRevision revision_observed_during_append{};
+    std::vector<JournalEntry> entries;
+    std::vector<DocumentRevision> checkpoints;
+    std::vector<Project> checkpoint_snapshots;
+};
+
 } // namespace
+
+TEST_CASE("Timeline journal sink is durable before a transaction is published") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    sink->session = session.get();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.size() == 1);
+    REQUIRE(sink->entries[0].before.value == 0);
+    REQUIRE(sink->entries[0].after.value == 1);
+    REQUIRE(sink->revision_observed_during_append.value == 0);
+    REQUIRE(session->revision().value == 1);
+    REQUIRE(velocity(*session->snapshot()) == 2000);
+    REQUIRE(sink->checkpoint_calls == 1);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(velocity(sink->checkpoint_snapshots.front()) == 1000);
+}
+
+TEST_CASE("Timeline journal sink failure rejects session creation") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    sink->fail_checkpoint = true;
+
+    auto rejected = DocumentSession::create(make_project(), {}, sink);
+
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(sink->checkpoint_calls == 1);
+    REQUIRE(sink->checkpoints.empty());
+}
+
+TEST_CASE("Timeline journal sink failure poisons the session after an ambiguous append") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    sink->fail_append = true;
+    sink->append_before_failure = true;
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+
+    auto rejected = session->submit(writer, std::move(edit));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision().value == 0);
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+    REQUIRE(session->journal().entries().empty());
+    REQUIRE(sink->entries.size() == 1);
+
+    sink->fail_append = false;
+    auto poisoned = session->submit(writer, std::move(retry));
+    REQUIRE_FALSE(poisoned);
+    REQUIRE(poisoned.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision().value == 0);
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.size() == 1);
+}
+
+TEST_CASE("Timeline journal checkpoint truncates only after the sink accepts it") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+    auto collision = edit;
+    collision.expected_revision = {99};
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    REQUIRE_FALSE(session->checkpoint({2}));
+    REQUIRE(sink->checkpoint_calls == 1);
+
+    sink->fail_checkpoint = true;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->journal().base_revision().value == 0);
+
+    sink->fail_checkpoint = false;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->journal().base_revision().value == 0);
+
+    auto cached = session->submit(writer, std::move(retry));
+    REQUIRE(cached);
+    REQUIRE(cached->revision.value == 1);
+    auto collided = session->submit(writer, std::move(collision));
+    REQUIRE_FALSE(collided);
+    REQUIRE(collided.error().code == ConflictCode::TransactionIdCollision);
+}
 
 TEST_CASE("Timeline journal replay reproduces the committed document") {
     const auto checkpoint = make_project();
@@ -350,8 +483,14 @@ TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
     auto writer = std::move(session->register_writer()).value();
     const auto next_before = session->snapshot()->next_item_id();
 
-    MediaAsset unsealed{{next_before}, "unsealed.wav", 480, {48'000, 1}, ContentHash{},
-                        AssetStoragePolicy::External, {}, {}};
+    MediaAsset unsealed{{next_before},
+                        "unsealed.wav",
+                        480,
+                        {48'000, 1},
+                        ContentHash{},
+                        AssetStoragePolicy::External,
+                        {},
+                        {}};
     REQUIRE_FALSE(unsealed.content_hash.valid());
     auto tx = session_transaction(writer, {}, {CreateAsset{unsealed}});
     auto rejected = session->submit(writer, std::move(tx));

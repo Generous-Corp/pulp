@@ -229,6 +229,13 @@ invariants.
 - The in-memory command journal is bounded and fail-closed. A full journal
   rejects before publication; it never ring-evicts committed entries.
   `checkpoint()` truncates only a caller-confirmed durable prefix.
+- A session may attach a `JournalSink`. It publishes a transaction only after
+  `append_batch()` reports the complete batch durable, and truncates a
+  checkpoint only after the sink installs its reconstructed snapshot. A sink
+  error is ambiguous, so it permanently poisons new durable writes for that
+  session; already-cached idempotent results retain their normal semantics.
+  Both callbacks run under the session writer lock and must not call
+  lock-taking APIs on the originating `DocumentSession`.
 - Journal mutation and tombstone restoration are session-internal. Public
   `reduce_transaction()` never revives tombstones, and replay rejects a
   checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
@@ -346,11 +353,12 @@ failed, without `node`).
 
 ## Scope boundary
 
-This subsystem does not own a durable `JournalSink`, package/container I/O,
-publication, playback or automation delivery, launch
-slots, takes, nesting, device implementations, routing, audio, format adapters,
-or UI. Add those in their owning modules instead of widening the command and
-persistence core opportunistically.
+This subsystem owns the abstract durable `JournalSink` ordering seam, but not a
+concrete file journal, package/container I/O, crash-recovery policy,
+publication, playback or automation delivery, launch slots, comping, nesting,
+device implementations, routing, audio, format adapters, or UI. Add those in
+their owning modules instead of widening the command and persistence core
+opportunistically.
 
 ## Validation
 

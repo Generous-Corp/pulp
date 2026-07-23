@@ -53,6 +53,8 @@ class DocumentSession {
   public:
     static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
     create(Project initial, SessionLimits limits = {});
+    static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+    create(Project initial, SessionLimits limits, std::shared_ptr<JournalSink> journal_sink);
     ~DocumentSession();
 
     DocumentSession(const DocumentSession&) = delete;

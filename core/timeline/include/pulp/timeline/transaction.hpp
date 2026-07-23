@@ -68,6 +68,7 @@ enum class ConflictCode : std::uint8_t {
     WriterLimit,
     SequenceExhausted,
     ModelInvariant,
+    JournalDurability,
 };
 
 struct TransactionError {

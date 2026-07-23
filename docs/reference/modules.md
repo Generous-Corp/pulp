@@ -876,9 +876,18 @@ bytes for lossless ordinary re-save. `SerializedSnapshot` flags those opaque
 objects so callers can surface compatibility risk. This is snapshot JSON only;
 it does not read or write ZIP/package containers.
 
-This surface intentionally excludes durable journal sinks, package I/O,
-playback, document-attached automation lanes and delivery, launch slots, takes,
-nesting, device implementation and routing, and UI.
+`journal.hpp` defines the optional `JournalSink` persistence seam. A session
+publishes a transaction only after the sink reports its complete batch durable,
+and installs a checkpoint before discarding the covered in-memory entries.
+Because a failed write can have reached storage before its error is observable,
+any sink error poisons that session for subsequent durable writes. Sink
+callbacks run under the session writer lock and must not call lock-taking APIs
+on the originating `DocumentSession`. Concrete file/package storage and crash
+recovery remain outside this module surface.
+
+This surface intentionally excludes package I/O, playback, document-attached
+automation lanes and delivery, launch slots, takes, nesting, device
+implementation and routing, and UI.
 
 ## playback
 

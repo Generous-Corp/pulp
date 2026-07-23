@@ -29,6 +29,38 @@ struct JournalEntry {
     JournalEntryKind kind = JournalEntryKind::Ordinary;
 };
 
+enum class JournalSinkError : std::uint8_t {
+    Closed,
+    IoError,
+    InvalidState,
+};
+
+class JournalSink {
+  public:
+    virtual ~JournalSink() = default;
+
+    JournalSink(const JournalSink&) = delete;
+    JournalSink& operator=(const JournalSink&) = delete;
+
+    /// Returns success only after the complete transaction batch is durable.
+    /// The session writer lock is held during this call, so implementations
+    /// must not invoke lock-taking APIs on the originating DocumentSession.
+    /// Any error permanently rejects later durable writes from that session.
+    virtual runtime::Result<bool, JournalSinkError>
+    append_batch(const JournalEntry& entry) noexcept = 0;
+
+    /// Durably installs the snapshot before discarding journal entries through
+    /// durable_revision. The session retains its prior checkpoint on failure.
+    /// The session writer lock is held during this call, so implementations
+    /// must not invoke lock-taking APIs on the originating DocumentSession.
+    /// Any error permanently rejects later durable writes from that session.
+    virtual runtime::Result<bool, JournalSinkError>
+    checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept = 0;
+
+  protected:
+    JournalSink() = default;
+};
+
 class CommandJournal {
   public:
     explicit CommandJournal(JournalLimits limits) : limits_(limits) {}
@@ -57,7 +89,8 @@ class CommandJournal {
     };
     friend class detail::JournalAccess;
     runtime::Result<bool, TransactionError> preflight(const JournalEntry& entry) const;
-    void append_preflighted(JournalEntry entry, const Project& before);
+    std::optional<Project> prepare_append(const Project& before);
+    void append_prepared(JournalEntry entry, std::optional<Project> initial_snapshot) noexcept;
     bool checkpoint(DocumentRevision durable_revision);
 
     JournalLimits limits_;
