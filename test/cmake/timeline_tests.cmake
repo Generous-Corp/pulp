@@ -28,6 +28,19 @@ pulp_add_test_suite(pulp-test-playback-program
     COMPILE_DEFINITIONS
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
+if(PULP_BENCHMARK)
+    set(PULP_TIMELINE_SCALE_SANITIZED OFF)
+    if(PULP_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "(^|[ ;])-fsanitize")
+        set(PULP_TIMELINE_SCALE_SANITIZED ON)
+    endif()
+    pulp_add_test_suite(pulp-test-timeline-scale
+        SOURCES test_timeline_scale.cpp
+        LIBRARIES pulp::playback
+        LABELS performance
+        TIMEOUT 120
+        COMPILE_DEFINITIONS
+            $<$<BOOL:${PULP_TIMELINE_SCALE_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>)
+endif()
 pulp_add_test_suite(pulp-test-playback-note-renderer
     SOURCES test_playback_note_renderer.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>

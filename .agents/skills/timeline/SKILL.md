@@ -29,6 +29,12 @@ invariants.
 - Tracks are sparse non-overlapping lanes. Their canonical clip order is
   `(anchor, start, ItemId)`. Timeline and ID indexes are persistent AVL trees;
   `replace_clip()` path-copies only search paths and shares untouched subtrees.
+- Initial `Track::create`, `Project::create`, and identity restoration must
+  validate and sort complete input sets, then bulk-build balanced persistent
+  AVL indexes with exactly one node per final entry. Do not feed bulk state
+  through the per-edit insertion path: its transient path copies turn initial
+  construction into allocator-heavy O(n log n) work. Ordinary edits still use
+  path-copy insertion/replacement so prior snapshots share untouched subtrees.
 - A Track owns an ordered `DevicePlacement` chain. Placements contain only a
   durable `ItemId`; chain order is semantic, and clip edits retain the exact
   immutable chain storage. Runtime instances, graph nodes, plugin formats,

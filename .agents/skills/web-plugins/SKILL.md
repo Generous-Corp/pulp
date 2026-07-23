@@ -295,6 +295,11 @@ per-ABI entry point for it.** Go through the plugin's own state:
   not native render jobs, so list them in the native timeline target,
   no-exceptions target, WAM, and WebCLAP together. Browser replay consumes the
   persisted artifact reference; it must never attempt to rerender a freeze.
+  These builds also share Timeline's persistent indexes: initial Track/Project
+  construction and identity restoration bulk-build sorted balanced trees,
+  while ordinary edits path-copy only the changed search paths. Do not replace
+  bulk construction with repeated persistent insertion; wasm's tighter memory
+  ceiling makes the transient allocation growth especially costly.
 
 - A new `core/timeline` translation unit belongs in four source lists:
   `core/timeline/CMakeLists.txt`, the `pulp-test-timeline-no-exceptions` OBJECT

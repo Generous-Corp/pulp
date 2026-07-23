@@ -221,13 +221,17 @@ TEST_CASE("Timeline identity and clip indexes path copy at logarithmic scale") {
         REQUIRE(value);
         clips.push_back(std::move(value).value());
     }
+    const auto before_track_nodes = Track::index_stats().nodes_created;
     auto track = Track::create({4}, "large", std::move(clips));
     REQUIRE(track);
+    REQUIRE(Track::index_stats().nodes_created - before_track_nodes == 20000);
     auto sequence =
         Sequence::create({3}, "sequence", TickDuration{200000}, {std::move(track).value()});
     REQUIRE(sequence);
+    const auto before_project_nodes = Project::identity_stats().nodes_created;
     auto project = Project::create({{1}, "large", 10005, {3}, {}, {std::move(sequence).value()}});
     REQUIRE(project);
+    REQUIRE(Project::identity_stats().nodes_created - before_project_nodes == 10003);
     const auto before_nodes = Project::identity_stats().nodes_created;
     auto added = Clip::create({10005}, {160000}, {8}, EmptyContent{});
     REQUIRE(added);

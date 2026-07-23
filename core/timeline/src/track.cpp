@@ -164,6 +164,15 @@ NodePtr node(Clip clip, NodePtr left = {}, NodePtr right = {}) {
                                                  node_height, node_count);
 }
 
+NodePtr build_balanced(std::span<const Clip> clips, std::size_t begin, std::size_t end) {
+    if (begin == end)
+        return {};
+    const auto middle = begin + (end - begin) / 2;
+    auto left = build_balanced(clips, begin, middle);
+    auto right = build_balanced(clips, middle + 1, end);
+    return node(clips[middle], std::move(left), std::move(right));
+}
+
 NodePtr balance(Clip clip, NodePtr left, NodePtr right) {
     if (height(left) > height(right) + 1) {
         if (height(left->left) < height(left->right)) {
@@ -295,14 +304,10 @@ bool ranges_overlap(const Clip& lhs, const Clip& rhs) noexcept {
            clip_start_scalar(rhs) < clip_end_scalar(lhs);
 }
 
-std::optional<std::pair<ItemId, ItemId>> first_overlap(const NodePtr& root) {
-    const Clip* previous = nullptr;
-    for (std::size_t i = 0; i < count(root); ++i) {
-        const auto& current = select(root, i);
-        if (previous && ranges_overlap(*previous, current))
-            return std::pair(previous->id(), current.id());
-        previous = &current;
-    }
+std::optional<std::pair<ItemId, ItemId>> first_overlap(std::span<const Clip> clips) {
+    for (std::size_t i = 1; i < clips.size(); ++i)
+        if (ranges_overlap(clips[i - 1], clips[i]))
+            return std::pair(clips[i - 1].id(), clips[i].id());
     return std::nullopt;
 }
 
@@ -383,18 +388,18 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
                 return fail<Track>(ModelErrorCode::IncompatibleSampleRate, input.id, clip.id());
         }
     }
-    NodePtr by_start;
-    NodePtr by_id;
-    for (auto& clip : input.clips) {
-        bool duplicate_start = false;
-        bool duplicate_id = false;
-        by_start = insert(std::move(by_start), clip, start_less, duplicate_start);
-        by_id = insert(std::move(by_id), clip, id_less, duplicate_id);
-        if (duplicate_id)
-            return fail<Track>(ModelErrorCode::DuplicateItemId, clip.id());
-    }
-    if (const auto overlap = first_overlap(by_start))
+    auto clips_by_start = input.clips;
+    std::sort(clips_by_start.begin(), clips_by_start.end(), start_less);
+    std::sort(input.clips.begin(), input.clips.end(), id_less);
+    if (const auto duplicate = std::adjacent_find(
+            input.clips.begin(), input.clips.end(),
+            [](const Clip& lhs, const Clip& rhs) { return lhs.id() == rhs.id(); });
+        duplicate != input.clips.end())
+        return fail<Track>(ModelErrorCode::DuplicateItemId, duplicate->id());
+    if (const auto overlap = first_overlap(clips_by_start))
         return fail<Track>(ModelErrorCode::OverlappingClips, overlap->first, overlap->second);
+    auto by_start = build_balanced(clips_by_start, 0, clips_by_start.size());
+    auto by_id = build_balanced(input.clips, 0, input.clips.size());
     std::sort(
         input.automation_lanes.begin(), input.automation_lanes.end(),
         [](const AutomationLane& lhs, const AutomationLane& rhs) { return lhs.id() < rhs.id(); });

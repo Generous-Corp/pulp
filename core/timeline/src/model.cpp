@@ -107,6 +107,47 @@ std::optional<ModelError> apply_identity_mutations(detail::IdentityDirectory& id
     return std::nullopt;
 }
 
+template <typename Visitor>
+void visit_project_identities(const ProjectInput& input, Visitor&& visit) {
+    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
+                              ItemId clip = {}, ItemId lane = {}) {
+        return ItemLocation{
+            kind,     immediate_parent_id(kind, input.id, sequence, track, clip, lane),
+            sequence, track,
+            clip,     true};
+    };
+    visit(input.id, location(ItemKind::Project));
+    for (const auto& asset : input.assets)
+        visit(asset.id, location(ItemKind::Asset));
+    for (const auto& sequence : input.sequences) {
+        visit(sequence.id(), location(ItemKind::Sequence, sequence.id()));
+        for (const auto& track : sequence.tracks()) {
+            visit(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
+            for (const auto& device : track.device_chain())
+                visit(device.id, location(ItemKind::DevicePlacement, sequence.id(), track.id()));
+            for (const auto& lane : track.automation_lanes()) {
+                visit(lane.id(), location(ItemKind::AutomationLane, sequence.id(), track.id()));
+                for (const auto& point : lane.curve().points())
+                    visit(point.id, location(ItemKind::AutomationPoint, sequence.id(), track.id(),
+                                             {}, lane.id()));
+            }
+            for (const auto& take_lane : track.take_lanes()) {
+                visit(take_lane.id(), location(ItemKind::TakeLane, sequence.id(), track.id()));
+                for (const auto& take : take_lane.takes())
+                    visit(take.id(),
+                          location(ItemKind::Take, sequence.id(), track.id(), {}, take_lane.id()));
+            }
+            for (const auto& clip : track.clips()) {
+                visit(clip.id(), location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
+                if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+                    for (const auto& note : notes->notes())
+                        visit(note.id,
+                              location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
+            }
+        }
+    }
+}
+
 } // namespace
 
 bool SchemaIdentity::valid() const noexcept {
@@ -465,7 +506,6 @@ detail::ProjectStateAccess::restore_identities(Project project,
         }) != entries.end())
         return fail<Project>(ModelErrorCode::DuplicateItemId);
 
-    detail::IdentityDirectory restored;
     std::size_t active_index = 0;
     const auto find_entry = [&](ItemId id) -> const detail::IdentityRecord* {
         const auto found = std::lower_bound(entries.begin(), entries.end(), id,
@@ -610,10 +650,12 @@ detail::ProjectStateAccess::restore_identities(Project project,
         } else if (project.data_->identities.locate(entry.item)) {
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         }
-        restored.insert(entry.item, location);
     }
     if (active_index != active_entries.size())
         return fail<Project>(ModelErrorCode::InvalidSchemaIdentity);
+    if (entries.size() == active_entries.size())
+        return runtime::Ok(std::move(project));
+    auto restored = detail::IdentityDirectory::from_sorted_entries(entries);
     auto next_data = *project.data_;
     next_data.identities = std::move(restored);
     project.data_ = std::make_shared<const Project::Data>(std::move(next_data));
@@ -623,59 +665,30 @@ detail::ProjectStateAccess::restore_identities(Project project,
 runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     if (!input.id.valid())
         return fail<Project>(ModelErrorCode::InvalidItemId, input.id);
-    std::vector<ItemId> all_ids{input.id};
-    std::uint64_t maximum_id = input.id.value;
+
     for (auto& asset : input.assets) {
         if (const auto error = validate_media_asset(asset))
             return runtime::Result<Project, ModelError>(runtime::Err(*error));
-        all_ids.push_back(asset.id);
-        maximum_id = std::max(maximum_id, asset.id.value);
     }
-    for (const auto& sequence : input.sequences) {
-        all_ids.push_back(sequence.id());
-        maximum_id = std::max(maximum_id, sequence.id().value);
-        for (const auto& track : sequence.tracks()) {
-            all_ids.push_back(track.id());
-            maximum_id = std::max(maximum_id, track.id().value);
-            for (const auto& device : track.device_chain()) {
-                all_ids.push_back(device.id);
-                maximum_id = std::max(maximum_id, device.id.value);
-            }
-            for (const auto& lane : track.automation_lanes()) {
-                all_ids.push_back(lane.id());
-                maximum_id = std::max(maximum_id, lane.id().value);
-                for (const auto& point : lane.curve().points()) {
-                    all_ids.push_back(point.id);
-                    maximum_id = std::max(maximum_id, point.id.value);
-                }
-            }
-            for (const auto& take_lane : track.take_lanes()) {
-                all_ids.push_back(take_lane.id());
-                maximum_id = std::max(maximum_id, take_lane.id().value);
-                for (const auto& take : take_lane.takes()) {
-                    all_ids.push_back(take.id());
-                    maximum_id = std::max(maximum_id, take.id().value);
-                }
-            }
-            for (const auto& clip : track.clips()) {
-                all_ids.push_back(clip.id());
-                maximum_id = std::max(maximum_id, clip.id().value);
-                if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
-                    for (const auto& note : notes->notes()) {
-                        all_ids.push_back(note.id);
-                        maximum_id = std::max(maximum_id, note.id.value);
-                    }
-                }
-            }
-        }
-    }
-    std::sort(all_ids.begin(), all_ids.end());
-    if (const auto duplicate = std::adjacent_find(all_ids.begin(), all_ids.end());
-        duplicate != all_ids.end())
-        return fail<Project>(ModelErrorCode::DuplicateItemId, *duplicate);
+    std::size_t identity_count = 0;
+    visit_project_identities(input, [&](ItemId, ItemLocation) { ++identity_count; });
+    std::vector<detail::IdentityRecord> identity_entries;
+    identity_entries.reserve(identity_count);
+    visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
+        identity_entries.push_back({id, item_location});
+    });
+    std::sort(identity_entries.begin(), identity_entries.end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.item < rhs.item; });
+    if (const auto duplicate = std::adjacent_find(
+            identity_entries.begin(), identity_entries.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.item == rhs.item; });
+        duplicate != identity_entries.end())
+        return fail<Project>(ModelErrorCode::DuplicateItemId, duplicate->item);
+    const auto maximum_id = identity_entries.back().item.value;
     if (input.next_item_id == 0 || input.next_item_id <= maximum_id)
         return fail<Project>(ModelErrorCode::NextItemIdNotMonotonic, {input.next_item_id},
                              {maximum_id});
+
     std::sort(input.assets.begin(), input.assets.end(),
               [](const MediaAsset& lhs, const MediaAsset& rhs) { return lhs.id < rhs.id; });
     std::sort(input.sequences.begin(), input.sequences.end(),
@@ -724,50 +737,7 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
             }
         }
     }
-    detail::IdentityDirectory identities;
-    auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
-    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
-                              ItemId clip = {}, ItemId lane = {}) {
-        return ItemLocation{
-            kind,     immediate_parent_id(kind, input.id, sequence, track, clip, lane),
-            sequence, track,
-            clip,     true};
-    };
-    add_identity(input.id, location(ItemKind::Project));
-    for (const auto& asset : input.assets)
-        add_identity(asset.id, location(ItemKind::Asset));
-    for (const auto& sequence : input.sequences) {
-        add_identity(sequence.id(), location(ItemKind::Sequence, sequence.id()));
-        for (const auto& track : sequence.tracks()) {
-            add_identity(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
-            for (const auto& device : track.device_chain())
-                add_identity(device.id,
-                             location(ItemKind::DevicePlacement, sequence.id(), track.id()));
-            for (const auto& lane : track.automation_lanes()) {
-                add_identity(lane.id(),
-                             location(ItemKind::AutomationLane, sequence.id(), track.id()));
-                for (const auto& point : lane.curve().points())
-                    add_identity(point.id, location(ItemKind::AutomationPoint, sequence.id(),
-                                                    track.id(), {}, lane.id()));
-            }
-            for (const auto& take_lane : track.take_lanes()) {
-                add_identity(take_lane.id(),
-                             location(ItemKind::TakeLane, sequence.id(), track.id()));
-                for (const auto& take : take_lane.takes())
-                    add_identity(take.id(), location(ItemKind::Take, sequence.id(), track.id(), {},
-                                                     take_lane.id()));
-            }
-            for (const auto& clip : track.clips()) {
-                add_identity(clip.id(),
-                             location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
-                if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
-                    for (const auto& note : notes->notes())
-                        add_identity(note.id, location(ItemKind::Note, sequence.id(), track.id(),
-                                                       clip.id()));
-                }
-            }
-        }
-    }
+    auto identities = detail::IdentityDirectory::from_sorted_entries(identity_entries);
     return runtime::Result<Project, ModelError>(runtime::Ok(
         Project(std::make_shared<const Data>(Data{.id = input.id,
                                                   .name = std::move(input.name),
