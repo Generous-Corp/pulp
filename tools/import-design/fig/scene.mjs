@@ -1103,6 +1103,30 @@ function localTransform(node) {
   };
 }
 
+// Where a w×h node box visually STARTS under an axis-aligned transform.
+// m02/m12 name where the local ORIGIN lands, and a mirror puts the box on the
+// other side of it: under m00 = -1 the box spans [m02 - w, m02], so reading
+// m02 as "left" reports the box one full width right of where Figma draws it.
+// That is exactly the Env chip's Frame 274 — a mirrored 10.4px arrow whose
+// declared-geometry sidecar claimed x = 802.4 while Figma (and the flex pass)
+// put its box at 792, a phantom dx of one icon width on every parity run.
+//
+// Scoped to TRUE mirrors — exactly one negative axis. Both axes negative is a
+// 180deg rotation, whose raw-m02 placement is pinned by the slider-fill lesson
+// in styleFor (see the orthogonal-rotation comment there and its test), and a
+// non-axis-aligned rotation keeps origin placement per the knob-needle
+// contract. Both stay byte-identical through this helper.
+function mirrorAwareOrigin(t, w, h) {
+  const m00 = typeof t.m00 === 'number' ? t.m00 : 1;
+  const m01 = typeof t.m01 === 'number' ? t.m01 : 0;
+  const m10 = typeof t.m10 === 'number' ? t.m10 : 0;
+  const m11 = typeof t.m11 === 'number' ? t.m11 : 1;
+  const axisAligned = Math.abs(m01) < 1e-3 && Math.abs(m10) < 1e-3;
+  const mirrored = (m00 < 0) !== (m11 < 0);
+  if (!axisAligned || !mirrored || !(w > 0) || !(h > 0)) return { x: t.m02, y: t.m12 };
+  return { x: t.m02 + Math.min(0, m00 * w), y: t.m12 + Math.min(0, m11 * h) };
+}
+
 /**
  * A box-model node's outline as SVG path data in its PARENT's space, for a
  * rectangle / rounded-rectangle / ellipse / frame used as a mask — shapes whose
@@ -1245,7 +1269,7 @@ export function materializeFrame(scene, frame, ctx) {
   // plain frame positions every child absolutely — that is the common case for
   // hand-designed plugin UIs, and dropping those coordinates collapses the whole
   // design into the parent's content origin.
-  function styleFor(node, parent) {
+  function styleFor(node, parent, parentAbs = IDENTITY) {
     const style = {};
     if (node.size) {
       style.width = Math.round(node.size.x);
@@ -1308,8 +1332,34 @@ export function materializeFrame(scene, frame, ctx) {
           // compensation above.
           style.transform = `rotate(${deg.toFixed(2)}deg)`;
         } else {
-          style.left = Math.round(x);
-          style.top = Math.round(y);
+          // Mirror-aware: a flipped node's box starts a full extent before its
+          // stored origin (see mirrorAwareOrigin). Orthogonal rotations and
+          // plain placement pass through unchanged.
+          let origin = mirrorAwareOrigin(t,
+            node.size ? node.size.x : 0, node.size ? node.size.y : 0);
+          // A container mirror is not emitted as a runtime transform, so every
+          // absolutely placed descendant must also move to the reflected side
+          // of its immediate parent. Handling only a vector leaf's ink is too
+          // late: an intermediate 8px frame at x=2 inside a flipped 20px
+          // parent belongs at x=10, and its whole subtree moves with it.
+          //
+          // Keep this to axis-aligned transforms, matching the vector mirror
+          // recovery below. Rotated ancestors need the full affine preserved,
+          // not a guessed box reflection.
+          const parentAxisAligned =
+            Math.abs(parentAbs.m01 || 0) < 1e-3 && Math.abs(parentAbs.m10 || 0) < 1e-3;
+          const nodeAxisAligned =
+            Math.abs(t.m01 || 0) < 1e-3 && Math.abs(t.m10 || 0) < 1e-3;
+          if (parentAxisAligned && nodeAxisAligned && parent?.size && node.size) {
+            const visualWidth = Math.abs(typeof t.m00 === 'number' ? t.m00 : 1) * node.size.x;
+            const visualHeight = Math.abs(typeof t.m11 === 'number' ? t.m11 : 1) * node.size.y;
+            if (parentAbs.m00 < 0)
+              origin = { ...origin, x: parent.size.x - (origin.x + visualWidth) };
+            if (parentAbs.m11 < 0)
+              origin = { ...origin, y: parent.size.y - (origin.y + visualHeight) };
+          }
+          style.left = Math.round(origin.x);
+          style.top = Math.round(origin.y);
         }
       }
     }
@@ -1978,7 +2028,7 @@ export function materializeFrame(scene, frame, ctx) {
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
-    const { style, assetRef, layout } = styleFor(node, parent);
+    const { style, assetRef, layout } = styleFor(node, parent, parentAbs);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
 
@@ -2017,13 +2067,19 @@ export function materializeFrame(scene, frame, ctx) {
     const abs = parent ? composeTransform(parentAbs, localTransform(node)) : IDENTITY;
     // Held, not just pushed: a resolved vector's ink is not where its node box
     // says, and the vector branch below corrects this entry once it knows.
+    // Mirror-aware: the composed transform of a flipped node (or a node inside
+    // a flipped ancestor) lands its origin on the box's FAR edge, and reporting
+    // that as x/y makes the parity tool cry "one full width misplaced!" at a
+    // node the flex pass placed exactly right.
+    const geomOrigin = mirrorAwareOrigin(abs,
+      node.size ? node.size.x : 0, node.size ? node.size.y : 0);
     const geomEntry = {
       node_id: key,
       parent_id: parentId || null,
       name: node.name || '',
       type,
-      x: round2(abs.m02),
-      y: round2(abs.m12),
+      x: round2(geomOrigin.x),
+      y: round2(geomOrigin.y),
       width: node.size ? round2(node.size.x) : null,
       height: node.size ? round2(node.size.y) : null,
     };
@@ -2094,8 +2150,18 @@ export function materializeFrame(scene, frame, ctx) {
     if (VECTOR_LIKE.has(type)) {
       let resolved = null;
       let failure = null;
+      // The emitted tree drops a container's mirror (a frame carries no
+      // scaleX(-1)), so the net ancestor flip must be baked into the ink here
+      // or the shape renders reflected — Figma composes every ancestor's flip
+      // into what it draws. Axis-aligned only: a rotated ancestor chain has no
+      // "flip" to recover, and the knob-needle path already handles rotation.
+      const pAbs = parentAbs || IDENTITY;
+      const pAxisAligned = Math.abs(pAbs.m01) < 1e-3 && Math.abs(pAbs.m10) < 1e-3;
+      const ancestorMirror = pAxisAligned && (pAbs.m00 < 0 || pAbs.m11 < 0)
+        ? { x: pAbs.m00 < 0, y: pAbs.m11 < 0 }
+        : null;
       try {
-        resolved = geometryToPath(node, scene.blobs || []);
+        resolved = geometryToPath(node, scene.blobs || [], ancestorMirror);
         if (!resolved) failure = 'no resolvable geometry';
       } catch (err) {
         // A blob we cannot parse is worth surfacing loudly: it means this file
@@ -2121,12 +2187,15 @@ export function materializeFrame(scene, frame, ctx) {
         // tool exists to avoid — so use the same ground truth the renderer
         // does. The bounds are Figma's own decoded geometry either way; what
         // changes is only that we stop comparing two different quantities.
-        const inkAbs = composeTransform(parentAbs || IDENTITY, {
+        const inkAbs = composeTransform(pAbs, {
           m00: 1, m01: 0, m02: resolved.box.minX,
           m10: 0, m11: 1, m12: resolved.box.minY,
         });
-        geomEntry.x = round2(inkAbs.m02);
-        geomEntry.y = round2(inkAbs.m12);
+        // Mirror-aware for the same reason as the node-box entry above: a
+        // flipped ancestor lands the composed origin on the ink's far edge.
+        const inkOrigin = mirrorAwareOrigin(inkAbs, resolved.box.width, resolved.box.height);
+        geomEntry.x = round2(inkOrigin.x);
+        geomEntry.y = round2(inkOrigin.y);
         geomEntry.width = round2(resolved.box.width);
         geomEntry.height = round2(resolved.box.height);
         // The path is already baked into parent space (transform included), so
@@ -2141,6 +2210,43 @@ export function materializeFrame(scene, frame, ctx) {
         if (style.position === 'absolute') {
           style.left = round2(resolved.box.minX);
           style.top = round2(resolved.box.minY);
+        } else if (node.size && (parent?.stackMode === 'HORIZONTAL'
+                                 || parent?.stackMode === 'VERTICAL')) {
+          // A FLOWING vector's flex slot must be its NODE box: Figma's
+          // auto-layout never sees the stroke, but the ink emitted below (a
+          // CENTER/OUTSIDE stroke band, round caps) overhangs that box, and
+          // letting the inflated ink ride the flex row shifts every later
+          // sibling — the env chip's 12px arrow carries a 2px stroke, and its
+          // 14.14px ink pushed the "env" label 2.14px right. Margins reconcile
+          // the two: the widget keeps the exact ink so nothing rescales, while
+          // Yoga's margin box shrinks (or grows) back to the node box.
+          //
+          // Gated to stroke-scale gaps (≤ strokeWeight + 1px, the worst an
+          // OUTSIDE stroke plus caps can overhang): through instance expansion
+          // the ink is solved at INSTANCE scale while node.size can still be
+          // the master's, and "correcting" that gap would move the child by
+          // the scale delta, not the stroke.
+          const t = localTransform(node);
+          const tAxisAligned = Math.abs(t.m01) < 1e-3 && Math.abs(t.m10) < 1e-3;
+          if (tAxisAligned) {
+            const nw = Math.abs(t.m00) * node.size.x;
+            const nh = Math.abs(t.m11) * node.size.y;
+            const nodeOrigin = mirrorAwareOrigin(t, node.size.x, node.size.y);
+            const overL = nodeOrigin.x - resolved.box.minX;
+            const overR = resolved.box.maxX - (nodeOrigin.x + nw);
+            const overT = nodeOrigin.y - resolved.box.minY;
+            const overB = resolved.box.maxY - (nodeOrigin.y + nh);
+            const cap = (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0) + 1;
+            const overhangs = [overL, overR, overT, overB];
+            if (overhangs.every((v) => Math.abs(v) <= cap)
+                && overhangs.some((v) => Math.abs(v) > 0.05)) {
+              out.layout = out.layout || {};
+              out.layout.marginLeft = round2(-overL);
+              out.layout.marginRight = round2(-overR);
+              out.layout.marginTop = round2(-overT);
+              out.layout.marginBottom = round2(-overB);
+            }
+          }
         }
         style.width = round2(resolved.box.width);
         style.height = round2(resolved.box.height);

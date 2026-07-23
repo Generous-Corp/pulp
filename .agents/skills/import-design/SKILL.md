@@ -227,6 +227,44 @@ pulp import-design --from fig --file design.fig --frame '102:1624' --output ui.j
 Frame selection accepts a guid (`102:1624`, unambiguous) or an exact
 case-insensitive name.
 
+**Mirrored layers: `m02`/`m12` is the transform ORIGIN, not the box corner.**
+A `.fig` transform with `m00 = -1` (horizontal flip — Figma's ⇋ on an icon)
+stores the box's RIGHT edge in `m02`; the visual box spans `[m02 - w, m02]`.
+Three consequences, all learned from the Triaz "Reverse/Env" chips
+(`mirrorAwareOrigin` in `scene.mjs` owns the rule):
+
+- *Sidecar truth*: `geometry.json` must report the visual min-corner, or
+  `layout_parity` cries "misplaced by exactly one width" (`dx = -10.4` = the
+  icon's own width) at a node the flex pass placed perfectly.
+- *Container flips are dropped*: an emitted frame carries no `scaleX(-1)`, so
+  a vector under a net-mirrored ancestor chain must have the ancestor mirror
+  baked into its own normalized path (`geometryToPath`'s `mirror` arg) — the
+  icon frame's flip cancels its child Union's own baked flip in Figma, and
+  without the re-bake the "reverse" arrow renders pointing forwards.
+- *Scope*: TRUE mirrors only (exactly one negative axis). BOTH axes negative
+  is a 180° rotation whose raw-`m02` placement is pinned by the slider-fill
+  lesson (see the orthogonal-rotation test in `fig.test.mjs`) — do not
+  "fix" it to min-corner.
+
+**A flowing vector's flex slot is its NODE box, not its ink.** Figma's
+auto-layout never sees a stroke, but the emitted ink box includes it (CENTER/
+OUTSIDE bands, round caps overhang). The decoder reconciles the two with
+negative margins on the child's `layout` (widget keeps the exact ink; Yoga
+gets the node box back) — gated to overhangs ≤ `strokeWeight + 1`, because
+through instance expansion the ink is solved at INSTANCE scale while
+`node.size` can still be the master's, and that gap is a scale delta, not a
+stroke. The JS codegen lowers `layout.margin_*` via `setFlex` — it silently
+dropped them before, so if margins ever stop landing, check
+`emit_js_layout_constraints` in `design_codegen.cpp` first.
+
+**Known residual (parity, not render): resized-instance auto-layout re-solve.**
+A 32×32 INSTANCE of a 40×40 auto-layout SYMBOL re-solves child layout at
+32×32 in both Figma and our Yoga pass, but the geometry sidecar composes the
+MASTER's 40×40-solved child transforms, so parity reports a phantom offset on
+such children (designers-pick "HiHat 01"/"Cymbal 01", `dx,dy ≈ -4`). Truth-side
+fix would need the decoder to re-solve (or read `derivedSymbolData` layout for
+swapped subtrees); the render itself matches Figma's re-layout behavior.
+
 **The `.fig` lane cannot capture multi-state designs.** Alternate frames are
 lowered ONLY by the faithful_svg path, and the `.fig` decoder emits a
 widget-recognition tree — no `render_mode`, no `svg_asset_id` (grep

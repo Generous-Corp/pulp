@@ -1756,6 +1756,45 @@ TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][im
     REQUIRE(js.find("void 0;") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_js lowers explicit per-child margins to setFlex",
+          "[view][import][issue-env-chip]") {
+    // The fig lane reconciles a flowing vector's stroke-inflated ink box back
+    // to Figma's node layout box with negative margins (the Env chip's 12px
+    // arrow carries a 2px stroke; its 14.14px ink pushed the "env" label
+    // 2.14px right). The IR carried the margins and the native lane applied
+    // them, but the JS codegen dropped them — so the envelope said one thing
+    // and the render did another.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Row";
+    ir.root.layout.display = "flex";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.style.width = 48.0f;
+    ir.root.style.height = 16.0f;
+
+    IRNode icon;
+    icon.type = "frame";
+    icon.name = "icon";
+    icon.style.width = 14.14f;
+    icon.style.height = 8.14f;
+    icon.layout.margin_left = -1.14f;
+    icon.layout.margin_right = -1.0f;
+    icon.layout.margin_top = -1.0f;
+    icon.layout.margin_bottom = -1.14f;
+    ir.root.children.push_back(icon);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("'margin_left', -1.14") != std::string::npos);
+    REQUIRE(js.find("'margin_right', -1") != std::string::npos);
+    REQUIRE(js.find("'margin_top', -1") != std::string::npos);
+    REQUIRE(js.find("'margin_bottom', -1.14") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js sprite knob emits an interactive single-frame strip + core-fit",
           "[view][import][sprite]") {
     // Interactive sprite knobs (task #22): in sprite mode a recognized knob
