@@ -59,11 +59,12 @@
 
 - (void)setAudioUnit:(AUAudioUnit *)audioUnit {
     if (_audioUnit == audioUnit) return;
-    if (_resizeProcessor) {
-        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
-        _resizeProcessor = nullptr;
-    }
+    // Preserve the previous unit until its processor handler is removed on
+    // main. The factory setter runs on the XPC queue, while all raw processor
+    // and editor-host state below is main-thread-owned.
+    AUAudioUnit *previousAudioUnit = _audioUnit;
 #if !__has_feature(objc_arc)
+    [previousAudioUnit retain];
     [_audioUnit release];
     _audioUnit = [audioUnit retain];
 #else
@@ -72,12 +73,22 @@
     // The factory method runs on the XPC connection queue; UIViewController
     // APIs (preferredContentSize, self.view) require main thread. See the
     // macOS controller for the full backstory — same bug bites iOS.
-    if ([NSThread isMainThread]) {
+    void (^rebuild)(void) = ^{
+        (void)previousAudioUnit;
+        if (self->_resizeProcessor) {
+            self->_resizeProcessor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_resizeProcessor = nullptr;
+        }
         [self rebuildEditorIfReady];
+#if !__has_feature(objc_arc)
+        [previousAudioUnit release];
+#endif
+    };
+    if ([NSThread isMainThread]) {
+        rebuild();
     } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self rebuildEditorIfReady];
-        });
+        dispatch_async(dispatch_get_main_queue(), rebuild);
     }
 }
 
@@ -319,16 +330,20 @@
     // thread FIRST (flips its liveness token + stops the display link) so
     // teardown and the idle block are mutually exclusive on one queue; its later
     // reverse-order ivar destruction is then a no-op and the contract above holds.
-    if (_resizeProcessor) {
-        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
-        _resizeProcessor = nullptr;
+    void (^teardownMainThreadState)(void) = ^{
+        if (self->_resizeProcessor) {
+            self->_resizeProcessor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_resizeProcessor = nullptr;
+        }
+        self->_viewHost.reset();
+    };
+    if ([NSThread isMainThread]) {
+        teardownMainThreadState();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), teardownMainThreadState);
     }
 #if !__has_feature(objc_arc)
-    if ([NSThread isMainThread]) {
-        _viewHost.reset();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
-    }
     [_audioUnit release];
     [super dealloc];
 #endif

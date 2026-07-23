@@ -165,14 +165,13 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
 
 - (void)setAudioUnit:(AUAudioUnit *)audioUnit {
     if (_audioUnit == audioUnit) return;
-    // _processor points into the currently retained unit. Unregister before
-    // replacing that unit, then clear the non-owning pointer so a queued main-
-    // thread rebuild cannot dereference the destroyed processor.
-    if (_processor) {
-        _processor->set_editor_resize_handler((const void *)self, nullptr);
-        _processor = nullptr;
-    }
+    // Keep the previous unit alive until the main queue has unregistered the
+    // handler that points into its processor. setAudioUnit: is called on the
+    // XPC queue while rebuild/handler state is main-thread-owned; touching the
+    // raw _processor here would race a queued rebuild.
+    AUAudioUnit *previousAudioUnit = _audioUnit;
 #if !__has_feature(objc_arc)
+    [previousAudioUnit retain];
     [_audioUnit release];
     _audioUnit = [audioUnit retain];
 #else
@@ -185,12 +184,22 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Logic reports "Failed to load Audio Unit". Bounce to main; dispatch
     // async so we don't deadlock if we ARE already on main (e.g. from
     // viewDidLoad).
-    if ([NSThread isMainThread]) {
+    void (^rebuild)(void) = ^{
+        (void)previousAudioUnit;  // captured to preserve processor lifetime
+        if (self->_processor) {
+            self->_processor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_processor = nullptr;
+        }
         [self rebuildEditorIfReady];
+#if !__has_feature(objc_arc)
+        [previousAudioUnit release];
+#endif
+    };
+    if ([NSThread isMainThread]) {
+        rebuild();
     } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self rebuildEditorIfReady];
-        });
+        dispatch_async(dispatch_get_main_queue(), rebuild);
     }
 }
 
@@ -512,15 +521,22 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Clear the root view's resize hook FIRST: it captures self unretained and
     // touches _viewHost (destroyed below, after [super dealloc]), so a stray
     // setFrameSize: during teardown must not call back into us.
-    if ([self.view isKindOfClass:[PulpAUMacRootView class]]) {
-        ((PulpAUMacRootView *)self.view).onResize = nil;
-    }
-    // Same reasoning for the editor→host resize handler: it captures self
-    // unretained and touches _viewHost (destroyed below).
-    if (_processor) {
-        _processor->set_editor_resize_handler((const void *)self, nullptr);
-        _processor = nullptr;
-    }
+    void (^teardownMainThreadState)(void) = ^{
+        // Guard the property read: self.view lazily calls loadView, which must
+        // never construct/schedule an editor while this controller deallocates.
+        if (self.isViewLoaded &&
+            [self.view isKindOfClass:[PulpAUMacRootView class]]) {
+            ((PulpAUMacRootView *)self.view).onResize = nil;
+        }
+        // Same reasoning for the editor→host resize handler: it captures self
+        // unretained and touches _viewHost (destroyed below).
+        if (self->_processor) {
+            self->_processor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_processor = nullptr;
+        }
+        self->_viewHost.reset();
+    };
     // The GPU host owns the CVDisplayLink idle pump, dispatched to the MAIN
     // queue, which dereferences the bridge. An AU v3 controller can be released
     // on the XPC connection queue (createAudioUnitWithComponentDescription and
@@ -538,9 +554,9 @@ static constexpr int64_t kInitialSizeSyncIntervalMs = 60;
     // Explicitly closing the bridge HERE would reverse that order and
     // dereference a dangling root_ from ~PluginViewHost. Don't.
     if ([NSThread isMainThread]) {
-        _viewHost.reset();
+        teardownMainThreadState();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
+        dispatch_sync(dispatch_get_main_queue(), teardownMainThreadState);
     }
 #if !__has_feature(objc_arc)
     [_audioUnit release];

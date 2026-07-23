@@ -1758,6 +1758,15 @@ How the seam is wired:
   letterbox / squish, (3) the format's host resize call — CLAP
   `clap_host_gui->request_resize`, VST3 `IPlugFrame::resizeView`, AU v3
   `preferredContentSize`, standalone `WindowHost::request_content_size`.
+  The standalone handler is currently installed only for the macOS window
+  host, the implementation that can synchronously honor
+  `request_content_size`; unsupported window hosts must report refusal rather
+  than mutate hints and claim success. Standalone also clears the owner after
+  `run_event_loop()` returns because application-quit can bypass the normal
+  close callback.
+  Its Settings-tab callback must read the bridge's CURRENT preferred size,
+  not capture the initial dimensions; otherwise returning from Settings after
+  an editor mode switch silently restores the old window shape.
 - `request_editor_resize` returns **false** when no handler is installed (no
   editor open, or a host with no resize path), when multiple simultaneous
   editor windows make the processor-level target ambiguous, or when the host

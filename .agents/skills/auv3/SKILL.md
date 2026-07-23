@@ -725,10 +725,13 @@ and publish the accepted size through `preferredContentSize`. Do not pin the
 design viewport or replace the normal pane-bounds layout: the AU host remains
 authoritative and the editor stays responsive. Register the handler under the
 view controller's owner key. Clear that owner before swapping the audio unit
-(before releasing the old unit's processor), before rebuilding/tearing down
-the editor, and in `dealloc`; otherwise a late request can call through a stale
-controller or host. Captures must remain unretained under both ARC and MRC, and
-the ARC `dealloc` path must clear the handler too.
+while keeping the old unit alive until main-thread cleanup, before
+rebuilding/tearing down the editor, and in `dealloc`; otherwise a late request
+can call through a stale controller or host. The XPC-queue setter must not read
+or write the raw cached processor; that state is main-thread-owned. Captures
+must remain unretained under both ARC and MRC, and the ARC `dealloc` path must
+clear the handler too. In macOS teardown, check `isViewLoaded` before reading
+`self.view` so deallocation cannot lazily construct a new editor.
 
 On macOS, the view controller's root view must be created at the
 compile-time design size when `PULP_PLUGIN_DESIGN_W/H` are available.
