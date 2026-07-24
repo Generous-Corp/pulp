@@ -370,6 +370,14 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   pane you ALSO need `ContentView.swift` to give the editor
   `.frame(maxWidth:.infinity, maxHeight:.infinity)`. A genuinely fixed-aspect
   editor that wants letterboxing can call `set_design_viewport` itself.
+- **Editor-initiated AUv3 resize is advisory** —
+  `Processor::request_editor_resize` should validate the requested size through
+  `ViewBridge` and publish an accepted size via `preferredContentSize` on the
+  main thread. Keep laying the editor out at the host pane's actual bounds; do
+  not turn the request into a fixed design viewport. Install the handler only
+  after bridge/host attachment, and clear it before changing audio units,
+  rebuilding or tearing down the editor, and in `dealloc`, so a late request
+  cannot reach stale controller or host state.
 - **Host-app AUParameter slider must mirror value in `@State`** — binding a
   SwiftUI `Slider` straight to `AUParameter.value` (get/set) does NOT update:
   SwiftUI doesn't observe `AUParameter`, so dragging writes the param but never

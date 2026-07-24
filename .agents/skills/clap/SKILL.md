@@ -927,3 +927,20 @@ The rule is `free = (min>0 && aspect_ratio==0)`. VST3's `PulpPlugView` mirrors i
 `test/test_clap_entry.cpp` build a `PulpClapPlugin` whose `bridge` is constructed
 directly from a controlled `view_size()` (the `ViewBridge` ctor copies `view_size()` into
 `size_hints_`, so no `gui_create`/attach is needed to exercise the negotiation math).
+
+## Editor-INITIATED resize (`request_editor_resize` → `gui.request_resize`)
+
+The resize contract above is HOST→plugin (the DAW dragged the window). The
+opposite direction — the editor asking the DAW to resize the plugin window —
+runs through `Processor::request_editor_resize(w, h)`. `gui_create` installs the
+handler under the CLAP editor instance's owner key (and `gui_destroy` clears
+that same owner BEFORE resetting
+`editor_host`/`bridge`, so a late call never touches freed state). The handler:
+`bridge->set_preferred_size(w,h)` (so `gui_get_size`/`gui_get_resize_hints`
+report the new shape), `editor_host->set_design_viewport(w,h)` +
+`set_fixed_aspect_ratio(w/h)`, then
+`host->get_extension(host, CLAP_EXT_GUI)->request_resize(host, w, h)`. Returns
+that call's bool (a host may refuse). This is what lets a mode switch (e.g. a
+compact "player" view) shrink the window and change its aspect at runtime — the
+design-viewport re-pin keeps content filling the new size with no letterbox. See
+the `view-bridge` skill for the cross-format seam.

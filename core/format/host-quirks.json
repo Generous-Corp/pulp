@@ -328,6 +328,16 @@
       "note": "AU tail-time wall-clock conversion."
     },
     {
+      "flag": "logic_au_v2_container_resize",
+      "tier": "Validated",
+      "host": "Logic Pro (AU v2)",
+      "symptom_area": "editor-resize",
+      "source_type": "repro",
+      "evidence": "Forge live-resize investigation 2026-07-23",
+      "last_verified": "2026-07-23",
+      "note": "AU v2 plugin-initiated editor resize through Logic's immediate Cocoa container."
+    },
+    {
       "flag": "au_v3_bypass_dual_tracking",
       "tier": "Speculative",
       "host": "AU v3 cross-host",

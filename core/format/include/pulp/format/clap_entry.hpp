@@ -518,6 +518,45 @@ inline bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* 
     return true;
 }
 
+inline bool request_host_resize(
+    clap_adapter::PulpClapPlugin& plugin,
+    uint32_t width,
+    uint32_t height) {
+    const clap_host_gui_t* gui = nullptr;
+    if (plugin.host && plugin.host->get_extension) {
+        gui = static_cast<const clap_host_gui_t*>(
+            plugin.host->get_extension(plugin.host, CLAP_EXT_GUI));
+    }
+    return gui && gui->request_resize &&
+           gui->request_resize(plugin.host, width, height);
+}
+
+inline void install_editor_resize_handler(
+    clap_adapter::PulpClapPlugin& plugin) {
+    if (!plugin.processor) return;
+    plugin.processor->set_editor_resize_handler(
+        &plugin,
+        [&plugin](uint32_t width, uint32_t height) -> bool {
+            if (!plugin.bridge) return false;
+            const bool accepted = detail::negotiate_preferred_size(
+                *plugin.bridge, width, height,
+                [&plugin](uint32_t requested_width,
+                          uint32_t requested_height) {
+                    return request_host_resize(
+                        plugin, requested_width, requested_height);
+                });
+            if (!accepted) return false;
+
+            if (plugin.editor_host) {
+                plugin.editor_host->set_design_viewport(
+                    static_cast<float>(width), static_cast<float>(height));
+                plugin.editor_host->set_fixed_aspect_ratio(
+                    static_cast<float>(width) / static_cast<float>(height));
+            }
+            return true;
+        });
+}
+
 inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (pulp::format::detail::editor_launch_blocked_by_environment()) {
@@ -577,6 +616,14 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
                 static_cast<float>(hints.preferred_width) /
                 static_cast<float>(hints.preferred_height));
         }
+        // Editor-INITIATED resize: let the editor ask the DAW to resize the
+        // plugin window (e.g. a chrome-hiding mode wanting a smaller shape).
+        // Publish the new hints optimistically because a host may synchronously
+        // query them from inside request_resize. A refusal rolls them back and
+        // leaves the live viewport untouched, so the old host window cannot
+        // render against the rejected mode's aspect. Captures the plugin struct
+        // `p`; gui_destroy clears the handler before tearing the editor down.
+        install_editor_resize_handler(*p);
         runtime::log_info("CLAP editor: created ({}x{}, mode={}, gpu={})",
                           hints.preferred_width, hints.preferred_height,
                           gpu.mode, p->editor_host->is_gpu_backed());
@@ -590,6 +637,9 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 
 inline void gui_destroy(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    // Drop the editor→host resize handler BEFORE the bridge / editor host it
+    // captures, so a late call can never dereference freed editor state.
+    if (p->processor) p->processor->set_editor_resize_handler(p, nullptr);
     p->editor_host.reset();
     if (p->bridge) {
         p->bridge->close();

@@ -31,6 +31,10 @@ export interface ExtractedTokens {
   /// Map of Figma variable id → canonical token name. Lets style extraction
   /// emit token references where a variable is bound to a style property.
   variableIdToName: Record<string, string>;
+  /// Per-variable mode id → canonical token name, used with a node's inherited
+  /// resolvedVariableModes so bindings name the value actually rendered.
+  variableIdToModeName?: Record<string, Record<string, string>>;
+  variableIdToCollectionId?: Record<string, string>;
 }
 
 export async function extractTokens(diagnostics: ExtractedDiagnostic[]): Promise<ExtractedTokens> {
@@ -40,6 +44,8 @@ export async function extractTokens(diagnostics: ExtractedDiagnostic[]): Promise
     strings: {},
     sourceIdentity: {},
     variableIdToName: {},
+    variableIdToModeName: {},
+    variableIdToCollectionId: {},
   };
   // Internal join ownership. A suffixed mode token can collide with another
   // variable's canonical base name; this tells us whether an overwritten path
@@ -111,12 +117,24 @@ async function ingestCollection(
           delete out.variableIdToName[previousOwner];
           delete defaultIdentityKeyByVariableId[previousOwner];
         }
+        if (previousOwner && previousOwner !== v.id) {
+          const previousModes = out.variableIdToModeName![previousOwner];
+          if (previousModes) {
+            for (const [previousModeId, previousName] of Object.entries(previousModes)) {
+              if (previousName === name) delete previousModes[previousModeId];
+            }
+            if (Object.keys(previousModes).length === 0)
+              delete out.variableIdToModeName![previousOwner];
+          }
+        }
         out.sourceIdentity[identityKey] = {
           sourceId: v.id,
           sourceCollection: coll.name,
           sourceMode: mode.name,
           sourceAdapter: "figma-plugin",
         };
+        (out.variableIdToModeName![v.id] ??= {})[mode.modeId] = name;
+        out.variableIdToCollectionId![v.id] = coll.id;
         if (mode.modeId === defaultModeId) {
           // A property binding names the default-mode token. Keep the join map
           // fail-closed: an invalid variable gets no entry, and when two

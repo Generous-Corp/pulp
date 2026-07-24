@@ -579,7 +579,7 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
 // restore matters: handing focus to nil instead of back to the host's own
 // view leaves hosts like Logic with dead keyboard routing (Musical Typing
 // stays silent after a type-in commit until the user resets the track).
-[[maybe_unused]] static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
+static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
     if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
     NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
     while (stack.count > 0) {
@@ -589,6 +589,27 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
         [stack addObjectsFromArray:v.subviews];
     }
     return nil;
+}
+
+// Keep CPU and GPU embedded views on one responder-transfer contract. A text
+// field temporarily borrows first responder from the host; when it releases,
+// restore the same still-live host view instead of dropping the window to nil.
+// An explicit host grab still wins through -resignFirstResponder, which clears
+// `prior` before ending the widget's text input.
+static void pulp_plugin_sync_key_focus(NSView* host,
+                                       pulp::view::View* root,
+                                       NSResponder*& prior) {
+    NSWindow* win = host.window;
+    if (!win) return;
+    const bool wants = pulp_text_input_focused_under_root(root);
+    if (wants && win.firstResponder != host) {
+        prior = win.firstResponder;
+        [win makeFirstResponder:host];
+    } else if (!wants && win.firstResponder == host) {
+        NSResponder* restore = pulp_plugin_live_prior_responder(prior, win);
+        prior = nil;
+        [win makeFirstResponder:restore];
+    }
 }
 
 // End the focused widget's text input because the HOST moved the keyboard
@@ -754,18 +775,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
-    NSWindow* win = self.window;
-    if (!win) return;
-    const bool wants = pulp_text_input_focused_under_root(self.rootView);
-    if (wants && win.firstResponder != self) {
-        [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        // No field focused — hand the keyboard back to the DAW so transport keys
-        // and the host's Musical Typing resume immediately (e.g. after a type-in
-        // commits). Without this the editor would keep first responder and swallow
-        // DAW shortcuts until the user clicked a host control.
-        [win makeFirstResponder:nil];
-    }
+    pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
 }
 // The host moved the keyboard elsewhere (click on a host control, window
 // switching) while a widget still held text-input focus: close that text
@@ -1516,14 +1526,7 @@ private:
     return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
-    NSWindow* win = self.window;
-    if (!win) return;
-    const bool wants = pulp_text_input_focused_under_root(self.rootView);
-    if (wants && win.firstResponder != self) {
-        [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        [win makeFirstResponder:nil];  // hand the keyboard back to the DAW
-    }
+    pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
 }
 // Host took the keyboard while a type-in was open: close it, don't re-claim.
 // See PulpPluginView::resignFirstResponder.
