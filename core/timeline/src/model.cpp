@@ -43,6 +43,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
         return ModelError{ModelErrorCode::InvalidItemId, asset.id, {}};
     if (!asset.sample_rate.valid())
         return ModelError{ModelErrorCode::InvalidSampleRate, asset.id, {}};
+    asset.sample_rate = asset.sample_rate.normalized();
     if (!asset.content_hash.valid())
         return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
     for (const auto& locator : asset.locators)

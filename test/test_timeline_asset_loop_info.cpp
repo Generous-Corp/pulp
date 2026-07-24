@@ -18,11 +18,21 @@ AudioLoopInfo valid_loop_info() {
     };
 }
 
-runtime::Result<Project, ModelError> project_with_loop_info(AudioLoopInfo loop_info) {
-    MediaAsset asset{{2}, "loop.wav", 96'000, {48'000, 1}, hash('a'),
+runtime::Result<Project, ModelError> project_with_loop_info(AudioLoopInfo loop_info,
+                                                            std::uint64_t frame_count = 96'000,
+                                                            RationalRate sample_rate = {48'000, 1}) {
+    MediaAsset asset{{2}, "loop.wav", frame_count, sample_rate, hash('a'),
                      AssetStoragePolicy::External, {}, {}, std::move(loop_info)};
     auto sequence = take(Sequence::create({3}, "root", TickDuration{7'680}, {}));
     return Project::create(ProjectInput{{1}, "loops", 4, {3}, {std::move(asset)}, {sequence}});
+}
+
+runtime::Result<Project, ModelError>
+project_with_empty_asset(std::optional<AudioLoopInfo> loop_info = std::nullopt) {
+    MediaAsset asset{{2}, "empty.wav", 0, {48'000, 1}, hash('a'),
+                     AssetStoragePolicy::External, {}, {}, std::move(loop_info)};
+    auto sequence = take(Sequence::create({3}, "root", TickDuration{7'680}, {}));
+    return Project::create(ProjectInput{{1}, "empty", 4, {3}, {std::move(asset)}, {sequence}});
 }
 
 const SchemaReleaseMap& release(std::string_view label) {
@@ -99,6 +109,70 @@ TEST_CASE("Audio loop metadata rejects invalid musical and frame state") {
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().code == ModelErrorCode::InvalidAudioLoopInfo);
     REQUIRE(result.error().item == ItemId{2});
+}
+
+TEST_CASE("Zero-frame audio assets reject musical loop length but remain persistable") {
+    const auto registry = builtins();
+
+    SECTION("direct model validation rejects musical length without audio frames") {
+        AudioLoopInfo loop;
+        loop.musical_length = TickDuration{7'680};
+        const auto result = project_with_loop_info(std::move(loop), 0);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code == ModelErrorCode::InvalidAudioLoopInfo);
+        REQUIRE(result.error().item == ItemId{2});
+    }
+
+    SECTION("deserialization cannot bypass the zero-frame musical-loop invariant") {
+        AudioLoopInfo loop;
+        loop.musical_length = TickDuration{7'680};
+        auto encoded = take(
+            serialize_project(take(project_with_loop_info(std::move(loop))), registry));
+        const auto frame_count = encoded.json.find(R"("frame_count":"96000")");
+        REQUIRE(frame_count != std::string::npos);
+        encoded.json.replace(frame_count, std::string_view{R"("frame_count":"96000")"}.size(),
+                             R"("frame_count":"0")");
+
+        const auto rejected = deserialize_project(encoded.json, registry);
+        REQUIRE_FALSE(rejected.has_value());
+        REQUIRE(rejected.error().code == PersistenceErrorCode::ModelRejected);
+        REQUIRE(rejected.error().model_error.has_value());
+        REQUIRE(rejected.error().model_error->code == ModelErrorCode::InvalidAudioLoopInfo);
+        REQUIRE(rejected.error().model_error->item == ItemId{2});
+    }
+
+    SECTION("zero-frame asset preserves loop metadata independent of frame extent") {
+        AudioLoopInfo loop;
+        loop.one_shot = true;
+        loop.root_note = 60;
+        loop.tags = {"empty-source", "one-shot"};
+        const auto project = take(project_with_empty_asset(loop));
+        const auto encoded = take(serialize_project(project, registry));
+        const auto decoded = take(deserialize_project(encoded.json, registry));
+        const auto* asset = decoded.find_asset({2});
+        REQUIRE(asset != nullptr);
+        REQUIRE(asset->frame_count == 0);
+        REQUIRE(asset->loop_info == std::optional<AudioLoopInfo>{loop});
+        REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
+    }
+}
+
+TEST_CASE("Media asset sample rate is canonical before loop metadata is persisted") {
+    const auto registry = builtins();
+    const auto project =
+        take(project_with_loop_info(valid_loop_info(), 96'000, RationalRate{96'000, 2}));
+    const auto* asset = project.find_asset({2});
+    REQUIRE(asset != nullptr);
+    REQUIRE(asset->sample_rate == RationalRate{48'000, 1});
+    REQUIRE(asset->loop_info.has_value());
+
+    const auto encoded = take(serialize_project(project, registry));
+    const auto decoded = take(deserialize_project(encoded.json, registry));
+    const auto* decoded_asset = decoded.find_asset({2});
+    REQUIRE(decoded_asset != nullptr);
+    REQUIRE(decoded_asset->sample_rate == RationalRate{48'000, 1});
+    REQUIRE(decoded_asset->loop_info == asset->loop_info);
+    REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
 }
 
 TEST_CASE("Audio asset v1 and v2 migrate only when loop metadata is lossless") {

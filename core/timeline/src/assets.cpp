@@ -44,7 +44,8 @@ std::string ContentHash::to_hex() const {
 
 bool detail::validate_and_canonicalize(AudioLoopInfo& loop, std::uint64_t frame_count) {
     const auto denominator = loop.meter.denominator;
-    if ((loop.musical_length && loop.musical_length->value <= 0) ||
+    if ((loop.musical_length &&
+         (loop.musical_length->value <= 0 || frame_count == 0)) ||
         loop.meter.numerator <= 0 || denominator <= 0 ||
         (static_cast<std::uint32_t>(denominator) &
          (static_cast<std::uint32_t>(denominator) - 1)) != 0 ||
