@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/view/js_engine.hpp>
 #include <pulp/view/js_engine_recommend.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -859,6 +860,73 @@ TEST_CASE("QuickJS rejection tracker surfaces 'new Promise(async ...)' anti-patt
 // into its check_exception() helper.
 
 #if __APPLE__
+TEST_CASE("JSC string conversion rejects embedded NUL without truncating",
+          "[js_engine][jsc][string-boundary]") {
+    if (!is_engine_available(JsEngineType::jsc)) return;
+    auto engine = create_js_engine(JsEngineType::jsc);
+    REQUIRE(engine->is_valid());
+    engine->register_function(
+        "acceptBoundaryValue",
+        [](const choc::value::Value*, size_t) {
+            return choc::value::createBool(true);
+        });
+
+    auto normal = engine->evaluate("'before-after'");
+    REQUIRE(normal.isString());
+    REQUIRE(normal.getString() == "before-after");
+
+    auto serialized = engine->evaluate(
+        "JSON.stringify({ value: 'before\\0after', suffix: 42 })");
+    REQUIRE(serialized.isString());
+    REQUIRE(serialized.getString()
+            == R"({"value":"before\u0000after","suffix":42})");
+
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("'before\\0after'"),
+        Catch::Matchers::ContainsSubstring("embedded NUL"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("({ value: 'before\\0after', suffix: 42 })"),
+        Catch::Matchers::ContainsSubstring(
+            "JSC object cannot cross the JsEngine value boundary"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate(
+            "(() => { const cyclic = {}; cyclic.self = cyclic; return cyclic; })()"),
+        Catch::Matchers::ContainsSubstring("JSC JSON serialization failed"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("({ toJSON() { throw undefined; } })"),
+        Catch::Matchers::ContainsSubstring("JSC JSON serialization failed: undefined"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate(
+            "(() => { const cyclic = []; cyclic.push(cyclic); return cyclic; })()"),
+        Catch::Matchers::ContainsSubstring("JSC array contains a cycle"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate(
+            "(() => { const values = []; Object.defineProperty(values, '0', "
+            "{ get() { throw undefined; } }); values.length = 1; return values; })()"),
+        Catch::Matchers::ContainsSubstring("JSC array conversion failed: undefined"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("throw '\\uD800'"),
+        Catch::Matchers::ContainsSubstring(
+            "JavaScript exception could not be encoded as UTF-8"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("throw 'before\\0after'"),
+        Catch::Matchers::ContainsSubstring("before\\u0000after"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate(
+            "throw { toString() { throw new Error('formatting failed'); } }"),
+        Catch::Matchers::ContainsSubstring(
+            "JavaScript exception could not be formatted"));
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("new Array(2147483648)"),
+        Catch::Matchers::ContainsSubstring(
+            "JSC array length exceeds the JsEngine value boundary"));
+    REQUIRE(engine->evaluate("({ toJSON() { return undefined; } })").isVoid());
+    REQUIRE_THROWS_WITH(
+        engine->evaluate("acceptBoundaryValue('before\\0after')"),
+        Catch::Matchers::ContainsSubstring("embedded NUL"));
+    REQUIRE(engine->evaluate("'still-usable'").getString() == "still-usable");
+}
+
 TEST_CASE("JSC evaluate surfaces NSException via std::runtime_error (#3206)",
           "[js_engine][jsc][issue-3206]") {
     if (!is_engine_available(JsEngineType::jsc)) return;

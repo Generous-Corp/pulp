@@ -9,15 +9,70 @@
 
 #import <JavaScriptCore/JavaScriptCore.h>
 #include <choc/text/choc_JSON.h>
+#include <cmath>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <stdexcept>
+#include <unordered_set>
 
 namespace pulp::view {
 
 // Forward declaration
 static JSValue* choc_to_jsc(JSContext* ctx, const choc::value::Value& value);
+
+static std::string nsstring_to_utf8(NSString* value) {
+    if (value == nil)
+        return {};
+
+    NSData* bytes = [value dataUsingEncoding:NSUTF8StringEncoding
+                         allowLossyConversion:NO];
+    if (bytes == nil) {
+        throw std::runtime_error(
+            "JSC string is not valid UTF-8 and cannot cross the JsEngine value boundary");
+    }
+    if (bytes.length == 0)
+        return {};
+
+    return {static_cast<const char*>(bytes.bytes),
+            static_cast<std::size_t>(bytes.length)};
+}
+
+static choc::value::Value jsc_string_to_choc(NSString* value) {
+    auto text = nsstring_to_utf8(value);
+    if (text.find('\0') != std::string::npos) {
+        throw std::runtime_error(
+            "JSC string contains an embedded NUL, which the JsEngine value model cannot represent");
+    }
+    return choc::value::createString(text);
+}
+
+static void throw_pending_jsc_exception(JSContext* context, const char* prefix = "") {
+    JSValue* exception = context.exception;
+    if (exception == nil)
+        return;
+
+    context.exception = nil;
+    std::string message;
+    NSString* description = [exception toString];
+    if (description == nil || context.exception != nil) {
+        context.exception = nil;
+        message = "JavaScript exception could not be formatted";
+    } else {
+        try {
+            message = nsstring_to_utf8(description);
+            for (std::size_t offset = 0;
+                 (offset = message.find('\0', offset)) != std::string::npos;
+                 offset += 6) {
+                message.replace(offset, 1, "\\u0000");
+            }
+        } catch (...) {
+            message = "JavaScript exception could not be encoded as UTF-8";
+        }
+    }
+    context.exception = nil;
+    throw std::runtime_error(std::string(prefix) + message);
+}
 
 template <typename ElementType, typename ConvertFn>
 static choc::value::Value typed_array_to_choc_array(const ElementType* data,
@@ -109,7 +164,8 @@ static choc::value::Value jsc_typed_array_to_choc(JSContext* ctx, JSValue* value
 
 // ── Value conversion: JSC → choc ────────────────────────────────────────────
 
-static choc::value::Value jsc_to_choc(JSContext* ctx, JSValue* value) {
+static choc::value::Value jsc_to_choc(
+    JSContext* ctx, JSValue* value, std::unordered_set<JSValueRef>& active_arrays) {
     if (value == nil || [value isUndefined] || [value isNull])
         return {};
 
@@ -124,32 +180,70 @@ static choc::value::Value jsc_to_choc(JSContext* ctx, JSValue* value) {
     }
 
     if ([value isString])
-        return choc::value::createString(std::string([[value toString] UTF8String]));
+        return jsc_string_to_choc([value toString]);
 
     auto typed_array = jsc_typed_array_to_choc(ctx, value);
     if (!typed_array.isVoid())
         return typed_array;
 
     if ([value isArray]) {
+        const auto reference = [value JSValueRef];
+        if (!active_arrays.insert(reference).second) {
+            throw std::runtime_error(
+                "JSC array contains a cycle and cannot cross the JsEngine value boundary");
+        }
         auto arr = choc::value::createEmptyArray();
-        int length = [[value valueForProperty:@"length"] toInt32];
-        for (int i = 0; i < length; ++i)
-            arr.addArrayElement(jsc_to_choc(ctx, [value valueAtIndex:i]));
-        return arr;
+        try {
+            JSValue* length_value = [value valueForProperty:@"length"];
+            throw_pending_jsc_exception(ctx, "JSC array conversion failed: ");
+            double length_number = [length_value toDouble];
+            throw_pending_jsc_exception(ctx, "JSC array conversion failed: ");
+            if (!std::isfinite(length_number)
+                || std::floor(length_number) != length_number
+                || length_number < 0
+                || length_number > static_cast<double>(INT32_MAX)) {
+                throw std::runtime_error(
+                    "JSC array length exceeds the JsEngine value boundary");
+            }
+            int length = static_cast<int>(length_number);
+            for (int i = 0; i < length; ++i) {
+                JSValue* element = [value valueAtIndex:i];
+                throw_pending_jsc_exception(ctx, "JSC array conversion failed: ");
+                arr.addArrayElement(jsc_to_choc(ctx, element, active_arrays));
+            }
+            active_arrays.erase(reference);
+            return arr;
+        } catch (...) {
+            active_arrays.erase(reference);
+            throw;
+        }
     }
 
     if ([value isObject]) {
         JSValue* stringify = [ctx evaluateScript:@"JSON.stringify"];
+        throw_pending_jsc_exception(ctx, "JSC JSON serialization failed: ");
         JSValue* jsonStr = [stringify callWithArguments:@[value]];
+        throw_pending_jsc_exception(ctx, "JSC JSON serialization failed: ");
         if (jsonStr && [jsonStr isString]) {
             try {
-                return choc::json::parse(std::string([[jsonStr toString] UTF8String]));
-            } catch (...) {}
+                return choc::json::parse(nsstring_to_utf8([jsonStr toString]));
+            } catch (const std::exception& error) {
+                throw std::runtime_error(
+                    std::string("JSC object cannot cross the JsEngine value boundary: ")
+                    + error.what());
+            }
         }
-        return choc::value::createObject("Object");
+        // Functions and objects whose toJSON deliberately returns undefined
+        // have no JSON value. Preserve that result as the engine's void value.
+        return {};
     }
 
     return {};
+}
+
+static choc::value::Value jsc_to_choc(JSContext* ctx, JSValue* value) {
+    std::unordered_set<JSValueRef> active_arrays;
+    return jsc_to_choc(ctx, value, active_arrays);
 }
 
 // ── Value conversion: choc → JSC ────────────────────────────────────────────
@@ -246,14 +340,13 @@ static JSValueRef jsc_native_trampoline(
 
     @autoreleasepool {
         JSContext* objcCtx = [JSContext contextWithJSGlobalContextRef:JSContextGetGlobalContext(ctx)];
-        std::vector<choc::value::Value> args;
-        args.reserve(argumentCount);
-        for (size_t i = 0; i < argumentCount; ++i) {
-            JSValue* val = [JSValue valueWithJSValueRef:arguments[i] inContext:objcCtx];
-            args.push_back(jsc_to_choc(objcCtx, val));
-        }
-
         try {
+            std::vector<choc::value::Value> args;
+            args.reserve(argumentCount);
+            for (size_t i = 0; i < argumentCount; ++i) {
+                JSValue* val = [JSValue valueWithJSValueRef:arguments[i] inContext:objcCtx];
+                args.push_back(jsc_to_choc(objcCtx, val));
+            }
             choc::value::Value result = (*(it->second))(args.data(), args.size());
             JSValue* jsResult = choc_to_jsc(objcCtx, result);
             return [jsResult JSValueRef];
@@ -411,12 +504,7 @@ private:
     bool console_registered_ = false;
 
     void check_exception() {
-        JSValue* exception = context_.exception;
-        if (exception && ![exception isUndefined] && ![exception isNull]) {
-            std::string msg([[exception toString] UTF8String]);
-            context_.exception = nil;
-            throw std::runtime_error(msg);
-        }
+        throw_pending_jsc_exception(context_);
     }
 
     void setup_console() {

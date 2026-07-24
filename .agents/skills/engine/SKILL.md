@@ -600,6 +600,26 @@ QuickJS does not call JS-side `addEventListener("unhandledrejection", ...)` hand
 
 `[JSContext evaluateScript:]` can throw `NSException` for malformed scripts (bare `import` statements, syntax errors that the parser can't recover from). Without `@catch(NSException*)`, the exception unwinds through the Objective-C runtime and surfaces in C++ as the useless string "unknown exception". Now the engine catches `NSException` + falls back to `id`, formats the reason + name, and rethrows as `std::runtime_error` with the actual JSC error message. Grep for `PULP_JSC_EVAL_NSEXCEPTION` / `PULP_JSC_EVAL_OBJC` in logs to find scripts that JSC's parser rejected.
 
+### The JsEngine value model cannot represent embedded NUL
+
+JavaScript and `NSString` can contain U+0000 inside a string, but CHOC's
+`SimpleStringDictionary` deliberately cannot. JSC therefore converts
+`NSString` with an explicit byte length and rejects a direct string containing
+NUL before CHOC construction; never use `std::string([value UTF8String])`,
+which silently truncates it. This is a value-model limit shared by the engine
+abstraction, not a reason to patch only JSC into returning a different type.
+`JSON.stringify` escapes U+0000 as the ASCII sequence `\u0000`, so the
+serialized JSON text itself is safe and must not be diagnosed as C-string
+truncation. Parsing that JSON into CHOC still rejects the unrepresentable
+value; object conversion must propagate that failure instead of substituting
+an empty object. The same applies when `JSON.stringify` itself throws (for
+example on a cyclic object): clear and propagate the pending JSC exception so
+the context remains usable. A non-`nil` exception is real even when JavaScript
+threw the value `undefined` or `null`. Arrays need explicit cycle detection because they
+use direct element conversion. Native callback arguments must be converted
+inside the callback's exception boundary so an unrepresentable value becomes a
+JavaScript exception rather than unwinding through JavaScriptCore.
+
 ### `self` as a window alias in the web-compat document shim (`core/view/js/web-compat-document.js`)
 
 Per browser spec, `self`, `window`, and `globalThis` all reference the same object in a page context. Three.js's `Animation` class (and many other libraries) keys its `requestAnimationFrame` lookup on `self`:
