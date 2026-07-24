@@ -7,6 +7,10 @@ import type {
   PulpFigmaUIMessage,
   PulpSandboxMessage,
 } from "./types";
+import {
+  encodeFigmaSelectionForForge,
+  FORGE_CLIPBOARD_MAX_BYTES,
+} from "./forge-roundtrip";
 
 const el = (id: string): HTMLElement => {
   const e = document.getElementById(id);
@@ -51,6 +55,50 @@ function downloadBlob(name: string, blob: Blob): void {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, 0);
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Figma's iframe can deny Clipboard API access. The selection-copy
+      // fallback below uses the browser's trusted copy command instead.
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "true");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(area);
+  if (!copied) throw new Error("Figma did not grant clipboard write access.");
+}
+
+async function importForgeClipboard(): Promise<void> {
+  let text = "";
+  if (navigator.clipboard?.readText) {
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      // The explicit paste field remains the permission-free path.
+    }
+  }
+  const area = el("forge-paste") as HTMLTextAreaElement;
+  if (!text) text = area.value;
+  if (!text) {
+    area.focus();
+    showStatus("Paste the Forge clipboard payload into the field, then click Import.");
+    return;
+  }
+  if (text.length > FORGE_CLIPBOARD_MAX_BYTES) {
+    throw new Error("Forge clipboard payload exceeds the 32 MiB safety limit.");
+  }
+  send({ type: "import-forge-design", clipboardText: text });
 }
 
 function buildZip(json: string, assets: AssetBundle[], extOfMime: (m: string) => string): Uint8Array {
@@ -184,7 +232,12 @@ window.onmessage = (e: MessageEvent) => {
         (msg.truncated ? " · truncated" : "");
       showStatus(summary);
 
-      if (msg.assetCount > 0) {
+      if (msg.delivery === "clipboard") {
+        const clipboard = encodeFigmaSelectionForForge(msg.json, msg.assets);
+        void writeClipboardText(clipboard)
+          .then(() => showStatus(`${summary} · copied for Forge`))
+          .catch((error) => showStatus(`Error: ${String(error)}`));
+      } else if (msg.assetCount > 0) {
         const zipped = buildZip(msg.json, msg.assets, extOfMime);
         // Cast through ArrayBuffer slice for Blob compatibility on strict TS5+
         const zipBlob = new Blob([zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer], { type: "application/zip" });
@@ -194,6 +247,14 @@ window.onmessage = (e: MessageEvent) => {
       }
       break;
     }
+    case "forge-import-result":
+      showStatus(
+        `Imported ${msg.nodeCount} Forge layer(s) into Figma` +
+        (msg.audioWidgetCount > 0
+          ? ` · ${msg.audioWidgetCount} audio widget(s) retained`
+          : ""),
+      );
+      break;
     case "fonts-detected":
       renderFonts(msg.fonts);
       break;
@@ -225,6 +286,12 @@ function cssEscape(s: string): string {
 document.addEventListener("DOMContentLoaded", () => {
   el("btn-refresh").addEventListener("click", () => send({ type: "get-selection-summary" }));
   el("btn-export").addEventListener("click", () => send({ type: "export" }));
+  el("btn-copy-forge").addEventListener("click", () =>
+    send({ type: "copy-selection-for-forge" }));
+  el("btn-import-forge").addEventListener("click", () => {
+    void importForgeClipboard().catch((error) =>
+      showStatus(`Error: ${String(error)}`));
+  });
   el("btn-close").addEventListener("click", () => send({ type: "close" }));
   el("btn-scan-fonts").addEventListener("click", () => send({ type: "scan-fonts" }));
 });

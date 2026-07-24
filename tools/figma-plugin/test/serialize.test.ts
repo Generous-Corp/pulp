@@ -348,6 +348,25 @@ test("serialized knob validates against figma-plugin-export-v1 schema", () => {
   assert.deepEqual(nodeErrors, [], `node schema violations:\n${nodeErrors.join("\n")}`);
 });
 
+test("preserved faithful semantic children validate as export nodes", () => {
+  const out = serializeExport([baseNode({
+    type: "vector",
+    render_mode: "faithful_svg",
+    svg_asset_id: "faithful-svg",
+    preserved_semantic_children: [{
+      type: "text",
+      figma_node_id: "8:99",
+      content: "Cutoff",
+      style: { transform: "rotate(15deg)" },
+      layout: {},
+    }],
+  })], [], ctx());
+  const errors: string[] = [];
+  validate(out, schema as any, schema as any, "$", errors);
+  assert.deepEqual(errors, [], `schema violations:\n${errors.join("\n")}`);
+  assert.equal(rootOf(out).children[0].figma_node_id, "1:2");
+});
+
 test("serialized constraints validate against the schema's constraints subschema", () => {
   const out = serializeExport(
     [baseNode({ constraints: { horizontal: "STRETCH", vertical: "MIN" } })],
