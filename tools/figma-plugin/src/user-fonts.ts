@@ -43,6 +43,15 @@ export class UserFontCache {
     return Array.from(this.byKey.values());
   }
 
+  restore(entries: UserFontEntry[]): void {
+    this.byKey = new Map(
+      entries.map((entry) => [
+        UserFontCache.makeKey(entry.family, entry.style),
+        entry,
+      ]),
+    );
+  }
+
   /// Look up an entry by (family, style). Used at serialize time to
   /// decide whether a font_family_assets entry should be stamped with
   /// an asset_id.

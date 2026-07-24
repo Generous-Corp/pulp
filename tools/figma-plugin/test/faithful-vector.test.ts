@@ -235,6 +235,14 @@ test("serializeExport: a normal node omits the faithful-vector keys", () => {
   assert.equal(root.interactive_elements, undefined);
 });
 
+test("serializeExport preserves an explicit empty authoritative overlay set", () => {
+  const env = serializeExport([
+    baseNode({ interactive_elements: [] }),
+  ], [], ctx()) as Record<string, any>;
+  const root = env.root as Record<string, any>;
+  assert.deepEqual(root.interactive_elements, []);
+});
+
 // ── Overlay detection — lockstep with the REST lane (test_figma_rest_export.py) ──
 
 function txt(s: string): ExtractedFigmaNode {

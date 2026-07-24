@@ -1654,25 +1654,62 @@ export function isPureVectorIllustration(node: SceneNode): boolean {
 
 export function collectFontFamilyAssets(roots: ExtractedFigmaNode[]): FontFamilyAsset[] {
   const seen = new Map<string, FontFamilyAsset>();
+  const exactFaceBySemanticTuple = new Map<string, string>();
   function visit(n: ExtractedFigmaNode): void {
     const family = n.style.font_family;
-    if (family) {
-      // Figma's `fontName.style` (already captured by extractTextStyle)
-      // lives on `style.font_style` as either "normal" or "italic" today;
-      // the verbose style string ("Semi Bold", "Bold Italic") is not yet
-      // surfaced. Emit what we have and let the runtime resolve.
-      const styleField = (n.style.font_style as string | undefined) ?? "Regular";
-      const weight = n.style.font_weight;
-      const italic = styleField === "italic" || /italic/i.test(styleField);
-      const key = `${family}|${styleField}|${weight ?? ""}|${italic ? "i" : ""}`;
-      if (!seen.has(key)) {
-        const row: FontFamilyAsset = { family, style: styleField };
-        if (typeof weight === "number") row.weight = weight;
+    if (n.font_faces && n.font_faces.length > 0) {
+      for (const face of n.font_faces) {
+        const italic = /italic|oblique/i.test(face.style);
+        const semanticTuple = `${face.family}|${face.weight ?? ""}|${italic}`;
+        const existing = exactFaceBySemanticTuple.get(semanticTuple);
+        if (existing && existing !== face.style) {
+          throw new Error(
+            `Distinct font faces "${existing}" and "${face.style}" collapse ` +
+            `to the same ${face.family} weight/style tuple; export refused.`,
+          );
+        }
+        exactFaceBySemanticTuple.set(semanticTuple, face.style);
+        const key = `${face.family}|${face.style}|${face.weight ?? ""}|${italic ? "i" : ""}`;
+        if (seen.has(key)) continue;
+        const row: FontFamilyAsset = {
+          family: face.family,
+          style: face.style,
+        };
+        if (typeof face.weight === "number") row.weight = face.weight;
         if (italic) row.italic = true;
         seen.set(key, row);
       }
+    } else if (family) {
+      // Figma's `fontName.style` (already captured by extractTextStyle)
+      // lives on `style.font_style` as either "normal" or "italic" today;
+      // the verbose style string ("Semi Bold", "Bold Italic") is not yet
+      // surfaced. Emit semantic weight/italic faces for both the base style
+      // and every range override so copy-back can resolve its own export.
+      const styleField = (n.style.font_style as string | undefined) ?? "Regular";
+      const weight = n.style.font_weight;
+      const italic = styleField === "italic" || /italic|oblique/i.test(styleField);
+      const addFace = (
+        faceWeight: number | undefined,
+        faceStyle: string,
+        faceItalic: boolean,
+      ): void => {
+        const key = `${family}|${faceStyle}|${faceWeight ?? ""}|${faceItalic ? "i" : ""}`;
+        if (seen.has(key)) return;
+        const row: FontFamilyAsset = { family, style: faceStyle };
+        if (typeof faceWeight === "number") row.weight = faceWeight;
+        if (faceItalic) row.italic = true;
+        seen.set(key, row);
+      };
+      addFace(weight, styleField, italic);
+      for (const run of n.runs ?? []) {
+        if (run.fontWeight === undefined && run.fontStyle === undefined) continue;
+        const runStyle = run.fontStyle ?? styleField;
+        const runItalic = runStyle === "italic" || /italic|oblique/i.test(runStyle);
+        addFace(run.fontWeight ?? weight, runStyle, runItalic);
+      }
     }
     for (const c of n.children) visit(c);
+    for (const alternate of n.alternate_frames ?? []) visit(alternate);
   }
   for (const r of roots) visit(r);
   return Array.from(seen.values());
