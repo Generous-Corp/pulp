@@ -118,6 +118,7 @@ target_sources(pulp-runtime PRIVATE
     src/mac_address.cpp
     src/url.cpp
     src/i18n.cpp
+    src/sha256.cpp
     src/crypto.cpp
     src/analytics.cpp
     src/big_integer.cpp

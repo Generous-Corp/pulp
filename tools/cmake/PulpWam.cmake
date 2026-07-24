@@ -135,8 +135,10 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/playback/src/track_automation_renderer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/transport.cpp
     ${_PULP_WAM_WAV_SOURCES}
+    ${_PULP_WAM_ROOT}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/identity.cpp
+    ${_PULP_WAM_ROOT}/core/runtime/src/sha256.cpp
     ${_PULP_WAM_ROOT}/core/state/src/store.cpp
     ${_PULP_WAM_ROOT}/core/state/src/state_migration.cpp
     ${_PULP_WAM_ROOT}/core/events/src/event_loop.cpp

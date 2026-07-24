@@ -11,6 +11,10 @@ import sys
 
 
 SUBSYSTEMS = ("timebase", "timeline", "playback")
+PORTABLE_DEPENDENCIES = (
+    "core/audio/src/rolling_audio_capture_buffer.cpp",
+    "core/runtime/src/sha256.cpp",
+)
 
 
 @dataclass(frozen=True)
@@ -145,16 +149,25 @@ def check_root(root: pathlib.Path) -> tuple[int, list[str]]:
                 f"found {len(source_sets)}")
             continue
         source_prefix = "${" + lane.root_variable + "}/"
-        listed = {
+        all_listed = {
             source[len(source_prefix):]
             for source in source_sets[0]
-            if source.startswith(source_prefix) and source.endswith(".cpp") and
-            re.fullmatch(r"core/(?:timebase|timeline|playback)/src/[^\s)]+\.cpp",
-                         source[len(source_prefix):])
+            if source.startswith(source_prefix) and source.endswith(".cpp")
+        }
+        listed = {
+            source
+            for source in all_listed
+            if re.fullmatch(
+                r"core/(?:timebase|timeline|playback)/src/[^\s)]+\.cpp", source)
         }
         missing = sorted(expected - listed)
         if missing:
             failures.append(f"{lane_name}: missing " + ", ".join(missing))
+        missing_dependencies = sorted(set(PORTABLE_DEPENDENCIES) - all_listed)
+        if missing_dependencies:
+            failures.append(
+                f"{lane_name}: missing portable dependency " +
+                ", ".join(missing_dependencies))
 
         libraries = arguments_for(commands, "add_library", lane.target)
         source_reference = "${" + lane.source_variable + "}"

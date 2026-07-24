@@ -760,6 +760,28 @@ TEST_CASE("Timeline file journal lock canonicalizes a symbolic-link alias") {
     REQUIRE_FALSE(symbolic_rejected);
     REQUIRE(symbolic_rejected.error().code == FileJournalErrorCode::AlreadyOpen);
 }
+
+TEST_CASE("Timeline file journal initializes the target of a dangling symbolic link") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    const auto target = temporary.directory / "target.ptlj";
+    const auto symbolic_alias = temporary.directory / "dangling-alias.ptlj";
+    std::filesystem::create_symlink(target.filename(), symbolic_alias);
+    REQUIRE(std::filesystem::is_symlink(
+        std::filesystem::symlink_status(symbolic_alias)));
+    REQUIRE_FALSE(std::filesystem::exists(target));
+
+    auto opened = FileJournal::open(symbolic_alias, fallback, builtins());
+
+    REQUIRE(opened);
+    REQUIRE_FALSE(opened.value().recovered_existing);
+    REQUIRE(std::filesystem::is_symlink(
+        std::filesystem::symlink_status(symbolic_alias)));
+    REQUIRE(std::filesystem::exists(target));
+    auto target_rejected = FileJournal::open(target, fallback, builtins());
+    REQUIRE_FALSE(target_rejected);
+    REQUIRE(target_rejected.error().code == FileJournalErrorCode::AlreadyOpen);
+}
 #endif
 
 #if !defined(_WIN32)

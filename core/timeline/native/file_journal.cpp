@@ -375,6 +375,41 @@ bool ensure_parent_directory(const std::filesystem::path& path) {
     return true;
 }
 
+bool resolve_journal_path(const std::filesystem::path& requested,
+                          std::filesystem::path& resolved) {
+    std::error_code error;
+    auto candidate = std::filesystem::absolute(requested, error);
+    if (error)
+        return false;
+    candidate = candidate.lexically_normal();
+
+    // weakly_canonical resolves existing parent components but deliberately
+    // leaves a dangling final symlink unresolved. Follow that final component
+    // explicitly so initialization creates the symlink's target and derives
+    // the same lock identity as a later open through the target path.
+    constexpr std::size_t kMaximumSymlinkDepth = 64;
+    for (std::size_t depth = 0; depth < kMaximumSymlinkDepth; ++depth) {
+        const auto status = std::filesystem::symlink_status(candidate, error);
+        if (error) {
+            if (error != std::errc::no_such_file_or_directory)
+                return false;
+            error.clear();
+        }
+        if (!std::filesystem::is_symlink(status)) {
+            resolved = std::filesystem::weakly_canonical(candidate, error);
+            return !error;
+        }
+
+        auto target = std::filesystem::read_symlink(candidate, error);
+        if (error)
+            return false;
+        if (target.is_relative())
+            target = candidate.parent_path() / target;
+        candidate = target.lexically_normal();
+    }
+    return false;
+}
+
 std::array<std::uint8_t, kFileHeaderBytes> file_header() noexcept {
     std::array<std::uint8_t, kFileHeaderBytes> header{};
     std::copy(kFileMagic.begin(), kFileMagic.end(), header.begin());
@@ -657,12 +692,10 @@ FileJournal::open(const std::filesystem::path& path, Project fallback, SchemaReg
         limits.max_file_bytes < kFileHeaderBytes + kFrameHeaderBytes)
         return file_failure<FileJournalOpenResult>(FileJournalErrorCode::LimitExceeded);
 
-    if (!ensure_parent_directory(path))
+    std::filesystem::path canonical_path;
+    if (!resolve_journal_path(path, canonical_path))
         return file_failure<FileJournalOpenResult>(FileJournalErrorCode::IoError);
-
-    std::error_code canonical_error;
-    const auto canonical_path = std::filesystem::weakly_canonical(path, canonical_error);
-    if (canonical_error)
+    if (!ensure_parent_directory(canonical_path))
         return file_failure<FileJournalOpenResult>(FileJournalErrorCode::IoError);
 
     auto lock_path = canonical_path;

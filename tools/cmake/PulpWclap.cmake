@@ -181,6 +181,8 @@ set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/state/src/state_migration.cpp
     ${_PULP_WCLAP_ROOT}/core/state/src/wasm/preset_manager_wasm.cpp
     ${_PULP_WCLAP_ROOT}/core/midi/src/mpe_voice_tracker.cpp
+    ${_PULP_WCLAP_ROOT}/core/audio/src/rolling_audio_capture_buffer.cpp
+    ${_PULP_WCLAP_ROOT}/core/runtime/src/sha256.cpp
     ${_PULP_WCLAP_ROOT}/core/runtime/src/scoped_no_alloc.cpp
 )
 
