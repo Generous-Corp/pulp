@@ -224,6 +224,24 @@ TEST_CASE("SignalGraph stateful custom node: lifecycle + state round-trip",
     for (int i = 0; i < 4; ++i) REQUIRE(out_s[i] == in_s[i] * 3.0f);
 }
 
+TEST_CASE("SignalGraph prepare reports a failed Custom instance factory",
+          "[host][graph][node-abi][negative]") {
+    SignalGraph graph;
+    auto failing_type = make_level_type();
+    failing_type.create = []() -> void* { return nullptr; };
+    REQUIRE(graph.register_custom_node_type(failing_type));
+    const auto node =
+        graph.add_custom_node("pulp.test.level", "Missing instance");
+    REQUIRE(node != 0);
+
+    CHECK_FALSE(graph.prepare(48000.0, 4));
+    CHECK(graph.last_prepare_custom_failure_node() == node);
+
+    REQUIRE(graph.register_custom_node_type(make_level_type()));
+    REQUIRE(graph.prepare(48000.0, 4));
+    CHECK(graph.last_prepare_custom_failure_node() == 0);
+}
+
 TEST_CASE("SignalGraph generated custom state changes require re-prepare",
           "[host][graph][generated][rt-safety]") {
     SignalGraph graph;
