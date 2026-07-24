@@ -770,12 +770,13 @@ def _verify_vellum_trust(
     app = _github_json("https://api.github.com/app", app_jwt)
     if app.get("id") != EXPECTED_VELLUM_READER_APP_ID:
         raise FreezeError("Vellum reader token identifies the wrong GitHub App")
-    token_installation = _github_json(
-        "https://api.github.com/installation", token
+    repository_installation = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}/installation",
+        app_jwt,
     )
-    if token_installation.get("app_id") != EXPECTED_VELLUM_READER_APP_ID:
+    if repository_installation.get("app_id") != EXPECTED_VELLUM_READER_APP_ID:
         raise FreezeError(
-            "Vellum reader installation token belongs to the wrong GitHub App"
+            "Vellum repository installation belongs to the wrong GitHub App"
         )
     repository = _github_json(
         f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}", token
