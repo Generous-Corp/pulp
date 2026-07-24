@@ -1537,12 +1537,13 @@ public:
         plan.num_ir = num_ir;
         plan.log2n = log2_of_pow2(n);
 
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
-        const uint32_t big = num_ir * small;                                    // 2n*num_ir
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
+        const uint32_t big = num_ir * small_bytes;          // 2n*num_ir
         const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
                       | wgpu::BufferUsage::CopySrc;
-        plan.fx_a = create_storage_buffer(small, sc);
-        plan.fx_b = create_storage_buffer(small, sc);
+        plan.fx_a = create_storage_buffer(small_bytes, sc);
+        plan.fx_b = create_storage_buffer(small_bytes, sc);
         plan.big_a = create_storage_buffer(big, sc);
         plan.big_b = create_storage_buffer(big, sc);
         plan.irspecs = create_storage_buffer(big,
@@ -1551,8 +1552,8 @@ public:
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         plan.panr = create_storage_buffer(num_ir * 4u,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.out_lr = create_storage_buffer(small, sc);
-        plan.readback = create_readback_buffer(small);
+        plan.out_lr = create_storage_buffer(small_bytes, sc);
+        plan.readback = create_readback_buffer(small_bytes);
         wgpu::BufferDescriptor cud{};
         cud.size = 16;
         cud.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -1625,11 +1626,12 @@ public:
         plan.log2n = log2_of_pow2(n);
         plan.prev_time.assign(plan.block, 0.0f);
 
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
         const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
                       | wgpu::BufferUsage::CopySrc;
-        plan.fx_a = create_storage_buffer(small, sc);
-        plan.fx_b = create_storage_buffer(small, sc);
+        plan.fx_a = create_storage_buffer(small_bytes, sc);
+        plan.fx_b = create_storage_buffer(small_bytes, sc);
         plan.ring = create_storage_buffer(static_cast<uint32_t>(ring_bytes), sc);
         plan.irspecs = create_storage_buffer(static_cast<uint32_t>(ir_bytes),
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
@@ -1639,8 +1641,8 @@ public:
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
         plan.panr = create_storage_buffer(num_ir * 4u,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.out_lr = create_storage_buffer(small, sc);
-        plan.readback = create_readback_buffer(small);
+        plan.out_lr = create_storage_buffer(small_bytes, sc);
+        plan.readback = create_readback_buffer(small_bytes);
         wgpu::BufferDescriptor ud16{};
         ud16.size = 16;
         ud16.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -1715,13 +1717,14 @@ public:
         if (gpu_ns) *gpu_ns = -1.0;
         bool do_ts = (gpu_ns != nullptr) && has_timestamp_ && ensure_device_ts();
 
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));
         const uint32_t fwd_wg = ((n / 2u) + 255u) / 256u;             // 1 transform
         const uint32_t inv_wg = ((num_ir * (n / 2u)) + 255u) / 256u;  // num_ir transforms
         const uint32_t mul_wg = ((num_ir * n) + 255u) / 256u;         // num_ir*n pairs
         const uint32_t comb_wg = (n + 255u) / 256u;                   // n output samples
 
-        queue_.WriteBuffer(plan.fx_a, 0, in_complex, small);
+        queue_.WriteBuffer(plan.fx_a, 0, in_complex, small_bytes);
         queue_.WriteBuffer(plan.panl, 0, pan_l, num_ir * 4u);
         queue_.WriteBuffer(plan.panr, 0, pan_r, num_ir * 4u);
 
@@ -1757,7 +1760,7 @@ public:
             pass.DispatchWorkgroups(comb_wg);
             pass.End();
         }
-        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small);
+        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small_bytes);
         if (do_ts) {
             encoder.ResolveQuerySet(dev_ts_qs_, 0, 2, dev_ts_resolve_, 0);
             encoder.CopyBufferToBuffer(dev_ts_resolve_, 0, dev_ts_readback_, 0,
@@ -1766,7 +1769,7 @@ public:
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
-        if (!read_back(plan.readback, out_lr, small)) return false;
+        if (!read_back(plan.readback, out_lr, small_bytes)) return false;
 
         if (do_ts) {
             uint64_t ticks[2] = {0, 0};
@@ -1787,13 +1790,14 @@ public:
         MultiFdlPlan& plan = it->second;
         const uint32_t block = plan.block;
         const uint32_t P = plan.num_part;
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));
 
         // Build the [prev | current] interleaved-complex window (imag = 0).
         std::vector<float> window(static_cast<size_t>(n) * 2u, 0.0f);
         for (uint32_t i = 0; i < block; ++i) window[2u * i] = plan.prev_time[i];
         for (uint32_t i = 0; i < block; ++i) window[2u * (block + i)] = in_block[i];
-        queue_.WriteBuffer(plan.fx_a, 0, window.data(), small);
+        queue_.WriteBuffer(plan.fx_a, 0, window.data(), small_bytes);
         queue_.WriteBuffer(plan.panl, 0, pan_l, num_ir * 4u);
         queue_.WriteBuffer(plan.panr, 0, pan_r, num_ir * 4u);
         struct FdlU { uint32_t n; uint32_t num_ir; uint32_t num_part; uint32_t head; };
@@ -1810,8 +1814,9 @@ public:
         // Forward-FFT the window into fx, copy the result into ring[head].
         encode_fft_passes(encoder, plan.fwd_bgs, fwd_wg);
         wgpu::Buffer& fwd_res = (plan.log2n & 1u) ? plan.fx_b : plan.fx_a;
-        encoder.CopyBufferToBuffer(fwd_res, 0, plan.ring,
-                                   static_cast<uint64_t>(plan.head) * small, small);
+        encoder.CopyBufferToBuffer(
+            fwd_res, 0, plan.ring,
+            static_cast<uint64_t>(plan.head) * small_bytes, small_bytes);
         // Partitioned MAC over the delay line → accum_a.
         {
             wgpu::ComputePassDescriptor pd{};
@@ -1831,13 +1836,13 @@ public:
             pass.DispatchWorkgroups(comb_wg);
             pass.End();
         }
-        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small);
+        encoder.CopyBufferToBuffer(plan.out_lr, 0, plan.readback, 0, small_bytes);
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
         // Read back the full 2n; overlap-save keeps the SECOND half of each room.
         std::vector<float> outbuf(static_cast<size_t>(n) * 2u);
-        if (!read_back(plan.readback, outbuf.data(), small)) return false;
+        if (!read_back(plan.readback, outbuf.data(), small_bytes)) return false;
         for (uint32_t i = 0; i < block; ++i) {
             out_block[i]         = outbuf[block + i];       // L: outlr[block .. 2*block)
             out_block[block + i] = outbuf[n + block + i];   // R: outlr[n+block .. n+2*block)
@@ -1877,7 +1882,8 @@ public:
         plan.hop_ratio = static_cast<float>(hop) / static_cast<float>(n);
         plan.log2n = log2_of_pow2(n);
 
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));   // 2n
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));  // 2n
         const uint32_t res = num_layers * n * static_cast<uint32_t>(sizeof(float));
         const auto sc = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst
                       | wgpu::BufferUsage::CopySrc;
@@ -1886,9 +1892,9 @@ public:
         plan.phase = create_storage_buffer(res, sc);
         plan.weights = create_storage_buffer(
             num_layers * 4u, wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        plan.comb_a = create_storage_buffer(small, sc);
-        plan.comb_b = create_storage_buffer(small, sc);
-        plan.readback = create_readback_buffer(small);
+        plan.comb_a = create_storage_buffer(small_bytes, sc);
+        plan.comb_b = create_storage_buffer(small_bytes, sc);
+        plan.readback = create_readback_buffer(small_bytes);
         wgpu::BufferDescriptor ad{};
         ad.size = 32;  // SpAdvance (8 x 4)
         ad.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -1950,7 +1956,8 @@ public:
             return false;
         SpectralStackPlan& plan = it->second;
 
-        const uint32_t small = n * 2u * static_cast<uint32_t>(sizeof(float));
+        const uint32_t small_bytes =
+            n * 2u * static_cast<uint32_t>(sizeof(float));
         // Blur half-width: any positive smear gives at least radius 1, up to
         // ~n/32 (matches the CPU reference's kernel growth, no odd-only step).
         const float sm = smear < 0.0f ? 0.0f : (smear > 1.0f ? 1.0f : smear);
@@ -2000,12 +2007,12 @@ public:
         }
         encode_fft_passes(encoder, plan.inv_bgs, fft_wg);
         wgpu::Buffer& result = (plan.log2n & 1u) ? plan.comb_b : plan.comb_a;
-        encoder.CopyBufferToBuffer(result, 0, plan.readback, 0, small);
+        encoder.CopyBufferToBuffer(result, 0, plan.readback, 0, small_bytes);
         auto cmd = encoder.Finish();
         queue_.Submit(1, &cmd);
 
-        if (!read_back(plan.readback, sp_scratch(small), small)) return false;
-        const float* cplx = sp_scratch(small);
+        if (!read_back(plan.readback, sp_scratch(small_bytes), small_bytes)) return false;
+        const float* cplx = sp_scratch(small_bytes);
         const float inv = 1.0f / static_cast<float>(n);
         for (uint32_t i = 0; i < n; ++i) frame_out[i] = cplx[2u * i] * inv;
         return true;
