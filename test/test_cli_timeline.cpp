@@ -236,6 +236,28 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     REQUIRE(read_text(oversized_error).find("command file exceeds") != std::string::npos);
     write_text(changed_path, changed_project);
 
+    const auto blocked_output = temp.path() / "blocked-output.json";
+    REQUIRE(std::filesystem::create_directory(blocked_output));
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
+                    quote(command_path) + " --out " + quote(blocked_output) +
+                    " > " + quote(command_result_path)) == 1);
+    REQUIRE(std::filesystem::is_directory(blocked_output));
+
+    const auto linked_target = temp.path() / "linked-target.json";
+    const auto linked_output = temp.path() / "linked-output.json";
+    write_text(linked_target, "preserve target");
+    std::error_code symlink_error;
+    std::filesystem::create_symlink(linked_target.filename(), linked_output,
+                                    symlink_error);
+    if (!symlink_error) {
+        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
+                        quote(command_path) + " --out " + quote(linked_output) +
+                        " > " + quote(command_result_path)) == 1);
+        REQUIRE(std::filesystem::is_symlink(
+            std::filesystem::symlink_status(linked_output)));
+        REQUIRE(read_text(linked_target) == "preserve target");
+    }
+
     REQUIRE(run_cli(cli + " render " + quote(project_path) + " --out " + quote(original_wav)) == 0);
     REQUIRE(run_cli(cli + " render " + quote(changed_path) + " --out " + quote(changed_wav)) == 0);
     const auto original = audio::read_audio_file(original_wav.string());

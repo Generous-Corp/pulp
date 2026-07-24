@@ -167,6 +167,9 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
     SECURITY_ATTRIBUTES* security = nullptr;
     const auto destination_attributes = ::GetFileAttributesW(destination.c_str());
     if (destination_attributes != INVALID_FILE_ATTRIBUTES) {
+        if ((destination_attributes &
+             (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+            return false;
         DWORD required = 0;
         ::GetFileSecurityW(destination.c_str(), kSecurityInformation, nullptr, 0, &required);
         if (required == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER)
