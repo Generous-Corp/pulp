@@ -268,14 +268,112 @@ inline constexpr double kHysteresisHalfBandStopbandDb = 81.3;  // → β ≈ 8
 /// Makeup-gain tolerance around unity small-signal gain, in dB.
 inline constexpr double kJaMakeupToleranceDb = 1.0;
 
-/// Wallace loss FIR (Wallace 1951; physical ranges from Bertram 1994).
-/// Order at 48 kHz, scaled ∝ fs. [64–128]
+/// Wallace playback loss (Wallace 1951; physical ranges from Bertram 1994) is
+/// split across two realizations — see tape_loss.hpp for why.
+///
+/// The gap null goes to a minimum-phase FIR: order at 48 kHz, scaled ∝ fs.
+/// [64–128]
 inline constexpr std::size_t kLossFirOrder48k = 96;
-/// Number of pre-designed banks across the age (spacing) axis. The banks are
-/// built once at set_sample_rate and interpolated per sample, so a moving age
-/// macro never triggers a filter design on the audio thread.
-inline constexpr std::size_t kLossFirAgeBanks = 9;
-/// Crossfade applied when the tape SPEED changes and every bank is rebuilt.
+/// The smooth spacing × thickness tilt goes to a fitted IIR cascade: how many
+/// log-spaced points the least-squares fit is evaluated at, and how many
+/// simplex iterations it gets. The fit runs on the control thread, once per age
+/// knot per tape speed.
+inline constexpr int kLossIirFitPoints = 64;
+
+/// Sections in each fitted cascade.
+///
+/// The counts are set by MEASUREMENT, not by taste. The spacing term is
+/// exp(-k·d), whose magnitude in dB is linear in FREQUENCY — on a
+/// log-frequency axis a curve whose slope steepens without bound, while every
+/// filter section contributes a bounded 20 dB/decade. Brute-forced worst-case
+/// error against the analytic magnitude:
+///
+///     2 poles + 1 shelf   7.5 ips 2.2 dB   3.75 ips 5.3 dB   1.875 ips 5.3 dB
+///     2 poles + 2 shelves         1.2               2.7                2.5
+///     2 poles + 3 shelves         0.8               1.9                1.5
+///     2 poles + 5 shelves         0.3               0.9                0.6
+///
+/// Five shelves is where +-1 dB is reached across the speed range. The
+/// thickness term is far gentler — it falls asymptotically at 20 dB/decade, so
+/// it is nearly one pole already — and needs only three sections.
+inline constexpr std::size_t kSpacingPoleSections = 3;
+inline constexpr std::size_t kSpacingShelfSections = 8;
+inline constexpr std::size_t kThicknessPoleSections = 1;
+inline constexpr std::size_t kThicknessShelfSections = 2;
+
+inline constexpr std::size_t kLossPoleSections =
+    kSpacingPoleSections + kThicknessPoleSections;
+inline constexpr std::size_t kLossShelfSections =
+    kSpacingShelfSections + kThicknessShelfSections;
+
+/// Search dimension of ONE shape fit (the larger of the two).
+inline constexpr std::size_t kLossSearchDimension =
+    kSpacingPoleSections + 2u * kSpacingShelfSections;
+
+/// THE FITTED SHAPES, as shipped.
+///
+/// These are constants of the PHYSICS, not of any machine or setting: the
+/// spacing term depends on frequency only through f·d/v and the thickness term
+/// only through f·δ/v, so one fit of each dimensionless curve is correct at
+/// every tape speed, every head-tape spacing and every sample rate, with its
+/// corners multiplied by a scalar.
+///
+/// They are shipped rather than fitted at load because the fit is a multi-start
+/// simplex search that takes over a second — fine as an offline derivation,
+/// unacceptable as a stall when a plugin is instantiated. The derivation is not
+/// lost: fit_tape_loss_shapes() still performs it, and the acceptance suite
+/// re-derives the fit and checks that these values reproduce the same response,
+/// so regenerating the table is a supported operation rather than a rewrite.
+///
+/// Worst-case error against the analytic curves: spacing 0.36 dB, thickness
+/// 0.12 dB, both equiripple (which is the signature of a minimax fit sitting at
+/// its structural optimum for the section count).
+inline constexpr std::array<double, kSpacingPoleSections> kSpacingShapePoleX = {
+    0.1736328177, 0.5872051207, 0.7066518389};
+inline constexpr std::array<double, kSpacingShelfSections> kSpacingShapeShelfX = {
+    0.0379101878, 0.8617586156, 1.195357912,  0.546821599,
+    1.874319242,  1.250559327,  1.349688739,  0.5618309026};
+inline constexpr std::array<double, kSpacingShelfSections> kSpacingShapeShelfDb = {
+    -4.870968905, -22.02414799, -32.23365298, -35.9700058,
+    -20.85639305, -35.24359399, -23.08806288, -40.0};
+inline constexpr std::array<double, kThicknessPoleSections> kThicknessShapePoleX = {
+    0.2127135512};
+inline constexpr std::array<double, kThicknessShelfSections> kThicknessShapeShelfX = {
+    0.03067430198, 0.1724152232};
+inline constexpr std::array<double, kThicknessShelfSections> kThicknessShapeShelfDb = {
+    -1.705785229, -0.6809460063};
+
+/// Normalized-frequency range each shape is fitted over, and how many
+/// log-spaced points. The range covers every (frequency, speed, spacing)
+/// combination the module can reach.
+inline constexpr double kLossShapeMinX = 1e-3;
+inline constexpr double kLossShapeMaxX = 4.0;
+
+/// Simplex iterations per start, restarts per start, and how many starts.
+///
+/// The shapes are DIMENSIONLESS: they do not depend on the sample rate, the
+/// tape speed or the spacing, only on the form of the physics. So they are
+/// fitted exactly once per process (see tape_loss_shapes()) and every instance
+/// shares the result — which is what lets this be as thorough as it is without
+/// costing anything at plugin load.
+inline constexpr int kLossIirFitIterations = 4000;
+inline constexpr int kLossIirFitRestarts = 3;
+inline constexpr int kLossIirFitStarts = 16;
+
+/// Deepest cut any one shelf may ask for.
+inline constexpr double kLossShelfMinDb = -40.0;
+/// NOTE: there are no age knots and no interpolation along the age axis.
+/// Both loss terms are exact frequency SCALINGS of a fixed dimensionless shape
+/// — the spacing term depends on frequency only through f·d/v and the thickness
+/// term only through f·δ/v — so a shape fitted once is correct at every spacing
+/// and every speed with its corners multiplied by a scalar. That removes the
+/// interpolation entirely, which matters: an earlier design that fitted the
+/// combined response at nine age knots and interpolated the parameters between
+/// them was inside 1 dB AT the knots and 3-4 dB BETWEEN them, because two fits
+/// of nearly the same curve can sit in different parameter basins and blending
+/// two descriptions describes neither.
+/// Crossfade applied when the tape SPEED changes and both filters are
+/// redesigned. Two complete instances run and their OUTPUTS are crossfaded.
 /// [20–50 ms]
 inline constexpr double kLossBankCrossfadeS = 0.030;
 

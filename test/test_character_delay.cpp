@@ -1216,44 +1216,179 @@ TEST_CASE("hysteresis distortion grows with drive and silence clears it",
 // 16 — Wallace loss filter
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE("the loss FIR realizes the modeled response", "[character-delay][tape][loss]") {
-    const std::size_t taps = cd::tape_loss_fir_taps(kSr);
+TEST_CASE("the loss cascade realizes the modeled response",
+          "[character-delay][tape][loss]") {
+    // The stage is a cascade: a fitted IIR ladder carries the smooth
+    // spacing/thickness tilt and a minimum-phase FIR carries the gap null. This
+    // measures the COMBINED response against the analytic model, which is the
+    // only comparison that means anything to a listener.
+    cd::TapeLossDesign design;
+    design.prepare(kSr, 7.5);
+    const std::size_t taps = cd::tape_gap_fir_taps(kSr);
 
-    auto worst_error = [&](double ips, double spacing_um, double from_hz) {
+    auto worst_error = [&](double ips, double spacing_um) {
         cd::TapeLossGeometry geometry;
         geometry.speed_ips = ips;
         geometry.spacing_m = spacing_um * 1e-6;
-        const auto coefficients = cd::design_tape_loss_fir(kSr, taps, geometry);
+
+        const auto gap = cd::design_tape_gap_fir(kSr, taps, geometry);
+        const auto parameters = design.shapes().parameters_for(geometry);
 
         double worst = 0.0;
         for (int k = 0; k < 10; ++k) {
-            const double f = from_hz * std::pow(0.45 * kSr / from_hz, k / 9.0);
+            const double f = 20.0 * std::pow(0.45 * kSr / 20.0, k / 9.0);
             std::complex<double> sum{0.0, 0.0};
             for (std::size_t i = 0; i < taps; ++i)
-                sum += coefficients[i] *
-                       std::exp(std::complex<double>(0.0, -2.0 * cd::kPi * f * i / kSr));
-            const double realized = 20.0 * std::log10(std::max(std::abs(sum), 1e-12));
+                sum += gap[i] * std::exp(std::complex<double>(0.0, -2.0 * cd::kPi * f * i / kSr));
+            const double realized = 20.0 * std::log10(std::max(std::abs(sum), 1e-12)) +
+                                    cd::tape_loss_iir_magnitude_db(parameters, f);
             const double target = 20.0 * std::log10(std::max(
                                              cd::tape_loss_magnitude_floored(f, geometry), 1e-12));
-            worst = std::max(worst, std::abs(realized - target));
+            worst = std::max(worst, std::abs(std::max(realized, cd::kTapeLossFloorDb) -
+                                             std::max(target, cd::kTapeLossFloorDb)));
         }
         return worst;
     };
 
-    // Nominal 7.5 ips with a new machine's spacing: within a decibel across the
-    // whole band.
-    const double nominal = worst_error(7.5, cd::kAgeSpacingUm.front(), 20.0);
-    INFO("7.5 ips nominal worst error " << nominal << " dB");
-    CHECK(nominal < 1.0);
+    // At and above 3.75 ips, within a decibel across the band — at every
+    // spacing on the age axis, not just the nominal one.
+    for (double ips : {3.75, 7.5, 15.0, 30.0}) {
+        for (double spacing : cd::kAgeSpacingUm) {
+            const double error = worst_error(ips, spacing);
+            INFO(ips << " ips at " << spacing << " um: worst error " << error << " dB");
+            CHECK(error < 1.0);
+        }
+    }
 
-    // Worn at the slowest speed: the physics puts the corner near 100 Hz, and a
-    // filter of this order spans 2 ms so it cannot express features that low
-    // (see tape_physical.hpp). This asserts the DOCUMENTED bound rather than a
-    // bound the design cannot meet, so a regression still fails the test.
-    const double worn = worst_error(1.875, cd::kAgeSpacingUm.back(), 20.0);
-    INFO("1.875 ips worn worst error " << worn << " dB (structural limit, see header)");
-    CHECK(worn < 20.0);
-    CHECK(worst_error(7.5, cd::kAgeSpacingUm[1], 20.0) < 2.0);
+    // The slowest speed at maximum wear is the hardest corner in the model —
+    // the analytic −3 dB point drops near 100 Hz there. Held to 2 dB.
+    const double worn = worst_error(1.875, cd::kAgeSpacingUm.back());
+    INFO("1.875 ips worn worst error " << worn << " dB");
+    CHECK(worn < 2.0);
+}
+
+TEST_CASE("the loss cascade is exact at every age, not just at fitted points",
+          "[character-delay][tape][loss]") {
+    // The age axis is a pure frequency SCALING of a fitted dimensionless shape,
+    // so there are no knots to fall between. This sweeps age continuously and
+    // asserts the accuracy never degrades — the case that would catch a
+    // regression back to fitting-and-interpolating, which measured inside 1 dB
+    // at its knots and 3-4 dB between them.
+    cd::TapeLossDesign design;
+    design.prepare(kSr, 7.5);
+
+    for (double age = 0.0; age <= 1.0; age += 0.03125) {
+        const auto geometry = design.geometry_at(age);
+        const auto parameters = design.parameters_at(age);
+
+        double worst = 0.0;
+        for (int k = 0; k < 12; ++k) {
+            const double f = 20.0 * std::pow(0.45 * kSr / 20.0, k / 11.0);
+            const double realized = cd::tape_loss_iir_magnitude_db(parameters, f);
+            const double target = 20.0 * std::log10(std::max(
+                                             cd::tape_loss_smooth_magnitude(f, geometry), 1e-12));
+            worst = std::max(worst, std::abs(std::max(realized, cd::kTapeLossFloorDb) -
+                                             std::max(target, cd::kTapeLossFloorDb)));
+        }
+        INFO("age " << age << " worst error " << worst << " dB");
+        CHECK(worst < 1.0);
+    }
+
+    // Scaling is monotone in age: more wear is never brighter.
+    double previous = 1e12;
+    for (double age = 0.0; age <= 1.0; age += 0.1) {
+        const auto parameters = design.parameters_at(age);
+        const double at_5k = cd::tape_loss_iir_magnitude_db(parameters, 5000.0);
+        INFO("age " << age << " response at 5 kHz " << at_5k << " dB");
+        CHECK(at_5k <= previous + 1e-9);
+        previous = at_5k;
+    }
+}
+
+TEST_CASE("the shipped loss shapes reproduce a fresh derivation",
+          "[character-delay][tape][loss][slow]") {
+    // The shapes in tables.hpp were derived offline by the fitter that still
+    // lives in tape_loss.hpp. This re-runs that derivation and checks the
+    // shipped values give the same RESPONSE — comparing responses rather than
+    // parameters because a minimax fit can reach the same curve through
+    // different parameter sets, and it is the curve that is the contract.
+    const auto fitted = cd::fit_tape_loss_shapes();
+    const auto shipped = cd::TapeLossShapes::tabulated();
+
+    auto magnitude = [](const auto& shape, double x) {
+        double db = 0.0;
+        for (double corner : shape.pole_x) {
+            const double r = x / corner;
+            db += -10.0 * std::log10(1.0 + r * r);
+        }
+        for (std::size_t i = 0; i < shape.shelf_x.size(); ++i) {
+            const double g = std::pow(10.0, shape.shelf_db[i] / 20.0);
+            const double r = x / shape.shelf_x[i];
+            db += 10.0 * std::log10((1.0 + g * g * r * r) / (1.0 + r * r));
+        }
+        return db;
+    };
+
+    double spacing_shipped = 0.0;
+    double spacing_fitted = 0.0;
+    double thickness_shipped = 0.0;
+    for (int k = 0; k < 40; ++k) {
+        const double x = cd::kLossShapeMinX *
+                         std::pow(cd::kLossShapeMaxX / cd::kLossShapeMinX, k / 39.0);
+        const auto clamp_db = [](double v) { return std::max(v, cd::kTapeLossFloorDb); };
+
+        spacing_shipped = std::max(spacing_shipped,
+                                   std::abs(clamp_db(magnitude(shipped.spacing, x)) -
+                                            clamp_db(cd::spacing_shape_db(x))));
+        spacing_fitted = std::max(spacing_fitted,
+                                  std::abs(clamp_db(magnitude(fitted.spacing, x)) -
+                                           clamp_db(cd::spacing_shape_db(x))));
+        thickness_shipped = std::max(thickness_shipped,
+                                     std::abs(clamp_db(magnitude(shipped.thickness, x)) -
+                                              clamp_db(cd::thickness_shape_db(x))));
+    }
+
+    INFO("shipped spacing " << spacing_shipped << " dB, fresh fit " << spacing_fitted
+                            << " dB, shipped thickness " << thickness_shipped << " dB");
+    CHECK(spacing_shipped < 0.5);
+    CHECK(thickness_shipped < 0.3);
+    // The shipped table must be at least as good as what the fitter produces
+    // now, with a little slack for the search's own run-to-run spread.
+    CHECK(spacing_shipped < spacing_fitted + 0.25);
+}
+
+TEST_CASE("the wet path stays inside a stated gain bound",
+          "[character-delay][gain]") {
+    // The bound a host or graph layer needs in order to size headroom, and the
+    // reason it is NOT the usual 1/(1-feedback) geometric series:
+    //
+    //   * Tape, BBD and Vintage carry an in-loop saturator whose output is hard
+    //     bounded to +-1 REGARDLESS of the feedback setting, so the loop
+    //     contributes at most unity to the line input however far past 1.0 the
+    //     feedback knob goes. The geometric series does not apply and would be
+    //     unbounded at feedback 1.1.
+    //   * Clean and Diffusion have no saturator, so their feedback IS clamped
+    //     below unity and the geometric bound is the right one: at the 0.98
+    //     ceiling a comb-resonant input can build to about 1/(1-0.98) = 50x.
+    //     That is inherent to any feedback delay, not specific to this module.
+    //
+    // This measures the first case, which is the one a bound derived from the
+    // feedback range alone would get badly wrong.
+    for (auto character : {Character::tape, Character::bbd, Character::vintage_digital}) {
+        Engine delay;
+        configure(delay, character, 120.0, 1.1, 1.0);
+        delay.set_crossfeed(0.5f);
+
+        // Full-scale input, worst case, long enough for the loop to fill.
+        auto buffers = sine_both(static_cast<int>(kSr * 8.0), 220.0, 1.0f);
+        render(delay, buffers);
+
+        const double top = peak(buffers.left, static_cast<int>(kSr * 2.0),
+                                static_cast<int>(buffers.left.size()));
+        INFO("character index " << static_cast<int>(character) << " peak " << top);
+        CHECK(all_finite(buffers.left));
+        CHECK(top < 4.0);
+    }
 }
 
 TEST_CASE("the gap-loss null lands where the physics predicts",
@@ -1381,8 +1516,7 @@ TEST_CASE("configuring the tape speed before the sample rate is safe",
     CHECK(all_finite(buffers.left));
     CHECK(rms(buffers.left, 0, static_cast<int>(buffers.left.size())) > 0.0);
     // The speed the caller asked for is the speed the banks were designed at.
-    CHECK(delay.tape_loss_coefficients(0).size() ==
-          cd::tape_loss_fir_taps(kSr));
+    CHECK(delay.tape_gap_coefficients(0).size() == cd::tape_gap_fir_taps(kSr));
 }
 
 TEST_CASE("the catalog node bakes and delays", "[character-delay][catalog]") {

@@ -297,8 +297,11 @@ public:
     std::size_t chew_state_index(int channel) const noexcept {
         return channels_[static_cast<std::size_t>(channel)].tape_physical.chew_state_index();
     }
-    const std::vector<double>& tape_loss_coefficients(int channel) const noexcept {
-        return channels_[static_cast<std::size_t>(channel)].tape_physical.coefficients();
+    const std::vector<double>& tape_gap_coefficients(int channel) const noexcept {
+        return channels_[static_cast<std::size_t>(channel)].tape_physical.gap_coefficients();
+    }
+    chardelay::TapeLossIirParams tape_loss_parameters(int channel) const noexcept {
+        return channels_[static_cast<std::size_t>(channel)].tape_physical.loss_parameters();
     }
 
 private:
@@ -485,8 +488,8 @@ private:
 
                 if (physical_tape()) {
                     // Fold the tier's in-loop group delay (the hysteresis
-                    // oversampler plus the minimum-phase loss FIR) out of the
-                    // line, so the echo still lands where the time knob says and
+                    // oversampler plus both halves of the loss cascade) out of
+                    // the line, so the echo lands where the time knob says and
                     // latency_samples() can stay 0. Below that floor the tier
                     // simply cannot deliver a shorter delay — a few hundred
                     // microseconds at typical rates — and the line clamps.
