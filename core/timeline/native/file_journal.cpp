@@ -586,8 +586,13 @@ scan_file(NativeFile& file, const SchemaRegistry& registry, const FileJournalLim
             std::array<std::uint8_t, kCommitTrailerBytes> trailer{};
             if (!file.read_all(trailer))
                 return file_failure<ScannedFile>(FileJournalErrorCode::IoError, offset);
-            if (!valid_commit_trailer(trailer, frame_revision, offset))
+            if (!valid_commit_trailer(trailer, frame_revision, offset)) {
+                if (trailer_end == *size) {
+                    torn_tail = true;
+                    break;
+                }
                 return file_failure<ScannedFile>(FileJournalErrorCode::CorruptRecord, offset);
+            }
             committed_end = trailer_end;
         }
         if (crc32(payload) != read_u32(frame.data() + 24))

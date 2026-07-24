@@ -194,6 +194,57 @@ std::optional<DawProjectImportError> require_int(const pugi::xml_node& node, con
     return std::nullopt;
 }
 
+std::optional<DawProjectImportError>
+reject_unsupported_play_start(const pugi::xml_node& node, const char* context) {
+    const auto attribute = node.attribute("playStart");
+    if (attribute.empty())
+        return std::nullopt;
+    double play_start = 0.0;
+    if (!parse_number(attribute, play_start) || !std::isfinite(play_start))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   std::string(context) + " has invalid numeric attribute 'playStart'");
+    if (play_start != 0.0)
+        return err(DawProjectImportErrorCode::UnsupportedFeature,
+                   std::string(context) +
+                       " uses unsupported playStart sub-range playback");
+    return std::nullopt;
+}
+
+std::optional<DawProjectImportError>
+reject_unsupported_clip_playback(const pugi::xml_node& clip) {
+    if (!clip.attribute("reference").empty())
+        return err(DawProjectImportErrorCode::UnsupportedFeature,
+                   "<Clip> uses unsupported referenced-content semantics");
+    if (auto e = reject_unsupported_play_start(clip, "<Clip>"))
+        return e;
+    for (const char* attribute_name : {"playStop", "loopStart", "loopEnd"}) {
+        if (!clip.attribute(attribute_name).empty())
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Clip> uses unsupported ") + attribute_name +
+                           " playback semantics");
+    }
+    const auto content_time_unit = clip.attribute("contentTimeUnit");
+    if (!content_time_unit.empty() &&
+        std::string_view(content_time_unit.as_string()) != "beats")
+        return err(DawProjectImportErrorCode::UnsupportedFeature,
+                   std::string("<Clip contentTimeUnit='") + content_time_unit.as_string() +
+                       "'> is unsupported; only beat-relative content is imported");
+    return std::nullopt;
+}
+
+std::optional<DawProjectImportError>
+reject_unsupported_audio_playback(const pugi::xml_node& audio) {
+    if (auto e = reject_unsupported_play_start(audio, "<Audio>"))
+        return e;
+    for (const char* attribute_name : {"playStop", "loopStart", "loopEnd"}) {
+        if (!audio.attribute(attribute_name).empty())
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Audio> uses unsupported ") + attribute_name +
+                           " playback semantics");
+    }
+    return std::nullopt;
+}
+
 // --- transport (tempo + meter) ---------------------------------------------
 
 std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_node& project) {
@@ -303,6 +354,12 @@ std::optional<DawProjectImportError> Importer::read_arrangement(const pugi::xml_
 }
 
 std::optional<DawProjectImportError> Importer::read_track_lanes(const pugi::xml_node& lanes) {
+    const auto time_unit = lanes.attribute("timeUnit");
+    if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
+        return err(DawProjectImportErrorCode::UnsupportedFeature,
+                   std::string("<Lanes timeUnit='") + time_unit.as_string() +
+                       "'> is unsupported; only musical 'beats' timing is imported");
+
     auto track_attr = lanes.attribute("track");
     if (track_attr.empty())
         return err(DawProjectImportErrorCode::UnsupportedFeature,
@@ -319,10 +376,21 @@ std::optional<DawProjectImportError> Importer::read_track_lanes(const pugi::xml_
             continue;
         std::string_view name = child.name();
         if (name == "Clips") {
+            const auto time_unit = child.attribute("timeUnit");
+            if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
+                return err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<Clips timeUnit='") + time_unit.as_string() +
+                               "'> is unsupported; only musical 'beats' timing is imported");
             auto& clips = clips_by_track_.at(track_id.value);
-            for (auto clip : child.children("Clip"))
+            for (auto clip : child.children()) {
+                if (clip.type() != pugi::node_element)
+                    continue;
+                if (std::string_view(clip.name()) != "Clip")
+                    return err(DawProjectImportErrorCode::UnsupportedFeature,
+                               std::string("<Clips> contains unsupported <") + clip.name() + ">");
                 if (auto e = read_clip(clip, clips))
                     return e;
+            }
         } else {
             // Per-track automation lanes (<Points>) and other content are a
             // documented follow-up; refuse rather than drop.
@@ -345,6 +413,8 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
     if (!range)
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<Clip> time and duration must form a finite positive tick range");
+    if (auto e = reject_unsupported_clip_playback(clip))
+        return e;
 
     // Exactly one content timeline is imported. Anything else is refused so a
     // clip's real content is never lost to an unrecognized child element.
@@ -386,8 +456,24 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
 
 std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& notes,
                                                           ClipContent& out) {
+    const auto time_unit = notes.attribute("timeUnit");
+    if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
+        return err(DawProjectImportErrorCode::UnsupportedFeature,
+                   std::string("<Notes timeUnit='") + time_unit.as_string() +
+                       "'> is unsupported; only musical 'beats' timing is imported");
+
     std::vector<NoteEvent> events;
-    for (auto note : notes.children("Note")) {
+    for (auto note : notes.children()) {
+        if (note.type() != pugi::node_element)
+            continue;
+        if (std::string_view(note.name()) != "Note")
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Notes> contains unsupported <") + note.name() + ">");
+        for (auto child : note.children()) {
+            if (child.type() == pugi::node_element)
+                return err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<Note> contains unsupported <") + child.name() + ">");
+        }
         double time_beats = 0.0, duration_beats = 0.0;
         if (auto e = require_double(note, "time", "<Note>", time_beats))
             return e;
@@ -530,6 +616,25 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
 
 std::optional<DawProjectImportError> Importer::read_audio(const pugi::xml_node& audio,
                                                           ClipContent& out) {
+    if (auto e = reject_unsupported_audio_playback(audio))
+        return e;
+    bool saw_file = false;
+    for (auto child : audio.children()) {
+        if (child.type() != pugi::node_element)
+            continue;
+        if (std::string_view(child.name()) != "File")
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Audio> contains unsupported <") + child.name() + ">");
+        if (saw_file)
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       "<Audio> contains multiple <File> references");
+        for (auto file_child : child.children()) {
+            if (file_child.type() == pugi::node_element)
+                return err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<File> contains unsupported <") + file_child.name() + ">");
+        }
+        saw_file = true;
+    }
     ItemId asset_id;
     std::uint64_t frame_count = 0;
     if (auto e = resolve_asset(audio, asset_id, frame_count))

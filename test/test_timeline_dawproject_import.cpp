@@ -356,6 +356,164 @@ TEST_CASE("DAWproject import fails closed on an out-of-subset clip (no silent dr
     REQUIRE(result.error().message.find("Warps") != std::string::npos);
 }
 
+TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and warp metadata") {
+    auto expect_error = [](std::string_view clip_xml, DawProjectImportErrorCode code,
+                           std::string_view detail) {
+        const auto xml =
+            std::string(R"(<Project version="1.0"><Structure>)") +
+            R"(<Track id="t1" name="A"/></Structure>)" +
+            R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)" +
+            std::string(clip_xml) +
+            R"(</Clips></Lanes></Lanes></Arrangement></Project>)";
+        auto result = import_dawproject_xml(xml);
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == code);
+        REQUIRE(result.error().message.find(detail) != std::string::npos);
+    };
+    auto expect_unsupported = [&](std::string_view clip_xml, std::string_view detail) {
+        expect_error(clip_xml, DawProjectImportErrorCode::UnsupportedFeature, detail);
+    };
+
+    SECTION("standard Clip playStart sub-range") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" playStart="0.25"><Notes/></Clip>)",
+            "playStart");
+    }
+    SECTION("referenced Clip content") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" reference="source-clip"><Notes/></Clip>)",
+            "referenced-content");
+    }
+    SECTION("Clip playStart is not numeric") {
+        expect_error(R"(<Clip time="0" duration="1" playStart="junk"><Notes/></Clip>)",
+                     DawProjectImportErrorCode::InvalidValue, "playStart");
+    }
+    SECTION("Clip playStart is non-finite") {
+        expect_error(R"(<Clip time="0" duration="1" playStart="inf"><Notes/></Clip>)",
+                     DawProjectImportErrorCode::InvalidValue, "playStart");
+    }
+    SECTION("Clip playStop") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" playStop="1"><Notes/></Clip>)",
+            "playStop");
+    }
+    SECTION("Clip loopStart") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" loopStart="0"><Notes/></Clip>)",
+            "loopStart");
+    }
+    SECTION("Clip loopEnd") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" loopEnd="1"><Notes/></Clip>)",
+            "loopEnd");
+    }
+    SECTION("absolute Clip content time") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1" contentTimeUnit="seconds"><Notes/></Clip>)",
+            "contentTimeUnit");
+    }
+    SECTION("Audio playStart variant") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio playStart="0.25" duration="1")"
+            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+            "playStart");
+    }
+    SECTION("Audio playStop variant") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio playStop="1" duration="1")"
+            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+            "playStop");
+    }
+    SECTION("Audio loopStart variant") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio loopStart="0" duration="1")"
+            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+            "loopStart");
+    }
+    SECTION("Audio loopEnd variant") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio loopEnd="1" duration="1")"
+            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+            "loopEnd");
+    }
+    SECTION("Warp nested directly under Audio") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+            R"(<File path="audio/bass.wav"/><Warp time="0" contentTime="0"/>)"
+            R"(</Audio></Clip>)",
+            "Warp");
+    }
+    SECTION("Warps nested under Audio") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+            R"(<File path="audio/bass.wav"/><Warps contentTimeUnit="seconds"/>)"
+            R"(</Audio></Clip>)",
+            "Warps");
+    }
+    SECTION("Warp nested under File") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+            R"(<File path="audio/bass.wav"><Warp time="0" contentTime="0"/></File>)"
+            R"(</Audio></Clip>)",
+            "Warp");
+    }
+    SECTION("Warps nested under Note") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Notes>)"
+            R"(<Note time="0" duration="1" channel="0" key="60">)"
+            R"(<Warps contentTimeUnit="seconds" timeUnit="beats">)"
+            R"(<Audio duration="1" sampleRate="44100"><File path="audio/bass.wav"/></Audio>)"
+            R"(<Warp time="0" contentTime="0"/></Warps></Note></Notes></Clip>)",
+            "Warps");
+    }
+    SECTION("non-Note timeline nested under Notes") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Notes>)"
+            R"(<Warps contentTimeUnit="seconds" timeUnit="beats"/>)"
+            R"(</Notes></Clip>)",
+            "Warps");
+    }
+    SECTION("Notes in absolute time") {
+        expect_unsupported(
+            R"(<Clip time="0" duration="1"><Notes timeUnit="seconds">)"
+            R"(<Note time="0" duration="1" channel="0" key="60"/>)"
+            R"(</Notes></Clip>)",
+            "timeUnit");
+    }
+}
+
+TEST_CASE("DAWproject import rejects absolute timing on a Clips container") {
+    auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Structure><Track id="t1" name="A"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips timeUnit="seconds">)"
+        R"(<Clip time="0" duration="1"><Notes/></Clip>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)");
+    REQUIRE(result.is_err());
+    REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+    REQUIRE(result.error().message.find("timeUnit") != std::string::npos);
+}
+
+TEST_CASE("DAWproject import rejects absolute timing on track-scoped Lanes") {
+    auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Structure><Track id="t1" name="A"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1" timeUnit="seconds"><Clips>)"
+        R"(<Clip time="0" duration="1"><Notes/></Clip>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)");
+    REQUIRE(result.is_err());
+    REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+    REQUIRE(result.error().message.find("timeUnit") != std::string::npos);
+}
+
+TEST_CASE("DAWproject import accepts explicit zero playStart as whole-content playback") {
+    auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Structure><Track id="t1" name="A"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+        R"(<Clip time="0" duration="1" contentTimeUnit="beats" playStart="0"><Notes/></Clip>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)");
+    REQUIRE(result);
+    REQUIRE(result->sequences()[0].tracks()[0].clips().size() == 1);
+}
+
 TEST_CASE("DAWproject import rejects malformed and out-of-subset input") {
     auto expect = [](std::string_view xml, DawProjectImportErrorCode code) {
         auto result = import_dawproject_xml(xml);

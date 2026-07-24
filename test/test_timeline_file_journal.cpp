@@ -284,11 +284,13 @@ TEST_CASE("Timeline file journal fails closed on corruption before the tail") {
     REQUIRE(rejected.error().code == FileJournalErrorCode::CorruptRecord);
 }
 
-TEST_CASE("Timeline file journal fails closed on complete final-frame corruption") {
+TEST_CASE("Timeline file journal discards a full-length invalid final commit trailer") {
     TemporaryJournal temporary;
     const auto fallback = make_project();
+    std::uintmax_t checkpoint_size = 0;
     {
         auto opened = open_journal(temporary.path, fallback);
+        checkpoint_size = std::filesystem::file_size(temporary.path);
         auto session =
             std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
         auto writer = std::move(session->register_writer()).value();
@@ -309,9 +311,11 @@ TEST_CASE("Timeline file journal fails closed on complete final-frame corruption
         REQUIRE(file);
     }
 
-    auto rejected = FileJournal::open(temporary.path, fallback, builtins());
-    REQUIRE_FALSE(rejected);
-    REQUIRE(rejected.error().code == FileJournalErrorCode::CorruptRecord);
+    const auto recovered = open_journal(temporary.path, fallback);
+    REQUIRE(recovered.repaired_torn_tail);
+    REQUIRE(recovered.revision == DocumentRevision{});
+    REQUIRE(velocity(recovered.checkpoint) == 1000);
+    REQUIRE(std::filesystem::file_size(temporary.path) == checkpoint_size);
 }
 
 TEST_CASE("Timeline file journal rejects committed final-frame payload corruption") {
@@ -386,6 +390,45 @@ TEST_CASE("Timeline file journal discards a checksum-invalid final frame without
     REQUIRE(recovered.revision == DocumentRevision{1});
     REQUIRE(velocity(recovered.checkpoint) == 2000);
     REQUIRE(std::filesystem::file_size(temporary.path) == revision_one_size);
+}
+
+TEST_CASE("Timeline file journal rejects an invalid commit trailer before a later record") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    std::uintmax_t revision_one_size = 0;
+    std::uintmax_t committed_size = 0;
+    {
+        auto opened = open_journal(temporary.path, fallback);
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto first =
+            session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+        REQUIRE(session->submit(writer, std::move(first)));
+        revision_one_size = std::filesystem::file_size(temporary.path);
+        auto second =
+            session_transaction(writer, {1}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+        REQUIRE(session->submit(writer, std::move(second)));
+        committed_size = std::filesystem::file_size(temporary.path);
+    }
+    REQUIRE(committed_size > revision_one_size);
+    {
+        std::fstream file(temporary.path, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(file);
+        file.seekg(static_cast<std::streamoff>(revision_one_size - 1));
+        char byte = 0;
+        file.read(&byte, 1);
+        REQUIRE(file);
+        byte ^= 0x01;
+        file.seekp(static_cast<std::streamoff>(revision_one_size - 1));
+        file.write(&byte, 1);
+        REQUIRE(file);
+    }
+
+    auto rejected = FileJournal::open(temporary.path, fallback, builtins());
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == FileJournalErrorCode::CorruptRecord);
+    REQUIRE(std::filesystem::file_size(temporary.path) == committed_size);
 }
 
 TEST_CASE("Timeline file journal does not misclassify middle-header corruption as a torn tail") {
