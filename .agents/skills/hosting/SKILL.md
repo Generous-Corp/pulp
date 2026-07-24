@@ -962,6 +962,44 @@ RT-safely, without re-baking — via the bake-layer injection primitive:
 `test/test_baked_graph_param_injection.cpp` is the executable spec (claims, ramps,
 sample accuracy, RT-allocation-free drain, the accumulate regression).
 
+#### Not every knob belongs in `baked_params`
+
+`baked_params` is for values a node can accept at ANY sample. A value that
+changes the node's TOPOLOGY — which stages exist, how a buffer is laid out, or
+anything whose setter designs a filter — must be a registration/construction
+choice with its own `type_id` instead, following the per-mode `"svf"` pattern.
+Two reasons, both learned the hard way:
+
+- **The artifact's identity.** A baked build authored as one thing must stay
+  that thing for the artifact's life; a control-thread write should not be able
+  to turn a tape delay into a BBD mid-render.
+- **The setter runs on the AUDIO thread.** Anything reachable from
+  `process_instance_baked_param` inherits the RT contract transitively. In
+  `forge_character_delay_catalog.hpp` the tape TIER and tape SPEED are
+  construction config precisely because changing the speed redesigns a bank of
+  FIRs; the age macro next to them is a baked param only because its filter
+  banks are pre-designed at `prepare()` and the audio thread merely interpolates
+  between two of them.
+
+A related ordering trap: a node's `prepare()` typically configures construction
+options and only THEN calls the DSP's `set_sample_rate`, so every config setter
+runs while the instance is still unsized. Those setters must tolerate being
+called before allocation — store the value and let `prepare()` design against it
+— or they walk buffers that do not exist yet. That is an out-of-bounds write
+that only fires for nodes constructed away from their defaults, so it survives
+casual testing; `test_character_delay.cpp` has an explicit regression case for
+it ("configuring the tape speed before the sample rate is safe").
+
+#### Per-sample params on a block-oriented DSP
+
+When the wrapped block processes buffers rather than single samples, the
+faithful wrapping is to call it one sample at a time and apply every param each
+sample. That is only cheap if the DSP's setters are stores rather than work —
+smoothing and coefficient recomputation belong INSIDE the block, on its own
+control-rate cadence. A wrapper that instead calls setters which recompute
+filters is doing a filter design per sample per param. Check what a setter costs
+before you put it in the per-sample loop.
+
 ## Common tripwires
 
 - **Instruments have no input bus — never address input element 0 blind.**
