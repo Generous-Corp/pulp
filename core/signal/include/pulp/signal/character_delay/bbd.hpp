@@ -31,6 +31,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 
 namespace pulp::signal::chardelay {
 
