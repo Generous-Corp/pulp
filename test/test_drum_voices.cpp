@@ -525,7 +525,59 @@ TEST_CASE("A single-burst clap is still a valid voice",
     REQUIRE_FALSE(voice.is_active());
 }
 
+TEST_CASE("A snare with a silenced layer still finishes",
+          "[signal][drum][snare]") {
+    // A layer at zero level renders nothing, so its envelope never advances --
+    // and a voice that counted it as active would stay active forever. Both
+    // layers get the check because each has its own early return.
+    for (int silenced = 0; silenced < 2; ++silenced) {
+        SnareVoice voice;
+        voice.prepare(kFs);
+        voice.set_tone_level(silenced == 0 ? 0.0 : 1.0);
+        voice.set_noise_level(silenced == 0 ? 1.0 : 0.0);
+        voice.set_snap_level(0.0);
+        voice.set_tone_decay_ms(50.0);
+        voice.set_noise_decay_ms(50.0);
+
+        voice.note_on(1.0f);
+        REQUIRE(voice.is_active());
+        render(voice, static_cast<int>(kFs));
+        INFO("silenced layer index " << silenced);
+        REQUIRE_FALSE(voice.is_active());
+    }
+}
+
 // -- Kit ---------------------------------------------------------------------
+
+TEST_CASE("A voice registered after the kit was prepared still runs at the "
+          "kit's rate",
+          "[signal][drum][kit]") {
+    // Registering in response to a preset load is reasonable, and a voice that
+    // missed prepare() would render at its construction-time rate -- audible as
+    // a wrongly-pitched drum rather than as an error.
+    Kit kit;
+    kit.prepare(kFs);
+
+    HatVoice late;
+    late.set_tune_hz(400.0);
+    late.set_decay_ms(500.0);
+    kit.add_voice(&late, 42);
+
+    kit.trigger(42, 1.0f);
+    std::vector<float> out(24000, 0.0f);
+    kit.process(out.data(), static_cast<int>(out.size()));
+
+    // Rendered at 48 kHz the hat's 500 ms decay is still audible half a second
+    // in; at a default 44.1 kHz it would be measurably shorter, and at a wrong
+    // rate the partials would land elsewhere.
+    REQUIRE(peak(out) > 1e-3);
+    HatVoice reference;
+    reference.set_tune_hz(400.0);
+    reference.set_decay_ms(500.0);
+    reference.prepare(kFs);
+    const auto expected = hit(reference, 1.0f, 24000);
+    REQUIRE(rms(out, 12000, 24000) > rms(expected, 12000, 24000) * 0.5);
+}
 
 TEST_CASE("A kit sums its voices", "[signal][drum][kit]") {
     SnareVoice snare;

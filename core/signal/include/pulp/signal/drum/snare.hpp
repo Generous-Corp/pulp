@@ -174,13 +174,20 @@ protected:
         pitch_env_.set_decay_time_constant_ms(pitch_sweep_ms_);
         pitch_env_.trigger();
 
-        tone_env_.set_attack_ms(0.3);
-        tone_env_.set_decay_t60_ms(tone_decay_ms_);
-        tone_env_.trigger();
-
-        noise_env_.set_attack_ms(0.2);
-        noise_env_.set_decay_t60_ms(noise_decay_ms_);
-        noise_env_.trigger();
+        // A layer at zero level is not started, and is not counted as active
+        // below. Both halves are needed: its render path returns early, so a
+        // started envelope would never advance and the voice would report
+        // itself active forever.
+        if (tone_level_ > 0.0) {
+            tone_env_.set_attack_ms(0.3);
+            tone_env_.set_decay_t60_ms(tone_decay_ms_);
+            tone_env_.trigger();
+        }
+        if (noise_level_ > 0.0) {
+            noise_env_.set_attack_ms(0.2);
+            noise_env_.set_decay_t60_ms(noise_decay_ms_);
+            noise_env_.trigger();
+        }
 
         snap_.trigger(brightness_);
         shell_.set_frequency(static_cast<float>(std::min(tune_hz_, 0.49 * sample_rate())));
@@ -188,7 +195,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return tone_env_.is_active() || noise_env_.is_active() || snap_.is_active();
+        return (tone_level_ > 0.0 && tone_env_.is_active()) ||
+               (noise_level_ > 0.0 && noise_env_.is_active()) || snap_.is_active();
     }
 
     void render_add(float* out, int num_samples) override {

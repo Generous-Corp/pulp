@@ -47,6 +47,12 @@ public:
     /// without a lookup on the audio thread.
     std::size_t add_voice(Voice* voice, int note, int choke_group = 0) {
         slots_.push_back({voice, note, choke_group});
+        // Prepare on registration as well as in `prepare()`. Registering after
+        // the kit was prepared is a reasonable thing to do -- a caller may add
+        // a voice in response to a preset load -- and without this the new
+        // voice would run at whatever rate it was constructed with, which is
+        // audible as a wrongly-pitched drum rather than as an error.
+        if (voice != nullptr) voice->prepare(sample_rate_);
         return slots_.size() - 1;
     }
 
