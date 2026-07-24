@@ -55,6 +55,7 @@ public:
         sample_positions[slot] = context.position_samples;
         beat_positions[slot] = context.position_beats;
         bars[slot] = context.bar;
+        transport_validity[slot] = context.transport_validity;
         midi_counts[slot] = static_cast<int>(midi_in.size());
         first_midi_offsets[slot] = midi_in.empty() ? -1 : midi_in[0].sample_offset;
         last_midi_offsets[slot] = midi_in.empty() ? -1 : midi_in[midi_in.size() - 1].sample_offset;
@@ -97,6 +98,7 @@ public:
     std::array<std::int64_t, 16> sample_positions{};
     std::array<double, 16> beat_positions{};
     std::array<std::int64_t, 16> bars{};
+    std::array<pulp::format::TransportValidity, 16> transport_validity{};
     std::array<int, 16> midi_counts{};
     std::array<int, 16> first_midi_offsets{};
     std::array<int, 16> last_midi_offsets{};
@@ -166,6 +168,18 @@ TEST_CASE("OfflineRenderHost prepares and steps deterministic blocks",
     REQUIRE(processor->sample_positions[3] == 352);
     REQUIRE_THAT(processor->beat_positions[1],
                  WithinAbs(4.0 + (32.0 / 48000.0) * 2.0, 0.000001));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::Playing));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::Tempo));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::BeatPosition));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::SamplePosition));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::TimeSignature));
+    REQUIRE(processor->transport_validity[0].has(
+        pulp::format::TransportField::Bar));
     REQUIRE(result.audio.num_channels() == 2);
     REQUIRE(result.audio.num_samples() == 100);
 }

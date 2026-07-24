@@ -218,7 +218,8 @@ struct ProcessContext {
 
     /// Identifies which transport values were supplied for this block. A clear
     /// bit means the corresponding value is only its compatibility default.
-    /// CLAP publishes this mask; adapters awaiting migration leave it empty.
+    /// Format adapters publish this mask from their host APIs; a host that does
+    /// not supply transport leaves it empty.
     /// Kept at the end of the data members so existing field offsets do not move.
     TransportValidity transport_validity{};
 

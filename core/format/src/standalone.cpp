@@ -357,12 +357,23 @@ void StandaloneApp::render_audio_block(
         proc_ctx.tempo_bpm = config_.tempo_bpm;
         proc_ctx.time_sig_numerator = config_.time_sig_numerator;
         proc_ctx.time_sig_denominator = config_.time_sig_denominator;
+        proc_ctx.transport_validity.set(TransportField::SamplePosition);
+        proc_ctx.transport_validity.set(TransportField::Playing);
+        proc_ctx.transport_validity.set(TransportField::Recording);
+        proc_ctx.transport_validity.set(TransportField::Looping);
+        if (config_.tempo_bpm > 0.0) {
+            proc_ctx.transport_validity.set(TransportField::Tempo);
+        }
+        if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
+            proc_ctx.transport_validity.set(TransportField::TimeSignature);
+        }
         if (config_.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
             const double seconds_per_beat = 60.0 / config_.tempo_bpm;
             const double samples_per_beat = seconds_per_beat * ctx.sample_rate;
             if (samples_per_beat > 0.0) {
                 proc_ctx.position_beats =
                     static_cast<double>(block_start_samples) / samples_per_beat;
+                proc_ctx.transport_validity.set(TransportField::BeatPosition);
             }
         }
         // Derive `bar`, then diff against the previous block for the transport
@@ -375,7 +386,12 @@ void StandaloneApp::render_audio_block(
         // AU / CLAP adapters so there is one definition of "the transport
         // started". Stateful; updates `playhead_prev_` in place.
         detail::derive_bar_from_beats(proc_ctx);
-        detail::compute_playhead_changes(proc_ctx, playhead_prev_);
+        if (proc_ctx.has_transport(TransportField::BeatPosition) &&
+            proc_ctx.has_transport(TransportField::TimeSignature)) {
+            proc_ctx.transport_validity.set(TransportField::Bar);
+        }
+        detail::compute_playhead_changes(
+            proc_ctx, playhead_prev_, detail::TransportDiffMode::FieldValidity);
 
         {
             // Flush denormals to zero for the DSP callback so quiet tails in

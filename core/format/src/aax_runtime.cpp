@@ -208,10 +208,20 @@ void read_transport(AAX_ITransport* transport, ProcessContext* context) {
         return;
     }
 
-    transport->GetCurrentTempo(&context->tempo_bpm);
-    transport->GetCurrentMeter(&context->time_sig_numerator, &context->time_sig_denominator);
-    transport->IsTransportPlaying(&context->is_playing);
-    transport->GetCurrentNativeSampleLocation(&context->position_samples);
+    if (transport->GetCurrentTempo(&context->tempo_bpm) == AAX_SUCCESS) {
+        context->transport_validity.set(TransportField::Tempo);
+    }
+    if (transport->GetCurrentMeter(&context->time_sig_numerator,
+                                   &context->time_sig_denominator) == AAX_SUCCESS) {
+        context->transport_validity.set(TransportField::TimeSignature);
+    }
+    if (transport->IsTransportPlaying(&context->is_playing) == AAX_SUCCESS) {
+        context->transport_validity.set(TransportField::Playing);
+    }
+    if (transport->GetCurrentNativeSampleLocation(&context->position_samples) ==
+        AAX_SUCCESS) {
+        context->transport_validity.set(TransportField::SamplePosition);
+    }
 
     int64_t tick_position = 0;
     uint32_t ticks_per_quarter = 0;
@@ -220,6 +230,7 @@ void read_transport(AAX_ITransport* transport, ProcessContext* context) {
         && ticks_per_quarter > 0)
     {
         context->position_beats = static_cast<double>(tick_position) / static_cast<double>(ticks_per_quarter);
+        context->transport_validity.set(TransportField::BeatPosition);
     }
 }
 
