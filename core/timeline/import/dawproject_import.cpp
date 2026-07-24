@@ -7,13 +7,25 @@
 
 #include <pugixml.hpp>
 
+#include <cerrno>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#include <clocale>
+#else
+#include <locale.h>
+#endif
 
 namespace pulp::timeline {
 namespace {
@@ -37,8 +49,32 @@ bool declared_duration_matches_frames(long double declared_frames,
     return declared_frames >= actual - 0.5L && declared_frames < actual + 0.5L;
 }
 
-std::int64_t beats_to_ticks(double beats) {
-    return static_cast<std::int64_t>(std::llround(beats * kPpq));
+std::optional<std::int64_t> beats_to_ticks(double beats) noexcept {
+    constexpr long double kExclusiveUpperTick = static_cast<long double>(std::uint64_t{1} << 63u);
+    const auto rounded =
+        std::round(static_cast<long double>(beats) * static_cast<long double>(kPpq));
+    if (!std::isfinite(rounded) || rounded < 0.0L || rounded >= kExclusiveUpperTick)
+        return std::nullopt;
+    return static_cast<std::int64_t>(rounded);
+}
+
+struct CheckedBeatRange {
+    std::int64_t start = 0;
+    std::int64_t duration = 0;
+    std::int64_t end = 0;
+};
+
+std::optional<CheckedBeatRange> checked_beat_range(double start_beats,
+                                                   double duration_beats) noexcept {
+    if (!std::isfinite(start_beats) || start_beats < 0.0 || !std::isfinite(duration_beats) ||
+        !(duration_beats > 0.0))
+        return std::nullopt;
+    const auto start = beats_to_ticks(start_beats);
+    const auto duration = beats_to_ticks(duration_beats);
+    if (!start || !duration || *duration <= 0 ||
+        *start > std::numeric_limits<std::int64_t>::max() - *duration)
+        return std::nullopt;
+    return CheckedBeatRange{*start, *duration, *start + *duration};
 }
 
 // A monotonic ItemId source. Sequential allocation guarantees the uniqueness and
@@ -104,13 +140,45 @@ bool has_attr(const pugi::xml_node& node, const char* name) {
     return !node.attribute(name).empty();
 }
 
+template <typename Value> bool parse_number(const pugi::xml_attribute& attribute, Value& out) {
+    const std::string_view text = attribute.as_string();
+    if constexpr (std::is_floating_point_v<Value>) {
+        const std::string buffer(text);
+        errno = 0;
+        char* end = nullptr;
+        double value = 0.0;
+#if defined(_WIN32)
+        static _locale_t c_locale = ::_create_locale(LC_ALL, "C");
+        if (c_locale == nullptr)
+            return false;
+        value = ::_strtod_l(buffer.c_str(), &end, c_locale);
+#else
+        static ::locale_t c_locale = ::newlocale(LC_ALL_MASK, "C", static_cast<::locale_t>(0));
+        if (c_locale == static_cast<::locale_t>(0))
+            return false;
+        const ::locale_t previous = ::uselocale(c_locale);
+        value = std::strtod(buffer.c_str(), &end);
+        ::uselocale(previous);
+#endif
+        if (errno == ERANGE || end == buffer.c_str() || end != buffer.c_str() + buffer.size())
+            return false;
+        out = value;
+        return true;
+    } else {
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), out);
+        return error == std::errc{} && end == text.data() + text.size();
+    }
+}
+
 std::optional<DawProjectImportError> require_double(const pugi::xml_node& node, const char* name,
                                                     const char* context, double& out) {
     auto attr = node.attribute(name);
     if (attr.empty())
         return err(DawProjectImportErrorCode::MissingAttribute,
                    std::string(context) + " is missing required attribute '" + name + "'");
-    out = attr.as_double();
+    if (!parse_number(attr, out))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   std::string(context) + " has invalid numeric attribute '" + name + "'");
     return std::nullopt;
 }
 
@@ -120,7 +188,9 @@ std::optional<DawProjectImportError> require_int(const pugi::xml_node& node, con
     if (attr.empty())
         return err(DawProjectImportErrorCode::MissingAttribute,
                    std::string(context) + " is missing required attribute '" + name + "'");
-    out = attr.as_llong();
+    if (!parse_number(attr, out))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   std::string(context) + " has invalid integer attribute '" + name + "'");
     return std::nullopt;
 }
 
@@ -140,7 +210,7 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
         double bpm = 0.0;
         if (auto e = require_double(tempo, "value", "<Tempo>", bpm))
             return e;
-        if (!(bpm > 0.0))
+        if (!std::isfinite(bpm) || !(bpm > 0.0))
             return err(DawProjectImportErrorCode::InvalidValue, "<Tempo value> must be positive");
         tempo_bpm_ = bpm;
     }
@@ -151,9 +221,10 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
             return e;
         if (auto e = require_int(sig, "denominator", "<TimeSignature>", den))
             return e;
-        if (num <= 0 || den <= 0)
+        if (num <= 0 || den <= 0 || num > std::numeric_limits<std::int32_t>::max() ||
+            den > std::numeric_limits<std::int32_t>::max())
             return err(DawProjectImportErrorCode::InvalidValue,
-                       "<TimeSignature> numerator and denominator must be positive");
+                       "<TimeSignature> numerator and denominator must be positive 32-bit values");
         meter_num_ = static_cast<std::int32_t>(num);
         meter_den_ = static_cast<std::int32_t>(den);
     }
@@ -270,10 +341,10 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
         return e;
     if (auto e = require_double(clip, "duration", "<Clip>", duration_beats))
         return e;
-    if (time_beats < 0.0)
-        return err(DawProjectImportErrorCode::InvalidValue, "<Clip time> must be non-negative");
-    if (!(duration_beats > 0.0))
-        return err(DawProjectImportErrorCode::InvalidValue, "<Clip duration> must be positive");
+    const auto range = checked_beat_range(time_beats, duration_beats);
+    if (!range)
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "<Clip> time and duration must form a finite positive tick range");
 
     // Exactly one content timeline is imported. Anything else is refused so a
     // clip's real content is never lost to an unrecognized child element.
@@ -301,16 +372,14 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    "<Clip> with multiple content timelines is not supported");
 
-    std::int64_t start = beats_to_ticks(time_beats);
-    std::int64_t duration = beats_to_ticks(duration_beats);
-    auto made = Clip::create(ids_.take(), timebase::TickPosition{start},
-                             timebase::TickDuration{duration}, std::move(content));
+    auto made = Clip::create(ids_.take(), timebase::TickPosition{range->start},
+                             timebase::TickDuration{range->duration}, std::move(content));
     if (made.is_err())
         return DawProjectImportError{DawProjectImportErrorCode::ModelRejected,
                                      "model rejected clip", made.error()};
 
-    if (start + duration > max_end_tick_)
-        max_end_tick_ = start + duration;
+    if (range->end > max_end_tick_)
+        max_end_tick_ = range->end;
     out.push_back(std::move(made.value()));
     return std::nullopt;
 }
@@ -324,10 +393,10 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
             return e;
         if (auto e = require_double(note, "duration", "<Note>", duration_beats))
             return e;
-        if (time_beats < 0.0)
-            return err(DawProjectImportErrorCode::InvalidValue, "<Note time> must be non-negative");
-        if (!(duration_beats > 0.0))
-            return err(DawProjectImportErrorCode::InvalidValue, "<Note duration> must be positive");
+        const auto range = checked_beat_range(time_beats, duration_beats);
+        if (!range)
+            return err(DawProjectImportErrorCode::InvalidValue,
+                       "<Note> time and duration must form a finite positive tick range");
 
         long long key = 0;
         if (auto e = require_int(note, "key", "<Note>", key))
@@ -338,19 +407,27 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
 
         // DAWproject velocity/channel are optional; default to full velocity on
         // channel 0. vel is a normalized 0..1 gain.
-        double vel = note.attribute("vel").empty() ? 1.0 : note.attribute("vel").as_double();
-        if (vel < 0.0 || vel > 1.0)
+        double vel = 1.0;
+        const auto velocity = note.attribute("vel");
+        if (!velocity.empty() && !parse_number(velocity, vel))
+            return err(DawProjectImportErrorCode::InvalidValue,
+                       "<Note vel> must be a number in the range 0..1");
+        if (!std::isfinite(vel) || vel < 0.0 || vel > 1.0)
             return err(DawProjectImportErrorCode::InvalidValue,
                        "<Note vel> must be in the range 0..1");
-        long long channel = note.attribute("channel").as_llong(0);
+        long long channel = 0;
+        const auto channel_attribute = note.attribute("channel");
+        if (!channel_attribute.empty() && !parse_number(channel_attribute, channel))
+            return err(DawProjectImportErrorCode::InvalidValue,
+                       "<Note channel> must be an integer in the range 0..15");
         if (channel < 0 || channel > 15)
             return err(DawProjectImportErrorCode::InvalidValue,
                        "<Note channel> must be in the range 0..15");
 
         NoteEvent ev;
         ev.id = ids_.take();
-        ev.start = timebase::TickPosition{beats_to_ticks(time_beats)};
-        ev.duration = timebase::TickDuration{beats_to_ticks(duration_beats)};
+        ev.start = timebase::TickPosition{range->start};
+        ev.duration = timebase::TickDuration{range->duration};
         ev.velocity = static_cast<std::uint16_t>(std::llround(vel * 65535.0));
         ev.pitch = static_cast<std::uint8_t>(key);
         ev.channel = static_cast<std::uint8_t>(channel);

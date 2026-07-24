@@ -6,14 +6,15 @@
 #include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
 
+#include <algorithm>
+#include <atomic>
 #include <charconv>
-#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -25,6 +26,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -51,42 +56,161 @@ int emit(OperationResult result) {
     return result.exit_code;
 }
 
-std::optional<std::string> read_text(const fs::path& path) {
+enum class ReadTextError { None, OpenFailed, TooLarge, ReadFailed };
+
+struct ReadTextResult {
+    std::optional<std::string> text;
+    ReadTextError error = ReadTextError::None;
+};
+
+ReadTextResult read_text_bounded(const fs::path& path, std::size_t maximum_bytes) {
+    std::error_code error;
+    const auto file_bytes = fs::file_size(path, error);
+    if (error)
+        return {{}, ReadTextError::OpenFailed};
+    if (file_bytes > maximum_bytes ||
+        file_bytes > static_cast<std::uintmax_t>(std::numeric_limits<std::size_t>::max()) ||
+        file_bytes > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+        return {{}, ReadTextError::TooLarge};
+
     std::ifstream stream(path, std::ios::binary);
     if (!stream)
-        return std::nullopt;
-    return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+        return {{}, ReadTextError::OpenFailed};
+    std::string text;
+    try {
+        text.resize(static_cast<std::size_t>(file_bytes));
+    } catch (...) {
+        return {{}, ReadTextError::ReadFailed};
+    }
+    if (!text.empty()) {
+        stream.read(text.data(), static_cast<std::streamsize>(text.size()));
+        if (stream.gcount() != static_cast<std::streamsize>(text.size()))
+            return {{}, ReadTextError::ReadFailed};
+    }
+    char extra = 0;
+    if (stream.read(&extra, 1))
+        return {{},
+                text.size() == maximum_bytes ? ReadTextError::TooLarge : ReadTextError::ReadFailed};
+    if (!stream.eof())
+        return {{}, ReadTextError::ReadFailed};
+    return {std::move(text), ReadTextError::None};
 }
 
-bool write_text_atomic(const fs::path& destination, std::string_view text) {
+fs::path temporary_path(const fs::path& destination, std::uint64_t serial) {
     auto temporary = destination;
-    temporary +=
-        ".tmp." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-    bool complete = false;
-    {
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (stream) {
-            stream.write(text.data(), static_cast<std::streamsize>(text.size()));
-            complete = static_cast<bool>(stream);
-        }
+#ifdef _WIN32
+    const auto process = static_cast<std::uint64_t>(::GetCurrentProcessId());
+#else
+    const auto process = static_cast<std::uint64_t>(::getpid());
+#endif
+    temporary += ".tmp." + std::to_string(process) + "." + std::to_string(serial);
+    return temporary;
+}
+
+void remove_temporary(const fs::path& path) {
+    std::error_code ignored;
+    fs::remove(path, ignored);
+}
+
+#ifndef _WIN32
+bool sync_file(int descriptor) noexcept {
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+    if (::fcntl(descriptor, F_FULLFSYNC) == 0)
+        return true;
+    if (errno != ENOTSUP)
+        return false;
+#endif
+    return ::fsync(descriptor) == 0;
+}
+
+bool sync_parent_directory(const fs::path& destination) noexcept {
+    auto parent = destination.parent_path();
+    if (parent.empty())
+        parent = ".";
+    const int descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+    if (descriptor < 0)
+        return false;
+    const bool synced = ::fsync(descriptor) == 0;
+    const bool closed = ::close(descriptor) == 0;
+    return synced && closed;
+}
+#endif
+
+bool write_text_atomic(const fs::path& destination, std::string_view text) noexcept {
+    static std::atomic<std::uint64_t> next_serial{1};
+    fs::path temporary;
+#ifdef _WIN32
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    for (int attempt = 0; attempt != 128; ++attempt) {
+        temporary = temporary_path(destination, next_serial.fetch_add(1));
+        handle = ::CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                               FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle != INVALID_HANDLE_VALUE)
+            break;
+        if (::GetLastError() != ERROR_FILE_EXISTS && ::GetLastError() != ERROR_ALREADY_EXISTS)
+            return false;
     }
+    if (handle == INVALID_HANDLE_VALUE)
+        return false;
+
+    bool complete = true;
+    std::size_t offset = 0;
+    while (offset < text.size()) {
+        const auto chunk = static_cast<DWORD>(
+            std::min<std::size_t>(text.size() - offset, std::numeric_limits<DWORD>::max()));
+        DWORD written = 0;
+        if (!::WriteFile(handle, text.data() + offset, chunk, &written, nullptr) || written == 0) {
+            complete = false;
+            break;
+        }
+        offset += written;
+    }
+    complete = complete && ::FlushFileBuffers(handle) != 0;
+    complete = ::CloseHandle(handle) != 0 && complete;
     if (!complete) {
-        std::error_code error;
-        fs::remove(temporary, error);
+        remove_temporary(temporary);
         return false;
     }
-    std::error_code error;
-#ifdef _WIN32
     if (::MoveFileExW(temporary.c_str(), destination.c_str(),
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         return true;
-    error = std::error_code(static_cast<int>(::GetLastError()), std::system_category());
 #else
-    fs::rename(temporary, destination, error);
-    if (!error)
-        return true;
+    int descriptor = -1;
+    for (int attempt = 0; attempt != 128; ++attempt) {
+        temporary = temporary_path(destination, next_serial.fetch_add(1));
+        descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (descriptor >= 0)
+            break;
+        if (errno != EEXIST)
+            return false;
+    }
+    if (descriptor < 0)
+        return false;
+
+    bool complete = true;
+    std::size_t offset = 0;
+    while (offset < text.size()) {
+        const auto chunk = std::min<std::size_t>(
+            text.size() - offset, static_cast<std::size_t>(std::numeric_limits<ssize_t>::max()));
+        const auto written = ::write(descriptor, text.data() + offset, chunk);
+        if (written < 0 && errno == EINTR)
+            continue;
+        if (written <= 0) {
+            complete = false;
+            break;
+        }
+        offset += static_cast<std::size_t>(written);
+    }
+    complete = complete && sync_file(descriptor);
+    complete = ::close(descriptor) == 0 && complete;
+    if (!complete) {
+        remove_temporary(temporary);
+        return false;
+    }
+    if (::rename(temporary.c_str(), destination.c_str()) == 0)
+        return sync_parent_directory(destination);
 #endif
-    fs::remove(temporary, error);
+    remove_temporary(temporary);
     return false;
 }
 
@@ -193,8 +317,14 @@ int cmd_seq(const std::vector<std::string>& args) {
     if (subcommand == "apply") {
         if (args.size() != 3 && args.size() != 5)
             return bad_seq_usage("apply requires project and command JSON paths");
-        const auto commands = read_text(args[2]);
-        if (!commands) {
+        const auto maximum_command_bytes = pulp::timeline::DecodeLimits{}.max_input_bytes;
+        const auto commands = read_text_bounded(args[2], maximum_command_bytes);
+        if (!commands.text) {
+            if (commands.error == ReadTextError::TooLarge) {
+                std::cerr << "pulp seq: command file exceeds " << maximum_command_bytes
+                          << " bytes: " << args[2] << "\n";
+                return 1;
+            }
             std::cerr << "pulp seq: could not read command file: " << args[2] << "\n";
             return 1;
         }
@@ -204,7 +334,7 @@ int cmd_seq(const std::vector<std::string>& args) {
                 return bad_seq_usage("unknown apply option: " + args[3]);
             output = args[4];
         }
-        auto result = pulp::tools::timeline::command_apply(args[1], *commands);
+        auto result = pulp::tools::timeline::command_apply(args[1], *commands.text);
         if (!result || output.empty())
             return emit(std::move(result));
         const auto project = project_member(result.json);

@@ -171,6 +171,25 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
                     " --out " + quote(changed_path) + " > " + quote(command_result_path)) == 0);
     REQUIRE(std::filesystem::is_regular_file(changed_path));
     REQUIRE(read_text(changed_path) != "sentinel");
+    const auto changed_project = read_text(changed_path);
+    for (const auto& entry : std::filesystem::directory_iterator(temp.path()))
+        REQUIRE_FALSE(entry.path().filename().string().starts_with("changed.json.tmp."));
+
+    const auto oversized_commands = temp.path() / "oversized-commands.json";
+    const auto oversized_error = temp.path() / "oversized-error.txt";
+    write_text(oversized_commands, "[]");
+    std::error_code resize_error;
+    std::filesystem::resize_file(oversized_commands,
+                                 static_cast<std::uintmax_t>(DecodeLimits{}.max_input_bytes) +
+                                     std::uintmax_t{1},
+                                 resize_error);
+    REQUIRE_FALSE(resize_error);
+    write_text(changed_path, "sentinel");
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(oversized_commands) +
+                    " --out " + quote(changed_path) + " 2> " + quote(oversized_error)) == 1);
+    REQUIRE(read_text(changed_path) == "sentinel");
+    REQUIRE(read_text(oversized_error).find("command file exceeds") != std::string::npos);
+    write_text(changed_path, changed_project);
 
     REQUIRE(run_cli(cli + " render " + quote(project_path) + " --out " + quote(original_wav)) == 0);
     REQUIRE(run_cli(cli + " render " + quote(changed_path) + " --out " + quote(changed_wav)) == 0);

@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <clocale>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -93,6 +94,35 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
     REQUIRE(result);
     return std::move(result).value();
 }
+
+class ScopedCommaNumericLocale {
+  public:
+    ScopedCommaNumericLocale() {
+        if (const char* previous = std::setlocale(LC_NUMERIC, nullptr))
+            previous_ = previous;
+        for (const char* name :
+             {"de_DE.UTF-8", "de_DE", "fr_FR.UTF-8", "fr_FR", "nl_NL.UTF-8", "nl_NL"}) {
+            if (std::setlocale(LC_NUMERIC, name) != nullptr &&
+                std::localeconv()->decimal_point[0] == ',') {
+                active_ = true;
+                break;
+            }
+        }
+    }
+
+    ~ScopedCommaNumericLocale() {
+        if (!previous_.empty())
+            std::setlocale(LC_NUMERIC, previous_.c_str());
+    }
+
+    bool active() const noexcept {
+        return active_;
+    }
+
+  private:
+    std::string previous_;
+    bool active_ = false;
+};
 
 struct PlaybackTrace {
     std::vector<float> audio;
@@ -378,6 +408,91 @@ TEST_CASE("DAWproject import rejects malformed and out-of-subset input") {
                R"(<Clip time="0.0"/></Clips></Lanes></Lanes></Arrangement></Project>)",
                DawProjectImportErrorCode::MissingAttribute);
     }
+    SECTION("clip non-finite time") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="inf" duration="1.0"/>)"
+               R"(</Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("clip time has trailing junk") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="1junk" duration="1.0"/>)"
+               R"(</Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("clip huge duration") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1e300"/>)"
+               R"(</Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("clip duration rounds to zero ticks") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1e-20"/>)"
+               R"(</Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("clip tick range overflows") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="10000000000000" duration="10000000000000"/>)"
+               R"(</Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("note tick range overflows") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1.0"><Notes>)"
+               R"(<Note time="10000000000000" duration="10000000000000" key="60"/>)"
+               R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("note time is not numeric") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1.0"><Notes>)"
+               R"(<Note time="garbage" duration="1.0" key="60"/>)"
+               R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("note velocity is non-finite") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1.0"><Notes>)"
+               R"(<Note time="0.0" duration="1.0" key="60" vel="nan"/>)"
+               R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("note velocity has trailing junk") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1.0"><Notes>)"
+               R"(<Note time="0.0" duration="1.0" key="60" vel="0.5junk"/>)"
+               R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
+    SECTION("note channel has trailing junk") {
+        expect(R"(<Project version="1.0"><Structure>)"
+               R"(<Track id="t1" name="A"/></Structure>)"
+               R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+               R"(<Clip time="0.0" duration="1.0"><Notes>)"
+               R"(<Note time="0.0" duration="1.0" key="60" channel="1junk"/>)"
+               R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+               DawProjectImportErrorCode::InvalidValue);
+    }
     SECTION("note pitch out of range") {
         expect(R"(<Project version="1.0"><Structure>)"
                R"(<Track id="t1" name="A"/></Structure>)"
@@ -413,6 +528,26 @@ TEST_CASE("DAWproject import accepts an empty project with defaults") {
     REQUIRE(project.sequences()[0].tracks().empty());
     REQUIRE(project.tempo_map().points()[0].bpm == 120.0);
     REQUIRE(project.meter_map().points()[0].signature.numerator == 4);
+}
+
+TEST_CASE("DAWproject decimal parsing is independent of the host numeric locale") {
+    ScopedCommaNumericLocale locale;
+    if (!locale.active())
+        SKIP("no comma-decimal locale is installed");
+
+    auto result = import_dawproject_xml(
+        R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120.5"/></Transport>)"
+        R"(<Structure><Track id="t1" name="A"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)"
+        R"(<Clip time="0.5" duration="1.5"><Notes>)"
+        R"(<Note time="0.25" duration="0.5" key="60" vel="0.5"/>)"
+        R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)");
+    REQUIRE(result);
+    REQUIRE(result.value().tempo_map().points()[0].bpm == 120.5);
+    const auto& clip = result.value().sequences()[0].tracks()[0].clips()[0];
+    REQUIRE(clip.start().value == kBeat / 2);
+    REQUIRE(clip.duration().value == 3 * kBeat / 2);
+    REQUIRE(std::get<NoteContent>(clip.content()).notes()[0].velocity == 32768);
 }
 
 TEST_CASE("DAWproject imported arrangement plays identically across block schedules") {
