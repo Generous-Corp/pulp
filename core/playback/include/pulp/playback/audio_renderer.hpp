@@ -18,6 +18,7 @@
 
 namespace pulp::audio {
 class PreparedSampleRateConversion;
+class PreparedVariableRateConversion;
 }
 
 namespace pulp::playback {
@@ -74,6 +75,7 @@ class DecodedAudioAssetPool {
 
 struct AudioClipRendererProgram {
     enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
+    enum class TimeDomain : std::uint8_t { Musical, Absolute };
 
     timeline::ItemId id;
     timeline::ItemId asset_id;
@@ -90,6 +92,8 @@ struct AudioClipRendererProgram {
     std::uint64_t fade_out_frames = 0;
     SourceKind source_kind = SourceKind::ArrangementClip;
     std::uint32_t source_ordinal = 0;
+    TimeDomain time_domain = TimeDomain::Absolute;
+    std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter;
 
     std::int64_t timeline_end() const noexcept;
 };

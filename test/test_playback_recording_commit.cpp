@@ -127,6 +127,26 @@ TEST_CASE("retrospective sealing bit-equals live sealing over the same window") 
     REQUIRE(equivalent(retrospective->commands[1], live->commands[1]));
 }
 
+TEST_CASE("recording sealing canonicalizes equivalent integral sample rates") {
+    audio::Buffer<float> audio(1, 4);
+    audio.channel(0)[0] = -1.0f;
+    audio.channel(0)[1] = -0.5f;
+    audio.channel(0)[2] = 0.5f;
+    audio.channel(0)[3] = 1.0f;
+
+    auto canonical = seal_recording_take(read_view(audio), request());
+    auto equivalent_request = request();
+    equivalent_request.sample_rate = {96'000, 2};
+    auto equivalent = seal_recording_take(read_view(audio), equivalent_request);
+
+    REQUIRE(canonical);
+    REQUIRE(equivalent);
+    REQUIRE(equivalent->wav_bytes == canonical->wav_bytes);
+    REQUIRE(equivalent->asset.content_hash == canonical->asset.content_hash);
+    REQUIRE(equivalent->asset.sample_rate == RationalRate{48'000, 1});
+    REQUIRE(equivalent->take.sample_rate() == RationalRate{48'000, 1});
+}
+
 TEST_CASE("MIDI capture quantizes notes and trims expression outside active notes") {
     const auto map = midi_map();
     std::array events{

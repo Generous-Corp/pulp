@@ -1,4 +1,5 @@
 #include "../core/timeline/src/journal_internal.hpp"
+#include "harness/rt_allocation_probe.hpp"
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/timeline/serialize.hpp>
@@ -74,6 +75,8 @@ class ProbeJournalSink final : public JournalSink {
         if (!acknowledge_append)
             return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(false));
         entries.push_back(entry);
+        if (allocation_probe)
+            allocations_at_ack = allocation_probe->allocation_count();
         return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
     }
 
@@ -107,6 +110,8 @@ class ProbeJournalSink final : public JournalSink {
     std::size_t append_calls = 0;
     std::size_t checkpoint_calls = 0;
     std::size_t validate_restore_calls = 0;
+    pulp::test::RtAllocationProbe* allocation_probe = nullptr;
+    std::size_t allocations_at_ack = 0;
     DocumentRevision revision_observed_during_append{};
     std::vector<JournalEntry> entries;
     std::vector<DocumentRevision> checkpoints;
@@ -134,6 +139,47 @@ TEST_CASE("Timeline journal sink is durable before a transaction is published") 
     REQUIRE(sink->checkpoint_calls == 1);
     REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
     REQUIRE(velocity(sink->checkpoint_snapshots.front()) == 1000);
+}
+
+TEST_CASE("Timeline durability acknowledgement is the final allocation boundary") {
+    SessionLimits limits;
+    limits.max_cached_results = 1;
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), limits, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto without_post_ack_allocation = [&](auto&& operation) {
+        pulp::runtime::Result<CommitResult, TransactionError> result;
+        std::size_t allocations_after_return = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            sink->allocation_probe = &probe;
+            result = operation();
+            allocations_after_return = probe.allocation_count();
+            sink->allocation_probe = nullptr;
+        }
+        REQUIRE(allocations_after_return == sink->allocations_at_ack);
+        return result;
+    };
+
+    const auto group = writer.allocate_undo_group_id();
+    auto begin =
+        session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(without_post_ack_allocation(
+        [&] { return session->submit(writer, std::move(begin)); }));
+
+    auto end = session_transaction(writer, {1},
+                                   {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+    end.undo_group = group;
+    end.gesture_phase = GesturePhase::End;
+    REQUIRE(
+        without_post_ack_allocation([&] { return session->submit(writer, std::move(end)); }));
+
+    REQUIRE(without_post_ack_allocation([&] { return session->undo(writer); }));
+    REQUIRE(without_post_ack_allocation([&] { return session->redo(writer); }));
+    REQUIRE(velocity(*session->snapshot()) == 3000);
 }
 
 TEST_CASE("Timeline journal sink failure rejects session creation") {

@@ -61,11 +61,10 @@ std::shared_ptr<const Project> host_tempo_note_project() {
     auto content = take(NoteContent::create({event}));
     auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
     auto track = take(Track::create({10}, "host-tempo notes", {std::move(clip)}));
-    auto sequence = take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter},
-                                         {std::move(track)}));
-    return std::make_shared<const Project>(
-        take(Project::create(ProjectInput{{1}, "host tempo", 1'000, {2}, {},
-                                         {std::move(sequence)}})));
+    auto sequence =
+        take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter}, {std::move(track)}));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "host tempo", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
 std::shared_ptr<const Project> host_tempo_same_sample_boundary_project() {
@@ -84,11 +83,10 @@ std::shared_ptr<const Project> host_tempo_same_sample_boundary_project() {
     auto content = take(NoteContent::create({ending, starting}));
     auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
     auto track = take(Track::create({10}, "same-sample boundary", {std::move(clip)}));
-    auto sequence = take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter},
-                                         {std::move(track)}));
-    return std::make_shared<const Project>(
-        take(Project::create(ProjectInput{{1}, "boundary", 1'000, {2}, {},
-                                         {std::move(sequence)}})));
+    auto sequence =
+        take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter}, {std::move(track)}));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "boundary", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
 } // namespace
@@ -168,7 +166,7 @@ TEST_CASE("host transport projection re-anchors after an exact second loop wrap"
     context.position_samples = 0;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE_FALSE(projected.reset_requested);
-    REQUIRE_FALSE(projected.ranges[0].discontinuity);
+    REQUIRE(projected.ranges[0].discontinuity);
 }
 
 TEST_CASE("host transport projection anchors blocks and seeks to a valid host beat clock") {
@@ -185,6 +183,7 @@ TEST_CASE("host transport projection anchors blocks and seeks to a valid host be
     context.position_samples = 96'000;
     context.transport_validity.set(format::TransportField::BeatPosition);
     context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
 
     TransportSnapshot projected;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
@@ -207,6 +206,38 @@ TEST_CASE("host transport projection anchors blocks and seeks to a valid host be
     REQUIRE(projected.ranges[0].discontinuity);
 }
 
+TEST_CASE("host beat projection preserves fractional tick phase across small blocks") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 1) == sequence::HostTransportProjectionError::None);
+
+    constexpr double sample_rate = 48'000.0;
+    constexpr double tempo_bpm = 123.0;
+    constexpr double start_beat = 10.0;
+    format::ProcessContext context;
+    context.sample_rate = sample_rate;
+    context.num_samples = 1;
+    context.is_playing = true;
+    context.tempo_bpm = tempo_bpm;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+
+    TickPosition previous_end;
+    for (std::int64_t frame = 0; frame < 64; ++frame) {
+        context.position_samples = frame;
+        context.position_beats =
+            start_beat + static_cast<double>(frame) * tempo_bpm / (60.0 * sample_rate);
+        TransportSnapshot projected;
+        REQUIRE(projector.project(context, projected) ==
+                sequence::HostTransportProjectionError::None);
+        if (frame != 0)
+            REQUIRE(projected.ranges[0].timeline_tick_start == previous_end);
+        previous_end = projected.ranges[0].timeline_tick_end;
+    }
+    REQUIRE(previous_end.value > static_cast<std::int64_t>(start_beat * kTicksPerQuarter));
+}
+
 TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
     const auto map = tempo_map();
     sequence::HostTransportProjector projector;
@@ -226,6 +257,7 @@ TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
     context.loop_end_beats = 2.0;
     context.transport_validity.set(format::TransportField::BeatPosition);
     context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
     context.transport_validity.set(format::TransportField::LoopRange);
 
     TransportSnapshot projected;
@@ -271,6 +303,7 @@ TEST_CASE("host beat-domain loop projection keeps the final fractional frame cel
     context.loop_end_beats = loop_end_beats;
     context.transport_validity.set(format::TransportField::BeatPosition);
     context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
     context.transport_validity.set(format::TransportField::LoopRange);
 
     TransportSnapshot projected;
@@ -336,6 +369,13 @@ TEST_CASE("host beat-domain projection falls back when beat clock validity is ab
     context.position_beats = 1.0;
     context.tempo_bpm = 60.0;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.ranges[0].host_beat_mapping);
+    REQUIRE(projected.ranges[0].timeline_tick_start ==
+            map->samples_to_ticks({context.position_samples}));
+
+    context.position_samples = 24'128;
+    context.transport_validity.set(format::TransportField::SamplePosition);
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE(projected.ranges[0].host_beat_mapping);
     REQUIRE(projected.reset_requested);
     REQUIRE(projected.ranges[0].discontinuity);
@@ -384,6 +424,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         context.position_samples = 84'000;
         context.transport_validity.set(format::TransportField::BeatPosition);
         context.transport_validity.set(format::TransportField::Tempo);
+        context.transport_validity.set(format::TransportField::SamplePosition);
         process(context, 16'000, output);
 
         REQUIRE(output.size() == 1);
@@ -403,6 +444,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         before.position_samples = 95'900;
         before.transport_validity.set(format::TransportField::BeatPosition);
         before.transport_validity.set(format::TransportField::Tempo);
+        before.transport_validity.set(format::TransportField::SamplePosition);
         process(before, 100, output);
         REQUIRE(output.empty());
 
@@ -413,6 +455,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         at.position_samples = 96'000;
         at.transport_validity.set(format::TransportField::BeatPosition);
         at.transport_validity.set(format::TransportField::Tempo);
+        at.transport_validity.set(format::TransportField::SamplePosition);
         process(at, 100, output);
         REQUIRE(output.size() == 1);
         REQUIRE(output[0].is_note_on());
@@ -433,6 +476,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         context.loop_end_beats = 2.5;
         context.transport_validity.set(format::TransportField::BeatPosition);
         context.transport_validity.set(format::TransportField::Tempo);
+        context.transport_validity.set(format::TransportField::SamplePosition);
         context.transport_validity.set(format::TransportField::LoopRange);
         process(context, 40'000, output);
 
@@ -459,6 +503,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
         mapped.position_samples = 42'000;
         mapped.transport_validity.set(format::TransportField::BeatPosition);
         mapped.transport_validity.set(format::TransportField::Tempo);
+        mapped.transport_validity.set(format::TransportField::SamplePosition);
         process(mapped, 16'000, output);
 
         REQUIRE(embedded.last_observation().discontinuity);
@@ -511,18 +556,15 @@ TEST_CASE("host-mapped note scheduling scans same-sample events through the exac
     context.position_samples = 48'000;
     context.transport_validity.set(format::TransportField::BeatPosition);
     context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
     sequence::HostTransportProjector projector;
-    REQUIRE(projector.prepare(*map, 48'000) ==
-            sequence::HostTransportProjectionError::None);
+    REQUIRE(projector.prepare(*map, 48'000) == sequence::HostTransportProjectionError::None);
     TransportSnapshot projected;
-    REQUIRE(projector.project(context, projected) ==
-            sequence::HostTransportProjectionError::None);
-    REQUIRE(projected.ranges[0].timeline_tick_end ==
-            TickPosition{2 * kTicksPerQuarter});
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_end == TickPosition{2 * kTicksPerQuarter});
     std::uint32_t boundary_offset = 0;
     REQUIRE(host_mapped_output_offset_for_tick(
-        projected.ranges[0], TickPosition{2 * kTicksPerQuarter - 1},
-        boundary_offset));
+        projected.ranges[0], TickPosition{2 * kTicksPerQuarter - 1}, boundary_offset));
     REQUIRE(boundary_offset == 47'999);
     auto audio_output_view = audio_output.view();
     const auto silence_view = silence.const_view();

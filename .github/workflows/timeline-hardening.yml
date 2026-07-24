@@ -36,6 +36,7 @@ concurrency:
 
 jobs:
   scale-and-compile-latency:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
     name: Timeline scale and compile latency
     runs-on: ubuntu-24.04
     timeout-minutes: 45

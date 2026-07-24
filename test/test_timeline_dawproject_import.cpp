@@ -281,6 +281,29 @@ TEST_CASE("DAWproject audio import requires media bytes to seal durable identity
     REQUIRE(result.error().message.find("audio/bass.wav") != std::string::npos);
 }
 
+TEST_CASE("DAWproject rejects unsafe package paths before resolving media") {
+    for (const auto unsafe :
+         std::array<std::string_view, 5>{"/tmp/outside.wav", R"(C:\outside.wav)",
+                                         "C:outside.wav", "../outside.wav",
+                                         R"(audio\..\outside.wav)"}) {
+        auto xml = read_fixture("linear_subset.dawproject.xml");
+        const auto path = xml.find("audio/bass.wav");
+        REQUIRE(path != std::string::npos);
+        xml.replace(path, std::string_view("audio/bass.wav").size(), unsafe);
+        bool resolver_called = false;
+        auto result = import_dawproject_xml(
+            xml, [&](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+                resolver_called = true;
+                return fixture_media_bytes();
+            });
+        CAPTURE(unsafe);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("package-relative") != std::string::npos);
+        REQUIRE_FALSE(resolver_called);
+    }
+}
+
 TEST_CASE("DAWproject audio import validates metadata against resolved WAV bytes") {
     auto xml = read_fixture("linear_subset.dawproject.xml");
 

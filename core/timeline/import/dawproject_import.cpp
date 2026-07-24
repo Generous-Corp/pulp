@@ -8,6 +8,7 @@
 #include <pugixml.hpp>
 
 #include <cerrno>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -39,6 +40,23 @@ constexpr double kPpq = static_cast<double>(timebase::kTicksPerQuarter);
 
 DawProjectImportError err(DawProjectImportErrorCode code, std::string message) {
     return DawProjectImportError{code, std::move(message), {}};
+}
+
+bool package_path_is_lexically_safe(std::string_view path) {
+    if (path.empty() || path.front() == '/' || path.front() == '\\')
+        return false;
+    if (path.size() >= 2 && std::isalpha(static_cast<unsigned char>(path.front())) &&
+        path[1] == ':')
+        return false;
+    std::size_t component_begin = 0;
+    for (std::size_t index = 0; index <= path.size(); ++index) {
+        if (index != path.size() && path[index] != '/' && path[index] != '\\')
+            continue;
+        if (path.substr(component_begin, index - component_begin) == "..")
+            return false;
+        component_begin = index + 1;
+    }
+    return true;
 }
 
 bool declared_duration_matches_frames(long double declared_frames,
@@ -586,6 +604,9 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     std::string path = path_attr.as_string();
     if (path.empty())
         return err(DawProjectImportErrorCode::InvalidValue, "<File path> must not be empty");
+    if (!package_path_is_lexically_safe(path))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "<File path> must be a safe package-relative path");
 
     double duration_sec = 0.0, sample_rate = 0.0;
     if (auto e = require_double(audio, "duration", "<Audio>", duration_sec))

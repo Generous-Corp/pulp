@@ -197,6 +197,36 @@ TEST_CASE("host-beat-mapped automation follows host frames through a document te
     REQUIRE(events[2].value == 1.0f / 3.0f);
 }
 
+TEST_CASE("host-beat-mapped automation work is bounded independently of frame count") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {kTicksPerQuarter}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    constexpr std::uint32_t frames = 100'000'000;
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = frames;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = frames;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {kTicksPerQuarter};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.candidate_points == frames);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{frames / 2, 0.5f, AutomationTransition::LinearRamp});
+}
+
 TEST_CASE("host-beat-mapped automation preserves authored knots under output coalescing") {
     const auto map = constant_map(120.0);
     auto curve = take(AutomationCurve::create(
@@ -228,9 +258,9 @@ TEST_CASE("host-beat-mapped automation preserves authored knots under output coa
 
 TEST_CASE("host-beat-mapped automation includes knots in the final output-frame cell") {
     const auto map = constant_map(120.0);
-    auto curve = take(AutomationCurve::create(
-        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {39}, 1.0f},
-         AutomationPoint{{12}, {40}, 0.0f}}));
+    auto curve = take(AutomationCurve::create({AutomationPoint{{10}, {0}, 0.0f},
+                                               AutomationPoint{{11}, {39}, 1.0f},
+                                               AutomationPoint{{12}, {40}, 0.0f}}));
     auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
     const auto compiled = program(source, map);
 
@@ -250,6 +280,37 @@ TEST_CASE("host-beat-mapped automation includes knots in the final output-frame 
     const auto result = cursor.process(*compiled, snapshot, events);
 
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{3, 1.0f, AutomationTransition::LinearRamp});
+}
+
+TEST_CASE("host-beat-mapped automation collapses knots projected into one output frame") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {31}, 0.25f},
+         AutomationPoint{{12}, {32}, 0.5f}, AutomationPoint{{13}, {39}, 1.0f},
+         AutomationPoint{{14}, {40}, 0.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 4;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {40};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.candidate_points == 4);
     REQUIRE(result.emitted_events == events.size());
     REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
     REQUIRE(events[1] == AutomationBlockEvent{3, 1.0f, AutomationTransition::LinearRamp});
@@ -287,8 +348,7 @@ TEST_CASE("host-beat-mapped automation remains safe at the positive tick edge") 
     const auto maximum = std::numeric_limits<std::int64_t>::max();
     const auto map = constant_map(120.0);
     auto curve = take(AutomationCurve::create(
-        {AutomationPoint{{10}, {maximum - 4}, 0.0f},
-         AutomationPoint{{11}, {maximum - 1}, 1.0f}}));
+        {AutomationPoint{{10}, {maximum - 4}, 0.0f}, AutomationPoint{{11}, {maximum - 1}, 1.0f}}));
     auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
     const auto compiled = program(source, map);
 
@@ -387,8 +447,8 @@ TEST_CASE("automation cursor coalesces deterministically to the caller budget") 
 
 TEST_CASE("automation cursor preserves authored peaks before optional refinement") {
     const auto map = constant_map();
-    auto source = lane({1}, {point(*map, 10, 0, 0.0f), point(*map, 11, 4, 1.0f),
-                             point(*map, 12, 8, 0.0f)});
+    auto source =
+        lane({1}, {point(*map, 10, 0, 0.0f), point(*map, 11, 4, 1.0f), point(*map, 12, 8, 0.0f)});
     const auto compiled = program(source, map);
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
@@ -416,11 +476,10 @@ TEST_CASE("automation cursor preserves authored peaks before optional refinement
 
 TEST_CASE("automation cursor preserves transition ownership across hold boundaries") {
     const auto map = constant_map();
-    auto source = lane(
-        {1}, {point(*map, 10, 0, 0.0f),
-              point(*map, 11, 4, 1.0f, AutomationInterpolation::Hold),
-              point(*map, 12, 8, 0.25f, AutomationInterpolation::Continuous),
-              point(*map, 13, 12, 0.75f)});
+    auto source = lane({1}, {point(*map, 10, 0, 0.0f),
+                             point(*map, 11, 4, 1.0f, AutomationInterpolation::Hold),
+                             point(*map, 12, 8, 0.25f, AutomationInterpolation::Continuous),
+                             point(*map, 13, 12, 0.75f)});
     const auto compiled = program(source, map);
     MasterTransport clock;
     prepare_transport(clock, *map, 16);
@@ -487,10 +546,8 @@ TEST_CASE("same-sample interior knots preserve the incoming segment and latest w
 TEST_CASE("same-sample final knots resolve to the latest authored winner") {
     const auto map = constant_map();
     const auto cluster_tick = map->samples_to_ticks({10});
-    auto source = lane({1},
-                       {point(*map, 10, 0, 0.0f),
-                        AutomationPoint{{11}, cluster_tick, 1.0f},
-                        AutomationPoint{{12}, {cluster_tick.value + 1}, 0.25f}});
+    auto source = lane({1}, {point(*map, 10, 0, 0.0f), AutomationPoint{{11}, cluster_tick, 1.0f},
+                             AutomationPoint{{12}, {cluster_tick.value + 1}, 0.25f}});
     const auto compiled = program(source, map);
     MasterTransport clock;
     prepare_transport(clock, *map, 16);

@@ -33,6 +33,15 @@ Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 
+When host beat mapping intentionally makes musical material follow the host
+tempo, keep absolute clips, take-comp segments, and frozen artifacts on
+`TransportRange::timeline_sample_start`; those sources are sample-domain
+content and must not inherit the beat projection. For musical audio, derive the
+effective source-position step per output frame. A converter prepared only for
+the asset-rate/timeline-rate ratio cannot anti-alias faster host playback, so
+select a bounded prebuilt reconstruction kernel without allocating on the
+audio thread.
+
 An active take lane replaces the track's arrangement source; zero
 `active_take_lane_id` selects arrangement clips. The compiler lowers each
 canonical comp selection to an `AudioClipRendererProgram` with

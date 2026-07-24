@@ -120,6 +120,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal
     SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp
+        harness/rt_allocation_probe.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)

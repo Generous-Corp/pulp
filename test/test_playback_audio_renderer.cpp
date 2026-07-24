@@ -394,6 +394,86 @@ TEST_CASE("host-mapped audio follows a document tempo ramp instead of endpoint i
     REQUIRE(std::abs(output.storage[0][2] - 0.5f) > 0.05f);
 }
 
+TEST_CASE("host beat mapping keeps absolute audio on the host sample clock") {
+    std::vector<float> absolute_ramp(64);
+    for (std::size_t frame = 0; frame < absolute_ramp.size(); ++frame)
+        absolute_ramp[frame] = static_cast<float>(frame);
+    auto absolute = absolute_media_clip(100, 0, 50, 3, 0, 50);
+    auto absolute_track = take(Track::create({10}, "absolute", {absolute}));
+    auto project = project_with_tracks({absolute_track}, {{3, "absolute", 64, {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({absolute_ramp})}}));
+    auto program = compiled.store.read();
+
+    auto mapped = snapshot(*program, 50);
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter / 960};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output output(1, 50);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+            AudioRenderStatus::Rendered);
+    REQUIRE_THAT(output.storage[0][10], WithinAbs(10.0f, 1.0e-6f));
+    REQUIRE_THAT(output.storage[0][20], WithinAbs(20.0f, 1.0e-6f));
+}
+
+TEST_CASE("host-tempo audio decimation rejects aliases without muting the passband path") {
+    std::vector<float> source(256);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = frame % 2 == 0 ? 1.0f : -1.0f;
+    auto clip = musical_media_clip(100, 0, kTicksPerQuarter / 120, 3, 200);
+    auto track = take(Track::create({10}, "host decimation", {clip}));
+    auto project = project_with_tracks({track}, {{3, "nyquist", source.size(), {48'000, 1}}});
+    const auto map = map_120();
+    const auto assets = pool({{3, audio_data({source})}});
+    CompiledFixture compiled(project, map, assets);
+    auto program = compiled.store.read();
+    REQUIRE(program->find_track({10})->audio_program()->clips()[0].host_rate_converter);
+
+    auto render = [&](std::int64_t tick_end) {
+        auto mapped = snapshot(*program, 100);
+        mapped.ranges[0].timeline_tick_start = {0};
+        mapped.ranges[0].timeline_tick_end = {tick_end};
+        mapped.ranges[0].host_beat_mapping = true;
+        Output output(1, 100);
+        REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+                AudioRenderStatus::Rendered);
+        double squared = 0.0;
+        for (std::size_t frame = 32; frame < 68; ++frame)
+            squared += static_cast<double>(output.storage[0][frame]) *
+                       static_cast<double>(output.storage[0][frame]);
+        return std::sqrt(squared / 36.0);
+    };
+
+    const auto passband_reference_rms = render(kTicksPerQuarter / 240);
+    const auto decimated_alias_rms = render(kTicksPerQuarter / 120);
+    CAPTURE(passband_reference_rms, decimated_alias_rms);
+    REQUIRE(passband_reference_rms >= 0.8);
+    REQUIRE(decimated_alias_rms <= 0.05);
+}
+
+TEST_CASE("host-tempo reconstruction uses the effective rate when slowed audio stops decimating") {
+    std::vector<float> source(256);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = frame % 2 == 0 ? 1.0f : -1.0f;
+    auto clip = musical_media_clip(100, 0, kTicksPerQuarter / 240, 3, 200);
+    auto track = take(Track::create({10}, "slowed downsample", {clip}));
+    auto project = project_with_tracks({track}, {{3, "96k-nyquist", source.size(), {96'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({source}, 96'000)}}));
+    auto program = compiled.store.read();
+
+    auto mapped = snapshot(*program, 100);
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter / 480};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output output(1, 100);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+            AudioRenderStatus::Rendered);
+    double squared = 0.0;
+    for (std::size_t frame = 16; frame < 84; ++frame)
+        squared += static_cast<double>(output.storage[0][frame]) *
+                   static_cast<double>(output.storage[0][frame]);
+    REQUIRE(std::sqrt(squared / 68.0) >= 0.8);
+}
+
 TEST_CASE("one bounded compiler pass publishes note and audio payloads for a mixed track") {
     const auto map = map_120();
     auto notes = take(NoteContent::create({{{101}, {0}, {kTicksPerQuarter / 4}, 0x8000, 64, 1}}));
@@ -460,6 +540,15 @@ TEST_CASE("active take comp lowers to a derived artifact and renders exact selec
     REQUIRE(status == AudioRenderStatus::Rendered);
     REQUIRE(allocations == 0);
     REQUIRE(output.storage[0] == std::vector<float>{0, 1, 18, 19, 4, 5});
+
+    auto mapped = snapshot(*program, 6);
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter / 8'000};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output host_tempo_output(1, 6);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, host_tempo_output.view()) ==
+            AudioRenderStatus::Rendered);
+    REQUIRE(host_tempo_output.storage[0] == std::vector<float>{0, 1, 18, 19, 4, 5});
 }
 
 TEST_CASE("inactive take comp is document data but not a playback source") {
@@ -1258,4 +1347,10 @@ TEST_CASE("prepared sample-rate conversion rejects invalid source domains") {
     REQUIRE_THAT(converter.read(source, 1.0e300), WithinAbs(0.25f, 1.0e-6f));
     REQUIRE(converter.read(source, std::numeric_limits<double>::quiet_NaN()) == 0.0f);
     REQUIRE(converter.read(source, std::numeric_limits<double>::infinity()) == 0.0f);
+
+    const audio::PreparedVariableRateConversion variable;
+    REQUIRE(variable.read(source, 0.0,
+                          audio::PreparedVariableRateConversion::
+                              kMaximumSourceFramesPerOutputFrame *
+                              2.0) == 0.0f);
 }

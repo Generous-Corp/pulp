@@ -243,6 +243,13 @@ usually means the processor emitted (almost) nothing, which is the finding.
   200 Hz lowpass check at 8 kHz looks decisive but still passes with the filter
   left at its 1000 Hz default, because 8 kHz is ~36 dB down either way. Only the
   1 kHz checkpoint separates them.
+- **A fixed sample-rate converter does not anti-alias a variable playback
+  rate.** Tempo maps, varispeed, and other runtime projections can advance the
+  source position by more than the asset-rate/timeline-rate ratio prepared at
+  compile time. Derive the reconstruction cutoff from the effective source
+  frames per output frame, prepare a bounded kernel bank off the audio thread,
+  and select from it without allocation. Prove the path with both a passband
+  control and a bright source that aliases under linear point sampling.
 - **Compiling a harness TU by hand? Copy `CXX_DEFINES`, not just `CXX_FLAGS`
   and `CXX_INCLUDES`.** Both live in the target's `build/**/flags.make`.
   Adapter structs are gated on defines (`PULP_CLAP_GUI` adds members to

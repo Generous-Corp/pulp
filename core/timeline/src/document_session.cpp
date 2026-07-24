@@ -9,6 +9,7 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
 namespace pulp::timeline {
@@ -40,6 +41,11 @@ struct OpenGesture {
     WriterId writer;
     UndoGroupId group;
 };
+
+static_assert(std::is_nothrow_move_constructible_v<CachedCommit>);
+static_assert(std::is_nothrow_move_assignable_v<CachedCommit>);
+static_assert(std::is_nothrow_move_assignable_v<UndoRecord>);
+static_assert(std::is_nothrow_move_constructible_v<CommitResult>);
 
 enum class CommitKind : std::uint8_t { Ordinary, History };
 
@@ -182,6 +188,10 @@ struct DocumentSession::Impl {
         }
 
         UndoRecord candidate;
+        std::optional<UndoRecord> coalesced_undo;
+        std::size_t undo_evictable_groups = 0;
+        std::size_t undo_evictable_bytes = 0;
+        bool undo_will_coalesce = false;
         if (record_undo) {
             candidate.writer = transaction.id.writer;
             candidate.group = transaction.undo_group;
@@ -193,26 +203,38 @@ struct DocumentSession::Impl {
             candidate.retained_bytes =
                 saturated_add(retained_size(candidate.forward), retained_size(candidate.inverse));
 
-            const bool coalesces = candidate.group && !undo.empty() &&
-                                   undo.back().group == candidate.group &&
-                                   undo.back().writer == candidate.writer && !undo.back().closed;
-            auto projected_groups = undo.size() + (coalesces ? 0 : 1);
+            undo_will_coalesce = candidate.group && !undo.empty() &&
+                                 undo.back().group == candidate.group &&
+                                 undo.back().writer == candidate.writer && !undo.back().closed;
+            auto projected_groups = undo.size() + (undo_will_coalesce ? 0 : 1);
             auto projected_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-            std::size_t evictable_groups = 0;
-            std::size_t evictable_bytes = 0;
-            while ((projected_groups - evictable_groups > limits.undo.max_groups ||
-                    projected_bytes - std::min(projected_bytes, evictable_bytes) >
+            while ((projected_groups - undo_evictable_groups > limits.undo.max_groups ||
+                    projected_bytes - std::min(projected_bytes, undo_evictable_bytes) >
                         limits.undo.max_retained_bytes) &&
-                   evictable_groups < undo.size() && undo[evictable_groups].closed) {
-                evictable_bytes =
-                    saturated_add(evictable_bytes, undo[evictable_groups].retained_bytes);
-                ++evictable_groups;
+                   undo_evictable_groups < undo.size() &&
+                   undo[undo_evictable_groups].closed) {
+                undo_evictable_bytes = saturated_add(
+                    undo_evictable_bytes, undo[undo_evictable_groups].retained_bytes);
+                ++undo_evictable_groups;
             }
-            if (projected_groups - evictable_groups > limits.undo.max_groups ||
-                projected_bytes - std::min(projected_bytes, evictable_bytes) >
+            if (projected_groups - undo_evictable_groups > limits.undo.max_groups ||
+                projected_bytes - std::min(projected_bytes, undo_evictable_bytes) >
                     limits.undo.max_retained_bytes)
                 return failure<CommitResult>(
                     error(ConflictCode::UndoFull, transaction, current_revision));
+
+            if (undo_will_coalesce) {
+                coalesced_undo.emplace(undo.back());
+                coalesced_undo->forward.insert(coalesced_undo->forward.end(),
+                                               candidate.forward.begin(),
+                                               candidate.forward.end());
+                coalesced_undo->inverse.insert(coalesced_undo->inverse.begin(),
+                                               candidate.inverse.begin(),
+                                               candidate.inverse.end());
+                coalesced_undo->retained_bytes =
+                    saturated_add(coalesced_undo->retained_bytes, candidate.retained_bytes);
+                coalesced_undo->closed = candidate.closed;
+            }
         }
 
         const auto next_revision = DocumentRevision{current_revision.value + 1};
@@ -227,9 +249,28 @@ struct DocumentSession::Impl {
         auto published_state =
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
         auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
+
+        CommitResult result{published, next_revision, reduced->dirty, {}};
+        result.applied_commands.reserve(transaction.commands.size());
+        for (const auto& envelope : transaction.commands)
+            result.applied_commands.push_back(envelope.id);
+
+        std::optional<CachedCommit> pending_cache;
+        if (limits.max_cached_results > 0)
+            pending_cache.emplace(CachedCommit{transaction, result});
+
+        // A new deque node can allocate. Stage the node before asking the sink
+        // to acknowledge durability, then fill it with a non-throwing move.
+        const bool staged_undo_slot = record_undo && !undo_will_coalesce;
+        if (staged_undo_slot)
+            undo.emplace_back();
+        const auto undo_added_bytes = candidate.retained_bytes;
+
         if (journal_sink) {
             auto durable = journal_sink->append_batch(journal_entry);
             if (!durable || !durable.value()) {
+                if (staged_undo_slot)
+                    undo.pop_back();
                 journal_sink_failed = true;
                 return failure<CommitResult>(
                     error(ConflictCode::JournalDurability, transaction, current_revision));
@@ -242,37 +283,16 @@ struct DocumentSession::Impl {
         writer->transaction_watermark = transaction.id.sequence;
         writer->command_watermark = previous_command;
 
-        CommitResult result{published, next_revision, reduced->dirty, {}};
-        result.applied_commands.reserve(transaction.commands.size());
-        for (const auto& envelope : transaction.commands)
-            result.applied_commands.push_back(envelope.id);
-
         if (record_undo) {
-            const bool will_coalesce =
-                candidate.group && !undo.empty() && undo.back().group == candidate.group &&
-                undo.back().writer == candidate.writer && !undo.back().closed;
-            while ((!will_coalesce && !undo.empty() && undo.size() >= limits.undo.max_groups) ||
-                   (!undo.empty() && saturated_add(undo_bytes, candidate.retained_bytes) >
-                                         limits.undo.max_retained_bytes)) {
-                if (!undo.front().closed)
-                    break;
+            for (std::size_t evicted = 0; evicted < undo_evictable_groups; ++evicted) {
                 undo_bytes -= undo.front().retained_bytes;
                 undo.pop_front();
             }
-            if (will_coalesce) {
-                auto& group = undo.back();
-                group.forward.insert(group.forward.end(), candidate.forward.begin(),
-                                     candidate.forward.end());
-                group.inverse.insert(group.inverse.begin(), candidate.inverse.begin(),
-                                     candidate.inverse.end());
-                group.retained_bytes =
-                    saturated_add(group.retained_bytes, candidate.retained_bytes);
-                group.closed = candidate.closed;
-                undo_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-            } else {
-                undo_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-                undo.push_back(std::move(candidate));
-            }
+            if (undo_will_coalesce)
+                undo.back() = std::move(*coalesced_undo);
+            else
+                undo.back() = std::move(candidate);
+            undo_bytes = saturated_add(undo_bytes, undo_added_bytes);
             if (transaction.gesture_phase == GesturePhase::Begin)
                 open_gesture = OpenGesture{transaction.id.writer, *transaction.undo_group};
             else if (transaction.gesture_phase == GesturePhase::End)
@@ -283,10 +303,10 @@ struct DocumentSession::Impl {
             }
         }
 
-        if (limits.max_cached_results > 0) {
+        if (pending_cache) {
             if (cache.size() == limits.max_cached_results)
                 cache.erase(cache.begin());
-            cache.push_back({transaction, result});
+            cache.push_back(std::move(*pending_cache));
         }
         return runtime::Result<CommitResult, TransactionError>(runtime::Ok(std::move(result)));
     }
@@ -459,15 +479,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToke
         value.current_revision = revision();
         return failure<CommitResult>(value);
     }
-    const auto record = impl_->undo.back();
+    auto record = impl_->undo.back();
     auto transaction = impl_->make_history_transaction(writer, record.inverse);
-    auto result = impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    impl_->redo.emplace_back();
+    auto result =
+        impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    if (!result)
+        impl_->redo.pop_back();
     if (!result)
         return result;
     impl_->undo_bytes -= impl_->undo.back().retained_bytes;
     impl_->undo.pop_back();
     impl_->redo_bytes = saturated_add(impl_->redo_bytes, record.retained_bytes);
-    impl_->redo.push_back(record);
+    impl_->redo.back() = std::move(record);
     return result;
 }
 
@@ -490,15 +514,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
         value.current_revision = revision();
         return failure<CommitResult>(value);
     }
-    const auto record = impl_->redo.back();
+    auto record = impl_->redo.back();
     auto transaction = impl_->make_history_transaction(writer, record.forward);
-    auto result = impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    impl_->undo.emplace_back();
+    auto result =
+        impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    if (!result)
+        impl_->undo.pop_back();
     if (!result)
         return result;
     impl_->redo_bytes -= impl_->redo.back().retained_bytes;
     impl_->redo.pop_back();
     impl_->undo_bytes = saturated_add(impl_->undo_bytes, record.retained_bytes);
-    impl_->undo.push_back(record);
+    impl_->undo.back() = std::move(record);
     return result;
 }
 

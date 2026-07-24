@@ -240,6 +240,46 @@ TEST_CASE("capture metronome renders during count-in before punch capture") {
     REQUIRE(drain(engine).size() == 1);
 }
 
+TEST_CASE("capture metronome projects ticks through host beat mapping") {
+    const auto map = constant_map();
+    auto config = capture_config(4'800);
+    config.maximum_take_frames = 4'800;
+    config.tracks[0].monitor = false;
+    CaptureEngine engine;
+    REQUIRE(engine.prepare(std::move(config)));
+
+    CaptureCommand start;
+    start.type = CaptureCommandType::Start;
+    start.sequence = 10;
+    start.session.metronome_enabled = true;
+    start.session.metronome_interval = {kTicksPerQuarter / 24};
+    start.session.metronome_level = 0.5f;
+    REQUIRE(engine.enqueue_command(start));
+
+    TransportSnapshot transport;
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.frame_count = 4'800;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    transport.ranges[0].frame_count = 4'800;
+    transport.ranges[0].timeline_tick_start = {0};
+    transport.ranges[0].timeline_tick_end = {kTicksPerQuarter / 10};
+    transport.ranges[0].host_beat_mapping = true;
+
+    audio::Buffer<float> input(1, 4'800);
+    audio::Buffer<float> output(1, 4'800);
+    midi::MidiBuffer midi;
+    auto output_view = output.view();
+    REQUIRE(engine.process(read_view(input), output_view, midi, transport) ==
+            CaptureProcessResult::Ok);
+    REQUIRE(output.channel(0)[0] == 0.5f);
+    REQUIRE(output.channel(0)[2'000] == 0.5f);
+    REQUIRE(output.channel(0)[4'000] == 0.5f);
+    REQUIRE(output.channel(0)[1'000] == 0.0f);
+    REQUIRE(output.channel(0)[3'000] == 0.0f);
+}
+
 TEST_CASE("capture engine rejects aggregate preallocation beyond its explicit budget") {
     CaptureEngine engine;
     REQUIRE(engine.prepare(capture_config()));

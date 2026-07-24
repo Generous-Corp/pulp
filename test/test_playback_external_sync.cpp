@@ -183,6 +183,35 @@ TEST_CASE("external sync emits sample-accurate clock and MTC", "[playback][exter
                                                      3'200, 3'600, 4'000, 4'400});
 }
 
+TEST_CASE("external sync projects MIDI clock through host beat mapping",
+          "[playback][external-sync]") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.frame_count = 4'800;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    transport.ranges[0].frame_count = 4'800;
+    transport.ranges[0].timeline_tick_start = {0};
+    transport.ranges[0].timeline_tick_end = {kTicksPerQuarter / 10};
+    transport.ranges[0].host_beat_mapping = true;
+
+    midi::MidiBuffer output;
+    output.reserve(8);
+    output.set_realtime_capacity_limit();
+    ExternalSyncOutputConfig config;
+    config.emit_mtc = false;
+    REQUIRE(ExternalSyncOutput(config).process(transport, output).code ==
+            ExternalSyncOutputCode::Complete);
+    std::vector<std::int32_t> offsets;
+    for (const auto& event : output) {
+        if (event.data()[0] == 0xf8)
+            offsets.push_back(event.sample_offset);
+    }
+    REQUIRE(offsets == std::vector<std::int32_t>{0, 2'000, 4'000});
+}
+
 TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
           "[playback][external-sync]") {
     const auto map = constant_map();

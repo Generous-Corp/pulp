@@ -264,6 +264,18 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
                 const timebase::TickPosition tick{tick_value};
                 if (!(tick < range.timeline_tick_end))
                     break;
+                std::uint32_t mapped_offset = 0;
+                if (range.host_beat_mapping &&
+                    host_mapped_output_offset_for_tick(range, tick, mapped_offset)) {
+                    if (!append_short(output, 0xf8, 0,
+                                      bounded_offset(range.sample_offset + mapped_offset),
+                                      config_.max_messages_per_block, result))
+                        return result;
+                    if (pulse == std::numeric_limits<std::int64_t>::max())
+                        break;
+                    ++pulse;
+                    continue;
+                }
                 const auto sample = transport.tempo_map->ticks_to_samples(tick);
                 if (sample >= range.timeline_sample_start && sample < range_end) {
                     if (!append_short(output, 0xf8, 0,

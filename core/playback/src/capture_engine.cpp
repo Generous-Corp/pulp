@@ -296,12 +296,24 @@ void CaptureEngine::render_metronome(audio::BufferView<float>& output,
         const auto& range = transport.ranges[range_index];
         auto tick = ceil_multiple(range.timeline_tick_start.value, interval);
         while (tick < range.timeline_tick_end.value) {
-            const auto sample = transport.tempo_map->ticks_to_samples({tick});
+            std::uint32_t mapped_offset = 0;
+            const auto mapped =
+                range.host_beat_mapping &&
+                host_mapped_output_offset_for_tick(range, {tick}, mapped_offset);
+            const auto sample =
+                mapped
+                    ? timebase::SamplePosition{
+                          range.timeline_sample_start.value +
+                          static_cast<std::int64_t>(mapped_offset)}
+                    : transport.tempo_map->ticks_to_samples({tick});
             if (sample >= session_.count_in_start &&
                 (!session_.has_punch_out || sample < session_.punch_out) &&
                 sample >= range.timeline_sample_start) {
-                const auto delta = static_cast<std::uint64_t>(sample.value) -
-                                   static_cast<std::uint64_t>(range.timeline_sample_start.value);
+                const auto delta =
+                    mapped ? static_cast<std::uint64_t>(mapped_offset)
+                           : static_cast<std::uint64_t>(sample.value) -
+                                 static_cast<std::uint64_t>(
+                                     range.timeline_sample_start.value);
                 if (delta < range.frame_count) {
                     output.channel(
                         session_.metronome_output_channel)[range.sample_offset +

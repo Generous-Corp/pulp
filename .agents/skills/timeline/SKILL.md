@@ -489,8 +489,9 @@ changes the model layout. Gotchas for extending it or adding another importer:
   (`<Warps>`, nested group tracks, `timeUnit="seconds"`, unknown timelines) is
   rejected explicitly. When iterating `children()`, skip non-element nodes
   before matching tag names.
-- **Provisional asset identity.** DAWproject references audio by package path,
-  and the bytes are inside the (not-yet-unzipped) container, so the durable
-  `ContentHash` is derived from the path via `runtime::sha256_hex` and the path
-  is preserved as a `PackageRelative` `AssetLocator` hint. Unzipping the
-  container to hash real bytes, and the `pulp import` CLI verb, are follow-ups.
+- **Seal media identity at the import boundary.** DAWproject references audio
+  by package path. Reject rooted, drive-qualified, or parent-traversing paths
+  before invoking `DawProjectMediaResolver`; a resolver is an untrusted-I/O
+  boundary, not the place to repair an unsafe locator. Hash the returned media
+  bytes, inspect their WAV metadata, and require that metadata to match the XML
+  before preserving the path as a `PackageRelative` locator hint.

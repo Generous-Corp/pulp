@@ -124,6 +124,15 @@ TEST_CASE("Frozen track playback selects one rendered artifact and hides authore
             AudioRenderStatus::Rendered);
     REQUIRE(output.samples == std::vector<float>{0.0f, 0.0f, 4.0f, 4.0f, 4.0f, 4.0f, 0.0f, 0.0f});
 
+    transport.ranges[0].timeline_tick_start = {0};
+    transport.ranges[0].timeline_tick_end = {kTicksPerQuarter / 6'000};
+    transport.ranges[0].host_beat_mapping = true;
+    Output host_tempo_output(8);
+    REQUIRE(ArrangementAudioRenderer::process(*program, transport, host_tempo_output.view()) ==
+            AudioRenderStatus::Rendered);
+    REQUIRE(host_tempo_output.samples ==
+            std::vector<float>{0.0f, 0.0f, 4.0f, 4.0f, 4.0f, 4.0f, 0.0f, 0.0f});
+
     auto thawed_track = take(Track::create(
         TrackInput{.id = {10}, .name = "track", .clips = {arrangement}, .device_chain = {{{30}}}}));
     auto thawed_sequence =

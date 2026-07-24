@@ -31,11 +31,11 @@ void append_tag(std::vector<std::uint8_t>& bytes, const char (&tag)[5]) {
 
 bool valid_request(const audio::BufferView<const float>& audio,
                    const RecordingTakeCommitRequest& request) noexcept {
+    const auto sample_rate = request.sample_rate.normalized();
     return request.sequence_id.valid() && request.track_id.valid() &&
            request.take_lane_id.valid() && request.asset_id.valid() && request.take_id.valid() &&
-           request.sample_rate.valid() && request.sample_rate.denominator == 1 &&
-           request.sample_rate.numerator > 0 && request.asset_name.size() > 0 &&
-           audio.num_channels() > 0 && audio.num_samples() > 0 &&
+           sample_rate.denominator == 1 && sample_rate.numerator > 0 &&
+           request.asset_name.size() > 0 && audio.num_channels() > 0 && audio.num_samples() > 0 &&
            (!request.create_take_lane || !request.take_lane_name.empty());
 }
 
@@ -92,6 +92,7 @@ seal_recording_take(const audio::BufferView<const float>& audio,
                     RecordingTakeCommitRequest request) {
     if (!valid_request(audio, request))
         return failure<SealedRecordingTake>(RecordingCommitError::InvalidRequest);
+    request.sample_rate = request.sample_rate.normalized();
     auto encoded = encode_float_wave(audio, request.sample_rate);
     if (!encoded)
         return runtime::Result<SealedRecordingTake, RecordingCommitError>(
