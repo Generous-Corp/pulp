@@ -126,3 +126,12 @@ pulp_add_test_suite(pulp-test-drum-voices
     SOURCES test_drum_voices.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 600)
+
+# The physically-modelled voices and their primitives. Each is measured against
+# the thing a simpler construction cannot do: the shifter against a pitch shift,
+# the string against a harmonic series it was never given, the membrane against
+# the inharmonic ratios that stop it having a pitch.
+pulp_add_test_suite(pulp-test-drum-physical
+    SOURCES test_drum_physical.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)

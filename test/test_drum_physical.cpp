@@ -1,0 +1,726 @@
+// The physically-modelled percussion voices and the primitives they need:
+// the frequency shifter, the Karplus-Strong string, and the phase-distortion
+// oscillator, plus the membrane, cymbal and zap voices built on them.
+//
+// Each of these is worth having only because it does something a simpler
+// construction cannot, so that is what the tests measure: the shifter is
+// checked against a pitch shift (which it is not), the string against a
+// harmonic series it was never given, the membrane against the inharmonic
+// ratios that stop it having a pitch, and the cymbal against the chordal
+// bank it would be without the shifter.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "harness/rt_allocation_probe.hpp"
+
+#include <pulp/signal/drum/cymbal.hpp>
+#include <pulp/signal/drum/membrane.hpp>
+#include <pulp/signal/drum/zap.hpp>
+#include <pulp/signal/frequency_shifter.hpp>
+#include <pulp/signal/karplus_strong.hpp>
+#include <pulp/signal/phase_distortion.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using pulp::signal::FrequencyShifter64;
+using pulp::signal::KarplusStrong;
+using pulp::signal::PhaseDistortionOsc;
+using pulp::signal::PhaseDistortionShape;
+using pulp::signal::drum::CymbalVoice;
+using pulp::signal::drum::MembraneVoice;
+using pulp::signal::drum::VelocityResponse;
+using pulp::signal::drum::Voice;
+using pulp::signal::drum::ZapVoice;
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kFs = 48000.0;
+
+std::vector<float> render(Voice& voice, int num_samples, int block = 64) {
+    std::vector<float> out(static_cast<std::size_t>(num_samples), 0.0f);
+    for (int i = 0; i < num_samples; i += block) {
+        voice.process(out.data() + i, std::min(block, num_samples - i));
+    }
+    return out;
+}
+
+std::vector<float> hit(Voice& voice, float velocity, int num_samples) {
+    voice.note_on(velocity);
+    return render(voice, num_samples);
+}
+
+double peak(const std::vector<float>& x) {
+    double m = 0.0;
+    for (float v : x) m = std::max(m, std::fabs(static_cast<double>(v)));
+    return m;
+}
+
+double rms(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0) {
+    if (to == 0) to = x.size();
+    double sum = 0.0;
+    for (std::size_t i = from; i < to && i < x.size(); ++i) {
+        sum += static_cast<double>(x[i]) * x[i];
+    }
+    return std::sqrt(sum / static_cast<double>(to - from));
+}
+
+// Hann-windowed Goertzel amplitude at one frequency.
+template <typename Container>
+double tone_amplitude(const Container& x, double f, double fs = kFs) {
+    const std::size_t n = x.size();
+    const double w = 2.0 * kPi * f / fs;
+    const double cw = std::cos(w);
+    const double coeff = 2.0 * cw;
+    double s1 = 0.0, s2 = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        const double win = 0.5 - 0.5 * std::cos(2.0 * kPi * static_cast<double>(i) /
+                                                static_cast<double>(n - 1));
+        const double s0 = coeff * s1 - s2 + win * static_cast<double>(x[i]);
+        s2 = s1;
+        s1 = s0;
+    }
+    const double re = s1 - s2 * cw;
+    const double im = s2 * std::sin(w);
+    return std::sqrt(re * re + im * im) / (static_cast<double>(n) * 0.25);
+}
+
+std::vector<double> sine(double f, std::size_t n, double amplitude = 1.0) {
+    std::vector<double> y(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        y[i] = amplitude * std::sin(2.0 * kPi * f * static_cast<double>(i) / kFs);
+    }
+    return y;
+}
+
+int audible_length(const std::vector<float>& x, double floor_level) {
+    for (std::size_t i = x.size(); i > 0; --i) {
+        if (std::fabs(static_cast<double>(x[i - 1])) > floor_level) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
+}  // namespace
+
+// -- Frequency shifter -------------------------------------------------------
+
+TEST_CASE("The shifter adds hertz rather than multiplying by a ratio",
+          "[signal][shifter]") {
+    // The whole distinction from a pitch shift, and the reason the cymbal
+    // needs it. A tone at 500 Hz shifted by 60 must land at 560, and one at
+    // 1000 Hz must land at 1060 -- not at 1120, which is what a ratio would do.
+    constexpr double kShift = 60.0;
+    for (double f : {500.0, 1000.0}) {
+        FrequencyShifter64 shifter;
+        shifter.set_sample_rate(kFs);
+        shifter.set_shift_hz(kShift);
+        shifter.reset();
+
+        const auto input = sine(f, 32768);
+        std::vector<double> out(input.size());
+        for (std::size_t i = 0; i < input.size(); ++i) out[i] = shifter.process(input[i]);
+
+        const double shifted = tone_amplitude(out, f + kShift);
+        const double original = tone_amplitude(out, f);
+        const double ratio_result = tone_amplitude(out, f * (1.0 + kShift / 500.0));
+
+        INFO("input " << f << " Hz");
+        REQUIRE(shifted > 0.3);
+        // The original frequency is suppressed -- this is a shift, not a
+        // detune added alongside.
+        REQUIRE(original < shifted * 0.2);
+        if (f > 500.0) REQUIRE(ratio_result < shifted * 0.3);
+    }
+}
+
+TEST_CASE("A negative shift moves frequencies down", "[signal][shifter]") {
+    FrequencyShifter64 shifter;
+    shifter.set_sample_rate(kFs);
+    shifter.set_shift_hz(-120.0);
+    shifter.reset();
+
+    const auto input = sine(800.0, 32768);
+    std::vector<double> out(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) out[i] = shifter.process(input[i]);
+    REQUIRE(tone_amplitude(out, 680.0) > tone_amplitude(out, 800.0) * 3.0);
+}
+
+TEST_CASE("A zero shift is close to transparent", "[signal][shifter]") {
+    FrequencyShifter64 shifter;
+    shifter.set_sample_rate(kFs);
+    shifter.set_shift_hz(0.0);
+    shifter.reset();
+
+    const auto input = sine(1000.0, 32768);
+    std::vector<double> out(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) out[i] = shifter.process(input[i]);
+    REQUIRE(tone_amplitude(out, 1000.0) > 0.8);
+}
+
+TEST_CASE("Shifting destroys a harmonic series", "[signal][shifter]") {
+    // The property the cymbal actually relies on. A harmonic input has energy
+    // at every multiple of its fundamental; after a shift, it does not.
+    FrequencyShifter64 shifter;
+    shifter.set_sample_rate(kFs);
+    shifter.set_shift_hz(37.0);
+    shifter.reset();
+
+    std::vector<double> harmonic(32768, 0.0);
+    for (int h = 1; h <= 4; ++h) {
+        const auto partial = sine(200.0 * h, harmonic.size(), 0.25);
+        for (std::size_t i = 0; i < harmonic.size(); ++i) harmonic[i] += partial[i];
+    }
+
+    std::vector<double> out(harmonic.size());
+    for (std::size_t i = 0; i < harmonic.size(); ++i) out[i] = shifter.process(harmonic[i]);
+
+    // Every partial has moved by the same 37 Hz, so they now sit at 237, 437,
+    // 637, 837 -- which are not multiples of any common fundamental.
+    for (int h = 1; h <= 4; ++h) {
+        INFO("partial " << h);
+        REQUIRE(tone_amplitude(out, 200.0 * h + 37.0) >
+                tone_amplitude(out, 200.0 * h) * 2.0);
+    }
+}
+
+TEST_CASE("The shifter allocates nothing on the audio thread",
+          "[signal][shifter][rt-safety]") {
+    FrequencyShifter64 shifter;
+    shifter.set_sample_rate(kFs);
+    shifter.set_shift_hz(50.0);
+    shifter.reset();
+
+    double sink = 0.0;
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int i = 0; i < 16384; ++i) sink += shifter.process(std::sin(0.01 * i));
+        shifter.reset();
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(std::isfinite(sink));
+    REQUIRE(allocations == 0);
+}
+
+// -- Karplus-Strong ----------------------------------------------------------
+
+TEST_CASE("The string produces a harmonic series it was never given",
+          "[signal][string]") {
+    // Nothing writes a harmonic anywhere: the partials appear because only
+    // frequencies whose period divides the loop survive going round it. That
+    // is the whole idea, so it is what gets measured.
+    KarplusStrong string;
+    string.prepare(kFs);
+    string.set_frequency(220.0);
+    string.set_decay_seconds(3.0);
+    string.set_damping(0.1);
+    string.set_pluck_position(0.25);
+    string.reset();
+    string.pluck();
+
+    pulp::signal::NoiseSource noise;
+    noise.prepare(kFs);
+    noise.reset();
+
+    std::vector<float> y(32768);
+    for (std::size_t i = 0; i < y.size(); ++i) {
+        y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+    }
+
+    REQUIRE(tone_amplitude(y, 220.0) > 1e-4);
+    REQUIRE(tone_amplitude(y, 440.0) > 1e-4);
+    REQUIRE(tone_amplitude(y, 660.0) > 1e-4);
+    // ...and nothing in between, which is what makes it a series rather than
+    // filtered noise.
+    REQUIRE(tone_amplitude(y, 330.0) < tone_amplitude(y, 220.0) * 0.35);
+}
+
+TEST_CASE("A higher note decays faster at the same decay setting",
+          "[signal][string]") {
+    // The loop runs f0 times a second, so the same per-trip loss is a much
+    // shorter note at a high pitch. A fixed loop gain would make every note
+    // last the same time, which no string does.
+    auto length_for = [](double hz) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(hz);
+        string.set_decay_seconds(1.0);
+        string.set_damping(0.2);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(static_cast<std::size_t>(2.0 * kFs));
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 512 ? noise.white() : 0.0f);
+        }
+        return audible_length(y, 1e-4);
+    };
+
+    // Both reach -60 dB at about the requested second, which is the point of
+    // deriving the gain from the frequency.
+    const int low = length_for(110.0);
+    const int high = length_for(880.0);
+    REQUIRE(low > 0);
+    REQUIRE(high > 0);
+    REQUIRE(std::fabs(static_cast<double>(low - high)) < 0.4 * kFs);
+}
+
+TEST_CASE("Damping removes the upper partials", "[signal][string]") {
+    // Measured early, where the fundamental and the upper partials are both
+    // still present. Later in the note a damped string has lost most of its
+    // level too, so a ratio taken over the whole render compares two kinds of
+    // quiet rather than two kinds of bright.
+    auto brightness = [](double damping) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(220.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(damping);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(4096);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        double lp = 0.0, low = 0.0, high = 0.0;
+        const double a = 1.0 - std::exp(-2.0 * kPi * 1500.0 / kFs);
+        for (float v : y) {
+            lp += a * (static_cast<double>(v) - lp);
+            low += lp * lp;
+            const double hp = static_cast<double>(v) - lp;
+            high += hp * hp;
+        }
+        return high / (high + low + 1e-30);
+    };
+
+    REQUIRE(brightness(0.0) > brightness(0.9) * 2.0);
+}
+
+TEST_CASE("Pluck position removes the partials with a node there",
+          "[signal][string]") {
+    // Plucking at exactly one third cancels the third harmonic, because that
+    // is where its node is. This is the comb, and it is why plucking near the
+    // bridge sounds thin.
+    auto third_harmonic = [](double position) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(200.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(0.05);
+        string.set_pluck_position(position);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(32768);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 480 ? noise.white() : 0.0f);
+        }
+        return tone_amplitude(y, 600.0) / (tone_amplitude(y, 200.0) + 1e-20);
+    };
+
+    REQUIRE(third_harmonic(1.0 / 3.0) < third_harmonic(0.2) * 0.6);
+}
+
+TEST_CASE("The string allocates nothing once prepared",
+          "[signal][string][rt-safety]") {
+    KarplusStrong string;
+    string.prepare(kFs);
+    string.set_frequency(330.0);
+    string.set_decay_seconds(1.0);
+    string.reset();
+
+    double sink = 0.0;
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int pluck = 0; pluck < 4; ++pluck) {
+            string.set_frequency(220.0 + 55.0 * pluck);
+            string.pluck();
+            for (int i = 0; i < 4096; ++i) sink += string.process(i < 128 ? 0.5f : 0.0f);
+        }
+        string.reset();
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(std::isfinite(sink));
+    REQUIRE(allocations == 0);
+}
+
+// -- Phase distortion --------------------------------------------------------
+
+TEST_CASE("Zero distortion is a plain cosine", "[signal][phase-distortion]") {
+    PhaseDistortionOsc osc;
+    osc.set_sample_rate(kFs);
+    osc.set_frequency(500.0);
+    osc.set_shape(PhaseDistortionShape::saw);
+    osc.set_amount(0.0);
+    osc.reset();
+
+    std::vector<float> y(16384);
+    for (auto& v : y) v = osc.process();
+    REQUIRE(tone_amplitude(y, 500.0) > 0.8);
+    // A cosine has no second harmonic.
+    REQUIRE(tone_amplitude(y, 1000.0) < 0.05);
+}
+
+TEST_CASE("Warping the phase adds harmonics without adding anything else",
+          "[signal][phase-distortion]") {
+    auto harmonics_at = [](double amount) {
+        PhaseDistortionOsc osc;
+        osc.set_sample_rate(kFs);
+        osc.set_frequency(500.0);
+        osc.set_shape(PhaseDistortionShape::saw);
+        osc.set_amount(amount);
+        osc.reset();
+        std::vector<float> y(16384);
+        for (auto& v : y) v = osc.process();
+        return (tone_amplitude(y, 1000.0) + tone_amplitude(y, 1500.0)) /
+               (tone_amplitude(y, 500.0) + 1e-20);
+    };
+
+    REQUIRE(harmonics_at(0.9) > harmonics_at(0.0) * 10.0);
+}
+
+TEST_CASE("The resonant shape puts a peak at a swept multiple",
+          "[signal][phase-distortion]") {
+    // The signature behaviour: the apparent formant sits at a multiple of the
+    // fundamental set by the amount, with no filter anywhere.
+    auto peak_multiple = [](double amount, double multiple) {
+        PhaseDistortionOsc osc;
+        osc.set_sample_rate(kFs);
+        osc.set_frequency(300.0);
+        osc.set_shape(PhaseDistortionShape::resonant_saw);
+        osc.set_resonant_depth(11.0);
+        osc.set_amount(amount);
+        osc.reset();
+        std::vector<float> y(16384);
+        for (auto& v : y) v = osc.process();
+        return tone_amplitude(y, 300.0 * multiple);
+    };
+
+    // At full amount the carrier sits at the 11th multiple, so there is more
+    // there than at the 3rd; at zero amount the reverse.
+    REQUIRE(peak_multiple(1.0, 11.0) > peak_multiple(1.0, 3.0));
+    REQUIRE(peak_multiple(0.0, 1.0) > peak_multiple(0.0, 11.0) * 5.0);
+}
+
+TEST_CASE("Every phase-distortion shape stays bounded",
+          "[signal][phase-distortion]") {
+    for (auto shape : {PhaseDistortionShape::saw, PhaseDistortionShape::pulse,
+                       PhaseDistortionShape::resonant_saw,
+                       PhaseDistortionShape::resonant_triangle,
+                       PhaseDistortionShape::resonant_trapezoid}) {
+        PhaseDistortionOsc osc;
+        osc.set_sample_rate(kFs);
+        osc.set_frequency(220.0);
+        osc.set_shape(shape);
+        osc.set_amount(1.0);
+        osc.reset();
+        for (int i = 0; i < 8192; ++i) {
+            const float v = osc.process();
+            REQUIRE(std::isfinite(v));
+            REQUIRE(std::fabs(v) <= 1.0001f);
+        }
+    }
+}
+
+// -- Membrane ----------------------------------------------------------------
+
+TEST_CASE("The membrane's modes sit at inharmonic ratios",
+          "[signal][drum][membrane]") {
+    // The reason a real drum has no clear pitch. At structure 1 the modes are
+    // the published circular-membrane ratios, which are not multiples of the
+    // fundamental.
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(200.0);
+    voice.set_structure(1.0);
+    voice.set_spread(0.0);
+    voice.set_damping(0.0);
+    voice.set_decay_ms(3000.0);
+    voice.set_position(0.35);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 48000);
+    REQUIRE(peak(y) > 1e-4);
+
+    const double fundamental = tone_amplitude(y, 200.0);
+    // The second mode is at 1.5933x, not at 2x.
+    REQUIRE(tone_amplitude(y, 200.0 * 1.5933) > tone_amplitude(y, 400.0) * 1.5);
+    REQUIRE(fundamental > 1e-5);
+}
+
+TEST_CASE("Structure zero gives a harmonic series instead",
+          "[signal][drum][membrane]") {
+    // The negative control: the same voice at structure 0 must put energy
+    // exactly where the membrane ratios do not.
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(200.0);
+    voice.set_structure(0.0);
+    voice.set_spread(0.0);
+    voice.set_damping(0.0);
+    voice.set_decay_ms(3000.0);
+    voice.set_position(0.35);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 48000);
+    REQUIRE(tone_amplitude(y, 400.0) > tone_amplitude(y, 200.0 * 1.5933) * 1.5);
+}
+
+TEST_CASE("Damping makes the upper modes die first",
+          "[signal][drum][membrane]") {
+    auto late_brightness = [](double damping) {
+        MembraneVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(150.0);
+        voice.set_damping(damping);
+        voice.set_decay_ms(2000.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 48000);
+        const std::vector<float> tail(y.begin() + 24000, y.end());
+        return tone_amplitude(tail, 150.0 * 2.9173) /
+               (tone_amplitude(tail, 150.0) + 1e-20);
+    };
+
+    REQUIRE(late_brightness(0.0) > late_brightness(0.95) * 2.0);
+}
+
+TEST_CASE("Strike position removes the modes with a node there",
+          "[signal][drum][membrane]") {
+    // The comb is not a level control: at the midpoint the second mode has a
+    // node exactly there and disappears, while the first mode -- which has an
+    // antinode there -- gets louder. Measuring overall energy would miss this
+    // entirely, because what changes is which partials exist.
+    auto modes_at = [](double position) {
+        MembraneVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(150.0);
+        voice.set_position(position);
+        voice.set_spread(0.0);
+        voice.set_decay_ms(1500.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 24000);
+        return std::pair<double, double>{tone_amplitude(y, 150.0),
+                                         tone_amplitude(y, 150.0 * 1.5933)};
+    };
+
+    const auto off_centre = modes_at(0.25);
+    const auto centre = modes_at(0.5);
+
+    REQUIRE(off_centre.second > 1e-4);            // present off-centre
+    REQUIRE(centre.second < off_centre.second * 0.01);  // nulled at the midpoint
+    REQUIRE(centre.first > off_centre.first);     // and the first mode is stronger
+}
+
+// -- Cymbal ------------------------------------------------------------------
+
+TEST_CASE("The cymbal's shifter is what removes the pitch",
+          "[signal][drum][cymbal]") {
+    // Without the shift the comb bank is chordal -- each comb rings on its own
+    // harmonic series. The shift is what makes it a cymbal, so the test is
+    // that turning it off brings a pitch back.
+    auto harmonic_strength = [](double shift_hz) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(300.0);
+        voice.set_decay_ms(2000.0);
+        voice.set_shift_hz(shift_hz);
+        voice.set_variation(0.0);
+        voice.set_low_cut_hz(100.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 48000);
+        REQUIRE(peak(y) > 1e-4);
+        // Energy at the lowest comb's own frequency and its octave, relative to
+        // a frequency that belongs to no comb.
+        return (tone_amplitude(y, 300.0) + tone_amplitude(y, 600.0)) /
+               (tone_amplitude(y, 337.0) + 1e-20);
+    };
+
+    REQUIRE(harmonic_strength(0.0) > harmonic_strength(60.0) * 1.5);
+}
+
+TEST_CASE("A cymbal with variation off is reproducible",
+          "[signal][drum][cymbal]") {
+    CymbalVoice voice;
+    voice.prepare(kFs);
+    voice.set_variation(0.0);
+    const auto first = hit(voice, 0.8f, 12000);
+    voice.reset();
+    const auto second = hit(voice, 0.8f, 12000);
+    REQUIRE(first == second);
+}
+
+TEST_CASE("Variation makes successive crashes differ",
+          "[signal][drum][cymbal]") {
+    // Two hits in a row, with no reset between them: `reset()` deliberately
+    // rewinds the variation sequence, so resetting between hits would put the
+    // second one back on the first one's seed and hide the feature.
+    CymbalVoice voice;
+    voice.prepare(kFs);
+    voice.set_variation(1.0);
+    const auto first = hit(voice, 0.8f, 12000);
+    const auto second = hit(voice, 0.8f, 12000);
+    REQUIRE_FALSE(first == second);
+}
+
+TEST_CASE("Cymbal decay controls how long the wash lasts",
+          "[signal][drum][cymbal]") {
+    auto length_for = [](double decay_ms) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_decay_ms(decay_ms);
+        voice.set_variation(0.0);
+        const auto y = hit(voice, 1.0f, static_cast<int>(4.0 * kFs));
+        return audible_length(y, 1e-4);
+    };
+
+    REQUIRE(length_for(3000.0) > length_for(200.0) * 3);
+}
+
+// -- Zap ---------------------------------------------------------------------
+
+TEST_CASE("The zap's distortion sweep is independent of its pitch sweep",
+          "[signal][drum][zap]") {
+    // The point of the voice. With the same pitch sweep, changing only the
+    // distortion decay must change the timbre and leave the pitch trajectory
+    // alone -- which a single shared envelope could not do.
+    auto render_zap = [](double distortion_ms) {
+        ZapVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(200.0);
+        voice.set_pitch_sweep_octaves(1.5);
+        voice.set_pitch_sweep_ms(40.0);
+        voice.set_distortion(1.0);
+        voice.set_distortion_ms(distortion_ms);
+        voice.set_decay_ms(500.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto quick = render_zap(5.0);
+    const auto slow = render_zap(200.0);
+    REQUIRE(peak(quick) > 1e-3);
+    REQUIRE(peak(slow) > 1e-3);
+
+    // A distortion still open late puts far more energy up high. Measured as a
+    // band fraction rather than at one frequency, because the formant's centre
+    // moves as the sweep runs and a single bin would be sampling a moving
+    // target.
+    auto high_band = [](const std::vector<float>& x) {
+        const double a = 1.0 - std::exp(-2.0 * kPi * 1000.0 / kFs);
+        double lp = 0.0, low = 0.0, high = 0.0;
+        for (float v : x) {
+            lp += a * (static_cast<double>(v) - lp);
+            low += lp * lp;
+            const double hp = static_cast<double>(v) - lp;
+            high += hp * hp;
+        }
+        return high / (high + low + 1e-30);
+    };
+
+    const std::vector<float> quick_tail(quick.begin() + 4800, quick.end());
+    const std::vector<float> slow_tail(slow.begin() + 4800, slow.end());
+    REQUIRE(high_band(slow_tail) > high_band(quick_tail) * 3.0);
+}
+
+TEST_CASE("Zero distortion leaves a clean swept tone", "[signal][drum][zap]") {
+    ZapVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(200.0);
+    voice.set_pitch_sweep_octaves(0.0);
+    voice.set_distortion(0.0);
+    voice.set_decay_ms(600.0);
+    voice.set_detune_cents(0.0);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    voice.gate().set_colour(0.0);
+
+    const auto y = hit(voice, 1.0f, 24000);
+    REQUIRE(tone_amplitude(y, 200.0) > tone_amplitude(y, 600.0) * 4.0);
+}
+
+TEST_CASE("Every physical voice stays finite at extreme settings",
+          "[signal][drum]") {
+    MembraneVoice membrane;
+    membrane.prepare(kFs);
+    membrane.set_tune_hz(2000.0);
+    membrane.set_stretch(1.0);
+    membrane.set_spread(1.0);
+    membrane.set_decay_ms(8000.0);
+    membrane.output().set_drive(1.0);
+    membrane.output().set_fold(1.0);
+
+    CymbalVoice cymbal;
+    cymbal.prepare(kFs);
+    cymbal.set_tune_hz(2000.0);
+    cymbal.set_decay_ms(8000.0);
+    cymbal.set_shift_hz(400.0);
+    cymbal.set_inharmonicity(1.0);
+    cymbal.output().set_drive(1.0);
+    cymbal.output().set_fold(1.0);
+
+    ZapVoice zap;
+    zap.prepare(kFs);
+    zap.set_tune_hz(4000.0);
+    zap.set_pitch_sweep_octaves(6.0);
+    zap.set_distortion(1.0);
+    zap.set_resonant_depth(32.0);
+    zap.set_ring(1.0);
+    zap.output().set_drive(1.0);
+    zap.output().set_fold(1.0);
+
+    Voice* voices[] = {&membrane, &cymbal, &zap};
+    for (Voice* voice : voices) {
+        for (int repeat = 0; repeat < 4; ++repeat) {
+            const auto y = hit(*voice, 1.0f, 12000);
+            for (float v : y) REQUIRE(std::isfinite(v));
+            REQUIRE(peak(y) < 20.0);
+        }
+    }
+}
+
+TEST_CASE("The physical voices allocate nothing on the audio thread",
+          "[signal][drum][rt-safety]") {
+    MembraneVoice membrane;
+    membrane.prepare(kFs);
+    CymbalVoice cymbal;
+    cymbal.prepare(kFs);
+    ZapVoice zap;
+    zap.prepare(kFs);
+
+    std::vector<float> buffer(256, 0.0f);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        Voice* voices[] = {&membrane, &cymbal, &zap};
+        for (Voice* voice : voices) {
+            for (int repeat = 0; repeat < 4; ++repeat) {
+                voice->note_on(0.5f + 0.1f * static_cast<float>(repeat));
+                for (int block = 0; block < 12; ++block) {
+                    std::fill(buffer.begin(), buffer.end(), 0.0f);
+                    voice->process(buffer.data(), static_cast<int>(buffer.size()));
+                }
+                voice->choke(3.0f);
+                voice->process(buffer.data(), static_cast<int>(buffer.size()));
+                voice->reset();
+            }
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
