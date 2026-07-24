@@ -50,6 +50,8 @@ import {
   extractDevMetadataAttrs,
   decodeRelativeTransform,
   extractBoundVariableBindings,
+  correlateNormalizedColorBindings,
+  stripNormalizedColorBindings,
   utf16ToUtf8ByteOffsets,
 } from "./extract-pure";
 
@@ -145,7 +147,11 @@ export async function extractScene(
     const extracted = await walk(n, null, i, ctx, null);
     ctx.pathStack.pop();
     if (extracted) {
-      if (cfg.faithfulVector) await applyFaithfulVector(extracted, n, ctx);
+      if (cfg.faithfulVector) {
+        await applyFaithfulVector(extracted, n, ctx);
+        if (extracted.render_mode === "faithful_svg")
+          stripNormalizedColorBindings(extracted);
+      }
       roots.push(extracted);
     }
   }
@@ -353,6 +359,13 @@ async function walk(
     const bound = extractBoundVariableBindings(
       (node as SceneNode & { boundVariables?: unknown }).boundVariables,
       ctx.tokens.variableIdToName,
+      {
+        resolvedModeByCollection:
+          (node as SceneNode & { resolvedVariableModes?: Record<string, string> })
+            .resolvedVariableModes ?? {},
+        variableIdToCollectionId: ctx.tokens.variableIdToCollectionId ?? {},
+        variableIdToModeName: ctx.tokens.variableIdToModeName ?? {},
+      },
     );
     if (bound) {
       if (Object.keys(bound.bindings).length > 0) ex.bound_variables = bound.bindings;
@@ -495,6 +508,19 @@ async function walk(
       pushDiag(ctx, "info", "illustration-export-failed", "capture_partial",
         `Illustration frame ${node.name}: ${res.error}`);
     }
+  }
+
+  // Correlate source paint bindings only after every asset-promotion path.
+  // Rasterized widgets/vectors/illustrations bake their color into an asset and
+  // therefore cannot advertise a mutable normalized literal.
+  if (ex.bound_variables && ex.type !== "image" && !ex.asset_ref) {
+    correlateNormalizedColorBindings(
+      node.type,
+      "fills" in node ? (node as GeometryMixin).fills : undefined,
+      "strokes" in node ? (node as GeometryMixin).strokes : undefined,
+      ex.bound_variables,
+      ex.style,
+    );
   }
 
   // Rotation (audit "Rotation / transform" row). The affine's rotation lowers

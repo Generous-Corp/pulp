@@ -1160,6 +1160,11 @@ export interface BoundVariableBindings {
 export function extractBoundVariableBindings(
   bound: unknown,
   idToName: Record<string, string>,
+  modeResolution?: {
+    resolvedModeByCollection: Record<string, string>;
+    variableIdToCollectionId: Record<string, string>;
+    variableIdToModeName: Record<string, Record<string, string>>;
+  },
 ): BoundVariableBindings | undefined {
   if (!bound || typeof bound !== "object") return undefined;
   const out: BoundVariableBindings = { bindings: {}, unresolved: [] };
@@ -1172,7 +1177,15 @@ export function extractBoundVariableBindings(
     return undefined;
   };
   const bind = (key: string, id: string) => {
-    const name = idToName[id];
+    let name = idToName[id];
+    if (modeResolution) {
+      const collectionId = modeResolution.variableIdToCollectionId[id];
+      const modeId = collectionId
+        ? modeResolution.resolvedModeByCollection[collectionId]
+        : undefined;
+      if (modeId)
+        name = modeResolution.variableIdToModeName[id]?.[modeId];
+    }
     if (name) out.bindings[key] = name;
     else out.unresolved.push(id);
   };
@@ -1200,6 +1213,63 @@ export function extractBoundVariableBindings(
   }
 
   return Object.keys(out.bindings).length > 0 || out.unresolved.length > 0 ? out : undefined;
+}
+
+export function correlateNormalizedColorBindings(
+  figmaType: string,
+  fills: unknown,
+  strokes: unknown,
+  bindings: Record<string, string>,
+  style: {
+    background_color?: string;
+    color?: string;
+    border_color?: string;
+    border_top_color?: string;
+    border_right_color?: string;
+    border_bottom_color?: string;
+    border_left_color?: string;
+  },
+): void {
+  const singleOpaqueSolid = (paints: unknown): boolean => {
+    if (!Array.isArray(paints) || paints.length !== 1) return false;
+    const paint = paints[0] as {
+      type?: string;
+      visible?: boolean;
+      opacity?: number;
+      blendMode?: string;
+    };
+    return paint.type === "SOLID" &&
+      paint.visible !== false &&
+      (paint.opacity === undefined || paint.opacity === 1) &&
+      (paint.blendMode === undefined || paint.blendMode === "NORMAL");
+  };
+
+  // Raw Figma fills/strokes bindings address paint-array entries. Emit a
+  // normalized-slot correlation only when the source has exactly one visible,
+  // opaque solid paint, so changing the token can safely replace the IR's
+  // whole-node literal without dropping compositing, opacity, or another paint.
+  if (bindings.fills && singleOpaqueSolid(fills)) {
+    if ((figmaType === "TEXT" || figmaType === "TEXT_PATH") && style.color) {
+      bindings["slot.color"] = bindings.fills;
+    } else if (style.background_color) {
+      bindings["slot.background_color"] = bindings.fills;
+    }
+  }
+  const hasSideColors = style.border_top_color || style.border_right_color ||
+    style.border_bottom_color || style.border_left_color;
+  if (bindings.strokes && singleOpaqueSolid(strokes) &&
+      style.border_color && !hasSideColors) {
+    bindings["slot.border_color"] = bindings.strokes;
+  }
+}
+
+export function stripNormalizedColorBindings(node: ExtractedFigmaNode): void {
+  if (node.bound_variables) {
+    for (const key of Object.keys(node.bound_variables)) {
+      if (key.startsWith("slot.")) delete node.bound_variables[key];
+    }
+  }
+  for (const child of node.children) stripNormalizedColorBindings(child);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
