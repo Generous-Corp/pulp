@@ -26,12 +26,24 @@ MAP_PATH = ".github/vellum-ownership.json"
 MANIFEST_PATH = "docs/contracts/vellum-initial-cut-manifest.json"
 EVENT_PREFIX = ".github/vellum-change-events/"
 EXPECTED_FRAMEWORK_REPOSITORY = "Generous-Corp/vellum"
+EXPECTED_FRAMEWORK_REPOSITORY_ID = 1309219868
 EXPECTED_FREEZE_OWNER = "@danielraffel"
-EXPECTED_SPEC_COMMIT = "a97eec582df79c22ed43968e20b36ac92d866129"
-EXPECTED_SPEC_BLOB = "32daed709c00fa754e7e0cd31e16c704f6e04507"
+EXPECTED_CHECK_APP_IDS = {
+    "forbidden-deps": 15368,
+    "provenance-verify": 15368,
+    "sterile-consumer": 15368,
+}
+EXPECTED_VELLUM_READER_APP_ID = 3878000
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 EVENT_ID_RE = re.compile(r"^[0-9]{8}-[a-z0-9][a-z0-9-]{2,79}$")
 SLICE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,79}$")
+RECORD_PATH_RE = re.compile(
+    r"^provenance/authority/records/[a-z0-9][a-z0-9._-]{2,120}\.json$"
+)
+AUTHORITY_REF_RE = re.compile(
+    r"^refs/tags/authority/[a-z0-9][a-z0-9._/-]{2,120}$"
+)
 ISSUE_RE = re.compile(
     r"^https://github\.com/Generous-Corp/(?:pulp|vellum)/issues/[1-9][0-9]*$"
 )
@@ -154,8 +166,8 @@ def validate_map(mapping: dict[str, Any]) -> None:
     }
     if set(mapping) != allowed_top:
         raise FreezeError("ownership map has missing or unknown top-level fields")
-    if mapping.get("schema_version") != 1:
-        raise FreezeError("ownership map schema_version must be 1")
+    if mapping.get("schema_version") != 2:
+        raise FreezeError("ownership map schema_version must be 2")
     if mapping.get("framework_repository") != EXPECTED_FRAMEWORK_REPOSITORY:
         raise FreezeError("ownership map framework_repository is not the approved repository")
     if mapping.get("freeze_owner") != EXPECTED_FREEZE_OWNER:
@@ -168,6 +180,8 @@ def validate_map(mapping: dict[str, Any]) -> None:
         "state",
         "pulp_extraction_base",
         "vellum_authority_commit",
+        "authority_record_path",
+        "initial_transition_event",
         "accepted_by",
         "accepted_at",
     }
@@ -181,13 +195,23 @@ def validate_map(mapping: dict[str, Any]) -> None:
         raise FreezeError("activation.pulp_extraction_base must be a 40-character SHA")
     if state == "prepared":
         if any(activation.get(field) is not None for field in (
-            "vellum_authority_commit", "accepted_by", "accepted_at"
+            "vellum_authority_commit",
+            "authority_record_path",
+            "initial_transition_event",
+            "accepted_by",
+            "accepted_at",
         )):
             raise FreezeError("prepared activation fields must remain null")
     else:
         authority = activation.get("vellum_authority_commit")
         if not isinstance(authority, str) or not SHA_RE.fullmatch(authority):
             raise FreezeError("active ownership requires vellum_authority_commit")
+        record_path = activation.get("authority_record_path")
+        if not isinstance(record_path, str) or not RECORD_PATH_RE.fullmatch(record_path):
+            raise FreezeError("active ownership requires a direct Vellum authority record path")
+        initial_event = activation.get("initial_transition_event")
+        if not isinstance(initial_event, str) or not EVENT_ID_RE.fullmatch(initial_event):
+            raise FreezeError("active ownership requires an initial transition event")
         if activation.get("accepted_by") != EXPECTED_FREEZE_OWNER:
             raise FreezeError("active ownership requires the approved freeze owner")
         accepted_at = _parse_utc(
@@ -201,8 +225,10 @@ def validate_map(mapping: dict[str, Any]) -> None:
         raise FreezeError("ownership map slices must be an array")
     seen: set[str] = set()
     for item in slices:
-        if not isinstance(item, dict) or set(item) != {"id", "state", "paths"}:
-            raise FreezeError("each ownership slice needs exactly id, state, and paths")
+        if not isinstance(item, dict) or set(item) != {"id", "state", "paths", "authority"}:
+            raise FreezeError(
+                "each ownership slice needs exactly id, state, paths, and authority"
+            )
         slice_id = item.get("id")
         if not isinstance(slice_id, str) or not SLICE_ID_RE.fullmatch(slice_id):
             raise FreezeError("each ownership slice needs a lowercase kebab-case id")
@@ -229,10 +255,81 @@ def validate_map(mapping: dict[str, Any]) -> None:
                 or ".." in pathlib.PurePosixPath(pattern).parts
             ):
                 raise FreezeError(f"slice {slice_id} has an unsafe path pattern")
+        slice_authority = item.get("authority")
+        if item.get("state") == "framework-authoritative-transferred":
+            required = {
+                "event_id",
+                "vellum_commit",
+                "counterpart",
+                "accepted_by",
+                "accepted_at",
+            }
+            if not isinstance(slice_authority, dict) or set(slice_authority) != required:
+                raise FreezeError(
+                    f"transferred slice {slice_id} requires exact authority metadata"
+                )
+            if (
+                not isinstance(slice_authority.get("event_id"), str)
+                or not EVENT_ID_RE.fullmatch(slice_authority["event_id"])
+                or not isinstance(slice_authority.get("vellum_commit"), str)
+                or not SHA_RE.fullmatch(slice_authority["vellum_commit"])
+                or not isinstance(slice_authority.get("counterpart"), str)
+                or not RECORD_PATH_RE.fullmatch(slice_authority["counterpart"])
+                or slice_authority.get("accepted_by") != EXPECTED_FREEZE_OWNER
+            ):
+                raise FreezeError(f"transferred slice {slice_id} authority is invalid")
+            _parse_utc(
+                slice_authority.get("accepted_at"),
+                f"slice {slice_id} authority.accepted_at",
+            )
+        elif slice_authority is not None:
+            raise FreezeError(
+                f"non-transferred slice {slice_id} cannot carry authority metadata"
+            )
 
 
 def _slice_map(mapping: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["id"]: item for item in mapping["slices"]}
+
+
+def _upgrade_prepared_v1(mapping: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the one allowed schema migration without changing ownership."""
+
+    if mapping.get("schema_version") != 1:
+        return mapping
+    activation = mapping.get("activation")
+    slices = mapping.get("slices")
+    if (
+        not isinstance(activation, dict)
+        or activation.get("state") != "prepared"
+        or set(activation)
+        != {
+            "state",
+            "pulp_extraction_base",
+            "vellum_authority_commit",
+            "accepted_by",
+            "accepted_at",
+        }
+        or any(
+            activation.get(field) is not None
+            for field in ("vellum_authority_commit", "accepted_by", "accepted_at")
+        )
+        or not isinstance(slices, list)
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"id", "state", "paths"}
+            or item.get("state") == "framework-authoritative-transferred"
+            for item in slices
+        )
+    ):
+        raise FreezeError("only the prepared, untransferred schema-v1 map may migrate")
+    normalized = json.loads(json.dumps(mapping))
+    normalized["schema_version"] = 2
+    normalized["activation"]["authority_record_path"] = None
+    normalized["activation"]["initial_transition_event"] = None
+    for item in normalized["slices"]:
+        item["authority"] = None
+    return normalized
 
 
 def validate_map_transition(
@@ -243,6 +340,7 @@ def validate_map_transition(
         if head_map["activation"]["state"] != "prepared":
             raise FreezeError("the first ownership projection must be prepared")
         return set()
+    base_map = _upgrade_prepared_v1(base_map)
     validate_map(base_map)
     for field in ("framework_repository", "freeze_owner"):
         if base_map[field] != head_map[field]:
@@ -280,6 +378,11 @@ def validate_map_transition(
         and not added
     ):
         raise FreezeError("activation must transfer at least one coherent slice")
+    if added and base_map["activation"]["state"] == "active":
+        raise FreezeError(
+            "schema-v2 authority is a one-shot coherent transfer; later slice transfer "
+            "needs a separately designed protocol"
+        )
     return added
 
 
@@ -290,7 +393,7 @@ def expected_authority_transition(
         return None
     if base_map is None or base_map["activation"]["state"] == "prepared":
         return "activate"
-    return "transfer-slice"
+    raise FreezeError("schema-v2 does not support later slice transfers")
 
 
 def validate_transferred_projection(
@@ -456,7 +559,6 @@ def validate_event(
         }
         if set(event) != allowed or event.get("transition") not in {
             "activate",
-            "transfer-slice",
         }:
             raise FreezeError(f"event {path} has an invalid authority transition shape")
         commit = event.get("vellum_authority_commit")
@@ -465,10 +567,8 @@ def validate_event(
         if event.get("approved_by") != EXPECTED_FREEZE_OWNER:
             raise FreezeError(f"event {path} requires the freeze owner's approval")
         counterpart = event.get("counterpart")
-        if not isinstance(counterpart, str) or not counterpart.startswith(
-            "provenance/activation/"
-        ):
-            raise FreezeError(f"event {path} needs a Vellum activation counterpart path")
+        if not isinstance(counterpart, str) or not RECORD_PATH_RE.fullmatch(counterpart):
+            raise FreezeError(f"event {path} needs a direct Vellum authority record path")
     else:
         raise FreezeError(f"event {path} has an invalid kind")
 
@@ -511,6 +611,7 @@ def _validate_event_coverage(
     transferred: set[str],
     authority_commit: str | None,
     expected_transition: str | None,
+    head_map: dict[str, Any],
 ) -> None:
     change_events = [event for _, event in events if event["kind"] == "change"]
     authority_events = [
@@ -544,6 +645,27 @@ def _validate_event_coverage(
             raise FreezeError("authority event label does not match the map transition")
         if authority_events[0]["vellum_authority_commit"] != authority_commit:
             raise FreezeError("authority event does not match the ownership projection commit")
+        event = authority_events[0]
+        activation = head_map["activation"]
+        if (
+            activation.get("initial_transition_event") != event["event_id"]
+            or activation.get("authority_record_path") != event["counterpart"]
+            or activation.get("accepted_by") != event["approved_by"]
+            or activation.get("accepted_at") != event["created_at"]
+        ):
+            raise FreezeError("activation metadata does not derive from the authority event")
+        for slice_id in transferred:
+            item = _slice_map(head_map)[slice_id]
+            if item.get("authority") != {
+                "event_id": event["event_id"],
+                "vellum_commit": event["vellum_authority_commit"],
+                "counterpart": event["counterpart"],
+                "accepted_by": event["approved_by"],
+                "accepted_at": event["created_at"],
+            }:
+                raise FreezeError(
+                    f"slice {slice_id} authority does not derive from the authority event"
+                )
     elif authority_events:
         raise FreezeError("authority event does not correspond to a source transfer")
 
@@ -611,17 +733,158 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
     return value
 
 
+def _git_blob(repo: pathlib.Path, revision: str, path: str) -> str:
+    output = _git(repo, "ls-tree", revision, "--", path).decode().strip()
+    rows = output.splitlines()
+    if len(rows) != 1:
+        raise FreezeError(f"expected one Git blob for {revision}:{path}")
+    metadata, actual_path = rows[0].split("\t", 1)
+    mode, object_type, blob = metadata.split()
+    if actual_path != path or object_type != "blob" or mode not in {"100644", "100755"}:
+        raise FreezeError(f"expected a regular Git blob for {revision}:{path}")
+    return blob
+
+
+def _git_tree_entry(repo: pathlib.Path, revision: str, path: str) -> dict[str, str]:
+    output = _git(repo, "ls-tree", revision, "--", path).decode().strip()
+    rows = output.splitlines()
+    if len(rows) != 1:
+        raise FreezeError(f"expected one Git tree entry for {revision}:{path}")
+    metadata, actual_path = rows[0].split("\t", 1)
+    mode, object_type, blob = metadata.split()
+    if actual_path != path or object_type != "blob" or mode not in {"100644", "100755"}:
+        raise FreezeError(f"expected a regular Git blob for {revision}:{path}")
+    return {"blob": blob, "mode": mode}
+
+
+def _verify_vellum_trust(
+    *,
+    commit: str,
+    authority_ref: str,
+    token: str,
+    app_jwt: str,
+) -> None:
+    app = _github_json("https://api.github.com/app", app_jwt)
+    if app.get("id") != EXPECTED_VELLUM_READER_APP_ID:
+        raise FreezeError("Vellum reader token identifies the wrong GitHub App")
+    token_installation = _github_json(
+        "https://api.github.com/installation", token
+    )
+    if token_installation.get("app_id") != EXPECTED_VELLUM_READER_APP_ID:
+        raise FreezeError(
+            "Vellum reader installation token belongs to the wrong GitHub App"
+        )
+    repository = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}", token
+    )
+    if (
+        repository.get("id") != EXPECTED_FRAMEWORK_REPOSITORY_ID
+        or repository.get("full_name") != EXPECTED_FRAMEWORK_REPOSITORY
+        or repository.get("private") is not True
+        or repository.get("archived") is not False
+    ):
+        raise FreezeError("Vellum repository identity or state differs")
+    installation = _github_json(
+        "https://api.github.com/installation/repositories?per_page=100", token
+    )
+    repositories = installation.get("repositories")
+    if (
+        installation.get("total_count") != 1
+        or not isinstance(repositories, list)
+        or len(repositories) != 1
+        or not isinstance(repositories[0], dict)
+        or repositories[0].get("id") != EXPECTED_FRAMEWORK_REPOSITORY_ID
+    ):
+        raise FreezeError("Vellum reader token is not scoped to exactly one repository")
+    tag_name = authority_ref.removeprefix("refs/tags/")
+    encoded_tag_path = urllib.parse.quote(tag_name, safe="/")
+    reference = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}/git/ref/"
+        f"tags/{encoded_tag_path}",
+        token,
+    )
+    tag_object = reference.get("object")
+    if (
+        not isinstance(tag_object, dict)
+        or tag_object.get("type") != "tag"
+        or not isinstance(tag_object.get("sha"), str)
+    ):
+        raise FreezeError("Vellum authority ref is not an annotated tag")
+    tag = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}/git/tags/"
+        f"{tag_object['sha']}",
+        token,
+    )
+    target = tag.get("object")
+    verification = tag.get("verification")
+    if (
+        not isinstance(target, dict)
+        or target.get("type") != "commit"
+        or target.get("sha") != commit
+        or not isinstance(verification, dict)
+        or verification.get("verified") is not True
+        or verification.get("reason") != "valid"
+    ):
+        raise FreezeError(
+            "Vellum authority tag is unsigned or targets the wrong commit"
+        )
+    release = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}/"
+        f"releases/tags/{urllib.parse.quote(tag_name, safe='')}",
+        token,
+    )
+    if (
+        release.get("tag_name") != tag_name
+        or release.get("draft") is not False
+        or release.get("immutable") is not True
+        or not isinstance(release.get("published_at"), str)
+    ):
+        raise FreezeError(
+            "Vellum authority tag lacks a published immutable release"
+        )
+    expected = set(EXPECTED_CHECK_APP_IDS.items())
+    check_runs = _github_json(
+        f"https://api.github.com/repos/{EXPECTED_FRAMEWORK_REPOSITORY}/commits/"
+        f"{commit}/check-runs?per_page=100",
+        token,
+    ).get("check_runs")
+    if not isinstance(check_runs, list):
+        raise FreezeError("Vellum authority check runs are unavailable")
+    successful: set[tuple[str, int]] = set()
+    for run in check_runs:
+        if (
+            isinstance(run, dict)
+            and run.get("head_sha") == commit
+            and run.get("conclusion") == "success"
+            and isinstance(run.get("app"), dict)
+            and isinstance(run["app"].get("id"), int)
+            and isinstance(run.get("name"), str)
+        ):
+            successful.add((run["name"], run["app"]["id"]))
+    if not expected.issubset(successful):
+        raise FreezeError("Vellum authority commit lacks successful pinned checks")
+
+
 def verify_authority_counterpart(
     *,
+    repo: pathlib.Path,
+    base: str,
+    head: str,
+    manifest: dict[str, Any],
     events: list[tuple[str, dict[str, Any]]],
     transferred: set[str],
     head_map: dict[str, Any],
     token: str | None,
+    app_jwt: str | None,
 ) -> None:
     if not transferred:
         return
     if not token:
         raise FreezeError("VELLUM_READER_TOKEN is required for an authority transfer")
+    if not app_jwt:
+        raise FreezeError(
+            "VELLUM_READER_APP_JWT is required for an authority transfer"
+        )
     authority_event = next(
         event for _, event in events if event["kind"] == "authority-transition"
     )
@@ -653,39 +916,174 @@ def verify_authority_counterpart(
         "schema_version",
         "state",
         "source_repository",
+        "framework_repository",
         "pulp_extraction_base",
-        "ownership_projection_sha256",
-        "transferred_paths_sha256",
-        "transferred_slices",
-        "burl_disposition",
-        "spec_commit",
-        "spec_blob",
+        "historical_seed_commit",
+        "pulp_candidate_commit",
+        "pulp_ownership_projection_blob",
+        "authority_start_commit",
+        "authority_record_ref",
+        "cut_manifest_sha256",
+        "authority_groups",
+        "pulp_activation",
+        "approved_by",
+        "approved_at",
     }
     if set(counterpart) != allowed:
         raise FreezeError("Vellum authority counterpart has missing or unknown fields")
     expected = {
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "pending-pulp-activation",
         "source_repository": "Generous-Corp/pulp",
+        "framework_repository": EXPECTED_FRAMEWORK_REPOSITORY,
         "pulp_extraction_base": head_map["activation"]["pulp_extraction_base"],
-        "ownership_projection_sha256": _canonical_sha256(head_map),
-        "transferred_paths_sha256": _transferred_paths_sha256(head_map),
-        "transferred_slices": sorted(transferred),
-        "spec_commit": EXPECTED_SPEC_COMMIT,
-        "spec_blob": EXPECTED_SPEC_BLOB,
+        "pulp_activation": None,
+        "approved_by": EXPECTED_FREEZE_OWNER,
     }
     for key, expected_value in expected.items():
         if counterpart.get(key) != expected_value:
             raise FreezeError(f"Vellum authority counterpart mismatch: {key}")
-    burl = counterpart.get("burl_disposition")
-    if not isinstance(burl, dict) or set(burl) != {"repository", "commit", "status"}:
-        raise FreezeError("Vellum authority counterpart needs an exact Burl disposition")
-    if burl.get("repository") != "danielraffel/burl":
-        raise FreezeError("Burl disposition names the wrong repository")
-    if burl.get("status") not in {"superseded-frozen", "disjoint", "extraction-seed"}:
-        raise FreezeError("Burl authority remains ambiguous")
-    if not isinstance(burl.get("commit"), str) or not SHA_RE.fullmatch(burl["commit"]):
-        raise FreezeError("Burl disposition needs an immutable commit")
+    for field in (
+        "historical_seed_commit",
+        "pulp_candidate_commit",
+        "pulp_ownership_projection_blob",
+        "authority_start_commit",
+    ):
+        if not isinstance(counterpart.get(field), str) or not SHA_RE.fullmatch(
+            counterpart[field]
+        ):
+            raise FreezeError(f"Vellum authority counterpart has invalid {field}")
+    digest = counterpart.get("cut_manifest_sha256")
+    if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        raise FreezeError("Vellum authority counterpart has an invalid cut manifest digest")
+    if digest != _canonical_sha256(manifest):
+        raise FreezeError("Vellum authority counterpart cut manifest digest differs")
+    candidate = counterpart["pulp_candidate_commit"]
+    resolved = _git(repo, "rev-parse", f"{candidate}^{{commit}}").decode().strip()
+    if resolved != candidate:
+        raise FreezeError("recorded Pulp candidate commit did not resolve exactly")
+    ancestor = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", candidate, base],
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise FreezeError("recorded Pulp candidate is not an ancestor of the activation base")
+    if _git_blob(repo, candidate, MAP_PATH) != counterpart["pulp_ownership_projection_blob"]:
+        raise FreezeError("recorded Pulp candidate ownership blob differs")
+    reference = counterpart.get("authority_record_ref")
+    if (
+        not isinstance(reference, str)
+        or not AUTHORITY_REF_RE.fullmatch(reference)
+        or ".." in pathlib.PurePosixPath(reference).parts
+    ):
+        raise FreezeError("Vellum authority record ref is invalid")
+    _verify_vellum_trust(
+        commit=commit,
+        authority_ref=reference,
+        token=token,
+        app_jwt=app_jwt,
+    )
+    groups = counterpart.get("authority_groups")
+    if not isinstance(groups, list) or not groups:
+        raise FreezeError("Vellum authority counterpart needs authority groups")
+    recorded_slices: list[str] = []
+    recorded_paths: dict[str, dict[str, str]] = {}
+    entries = manifest.get("entries")
+    if not isinstance(entries, list):
+        raise FreezeError("Pulp cut manifest entries are invalid")
+    manifest_by_path = {
+        item.get("source_path"): item for item in entries if isinstance(item, dict)
+    }
+    if len(manifest_by_path) != len(entries):
+        raise FreezeError("Pulp cut manifest paths are not unique")
+    group_fields = {
+        "id",
+        "lineage_mode",
+        "pulp_legacy_slices",
+        "pulp_historical_seed_projection",
+        "pulp_activation_candidate_projection",
+        "vellum_implementation_projection",
+    }
+    for group in groups:
+        if not isinstance(group, dict) or set(group) != group_fields:
+            raise FreezeError("Vellum authority group has missing or unknown fields")
+        slices = group.get("pulp_legacy_slices")
+        if (
+            group.get("lineage_mode")
+            != "history-seed-ancestor-active-reimplementation"
+            or not isinstance(slices, list)
+            or not slices
+            or slices != sorted(set(slices))
+        ):
+            raise FreezeError("Vellum authority group lineage or slices are invalid")
+        for field in (
+            "pulp_historical_seed_projection",
+            "pulp_activation_candidate_projection",
+            "vellum_implementation_projection",
+        ):
+            if not isinstance(group.get(field), dict) or not group[field]:
+                raise FreezeError(f"Vellum authority group {field} must be non-empty")
+        if set(group["pulp_historical_seed_projection"]) != set(
+            group["pulp_activation_candidate_projection"]
+        ):
+            raise FreezeError("Vellum authority group candidate path sets differ")
+        for path, metadata in group["pulp_historical_seed_projection"].items():
+            entry = manifest_by_path.get(path)
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(metadata, dict)
+                or set(metadata) != {"blob", "mode", "classification"}
+                or metadata
+                != {
+                    "blob": entry.get("git_blob_sha"),
+                    "mode": entry.get("git_mode"),
+                    "classification": entry.get("classification"),
+                }
+            ):
+                raise FreezeError(
+                    f"Vellum authority historical projection differs at {path}"
+                )
+        for path, metadata in group["pulp_activation_candidate_projection"].items():
+            if (
+                not isinstance(path, str)
+                or not isinstance(metadata, dict)
+                or set(metadata) != {"blob", "mode"}
+                or path in recorded_paths
+            ):
+                raise FreezeError("Vellum authority candidate projection is invalid")
+            if _git_tree_entry(repo, candidate, path) != metadata:
+                raise FreezeError(
+                    f"Vellum authority candidate projection differs at {path}"
+                )
+            recorded_paths[path] = metadata
+        recorded_slices.extend(slices)
+    if len(recorded_slices) != len(set(recorded_slices)):
+        raise FreezeError("Vellum authority record repeats a Pulp slice")
+    if sorted(recorded_slices) != sorted(transferred):
+        raise FreezeError("Vellum authority record slice set differs from the transfer")
+    transferred_paths = sorted(
+        path
+        for item in head_map["slices"]
+        if item["id"] in transferred
+        for path in item["paths"]
+    )
+    if transferred_paths != sorted(recorded_paths):
+        raise FreezeError("Vellum authority record path set differs from the transfer")
+    changed = _git(
+        repo,
+        "diff",
+        "--name-only",
+        candidate,
+        head,
+        "--",
+        *sorted(recorded_paths),
+    ).decode().splitlines()
+    if changed:
+        raise FreezeError(
+            "Pulp candidate source changed before activation: " + ", ".join(changed)
+        )
+    approved_at = counterpart.get("approved_at")
+    _parse_utc(approved_at, "Vellum authority counterpart approved_at")
 
 
 def verify_framework_backports(
@@ -738,6 +1136,13 @@ def main(argv: list[str] | None = None) -> int:
         head_map = _json_at(repo, args.head, MAP_PATH)
         if head_map is None:
             raise FreezeError(f"{args.head}:{MAP_PATH} is required")
+        # The trusted controls must land before the durable projection can
+        # migrate. Normalize the one safe, prepared v1 state in memory so a
+        # control-only bootstrap commit remains verifiable while the following
+        # data commit performs the explicit v1 -> v2 transition.
+        if base_map is not None:
+            base_map = _upgrade_prepared_v1(base_map)
+        head_map = _upgrade_prepared_v1(head_map)
         transferred = validate_map_transition(base_map, head_map)
         manifest = _json_at(repo, args.head, MANIFEST_PATH)
         if manifest is None:
@@ -755,15 +1160,22 @@ def main(argv: list[str] | None = None) -> int:
             transferred,
             authority_commit,
             expected_authority_transition(base_map, transferred),
+            head_map,
         )
         if args.verify_authority:
             token = os.environ.get("VELLUM_READER_TOKEN")
+            app_jwt = os.environ.get("VELLUM_READER_APP_JWT")
             verify_framework_backports(events, token)
             verify_authority_counterpart(
+                repo=repo,
+                base=args.base,
+                head=args.head,
+                manifest=manifest,
                 events=events,
                 transferred=transferred,
                 head_map=head_map,
                 token=token,
+                app_jwt=app_jwt,
             )
         outbox = build_outbox(
             base=args.base,

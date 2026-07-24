@@ -37,6 +37,24 @@ def manifest(entries: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def activation_event(*, slices: list[str] | None = None) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "event_id": "20260723-authority-activation",
+        "kind": "authority-transition",
+        "created_at": "2026-07-23T22:00:00Z",
+        "slices": slices or ["canvas-kernel"],
+        "rationale": "Activate Vellum source authority after independent validation.",
+        "tests": ["Vellum freeze", "Vellum trusted freeze"],
+        "transition": "activate",
+        "vellum_authority_commit": "c" * 40,
+        "approved_by": "@danielraffel",
+        "counterpart": (
+            "provenance/authority/records/native-design-kernel-v1.json"
+        ),
+    }
+
+
 class OwnershipProjectionTests(unittest.TestCase):
     def test_candidate_paths_are_exact_and_forbidden_classes_are_deferred(self) -> None:
         value = manifest(
@@ -152,6 +170,170 @@ class OwnershipProjectionTests(unittest.TestCase):
         second = projection_tool.serialize(projection_tool.build_projection(value))
         self.assertEqual(first, second)
         self.assertEqual(json.loads(first)["activation"]["state"], "prepared")
+
+    def test_prepared_v1_projection_remains_verifiable_during_bootstrap(self) -> None:
+        value = manifest([entry("LICENSE.md", "framework-core")])
+        legacy = projection_tool.build_projection(value)
+        legacy["schema_version"] = 1
+        legacy["activation"].pop("authority_record_path")
+        legacy["activation"].pop("initial_transition_event")
+        for item in legacy["slices"]:
+            item.pop("authority")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            projection_tool.verify_projection(
+                repo=Path(temporary),
+                manifest=value,
+                projection=legacy,
+            )
+
+        legacy["activation"]["state"] = "active"
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(projection_tool.ProjectionError, "only the prepared"):
+                projection_tool.verify_projection(
+                    repo=Path(temporary),
+                    manifest=value,
+                    projection=legacy,
+                )
+
+    def test_activation_is_derived_from_one_event(self) -> None:
+        value = manifest([entry("core/canvas/src/skia_canvas.cpp", "framework-core")])
+        projection = projection_tool.activate_projection(
+            projection_tool.build_projection(value),
+            activation_event(),
+        )
+        activation = projection["activation"]
+        self.assertEqual(activation["state"], "active")
+        self.assertEqual(
+            activation["initial_transition_event"],
+            "20260723-authority-activation",
+        )
+        canvas = next(
+            item for item in projection["slices"] if item["id"] == "canvas-kernel"
+        )
+        self.assertEqual(canvas["state"], "framework-authoritative-transferred")
+        self.assertEqual(
+            canvas["authority"],
+            {
+                "event_id": "20260723-authority-activation",
+                "vellum_commit": "c" * 40,
+                "counterpart": (
+                    "provenance/authority/records/native-design-kernel-v1.json"
+                ),
+                "accepted_by": "@danielraffel",
+                "accepted_at": "2026-07-23T22:00:00Z",
+            },
+        )
+
+    def test_activation_rejects_unknown_or_non_candidate_slice(self) -> None:
+        value = manifest([entry("core/canvas/src/skia_canvas.cpp", "framework-core")])
+        with self.assertRaisesRegex(projection_tool.ProjectionError, "unknown"):
+            projection_tool.activate_projection(
+                projection_tool.build_projection(value),
+                activation_event(slices=["missing"]),
+            )
+        projection = projection_tool.build_projection(value)
+        canvas = next(
+            item for item in projection["slices"] if item["id"] == "canvas-kernel"
+        )
+        canvas["state"] = "excluded"
+        with self.assertRaisesRegex(projection_tool.ProjectionError, "not a prepared"):
+            projection_tool.activate_projection(projection, activation_event())
+
+    def test_verify_active_projection_replays_committed_event(self) -> None:
+        value = manifest([entry("core/canvas/src/skia_canvas.cpp", "framework-core")])
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            event_path = (
+                repo
+                / ".github/vellum-change-events/20260723-authority-activation.json"
+            )
+            event_path.parent.mkdir(parents=True)
+            event_path.write_text(
+                json.dumps(activation_event(), indent=2) + "\n",
+                encoding="utf-8",
+            )
+            source = repo / "core/canvas/src/skia_canvas.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("int render_surface = 0;\n", encoding="utf-8")
+            projection = projection_tool.activate_projection(
+                projection_tool.build_projection(value),
+                activation_event(),
+            )
+            projection_tool.verify_projection(
+                repo=repo,
+                manifest=value,
+                projection=projection,
+            )
+            projection["activation"]["accepted_at"] = "2026-07-23T22:00:01Z"
+            with self.assertRaisesRegex(projection_tool.ProjectionError, "stale"):
+                projection_tool.verify_projection(
+                    repo=repo,
+                    manifest=value,
+                    projection=projection,
+                )
+
+    def test_cli_verify_does_not_ignore_explicit_activation_event(self) -> None:
+        value = manifest([entry("core/canvas/src/skia_canvas.cpp", "framework-core")])
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            manifest_path = repo / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(value, indent=2) + "\n", encoding="utf-8"
+            )
+            source = repo / "core/canvas/src/skia_canvas.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("int render_surface = 0;\n", encoding="utf-8")
+            event_a = activation_event()
+            event_b = activation_event()
+            event_b["event_id"] = "20260723-other-activation"
+            event_b["created_at"] = "2026-07-23T22:00:01Z"
+            path_a = repo / "event-a" / f"{event_a['event_id']}.json"
+            path_b = repo / "event-b" / f"{event_b['event_id']}.json"
+            path_a.parent.mkdir()
+            path_b.parent.mkdir()
+            path_a.write_text(json.dumps(event_a) + "\n", encoding="utf-8")
+            path_b.write_text(json.dumps(event_b) + "\n", encoding="utf-8")
+            output = repo / "ownership.json"
+            output.write_bytes(
+                projection_tool.serialize(
+                    projection_tool.activate_projection(
+                        projection_tool.build_projection(value),
+                        projection_tool.load_activation_event(path_b),
+                    )
+                )
+            )
+            self.assertEqual(
+                projection_tool.main(
+                    [
+                        "--repo",
+                        str(repo),
+                        "--manifest",
+                        str(manifest_path),
+                        "--output",
+                        str(output),
+                        "--activation-event",
+                        str(path_a),
+                        "--verify",
+                    ]
+                ),
+                1,
+            )
+
+    def test_event_loader_matches_freeze_gate_basics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for field, value, message in (
+                ("created_at", "not-a-timeZ", "valid timestamp"),
+                ("rationale", "  ", "rationale"),
+                ("tests", [], "tests"),
+            ):
+                event = activation_event()
+                event[field] = value
+                path = root / f"{event['event_id']}.json"
+                path.write_text(json.dumps(event) + "\n", encoding="utf-8")
+                with self.assertRaisesRegex(projection_tool.ProjectionError, message):
+                    projection_tool.load_activation_event(path)
 
 
 if __name__ == "__main__":
