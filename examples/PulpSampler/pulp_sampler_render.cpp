@@ -375,6 +375,18 @@ void PulpSamplerProcessor::render_output_segment(audio::BufferView<float>& outpu
     }
 
     if (heritage_.typed_profile()) {
+        // bus_voice_activity_ is sized to the block width declared at prepare.
+        // render_active_voices chunks to that width, but the bus path cannot:
+        // it hands process_bus one activity span covering the whole segment.
+        // Refuse the segment rather than write past the buffer — a host that
+        // exceeds its declared block size is out of contract, and silent heap
+        // corruption is the worst way for a plugin to fail in a DAW.
+        if (start_frame > bus_voice_activity_.size() ||
+            frames > bus_voice_activity_.size() - start_frame) {
+            heritage_.reject_process();
+            clear_output_segment(output, start_frame, frames);
+            return;
+        }
         std::fill_n(bus_voice_activity_.begin() + start_frame, frames, std::uint8_t{0});
         render_active_voices(output, start_frame, frames, params);
         if (!heritage_.processing_required()) {

@@ -128,6 +128,30 @@ Do not call a profile complete until all of these are present:
 No named Pulp Heritage profile is implied to ship merely because this workflow
 or its templates exist.
 
+## The typed bus path cannot absorb an oversized block
+
+`PulpSamplerProcessor::render_output_segment` has two shapes.
+`render_active_voices` chunks by the block width declared at prepare, so it
+tolerates a host handing it more frames than it asked for. The typed-heritage
+bus path cannot: it passes `process_bus` a single activity span over the whole
+segment, and `bus_voice_activity_` was sized once at prepare. Indexing that
+buffer by the block's actual frame count writes past the end.
+
+The overrun is silent. It corrupts allocator metadata rather than faulting, so
+it surfaces later and somewhere else — `mutex lock failed: Invalid argument`,
+or an abort raised from inside `libsystem_malloc`. Running the test binary
+unfiltered can even print "All tests passed", because by then the heap has
+enough slack for the stray bytes to land on nothing live; only one-process-per-
+case (`ctest`, via `catch_discover_tests`) reliably smashes something. **A green
+unfiltered run is not evidence.** Reach for Guard Malloc
+(`DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib`) — it names the overrun and
+faults at the write.
+
+So when adding a heritage fixture, prepare it at the largest single block it
+will be driven with. A fixture prepared at 512 and processed with 2048 is out
+of contract, and the bus path now refuses that segment rather than corrupting
+the heap.
+
 ## Copy-paste prompt
 
 For a ready-to-send prompt that asks another agent to perform this workflow,
