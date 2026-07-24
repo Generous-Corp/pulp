@@ -42,6 +42,7 @@
     // View (the bridge's view, OR _fallbackView in the no-bridge preview
     // path). Declaring _viewHost LAST makes it destroy FIRST (reverse order),
     // which is safe for both paths.
+    pulp::format::Processor *_resizeProcessor;
     std::unique_ptr<pulp::format::ViewBridge> _bridge;
     std::unique_ptr<pulp::view::View> _fallbackView;
     std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
@@ -58,7 +59,12 @@
 
 - (void)setAudioUnit:(AUAudioUnit *)audioUnit {
     if (_audioUnit == audioUnit) return;
+    // Preserve the previous unit until its processor handler is removed on
+    // main. The factory setter runs on the XPC queue, while all raw processor
+    // and editor-host state below is main-thread-owned.
+    AUAudioUnit *previousAudioUnit = _audioUnit;
 #if !__has_feature(objc_arc)
+    [previousAudioUnit retain];
     [_audioUnit release];
     _audioUnit = [audioUnit retain];
 #else
@@ -67,12 +73,22 @@
     // The factory method runs on the XPC connection queue; UIViewController
     // APIs (preferredContentSize, self.view) require main thread. See the
     // macOS controller for the full backstory — same bug bites iOS.
-    if ([NSThread isMainThread]) {
+    void (^rebuild)(void) = ^{
+        (void)previousAudioUnit;
+        if (self->_resizeProcessor) {
+            self->_resizeProcessor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_resizeProcessor = nullptr;
+        }
         [self rebuildEditorIfReady];
+#if !__has_feature(objc_arc)
+        [previousAudioUnit release];
+#endif
+    };
+    if ([NSThread isMainThread]) {
+        rebuild();
     } else {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self rebuildEditorIfReady];
-        });
+        dispatch_async(dispatch_get_main_queue(), rebuild);
     }
 }
 
@@ -123,8 +139,12 @@
         return;
     }
 
-    // Drop the previous editor first, in destruction order (host → fallback
-    // → bridge) so we can rebuild against a fresh ViewBridge.
+    // Drop the previous editor first, in destruction order (handler → host →
+    // fallback → bridge) so we can rebuild against a fresh ViewBridge.
+    if (_resizeProcessor) {
+        _resizeProcessor->set_editor_resize_handler((const void *)self, nullptr);
+        _resizeProcessor = nullptr;
+    }
     _viewHost.reset();
     _fallbackView.reset();
     _bridge.reset();
@@ -210,7 +230,38 @@
     // genuinely needs letterboxing can call set_design_viewport itself.
 
     _viewHost->attach_to_parent((__bridge void*)self.view);
+
+    // AUv3 publishes a preferredContentSize rather than receiving an
+    // accept/refuse callback. Keep iOS responsive (no design viewport/aspect
+    // pin), but let an editor mode publish its new natural size. The host's
+    // eventual pane bounds remain authoritative through viewDidLayoutSubviews.
+    if (processor && _bridge) {
+        _resizeProcessor = processor;
+        __unsafe_unretained PulpAUViewController *controller = self;
+        processor->set_editor_resize_handler(
+            (const void *)self,
+            [controller](uint32_t requested_width,
+                         uint32_t requested_height) -> bool {
+                if (requested_width == 0 || requested_height == 0 ||
+                    ![NSThread isMainThread]) {
+                    return false;
+                }
+                if (!controller->_bridge ||
+                    !controller->_bridge->set_preferred_size(
+                        requested_width, requested_height)) {
+                    return false;
+                }
+                controller.preferredContentSize =
+                    CGSizeMake(requested_width, requested_height);
+                return true;
+            });
+    }
+    // Notify only after this view has registered its owner-scoped handler.
+    // on_view_opened() may synchronously restore a mode-specific natural size;
+    // registering first prevents that request from being dropped or routed to
+    // another already-open view.
     if (_bridge) _bridge->notify_attached();
+
     pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}, mode={}, gpu={}",
                             opts.size.width, opts.size.height, mode,
                             _viewHost->is_gpu_backed());
@@ -284,12 +335,20 @@
     // thread FIRST (flips its liveness token + stops the display link) so
     // teardown and the idle block are mutually exclusive on one queue; its later
     // reverse-order ivar destruction is then a no-op and the contract above holds.
-#if !__has_feature(objc_arc)
+    void (^teardownMainThreadState)(void) = ^{
+        if (self->_resizeProcessor) {
+            self->_resizeProcessor->set_editor_resize_handler(
+                (const void *)self, nullptr);
+            self->_resizeProcessor = nullptr;
+        }
+        self->_viewHost.reset();
+    };
     if ([NSThread isMainThread]) {
-        _viewHost.reset();
+        teardownMainThreadState();
     } else {
-        dispatch_sync(dispatch_get_main_queue(), ^{ _viewHost.reset(); });
+        dispatch_sync(dispatch_get_main_queue(), teardownMainThreadState);
     }
+#if !__has_feature(objc_arc)
     [_audioUnit release];
     [super dealloc];
 #endif

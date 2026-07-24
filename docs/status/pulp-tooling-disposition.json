@@ -4510,7 +4510,7 @@
         "name": "mcp-server:pulp",
         "disposition": "pulp-owned",
         "configuration": {
-          "command": "./tools/mcp/pulp-mcp-launcher"
+          "command": "${PULP_MCP_BINARY}"
         },
         "registration_keys": [
           "command",

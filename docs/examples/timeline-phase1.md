@@ -1,7 +1,7 @@
 # Creative Timeline Engine Phase 1 examples
 
-These two examples prove the smallest useful Creative Timeline Engine through
-the same runtime path a desktop product uses. Both create a real immutable
+These three examples prove the smallest useful Creative Timeline Engine through
+the same runtime path a desktop product uses. All three create a real immutable
 `Project`, compile a `PlaybackProgram`, advance `MasterTransport`, and render
 through `TimelineGraphPlaybackBinding` into `SignalGraph`. The headless tests and
 standalone executables share the same processor classes; neither substitutes a
@@ -52,13 +52,35 @@ The device-free validation path is:
 ./build/examples/timeline-phase1/pulp-timeline-step-sequencer --headless
 ```
 
+## Multitrack arrangement
+
+`pulp-timeline-multitrack-arrangement` is the integration-shaped example. It
+builds two parallel audio tracks plus an instrument track, publishes tempo and
+meter changes, compiles device-parameter automation, routes authored device
+placements into a `SignalGraph`, and applies its delay compensation.
+The executable uses `HeadlessHost`, checks the compensated output sample, and
+requires no audio hardware:
+
+```bash
+cmake --build build --target pulp-timeline-multitrack-arrangement
+./build/examples/timeline-phase1/pulp-timeline-multitrack-arrangement
+```
+
+Use this example when the question is how an immutable project and playback
+program reach real graph devices. It intentionally does not make the Timeline
+document own runtime plugin instances or graph nodes.
+
 ## Focused tests
 
 The `pulp-test-timeline-phase1-examples` suite covers bounded decode rejection,
 variable block sizes, one-wrap split blocks, registered-pattern persistence,
 command-to-recompile output changes, audible note delivery, stop-time note
-flushing, and allocation-free processing after prepare. It also drives both
-real processors through `StandaloneApp`'s device-independent callback seam and
-requires nonzero output; unavailable hardware cannot turn the test green. The
-two standalone binaries register their `--headless` paths as CTest cases so
-their real entry points cannot silently rot.
+flushing, allocation-free processing after prepare, multitrack routing,
+automation delivery, tempo/meter changes, and active graph PDC. It also drives
+the two standalone processors through `StandaloneApp`'s device-independent
+callback seam and require nonzero output; unavailable hardware cannot turn the
+test green.
+Those two standalone binaries register their `--headless` paths as CTest
+cases, while the multitrack executable has its own device-free
+`timeline-multitrack-arrangement-headless-run` case, so all three entry points
+remain live.

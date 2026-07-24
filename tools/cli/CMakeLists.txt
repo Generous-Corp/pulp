@@ -135,7 +135,7 @@ set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp-cpp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::tool-timeline pulp::audio-analysis pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 if(WIN32)
-    target_link_libraries(pulp-cli PRIVATE Advapi32)
+    target_link_libraries(pulp-cli PRIVATE Advapi32 User32)
 endif()
 
 # Keep `libskia.a` before fontconfig on Linux+GNU ld.

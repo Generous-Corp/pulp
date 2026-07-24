@@ -3,6 +3,7 @@
 #include <pulp/format/detail/standalone_environment.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/settings_panel.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/view/window_host.hpp>
 
@@ -238,6 +239,52 @@ inline void configure_standalone_design_viewport(
     window.set_fixed_aspect_ratio(
         static_cast<float>(viewport.width) /
         static_cast<float>(viewport.height));
+}
+
+inline void configure_standalone_tab_resizing(
+    view::WindowHost& window,
+    StandaloneEditorChrome& chrome,
+    ViewBridge& bridge) {
+    auto* tab_panel = chrome.tab_panel();
+    if (!tab_panel) return;
+
+    tab_panel->on_tab_change = [&window, tab_panel, &bridge](int index) {
+        const auto& hints = bridge.size_hints();
+        const float editor_w = static_cast<float>(hints.preferred_width);
+        const float editor_h = static_cast<float>(hints.preferred_height);
+        const bool settings = index == tab_panel->find_tab("Settings");
+        const float height =
+            settings
+                ? std::max(
+                      editor_h,
+                      static_cast<float>(SettingsPanel::preferred_height()))
+                : editor_h;
+        window.set_fixed_aspect_ratio(editor_w / height);
+        window.set_design_viewport(editor_w, height);
+        window.request_content_size(editor_w, height);
+    };
+}
+
+inline void install_standalone_editor_resize_handler(
+    Processor& processor,
+    const void* owner,
+    view::WindowHost& window,
+    ViewBridge& bridge) {
+    processor.set_editor_resize_handler(
+        owner,
+        [&window, &bridge](uint32_t width, uint32_t height) -> bool {
+            if (!bridge.set_preferred_size(width, height)) return false;
+
+            const float w = static_cast<float>(width);
+            const float h = static_cast<float>(height);
+            // An owned native window has no host negotiation step:
+            // request_content_size is synchronous on supported standalone
+            // hosts, so publish it before committing the live viewport.
+            window.request_content_size(w, h);
+            window.set_fixed_aspect_ratio(w / h);
+            window.set_design_viewport(w, h);
+            return true;
+        });
 }
 
 template <typename ResizeFn>

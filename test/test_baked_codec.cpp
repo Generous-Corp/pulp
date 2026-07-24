@@ -79,6 +79,13 @@ TEST_CASE("parse_plan_bounded rejects malformed / over-cap plan bytes",
         p.connections.push_back({999, 0, 4, 0, false});
         CHECK_FALSE(parse_plan_bounded(serialize_plan(p)).has_value());
     }
+    SECTION("duplicate node identity -> nullopt") {
+        BakedPlan p = sample_plan();
+        auto duplicate = p.nodes.back();
+        duplicate.id = p.nodes.front().id;
+        p.nodes.push_back(std::move(duplicate));
+        CHECK_FALSE(parse_plan_bounded(serialize_plan(p)).has_value());
+    }
 }
 
 TEST_CASE("signed .pulpbake round-trips under trust and rejects every tamper",

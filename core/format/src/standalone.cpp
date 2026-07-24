@@ -21,6 +21,10 @@
 #include <functional>
 #include <string_view>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 // The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
 // compile flag (root CMake option, default ON for dev/examples builds;
 // release/standalone-ship builds set it OFF) so a shipped standalone app does
@@ -681,21 +685,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // so paint scale and the OS aspect lock track each tab. Editor stays pinned
     // at its declared size (no letterbox); Settings reflows to fill its taller
     // window. Framework-level so every standalone settings chrome benefits.
-    if (auto* tab_panel = chrome.tab_panel()) {
-        view::WindowHost* host = window.get();
-        const float editor_w = static_cast<float>(size_hints.preferred_width);
-        const float editor_h = static_cast<float>(size_hints.preferred_height);
-        const float settings_h =
-            std::max(editor_h, static_cast<float>(SettingsPanel::preferred_height()));
-        tab_panel->on_tab_change = [host, tab_panel, editor_w, editor_h, settings_h](int index) {
-            const bool settings = index == tab_panel->find_tab("Settings");
-            const float w = editor_w;
-            const float h = settings ? settings_h : editor_h;
-            host->set_fixed_aspect_ratio(w / h);
-            host->set_design_viewport(w, h);
-            host->request_content_size(w, h);
-        };
-    }
+    detail::configure_standalone_tab_resizing(*window, chrome, *bridge);
+
+    // Editor-INITIATED resize: let the editor ask the standalone window to
+    // resize itself (e.g. a chrome-hiding mode wanting a smaller shape). Drives
+    // the SAME design-viewport + content-size path the Settings tab uses above,
+    // and updates the bridge's reported hints so the new aspect sticks. Cleared
+    // in the close callback before the window / bridge it captures die.
+#if defined(__APPLE__) && TARGET_OS_OSX
+    detail::install_standalone_editor_resize_handler(
+        *processor_, this, *window, *bridge);
+#endif
 
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
@@ -711,6 +711,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
     window->set_close_callback([this, bridge_raw]() {
+        // Drop the editor→host resize handler before the window / bridge it
+        // captures are torn down by stop().
+        if (processor_) processor_->set_editor_resize_handler(this, nullptr);
         if (bridge_raw) bridge_raw->close();
         stop();
     });
@@ -1026,6 +1029,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // while the processor is still alive; the call is idempotent.
     window->run_event_loop();
 
+    // Application quit can leave the event loop without invoking the window's
+    // close callback. Remove this owner's entry before the bridge/window or
+    // processor is torn down; removal is harmless on platforms where no
+    // editor-initiated resize handler was installed.
+    if (processor_) processor_->set_editor_resize_handler(this, nullptr);
     bridge->close();
     stop();
     return true;

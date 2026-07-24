@@ -161,7 +161,8 @@ TEST_CASE("shell_quote escapes backslash and quote on POSIX", "[cli][shell-quote
 
 TEST_CASE("shell_quote wraps empty and POSIX metacharacter arguments", "[cli][shell-quote]") {
     REQUIRE(shell_quote(std::string()) == "\"\"");
-    REQUIRE(shell_quote(std::string("a;b$(c)`d e")) == "\"a;b$(c)`d e\"");
+    REQUIRE(shell_quote(std::string("a;b$(c)`d e")) ==
+            "\"a;b\\$(c)\\`d e\"");
 }
 
 TEST_CASE("shell_quote path overload matches string overload on POSIX", "[cli][shell-quote]") {

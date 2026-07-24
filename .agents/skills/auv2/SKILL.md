@@ -545,6 +545,24 @@ The attribute is a static-analysis hint only — dropping it from derived-class 
 
 Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. The fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
 
+### Plugin-initiated resize is a Logic-only immediate-container transaction
+
+AU v2 exposes no host `request_resize` callback. For Logic, the validated
+plugin-initiated path resizes the Cocoa editor's immediate container on the
+main thread, behind the `logic_au_v2_container_resize` host quirk. Do not enable
+that hierarchy mutation for GarageBand or an unverified AU host merely because
+it also embeds the returned NSView.
+
+The transaction publishes the proposed `ViewBridge` preferred size before the
+native resize because Logic may synchronously query the Audio Unit during the
+frame change. It commits the design viewport only when both the returned editor
+view and its immediate container accept the exact requested dimensions; a
+clamp or refusal restores the prior native and bridge sizes. Install the
+owner-scoped handler before `notify_attached()` so an editor-open callback can
+request its restored mode size, and remove it before host/bridge teardown.
+`PulpAUEditorOwnership` uses the processor's alive token for that cleanup
+because the adapter can outlive the Cocoa view.
+
 ### Out-of-process Logic starves the CPU editor's paint — drive it from the pump
 
 Logic hosts AU v2 **out-of-process** (`AUHostingServiceXPC`). A CPU

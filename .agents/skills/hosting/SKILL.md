@@ -912,6 +912,23 @@ Gotchas:
   live graph's legacy WALK and to its routed executor (the test asserts the walk case
   explicitly by forcing routing OFF, since canonical-executor routing is now ON by
   default).
+- **Signed `.pulpbake` files carry authored Custom state, never sampled live
+  state.** `bake_to_plan()` copies each node's staged
+  `GraphNode::custom_state_blob` (set through `set_custom_node_state()`); it must
+  never call a live instance's `save_state()` because bake can run while DSP is
+  processing and that callback has no concurrent-process contract. Temporal DSP
+  history is intentionally excluded. Stage the intended publish state before
+  `prepare()`.
+- **Disk load verifies first and restores fail-closed.** `load_baked()` verifies the
+  Ed25519 signature before bounded parsing, rejects duplicate plan node ids and
+  duplicate host registry identities, then resolves every Custom record by exact
+  type/version/shape. A stateful record requires a valid `create` +
+  `load_state` lifecycle (an empty byte span may still be meaningful); null instance
+  creation or rejected state names the exact offending node and aborts the whole
+  load. The authenticated blob is restored after the Custom lifecycle's
+  `prepare`/`reset` on every baked `prepare()`, so those hooks cannot silently erase
+  authored state. The in-memory `bake()` path remains a fresh-state stream and does
+  not perform this disk restore.
 - **In-place hosts alias input over output — never let the executor's output-zero
   destroy the input.** `process_routed()` zeroes the main output bus BEFORE its
   `AudioInput` gather reads the input bus (AudioOutput nodes accumulate, so N sinks

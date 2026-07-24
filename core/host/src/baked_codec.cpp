@@ -165,7 +165,10 @@ std::optional<BakedPlan> parse_plan_bounded(std::span<const std::uint8_t> bytes)
         total_ports += static_cast<std::size_t>(n.num_input_ports) +
                        static_cast<std::size_t>(n.num_output_ports);
         if (total_ports > kBakedMaxTotalPorts) return std::nullopt;
-        by_id[n.id] = {n.num_input_ports, n.num_output_ports};
+        if (!by_id.emplace(n.id,
+                           Arity{n.num_input_ports, n.num_output_ports}).second) {
+            return std::nullopt;
+        }
         plan.nodes.push_back(std::move(n));
     }
 

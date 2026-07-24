@@ -989,6 +989,26 @@ design_import:
     status: usable
     notes: /import-design skill with MCP-aware flow for Figma, Stitch, Pencil, v0.
 
+timeline_engine:
+  model:
+    status: experimental
+    notes: Immutable project snapshots, typed transactions, canonical persistence, undo/redo, release downgrade, takes/comps, track freeze, and crash-consistent native journals.
+  playback:
+    status: experimental
+    notes: Immutable compiled programs, master transport, arrangement audio/note/automation rendering, sample-rate conversion, and external MIDI synchronization.
+  capture:
+    status: experimental
+    notes: Fixed-capacity audio/MIDI capture with control-side materialization and sealed recording commit; applications own device I/O and media publication.
+  dawproject_import:
+    status: experimental
+    notes: Fail-closed DAWproject v1 linear subset with flat beats-timed note/audio tracks, sealed WAV identity, and explicit resource limits.
+  cli_mcp:
+    status: experimental
+    notes: pulp seq validate/explain/apply, pulp render, five generated MCP operations, and the Claude Timeline skill share one headless implementation.
+  sequence_adapter:
+    status: experimental
+    notes: SequenceProcessor projects host transport and a caller-owned immutable playback program into plugin-format processing without owning editing, media resolution, devices, or UI.
+
 subsystems:
   runtime: stable
   events: usable
@@ -1016,6 +1036,15 @@ subsystems:
 # Consistency rule enforced by check-docs-consistency.py (warn-mode):
 # every key under limitations: must resolve to a real entry in the matrix.
 limitations:
+  timeline_engine.cli_mcp:
+    - text: "The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented."
+      tracked_in: "../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp"
+  timeline_engine.dawproject_import:
+    - text: "DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped."
+      tracked_in: "../guides/timeline-sdk.md#optional-dawproject-importer"
+  timeline_engine.capture:
+    - text: "Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities."
+      tracked_in: "../guides/timeline-sdk.md#takes-comps-freeze-and-capture"
   formats.clap:
     - text: "Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed."
       tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"

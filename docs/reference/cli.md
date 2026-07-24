@@ -1557,6 +1557,10 @@ audio-region counts, and automation presence. Plugin latency is a host-binding
 property, so the headless report returns `pdc_offset_samples: null` rather than
 claiming a value it cannot measure.
 
+See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
+for a generated-schema lookup, complete command envelope, transactional apply,
+validation, explanation, render, and the equivalent five-tool MCP flow.
+
 ### render
 
 **Status**: experimental
