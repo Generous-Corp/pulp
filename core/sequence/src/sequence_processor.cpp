@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -143,6 +144,12 @@ bool SequenceProcessor::prepare_graph(const playback::PlaybackProgram& program,
     const auto track_count = program.tracks().size();
     if (track_count + 2 > graph::GraphRuntimeLimits{}.max_nodes)
         return false;
+    if (track_count != 0 &&
+        config_.maximum_note_events_per_track_per_block >
+            std::numeric_limits<std::size_t>::max() / track_count)
+        return false;
+    const auto aggregate_note_capacity =
+        std::max<std::size_t>(1, track_count * config_.maximum_note_events_per_track_per_block);
 
     std::vector<graph::GraphRuntimeNodeSpec> nodes;
     std::vector<graph::GraphRuntimeConnectionSpec> connections;
@@ -221,9 +228,17 @@ bool SequenceProcessor::prepare_graph(const playback::PlaybackProgram& program,
     auto plan = graph::build_graph_runtime_plan(nodes, connections);
     if (!plan.ok() || !snapshot_.reset(std::move(plan.plan), bindings))
         return false;
+    std::vector<std::size_t> midi_capacities(snapshot_.node_count(), 1);
+    for (std::uint32_t index = 0; index < snapshot_.plan().nodes.size(); ++index) {
+        const auto id = snapshot_.plan().nodes[index].id;
+        if (id >= kFirstTrackNode && id < audio_output_id)
+            midi_capacities[index] = config_.maximum_note_events_per_track_per_block;
+        else if (id == midi_output_id)
+            midi_capacities[index] = aggregate_note_capacity;
+    }
     if (!pool_.reset(snapshot_.buffer_slot_count(), maximum_block_size,
                      snapshot_.buffer_assignment().connection_delay_samples) ||
-        !midi_scratch_.reset(snapshot_.node_count())) {
+        !midi_scratch_.reset(midi_capacities)) {
         return false;
     }
     for (std::uint32_t index = 0; index < snapshot_.plan().nodes.size(); ++index) {

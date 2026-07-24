@@ -90,6 +90,34 @@ std::shared_ptr<const Project> host_tempo_same_sample_boundary_project() {
         Project::create(ProjectInput{{1}, "boundary", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
+std::shared_ptr<const Project> dense_multitrack_note_project(std::size_t notes_per_track) {
+    std::vector<Track> tracks;
+    tracks.reserve(2);
+    std::uint64_t next_id = 100;
+    for (std::size_t track_index = 0; track_index < 2; ++track_index) {
+        std::vector<NoteEvent> events;
+        events.reserve(notes_per_track);
+        for (std::size_t note_index = 0; note_index < notes_per_track; ++note_index) {
+            NoteEvent event;
+            event.id = {next_id++};
+            event.start = {};
+            event.duration = {kTicksPerQuarter};
+            event.velocity = 0xffff;
+            event.pitch = static_cast<std::uint8_t>(note_index % 128);
+            event.channel = static_cast<std::uint8_t>(note_index / 128);
+            events.push_back(event);
+        }
+        auto content = take(NoteContent::create(std::move(events)));
+        auto clip =
+            take(Clip::create({next_id++}, {0}, {2 * kTicksPerQuarter}, std::move(content)));
+        tracks.push_back(take(Track::create({next_id++}, "dense", {std::move(clip)})));
+    }
+    auto sequence =
+        take(Sequence::create({2}, "root", TickDuration{2 * kTicksPerQuarter}, std::move(tracks)));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "dense", next_id, {2}, {}, {std::move(sequence)}})));
+}
+
 } // namespace
 
 TEST_CASE("host transport projection fails closed for unsupported loop density "
@@ -715,6 +743,46 @@ TEST_CASE("host-mapped note scheduling preserves tick order within one compiled 
     REQUIRE(output[1].is_note_on());
     REQUIRE(output[1].data()[1] == 61);
     REQUIRE(output[1].sample_offset == 47'999);
+}
+
+TEST_CASE("embedded sequence processor sizes routed MIDI for dense multiple tracks") {
+    constexpr std::size_t notes_per_track = 600;
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(dense_multitrack_note_project(notes_per_track), map,
+                     take(DecodedAudioAssetPool::create({})), 1);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    processor_config.maximum_note_events_per_track_per_block = notes_per_track;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    state::StateStore state;
+    embedded.define_parameters(state);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 32,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer silence(1, 32);
+    Buffer audio_output(1, 32);
+    midi::MidiBuffer input;
+    midi::MidiBuffer output;
+    output.reserve(2 * notes_per_track);
+    output.set_realtime_capacity_limit(true);
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 0;
+    auto audio_output_view = audio_output.view();
+    embedded.process(audio_output_view, silence.const_view(), input, output, context);
+
+    REQUIRE(embedded.ready());
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(output.size() == 2 * notes_per_track);
 }
 
 TEST_CASE("embedded sequence processor matches offline and desktop event streams "
