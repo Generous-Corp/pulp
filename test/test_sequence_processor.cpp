@@ -496,6 +496,27 @@ TEST_CASE("host beat-domain projection rejects an authoritative beat outside the
             sequence::HostTransportProjectionError::BeatPositionOutOfRange);
 }
 
+TEST_CASE("host beat-domain projection rejects a precise range that cannot advance") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 24'000;
+    context.position_beats = 1.0e13;
+    context.tempo_bpm = 60.0;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::BeatPositionOutOfRange);
+}
+
 TEST_CASE("embedded sequence processor schedules program-beat notes on the host beat clock") {
     const auto map = tempo_map();
     ProgramHarness programs;

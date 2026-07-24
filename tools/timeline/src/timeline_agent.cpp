@@ -17,6 +17,8 @@
 #include <cerrno>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -392,8 +394,7 @@ bool write_wav_atomic(const fs::path& destination,
     HANDLE reservation = INVALID_HANDLE_VALUE;
     for (int attempt = 0; attempt != 128; ++attempt) {
         temporary = render_temporary_path(destination, next_serial.fetch_add(1));
-        reservation = ::CreateFileW(temporary.c_str(), GENERIC_WRITE,
-                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        reservation = ::CreateFileW(temporary.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ,
                                     security, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (reservation != INVALID_HANDLE_VALUE)
             break;
@@ -409,15 +410,29 @@ bool write_wav_atomic(const fs::path& destination,
         pulp::audio::write_wav_stream(output, audio, pulp::audio::WavBitDepth::Float32);
     const bool matches = render_temporary_matches(reservation, temporary);
     const bool synced = written && matches && ::FlushFileBuffers(reservation) != 0;
+    std::error_code destination_path_error;
+    const auto destination_name = fs::absolute(destination, destination_path_error).wstring();
+    const auto rename_size = offsetof(FILE_RENAME_INFO, FileName) +
+                             destination_name.size() * sizeof(wchar_t);
+    std::vector<std::uint8_t> rename_storage(rename_size);
+    auto* rename = reinterpret_cast<FILE_RENAME_INFO*>(rename_storage.data());
+    rename->ReplaceIfExists = TRUE;
+    rename->RootDirectory = nullptr;
+    rename->FileNameLength =
+        static_cast<DWORD>(destination_name.size() * sizeof(wchar_t));
+    std::memcpy(rename->FileName, destination_name.data(), rename->FileNameLength);
+    const bool published =
+        synced && !destination_path_error &&
+        ::SetFileInformationByHandle(reservation, FileRenameInfo, rename,
+                                     static_cast<DWORD>(rename_size)) != 0;
+    const bool publication_synced = published && ::FlushFileBuffers(reservation) != 0;
     const bool closed = ::CloseHandle(reservation) != 0;
-    if (!written || !matches || !synced || !closed) {
+    if (!written || !matches || !synced || !published || !publication_synced || !closed) {
         if (matches)
             remove_render_temporary(temporary);
         return false;
     }
-    if (::MoveFileExW(temporary.c_str(), destination.c_str(),
-                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        return true;
+    return true;
 #else
     bool destination_exists = false;
     struct stat destination_status{};

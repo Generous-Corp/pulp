@@ -154,6 +154,16 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 });
             }
             entries.reserve(entries.size() + 1u);
+            const auto observed_required = required_bytes(estimated_bytes);
+            if (observed_required > limits.max_sample_rate_converter_bytes) {
+                return runtime::Err(AudioRendererError{
+                    AudioRendererErrorCode::CapacityExceeded,
+                    item,
+                    related_item,
+                    observed_required,
+                    limits.max_sample_rate_converter_bytes,
+                });
+            }
             fixed_rate_source = source;
             fixed_rate_target = target;
             fixed_rate_builder = std::make_unique<audio::SampleRateConversionBuilder>(cutoff);
@@ -226,6 +236,16 @@ struct detail::AudioSampleRateConverterCache::Impl {
             });
         }
         entries.reserve(entries.size() + 1u);
+        const auto observed_required = required_bytes(converter->prepared_bytes());
+        if (observed_required > limits.max_sample_rate_converter_bytes) {
+            return runtime::Err(AudioRendererError{
+                AudioRendererErrorCode::CapacityExceeded,
+                item,
+                related_item,
+                observed_required,
+                limits.max_sample_rate_converter_bytes,
+            });
+        }
         converter_bytes += converter->prepared_bytes();
         entries.push_back({source, target, converter});
         return runtime::Ok(std::move(converter));
@@ -275,6 +295,16 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 });
             }
             host_rate_entries.reserve(host_rate_entries.size() + 1u);
+            const auto observed_required = required_bytes(*bytes);
+            if (observed_required > limits.max_sample_rate_converter_bytes) {
+                return runtime::Err(AudioRendererError{
+                    AudioRendererErrorCode::CapacityExceeded,
+                    item,
+                    related_item,
+                    observed_required,
+                    limits.max_sample_rate_converter_bytes,
+                });
+            }
             host_rate_source = source;
             host_rate_source_start = source_start;
             host_rate_source_frames = source_frames;
@@ -361,6 +391,16 @@ struct detail::AudioSampleRateConverterCache::Impl {
             });
         }
         host_rate_entries.reserve(host_rate_entries.size() + 1u);
+        const auto observed_required = required_bytes(converter->prepared_bytes());
+        if (observed_required > limits.max_sample_rate_converter_bytes) {
+            return runtime::Err(AudioRendererError{
+                AudioRendererErrorCode::CapacityExceeded,
+                item,
+                related_item,
+                observed_required,
+                limits.max_sample_rate_converter_bytes,
+            });
+        }
         converter_bytes += converter->prepared_bytes();
         host_rate_entries.push_back({std::move(source), source_start, source_frames, converter});
         return runtime::Ok(std::move(converter));

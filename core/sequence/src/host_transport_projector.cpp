@@ -160,6 +160,13 @@ HostTransportProjector::project(const format::ProcessContext& context,
     if (use_host_beat_clock && !beats_to_ticks(context.position_beats, host_tick_start)) {
         return HostTransportProjectionError::BeatPositionOutOfRange;
     }
+    if (use_host_beat_clock && context.is_playing) {
+        const auto host_beat_end =
+            context.position_beats + static_cast<double>(frames) * context.tempo_bpm /
+                                         (60.0 * context.sample_rate);
+        if (!(host_beat_end > context.position_beats))
+            return HostTransportProjectionError::BeatPositionOutOfRange;
+    }
     const bool mapping_transition =
         !first_block_ && use_host_beat_clock != previous_host_beat_mapping_;
     const bool inferred_jump =
