@@ -378,6 +378,14 @@ TEST_CASE("VST3 moduleinfo FUID reader normalizes valid CIDs and rejects malform
     write_vst3_moduleinfo(bundle, "{ not valid json");
     REQUIRE(read_vst3_bundle_fuid(bundle.string()).empty());
 
+    // Installed third-party manifests fail in a subtler way than free text: a
+    // trailing comma parses as far as an otherwise well-formed class array
+    // before choc::json throws. Both shapes have to be contained.
+    write_vst3_moduleinfo(
+        bundle,
+        R"({"Classes":[{"Category":"Audio Module Class","CID":"0123456789abcdef0123456789abcdef"},]})");
+    REQUIRE(read_vst3_bundle_fuid(bundle.string()).empty());
+
     write_vst3_moduleinfo(bundle, R"({"Classes":"not an array"})");
     REQUIRE(read_vst3_bundle_fuid(bundle.string()).empty());
 
