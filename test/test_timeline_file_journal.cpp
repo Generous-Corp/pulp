@@ -5,6 +5,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#if defined(__linux__)
+#include "linux_posix_acl_test_helpers.hpp"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -550,10 +554,32 @@ TEST_CASE("Timeline file journal checkpoint atomically compacts prior revisions"
     auto edit =
         session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
     REQUIRE(session->submit(writer, std::move(edit)));
+#if !defined(_WIN32)
+    constexpr auto preserved_permissions = std::filesystem::perms::owner_read |
+                                           std::filesystem::perms::owner_write |
+                                           std::filesystem::perms::group_read;
+    std::filesystem::permissions(temporary.path, preserved_permissions,
+                                 std::filesystem::perm_options::replace);
+#if defined(__linux__)
+    const auto acl_result = linux_acl_test::install(temporary.path);
+    REQUIRE(acl_result != linux_acl_test::InstallResult::Failed);
+    const auto expected_acl = acl_result == linux_acl_test::InstallResult::Installed
+                                  ? linux_acl_test::read(temporary.path)
+                                  : std::nullopt;
+#endif
+#endif
     const auto before = std::filesystem::file_size(temporary.path);
     REQUIRE(session->checkpoint({1}));
     const auto after = std::filesystem::file_size(temporary.path);
     REQUIRE(after < before);
+#if !defined(_WIN32)
+    REQUIRE(std::filesystem::status(temporary.path).permissions() ==
+            preserved_permissions);
+#if defined(__linux__)
+    if (expected_acl)
+        REQUIRE(linux_acl_test::read(temporary.path) == expected_acl);
+#endif
+#endif
 
     session.reset();
     opened.sink.reset();

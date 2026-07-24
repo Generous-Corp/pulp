@@ -34,6 +34,8 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
 #endif
 #endif
 
@@ -141,6 +143,19 @@ bool sync_parent_directory(const fs::path& destination) noexcept {
 }
 #endif
 
+#if defined(__APPLE__)
+bool clear_extended_acl(int descriptor) noexcept {
+    acl_t empty = ::acl_init(0);
+    errno = 0;
+    const bool cleared =
+        empty != nullptr && ::acl_set_fd_np(descriptor, empty, ACL_TYPE_EXTENDED) == 0;
+    const bool unsupported = !cleared && errno == EOPNOTSUPP;
+    if (empty != nullptr)
+        ::acl_free(empty);
+    return cleared || unsupported;
+}
+#endif
+
 bool write_text_atomic(const fs::path& destination, std::string_view text) noexcept {
     static std::atomic<std::uint64_t> next_serial{1};
     fs::path temporary;
@@ -231,6 +246,24 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
             }
         }
     }
+#elif defined(__linux__)
+    std::optional<std::vector<std::uint8_t>> destination_acl;
+    if (destination_exists) {
+        constexpr auto acl_name = "system.posix_acl_access";
+        errno = 0;
+        const auto acl_size = ::getxattr(destination.c_str(), acl_name, nullptr, 0);
+        if (acl_size < 0) {
+            if (errno != ENODATA)
+                return false;
+        } else {
+            destination_acl.emplace(static_cast<std::size_t>(acl_size));
+            const auto copied =
+                ::getxattr(destination.c_str(), acl_name, destination_acl->data(),
+                           destination_acl->size());
+            if (copied != acl_size)
+                return false;
+        }
+    }
 #endif
 
     int descriptor = -1;
@@ -279,8 +312,19 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
         complete = complete && ::fchmod(descriptor, destination_status.st_mode &
                                                         static_cast<mode_t>(07777)) == 0;
 #if defined(__APPLE__)
-        if (complete && destination_acl != nullptr)
+        if (complete && destination_acl != nullptr) {
             complete = ::acl_set_fd_np(descriptor, destination_acl, ACL_TYPE_EXTENDED) == 0;
+        } else if (complete)
+            complete = clear_extended_acl(descriptor);
+#elif defined(__linux__)
+        constexpr auto acl_name = "system.posix_acl_access";
+        if (complete && destination_acl) {
+            complete = ::fsetxattr(descriptor, acl_name, destination_acl->data(),
+                                   destination_acl->size(), 0) == 0;
+        } else if (complete && ::fremovexattr(descriptor, acl_name) != 0 &&
+                   errno != ENODATA) {
+            complete = false;
+        }
 #endif
     }
 #if defined(__APPLE__)

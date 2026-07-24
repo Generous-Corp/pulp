@@ -7,6 +7,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#if defined(__linux__)
+#include "linux_posix_acl_test_helpers.hpp"
+#endif
+
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -181,6 +185,20 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     REQUIRE(read_text(changed_path) != "sentinel");
 #ifndef _WIN32
     REQUIRE(std::filesystem::status(changed_path).permissions() == changed_permissions);
+#if defined(__linux__)
+    const auto acl_path = temp.path() / "acl.json";
+    write_text(acl_path, "sentinel");
+    const auto acl_result = linux_acl_test::install(acl_path);
+    REQUIRE(acl_result != linux_acl_test::InstallResult::Failed);
+    if (acl_result == linux_acl_test::InstallResult::Installed) {
+        const auto expected_acl = linux_acl_test::read(acl_path);
+        REQUIRE(expected_acl);
+        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
+                        quote(command_path) + " --out " + quote(acl_path) +
+                        " > /dev/null") == 0);
+        REQUIRE(linux_acl_test::read(acl_path) == expected_acl);
+    }
+#endif
 
     const auto new_path = temp.path() / "new.json";
     const auto previous_mask = ::umask(0027);

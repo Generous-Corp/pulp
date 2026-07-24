@@ -9,8 +9,10 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -34,6 +36,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
+#endif
 #endif
 
 namespace pulp::timeline {
@@ -107,6 +114,102 @@ std::uint64_t read_u64(const std::uint8_t* input) noexcept {
     return value;
 }
 
+struct ReplacementMetadata {
+    bool exists = false;
+#if defined(_WIN32)
+    std::vector<std::uint8_t> security_descriptor;
+#else
+    struct stat status{};
+#if defined(__APPLE__)
+    acl_t acl = nullptr;
+
+    ~ReplacementMetadata() {
+        if (acl != nullptr)
+            ::acl_free(acl);
+    }
+#elif defined(__linux__)
+    std::optional<std::vector<std::uint8_t>> acl;
+#endif
+#endif
+};
+
+bool capture_replacement_metadata(const std::filesystem::path& path,
+                                  ReplacementMetadata& metadata) {
+#if defined(_WIN32)
+    constexpr SECURITY_INFORMATION kSecurityInformation =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    const auto attributes = ::GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const auto error = ::GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    if ((attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0)
+        return false;
+    DWORD required = 0;
+    ::GetFileSecurityW(path.c_str(), kSecurityInformation, nullptr, 0, &required);
+    if (required == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+        return false;
+    metadata.security_descriptor.resize(required);
+    if (!::GetFileSecurityW(path.c_str(), kSecurityInformation,
+                            metadata.security_descriptor.data(), required, &required))
+        return false;
+    metadata.exists = true;
+    return true;
+#else
+    if (::lstat(path.c_str(), &metadata.status) != 0) {
+        if (errno == ENOENT)
+            return true;
+        return false;
+    }
+    if (!S_ISREG(metadata.status.st_mode))
+        return false;
+    metadata.exists = true;
+#if defined(__APPLE__)
+    metadata.acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
+    if (metadata.acl == nullptr && errno != ENOENT && errno != ENOATTR)
+        return false;
+    if (metadata.acl != nullptr) {
+        acl_entry_t entry = nullptr;
+        const auto entry_result = ::acl_get_entry(metadata.acl, ACL_FIRST_ENTRY, &entry);
+        if (entry_result < 0)
+            return false;
+        if (entry_result == 0) {
+            ::acl_free(metadata.acl);
+            metadata.acl = nullptr;
+        }
+    }
+#elif defined(__linux__)
+    constexpr auto acl_name = "system.posix_acl_access";
+    errno = 0;
+    const auto acl_size = ::getxattr(path.c_str(), acl_name, nullptr, 0);
+    if (acl_size < 0) {
+        if (errno != ENODATA)
+            return false;
+    } else {
+        metadata.acl.emplace(static_cast<std::size_t>(acl_size));
+        const auto copied =
+            ::getxattr(path.c_str(), acl_name, metadata.acl->data(), metadata.acl->size());
+        if (copied != acl_size)
+            return false;
+    }
+#endif
+    return true;
+#endif
+}
+
+#if defined(__APPLE__)
+bool clear_extended_acl(int descriptor) noexcept {
+    acl_t empty = ::acl_init(0);
+    errno = 0;
+    const bool cleared =
+        empty != nullptr && ::acl_set_fd_np(descriptor, empty, ACL_TYPE_EXTENDED) == 0;
+    const bool unsupported = !cleared && errno == EOPNOTSUPP;
+    if (empty != nullptr)
+        ::acl_free(empty);
+    return cleared || unsupported;
+}
+#endif
+
 class NativeFile {
   public:
     NativeFile() = default;
@@ -133,12 +236,34 @@ class NativeFile {
 #endif
     }
 
-    static NativeFile create_exclusive(const std::filesystem::path& path) noexcept {
+    static NativeFile create_exclusive(const std::filesystem::path& path,
+                                       const ReplacementMetadata* metadata = nullptr) noexcept {
 #if defined(_WIN32)
-        return NativeFile(_wopen(path.c_str(),
-                                 _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_NOINHERIT,
-                                 _S_IREAD | _S_IWRITE));
+        SECURITY_ATTRIBUTES security_attributes{};
+        SECURITY_ATTRIBUTES* security = nullptr;
+        if (metadata != nullptr && metadata->exists) {
+            security_attributes.nLength = sizeof(security_attributes);
+            security_attributes.lpSecurityDescriptor =
+                const_cast<std::uint8_t*>(metadata->security_descriptor.data());
+            security = &security_attributes;
+        }
+        const auto handle =
+            ::CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0, security, CREATE_NEW,
+                          FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const auto error = ::GetLastError();
+            errno = error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS ? EEXIST : EIO;
+            return {};
+        }
+        const auto descriptor = _open_osfhandle(reinterpret_cast<std::intptr_t>(handle),
+                                                _O_RDWR | _O_BINARY | _O_NOINHERIT);
+        if (descriptor < 0) {
+            ::CloseHandle(handle);
+            return {};
+        }
+        return NativeFile(descriptor);
 #else
+        (void)metadata;
         return NativeFile(::open(path.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600));
 #endif
     }
@@ -154,6 +279,10 @@ class NativeFile {
 
     bool valid() const noexcept {
         return descriptor_ >= 0;
+    }
+
+    int native_descriptor() const noexcept {
+        return descriptor_;
     }
 
     void close() noexcept {
@@ -319,6 +448,40 @@ class NativeFile {
   private:
     int descriptor_ = -1;
 };
+
+bool apply_replacement_metadata(NativeFile& file,
+                                const ReplacementMetadata& metadata) noexcept {
+    if (!metadata.exists)
+        return true;
+#if defined(_WIN32)
+    (void)file;
+    return true;
+#else
+    struct stat temporary_status{};
+    const auto descriptor = file.native_descriptor();
+    if (::fstat(descriptor, &temporary_status) != 0)
+        return false;
+    if ((temporary_status.st_uid != metadata.status.st_uid ||
+         temporary_status.st_gid != metadata.status.st_gid) &&
+        ::fchown(descriptor, metadata.status.st_uid, metadata.status.st_gid) != 0)
+        return false;
+    if (::fchmod(descriptor, metadata.status.st_mode & static_cast<mode_t>(07777)) != 0)
+        return false;
+#if defined(__APPLE__)
+    if (metadata.acl != nullptr)
+        return ::acl_set_fd_np(descriptor, metadata.acl, ACL_TYPE_EXTENDED) == 0;
+    return clear_extended_acl(descriptor);
+#elif defined(__linux__)
+    constexpr auto acl_name = "system.posix_acl_access";
+    if (metadata.acl)
+        return ::fsetxattr(descriptor, acl_name, metadata.acl->data(),
+                          metadata.acl->size(), 0) == 0;
+    return ::fremovexattr(descriptor, acl_name) == 0 || errno == ENODATA;
+#else
+    return true;
+#endif
+#endif
+}
 
 bool sync_directory(const std::filesystem::path& directory) noexcept {
 #if defined(_WIN32)
@@ -506,11 +669,15 @@ write_checkpoint_file(const std::filesystem::path& destination, const Project& s
         encoded.value().size() > limits.max_file_bytes - fixed_bytes)
         return file_failure<NativeFile>(FileJournalErrorCode::LimitExceeded);
 
+    ReplacementMetadata metadata;
+    if (!capture_replacement_metadata(destination, metadata))
+        return file_failure<NativeFile>(FileJournalErrorCode::IoError);
+
     std::filesystem::path temporary;
     NativeFile file;
     for (std::size_t attempt = 0; attempt < 128 && !file.valid(); ++attempt) {
         temporary = temporary_sibling(destination);
-        file = NativeFile::create_exclusive(temporary);
+        file = NativeFile::create_exclusive(temporary, &metadata);
         if (!file.valid() && errno != EEXIST)
             break;
     }
@@ -518,7 +685,8 @@ write_checkpoint_file(const std::filesystem::path& destination, const Project& s
         return file_failure<NativeFile>(FileJournalErrorCode::IoError);
     const auto header = file_header();
     if (!file.write_all(header) ||
-        !write_frame(file, kCheckpointFrame, revision, encoded.value()) || !file.sync()) {
+        !write_frame(file, kCheckpointFrame, revision, encoded.value()) ||
+        !apply_replacement_metadata(file, metadata) || !file.sync()) {
         file.close();
         std::error_code ignored;
         std::filesystem::remove(temporary, ignored);

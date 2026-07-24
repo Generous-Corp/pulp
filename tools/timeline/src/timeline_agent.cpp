@@ -362,6 +362,19 @@ bool render_temporary_matches(
 #endif
 }
 
+#if defined(__APPLE__)
+bool clear_extended_acl(int descriptor) noexcept {
+    acl_t empty = ::acl_init(0);
+    errno = 0;
+    const bool cleared =
+        empty != nullptr && ::acl_set_fd_np(descriptor, empty, ACL_TYPE_EXTENDED) == 0;
+    const bool unsupported = !cleared && errno == EOPNOTSUPP;
+    if (empty != nullptr)
+        ::acl_free(empty);
+    return cleared || unsupported;
+}
+#endif
+
 bool write_wav_atomic(const fs::path& destination,
                       const pulp::audio::AudioFileData& audio) noexcept {
     static std::atomic<std::uint64_t> next_serial{1};
@@ -520,8 +533,10 @@ bool write_wav_atomic(const fs::path& destination,
         complete = complete && ::fchmod(reservation, destination_status.st_mode &
                                                          static_cast<mode_t>(07777)) == 0;
 #if defined(__APPLE__)
-        if (complete && destination_acl != nullptr)
+        if (complete && destination_acl != nullptr) {
             complete = ::acl_set_fd_np(reservation, destination_acl, ACL_TYPE_EXTENDED) == 0;
+        } else if (complete)
+            complete = clear_extended_acl(reservation);
 #elif defined(__linux__)
         constexpr auto acl_name = "system.posix_acl_access";
         if (complete && destination_acl) {
