@@ -37,6 +37,95 @@ TEST_CASE("Timeline snapshots round trip canonically with durable asset identity
     REQUIRE(second.value().json == first.value().json);
 }
 
+TEST_CASE("Timeline project summary peeks without constructing the editable document") {
+    const auto snapshot = take(serialize_project(mixed_project(), builtins())).json;
+    auto escaped_name = snapshot;
+    const auto name = escaped_name.find(R"("name":"mixed")");
+    REQUIRE(name != std::string::npos);
+    escaped_name.replace(name, std::string_view(R"("name":"mixed")").size(),
+                         R"("name":"m\u00edxed")");
+
+    const auto nodes_before = Project::identity_stats().nodes_created;
+    const auto registry = builtins();
+    const auto summary = take(peek_project_summary(escaped_name, registry));
+    const auto nodes_after = Project::identity_stats().nodes_created;
+
+    REQUIRE(summary.project_id == ItemId{1});
+    REQUIRE(summary.name == "m\u00edxed");
+    REQUIRE(summary.next_item_id == 12);
+    REQUIRE(summary.root_sequence_id == ItemId{8});
+    REQUIRE(summary.schema_version == 1);
+    REQUIRE(summary.counts.assets == 1);
+    REQUIRE(summary.counts.sequences == 2);
+    REQUIRE(summary.counts.tracks == 2);
+    REQUIRE(summary.counts.clips == 3);
+    REQUIRE(summary.counts.notes == 2);
+    REQUIRE(summary.counts.device_placements == 0);
+    REQUIRE(summary.counts.automation_lanes == 0);
+    REQUIRE(summary.counts.automation_points == 0);
+    REQUIRE(summary.counts.take_lanes == 0);
+    REQUIRE(summary.counts.takes == 0);
+    REQUIRE(summary.counts.take_comp_segments == 0);
+    REQUIRE(nodes_after == nodes_before);
+
+    auto invalid_id = escaped_name;
+    const auto id = invalid_id.find(R"("id":"1")");
+    REQUIRE(id != std::string::npos);
+    invalid_id.replace(id, std::string_view(R"("id":"1")").size(), R"("id":"01")");
+    const auto rejected = peek_project_summary(invalid_id, registry);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(rejected.error().path == "/data/id");
+    REQUIRE(rejected.error().byte_offset == id + std::string_view(R"("id":)").size());
+}
+
+TEST_CASE("Timeline project summary counts nested authored structures") {
+    auto clip = take(Clip::create({7}, {0}, {100}, EmptyContent{}));
+    auto curve = take(AutomationCurve::create(
+        {{{10}, {0}, 0.25f}, {{11}, {50}, 0.75f}}));
+    auto automation =
+        take(AutomationLane::create({9}, DeviceParameterTarget{{8}, 42}, std::move(curve)));
+    auto recording =
+        take(Take::create({13}, MediaRef{{20}, {0}, 100}, {0}, RationalRate{48'000, 1}));
+    auto take_lane = take(TakeLane::create(
+        {12}, "recording", {recording},
+        {{.take_id = {13}, .range = {{0}, 50, {48'000, 1}}}}));
+    auto track = take(Track::create(TrackInput{
+        .id = {6},
+        .name = "authored",
+        .clips = {clip},
+        .device_chain = {{{8}}},
+        .automation_lanes = {automation},
+        .take_lanes = {take_lane},
+    }));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    MediaAsset asset{{20},
+                     "take.wav",
+                     100,
+                     {48'000, 1},
+                     hash('d'),
+                     AssetStoragePolicy::External,
+                     {},
+                     {}};
+    auto project =
+        take(Project::create(ProjectInput{{1}, "counts", 21, {5}, {asset}, {sequence}}));
+
+    const auto registry = builtins();
+    const auto summary =
+        take(peek_project_summary(take(serialize_project(project, registry)).json, registry));
+    REQUIRE(summary.counts.assets == 1);
+    REQUIRE(summary.counts.sequences == 1);
+    REQUIRE(summary.counts.tracks == 1);
+    REQUIRE(summary.counts.clips == 1);
+    REQUIRE(summary.counts.notes == 0);
+    REQUIRE(summary.counts.device_placements == 1);
+    REQUIRE(summary.counts.automation_lanes == 1);
+    REQUIRE(summary.counts.automation_points == 2);
+    REQUIRE(summary.counts.take_lanes == 1);
+    REQUIRE(summary.counts.takes == 1);
+    REQUIRE(summary.counts.take_comp_segments == 1);
+}
+
 TEST_CASE("Timeline identity persistence derives immediate parents from legacy snapshots") {
     const auto registry = builtins();
     const auto encoded = take(serialize_project(mixed_project(), registry));
@@ -67,9 +156,14 @@ TEST_CASE("Timeline schema-v1 owns and canonically replays editable tempo and me
         MeterPoint{{0}, {4, 4}},
         MeterPoint{{8 * kTicksPerQuarter}, {3, 4}},
     };
-    auto project = take(Project::create(ProjectInput{
-        {1}, "maps", 5, {2}, {}, {sequence}, take(TempoMap::create(tempo_points)),
-        take(MeterMap::create(meter_points))}));
+    auto project = take(Project::create(ProjectInput{{1},
+                                                     "maps",
+                                                     5,
+                                                     {2},
+                                                     {},
+                                                     {sequence},
+                                                     take(TempoMap::create(tempo_points)),
+                                                     take(MeterMap::create(meter_points))}));
     const auto registry = builtins();
     const auto encoded = take(serialize_project(project, registry));
     REQUIRE(encoded.json.find("\"tempo_map\"") != std::string::npos);
@@ -82,8 +176,7 @@ TEST_CASE("Timeline schema-v1 owns and canonically replays editable tempo and me
     auto malformed = encoded.json;
     const auto denominator = malformed.find("\"denominator\":4");
     REQUIRE(denominator != std::string::npos);
-    malformed.replace(denominator, std::string("\"denominator\":4").size(),
-                      "\"denominator\":3");
+    malformed.replace(denominator, std::string("\"denominator\":4").size(), "\"denominator\":3");
     REQUIRE_FALSE(deserialize_project(malformed, registry));
 }
 

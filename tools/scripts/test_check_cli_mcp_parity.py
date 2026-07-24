@@ -243,6 +243,27 @@ class McpExtractor(unittest.TestCase):
                 {"pulp_build", "pulp_test"},
             )
 
+    def test_extracts_manifest_generated_timeline_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = make_repo(pathlib.Path(td) / "repo")
+            write_mcp(root, "pulp_build")
+            artifact = root / "core" / "timeline" / "schema"
+            artifact.mkdir(parents=True)
+            (artifact / "timeline_mcp_tools.json").write_text(
+                json.dumps(
+                    {
+                        "tools": [
+                            {"name": "pulp_timeline_validate"},
+                            {"name": "other_tool"},
+                        ]
+                    }
+                )
+            )
+            self.assertEqual(
+                parity.extract_mcp_tools(root / "tools" / "mcp" / "pulp_mcp.cpp"),
+                {"pulp_build", "pulp_timeline_validate"},
+            )
+
     def test_returns_empty_for_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             self.assertEqual(

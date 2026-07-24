@@ -59,6 +59,12 @@ enum class ModelErrorCode : std::uint8_t {
     DuplicateAutomationTarget,
     InvalidTake,
     DuplicateTake,
+    ActiveTakeLaneRemoval,
+    InvalidTakeComp,
+    OverlappingTakeComp,
+    ActiveCompTakeRemoval,
+    InvalidAudioLoopInfo,
+    InvalidAssetStoragePolicy,
 };
 
 struct ModelError {
@@ -99,6 +105,7 @@ struct MediaAsset {
     AssetStoragePolicy storage_policy = AssetStoragePolicy::External;
     std::vector<AssetLocator> locators;
     std::vector<AssetRepresentation> representations;
+    std::optional<AudioLoopInfo> loop_info;
 };
 
 struct MediaRef {
@@ -322,19 +329,55 @@ class Take {
 static_assert(std::is_nothrow_copy_constructible_v<Take>);
 static_assert(std::is_nothrow_move_constructible_v<Take>);
 
-// Immutable ownership of one alternate recording lane on a Track: an ordered set
-// of takes keyed by identity. The lane and its takes are owned identities; a
-// take's MediaRef::asset_id is an external reference. Comp selection, capture
-// engine wiring, and playback compilation are separate concerns and absent here.
+// One exact absolute-time selection in a take comp. The selected timeline range
+// must lie inside the referenced take and use its normalized sample rate.
+struct TakeCompSegment {
+    ItemId take_id;
+    AbsoluteTimeRange range;
+    constexpr bool operator==(const TakeCompSegment& other) const noexcept {
+        return take_id == other.take_id && range.start == other.range.start &&
+               range.sample_count == other.range.sample_count &&
+               range.sample_rate == other.range.sample_rate;
+    }
+};
+
+// A track freeze selects a sealed offline-rendered asset without discarding the
+// authored track. The render-plan hash identifies the exact immutable inputs
+// used to derive the artifact, so callers can detect and replace stale caches.
+struct TrackFreeze {
+    MediaRef media;
+    timebase::SamplePosition placement_start;
+    timebase::RationalRate sample_rate;
+    ContentHash render_plan_hash;
+    constexpr bool operator==(const TrackFreeze& other) const noexcept {
+        return media.asset_id == other.media.asset_id &&
+               media.source_start == other.media.source_start &&
+               media.frame_count == other.media.frame_count &&
+               placement_start == other.placement_start && sample_rate == other.sample_rate &&
+               render_plan_hash == other.render_plan_hash;
+    }
+};
+
+// Immutable ownership of one alternate recording lane on a Track: an ordered
+// set of takes keyed by identity and an optional sample-exact comp assembled
+// from non-overlapping take segments. The comp is document intent; playback can
+// derive and cache a flattened artifact without changing this source data.
 class TakeLane {
   public:
     static runtime::Result<TakeLane, ModelError> create(ItemId id, std::string name,
-                                                         std::vector<Take> takes);
+                                                         std::vector<Take> takes,
+                                                         std::vector<TakeCompSegment> comp = {});
+    runtime::Result<TakeLane, ModelError> insert_take(Take take) const;
+    runtime::Result<TakeLane, ModelError> erase_take(ItemId id) const;
+    runtime::Result<TakeLane, ModelError>
+    with_comp_segments(std::vector<TakeCompSegment> comp) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
     // Canonical order by take identity; carries no playback semantics.
     std::span<const Take> takes() const noexcept;
+    // Canonical order by timeline start, then take identity.
+    std::span<const TakeCompSegment> comp_segments() const noexcept;
     const Take* find_take(ItemId id) const noexcept;
 
   private:
@@ -351,6 +394,9 @@ struct TrackInput {
     std::vector<AutomationLane> automation_lanes;
     std::vector<TakeLane> take_lanes;
     bool record_armed = false;
+    // Zero selects the arrangement rather than a take playlist/comp lane.
+    ItemId active_take_lane_id;
+    std::optional<TrackFreeze> freeze;
 };
 
 class Track {
@@ -408,6 +454,17 @@ class Track {
     runtime::Result<Track, ModelError> replace_clip(Clip replacement) const;
     runtime::Result<Track, ModelError> insert_automation_lane(AutomationLane lane) const;
     runtime::Result<Track, ModelError> erase_automation_lane(ItemId id) const;
+    runtime::Result<Track, ModelError> insert_take_lane(TakeLane lane) const;
+    runtime::Result<Track, ModelError> erase_take_lane(ItemId id) const;
+    runtime::Result<Track, ModelError> insert_take(ItemId lane_id, Take take) const;
+    runtime::Result<Track, ModelError> erase_take(ItemId lane_id, ItemId take_id) const;
+    runtime::Result<Track, ModelError>
+    with_take_comp(ItemId lane_id, std::vector<TakeCompSegment> comp) const;
+    // Sets the record-arm intent flag. Path-copies only the Track's own Data;
+    // clip, automation, and take index storage is shared with the old Track.
+    Track with_record_armed(bool armed) const;
+    runtime::Result<Track, ModelError> with_active_take_lane(ItemId lane_id) const;
+    runtime::Result<Track, ModelError> with_freeze(std::optional<TrackFreeze> freeze) const;
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -427,6 +484,10 @@ class Track {
     // Whether this track is armed to capture into a take lane. Pure document
     // intent; the capture engine reads it but never mutates it here.
     bool record_armed() const noexcept;
+    // Zero means the arrangement is active. A non-zero value always names one
+    // of this track's take lanes; full segment-comp data remains a later layer.
+    ItemId active_take_lane_id() const noexcept;
+    const std::optional<TrackFreeze>& freeze() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
@@ -495,7 +556,8 @@ enum class ItemKind : std::uint8_t {
 // it from coordinates. The lane_id parameter carries an AutomationLane for a
 // point and a TakeLane for a take.
 constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId sequence_id,
-                                     ItemId track_id, ItemId clip_id, ItemId lane_id = {}) noexcept {
+                                     ItemId track_id, ItemId clip_id,
+                                     ItemId lane_id = {}) noexcept {
     switch (kind) {
     case ItemKind::Project:
         return {};
@@ -530,8 +592,8 @@ struct ItemLocation {
     constexpr ItemLocation() noexcept = default;
     constexpr ItemLocation(ItemKind item_kind, ItemId parent, ItemId sequence, ItemId track,
                            ItemId clip, bool is_active) noexcept
-        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track),
-          clip_id(clip), active(is_active) {}
+        : kind(item_kind), parent_id(parent), sequence_id(sequence), track_id(track), clip_id(clip),
+          active(is_active) {}
 
     constexpr bool has_same_owner(const ItemLocation& other) const noexcept {
         return kind == other.kind && parent_id == other.parent_id;

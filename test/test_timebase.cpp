@@ -552,6 +552,15 @@ TEST_CASE("CompiledTempoMap analytically integrates and inverts linear tick ramp
                static_cast<long double>(tick - 16 * kTicksPerQuarter) * 48'000.0L * 60.0L /
                    (static_cast<long double>(kTicksPerQuarter) * 90.0L);
     };
+    const auto fractional_tick =
+        static_cast<long double>(3 * kTicksPerQuarter) + 0.5L;
+    const auto fractional_expected =
+        ramp_samples(fractional_tick, 8.0L * kTicksPerQuarter, 60.0L, 180.0L);
+    REQUIRE(std::abs(map.fractional_ticks_to_samples(fractional_tick) -
+                     fractional_expected) < 1e-9L);
+    REQUIRE(map.fractional_ticks_to_samples(
+                static_cast<long double>(8 * kTicksPerQuarter)) ==
+            static_cast<long double>(first_boundary.value));
     verify_properties(map, 0x43ab'0032, -100'000, second_boundary.value + 200'000,
                       -2 * kTicksPerQuarter, 20 * kTicksPerQuarter, 1'000, exact_samples);
 }

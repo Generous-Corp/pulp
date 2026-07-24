@@ -1,5 +1,146 @@
 #include "support/timeline_persistence_test_support.hpp"
 
+TEST_CASE("Timeline project summary scans metadata and counts without resolving references") {
+    const auto registry = builtins();
+    auto snapshot = take(serialize_project(mixed_project(), registry)).json;
+
+    const auto summary = take(peek_project_summary(snapshot, registry));
+    REQUIRE(summary.schema_version == 1);
+    REQUIRE(summary.project_id == ItemId{1});
+    REQUIRE(summary.name == "mixed");
+    REQUIRE(summary.next_item_id == 12);
+    REQUIRE(summary.root_sequence_id == ItemId{8});
+    REQUIRE(summary.counts.assets == 1);
+    REQUIRE(summary.counts.sequences == 2);
+    REQUIRE(summary.counts.tracks == 2);
+    REQUIRE(summary.counts.clips == 3);
+    REQUIRE(summary.counts.notes == 2);
+
+    DecodeLimits total_limit;
+    total_limit.max_total_values = 1;
+    REQUIRE_FALSE(peek_project_summary(snapshot, registry, total_limit).has_value());
+
+    DecodeLimits array_limit;
+    array_limit.max_array_elements = 0;
+    REQUIRE_FALSE(peek_project_summary(snapshot, registry, array_limit).has_value());
+
+    DecodeLimits object_limit;
+    object_limit.max_object_members = 3;
+    REQUIRE_FALSE(peek_project_summary(snapshot, registry, object_limit).has_value());
+
+    DecodeLimits string_limit;
+    string_limit.max_string_bytes = 4;
+    REQUIRE_FALSE(peek_project_summary(snapshot, registry, string_limit).has_value());
+
+    auto invalid_utf8 = snapshot;
+    const auto asset_name = invalid_utf8.find("\"name\":\"source.wav\"");
+    REQUIRE(asset_name != std::string::npos);
+    invalid_utf8[asset_name + std::string_view("\"name\":\"").size()] = static_cast<char>(0xc0);
+    auto invalid_utf8_summary = peek_project_summary(invalid_utf8, registry);
+    REQUIRE_FALSE(invalid_utf8_summary.has_value());
+    REQUIRE(invalid_utf8_summary.error().code == PersistenceErrorCode::InvalidUtf8);
+
+    auto invalid_project_name = snapshot;
+    const auto project_name = invalid_project_name.find(R"("name":"mixed")");
+    REQUIRE(project_name != std::string::npos);
+    const auto project_name_byte = project_name + std::string_view(R"("name":")").size();
+    invalid_project_name[project_name_byte] = static_cast<char>(0xc0);
+    auto invalid_project_name_summary = peek_project_summary(invalid_project_name, registry);
+    REQUIRE_FALSE(invalid_project_name_summary.has_value());
+    REQUIRE(invalid_project_name_summary.error().code == PersistenceErrorCode::InvalidUtf8);
+    REQUIRE(invalid_project_name_summary.error().path == "/data/name");
+    REQUIRE(invalid_project_name_summary.error().byte_offset == project_name_byte);
+
+    auto escaped_project_name = snapshot;
+    escaped_project_name.replace(project_name, std::string_view(R"("name":"mixed")").size(),
+                                 R"("name":"\u20ac")");
+    DecodeLimits escaped_name_limit;
+    escaped_name_limit.max_string_bytes = 1;
+    auto escaped_project_name_summary =
+        peek_project_summary(escaped_project_name, registry, escaped_name_limit);
+    REQUIRE_FALSE(escaped_project_name_summary.has_value());
+    REQUIRE(escaped_project_name_summary.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(escaped_project_name_summary.error().path == "/data/name");
+    REQUIRE(escaped_project_name_summary.error().actual == 3);
+    REQUIRE(escaped_project_name_summary.error().limit == 1);
+    REQUIRE(escaped_project_name_summary.error().byte_offset ==
+            escaped_project_name.find(R"("\u20ac")"));
+
+    auto invalid_surrogate = snapshot;
+    invalid_surrogate.replace(asset_name, std::string_view("\"name\":\"source.wav\"").size(),
+                              R"("name":"\uD800")");
+    auto invalid_surrogate_summary = peek_project_summary(invalid_surrogate, registry);
+    REQUIRE_FALSE(invalid_surrogate_summary.has_value());
+    REQUIRE(invalid_surrogate_summary.error().code == PersistenceErrorCode::InvalidUtf8);
+
+    auto invalid_surrogate_pair = snapshot;
+    invalid_surrogate_pair.replace(asset_name, std::string_view("\"name\":\"source.wav\"").size(),
+                                   R"("name":"\uD800\uZZZZ")");
+    auto invalid_pair_summary = peek_project_summary(invalid_surrogate_pair, registry);
+    REQUIRE_FALSE(invalid_pair_summary.has_value());
+    REQUIRE(invalid_pair_summary.error().code == PersistenceErrorCode::InvalidUtf8);
+
+    auto duplicate_unexamined_key = snapshot;
+    const auto active = duplicate_unexamined_key.find("\"active\":true");
+    REQUIRE(active != std::string::npos);
+    duplicate_unexamined_key.replace(active, std::string_view("\"active\":true").size(),
+                                     R"("active":true,"\u0061ctive":true)");
+    auto duplicate_summary = peek_project_summary(duplicate_unexamined_key, registry);
+    REQUIRE_FALSE(duplicate_summary.has_value());
+    REQUIRE(duplicate_summary.error().code == PersistenceErrorCode::DuplicateKey);
+
+    auto noncanonical_id = snapshot;
+    const auto project_id = noncanonical_id.find(R"("id":"1")");
+    REQUIRE(project_id != std::string::npos);
+    noncanonical_id.replace(project_id, std::string_view(R"("id":"1")").size(), R"("id":"01")");
+    auto invalid_id_summary = peek_project_summary(noncanonical_id, registry);
+    REQUIRE_FALSE(invalid_id_summary.has_value());
+    REQUIRE(invalid_id_summary.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(invalid_id_summary.error().byte_offset == noncanonical_id.find(R"("01")"));
+
+    const auto root = snapshot.find("\"root_sequence_id\":\"8\"");
+    REQUIRE(root != std::string::npos);
+    snapshot.replace(root, std::string_view("\"root_sequence_id\":\"8\"").size(),
+                     "\"root_sequence_id\":\"999\"");
+    const auto unresolved = take(peek_project_summary(snapshot, registry));
+    REQUIRE(unresolved.root_sequence_id == ItemId{999});
+    REQUIRE_FALSE(deserialize_project(snapshot, registry).has_value());
+}
+
+TEST_CASE("Timeline structural scan accounts for take lanes and takes") {
+    auto take_a = take(Take::create({7}, MediaRef{{6}, {0}, 100}, {0}, RationalRate{48'000, 1}));
+    auto take_b =
+        take(Take::create({8}, MediaRef{{6}, {100}, 200}, {480}, RationalRate{48'000, 1}));
+    auto lane = take(TakeLane::create({5}, "takes", {take_a, take_b}));
+    auto track = take(Track::create(
+        TrackInput{.id = {4}, .name = "track", .take_lanes = {lane}, .record_armed = true}));
+    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, {track}));
+    MediaAsset asset{{6}, "audio.wav", 1'000, {48'000, 1}, hash('a'), AssetStoragePolicy::External,
+                     {},  {}};
+    const auto project =
+        take(Project::create(ProjectInput{{1}, "takes", 9, {2}, {asset}, {sequence}}));
+    const auto registry = builtins();
+    const auto snapshot = take(serialize_project(project, registry)).json;
+
+    const auto summary = take(peek_project_summary(snapshot, registry));
+    REQUIRE(summary.counts.take_lanes == 1);
+    REQUIRE(summary.counts.takes == 2);
+
+    DecodeLimits take_limit;
+    take_limit.max_takes = 1;
+    auto too_many_takes = peek_project_summary(snapshot, registry, take_limit);
+    REQUIRE_FALSE(too_many_takes.has_value());
+    REQUIRE(too_many_takes.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(too_many_takes.error().path == "/data/sequences/0/data/tracks/0/data/take_lanes/0/"
+                                           "data/takes");
+
+    DecodeLimits lane_limit;
+    lane_limit.max_take_lanes = 0;
+    auto too_many_lanes = peek_project_summary(snapshot, registry, lane_limit);
+    REQUIRE_FALSE(too_many_lanes.has_value());
+    REQUIRE(too_many_lanes.error().code == PersistenceErrorCode::LimitExceeded);
+}
+
 TEST_CASE("Timeline JSON rejects ambiguous malformed and oversized input") {
     DecodeLimits limits;
     REQUIRE_FALSE(parse_json(R"({"a":1,"a":2})", limits).has_value());
@@ -176,6 +317,15 @@ TEST_CASE("Timeline structural preflight applies quotas before scanning rejected
                   "],\"sequences\":[]}"),
           &DecodeLimits::max_representations, "/data/assets/0/data/representations");
 
+    DecodeLimits reject_before_generic_validation;
+    reject_before_generic_validation.max_assets = 0;
+    auto rejected_duplicate = peek_project_summary(
+        project(R"({"assets":[{"duplicate":1,"duplicate":2}],"sequences":[]})"), builtins(),
+        reject_before_generic_validation);
+    REQUIRE_FALSE(rejected_duplicate.has_value());
+    REQUIRE(rejected_duplicate.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(rejected_duplicate.error().path == "/data/assets");
+
     for (const auto malformed : {std::string_view("1.0"), std::string_view("\"1\"")}) {
         auto bad = project(
             "{\"assets\":[],\"sequences\":[" +
@@ -250,12 +400,27 @@ TEST_CASE("Timeline extension decoys do not consume structural quotas") {
     exact.max_representations = 1;
     REQUIRE(deserialize_project(opaque_snapshot, builtins(), exact).has_value());
 
+    auto opaque_limit = exact;
+    opaque_limit.max_opaque_bytes = raw.size() - 1;
+    auto oversized_opaque = peek_project_summary(opaque_snapshot, builtins(), opaque_limit);
+    REQUIRE_FALSE(oversized_opaque.has_value());
+    REQUIRE(oversized_opaque.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(oversized_opaque.error().actual == raw.size());
+    REQUIRE(oversized_opaque.error().limit == raw.size() - 1);
+    REQUIRE(oversized_opaque.error().path ==
+            "/data/sequences/0/data/tracks/0/data/clips/0/data/content");
+
     const auto registered_registry = registry_with_decoys();
     auto registered = take(registered_registry.create_registered_no_owned_ids(
         {"vendor.decoys", 1}, std::make_shared<const int>(1), 4096));
     auto registered_snapshot =
         take(serialize_project(project_with(registered), registered_registry)).json;
-    REQUIRE(deserialize_project(registered_snapshot, registered_registry, exact).has_value());
+    auto registered_limits = exact;
+    registered_limits.max_opaque_bytes = 0;
+    REQUIRE(deserialize_project(registered_snapshot, registered_registry, registered_limits)
+                .has_value());
+    REQUIRE(peek_project_summary(registered_snapshot, registered_registry, registered_limits)
+                .has_value());
 
     auto empty_clip = take(Clip::create({4}, {0}, {10}, EmptyContent{}));
     auto track = take(Track::create({3}, "track", {empty_clip}));
@@ -270,7 +435,8 @@ TEST_CASE("Timeline extension decoys do not consume structural quotas") {
                      {{"proxy",
                        hash('d'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "proxy.wav"}}}},
+                     {}};
     auto shared = take(Project::create(ProjectInput{{1}, "shared", 6, {2}, {asset}, {sequence}}));
     auto shared_snapshot = take(serialize_project(shared, builtins())).json;
     exact.max_locators = 1;

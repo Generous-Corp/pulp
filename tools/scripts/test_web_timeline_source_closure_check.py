@@ -25,6 +25,8 @@ set({sources}
     ${{{root}}}/core/timebase/src/compiled_time.cpp
     ${{{root}}}/core/timeline/src/model.cpp
     ${{{root}}}/core/playback/src/transport.cpp
+    ${{{root}}}/core/audio/src/rolling_audio_capture_buffer.cpp
+    ${{{root}}}/core/runtime/src/sha256.cpp
 )
 add_library({target} OBJECT ${{{sources}}})
 target_compile_features({target} PUBLIC cxx_std_20)
@@ -42,6 +44,10 @@ class SourceClosureTests(unittest.TestCase):
             directory = self.root / "core" / subsystem / "src"
             directory.mkdir(parents=True)
             (directory / source).write_text("// fixture\n", encoding="utf-8")
+        for source in checker.PORTABLE_DEPENDENCIES:
+            path = self.root / source
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("// fixture\n", encoding="utf-8")
         cmake = self.root / "tools" / "cmake"
         cmake.mkdir(parents=True)
         (cmake / "PulpWam.cmake").write_text(
@@ -64,6 +70,34 @@ class SourceClosureTests(unittest.TestCase):
     def test_valid_fixture_passes(self) -> None:
         self.assertEqual(self.check(), [])
 
+    def test_shared_playback_manifest_passes_and_remains_complete(self) -> None:
+        manifest = self.root / "core" / "playback" / "PulpPlaybackSources.cmake"
+        manifest.write_text(
+            "set(_PULP_PLAYBACK_SOURCE_FILES\n    transport.cpp\n)\n",
+            encoding="utf-8")
+        for filename, prefix in (("PulpWam.cmake", "WAM"),
+                                 ("PulpWclap.cmake", "WCLAP")):
+            root = f"_PULP_{prefix}_ROOT"
+            variable = f"_PULP_{prefix}_PLAYBACK_SOURCES"
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"set(_PULP_{prefix}_CORE_SOURCES\n",
+                f'pulp_resolve_playback_sources("${{{root}}}" {variable})\n'
+                f"set(_PULP_{prefix}_CORE_SOURCES\n")
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"    ${{{root}}}/core/playback/src/transport.cpp\n",
+                f"    ${{{variable}}}\n")
+        self.assertEqual(self.check(), [])
+
+        manifest.write_text(
+            "set(_PULP_PLAYBACK_SOURCE_FILES\n)\n", encoding="utf-8")
+        failures = self.check()
+        self.assertEqual(
+            sum("missing core/playback/src/transport.cpp" in failure
+                for failure in failures),
+            2)
+
     def test_identical_omission_in_both_lists_fails(self) -> None:
         for filename in ("PulpWam.cmake", "PulpWclap.cmake"):
             self.mutate(f"tools/cmake/{filename}",
@@ -79,6 +113,19 @@ class SourceClosureTests(unittest.TestCase):
         failures = self.check()
         self.assertEqual(sum("missing core/timeline/src/future.cpp" in failure
                              for failure in failures), 2)
+
+    def test_recording_commit_portable_dependencies_are_required(self) -> None:
+        for filename in ("PulpWam.cmake", "PulpWclap.cmake"):
+            prefix = "WAM" if filename == "PulpWam.cmake" else "WCLAP"
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"    ${{_PULP_{prefix}_ROOT}}/core/runtime/src/sha256.cpp\n",
+                "")
+        failures = self.check()
+        self.assertEqual(
+            sum("missing portable dependency core/runtime/src/sha256.cpp" in failure
+                for failure in failures),
+            2)
 
     def test_commented_source_is_missing(self) -> None:
         self.mutate("tools/cmake/PulpWam.cmake",

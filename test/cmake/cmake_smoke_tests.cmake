@@ -108,6 +108,19 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
+# Installed Creative Timeline Engine consumer. The fixture requests the three
+# public engine components plus the optional DAWproject importer, builds and
+# runs outside the source tree, and audits both target closures for forbidden
+# UI/GPU/host baggage.
+add_test(NAME cmake-timeline-sdk-consumer
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DPULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_timeline_sdk_consumer.cmake)
+set_tests_properties(cmake-timeline-sdk-consumer PROPERTIES
+    LABELS "cmake;sdk;timeline;slow"
+    TIMEOUT 180)
+
 # Min-OS floor propagation to find_package(Pulp) consumers. PulpMinOs.cmake must
 # pin the consumer's deployment target when it runs AFTER project() (where the
 # target is a DEFINED-but-empty cache entry), not only when it runs before

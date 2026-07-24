@@ -1,10 +1,12 @@
 #include <pulp/playback/program_compiler.hpp>
 
+#include "audio_renderer_internal.hpp"
 #include "budgeted_stable_merge.hpp"
 #include "track_automation_compiler.hpp"
 
 #include <algorithm>
 #include <limits>
+#include <tuple>
 #include <utility>
 
 namespace pulp::playback {
@@ -20,10 +22,12 @@ class ProgramCompilerTask final : public CompileTask {
   private:
     enum class Stage {
         Capture,
+        SeedConverterCache,
         CompileTracks,
         SortTrackNotes,
         SortTrackAudioIds,
         ValidateTrackAudioIds,
+        CompileTrackTakeComp,
         SortTrackAudio,
         CompileTrackAutomation,
         FinalizeTrack,
@@ -33,6 +37,7 @@ class ProgramCompilerTask final : public CompileTask {
     };
     CompileTaskStatus fail(CompileError error) noexcept;
     void begin_track_automation();
+    void begin_track_audio_link();
 
     std::shared_ptr<PlaybackProgramCompilerCore> core_;
     std::unique_ptr<ProgramCompileRequest> request_;
@@ -41,6 +46,8 @@ class ProgramCompilerTask final : public CompileTask {
     ProgramGeneration generation_ = 0;
     bool all_dirty_ = false;
     std::size_t track_index_ = 0;
+    std::size_t converter_track_index_ = 0;
+    std::size_t converter_clip_index_ = 0;
     std::size_t clip_index_ = 0;
     std::size_t note_index_ = 0;
     bool clip_started_ = false;
@@ -49,12 +56,16 @@ class ProgramCompilerTask final : public CompileTask {
     std::vector<NoteProgramEvent> note_merge_buffer_;
     detail::BudgetedStableMergeState note_merge_;
     std::vector<AudioClipRendererProgram> current_audio_clips_;
+    detail::AudioSampleRateConverterCache sample_rate_converters_;
     std::vector<timeline::ItemId> current_audio_ids_;
     std::vector<timeline::ItemId> audio_id_merge_buffer_;
     detail::BudgetedStableMergeState audio_id_merge_;
     std::size_t audio_id_validation_index_ = 1;
     std::vector<AudioClipRendererProgram> audio_merge_buffer_;
     detail::BudgetedStableMergeState audio_merge_;
+    const timeline::TakeLane* current_take_lane_ = nullptr;
+    bool current_track_frozen_ = false;
+    std::size_t take_comp_index_ = 0;
     detail::TrackAutomationCompiler automation_compiler_;
     detail::CompiledTrackAutomation current_automation_;
     bool automation_compiler_started_ = false;
@@ -158,8 +169,25 @@ struct PlaybackProgramCompilerCore
 };
 
 void ProgramCompilerTask::begin_track_automation() {
+    if (current_track_frozen_) {
+        current_automation_ = {};
+        stage_ = Stage::FinalizeTrack;
+        return;
+    }
     automation_compiler_started_ = false;
     stage_ = Stage::CompileTrackAutomation;
+}
+
+void ProgramCompilerTask::begin_track_audio_link() {
+    if (current_audio_ids_.size() > 1) {
+        audio_id_merge_.reset(audio_id_merge_buffer_);
+        stage_ = Stage::SortTrackAudioIds;
+    } else if (current_audio_clips_.size() > 1) {
+        audio_merge_.reset(audio_merge_buffer_);
+        stage_ = Stage::SortTrackAudio;
+    } else {
+        begin_track_automation();
+    }
 }
 
 CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budget) noexcept {
@@ -191,11 +219,56 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         tracks_.reserve(sequence_->tracks().size());
         merge_buffer_.reserve(sequence_->tracks().size());
-        stage_ = Stage::CompileTracks;
+        stage_ = Stage::SeedConverterCache;
     }
 
     std::size_t work = 0;
     while (std::chrono::steady_clock::now() < budget.deadline && work < budget.max_work_units) {
+        if (stage_ == Stage::SeedConverterCache) {
+            const auto& live = core_->store.live();
+            if (all_dirty_ || !live || converter_track_index_ == sequence_->tracks().size()) {
+                stage_ = Stage::CompileTracks;
+                continue;
+            }
+            const auto& track = sequence_->tracks()[converter_track_index_];
+            const bool dirty = std::binary_search(request_->dirty.tracks.begin(),
+                                                  request_->dirty.tracks.end(), track.id());
+            const auto* old = dirty ? nullptr : live->find_track_owner(track.id());
+            const auto* audio_program =
+                old && (*old)->audio_program() ? (*old)->audio_program() : nullptr;
+            const auto clips = audio_program ? audio_program->clips()
+                                             : std::span<const AudioClipRendererProgram>{};
+            if (converter_clip_index_ < clips.size()) {
+                const auto& clip = clips[converter_clip_index_++];
+                const auto& sample_rate_converter =
+                    clip.conversion_artifact->sample_rate_converter();
+                if (sample_rate_converter) {
+                    const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
+                    auto seeded = sample_rate_converters_.seed(
+                        source_rate, request_->tempo_map->sample_rate(), sample_rate_converter,
+                        clip.id, clip.asset_id, request_->audio_limits);
+                    if (!seeded)
+                        return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
+                                     request_->document_revision, seeded.error().code});
+                }
+                const auto& host_rate_converter =
+                    clip.conversion_artifact->host_rate_converter();
+                if (host_rate_converter) {
+                    auto seeded = sample_rate_converters_.seed_host(
+                        clip.audio, clip.source_start, clip.source_frame_count,
+                        host_rate_converter, clip.id, clip.asset_id, request_->audio_limits);
+                    if (!seeded)
+                        return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
+                                     request_->document_revision, seeded.error().code});
+                }
+                ++work;
+                continue;
+            }
+            converter_clip_index_ = 0;
+            ++converter_track_index_;
+            ++work;
+            continue;
+        }
         if (stage_ == Stage::CompileTracks) {
             if (track_index_ == sequence_->tracks().size()) {
                 track_merge_.reset(merge_buffer_);
@@ -227,50 +300,106 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 continue;
             }
             if (clip_index_ == 0 && !clip_started_) {
-                current_clip_ids_.reserve(track.clips().size());
-                const auto audio_capacity = static_cast<std::size_t>(std::min<std::uint64_t>(
-                    track.clips().size(), request_->audio_limits.max_clips));
+                current_track_frozen_ = track.freeze().has_value();
+                current_take_lane_ = !current_track_frozen_ && track.active_take_lane_id().valid()
+                                         ? track.find_take_lane(track.active_take_lane_id())
+                                         : nullptr;
+                current_clip_ids_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : track.clips().size());
+                const auto comp_count =
+                    current_take_lane_ ? current_take_lane_->comp_segments().size() : 0;
+                const auto remaining =
+                    request_->audio_limits.max_clips -
+                    std::min<std::uint64_t>(total_audio_clips_, request_->audio_limits.max_clips);
+                const auto source_count =
+                    current_track_frozen_
+                        ? 1
+                        : (current_take_lane_ ? comp_count : track.clips().size());
+                const auto audio_capacity =
+                    static_cast<std::size_t>(std::min<std::uint64_t>(source_count, remaining));
                 current_audio_clips_.reserve(audio_capacity);
-                current_audio_ids_.reserve(audio_capacity);
-                audio_id_merge_buffer_.reserve(audio_capacity);
+                current_audio_ids_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : audio_capacity);
+                audio_id_merge_buffer_.reserve(
+                    current_take_lane_ || current_track_frozen_ ? 0 : audio_capacity);
                 audio_merge_buffer_.reserve(audio_capacity);
             }
-            if (clip_index_ == track.clips().size()) {
-                if (current_note_events_.size() > 1) {
-                    note_merge_buffer_.reserve(current_note_events_.size());
-                    note_merge_.reset(note_merge_buffer_);
-                    stage_ = Stage::SortTrackNotes;
-                } else if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_.reset(audio_id_merge_buffer_);
-                    stage_ = Stage::SortTrackAudioIds;
-                } else {
-                    begin_track_automation();
+            if (current_track_frozen_) {
+                if (clip_index_ == 0) {
+                    if (!request_->audio_assets)
+                        return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::MissingDecodedAsset});
+                    if (total_audio_clips_ >= request_->audio_limits.max_clips)
+                        return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
+                                     request_->document_revision,
+                                     AudioRendererErrorCode::CapacityExceeded});
+                    auto prepared = detail::prepare_track_freeze_sample_rate_converter(
+                        track, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!prepared)
+                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                                     request_->document_revision, prepared.error().code});
+                    if (!*prepared) {
+                        ++work;
+                        continue;
+                    }
+                    auto compiled = detail::compile_track_freeze_program_cached(
+                        track, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!compiled)
+                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
+                                     request_->document_revision, compiled.error().code});
+                    ++total_audio_clips_;
+                    current_audio_clips_.push_back(std::move(compiled).value());
+                    clip_index_ = 1;
+                    ++work;
+                    continue;
                 }
+                stage_ = Stage::CompileTrackTakeComp;
+                continue;
+            }
+            if (current_take_lane_) {
+                stage_ = Stage::CompileTrackTakeComp;
+                continue;
+            }
+            if (clip_index_ == track.clips().size()) {
+                stage_ = Stage::CompileTrackTakeComp;
                 continue;
             }
 
             const auto& clip = track.clips()[clip_index_];
             if (!clip_started_) {
-                current_clip_ids_.push_back(clip.id());
                 if (std::holds_alternative<timeline::MediaRef>(clip.content())) {
                     if (!request_->audio_assets)
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::MissingDecodedAsset});
-                    auto compiled =
-                        compile_audio_clip_program(clip, *request_->project, *request_->tempo_map,
-                                                   *request_->audio_assets, request_->audio_limits);
-                    if (!compiled)
-                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
-                                     request_->document_revision, compiled.error().code});
                     if (total_audio_clips_ >= request_->audio_limits.max_clips)
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
+                    auto prepared = detail::prepare_audio_clip_sample_rate_converters(
+                        clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!prepared)
+                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                                     request_->document_revision, prepared.error().code});
+                    if (!*prepared) {
+                        ++work;
+                        continue;
+                    }
+                    auto compiled = detail::compile_audio_clip_program_cached(
+                        clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!compiled)
+                        return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
+                                     request_->document_revision, compiled.error().code});
                     ++total_audio_clips_;
                     current_audio_clips_.push_back(std::move(compiled).value());
                     current_audio_ids_.push_back(clip.id());
                 }
+                current_clip_ids_.push_back(clip.id());
                 clip_started_ = true;
             }
             const auto* notes = std::get_if<timeline::NoteContent>(&clip.content());
@@ -304,18 +433,54 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             ++work;
             continue;
         }
-        if (stage_ == Stage::SortTrackNotes) {
-            const auto step = note_merge_.step(
-                current_note_events_, note_merge_buffer_, note_program_event_less);
-            work += step.work_units;
-            if (step.complete) {
-                if (current_audio_clips_.size() > 1) {
-                    audio_id_merge_.reset(audio_id_merge_buffer_);
-                    stage_ = Stage::SortTrackAudioIds;
+        if (stage_ == Stage::CompileTrackTakeComp) {
+            if (!current_take_lane_ ||
+                take_comp_index_ == current_take_lane_->comp_segments().size()) {
+                if (current_note_events_.size() > 1) {
+                    note_merge_buffer_.reserve(current_note_events_.size());
+                    note_merge_.reset(note_merge_buffer_);
+                    stage_ = Stage::SortTrackNotes;
                 } else {
-                    begin_track_automation();
+                    begin_track_audio_link();
                 }
+                continue;
             }
+            if (!request_->audio_assets)
+                return fail({CompileErrorCode::AudioProgramInvalid, current_take_lane_->id(),
+                             request_->document_revision,
+                             AudioRendererErrorCode::MissingDecodedAsset});
+            if (total_audio_clips_ >= request_->audio_limits.max_clips)
+                return fail({CompileErrorCode::AudioProgramInvalid, current_take_lane_->id(),
+                             request_->document_revision,
+                             AudioRendererErrorCode::CapacityExceeded});
+            auto prepared = detail::prepare_take_comp_segment_sample_rate_converter(
+                *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
+                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
+            if (!prepared)
+                return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                             request_->document_revision, prepared.error().code});
+            if (!*prepared) {
+                ++work;
+                continue;
+            }
+            auto compiled = detail::compile_take_comp_segment_program_cached(
+                *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
+                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
+            if (!compiled)
+                return fail({CompileErrorCode::AudioProgramInvalid, compiled.error().item,
+                             request_->document_revision, compiled.error().code});
+            ++total_audio_clips_;
+            ++take_comp_index_;
+            current_audio_clips_.push_back(std::move(compiled).value());
+            ++work;
+            continue;
+        }
+        if (stage_ == Stage::SortTrackNotes) {
+            const auto step =
+                note_merge_.step(current_note_events_, note_merge_buffer_, note_program_event_less);
+            work += step.work_units;
+            if (step.complete)
+                begin_track_audio_link();
             continue;
         }
         if (stage_ == Stage::SortTrackAudioIds) {
@@ -348,10 +513,11 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
         if (stage_ == Stage::SortTrackAudio) {
             const auto step = audio_merge_.step(
                 current_audio_clips_, audio_merge_buffer_,
-                [](const AudioClipRendererProgram& lhs,
-                   const AudioClipRendererProgram& rhs) {
-                    return std::pair(lhs.timeline_start, lhs.id.value) <
-                           std::pair(rhs.timeline_start, rhs.id.value);
+                [](const AudioClipRendererProgram& lhs, const AudioClipRendererProgram& rhs) {
+                    return std::tuple(lhs.timeline_start, lhs.source_kind, lhs.id.value,
+                                      lhs.source_ordinal) <
+                           std::tuple(rhs.timeline_start, rhs.source_kind, rhs.id.value,
+                                      rhs.source_ordinal);
                 });
             work += step.work_units;
             if (step.complete)
@@ -412,6 +578,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             current_note_events_.clear();
             current_audio_clips_.clear();
             current_audio_ids_.clear();
+            current_take_lane_ = nullptr;
+            current_track_frozen_ = false;
+            take_comp_index_ = 0;
             current_automation_ = {};
             automation_compiler_started_ = false;
             clip_index_ = 0;
@@ -423,8 +592,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             continue;
         }
         if (stage_ == Stage::Link) {
-            const auto step = track_merge_.step(
-                tracks_, merge_buffer_, [](const auto& lhs, const auto& rhs) {
+            const auto step =
+                track_merge_.step(tracks_, merge_buffer_, [](const auto& lhs, const auto& rhs) {
                     return lhs->id() < rhs->id();
                 });
             work += step.work_units;
@@ -475,11 +644,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
             continue;
         }
-        auto program = std::shared_ptr<const PlaybackProgram>(
-            new PlaybackProgram(generation_, request_->document_revision, request_->project->id(),
-                                request_->sequence_id, request_->tempo_map, request_->audio_assets,
-                                request_->audio_limits, request_->automation_limits,
-                                std::move(tracks_)));
+        auto program = std::shared_ptr<const PlaybackProgram>(new PlaybackProgram(
+            generation_, request_->document_revision, request_->project->id(),
+            request_->sequence_id, request_->tempo_map, request_->audio_assets,
+            request_->audio_limits, request_->automation_limits, std::move(tracks_)));
         core_->store.publish(std::move(program));
         core_->finish(true, request_->document_revision, generation_);
         return CompileTaskStatus::Complete;
@@ -513,8 +681,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
         return runtime::Err(error);
     };
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
-        request.document_revision == 0 ||
-        !request.automation_limits.valid() ||
+        request.document_revision == 0 || !request.automation_limits.valid() ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

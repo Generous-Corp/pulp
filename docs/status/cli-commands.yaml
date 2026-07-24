@@ -1950,6 +1950,53 @@ commands:
         description: "Platform-arch target (e.g., macOS-arm64, Windows-x64)"
     docs: reference/cli.md#target
 
+  - name: seq
+    status: experimental
+    summary: Open, validate, explain, and transactionally edit canonical timeline project JSON.
+    subcommands:
+      - name: schema
+        summary: Emit the registry-derived timeline JSON Schema manifest
+      - name: validate
+        summary: Decode and validate a canonical timeline project
+        args:
+          - name: project
+            kind: positional
+            required: true
+      - name: explain
+        summary: Compile a project and report its track, clip, note, audio-region, and automation plan
+        args:
+          - name: project
+            kind: positional
+            required: true
+          - name: --sample-rate
+            kind: option
+      - name: apply
+        summary: Apply a registry-typed command-envelope array through DocumentSession
+        args:
+          - name: project
+            kind: positional
+            required: true
+          - name: commands
+            kind: positional
+            required: true
+          - name: --out
+            kind: option
+    docs: reference/cli.md#seq
+
+  - name: render
+    status: experimental
+    summary: Render a canonical timeline project's arrangement audio to Float32 WAV without an audio device.
+    args:
+      - name: project
+        kind: positional
+        required: true
+      - name: --out
+        kind: option
+        required: true
+      - name: --sample-rate
+        kind: option
+    docs: reference/cli.md#render
+
   - name: audio
     status: experimental
     summary: Repo-level audio analysis and sampler asset tooling. Manage offline audio model metadata, read reproducible WAV-first excerpt bundles, build streamed-sampler mip sidecars, and run live/offline Audio Scope analysis.

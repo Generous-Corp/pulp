@@ -9,6 +9,7 @@
 #include <deque>
 #include <limits>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
 namespace pulp::timeline {
@@ -41,6 +42,11 @@ struct OpenGesture {
     UndoGroupId group;
 };
 
+static_assert(std::is_nothrow_move_constructible_v<CachedCommit>);
+static_assert(std::is_nothrow_move_assignable_v<CachedCommit>);
+static_assert(std::is_nothrow_move_assignable_v<UndoRecord>);
+static_assert(std::is_nothrow_move_constructible_v<CommitResult>);
+
 enum class CommitKind : std::uint8_t { Ordinary, History };
 
 struct PublishedState {
@@ -72,10 +78,14 @@ std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
 } // namespace
 
 struct DocumentSession::Impl {
-    explicit Impl(Project project, SessionLimits session_limits, std::uint64_t nonce)
+    explicit Impl(Project project, DocumentRevision revision, SessionLimits session_limits,
+                  std::uint64_t nonce, std::shared_ptr<JournalSink> sink)
         : published(std::make_shared<const PublishedState>(
-              PublishedState{std::make_shared<const Project>(std::move(project)), {}})),
-          journal(session_limits.journal), limits(session_limits), session_nonce(nonce) {
+              PublishedState{std::make_shared<const Project>(std::move(project)), revision})),
+          journal(session_limits.journal), limits(session_limits), session_nonce(nonce),
+          journal_sink(std::move(sink)) {
+        if (revision != DocumentRevision{})
+            detail::JournalAccess::restore_checkpoint(journal, *published->snapshot, revision);
         cache.reserve(limits.max_cached_results);
         writers.reserve(limits.max_writers);
     }
@@ -85,6 +95,8 @@ struct DocumentSession::Impl {
     CommandJournal journal;
     SessionLimits limits;
     std::uint64_t session_nonce = 0;
+    std::shared_ptr<JournalSink> journal_sink;
+    bool journal_sink_failed = false;
     std::uint64_t next_writer = 1;
     std::vector<WriterState> writers;
     std::vector<CachedCommit> cache;
@@ -121,6 +133,9 @@ struct DocumentSession::Impl {
         if (transaction.id.sequence <= writer->transaction_watermark)
             return failure<CommitResult>(
                 error(ConflictCode::AlreadyAppliedResultExpired, transaction, current_revision));
+        if (journal_sink_failed)
+            return failure<CommitResult>(
+                error(ConflictCode::JournalDurability, transaction, current_revision));
         if (transaction.expected_revision != current_revision)
             return failure<CommitResult>(
                 error(ConflictCode::StaleRevision, transaction, current_revision));
@@ -173,6 +188,10 @@ struct DocumentSession::Impl {
         }
 
         UndoRecord candidate;
+        std::optional<UndoRecord> coalesced_undo;
+        std::size_t undo_evictable_groups = 0;
+        std::size_t undo_evictable_bytes = 0;
+        bool undo_will_coalesce = false;
         if (record_undo) {
             candidate.writer = transaction.id.writer;
             candidate.group = transaction.undo_group;
@@ -184,26 +203,38 @@ struct DocumentSession::Impl {
             candidate.retained_bytes =
                 saturated_add(retained_size(candidate.forward), retained_size(candidate.inverse));
 
-            const bool coalesces = candidate.group && !undo.empty() &&
-                                   undo.back().group == candidate.group &&
-                                   undo.back().writer == candidate.writer && !undo.back().closed;
-            auto projected_groups = undo.size() + (coalesces ? 0 : 1);
+            undo_will_coalesce = candidate.group && !undo.empty() &&
+                                 undo.back().group == candidate.group &&
+                                 undo.back().writer == candidate.writer && !undo.back().closed;
+            auto projected_groups = undo.size() + (undo_will_coalesce ? 0 : 1);
             auto projected_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-            std::size_t evictable_groups = 0;
-            std::size_t evictable_bytes = 0;
-            while ((projected_groups - evictable_groups > limits.undo.max_groups ||
-                    projected_bytes - std::min(projected_bytes, evictable_bytes) >
+            while ((projected_groups - undo_evictable_groups > limits.undo.max_groups ||
+                    projected_bytes - std::min(projected_bytes, undo_evictable_bytes) >
                         limits.undo.max_retained_bytes) &&
-                   evictable_groups < undo.size() && undo[evictable_groups].closed) {
-                evictable_bytes =
-                    saturated_add(evictable_bytes, undo[evictable_groups].retained_bytes);
-                ++evictable_groups;
+                   undo_evictable_groups < undo.size() &&
+                   undo[undo_evictable_groups].closed) {
+                undo_evictable_bytes = saturated_add(
+                    undo_evictable_bytes, undo[undo_evictable_groups].retained_bytes);
+                ++undo_evictable_groups;
             }
-            if (projected_groups - evictable_groups > limits.undo.max_groups ||
-                projected_bytes - std::min(projected_bytes, evictable_bytes) >
+            if (projected_groups - undo_evictable_groups > limits.undo.max_groups ||
+                projected_bytes - std::min(projected_bytes, undo_evictable_bytes) >
                     limits.undo.max_retained_bytes)
                 return failure<CommitResult>(
                     error(ConflictCode::UndoFull, transaction, current_revision));
+
+            if (undo_will_coalesce) {
+                coalesced_undo.emplace(undo.back());
+                coalesced_undo->forward.insert(coalesced_undo->forward.end(),
+                                               candidate.forward.begin(),
+                                               candidate.forward.end());
+                coalesced_undo->inverse.insert(coalesced_undo->inverse.begin(),
+                                               candidate.inverse.begin(),
+                                               candidate.inverse.end());
+                coalesced_undo->retained_bytes =
+                    saturated_add(coalesced_undo->retained_bytes, candidate.retained_bytes);
+                coalesced_undo->closed = candidate.closed;
+            }
         }
 
         const auto next_revision = DocumentRevision{current_revision.value + 1};
@@ -214,48 +245,54 @@ struct DocumentSession::Impl {
         if (!journal_preflight)
             return failure<CommitResult>(journal_preflight.error());
 
-        // In-memory journal append is the commit point. Publication follows it,
-        // so the future durable sink can preserve the same recovery ordering.
         auto published = std::make_shared<const Project>(std::move(reduced).value().project);
-        detail::JournalAccess::append(journal, std::move(journal_entry), *current->snapshot);
         auto published_state =
             std::make_shared<const PublishedState>(PublishedState{published, next_revision});
-        std::atomic_store_explicit(&this->published, std::move(published_state),
-                                   std::memory_order_release);
-        writer->transaction_watermark = transaction.id.sequence;
-        writer->command_watermark = previous_command;
+        auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
 
         CommitResult result{published, next_revision, reduced->dirty, {}};
         result.applied_commands.reserve(transaction.commands.size());
         for (const auto& envelope : transaction.commands)
             result.applied_commands.push_back(envelope.id);
 
+        std::optional<CachedCommit> pending_cache;
+        if (limits.max_cached_results > 0)
+            pending_cache.emplace(CachedCommit{transaction, result});
+
+        // A new deque node can allocate. Stage the node before asking the sink
+        // to acknowledge durability, then fill it with a non-throwing move.
+        const bool staged_undo_slot = record_undo && !undo_will_coalesce;
+        if (staged_undo_slot)
+            undo.emplace_back();
+        const auto undo_added_bytes = candidate.retained_bytes;
+
+        if (journal_sink) {
+            auto durable = journal_sink->append_batch(journal_entry);
+            if (!durable || !durable.value()) {
+                if (staged_undo_slot)
+                    undo.pop_back();
+                journal_sink_failed = true;
+                return failure<CommitResult>(
+                    error(ConflictCode::JournalDurability, transaction, current_revision));
+            }
+        }
+        detail::JournalAccess::append_prepared(journal, std::move(journal_entry),
+                                               std::move(initial_snapshot));
+        std::atomic_store_explicit(&this->published, std::move(published_state),
+                                   std::memory_order_release);
+        writer->transaction_watermark = transaction.id.sequence;
+        writer->command_watermark = previous_command;
+
         if (record_undo) {
-            const bool will_coalesce =
-                candidate.group && !undo.empty() && undo.back().group == candidate.group &&
-                undo.back().writer == candidate.writer && !undo.back().closed;
-            while ((!will_coalesce && !undo.empty() && undo.size() >= limits.undo.max_groups) ||
-                   (!undo.empty() && saturated_add(undo_bytes, candidate.retained_bytes) >
-                                         limits.undo.max_retained_bytes)) {
-                if (!undo.front().closed)
-                    break;
+            for (std::size_t evicted = 0; evicted < undo_evictable_groups; ++evicted) {
                 undo_bytes -= undo.front().retained_bytes;
                 undo.pop_front();
             }
-            if (will_coalesce) {
-                auto& group = undo.back();
-                group.forward.insert(group.forward.end(), candidate.forward.begin(),
-                                     candidate.forward.end());
-                group.inverse.insert(group.inverse.begin(), candidate.inverse.begin(),
-                                     candidate.inverse.end());
-                group.retained_bytes =
-                    saturated_add(group.retained_bytes, candidate.retained_bytes);
-                group.closed = candidate.closed;
-                undo_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-            } else {
-                undo_bytes = saturated_add(undo_bytes, candidate.retained_bytes);
-                undo.push_back(std::move(candidate));
-            }
+            if (undo_will_coalesce)
+                undo.back() = std::move(*coalesced_undo);
+            else
+                undo.back() = std::move(candidate);
+            undo_bytes = saturated_add(undo_bytes, undo_added_bytes);
             if (transaction.gesture_phase == GesturePhase::Begin)
                 open_gesture = OpenGesture{transaction.id.writer, *transaction.undo_group};
             else if (transaction.gesture_phase == GesturePhase::End)
@@ -266,10 +303,10 @@ struct DocumentSession::Impl {
             }
         }
 
-        if (limits.max_cached_results > 0) {
+        if (pending_cache) {
             if (cache.size() == limits.max_cached_results)
                 cache.erase(cache.begin());
-            cache.push_back({transaction, result});
+            cache.push_back(std::move(*pending_cache));
         }
         return runtime::Result<CommitResult, TransactionError>(runtime::Ok(std::move(result)));
     }
@@ -330,6 +367,27 @@ WriterToken& WriterToken::operator=(WriterToken&& other) noexcept {
 
 runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
 DocumentSession::create(Project initial, SessionLimits limits) {
+    return create(std::move(initial), limits, {});
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::create(Project initial, SessionLimits limits,
+                        std::shared_ptr<JournalSink> journal_sink) {
+    return create_impl(std::move(initial), {}, limits, std::move(journal_sink),
+                       SinkAttachment::Initialize);
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::restore(Project checkpoint, DocumentRevision checkpoint_revision,
+                         SessionLimits limits, std::shared_ptr<JournalSink> journal_sink) {
+    return create_impl(std::move(checkpoint), checkpoint_revision, limits,
+                       std::move(journal_sink), SinkAttachment::Restore);
+}
+
+runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+DocumentSession::create_impl(Project checkpoint, DocumentRevision checkpoint_revision,
+                             SessionLimits limits, std::shared_ptr<JournalSink> journal_sink,
+                             SinkAttachment attachment) {
     if (limits.max_writers == 0) {
         TransactionError value;
         value.code = ConflictCode::WriterLimit;
@@ -341,9 +399,21 @@ DocumentSession::create(Project initial, SessionLimits limits) {
         value.code = ConflictCode::SequenceExhausted;
         return failure<std::unique_ptr<DocumentSession>>(value);
     }
+    if (journal_sink) {
+        auto validated = attachment == SinkAttachment::Initialize
+                             ? journal_sink->checkpoint(checkpoint, checkpoint_revision)
+                             : journal_sink->validate_restore(checkpoint, checkpoint_revision);
+        if (validated && validated.value() && attachment == SinkAttachment::Initialize)
+            validated = journal_sink->validate_restore(checkpoint, checkpoint_revision);
+        if (!validated || !validated.value()) {
+            TransactionError value;
+            value.code = ConflictCode::JournalDurability;
+            return failure<std::unique_ptr<DocumentSession>>(value);
+        }
+    }
     return runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>(
-        runtime::Ok(std::unique_ptr<DocumentSession>(
-            new DocumentSession(std::make_unique<Impl>(std::move(initial), limits, nonce)))));
+        runtime::Ok(std::unique_ptr<DocumentSession>(new DocumentSession(std::make_unique<Impl>(
+            std::move(checkpoint), checkpoint_revision, limits, nonce, std::move(journal_sink))))));
 }
 
 std::uint64_t detail::SessionNonceTestAccess::exchange_next(std::uint64_t value) noexcept {
@@ -411,15 +481,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::undo(WriterToke
         value.current_revision = revision();
         return failure<CommitResult>(value);
     }
-    const auto record = impl_->undo.back();
+    auto record = impl_->undo.back();
     auto transaction = impl_->make_history_transaction(writer, record.inverse);
-    auto result = impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    impl_->redo.emplace_back();
+    auto result =
+        impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    if (!result)
+        impl_->redo.pop_back();
     if (!result)
         return result;
     impl_->undo_bytes -= impl_->undo.back().retained_bytes;
     impl_->undo.pop_back();
     impl_->redo_bytes = saturated_add(impl_->redo_bytes, record.retained_bytes);
-    impl_->redo.push_back(record);
+    impl_->redo.back() = std::move(record);
     return result;
 }
 
@@ -442,15 +516,19 @@ runtime::Result<CommitResult, TransactionError> DocumentSession::redo(WriterToke
         value.current_revision = revision();
         return failure<CommitResult>(value);
     }
-    const auto record = impl_->redo.back();
+    auto record = impl_->redo.back();
     auto transaction = impl_->make_history_transaction(writer, record.forward);
-    auto result = impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    impl_->undo.emplace_back();
+    auto result =
+        impl_->commit_locked(std::move(transaction), false, false, CommitKind::History);
+    if (!result)
+        impl_->undo.pop_back();
     if (!result)
         return result;
     impl_->redo_bytes -= impl_->redo.back().retained_bytes;
     impl_->redo.pop_back();
     impl_->undo_bytes = saturated_add(impl_->undo_bytes, record.retained_bytes);
-    impl_->undo.push_back(record);
+    impl_->undo.back() = std::move(record);
     return result;
 }
 
@@ -471,7 +549,25 @@ CommandJournal DocumentSession::journal() const {
 
 bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     std::lock_guard lock(impl_->mutex);
-    return detail::JournalAccess::checkpoint(impl_->journal, durable_revision);
+    if (impl_->journal_sink_failed)
+        return false;
+    if (durable_revision == impl_->journal.base_revision())
+        return true;
+    if (!impl_->journal_sink)
+        return detail::JournalAccess::checkpoint(impl_->journal, durable_revision);
+    auto checkpointed = impl_->journal;
+    if (!detail::JournalAccess::checkpoint(checkpointed, durable_revision))
+        return false;
+    const auto* snapshot = detail::JournalAccess::checkpoint_snapshot(checkpointed);
+    if (!snapshot)
+        return false;
+    auto durable = impl_->journal_sink->checkpoint(*snapshot, durable_revision);
+    if (!durable || !durable.value()) {
+        impl_->journal_sink_failed = true;
+        return false;
+    }
+    impl_->journal = std::move(checkpointed);
+    return true;
 }
 
 } // namespace pulp::timeline

@@ -1,4 +1,5 @@
 #include "../core/timeline/src/journal_internal.hpp"
+#include "harness/rt_allocation_probe.hpp"
 #include "timeline_command_test_helpers.hpp"
 
 #include <pulp/timeline/serialize.hpp>
@@ -36,7 +37,8 @@ Project make_durable_media_project(ContentHash source_hash = hash_of('a')) {
                      {{"proxy",
                        hash_of('b'),
                        AssetStoragePolicy::Embedded,
-                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}}};
+                       {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}},
+                     {}};
     auto project = Project::create(
         {{1}, "durable", 6, {3}, {std::move(asset)}, {std::move(sequence).value()}});
     REQUIRE(project);
@@ -57,7 +59,297 @@ Project make_device_chain_project(std::vector<DevicePlacement> device_chain) {
     return std::move(project).value();
 }
 
+class ProbeJournalSink final : public JournalSink {
+  public:
+    pulp::runtime::Result<bool, JournalSinkError>
+    append_batch(const JournalEntry& entry) noexcept override {
+        ++append_calls;
+        if (session)
+            revision_observed_during_append = session->revision();
+        if (fail_append) {
+            if (append_before_failure)
+                entries.push_back(entry);
+            return pulp::runtime::Result<bool, JournalSinkError>(
+                pulp::runtime::Err(JournalSinkError::IoError));
+        }
+        if (!acknowledge_append)
+            return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(false));
+        entries.push_back(entry);
+        if (allocation_probe)
+            allocations_at_ack = allocation_probe->allocation_count();
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept override {
+        ++checkpoint_calls;
+        if (fail_checkpoint)
+            return pulp::runtime::Result<bool, JournalSinkError>(
+                pulp::runtime::Err(JournalSinkError::IoError));
+        if (!acknowledge_checkpoint)
+            return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(false));
+        checkpoints.push_back(durable_revision);
+        checkpoint_snapshots.push_back(snapshot);
+        return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    validate_restore(const Project&, DocumentRevision) noexcept override {
+        ++validate_restore_calls;
+        return pulp::runtime::Result<bool, JournalSinkError>(
+            pulp::runtime::Ok(acknowledge_restore));
+    }
+
+    DocumentSession* session = nullptr;
+    bool fail_append = false;
+    bool append_before_failure = false;
+    bool fail_checkpoint = false;
+    bool acknowledge_append = true;
+    bool acknowledge_checkpoint = true;
+    bool acknowledge_restore = true;
+    std::size_t append_calls = 0;
+    std::size_t checkpoint_calls = 0;
+    std::size_t validate_restore_calls = 0;
+    pulp::test::RtAllocationProbe* allocation_probe = nullptr;
+    std::size_t allocations_at_ack = 0;
+    DocumentRevision revision_observed_during_append{};
+    std::vector<JournalEntry> entries;
+    std::vector<DocumentRevision> checkpoints;
+    std::vector<Project> checkpoint_snapshots;
+};
+
 } // namespace
+
+TEST_CASE("Timeline journal sink is durable before a transaction is published") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    sink->session = session.get();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.size() == 1);
+    REQUIRE(sink->entries[0].before.value == 0);
+    REQUIRE(sink->entries[0].after.value == 1);
+    REQUIRE(sink->revision_observed_during_append.value == 0);
+    REQUIRE(session->revision().value == 1);
+    REQUIRE(velocity(*session->snapshot()) == 2000);
+    REQUIRE(sink->checkpoint_calls == 1);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(velocity(sink->checkpoint_snapshots.front()) == 1000);
+}
+
+TEST_CASE("Timeline durability acknowledgement is the final allocation boundary") {
+    SessionLimits limits;
+    limits.max_cached_results = 1;
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), limits, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    auto without_post_ack_allocation = [&](auto&& operation) {
+        pulp::runtime::Result<CommitResult, TransactionError> result;
+        std::size_t allocations_after_return = 0;
+        {
+            pulp::test::RtAllocationProbe probe;
+            sink->allocation_probe = &probe;
+            result = operation();
+            allocations_after_return = probe.allocation_count();
+            sink->allocation_probe = nullptr;
+        }
+        REQUIRE(allocations_after_return == sink->allocations_at_ack);
+        return result;
+    };
+
+    const auto group = writer.allocate_undo_group_id();
+    auto begin =
+        session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    begin.undo_group = group;
+    begin.gesture_phase = GesturePhase::Begin;
+    REQUIRE(without_post_ack_allocation(
+        [&] { return session->submit(writer, std::move(begin)); }));
+
+    auto end = session_transaction(writer, {1},
+                                   {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+    end.undo_group = group;
+    end.gesture_phase = GesturePhase::End;
+    REQUIRE(
+        without_post_ack_allocation([&] { return session->submit(writer, std::move(end)); }));
+
+    REQUIRE(without_post_ack_allocation([&] { return session->undo(writer); }));
+    REQUIRE(without_post_ack_allocation([&] { return session->redo(writer); }));
+    REQUIRE(velocity(*session->snapshot()) == 3000);
+}
+
+TEST_CASE("Timeline journal sink failure rejects session creation") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    sink->fail_checkpoint = true;
+
+    auto rejected = DocumentSession::create(make_project(), {}, sink);
+
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(sink->checkpoint_calls == 1);
+    REQUIRE(sink->checkpoints.empty());
+}
+
+TEST_CASE("Timeline journal sink requires an affirmative attachment acknowledgement") {
+    SECTION("initial checkpoint") {
+        auto sink = std::make_shared<ProbeJournalSink>();
+        sink->acknowledge_checkpoint = false;
+
+        auto rejected = DocumentSession::create(make_project(), {}, sink);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+        REQUIRE(sink->checkpoint_calls == 1);
+        REQUIRE(sink->checkpoints.empty());
+
+        sink->acknowledge_checkpoint = true;
+        auto recovered = DocumentSession::create(make_project(), {}, sink);
+        REQUIRE(recovered);
+        REQUIRE(sink->checkpoint_calls == 2);
+        REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    }
+
+    SECTION("restore validation") {
+        auto sink = std::make_shared<ProbeJournalSink>();
+        sink->acknowledge_restore = false;
+
+        auto rejected = DocumentSession::restore(make_project(), {7}, {}, sink);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+        REQUIRE(sink->validate_restore_calls == 1);
+
+        sink->acknowledge_restore = true;
+        auto recovered = DocumentSession::restore(make_project(), {7}, {}, sink);
+        REQUIRE(recovered);
+        REQUIRE(recovered.value()->revision() == DocumentRevision{7});
+        REQUIRE(sink->validate_restore_calls == 2);
+    }
+}
+
+TEST_CASE("Timeline journal sink failure poisons the session after an ambiguous append") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    sink->fail_append = true;
+    sink->append_before_failure = true;
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+
+    auto rejected = session->submit(writer, std::move(edit));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision().value == 0);
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+    REQUIRE(session->journal().entries().empty());
+    REQUIRE(sink->entries.size() == 1);
+
+    sink->fail_append = false;
+    auto poisoned = session->submit(writer, std::move(retry));
+    REQUIRE_FALSE(poisoned);
+    REQUIRE(poisoned.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision().value == 0);
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.size() == 1);
+}
+
+TEST_CASE("Timeline journal sink Ok false rejects append before publication") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    sink->acknowledge_append = false;
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+
+    auto rejected = session->submit(writer, std::move(edit));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+    REQUIRE(session->journal().entries().empty());
+    REQUIRE_FALSE(session->can_undo());
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.empty());
+
+    sink->acknowledge_append = true;
+    auto poisoned = session->submit(writer, std::move(retry));
+    REQUIRE_FALSE(poisoned);
+    REQUIRE(poisoned.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(sink->append_calls == 1);
+
+    auto recovered = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto recovered_writer = std::move(recovered->register_writer()).value();
+    auto recovered_edit = session_transaction(
+        recovered_writer, {},
+        {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(recovered->submit(recovered_writer, std::move(recovered_edit)));
+    REQUIRE(recovered->revision() == DocumentRevision{1});
+    REQUIRE(velocity(*recovered->snapshot()) == 2000);
+}
+
+TEST_CASE("Timeline journal checkpoint truncates only after the sink accepts it") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+    auto collision = edit;
+    collision.expected_revision = {99};
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    REQUIRE_FALSE(session->checkpoint({2}));
+    REQUIRE(sink->checkpoint_calls == 1);
+
+    sink->fail_checkpoint = true;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->journal().base_revision().value == 0);
+
+    sink->fail_checkpoint = false;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->journal().base_revision().value == 0);
+
+    auto cached = session->submit(writer, std::move(retry));
+    REQUIRE(cached);
+    REQUIRE(cached->revision.value == 1);
+    auto collided = session->submit(writer, std::move(collision));
+    REQUIRE_FALSE(collided);
+    REQUIRE(collided.error().code == ConflictCode::TransactionIdCollision);
+}
+
+TEST_CASE("Timeline journal sink Ok false preserves checkpoint recovery state") {
+    const auto initial = make_project();
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(initial, {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+    sink->acknowledge_checkpoint = false;
+
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(session->revision() == DocumentRevision{1});
+    REQUIRE(velocity(*session->snapshot()) == 2000);
+    REQUIRE(session->journal().base_revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->can_undo());
+
+    const auto replayed = session->journal().replay(initial, {});
+    REQUIRE(replayed);
+    REQUIRE(velocity(replayed.value()) == 2000);
+
+    sink->acknowledge_checkpoint = true;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+}
 
 TEST_CASE("Timeline journal replay reproduces the committed document") {
     const auto checkpoint = make_project();
@@ -315,7 +607,8 @@ MediaAsset make_recorded_asset(ItemId id, ContentHash source_hash) {
                       {{"proxy",
                         hash_of('b'),
                         AssetStoragePolicy::Embedded,
-                        {{AssetLocatorKind::PackageRelative, "media/recorded.proxy.wav"}}}}};
+                        {{AssetLocatorKind::PackageRelative, "media/recorded.proxy.wav"}}}},
+                      {}};
 }
 
 } // namespace
@@ -350,8 +643,15 @@ TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
     auto writer = std::move(session->register_writer()).value();
     const auto next_before = session->snapshot()->next_item_id();
 
-    MediaAsset unsealed{{next_before}, "unsealed.wav", 480, {48'000, 1}, ContentHash{},
-                        AssetStoragePolicy::External, {}, {}};
+    MediaAsset unsealed{{next_before},
+                        "unsealed.wav",
+                        480,
+                        {48'000, 1},
+                        ContentHash{},
+                        AssetStoragePolicy::External,
+                        {},
+                        {},
+                        {}};
     REQUIRE_FALSE(unsealed.content_hash.valid());
     auto tx = session_transaction(writer, {}, {CreateAsset{unsealed}});
     auto rejected = session->submit(writer, std::move(tx));
@@ -360,6 +660,37 @@ TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
     REQUIRE(rejected.error().model_error);
     REQUIRE(rejected.error().model_error->code == ModelErrorCode::InvalidContentHash);
     // Fail closed: no asset, revision, or journal entry survives the rejection.
+    REQUIRE(session->snapshot()->assets().empty());
+    REQUIRE(session->snapshot()->next_item_id() == next_before);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().empty());
+}
+
+TEST_CASE("CreateAsset rejects invalid media enums and duplicate representation hashes") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto next_before = session->snapshot()->next_item_id();
+
+    auto invalid_policy = make_recorded_asset({next_before}, hash_of('e'));
+    invalid_policy.storage_policy = static_cast<AssetStoragePolicy>(0xff);
+    auto rejected_policy =
+        session->submit(writer, session_transaction(writer, {}, {CreateAsset{invalid_policy}}));
+    REQUIRE_FALSE(rejected_policy);
+    REQUIRE(rejected_policy.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected_policy.error().model_error);
+    REQUIRE(rejected_policy.error().model_error->code ==
+            ModelErrorCode::InvalidAssetStoragePolicy);
+
+    auto duplicate_hash = make_recorded_asset({next_before}, hash_of('e'));
+    duplicate_hash.representations[0].content_hash = duplicate_hash.content_hash;
+    auto rejected_hash =
+        session->submit(writer, session_transaction(writer, {}, {CreateAsset{duplicate_hash}}));
+    REQUIRE_FALSE(rejected_hash);
+    REQUIRE(rejected_hash.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected_hash.error().model_error);
+    REQUIRE(rejected_hash.error().model_error->code ==
+            ModelErrorCode::DuplicateAssetRepresentation);
+
     REQUIRE(session->snapshot()->assets().empty());
     REQUIRE(session->snapshot()->next_item_id() == next_before);
     REQUIRE(session->revision() == DocumentRevision{});

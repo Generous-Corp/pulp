@@ -83,6 +83,31 @@ audio_project(float gain = 1.0f, std::uint64_t frames = 512) {
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
 }
 
+[[maybe_unused]] std::shared_ptr<const Project> frozen_device_project(std::uint64_t frames = 128) {
+    const auto render_plan = ContentHash::from_hex(std::string(64, 'c'));
+    if (!render_plan)
+        std::abort();
+    auto track = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "frozen device track",
+        .clips = {audio_clip(0.25f, frames)},
+        .device_chain = {{{20}}},
+        .freeze = TrackFreeze{MediaRef{{3}, {0}, frames}, {0}, {48'000, 1}, *render_plan},
+    }));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    const auto artifact_hash = ContentHash::from_hex(std::string(64, 'a'));
+    if (!artifact_hash)
+        std::abort();
+    MediaAsset artifact{.id = {3},
+                        .name = "freeze.wav",
+                        .frame_count = frames,
+                        .sample_rate = {48'000, 1},
+                        .content_hash = *artifact_hash};
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1}, "frozen binding", 1'000, {2}, {artifact}, {std::move(sequence)}})));
+}
+
 [[maybe_unused]] std::shared_ptr<const Project>
 parallel_audio_project(std::uint64_t frames = 512,
                        bool reverse_tracks = false) {

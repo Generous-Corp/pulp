@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <iosfwd>
 #include <optional>
 
 namespace pulp::audio {
@@ -47,6 +48,10 @@ bool write_wav_file(const std::string& path, const AudioFileData& data);
 // Write audio data to a WAV file at the given sample format.
 bool write_wav_file(const std::string& path, const AudioFileData& data,
                     WavBitDepth bit_depth);
+
+// Write audio data to an already-open seekable stream. The caller retains
+// ownership and is responsible for durably syncing/closing its backing file.
+bool write_wav_stream(std::ostream& output, const AudioFileData& data, WavBitDepth bit_depth);
 
 // ── Sample format conversion ─────────────────────────────────────────────
 

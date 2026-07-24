@@ -197,7 +197,7 @@ TEST_CASE("CreateAsset is undoable and redoable through its RemoveAsset inverse"
     auto writer = std::move(session->register_writer()).value();
     const auto asset_id = session->snapshot()->next_item_id();
     MediaAsset asset{{asset_id}, "take.wav", 240, {48'000, 1}, content_hash('c'),
-                     AssetStoragePolicy::External, {}, {}};
+                     AssetStoragePolicy::External, {}, {}, {}};
     REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
     REQUIRE(session->snapshot()->assets().size() == 1);
     REQUIRE(session->can_undo());
@@ -222,11 +222,11 @@ TEST_CASE("CreateAsset rejects an id that is already live") {
     auto writer = std::move(session->register_writer()).value();
     const auto asset_id = session->snapshot()->next_item_id();
     MediaAsset asset{{asset_id}, "first.wav", 100, {48'000, 1}, content_hash('a'),
-                     AssetStoragePolicy::External, {}, {}};
+                     AssetStoragePolicy::External, {}, {}, {}};
     REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
 
     MediaAsset again{{asset_id}, "second.wav", 100, {48'000, 1}, content_hash('b'),
-                     AssetStoragePolicy::External, {}, {}};
+                     AssetStoragePolicy::External, {}, {}, {}};
     auto rejected =
         session->submit(writer, session_transaction(writer, session->revision(),
                                                     {CreateAsset{again}}));
@@ -241,7 +241,7 @@ TEST_CASE("RemoveAsset is rejected while a clip still references the asset") {
     auto writer = std::move(session->register_writer()).value();
     const auto asset_id = session->snapshot()->next_item_id();
     MediaAsset asset{{asset_id}, "ref.wav", 480, {48'000, 1}, content_hash('a'),
-                     AssetStoragePolicy::External, {}, {}};
+                     AssetStoragePolicy::External, {}, {}, {}};
     REQUIRE(session->submit(writer, session_transaction(writer, {}, {CreateAsset{asset}})));
 
     const auto clip_id = session->snapshot()->next_item_id();

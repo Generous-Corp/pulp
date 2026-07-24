@@ -1,3 +1,4 @@
+#include "asset_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -58,6 +59,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField asset_fields[] = {
         {"content_hash", SchemaValueKind::String}, {"frame_count", SchemaValueKind::U64String},
         {"id", SchemaValueKind::U64String},        {"locators", SchemaValueKind::Array},
+        {"loop_info", SchemaValueKind::Object, false},
         {"name", SchemaValueKind::String},         {"representations", SchemaValueKind::Array},
         {"sample_rate", SchemaValueKind::Object},  {"storage_policy", SchemaValueKind::String},
     };
@@ -75,9 +77,11 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField track_fields[] = {
+        {"active_take_lane_id", SchemaValueKind::U64String},
         {"automation_lanes", SchemaValueKind::Array},
         {"clips", SchemaValueKind::Array},
         {"device_chain", SchemaValueKind::Array},
+        {"freeze", SchemaValueKind::Object, false},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
         {"record_armed", SchemaValueKind::Boolean},
@@ -87,17 +91,15 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"id", SchemaValueKind::U64String},
     };
     static constexpr ExpectedField take_lane_fields[] = {
+        {"comp_segments", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
         {"takes", SchemaValueKind::Array},
     };
     static constexpr ExpectedField take_fields[] = {
-        {"asset_id", SchemaValueKind::U64String},
-        {"frame_count", SchemaValueKind::U64String},
-        {"id", SchemaValueKind::U64String},
-        {"placement_start", SchemaValueKind::I64String},
-        {"sample_rate", SchemaValueKind::Object},
-        {"source_start", SchemaValueKind::I64String},
+        {"asset_id", SchemaValueKind::U64String}, {"frame_count", SchemaValueKind::U64String},
+        {"id", SchemaValueKind::U64String},       {"placement_start", SchemaValueKind::I64String},
+        {"sample_rate", SchemaValueKind::Object}, {"source_start", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField automation_lane_fields[] = {
         {"id", SchemaValueKind::U64String},
@@ -126,7 +128,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     constexpr RequiredSchema required[] = {
         {SchemaDomain::Document, "pulp.timeline.project", project_fields},
-        {SchemaDomain::Document, "pulp.timeline.asset", asset_fields},
+        {SchemaDomain::Document, asset_schema_policy.type_name, asset_fields,
+         asset_schema_policy.current_version, asset_schema_policy.oldest_readable_version},
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
         {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
@@ -136,7 +139,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, "pulp.timeline.automation_target.device_parameter",
          automation_target_fields},
         {SchemaDomain::Document, "pulp.timeline.device_placement", device_placement_fields},
-        {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields},
+        {SchemaDomain::Document, "pulp.timeline.take_lane", take_lane_fields, 2, 1},
         {SchemaDomain::Document, "pulp.timeline.take", take_fields},
         {SchemaDomain::Document, "pulp.timeline.clip", clip_fields},
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},

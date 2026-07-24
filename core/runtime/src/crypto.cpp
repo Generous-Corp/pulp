@@ -2,7 +2,6 @@
 #include <pulp/runtime/ip_address.hpp>
 #include <pulp/runtime/system.hpp>
 
-#include <mbedtls/sha256.h>
 #include <mbedtls/sha1.h>
 #include <mbedtls/md5.h>
 #include <mbedtls/aes.h>
@@ -31,27 +30,6 @@ static std::string bytes_to_hex(const uint8_t* data, size_t size) {
     for (size_t i = 0; i < size; ++i)
         ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(data[i]);
     return ss.str();
-}
-
-// ── SHA-256 ─────────────────────────────────────────────────────────────
-
-std::vector<uint8_t> sha256(const uint8_t* data, size_t size) {
-    std::vector<uint8_t> digest(32);
-    mbedtls_sha256(data, size, digest.data(), 0);
-    return digest;
-}
-
-std::vector<uint8_t> sha256(std::string_view data) {
-    return sha256(reinterpret_cast<const uint8_t*>(data.data()), data.size());
-}
-
-std::string sha256_hex(const uint8_t* data, size_t size) {
-    auto digest = sha256(data, size);
-    return bytes_to_hex(digest.data(), digest.size());
-}
-
-std::string sha256_hex(std::string_view data) {
-    return sha256_hex(reinterpret_cast<const uint8_t*>(data.data()), data.size());
 }
 
 // ── SHA-1 (legacy protocols only) ───────────────────────────────────────

@@ -65,6 +65,27 @@ std::unique_ptr<pulp::format::Processor> make_midi_probe() {
     return std::make_unique<MidiProbe>();
 }
 
+struct TransportCapture {
+    pulp::format::ProcessContext context;
+};
+TransportCapture g_transport_capture;
+
+class TransportProbe : public MidiProbe {
+public:
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>& in,
+                 pulp::midi::MidiBuffer& midi_in,
+                 pulp::midi::MidiBuffer& midi_out,
+                 const pulp::format::ProcessContext& context) override {
+        g_transport_capture.context = context;
+        MidiProbe::process(out, in, midi_in, midi_out, context);
+    }
+};
+
+std::unique_ptr<pulp::format::Processor> make_transport_probe() {
+    return std::make_unique<TransportProbe>();
+}
+
 // Counts non-realtime ticks and records the parameter value each tick saw. Stands
 // in for a processor whose control changes need heavy off-audio work (
 // SuperConvolver rebuilds its impulse response when `Size` moves: decode,
@@ -129,6 +150,33 @@ std::vector<std::unique_ptr<pulp::format::Processor>> make_tick_chain() {
     return stages;
 }
 } // namespace
+
+TEST_CASE("WAM transport validity starts empty and follows host set_transport",
+          "[wam][transport]") {
+    g_transport_capture = {};
+    WamProcessorBridge bridge(make_transport_probe);
+    REQUIRE(bridge.initialize(48000.0, 128));
+
+    constexpr int kChannels = 2;
+    constexpr int kFrames = 16;
+    std::vector<float> input(kChannels * kFrames, 0.0f);
+    std::vector<float> output(kChannels * kFrames, 0.0f);
+    const float* inputs[] = {input.data(), input.data() + kFrames};
+    float* outputs[] = {output.data(), output.data() + kFrames};
+
+    bridge.process(inputs, outputs, kChannels, kFrames);
+    REQUIRE(g_transport_capture.context.transport_validity.empty());
+
+    bridge.set_transport(true, 137.5, 12.25, 48000.0, 7, 8);
+    bridge.process(inputs, outputs, kChannels, kFrames);
+    const auto& context = g_transport_capture.context;
+    REQUIRE(context.has_transport(pulp::format::TransportField::Playing));
+    REQUIRE(context.has_transport(pulp::format::TransportField::Tempo));
+    REQUIRE(context.has_transport(pulp::format::TransportField::BeatPosition));
+    REQUIRE(context.has_transport(pulp::format::TransportField::SamplePosition));
+    REQUIRE(context.has_transport(pulp::format::TransportField::TimeSignature));
+    REQUIRE_FALSE(context.has_transport(pulp::format::TransportField::Recording));
+}
 
 // A knob drag delivers a BURST of parameter messages to the worklet in one turn,
 // all dispatched on the render thread. Ticking inline per message would run the

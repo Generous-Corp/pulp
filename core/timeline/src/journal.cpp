@@ -63,9 +63,15 @@ runtime::Result<bool, TransactionError> CommandJournal::preflight(const JournalE
     return runtime::Result<bool, TransactionError>(runtime::Ok(true));
 }
 
-void CommandJournal::append_preflighted(JournalEntry entry, const Project& before) {
-    if (!base_snapshot_)
-        base_snapshot_ = before;
+std::optional<Project> CommandJournal::prepare_append(const Project& before) {
+    entries_.reserve(entries_.size() + 1);
+    return base_snapshot_ ? std::nullopt : std::optional<Project>(before);
+}
+
+void CommandJournal::append_prepared(JournalEntry entry,
+                                     std::optional<Project> initial_snapshot) noexcept {
+    if (initial_snapshot)
+        base_snapshot_ = std::move(initial_snapshot);
     retained_bytes_ += retained_size(entry);
     command_count_ += entry.transaction.commands.size();
     entries_.push_back(std::move(entry));

@@ -286,7 +286,20 @@ per-ABI entry point for it.** Go through the plugin's own state:
   belongs in the native timeline target, the no-exceptions target, and both web
   ABI lists. This proves that snapshots containing automation can compile into
   the browser runtimes; it does not prove scheduling or parameter delivery until
-  the playback/host binding consumes those lanes.
+  the playback/host binding consumes those lanes. Take-lane editing follows the
+  same rule: a dedicated reducer such as `transaction_take_internal.cpp` is not
+  pulled in transitively just because `transaction.cpp` is already listed, so it
+  must be mirrored into both web ABI source lists with the native and
+  no-exceptions targets. Track-freeze document support has the same closure:
+  decoder helpers and the `SetTrackFreeze` reducer are portable timeline units,
+  not native render jobs, so list them in the native timeline target,
+  no-exceptions target, WAM, and WebCLAP together. Browser replay consumes the
+  persisted artifact reference; it must never attempt to rerender a freeze.
+  These builds also share Timeline's persistent indexes: initial Track/Project
+  construction and identity restoration bulk-build sorted balanced trees,
+  while ordinary edits path-copy only the changed search paths. Do not replace
+  bulk construction with repeated persistent insertion; wasm's tighter memory
+  ceiling makes the transient allocation growth especially costly.
 
 - A new `core/timeline` translation unit belongs in four source lists:
   `core/timeline/CMakeLists.txt`, the `pulp-test-timeline-no-exceptions` OBJECT
@@ -683,7 +696,8 @@ NOT linking `pulp-runtime` (it drags in mbedTLS + http, too heavy for wasm). The
 `core/{timebase,timeline,playback}/src/*.cpp` appear in those lists — so adding a
 new production TU under `core/timeline/src/` forces it into the wasm plugin. Keep
 native-only or heavy-dependency code (e.g. the DAWproject importer, which needs
-pugixml from `pulp-runtime`) OUT of `core/timeline/src/` — put it in a sibling
-dir like `core/timeline/import/` so the closure does not sweep it into the wasm
-DSP binary. If a timeline source genuinely belongs in the web plugin, add it to
-BOTH lane lists (and provide any dependency the lanes don't already compile).
+pugixml and audio/WAV inspection) OUT of `core/timeline/src/` — put it in a
+sibling module such as `core/dawproject/` with its own target so the closure
+does not sweep it into the wasm DSP binary. If a timeline source genuinely
+belongs in the web plugin, add it to BOTH lane lists (and provide any dependency
+the lanes don't already compile).

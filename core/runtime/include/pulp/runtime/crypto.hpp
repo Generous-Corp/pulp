@@ -1,7 +1,7 @@
 #pragma once
 
 // Cryptographic primitives.
-// Mbed TLS: SHA-1/256, MD5, AES-CBC/GCM, HMAC.
+// Portable SHA-256; Mbed TLS: SHA-1, MD5, AES-CBC/GCM, HMAC.
 // TweetNaCl: Ed25519 sign/verify.
 
 #include <string>

@@ -25,50 +25,83 @@
 /// RT contract: build() allocates the kernel table and is not audio-thread
 /// safe. apply(), read(), and accessors are allocation-free after build().
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
 
 namespace pulp::signal {
 
-template <typename SampleType = float>
-class SincResamplerT {
-public:
+template <typename SampleType = float> class SincResamplerT {
+  public:
     /// Build the kernel. `half_width` taps each side (quality vs cost; 16 is
     /// a good default), `phases` sub-sample resolution (table rows; 512 is
     /// transparent with linear phase interpolation), `beta` the Kaiser shape
-    /// (≈ 8–10 for deep stopband; higher = more rejection, wider transition).
-    void build(int half_width = 16, int phases = 512, double beta = 9.0) {
-        half_ = half_width;
-        phases_ = phases;
+    /// (≈ 8–10 for deep stopband; higher = more rejection, wider transition),
+    /// and `cutoff` the normalized source-Nyquist cutoff in `(0, 1]`. Values
+    /// outside that interval are clamped.
+    void build(int half_width = 16, int phases = 512, double beta = 9.0, double cutoff = 1.0) {
+        begin_build(half_width, phases, beta, cutoff);
+        while (!build_step()) {
+        }
+    }
+
+    /// Starts a resumable kernel-table build. Each build_step() computes one
+    /// phase row so control-thread callers can honor an external work budget.
+    void begin_build(int half_width = 16, int phases = 512, double beta = 9.0,
+                     double cutoff = 1.0) {
+        half_ = std::max(1, half_width);
+        phases_ = std::max(1, phases);
+        cutoff_ = std::isfinite(cutoff) ? std::clamp(cutoff, 1.0e-6, 1.0) : 1.0;
         const int taps = 2 * half_;
         // table_[phase][tap]; phase in [0, phases_] inclusive (the extra row
         // lets read() linearly interpolate up to phase == phases_).
         table_.assign(static_cast<size_t>(phases_ + 1) * taps, SampleType{0.0f});
-        const double i0_beta = bessel_i0(beta);
-        for (int ph = 0; ph <= phases_; ++ph) {
-            const double frac = static_cast<double>(ph) / phases_;
-            for (int t = 0; t < taps; ++t) {
-                // Distance from the interpolation point to tap t. Taps span
-                // [-half+1 .. half], so the sample at index (i0 + t - half + 1)
-                // sits at offset (t - half + 1 - frac) from the read point.
-                const double x = static_cast<double>(t - half_ + 1) - frac;
-                const double s = sinc(x);
-                // Kaiser window over the kernel support [-half, half].
-                const double wn = x / half_;
-                const double w =
-                    (wn > -1.0 && wn < 1.0)
-                        ? bessel_i0(beta * std::sqrt(1.0 - wn * wn)) / i0_beta
-                        : 0.0;
-                table_[static_cast<size_t>(ph) * taps + t] =
-                    static_cast<SampleType>(s * w);
-            }
-        }
+        build_beta_ = beta;
+        build_i0_beta_ = bessel_i0(beta);
+        next_build_phase_ = 0;
     }
 
-    int half_width() const { return half_; }
-    int taps() const { return 2 * half_; }
-    bool ready() const { return !table_.empty(); }
+    bool build_step() {
+        if (next_build_phase_ > phases_)
+            return true;
+        const int ph = next_build_phase_;
+        const int taps = 2 * half_;
+        const double frac = static_cast<double>(ph) / phases_;
+        double sum = 0.0;
+        for (int t = 0; t < taps; ++t) {
+            const double x = static_cast<double>(t - half_ + 1) - frac;
+            const double s = cutoff_ * sinc(cutoff_ * x);
+            const double wn = x / half_;
+            const double w =
+                (wn > -1.0 && wn < 1.0)
+                    ? bessel_i0(build_beta_ * std::sqrt(1.0 - wn * wn)) / build_i0_beta_
+                    : 0.0;
+            table_[static_cast<size_t>(ph) * taps + t] = static_cast<SampleType>(s * w);
+            sum += s * w;
+        }
+        if (std::abs(sum) > 1.0e-12)
+            for (int t = 0; t < taps; ++t)
+                table_[static_cast<size_t>(ph) * taps + t] /= static_cast<SampleType>(sum);
+        ++next_build_phase_;
+        return next_build_phase_ > phases_;
+    }
+
+    int half_width() const {
+        return half_;
+    }
+    int taps() const {
+        return 2 * half_;
+    }
+    bool ready() const {
+        return !table_.empty() && next_build_phase_ > phases_;
+    }
+    double cutoff() const {
+        return cutoff_;
+    }
+    std::size_t prepared_bytes() const noexcept {
+        return table_.capacity() * sizeof(SampleType);
+    }
 
     /// Apply the kernel at fractional phase `frac` (in [0,1)) to exactly
     /// `taps()` contiguous samples, ordered from (i0-half+1) to (i0+half)
@@ -93,6 +126,9 @@ public:
     /// lies within `[0, len)`; out-of-range taps are clamped to the edge so
     /// boundary reads degrade gracefully rather than read out of bounds.
     SampleType read(const SampleType* src, int len, double pos) const {
+        if (src == nullptr || len <= 0 || !ready() || !std::isfinite(pos))
+            return SampleType{0};
+        pos = std::clamp(pos, 0.0, static_cast<double>(len - 1));
         const int taps = 2 * half_;
         const long i0 = static_cast<long>(std::floor(pos));
         const double frac = pos - static_cast<double>(i0);
@@ -105,17 +141,20 @@ public:
         SampleType acc = SampleType{0.0f};
         for (int t = 0; t < taps; ++t) {
             long idx = i0 + t - half_ + 1;
-            if (idx < 0) idx = 0;
-            else if (idx >= len) idx = len - 1;
+            if (idx < 0)
+                idx = 0;
+            else if (idx >= len)
+                idx = len - 1;
             const SampleType k = row0[t] + a * (row1[t] - row0[t]);
             acc += k * src[idx];
         }
         return acc;
     }
 
-private:
+  private:
     static double sinc(double x) {
-        if (std::abs(x) < 1e-9) return 1.0;
+        if (std::abs(x) < 1e-9)
+            return 1.0;
         const double px = 3.14159265358979323846 * x;
         return std::sin(px) / px;
     }
@@ -126,14 +165,19 @@ private:
         for (int k = 1; k < 40; ++k) {
             term *= (half_x / k) * (half_x / k);
             sum += term;
-            if (term < 1e-12 * sum) break;
+            if (term < 1e-12 * sum)
+                break;
         }
         return sum;
     }
 
     int half_ = 0;
     int phases_ = 0;
+    double cutoff_ = 1.0;
     std::vector<SampleType> table_;
+    double build_beta_ = 9.0;
+    double build_i0_beta_ = 1.0;
+    int next_build_phase_ = 1;
 };
 
 using SincResampler = SincResamplerT<float>;

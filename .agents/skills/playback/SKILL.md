@@ -33,6 +33,62 @@ Gain and anchor-native fade durations live on the immutable Clip. Missing,
 mismatched, or over-capacity assets fail compilation instead of creating a
 silent placeholder.
 
+When host beat mapping intentionally makes musical material follow the host
+tempo, keep absolute clips, take-comp segments, and frozen artifacts on
+`TransportRange::timeline_sample_start`; those sources are sample-domain
+content and must not inherit the beat projection. Carry precise fractional host
+tick endpoints through every callback and nested `ProcessContext` projection;
+integer `timeline_tick_*` fields remain compatibility metadata and must not
+drive host-mapped interpolation, loop admission, note scheduling, automation
+refinement, MIDI clock, or metronome enumeration. A precise host-mapping
+rejection must not fall back to document-tempo placement. For musical audio,
+derive the
+effective source-position step per output frame. A converter prepared only for
+the asset-rate/timeline-rate ratio cannot anti-alias faster host playback, so
+prepare and share a per-MediaRef-range multiresolution audio pyramid off the
+audio thread. Build it incrementally inside the compiler work budget, count it
+against both converter-count and aggregate prepared-byte limits, including
+persistent sinc tables and container storage, and seed unchanged programs back
+into the cache. Clamp every pyramid level to the exact
+referenced source range so neighboring asset frames cannot bleed into a clip.
+Fixed-rate and variable-rate kernel construction are part of that same
+incremental budget: initializing a converter must not synchronously populate
+every sinc phase before yielding.
+Use fixed-size, incrementally allocated prepared chunks whose persistent
+footprint is computable; implementation-defined container bookkeeping cannot
+sit outside the byte cap.
+Each 2:1 stage must low-pass before decimation; select the coarsest level that
+leaves a bounded residual step, then use its prebuilt reconstruction kernel. Do
+not approximate extreme ratios by clamping a tiny cutoff onto a
+fixed-width source-rate kernel: once the sinc support contains too few zero
+crossings, normalization turns it into a short moving average and aliases
+despite the nominal cutoff. The fixed asset-rate/timeline-rate path therefore
+fails compilation beyond its honest kernel range, while host-tempo playback
+uses the prepared pyramid to retain its wider bounded contract.
+
+An active take lane replaces the track's arrangement source; zero
+`active_take_lane_id` selects arrangement clips. The compiler lowers each
+canonical comp selection to an `AudioClipRendererProgram` with
+`SourceKind::TakeCompSegment` and a one-based lane ordinal. The typed origin
+keeps repeated selections from one take distinct without inventing project
+identities. Lower one selection per compile work unit, count arrangement
+regions and comp selections against the same whole-program `max_clips`, and
+require the take rate, asset metadata, and decoded audio rate to agree.
+Inactive lanes remain document data and contribute no playback regions.
+
+A selected `TrackFreeze` supersedes both the arrangement and active take comp
+with one `AudioClipRendererProgram` whose `SourceKind` is `FrozenTrack` and
+whose stable identity is the owning track. It is a sealed post-device artifact:
+the compiler emits no authored clip/note events, ordered device placements, or
+automation program for that track, while leaving all authored document state
+intact for unfreeze. Count the artifact against the same whole-program
+`max_clips`, validate its project asset, decoded audio, media range, and sample
+rate exactly, and reject coordinate/SRC overflow before publication. A dirty
+freeze/unfreeze edit must rebuild the track program; replay selects the sealed
+asset and never re-renders it. Desktop graph binding therefore accepts no
+device routes for a frozen track and rejects stale routes as unexpected,
+preventing a post-device freeze from traversing the authored chain twice.
+
 On the audio thread, call `PlaybackProgramBlockLatch::begin_block()` exactly
 once per callback and pass that pin to every `StableRendererShell`. Never cache
 a `TrackProgram*` past the pin. Adoption accepts skipped generations
@@ -171,6 +227,9 @@ Build and run `pulp-test-playback-automation-cursor`,
 `pulp-test-playback-transport`, `pulp-test-timebase`, and
 `pulp-test-transport-quantizer`, plus `pulp-test-playback-audio-renderer`. Keep loop-boundary, variable-block, ramp,
 negative-preroll, extreme-position, SeqLock hammer, and RT-allocation cases.
+Track-freeze changes also require `pulp-test-timeline-graph-binding`: prove the
+artifact routes directly after the authored chain, a stale device mapping is
+rejected, and a dirty thaw restores arrangement/device compilation.
 
 `pulp-test-playback-note-renderer` also fuzzes the no-stuck-notes property:
 fixed-seed randomized seek/loop/play sequences over overlapping notes assert

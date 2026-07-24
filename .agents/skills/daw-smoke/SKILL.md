@@ -9,7 +9,9 @@ Use this when you need proof that a **reload / editor / format-adapter** behavio
 actually works **inside a host**, beyond what `auval` / `pluginval` /
 `clap-validator` give (those prove scan+load, not functional behavior).
 
-Harness: `tools/testing/daw-smoke/reaper_smoke.py` (+ `insert_and_float.lua`).
+Harness: `tools/testing/daw-smoke/reaper_smoke.py` (+ `insert_and_float.lua` and
+`sequence_loop_seek.lua`). The scraper + mode dispatch are unit-tested with no
+REAPER in `tools/testing/daw-smoke/test_reaper_smoke.py`.
 Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
 
 ## Modes (`--mode`, default `reload`)
@@ -28,6 +30,21 @@ Full rules: `docs/guides/daw-smoke.md`. CLAUDE.md has the one-paragraph policy.
   stage + `prepare_swap` commit through `process()` and asserts sample continuity
   (no dropout/xrun) across the swap block for every hosted format (VST3/AU/CLAP/
   LV2). Use the REAPER mode as the local-only in-host confirmation.
+- **`sequence-loop-seek`** — set a loop region on the REAPER timeline, play, and
+  perform scripted seeks (into/out of the loop and across the wrap) against a
+  plugin that embeds a sequence. `sequence_loop_seek.lua` drives the transport
+  via a deferred pump (`GetSet_LoopTimeRange` + `GetSetRepeat` + `OnPlayButton` +
+  `SetEditCurPos` seeks), handshaking `FX_SHOWN`→`SEEKS_DONE` through the status
+  file. The plugin emits per-block markers `[seq-loop] blk host_qn=.. seq_qn=..
+  active=.. jump=.. dropout=..`; the scraper (`analyze_seq_loop_log`) asserts the
+  sequence read position TRACKED the host playhead within `--pos-tolerance-qn` on
+  every block — a free-running counter that ignores the host jump is caught as
+  drift → FAIL. PASS requires >=1 wrap AND >=1 seek, note activity, and no
+  dropout; otherwise INCONCLUSIVE (a SKIP/INCONCLUSIVE is never a PASS). This is
+  the **harness half of Phase-2 DoD Proof #2** — the full proof also needs the
+  embedded-sequence plugin (Gate-5/6) and a real REAPER run. The scraper is
+  unit-tested with synthetic logs (incl. a negative drift/dropout case), so the
+  parse logic is proven without REAPER.
 - All modes share the same REAPER lifecycle (`ReaperSession`): fresh portable
   dir, temp scan path, pre-warm scan, scripted insert+float, guaranteed teardown.
   They differ only in what they SEED, the TRIGGER they fire once the FX is shown,

@@ -92,6 +92,11 @@ if(NOT IOS)
     add_subdirectory(timeline-phase1)
 endif()
 
+# Host-slaved embedded timeline sequence. This is a real format plugin over
+# pulp::sequence (no pulp::host dependency) and is the REAPER loop/seek proof
+# target for the Creative Timeline Engine.
+add_subdirectory(PulpSequence)
+
 # PulpSynth: macro oscillator with DSP library
 add_subdirectory(PulpSynth)
 

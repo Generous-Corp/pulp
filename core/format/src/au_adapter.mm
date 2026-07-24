@@ -1240,14 +1240,19 @@ struct ScopedAuV3HostWriting {
                 &sample_offset_to_next_beat,
                 &current_measure_downbeat_position);
             if (ok) {
-                if (tempo_bpm > 0.0) ctx.tempo_bpm = tempo_bpm;
-                if (time_sig_numerator > 0.0) {
-                    ctx.time_sig_numerator = static_cast<int>(time_sig_numerator);
+                if (tempo_bpm > 0.0) {
+                    ctx.tempo_bpm = tempo_bpm;
+                    ctx.transport_validity.set(pulp::format::TransportField::Tempo);
                 }
-                if (time_sig_denominator > 0) {
+                if (time_sig_numerator > 0.0 && time_sig_denominator > 0) {
+                    ctx.time_sig_numerator = static_cast<int>(time_sig_numerator);
                     ctx.time_sig_denominator = static_cast<int>(time_sig_denominator);
+                    ctx.transport_validity.set(
+                        pulp::format::TransportField::TimeSignature);
                 }
                 ctx.position_beats = current_beat_position;
+                ctx.transport_validity.set(
+                    pulp::format::TransportField::BeatPosition);
             }
         }
         if (transportStateBlock) {
@@ -1269,9 +1274,16 @@ struct ScopedAuV3HostWriting {
                     (transport_flags & AUHostTransportStateCycling) != 0;
                 ctx.position_samples =
                     static_cast<int64_t>(current_sample_position);
+                ctx.transport_validity.set(pulp::format::TransportField::Playing);
+                ctx.transport_validity.set(pulp::format::TransportField::Recording);
+                ctx.transport_validity.set(pulp::format::TransportField::Looping);
+                ctx.transport_validity.set(
+                    pulp::format::TransportField::SamplePosition);
                 if (ctx.is_looping) {
                     ctx.loop_start_beats = cycle_start_beat_position;
                     ctx.loop_end_beats = cycle_end_beat_position;
+                    ctx.transport_validity.set(
+                        pulp::format::TransportField::LoopRange);
                 }
             }
         }
@@ -1281,12 +1293,19 @@ struct ScopedAuV3HostWriting {
             if (timebase.denom != 0) {
                 ctx.host_time_ns = static_cast<int64_t>(
                     (timestamp->mHostTime * timebase.numer) / timebase.denom);
+                ctx.transport_validity.set(pulp::format::TransportField::HostTime);
             }
         }
         // AUv3 has no host-supplied frame-rate; `ctx.frame_rate` stays
         // `FrameRate::unknown` per the documented sentinel.
         pulp::format::detail::derive_bar_from_beats(ctx);
-        pulp::format::detail::compute_playhead_changes(ctx, bridge->playhead_prev);
+        if (ctx.has_transport(pulp::format::TransportField::BeatPosition) &&
+            ctx.has_transport(pulp::format::TransportField::TimeSignature)) {
+            ctx.transport_validity.set(pulp::format::TransportField::Bar);
+        }
+        pulp::format::detail::compute_playhead_changes(
+            ctx, bridge->playhead_prev,
+            pulp::format::detail::TransportDiffMode::FieldValidity);
 
         std::array<pulp::format::ProcessBusBufferView<const float>, 2> input_buses{{
             {

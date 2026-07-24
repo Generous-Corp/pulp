@@ -18,6 +18,8 @@ enum class DirtyFlags : std::uint16_t {
     Added = 1 << 4,
     Removed = 1 << 5,
     Automation = 1 << 6,
+    Take = 1 << 7,
+    Freeze = 1 << 8,
 };
 
 constexpr DirtyFlags operator|(DirtyFlags lhs, DirtyFlags rhs) noexcept {
@@ -66,6 +68,7 @@ enum class ConflictCode : std::uint8_t {
     WriterLimit,
     SequenceExhausted,
     ModelInvariant,
+    JournalDurability,
 };
 
 struct TransactionError {

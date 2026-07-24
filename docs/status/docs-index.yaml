@@ -224,6 +224,11 @@ docs:
     kind: guide
     summary: Creative Timeline Engine Phase 1 audio-file and step-pattern worked examples
 
+  - slug: timeline-sdk
+    path: guides/timeline-sdk.md
+    kind: guide
+    summary: Installed Creative Timeline Engine components, audited dependency closure, external consumer, and cheap project peek
+
   - slug: example-pulp-gain
     path: examples/pulp-gain.md
     kind: guide

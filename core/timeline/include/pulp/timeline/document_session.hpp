@@ -53,6 +53,11 @@ class DocumentSession {
   public:
     static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
     create(Project initial, SessionLimits limits = {});
+    static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+    create(Project initial, SessionLimits limits, std::shared_ptr<JournalSink> journal_sink);
+    static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+    restore(Project checkpoint, DocumentRevision checkpoint_revision, SessionLimits limits,
+            std::shared_ptr<JournalSink> journal_sink);
     ~DocumentSession();
 
     DocumentSession(const DocumentSession&) = delete;
@@ -72,6 +77,12 @@ class DocumentSession {
     bool checkpoint(DocumentRevision durable_revision);
 
   private:
+    enum class SinkAttachment : std::uint8_t { Initialize, Restore };
+
+    static runtime::Result<std::unique_ptr<DocumentSession>, TransactionError>
+    create_impl(Project checkpoint, DocumentRevision checkpoint_revision, SessionLimits limits,
+                std::shared_ptr<JournalSink> journal_sink, SinkAttachment attachment);
+
     struct Impl;
     explicit DocumentSession(std::unique_ptr<Impl> impl);
     std::unique_ptr<Impl> impl_;

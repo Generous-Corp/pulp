@@ -1,5 +1,8 @@
 #pragma once
 
+#include <pulp/timebase/compiled_meter_map.hpp>
+#include <pulp/timebase/tick.hpp>
+
 #include <array>
 #include <compare>
 #include <cstdint>
@@ -54,6 +57,37 @@ struct AssetRepresentation {
     ContentHash content_hash;
     AssetStoragePolicy storage_policy = AssetStoragePolicy::External;
     std::vector<AssetLocator> locators;
+};
+
+enum class AudioLoopPointKind : std::uint8_t {
+    Manual,
+    Automatic,
+};
+
+struct AudioLoopPoint {
+    std::uint64_t frame = 0;
+    AudioLoopPointKind kind = AudioLoopPointKind::Manual;
+    constexpr auto operator<=>(const AudioLoopPoint&) const = default;
+};
+
+struct AudioFrameRange {
+    std::uint64_t start_frame = 0;
+    std::uint64_t end_frame = 0;
+    constexpr auto operator<=>(const AudioFrameRange&) const = default;
+};
+
+// Typed musical metadata attached to sealed audio content. Tempo is derived
+// from musical_length, frame_count, and sample_rate instead of being stored as
+// a second value that can drift. Frame ranges are half-open [start, end).
+struct AudioLoopInfo {
+    std::optional<timebase::TickDuration> musical_length;
+    timebase::MeterSignature meter{4, 4};
+    bool one_shot = false;
+    std::optional<std::uint8_t> root_note;
+    std::optional<AudioFrameRange> active_range;
+    std::vector<AudioLoopPoint> points;
+    std::vector<std::string> tags;
+    auto operator<=>(const AudioLoopInfo&) const = default;
 };
 
 } // namespace pulp::timeline

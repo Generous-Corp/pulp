@@ -120,7 +120,11 @@ inline void apply_host_callbacks_to_process_context(
     Float64 tempo = 0.0;
     if (unit.CallHostBeatAndTempo(&beat, &tempo) == noErr) {
         ctx.position_beats = beat;
-        if (tempo > 0.0) ctx.tempo_bpm = tempo;
+        ctx.transport_validity.set(TransportField::BeatPosition);
+        if (tempo > 0.0) {
+            ctx.tempo_bpm = tempo;
+            ctx.transport_validity.set(TransportField::Tempo);
+        }
     }
 
     UInt32 delta_samples = 0;
@@ -129,8 +133,11 @@ inline void apply_host_callbacks_to_process_context(
     Float64 current_measure_downbeat = 0.0;
     if (unit.CallHostMusicalTimeLocation(&delta_samples, &ts_num, &ts_denom,
                                          &current_measure_downbeat) == noErr) {
-        if (ts_num > 0.0f) ctx.time_sig_numerator = static_cast<int>(ts_num);
-        if (ts_denom > 0) ctx.time_sig_denominator = static_cast<int>(ts_denom);
+        if (ts_num > 0.0f && ts_denom > 0) {
+            ctx.time_sig_numerator = static_cast<int>(ts_num);
+            ctx.time_sig_denominator = static_cast<int>(ts_denom);
+            ctx.transport_validity.set(TransportField::TimeSignature);
+        }
     }
 
     Boolean is_playing = false;
@@ -145,9 +152,13 @@ inline void apply_host_callbacks_to_process_context(
         ctx.is_playing = (is_playing != 0);
         ctx.position_samples = static_cast<int64_t>(current_sample_in_timeline);
         ctx.is_looping = (is_cycling != 0);
+        ctx.transport_validity.set(TransportField::Playing);
+        ctx.transport_validity.set(TransportField::Looping);
+        ctx.transport_validity.set(TransportField::SamplePosition);
         if (ctx.is_looping) {
             ctx.loop_start_beats = cycle_start;
             ctx.loop_end_beats = cycle_end;
+            ctx.transport_validity.set(TransportField::LoopRange);
         }
     }
 
@@ -157,10 +168,16 @@ inline void apply_host_callbacks_to_process_context(
         const uint64_t now = mach_absolute_time();
         ctx.host_time_ns = static_cast<int64_t>(
             (now * timebase.numer) / timebase.denom);
+        ctx.transport_validity.set(TransportField::HostTime);
     }
 
     detail::derive_bar_from_beats(ctx);
-    detail::compute_playhead_changes(ctx, previous);
+    if (ctx.has_transport(TransportField::BeatPosition) &&
+        ctx.has_transport(TransportField::TimeSignature)) {
+        ctx.transport_validity.set(TransportField::Bar);
+    }
+    detail::compute_playhead_changes(
+        ctx, previous, detail::TransportDiffMode::FieldValidity);
 }
 
 inline Float64 tail_samples_to_seconds(int tail_samples,

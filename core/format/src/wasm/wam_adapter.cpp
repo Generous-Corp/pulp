@@ -281,6 +281,7 @@ bool append_midi_record(std::vector<uint8_t>& scratch, std::size_t& used,
 void store_transport(WamTransport& t, bool is_playing, double bpm,
                      double position_beats, double position_samples,
                      int tsig_num, int tsig_den) noexcept {
+    t.valid = true;
     t.is_playing = is_playing;
     t.tempo_bpm = bpm;
     t.position_beats = position_beats;
@@ -398,6 +399,13 @@ void WamProcessorBridge::process(const float* const* inputs,
     ctx.position_samples = transport_.position_samples;
     ctx.time_sig_numerator = transport_.time_sig_numerator;
     ctx.time_sig_denominator = transport_.time_sig_denominator;
+    if (transport_.valid) {
+        ctx.transport_validity.set(TransportField::Playing);
+        ctx.transport_validity.set(TransportField::Tempo);
+        ctx.transport_validity.set(TransportField::BeatPosition);
+        ctx.transport_validity.set(TransportField::SamplePosition);
+        ctx.transport_validity.set(TransportField::TimeSignature);
+    }
 
     // One-shot reset: Processor has no reset() virtual, so request a DSP-state
     // reset via the ProcessContext contract for exactly this block, then clear
@@ -878,6 +886,13 @@ void WamChainBridge::process(const float* const* inputs, float* const* outputs,
     ctx.position_samples = transport_.position_samples;
     ctx.time_sig_numerator = transport_.time_sig_numerator;
     ctx.time_sig_denominator = transport_.time_sig_denominator;
+    if (transport_.valid) {
+        ctx.transport_validity.set(TransportField::Playing);
+        ctx.transport_validity.set(TransportField::Tempo);
+        ctx.transport_validity.set(TransportField::BeatPosition);
+        ctx.transport_validity.set(TransportField::SamplePosition);
+        ctx.transport_validity.set(TransportField::TimeSignature);
+    }
 
     // One-shot rack reset: every stage sees reset_requested for exactly this
     // block, then the flag clears.

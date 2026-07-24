@@ -41,6 +41,10 @@ struct TransportRange {
     double tempo_bpm = 120.0;
     bool tempo_changed = false;
     bool discontinuity = false;
+    bool host_beat_mapping = false;
+    double host_tick_start = 0.0;
+    double host_tick_end = 0.0;
+    bool has_precise_host_ticks = false;
 };
 
 struct TransportSnapshot {
@@ -61,10 +65,28 @@ struct TransportSnapshot {
     double tempo_bpm = 120.0;
     std::array<TransportRange, 2> ranges{};
     std::uint8_t range_count = 0;
+    double host_loop_start_beats = 0.0;
+    double host_loop_end_beats = 0.0;
+    bool has_precise_host_loop = false;
 };
 
 /// Validates the shared structural contract consumed by every block renderer.
 bool valid_transport_ranges(const TransportSnapshot& transport) noexcept;
+
+/// Maps an output-frame boundary in a host-beat-mapped range back into the
+/// program's document-sample domain. The returned value is fractional so audio
+/// renderers can interpolate without discarding host-tempo scaling.
+long double
+host_mapped_document_sample_at_output_offset(const TransportRange& range,
+                                             const timebase::CompiledTempoMap& tempo_map,
+                                             std::uint32_t output_offset) noexcept;
+
+/// Maps an exact program event tick into a half-open host-beat-mapped transport
+/// range. Callers must retain the source tick rather than round-tripping an
+/// integer document sample through the tempo map at range boundaries.
+bool host_mapped_output_offset_for_tick(const TransportRange& range,
+                                        timebase::TickPosition document_tick,
+                                        std::uint32_t& output_offset) noexcept;
 
 struct MasterTransportConfig {
     std::uint32_t max_buffer_size = 0;
