@@ -4,6 +4,10 @@ import { extractScene } from "./extract";
 import { serializeExport, type LibraryManifestSnapshot } from "./serialize";
 import type { FontFamilyAssetSummary, PulpFigmaUIMessage, PulpSandboxMessage } from "./types";
 import { UserFontCache } from "./user-fonts";
+import {
+  decodeForgeDesignForFigma,
+  type ForgeFigmaPlanNode,
+} from "./forge-roundtrip";
 
 const PLUGIN_VERSION = "0.2.0";
 
@@ -51,7 +55,15 @@ figma.ui.onmessage = async (msg: PulpFigmaUIMessage) => {
         break;
 
       case "export":
-        await handleExport();
+        await handleExport("download");
+        break;
+
+      case "copy-selection-for-forge":
+        await handleExport("clipboard");
+        break;
+
+      case "import-forge-design":
+        await handleForgeImport(msg.clipboardText);
         break;
 
       case "scan-fonts":
@@ -76,7 +88,7 @@ figma.ui.onmessage = async (msg: PulpFigmaUIMessage) => {
   }
 };
 
-async function handleExport(): Promise<void> {
+async function handleExport(delivery: "download" | "clipboard"): Promise<void> {
   const sel = figma.currentPage.selection;
   if (sel.length === 0) {
     reply({ type: "error", message: "Select at least one frame in Figma before exporting." });
@@ -147,6 +159,113 @@ async function handleExport(): Promise<void> {
     suggestedName,
     json,
     assets: assetBundles,
+    delivery,
+  });
+}
+
+function parseHexColor(value: string | undefined): RGB | null {
+  if (!value) return null;
+  const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
+  if (!match) return null;
+  const raw = match[1];
+  return {
+    r: parseInt(raw.slice(0, 2), 16) / 255,
+    g: parseInt(raw.slice(2, 4), 16) / 255,
+    b: parseInt(raw.slice(4, 6), 16) / 255,
+  };
+}
+
+function applyRoundtripMetadata(node: SceneNode, plan: ForgeFigmaPlanNode): void {
+  if (!("setPluginData" in node)) return;
+  if (plan.audioWidget) node.setPluginData("pulp.audio_widget", plan.audioWidget);
+  if (plan.audioLabel) node.setPluginData("pulp.audio_label", plan.audioLabel);
+  if (plan.audioMin !== undefined)
+    node.setPluginData("pulp.audio_min", String(plan.audioMin));
+  if (plan.audioMax !== undefined)
+    node.setPluginData("pulp.audio_max", String(plan.audioMax));
+  if (plan.audioDefault !== undefined)
+    node.setPluginData("pulp.audio_default", String(plan.audioDefault));
+  if (plan.audioUnits) node.setPluginData("pulp.audio_units", plan.audioUnits);
+  if (plan.binding) node.setPluginData("pulp.binding", plan.binding);
+  if (plan.bindingY) node.setPluginData("pulp.binding_y", plan.bindingY);
+  if (plan.sourceNodeId) node.setPluginData("pulp.source_node_id", plan.sourceNodeId);
+  if (plan.stableAnchorId) node.setPluginData("pulp.stable_anchor_id", plan.stableAnchorId);
+}
+
+async function materializeForgeNode(
+  plan: ForgeFigmaPlanNode,
+  parent: ChildrenMixin,
+): Promise<SceneNode> {
+  let node: SceneNode;
+  if (plan.kind === "text") {
+    await figma.loadFontAsync({ family: "Inter", style: "Regular" });
+    const text = figma.createText();
+    text.fontName = { family: "Inter", style: "Regular" };
+    text.characters = plan.content ?? plan.name;
+    if (plan.fontSize) text.fontSize = plan.fontSize;
+    const color = parseHexColor(plan.textColor);
+    if (color) text.fills = [{ type: "SOLID", color }];
+    node = text;
+  } else if (plan.kind === "ellipse") {
+    node = figma.createEllipse();
+  } else if (plan.kind === "rectangle") {
+    node = figma.createRectangle();
+  } else {
+    const frame = figma.createFrame();
+    if (plan.layoutMode) {
+      frame.layoutMode = plan.layoutMode;
+      frame.itemSpacing = plan.itemSpacing ?? 0;
+      frame.paddingTop = plan.paddingTop ?? 0;
+      frame.paddingRight = plan.paddingRight ?? 0;
+      frame.paddingBottom = plan.paddingBottom ?? 0;
+      frame.paddingLeft = plan.paddingLeft ?? 0;
+    }
+    node = frame;
+  }
+
+  node.name = plan.name;
+  parent.appendChild(node);
+  if ("resize" in node) node.resize(plan.width, plan.height);
+  const parentLaysOutChildren =
+    "layoutMode" in parent && parent.layoutMode !== "NONE";
+  if (!parentLaysOutChildren) {
+    node.x = plan.x;
+    node.y = plan.y;
+  }
+
+  if ("fills" in node && plan.kind !== "text") {
+    const fill = parseHexColor(plan.backgroundColor);
+    node.fills = fill ? [{ type: "SOLID", color: fill }] : [];
+  }
+  if ("strokes" in node) {
+    const stroke = parseHexColor(plan.borderColor);
+    if (stroke && (plan.borderWidth ?? 0) > 0) {
+      node.strokes = [{ type: "SOLID", color: stroke }];
+      node.strokeWeight = plan.borderWidth ?? 1;
+    }
+  }
+  if ("cornerRadius" in node && plan.cornerRadius !== undefined) {
+    node.cornerRadius = plan.cornerRadius;
+  }
+  applyRoundtripMetadata(node, plan);
+
+  if ("appendChild" in node) {
+    for (const child of plan.children) {
+      await materializeForgeNode(child, node as FrameNode);
+    }
+  }
+  return node;
+}
+
+async function handleForgeImport(clipboardText: string): Promise<void> {
+  const plan = decodeForgeDesignForFigma(clipboardText);
+  const root = await materializeForgeNode(plan.root, figma.currentPage);
+  figma.currentPage.selection = [root];
+  figma.viewport.scrollAndZoomIntoView([root]);
+  reply({
+    type: "forge-import-result",
+    nodeCount: plan.nodeCount,
+    audioWidgetCount: plan.audioWidgetCount,
   });
 }
 

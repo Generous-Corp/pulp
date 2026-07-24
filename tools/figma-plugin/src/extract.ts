@@ -266,6 +266,47 @@ async function walk(
     children: [],
   };
 
+  // Forge copy-back creates ordinary Figma nodes and records the DesignIR
+  // semantics as plugin-owned metadata. Read that metadata before the normal
+  // component-key/name recognizers so the next export retains widget kind and
+  // parameter binding without guessing from pixels or layer names.
+  if ("getPluginData" in node) {
+    const roundtripKind = node.getPluginData("pulp.audio_widget");
+    if (roundtripKind === "knob" || roundtripKind === "fader" ||
+        roundtripKind === "meter" || roundtripKind === "xy_pad" ||
+        roundtripKind === "waveform" || roundtripKind === "spectrum") {
+      ex.library_widget_kind = roundtripKind;
+      ex.audio_label = node.getPluginData("pulp.audio_label") || undefined;
+      const readRoundtripNumber = (key: string): number | undefined => {
+        const value = node.getPluginData(key);
+        if (!value) return undefined;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      };
+      ex.audio_min = readRoundtripNumber("pulp.audio_min");
+      ex.audio_max = readRoundtripNumber("pulp.audio_max");
+      ex.audio_default = readRoundtripNumber("pulp.audio_default");
+      ex.audio_units = node.getPluginData("pulp.audio_units") || undefined;
+      ex.audio_binding = node.getPluginData("pulp.binding") || undefined;
+      ex.audio_binding_y = node.getPluginData("pulp.binding_y") || undefined;
+      ex.library_version = "forge-roundtrip-v1";
+    }
+    const sourceNodeId = node.getPluginData("pulp.source_node_id");
+    const stableAnchorId = node.getPluginData("pulp.stable_anchor_id");
+    if (sourceNodeId) {
+      ex.attributes = {
+        ...(ex.attributes ?? {}),
+        "pulp:roundtrip_source_node_id": sourceNodeId,
+      };
+    }
+    if (stableAnchorId) {
+      ex.attributes = {
+        ...(ex.attributes ?? {}),
+        "pulp:roundtrip_stable_anchor_id": stableAnchorId,
+      };
+    }
+  }
+
   // Strokes → box border (uniform or per-side), preserved figma:* stroke
   // provenance, and the multi-paint / complex-stroke diagnostics. Lives
   // outside extractStyle because the result spans style + attributes +
