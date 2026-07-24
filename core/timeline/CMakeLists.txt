@@ -61,6 +61,8 @@ target_link_libraries(pulp-timeline
     PUBLIC
         pulp::runtime
         pulp::timebase
+    PRIVATE
+        pulp::audio
 )
 
 # The DAWproject importer parses project.xml with pugixml directly (its object

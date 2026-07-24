@@ -185,3 +185,44 @@ TEST_CASE("embedded sequence processor matches offline and desktop event streams
                             [](float sample) { return sample == 0.0f; }));
     }
 }
+
+TEST_CASE("embedded sequence processor never publishes a partial MIDI block") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map), map, take(DecodedAudioAssetPool::create({})), 1);
+    auto program = programs.store.read();
+    REQUIRE(program);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    state::StateStore state;
+    embedded.define_parameters(state);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 32,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer silence(1, 32);
+    Buffer output(1, 32);
+    auto output_view = output.view();
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi_out.reserve(1);
+    midi_out.set_realtime_capacity_limit(true);
+    const auto transport = snapshot(*program, 32, 0);
+    auto context = host_context(transport);
+
+    std::size_t allocations = 0;
+    {
+        test::ScopedRtProcessProbe probe;
+        embedded.process(output_view, silence.const_view(), midi_in, midi_out, context);
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::RenderFailed);
+    REQUIRE(midi_out.empty());
+}

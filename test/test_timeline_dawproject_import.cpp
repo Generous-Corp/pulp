@@ -27,8 +27,45 @@ using namespace pulp::timebase;
 
 namespace {
 
+void append_u16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
+    bytes.push_back(static_cast<std::uint8_t>(value));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8u));
+}
+
+void append_u32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
+    for (unsigned shift = 0; shift != 32u; shift += 8u)
+        bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+}
+
+void append_id(std::vector<std::uint8_t>& bytes, std::string_view id) {
+    bytes.insert(bytes.end(), id.begin(), id.end());
+}
+
 const std::vector<std::uint8_t>& fixture_media_bytes() {
-    static const std::vector<std::uint8_t> bytes{'b', 'a', 's', 's', '-', 'm', 'e', 'd', 'i', 'a'};
+    static const std::vector<std::uint8_t> bytes = [] {
+        constexpr std::uint32_t sample_rate = 44'100;
+        constexpr std::uint32_t channels = 2;
+        constexpr std::uint32_t frames = 88'200;
+        constexpr std::uint32_t bytes_per_sample = 2;
+        constexpr std::uint32_t data_bytes = frames * channels * bytes_per_sample;
+        std::vector<std::uint8_t> wav;
+        wav.reserve(44u + data_bytes);
+        append_id(wav, "RIFF");
+        append_u32(wav, 36u + data_bytes);
+        append_id(wav, "WAVE");
+        append_id(wav, "fmt ");
+        append_u32(wav, 16u);
+        append_u16(wav, 1u);
+        append_u16(wav, channels);
+        append_u32(wav, sample_rate);
+        append_u32(wav, sample_rate * channels * bytes_per_sample);
+        append_u16(wav, channels * bytes_per_sample);
+        append_u16(wav, bytes_per_sample * 8u);
+        append_id(wav, "data");
+        append_u32(wav, data_bytes);
+        wav.resize(wav.size() + data_bytes);
+        return wav;
+    }();
     return bytes;
 }
 
@@ -212,6 +249,72 @@ TEST_CASE("DAWproject audio import requires media bytes to seal durable identity
     REQUIRE_FALSE(result);
     REQUIRE(result.error().code == DawProjectImportErrorCode::MissingMediaBytes);
     REQUIRE(result.error().message.find("audio/bass.wav") != std::string::npos);
+}
+
+TEST_CASE("DAWproject audio import validates metadata against resolved WAV bytes") {
+    auto xml = read_fixture("linear_subset.dawproject.xml");
+
+    SECTION("sample rate mismatch") {
+        const auto offset = xml.find(R"(sampleRate="44100")");
+        REQUIRE(offset != std::string::npos);
+        xml.replace(offset, std::string_view(R"(sampleRate="44100")").size(),
+                    R"(sampleRate="48000")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("sampleRate") != std::string::npos);
+    }
+
+    SECTION("duration mismatch") {
+        const auto offset = xml.find(R"(<Audio algorithm="stretch" channels="2" duration="2.0")");
+        REQUIRE(offset != std::string::npos);
+        const auto duration_offset = xml.find(R"(duration="2.0")", offset);
+        REQUIRE(duration_offset != std::string::npos);
+        xml.replace(duration_offset, std::string_view(R"(duration="2.0")").size(),
+                    R"(duration="1.0")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("duration") != std::string::npos);
+    }
+
+    SECTION("huge finite duration") {
+        const auto audio = xml.find("<Audio");
+        REQUIRE(audio != std::string::npos);
+        const auto duration = xml.find(R"(duration="2.0")", audio);
+        REQUIRE(duration != std::string::npos);
+        xml.replace(duration, std::string_view(R"(duration="2.0")").size(),
+                    R"(duration="418446744073709.55")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("duration") != std::string::npos);
+    }
+
+    SECTION("reused path with conflicting metadata") {
+        const auto first_audio = xml.find("<Audio");
+        REQUIRE(first_audio != std::string::npos);
+        const auto second_audio = xml.find("<Audio", first_audio + 1);
+        REQUIRE(second_audio != std::string::npos);
+        const auto duration = xml.find(R"(duration="2.0")", second_audio);
+        REQUIRE(duration != std::string::npos);
+        xml.replace(duration, std::string_view(R"(duration="2.0")").size(), R"(duration="1.0")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("earlier reference") != std::string::npos);
+    }
+
+    SECTION("invalid media") {
+        DawProjectMediaResolver invalid =
+            [](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+            return std::vector<std::uint8_t>{'n', 'o', 't', '-', 'w', 'a', 'v'};
+        };
+        auto result = import_dawproject_xml(xml, std::move(invalid));
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("invalid or unsupported WAV") != std::string::npos);
+    }
 }
 
 TEST_CASE("DAWproject import fails closed on an out-of-subset clip (no silent drop)") {

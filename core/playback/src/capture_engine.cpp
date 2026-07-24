@@ -1,5 +1,7 @@
 #include <pulp/playback/capture_engine.hpp>
 
+#include <pulp/runtime/exceptions.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -19,12 +21,21 @@ std::int64_t ceil_multiple(std::int64_t value, std::int64_t interval) noexcept {
     return value - remainder;
 }
 
+bool add_storage_bytes(std::uint64_t count, std::uint64_t element_size, std::uint64_t maximum,
+                       std::uint64_t& total) noexcept {
+    if (element_size != 0 && count > (maximum - total) / element_size)
+        return false;
+    total += count * element_size;
+    return true;
+}
+
 } // namespace
 
 bool CaptureEngine::valid_config(const CaptureEngineConfig& config) noexcept {
     if (!config.sample_rate.valid() || config.maximum_block_size == 0 ||
         config.maximum_take_frames == 0 || config.take_slots_per_track == 0 ||
-        config.take_slots_per_track > kMaximumTakeSlotsPerTrack || config.tracks.empty() ||
+        config.take_slots_per_track > kMaximumTakeSlotsPerTrack ||
+        config.maximum_preallocated_bytes == 0 || config.tracks.empty() ||
         config.tracks.size() > kMaximumTracks)
         return false;
     if (config.maximum_take_frames >
@@ -33,12 +44,37 @@ bool CaptureEngine::valid_config(const CaptureEngineConfig& config) noexcept {
     if (config.take_slots_per_track >
         std::numeric_limits<std::uint32_t>::max() / config.tracks.size())
         return false;
+    const auto slot_count =
+        config.tracks.size() * static_cast<std::size_t>(config.take_slots_per_track);
+    if (slot_count > std::vector<TakeSlot>{}.max_size() ||
+        config.tracks.size() > std::vector<TrackRuntime>{}.max_size() ||
+        config.midi_events_per_take > std::vector<CapturedMidiEvent>{}.max_size())
+        return false;
+    std::uint64_t storage_bytes = 0;
+    if (!add_storage_bytes(config.tracks.size(), sizeof(TrackRuntime),
+                           config.maximum_preallocated_bytes, storage_bytes) ||
+        !add_storage_bytes(slot_count, sizeof(TakeSlot), config.maximum_preallocated_bytes,
+                           storage_bytes))
+        return false;
     for (const auto& track : config.tracks) {
         if (!track.track_id.valid() || !track.take_lane_id.valid() || track.channel_count == 0)
             return false;
         if (config.maximum_take_frames >
             static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) /
                 track.channel_count)
+            return false;
+        const auto samples_per_slot =
+            config.maximum_take_frames * static_cast<std::uint64_t>(track.channel_count);
+        if (samples_per_slot > std::vector<float>{}.max_size())
+            return false;
+        const auto track_slot_count = static_cast<std::uint64_t>(config.take_slots_per_track);
+        if (samples_per_slot > std::numeric_limits<std::uint64_t>::max() / track_slot_count)
+            return false;
+        if (!add_storage_bytes(samples_per_slot * track_slot_count, sizeof(float),
+                               config.maximum_preallocated_bytes, storage_bytes) ||
+            !add_storage_bytes(
+                static_cast<std::uint64_t>(config.midi_events_per_take) * track_slot_count,
+                sizeof(CapturedMidiEvent), config.maximum_preallocated_bytes, storage_bytes))
             return false;
     }
     return true;
@@ -65,28 +101,40 @@ timebase::SamplePosition CaptureEngine::add_frames(timebase::SamplePosition star
     return {start.value + signed_frames};
 }
 
-bool CaptureEngine::prepare(CaptureEngineConfig config) {
+bool CaptureEngine::prepare(const CaptureEngineConfig& config) {
     release();
     if (!valid_config(config))
         return false;
 
-    config_ = std::move(config);
-    track_runtime_.resize(config_.tracks.size());
+    CaptureEngineConfig prepared_config;
+    std::vector<TrackRuntime> track_runtime;
+    std::vector<TakeSlot> slots;
     const auto slot_count =
-        config_.tracks.size() * static_cast<std::size_t>(config_.take_slots_per_track);
-    slots_.resize(slot_count);
-    for (std::size_t track_index = 0; track_index < config_.tracks.size(); ++track_index) {
-        const auto& track = config_.tracks[track_index];
-        for (std::uint32_t local_slot = 0; local_slot < config_.take_slots_per_track;
-             ++local_slot) {
-            auto& slot = slots_[track_index * config_.take_slots_per_track + local_slot];
-            slot.track_index = static_cast<std::uint32_t>(track_index);
-            slot.audio.resize(static_cast<std::size_t>(config_.maximum_take_frames) *
-                              track.channel_count);
-            slot.midi.reserve(config_.midi_events_per_take);
+        config.tracks.size() * static_cast<std::size_t>(config.take_slots_per_track);
+    PULP_TRY {
+        prepared_config = config;
+        track_runtime.resize(config.tracks.size());
+        slots.resize(slot_count);
+        for (std::size_t track_index = 0; track_index < config.tracks.size(); ++track_index) {
+            const auto& track = config.tracks[track_index];
+            for (std::uint32_t local_slot = 0; local_slot < config.take_slots_per_track;
+                 ++local_slot) {
+                auto& slot = slots[track_index * config.take_slots_per_track + local_slot];
+                slot.track_index = static_cast<std::uint32_t>(track_index);
+                slot.audio.resize(static_cast<std::size_t>(config.maximum_take_frames) *
+                                  track.channel_count);
+                slot.midi.reserve(config.midi_events_per_take);
+            }
         }
-        input_peaks_[track_index].store(0.0f, std::memory_order_relaxed);
     }
+    PULP_CATCH_ALL {
+        return false;
+    }
+    config_ = std::move(prepared_config);
+    track_runtime_ = std::move(track_runtime);
+    slots_ = std::move(slots);
+    for (std::size_t track_index = 0; track_index < config_.tracks.size(); ++track_index)
+        input_peaks_[track_index].store(0.0f, std::memory_order_relaxed);
     prepared_ = true;
     return true;
 }

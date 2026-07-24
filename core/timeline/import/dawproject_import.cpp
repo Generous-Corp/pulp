@@ -1,5 +1,6 @@
 #include <pulp/timeline/dawproject_import.hpp>
 
+#include <pulp/audio/wav_decoder.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
@@ -26,6 +27,14 @@ constexpr double kPpq = static_cast<double>(timebase::kTicksPerQuarter);
 
 DawProjectImportError err(DawProjectImportErrorCode code, std::string message) {
     return DawProjectImportError{code, std::move(message), {}};
+}
+
+bool declared_duration_matches_frames(long double declared_frames,
+                                      std::uint64_t actual_frames) noexcept {
+    if (!std::isfinite(declared_frames) || actual_frames == 0)
+        return false;
+    const auto actual = static_cast<long double>(actual_frames);
+    return declared_frames >= actual - 0.5L && declared_frames < actual + 0.5L;
 }
 
 std::int64_t beats_to_ticks(double beats) {
@@ -371,30 +380,37 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     if (path.empty())
         return err(DawProjectImportErrorCode::InvalidValue, "<File path> must not be empty");
 
-    if (auto it = asset_by_path_.find(path); it != asset_by_path_.end()) {
-        asset_id_out = it->second;
-        // Reuse the already-sealed asset's frame count.
-        for (const auto& a : assets_)
-            if (a.id == it->second)
-                frame_count_out = a.frame_count;
-        return std::nullopt;
-    }
-
     double duration_sec = 0.0, sample_rate = 0.0;
     if (auto e = require_double(audio, "duration", "<Audio>", duration_sec))
         return e;
     if (auto e = require_double(audio, "sampleRate", "<Audio>", sample_rate))
         return e;
-    if (!(duration_sec > 0.0))
+    if (!std::isfinite(duration_sec) || !(duration_sec > 0.0))
         return err(DawProjectImportErrorCode::InvalidValue, "<Audio duration> must be positive");
-    if (!(sample_rate > 0.0))
+    if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
         return err(DawProjectImportErrorCode::InvalidValue, "<Audio sampleRate> must be positive");
-
-    std::uint64_t frame_count =
-        static_cast<std::uint64_t>(std::llround(duration_sec * sample_rate));
-    if (frame_count == 0)
+    const auto declared_frames =
+        static_cast<long double>(duration_sec) * static_cast<long double>(sample_rate);
+    if (!std::isfinite(declared_frames) || declared_frames <= 0.0L)
         return err(DawProjectImportErrorCode::InvalidValue,
-                   "<Audio> resolves to a zero-length asset");
+                   "<Audio> duration exceeds the supported frame domain");
+
+    if (auto it = asset_by_path_.find(path); it != asset_by_path_.end()) {
+        for (const auto& asset : assets_) {
+            if (asset.id != it->second)
+                continue;
+            if (sample_rate != asset.sample_rate.as_long_double() ||
+                !declared_duration_matches_frames(declared_frames, asset.frame_count))
+                return err(DawProjectImportErrorCode::InvalidValue,
+                           "<Audio> metadata disagrees with an earlier reference to '" + path +
+                               "'");
+            asset_id_out = asset.id;
+            frame_count_out = asset.frame_count;
+            return std::nullopt;
+        }
+        return err(DawProjectImportErrorCode::ModelRejected,
+                   "internal asset index lost resolved media '" + path + "'");
+    }
 
     if (!media_resolver_)
         return err(DawProjectImportErrorCode::MissingMediaBytes,
@@ -403,6 +419,17 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     if (!bytes)
         return err(DawProjectImportErrorCode::MissingMediaBytes,
                    "media resolver did not provide '" + path + "'");
+    const auto info = audio::inspect_wav(*bytes);
+    if (!info)
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "media resolver provided an invalid or unsupported WAV for '" + path + "'");
+    if (sample_rate != static_cast<double>(info->sample_rate))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "<Audio sampleRate> does not match resolved media '" + path + "'");
+    if (!declared_duration_matches_frames(declared_frames, info->num_frames))
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "<Audio duration> does not match resolved media '" + path + "'");
+
     auto hash = ContentHash::from_hex(runtime::sha256_hex(bytes->data(), bytes->size()));
     if (!hash)
         return err(DawProjectImportErrorCode::InvalidValue,
@@ -412,12 +439,12 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     MediaAsset asset;
     asset.id = asset_id;
     asset.name = path;
-    asset.frame_count = frame_count;
-    asset.sample_rate = timebase::RationalRate{static_cast<std::uint64_t>(sample_rate), 1};
+    asset.frame_count = info->num_frames;
+    asset.sample_rate = timebase::RationalRate{info->sample_rate, 1};
     asset.content_hash = *hash;
     asset.storage_policy = AssetStoragePolicy::External;
     asset.locators.push_back(AssetLocator{AssetLocatorKind::PackageRelative, path});
-    frame_count_out = frame_count;
+    frame_count_out = info->num_frames;
     assets_.push_back(std::move(asset));
     asset_by_path_.emplace(path, asset_id);
     asset_id_out = asset_id;

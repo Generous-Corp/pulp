@@ -326,6 +326,7 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
 
     auto* rendered_midi = midi_scratch_.in(midi_output_node_index_);
     if (rendered_midi == nullptr || !copy_arrangement_note_output(*rendered_midi, midi_out)) {
+        midi::clear_midi_block(midi_out);
         status_ = SequenceProcessorStatus::RenderFailed;
         return;
     }

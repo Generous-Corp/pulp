@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using namespace pulp;
@@ -237,4 +238,34 @@ TEST_CASE("capture metronome renders during count-in before punch capture") {
     REQUIRE(std::all_of(output.channel(0).begin() + 1, output.channel(0).end(),
                         [](float sample) { return sample == 0.0f; }));
     REQUIRE(drain(engine).size() == 1);
+}
+
+TEST_CASE("capture engine rejects aggregate preallocation beyond its explicit budget") {
+    CaptureEngine engine;
+    REQUIRE(engine.prepare(capture_config()));
+
+    auto undersized_budget = capture_config();
+    undersized_budget.maximum_preallocated_bytes = 1;
+    REQUIRE_FALSE(engine.prepare(std::move(undersized_budget)));
+
+    audio::Buffer<float> input(1, 1);
+    audio::Buffer<float> output(1, 1);
+    auto output_view = output.view();
+    midi::MidiBuffer midi;
+    REQUIRE(engine.process(read_view(input), output_view, midi, {}) ==
+            CaptureProcessResult::NotPrepared);
+
+    auto aggregate_overflow = capture_config(32, CaptureEngine::kMaximumTakeSlotsPerTrack);
+    aggregate_overflow.maximum_take_frames = std::numeric_limits<std::uint64_t>::max();
+    aggregate_overflow.maximum_preallocated_bytes = std::numeric_limits<std::uint64_t>::max();
+    REQUIRE_FALSE(engine.prepare(std::move(aggregate_overflow)));
+
+    auto midi_overflow = capture_config(32, CaptureEngine::kMaximumTakeSlotsPerTrack);
+    midi_overflow.midi_events_per_take = std::numeric_limits<std::uint32_t>::max();
+    REQUIRE_FALSE(engine.prepare(std::move(midi_overflow)));
+
+    auto excessive_tracks = capture_config();
+    excessive_tracks.tracks.resize(CaptureEngine::kMaximumTracks + 1,
+                                   excessive_tracks.tracks.front());
+    REQUIRE_FALSE(engine.prepare(excessive_tracks));
 }

@@ -28,11 +28,14 @@ struct CaptureTrackConfig {
 };
 
 struct CaptureEngineConfig {
+    static constexpr std::uint64_t kDefaultMaximumPreallocatedBytes = 512ull * 1024ull * 1024ull;
+
     timebase::RationalRate sample_rate;
     std::uint32_t maximum_block_size = 0;
     std::uint64_t maximum_take_frames = 0;
     std::uint32_t take_slots_per_track = 0;
     std::uint32_t midi_events_per_take = 0;
+    std::uint64_t maximum_preallocated_bytes = kDefaultMaximumPreallocatedBytes;
     std::vector<CaptureTrackConfig> tracks;
 };
 
@@ -125,7 +128,7 @@ class CaptureEngine {
     static constexpr audio::RtSafetyClass process_rt_safety_class =
         audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
 
-    bool prepare(CaptureEngineConfig config);
+    bool prepare(const CaptureEngineConfig& config);
     void release() noexcept;
 
     bool enqueue_command(const CaptureCommand& command) noexcept;
