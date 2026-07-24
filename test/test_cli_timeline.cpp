@@ -20,7 +20,6 @@
 #include <vector>
 
 #ifndef _WIN32
-#include <sys/stat.h>
 #include <sys/wait.h>
 #endif
 
@@ -201,15 +200,12 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
 #endif
 
     const auto new_path = temp.path() / "new.json";
-    const auto previous_mask = ::umask(0027);
     const auto new_result =
         run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) + " --out " +
                 quote(new_path) + " > /dev/null");
-    ::umask(previous_mask);
     REQUIRE(new_result == 0);
     REQUIRE(std::filesystem::status(new_path).permissions() ==
-            (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
-             std::filesystem::perms::group_read));
+            (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
 
     const auto write_only_path = temp.path() / "write-only.json";
     write_text(write_only_path, "sentinel");

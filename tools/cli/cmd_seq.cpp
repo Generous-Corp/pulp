@@ -278,7 +278,7 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
     int descriptor = -1;
     for (int attempt = 0; attempt != 128; ++attempt) {
         temporary = temporary_path(destination, next_serial.fetch_add(1));
-        descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
         if (descriptor >= 0)
             break;
         if (errno != EEXIST) {

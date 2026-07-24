@@ -143,7 +143,10 @@ HostTransportProjector::project(const format::ProcessContext& context,
         return HostTransportProjectionError::InvalidMeter;
 
     playback::LoopRegion loop;
-    loop.enabled = context.is_looping;
+    loop.enabled =
+        context.is_looping &&
+        (context.transport_validity.empty() ||
+         context.has_transport(format::TransportField::LoopRange));
     if (loop.enabled) {
         if (!beats_to_ticks(context.loop_start_beats, loop.start) ||
             !beats_to_ticks(context.loop_end_beats, loop.end) || !(loop.start < loop.end)) {

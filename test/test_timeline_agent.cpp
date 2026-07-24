@@ -191,6 +191,11 @@ TEST_CASE("timeline agent render constructs every output channel") {
 
     const auto output_path = temp.path() / "rendered.wav";
     REQUIRE(tools::timeline::render(project_json(source_path), output_path.string()));
+#ifndef _WIN32
+    REQUIRE(std::filesystem::status(output_path).permissions() ==
+            (std::filesystem::perms::owner_read |
+             std::filesystem::perms::owner_write));
+#endif
     const auto rendered = audio::read_audio_file(output_path.string());
     REQUIRE(rendered);
     REQUIRE(rendered->channels.size() == 2);

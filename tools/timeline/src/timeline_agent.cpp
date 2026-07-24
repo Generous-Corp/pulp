@@ -508,7 +508,7 @@ bool write_wav_atomic(const fs::path& destination,
     int reservation = -1;
     for (int attempt = 0; attempt != 128; ++attempt) {
         temporary = render_temporary_path(destination, next_serial.fetch_add(1));
-        reservation = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        reservation = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
         if (reservation >= 0)
             break;
         if (errno != EEXIST) {

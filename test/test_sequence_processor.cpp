@@ -146,6 +146,29 @@ TEST_CASE("host transport projection fails closed for unsupported loop density "
     REQUIRE_FALSE(projected.reset_requested);
 }
 
+TEST_CASE("host transport projection ignores loop bounds withheld by a validity mask") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.loop_end_beats = 0.0005;
+    context.transport_validity.set(format::TransportField::Looping);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.loop.enabled);
+
+    context.transport_validity.set(format::TransportField::LoopRange);
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::LoopTooShortForBlock);
+}
+
 TEST_CASE("host transport projection preserves authoritative positions outside an active loop") {
     const auto map = tempo_map();
     sequence::HostTransportProjector projector;
