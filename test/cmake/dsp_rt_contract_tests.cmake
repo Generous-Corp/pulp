@@ -121,3 +121,8 @@ pulp_add_test_suite(pulp-test-drum-kick
     SOURCES test_drum_kick.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 600)
+
+pulp_add_test_suite(pulp-test-drum-voices
+    SOURCES test_drum_voices.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
