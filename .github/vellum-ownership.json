@@ -2,15 +2,18 @@
   "activation": {
     "accepted_at": null,
     "accepted_by": null,
+    "authority_record_path": null,
+    "initial_transition_event": null,
     "pulp_extraction_base": "2ccff748f0d59da34b01ce1fbceabcf19f452731",
     "state": "prepared",
     "vellum_authority_commit": null
   },
   "framework_repository": "Generous-Corp/vellum",
   "freeze_owner": "@danielraffel",
-  "schema_version": 1,
+  "schema_version": 2,
   "slices": [
     {
+      "authority": null,
       "id": "canvas-kernel",
       "paths": [
         "core/canvas/include/pulp/canvas/affine_transform.hpp",
@@ -94,6 +97,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "canvas-kernel-deferred",
       "paths": [
         "core/canvas/CMakeLists.txt",
@@ -125,6 +129,7 @@
       "state": "excluded"
     },
     {
+      "authority": null,
       "id": "capture-primitives",
       "paths": [
         "core/view/include/pulp/view/screenshot.hpp",
@@ -140,6 +145,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "design-schema-compiler",
       "paths": [
         "core/view/include/pulp/view/anchor_strategy.hpp",
@@ -165,6 +171,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "legacy-figma-schema",
       "paths": [
         "tools/figma-plugin/schema/figma-plugin-export-v1.json"
@@ -172,6 +179,7 @@
       "state": "pulp-only"
     },
     {
+      "authority": null,
       "id": "legal-provenance",
       "paths": [
         "DEPENDENCIES.md",
@@ -181,6 +189,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "macos-shell",
       "paths": [
         "core/view/platform/mac/accessibility_mac.mm",
@@ -192,6 +201,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "pulp-audio-plugin-product",
       "paths": [
         "core/audio/",
@@ -206,6 +216,7 @@
       "state": "pulp-only"
     },
     {
+      "authority": null,
       "id": "pulp-tooling-surface",
       "paths": [
         ".agents/skills/",
@@ -218,6 +229,7 @@
       "state": "pulp-only"
     },
     {
+      "authority": null,
       "id": "render-skia-dawn",
       "paths": [
         "core/render/include/pulp/render/dirty_tracker.hpp",
@@ -241,6 +253,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "render-skia-dawn-deferred",
       "paths": [
         "core/render/CMakeLists.txt",
@@ -276,6 +289,7 @@
       "state": "excluded"
     },
     {
+      "authority": null,
       "id": "retained-ui-kernel",
       "paths": [
         "core/view/include/pulp/view/accessibility.hpp",
@@ -326,6 +340,7 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": null,
       "id": "retained-ui-kernel-deferred",
       "paths": [
         "core/view/include/pulp/view/theme.hpp",
@@ -334,6 +349,7 @@
       "state": "excluded"
     },
     {
+      "authority": null,
       "id": "runtime-assets",
       "paths": [
         "external/fonts/Inter-Regular.ttf",
