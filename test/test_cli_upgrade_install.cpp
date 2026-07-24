@@ -299,7 +299,9 @@ TEST_CASE("ensure_dir_on_path: appends an export line for a fresh zsh profile",
     REQUIRE(r.status == PS::added);
     REQUIRE(r.profile == home / ".zshrc");
     auto body = read_file(home / ".zshrc");
-    REQUIRE(body.find("export PATH=\"" + dir.string() + ":$PATH\"") != std::string::npos);
+    REQUIRE(body.find(
+                "export PATH=" + ui::quote_sh_profile_value(dir.string()) +
+                ":$PATH") != std::string::npos);
 
     // Idempotent: a second call must not double-add.
     auto r2 = ui::ensure_dir_on_path(dir, "/usr/bin:/bin", "zsh", home, false);
