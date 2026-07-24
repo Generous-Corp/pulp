@@ -28,18 +28,45 @@ struct detail::AudioSampleRateConverterCache::Impl {
         std::shared_ptr<const audio::PreparedVariableRateConversion> converter;
     };
 
+    struct EntryNode {
+        Entry value;
+        std::unique_ptr<EntryNode> next;
+    };
+
+    struct HostRateEntryNode {
+        HostRateEntry value;
+        std::unique_ptr<HostRateEntryNode> next;
+    };
+
+    ~Impl() {
+        while (entries)
+            entries = std::move(entries->next);
+        while (host_rate_entries)
+            host_rate_entries = std::move(host_rate_entries->next);
+    }
+
     std::size_t converter_count() const noexcept {
-        return entries.size() + host_rate_entries.size() + (fixed_rate_builder ? 1u : 0u) +
+        return entry_count + host_rate_entry_count + (fixed_rate_builder ? 1u : 0u) +
                (host_rate_builder ? 1u : 0u);
     }
 
-    auto find_host(const std::shared_ptr<const audio::AudioFileData>& source,
-                   std::uint64_t source_start, std::uint64_t source_frames) {
-        return std::find_if(
-            host_rate_entries.begin(), host_rate_entries.end(), [&](const HostRateEntry& entry) {
-                return entry.source == source && entry.source_start == source_start &&
-                       entry.source_frames == source_frames;
-            });
+    Entry* find_entry(timebase::RationalRate source, timebase::RationalRate target) noexcept {
+        for (auto* node = entries.get(); node != nullptr; node = node->next.get()) {
+            if (node->value.source == source && node->value.target == target)
+                return &node->value;
+        }
+        return nullptr;
+    }
+
+    HostRateEntry* find_host(const std::shared_ptr<const audio::AudioFileData>& source,
+                             std::uint64_t source_start,
+                             std::uint64_t source_frames) noexcept {
+        for (auto* node = host_rate_entries.get(); node != nullptr; node = node->next.get()) {
+            if (node->value.source == source && node->value.source_start == source_start &&
+                node->value.source_frames == source_frames)
+                return &node->value;
+        }
+        return nullptr;
     }
 
     static std::uint64_t saturating_add(std::uint64_t lhs, std::uint64_t rhs) noexcept {
@@ -48,37 +75,46 @@ struct detail::AudioSampleRateConverterCache::Impl {
                    : std::numeric_limits<std::uint64_t>::max();
     }
 
-    template <typename T>
-    static std::uint64_t vector_storage_bytes_for_capacity(std::size_t capacity) noexcept {
-        if (capacity >
-            (std::numeric_limits<std::uint64_t>::max() - audio::kConverterAllocationOverhead) /
-                sizeof(T))
+    static std::uint64_t node_storage_bytes(std::size_t count,
+                                            std::size_t node_size) noexcept {
+        const auto charged_size = saturating_add(node_size, audio::kConverterAllocationOverhead);
+        if (charged_size != 0 &&
+            count > std::numeric_limits<std::uint64_t>::max() / charged_size)
             return std::numeric_limits<std::uint64_t>::max();
-        return capacity * sizeof(T) +
-               (capacity != 0 ? audio::kConverterAllocationOverhead : 0u);
+        return count * charged_size;
     }
 
-    template <typename T>
-    static std::uint64_t vector_storage_bytes(const std::vector<T>& values) noexcept {
-        return vector_storage_bytes_for_capacity<T>(values.capacity());
+    std::uint64_t cache_storage_bytes(std::size_t fixed_count,
+                                      std::size_t host_count) const noexcept {
+        return saturating_add(node_storage_bytes(fixed_count, sizeof(EntryNode)),
+                              node_storage_bytes(host_count, sizeof(HostRateEntryNode)));
     }
 
-    std::uint64_t cache_storage_bytes() const noexcept {
-        return saturating_add(vector_storage_bytes(entries),
-                              vector_storage_bytes(host_rate_entries));
-    }
-
-    std::uint64_t required_bytes_with_capacities(std::uint64_t additional,
-                                                 std::size_t entry_capacity,
-                                                 std::size_t host_capacity) const noexcept {
-        const auto storage =
-            saturating_add(vector_storage_bytes_for_capacity<Entry>(entry_capacity),
-                           vector_storage_bytes_for_capacity<HostRateEntry>(host_capacity));
+    std::uint64_t required_bytes_with_counts(std::uint64_t additional,
+                                             std::size_t fixed_count,
+                                             std::size_t host_count) const noexcept {
+        const auto storage = cache_storage_bytes(fixed_count, host_count);
         return saturating_add(saturating_add(converter_bytes, storage), additional);
     }
 
     std::uint64_t required_bytes(std::uint64_t additional = 0) const noexcept {
-        return saturating_add(saturating_add(converter_bytes, cache_storage_bytes()), additional);
+        return required_bytes_with_counts(additional, entry_count, host_rate_entry_count);
+    }
+
+    void add_entry(Entry value) {
+        auto node = std::make_unique<EntryNode>();
+        node->value = std::move(value);
+        node->next = std::move(entries);
+        entries = std::move(node);
+        ++entry_count;
+    }
+
+    void add_host_entry(HostRateEntry value) {
+        auto node = std::make_unique<HostRateEntryNode>();
+        node->value = std::move(value);
+        node->next = std::move(host_rate_entries);
+        host_rate_entries = std::move(node);
+        ++host_rate_entry_count;
     }
 
     runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
@@ -95,10 +131,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
         target = target.normalized();
         if (source == target)
             return runtime::Ok(std::shared_ptr<const audio::PreparedSampleRateConversion>{});
-        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
-            return entry.source == source && entry.target == target;
-        });
-        return runtime::Ok(found->converter);
+        return runtime::Ok(find_entry(source, target)->converter);
     }
 
     runtime::Result<bool, AudioRendererError>
@@ -108,10 +141,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
         target = target.normalized();
         if (source == target)
             return runtime::Ok(true);
-        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
-            return entry.source == source && entry.target == target;
-        });
-        if (found != entries.end())
+        if (find_entry(source, target) != nullptr)
             return runtime::Ok(true);
 
         // Scale the reconstruction cutoff to the target Nyquist when
@@ -141,26 +171,14 @@ struct detail::AudioSampleRateConverterCache::Impl {
             }
             const auto estimated_bytes =
                 audio::PreparedSampleRateConversion::estimated_prepared_bytes();
-            const auto required = required_bytes_with_capacities(
-                estimated_bytes, std::max(entries.capacity(), entries.size() + 1u),
-                host_rate_entries.capacity());
+            const auto required = required_bytes_with_counts(
+                estimated_bytes, entry_count + 1u, host_rate_entry_count);
             if (required > limits.max_sample_rate_converter_bytes) {
                 return runtime::Err(AudioRendererError{
                     AudioRendererErrorCode::CapacityExceeded,
                     item,
                     related_item,
                     required,
-                    limits.max_sample_rate_converter_bytes,
-                });
-            }
-            entries.reserve(entries.size() + 1u);
-            const auto observed_required = required_bytes(estimated_bytes);
-            if (observed_required > limits.max_sample_rate_converter_bytes) {
-                return runtime::Err(AudioRendererError{
-                    AudioRendererErrorCode::CapacityExceeded,
-                    item,
-                    related_item,
-                    observed_required,
                     limits.max_sample_rate_converter_bytes,
                 });
             }
@@ -184,7 +202,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 required,
                 limits.max_sample_rate_converter_bytes,
             });
-        entries.push_back({source, target, std::move(converter)});
+        add_entry({source, target, std::move(converter)});
         converter_bytes += actual_bytes;
         fixed_rate_builder.reset();
         fixed_rate_source = {};
@@ -209,10 +227,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 item,
                 related_item,
             });
-        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
-            return entry.source == source && entry.target == target;
-        });
-        if (found != entries.end())
+        if (const auto* found = find_entry(source, target))
             return runtime::Ok(found->converter);
         if (converter_count() >= limits.max_sample_rate_converters) {
             return runtime::Err(AudioRendererError{
@@ -223,9 +238,8 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converters,
             });
         }
-        const auto required = required_bytes_with_capacities(
-            converter->prepared_bytes(), std::max(entries.capacity(), entries.size() + 1u),
-            host_rate_entries.capacity());
+        const auto required = required_bytes_with_counts(
+            converter->prepared_bytes(), entry_count + 1u, host_rate_entry_count);
         if (required > limits.max_sample_rate_converter_bytes) {
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
@@ -235,19 +249,8 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converter_bytes,
             });
         }
-        entries.reserve(entries.size() + 1u);
-        const auto observed_required = required_bytes(converter->prepared_bytes());
-        if (observed_required > limits.max_sample_rate_converter_bytes) {
-            return runtime::Err(AudioRendererError{
-                AudioRendererErrorCode::CapacityExceeded,
-                item,
-                related_item,
-                observed_required,
-                limits.max_sample_rate_converter_bytes,
-            });
-        }
+        add_entry({source, target, converter});
         converter_bytes += converter->prepared_bytes();
-        entries.push_back({source, target, converter});
         return runtime::Ok(std::move(converter));
     }
 
@@ -259,7 +262,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
             source_frames > source->num_frames() - source_start)
             return runtime::Err(
                 AudioRendererError{AudioRendererErrorCode::InvalidAsset, item, related_item});
-        if (find_host(source, source_start, source_frames) != host_rate_entries.end())
+        if (find_host(source, source_start, source_frames) != nullptr)
             return runtime::Ok(true);
 
         const auto same_active = host_rate_builder && host_rate_source == source &&
@@ -279,29 +282,16 @@ struct detail::AudioSampleRateConverterCache::Impl {
             }
             const auto bytes = audio::PreparedVariableRateConversion::prepared_bytes(
                 source_frames, source->channels.size());
-            const auto required = bytes
-                                      ? required_bytes_with_capacities(
-                                            *bytes, entries.capacity(),
-                                            std::max(host_rate_entries.capacity(),
-                                                     host_rate_entries.size() + 1u))
-                                      : std::numeric_limits<std::uint64_t>::max();
+            const auto required =
+                bytes ? required_bytes_with_counts(*bytes, entry_count,
+                                                   host_rate_entry_count + 1u)
+                      : std::numeric_limits<std::uint64_t>::max();
             if (!bytes || required > limits.max_sample_rate_converter_bytes) {
                 return runtime::Err(AudioRendererError{
                     AudioRendererErrorCode::CapacityExceeded,
                     item,
                     related_item,
                     required,
-                    limits.max_sample_rate_converter_bytes,
-                });
-            }
-            host_rate_entries.reserve(host_rate_entries.size() + 1u);
-            const auto observed_required = required_bytes(*bytes);
-            if (observed_required > limits.max_sample_rate_converter_bytes) {
-                return runtime::Err(AudioRendererError{
-                    AudioRendererErrorCode::CapacityExceeded,
-                    item,
-                    related_item,
-                    observed_required,
                     limits.max_sample_rate_converter_bytes,
                 });
             }
@@ -328,7 +318,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 required,
                 limits.max_sample_rate_converter_bytes,
             });
-        host_rate_entries.push_back(
+        add_host_entry(
             {host_rate_source, host_rate_source_start, host_rate_source_frames, converter});
         converter_bytes += actual_bytes;
         host_rate_builder.reset();
@@ -367,7 +357,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
             return runtime::Err(
                 AudioRendererError{AudioRendererErrorCode::InvalidAsset, item, related_item});
         const auto found = find_host(source, source_start, source_frames);
-        if (found != host_rate_entries.end())
+        if (found != nullptr)
             return runtime::Ok(found->converter);
         if (converter_count() >= limits.max_sample_rate_converters) {
             return runtime::Err(AudioRendererError{
@@ -378,9 +368,8 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converters,
             });
         }
-        const auto required = required_bytes_with_capacities(
-            converter->prepared_bytes(), entries.capacity(),
-            std::max(host_rate_entries.capacity(), host_rate_entries.size() + 1u));
+        const auto required = required_bytes_with_counts(
+            converter->prepared_bytes(), entry_count, host_rate_entry_count + 1u);
         if (required > limits.max_sample_rate_converter_bytes) {
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
@@ -390,24 +379,15 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converter_bytes,
             });
         }
-        host_rate_entries.reserve(host_rate_entries.size() + 1u);
-        const auto observed_required = required_bytes(converter->prepared_bytes());
-        if (observed_required > limits.max_sample_rate_converter_bytes) {
-            return runtime::Err(AudioRendererError{
-                AudioRendererErrorCode::CapacityExceeded,
-                item,
-                related_item,
-                observed_required,
-                limits.max_sample_rate_converter_bytes,
-            });
-        }
+        add_host_entry({std::move(source), source_start, source_frames, converter});
         converter_bytes += converter->prepared_bytes();
-        host_rate_entries.push_back({std::move(source), source_start, source_frames, converter});
         return runtime::Ok(std::move(converter));
     }
 
-    std::vector<Entry> entries;
-    std::vector<HostRateEntry> host_rate_entries;
+    std::unique_ptr<EntryNode> entries;
+    std::unique_ptr<HostRateEntryNode> host_rate_entries;
+    std::size_t entry_count = 0;
+    std::size_t host_rate_entry_count = 0;
     std::unique_ptr<audio::SampleRateConversionBuilder> fixed_rate_builder;
     timebase::RationalRate fixed_rate_source;
     timebase::RationalRate fixed_rate_target;

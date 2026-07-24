@@ -445,6 +445,12 @@ TEST_CASE("capture engine rejects aggregate preallocation beyond its explicit bu
     undersized_budget.maximum_preallocated_bytes = 1;
     REQUIRE_FALSE(engine.prepare(std::move(undersized_budget)));
 
+    auto omitted_container_storage = capture_config(1, 1);
+    omitted_container_storage.maximum_take_frames = 1;
+    omitted_container_storage.midi_events_per_take = 0;
+    omitted_container_storage.maximum_preallocated_bytes = 150;
+    REQUIRE_FALSE(engine.prepare(std::move(omitted_container_storage)));
+
     audio::Buffer<float> input(1, 1);
     audio::Buffer<float> output(1, 1);
     auto output_view = output.view();

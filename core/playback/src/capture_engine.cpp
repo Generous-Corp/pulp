@@ -45,6 +45,15 @@ bool add_storage_bytes(std::uint64_t count, std::uint64_t element_size, std::uin
     return true;
 }
 
+constexpr std::uint64_t kCaptureAllocationOverhead = 4u * sizeof(void*);
+
+bool add_allocation_bytes(std::uint64_t count, std::uint64_t element_size,
+                          std::uint64_t maximum, std::uint64_t& total) noexcept {
+    return count == 0 ||
+           (add_storage_bytes(count, element_size, maximum, total) &&
+            add_storage_bytes(1, kCaptureAllocationOverhead, maximum, total));
+}
+
 } // namespace
 
 bool CaptureEngine::valid_config(const CaptureEngineConfig& config) noexcept {
@@ -67,10 +76,12 @@ bool CaptureEngine::valid_config(const CaptureEngineConfig& config) noexcept {
         config.midi_events_per_take > std::vector<CapturedMidiEvent>{}.max_size())
         return false;
     std::uint64_t storage_bytes = 0;
-    if (!add_storage_bytes(config.tracks.size(), sizeof(TrackRuntime),
-                           config.maximum_preallocated_bytes, storage_bytes) ||
-        !add_storage_bytes(slot_count, sizeof(TakeSlot), config.maximum_preallocated_bytes,
-                           storage_bytes))
+    if (!add_allocation_bytes(config.tracks.size(), sizeof(CaptureTrackConfig),
+                              config.maximum_preallocated_bytes, storage_bytes) ||
+        !add_allocation_bytes(config.tracks.size(), sizeof(TrackRuntime),
+                              config.maximum_preallocated_bytes, storage_bytes) ||
+        !add_allocation_bytes(slot_count, sizeof(TakeSlot), config.maximum_preallocated_bytes,
+                              storage_bytes))
         return false;
     for (const auto& track : config.tracks) {
         if (!track.track_id.valid() || !track.take_lane_id.valid() || track.channel_count == 0)
@@ -88,9 +99,14 @@ bool CaptureEngine::valid_config(const CaptureEngineConfig& config) noexcept {
             return false;
         if (!add_storage_bytes(samples_per_slot * track_slot_count, sizeof(float),
                                config.maximum_preallocated_bytes, storage_bytes) ||
+            !add_storage_bytes(track_slot_count, kCaptureAllocationOverhead,
+                               config.maximum_preallocated_bytes, storage_bytes) ||
             !add_storage_bytes(
                 static_cast<std::uint64_t>(config.midi_events_per_take) * track_slot_count,
-                sizeof(CapturedMidiEvent), config.maximum_preallocated_bytes, storage_bytes))
+                sizeof(CapturedMidiEvent), config.maximum_preallocated_bytes, storage_bytes) ||
+            (config.midi_events_per_take != 0 &&
+             !add_storage_bytes(track_slot_count, kCaptureAllocationOverhead,
+                                config.maximum_preallocated_bytes, storage_bytes)))
             return false;
     }
     return true;
@@ -142,6 +158,21 @@ bool CaptureEngine::prepare(const CaptureEngineConfig& config) {
                                   track.channel_count);
                 slot.midi.reserve(config.midi_events_per_take);
             }
+        }
+        std::uint64_t retained_bytes = 0;
+        if (!add_allocation_bytes(prepared_config.tracks.capacity(), sizeof(CaptureTrackConfig),
+                                  config.maximum_preallocated_bytes, retained_bytes) ||
+            !add_allocation_bytes(track_runtime.capacity(), sizeof(TrackRuntime),
+                                  config.maximum_preallocated_bytes, retained_bytes) ||
+            !add_allocation_bytes(slots.capacity(), sizeof(TakeSlot),
+                                  config.maximum_preallocated_bytes, retained_bytes))
+            return false;
+        for (const auto& slot : slots) {
+            if (!add_allocation_bytes(slot.audio.capacity(), sizeof(float),
+                                      config.maximum_preallocated_bytes, retained_bytes) ||
+                !add_allocation_bytes(slot.midi.capacity(), sizeof(CapturedMidiEvent),
+                                      config.maximum_preallocated_bytes, retained_bytes))
+                return false;
         }
     }
     PULP_CATCH_ALL {
