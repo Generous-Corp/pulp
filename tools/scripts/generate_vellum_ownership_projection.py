@@ -3,8 +3,8 @@
 
 The cut manifest is the only input for candidate/deferred source membership.
 Every manifest blob belongs to exactly one semantic slice. Candidate slices
-contain exact selected files and may contain explicit ``unresolved`` rows, but
-never optional, excluded, or Pulp-specific rows.
+contain exact selected files and only positively transferable rows; unresolved,
+optional, excluded, and Pulp-specific rows remain deferred or Pulp-owned.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ RECORD_PATH_RE = re.compile(
 TRANSFERABLE = frozenset(
     {"framework-core", "authoring-only", "platform-adapter", "test-only"}
 )
-CANDIDATE_ALLOWED = TRANSFERABLE | {"unresolved"}
+CANDIDATE_ALLOWED = TRANSFERABLE
 DEFERRED = frozenset({"optional", "excluded"})
 
 CODE_SUFFIXES = frozenset(
@@ -89,8 +89,12 @@ def semantic_slice(path: str, classification: str, classification_source: str) -
             return "render-skia-dawn-deferred"
         return "render-skia-dawn"
     if path.startswith("core/view/") and _is_capture(path):
+        if classification == "unresolved":
+            return "capture-primitives-deferred"
         return "capture-primitives"
     if path.startswith("core/view/platform/mac/"):
+        if classification == "unresolved":
+            return "macos-shell-deferred"
         return "macos-shell"
     if (
         "/design_" in path
@@ -98,9 +102,14 @@ def semantic_slice(path: str, classification: str, classification_source: str) -
         or path.endswith("/anchor_strategy.cpp")
         or path.startswith("packages/pulp-import-ir/")
     ):
+        if classification == "unresolved":
+            return "design-schema-compiler-deferred"
         return "design-schema-compiler"
     if path.startswith(("core/view/include/", "core/view/src/")):
-        if classification_source == "derived:audio-plugin-neutrality-split":
+        if (
+            classification == "unresolved"
+            or classification_source == "derived:audio-plugin-neutrality-split"
+        ):
             return "retained-ui-kernel-deferred"
         return "retained-ui-kernel"
     if path.startswith(("external/fonts/", "external/nanosvg/")):
@@ -113,6 +122,9 @@ def semantic_slice(path: str, classification: str, classification_source: str) -
 def _candidate_slice(slice_id: str) -> bool:
     return slice_id not in {
         "canvas-kernel-deferred",
+        "capture-primitives-deferred",
+        "design-schema-compiler-deferred",
+        "macos-shell-deferred",
         "render-skia-dawn-deferred",
         "retained-ui-kernel-deferred",
         "legacy-figma-schema",
