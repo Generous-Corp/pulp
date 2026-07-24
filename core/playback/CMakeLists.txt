@@ -1,24 +1,8 @@
-add_library(pulp-playback
-    src/audio_renderer.cpp
-    src/automation_cursor.cpp
-    src/automation_program.cpp
-    src/automation_program_compiler.cpp
-    src/automation_recording.cpp
-    src/capture_engine.cpp
-    src/compile_executor.cpp
-    src/external_sync_output.cpp
-    src/external_sync_timecode.cpp
-    src/midi_capture_materializer.cpp
-    src/note_renderer.cpp
-    src/program.cpp
-    src/program_compiler.cpp
-    src/recording_commit.cpp
-    src/stable_renderer_shell.cpp
-    src/track_automation_compiler.cpp
-    src/track_automation_program.cpp
-    src/track_automation_renderer.cpp
-    src/transport.cpp
-)
+get_filename_component(_PULP_PLAYBACK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+include(PulpPlaybackSources.cmake)
+pulp_resolve_playback_sources("${_PULP_PLAYBACK_ROOT}" _PULP_PLAYBACK_SOURCES)
+
+add_library(pulp-playback ${_PULP_PLAYBACK_SOURCES})
 add_library(pulp::playback ALIAS pulp-playback)
 
 target_compile_features(pulp-playback PUBLIC cxx_std_20)
@@ -49,25 +33,7 @@ endif()
 # curated WAM/WebCLAP closure.
 if(PULP_BUILD_TESTS AND NOT MSVC)
     add_library(timeline-program-threadless-no-exceptions-check OBJECT
-        src/audio_renderer.cpp
-        src/automation_cursor.cpp
-        src/automation_program.cpp
-        src/automation_program_compiler.cpp
-        src/automation_recording.cpp
-        src/capture_engine.cpp
-        src/compile_executor.cpp
-        src/external_sync_output.cpp
-        src/external_sync_timecode.cpp
-        src/midi_capture_materializer.cpp
-        src/note_renderer.cpp
-        src/program.cpp
-        src/program_compiler.cpp
-        src/recording_commit.cpp
-        src/stable_renderer_shell.cpp
-        src/track_automation_compiler.cpp
-        src/track_automation_program.cpp
-        src/track_automation_renderer.cpp
-        src/transport.cpp
+        ${_PULP_PLAYBACK_SOURCES}
     )
     target_compile_features(timeline-program-threadless-no-exceptions-check PRIVATE cxx_std_20)
     target_include_directories(timeline-program-threadless-no-exceptions-check PRIVATE

@@ -160,6 +160,13 @@ class PreparedVariableRateConversion {
         return prepared_bytes_;
     }
 
+    bool matches_source_slice(const std::shared_ptr<const AudioFileData>& source,
+                              std::uint64_t source_start,
+                              std::uint64_t source_frames) const noexcept {
+        return source_ == source && source_start_ == source_start &&
+               source_frames_ == source_frames;
+    }
+
     float read(std::size_t channel, double position,
                double source_frames_per_output_frame) const noexcept {
         if (!source_ || channel >= source_->channels.size() || !std::isfinite(position) ||

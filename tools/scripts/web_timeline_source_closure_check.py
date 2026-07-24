@@ -22,14 +22,16 @@ class Lane:
     cmake_file: str
     source_variable: str
     root_variable: str
+    playback_variable: str
     target: str
 
 
 LANES = {
     "WAM": Lane("tools/cmake/PulpWam.cmake", "_PULP_WAM_CORE_SOURCES",
-                "_PULP_WAM_ROOT", "pulp-wam-dsp"),
+                "_PULP_WAM_ROOT", "_PULP_WAM_PLAYBACK_SOURCES", "pulp-wam-dsp"),
     "WebCLAP": Lane("tools/cmake/PulpWclap.cmake", "_PULP_WCLAP_CORE_SOURCES",
-                    "_PULP_WCLAP_ROOT", "pulp-wclap-dsp"),
+                    "_PULP_WCLAP_ROOT", "_PULP_WCLAP_PLAYBACK_SOURCES",
+                    "pulp-wclap-dsp"),
 }
 
 
@@ -134,6 +136,23 @@ def check_root(root: pathlib.Path) -> tuple[int, list[str]]:
     }
 
     failures: list[str] = []
+    playback_manifest = root / "core/playback/PulpPlaybackSources.cmake"
+    playback_sources: set[str] | None = None
+    if playback_manifest.exists():
+        try:
+            manifest_commands = cmake_commands(
+                playback_manifest.read_text(encoding="utf-8"))
+            manifest_sets = arguments_for(
+                manifest_commands, "set", "_PULP_PLAYBACK_SOURCE_FILES")
+            if len(manifest_sets) == 1:
+                playback_sources = {
+                    f"core/playback/src/{source}"
+                    for source in manifest_sets[0]
+                    if re.fullmatch(r"[^\s/)]+\.cpp", source)
+                }
+        except (OSError, ValueError):
+            playback_sources = None
+
     for lane_name, lane in LANES.items():
         cmake = root / lane.cmake_file
         try:
@@ -154,6 +173,18 @@ def check_root(root: pathlib.Path) -> tuple[int, list[str]]:
             for source in source_sets[0]
             if source.startswith(source_prefix) and source.endswith(".cpp")
         }
+        playback_reference = "${" + lane.playback_variable + "}"
+        if playback_reference in source_sets[0]:
+            resolutions = arguments_for(
+                commands, "pulp_resolve_playback_sources",
+                "${" + lane.root_variable + "}")
+            resolved = any(arguments and arguments[-1] == lane.playback_variable
+                           for arguments in resolutions)
+            if playback_sources is None or not resolved:
+                failures.append(
+                    f"{lane_name}: invalid shared playback source manifest wiring")
+            else:
+                all_listed.update(playback_sources)
         listed = {
             source
             for source in all_listed

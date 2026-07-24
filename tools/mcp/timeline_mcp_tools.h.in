@@ -1,10 +1,22 @@
 #pragma once
 
+#include <array>
 #include <string_view>
 
 namespace pulp_mcp {
 
 inline constexpr std::string_view kTimelineMcpToolsDocument =
     R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_JSON@)PULPTL";
+
+inline constexpr std::string_view kTimelineMcpToolsArray =
+    R"PULPTL(@PULP_TIMELINE_MCP_TOOLS_ARRAY@)PULPTL";
+
+inline constexpr std::array<std::string_view, 5> kTimelineMcpToolNames{
+    "@PULP_TIMELINE_MCP_TOOL_NAME_0@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_1@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_2@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_3@",
+    "@PULP_TIMELINE_MCP_TOOL_NAME_4@",
+};
 
 } // namespace pulp_mcp

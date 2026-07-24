@@ -9,6 +9,7 @@ pulp_add_test_suite(pulp-test-timeline-model
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
+        test_timeline_dawproject_import_runtime.cpp
     LIBRARIES pulp::playback)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
@@ -64,7 +65,9 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-audio-renderer
-    SOURCES test_playback_audio_renderer.cpp test_playback_track_freeze.cpp
+    SOURCES test_playback_audio_renderer.cpp
+        test_playback_audio_renderer_conversion.cpp
+        test_playback_track_freeze.cpp
         harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
         pulp::runtime)
@@ -152,6 +155,7 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
         test_timeline_graph_binding_publication.cpp
+        test_host_transport_projector.cpp
         test_sequence_processor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>

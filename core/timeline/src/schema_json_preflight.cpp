@@ -1,12 +1,13 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "bounded_increment.hpp"
+#include "json_span_reader.hpp"
 #include "schema_json_validation.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
-#include <charconv>
 #include <limits>
 
 namespace pulp::timeline {
@@ -24,17 +25,18 @@ class StructuralScanner {
   public:
     StructuralScanner(std::string_view source, const DecodeLimits& limits,
                       const SchemaRegistry* registry = nullptr)
-        : source_(source), limits_(limits), registry_(registry) {}
+        : source_(source), limits_(limits), registry_(registry), reader_(source, limits) {}
 
     runtime::Result<StructuralPreflightSuccess, PersistenceError> run() {
-        if (!scan()) return failed();
+        if (!scan())
+            return failed();
         return runtime::Result<StructuralPreflightSuccess, PersistenceError>(
             runtime::Ok(StructuralPreflightSuccess{}));
     }
 
     runtime::Result<ProjectSnapshotSummary, PersistenceError> peek() {
-        if (!scan()) return runtime::Result<ProjectSnapshotSummary, PersistenceError>(
-            runtime::Err(error_));
+        if (!scan())
+            return runtime::Result<ProjectSnapshotSummary, PersistenceError>(runtime::Err(error_));
         return runtime::Result<ProjectSnapshotSummary, PersistenceError>(
             runtime::Ok(std::move(summary_)));
     }
@@ -43,15 +45,20 @@ class StructuralScanner {
     bool scan() {
         std::size_t position = 0;
         Span root;
-        if (!skip_value(position, 0, root)) return refine_json_error();
+        if (!skip_value(position, 0, root))
+            return refine_json_error();
         skip_space(position);
         if (position != source_.size()) {
-            set_error(PersistenceErrorCode::InvalidJson, position); return refine_json_error();
+            set_error(PersistenceErrorCode::InvalidJson, position);
+            return refine_json_error();
         }
-        if (!walk_project(root)) return false;
+        if (!walk_project(root))
+            return false;
         if (registry_)
             if (const auto error = detail::validate_json_syntax_and_limits(source_, limits_)) {
-                error_ = *error; has_error_ = true; return false;
+                error_ = *error;
+                has_error_ = true;
+                return false;
             }
         return true;
     }
@@ -63,10 +70,7 @@ class StructuralScanner {
         return false;
     }
 
-    struct Span {
-        std::size_t begin = 0;
-        std::size_t end = 0;
-    };
+    using Span = detail::JsonSpan;
 
     struct EnvelopeView {
         std::string type;
@@ -78,21 +82,12 @@ class StructuralScanner {
     std::string_view source_;
     const DecodeLimits& limits_;
     const SchemaRegistry* registry_;
+    detail::JsonSpanReader reader_;
     PersistenceError error_;
     bool has_error_ = false;
-    std::size_t assets_ = 0;
+    ProjectSnapshotCounts counts_;
     std::size_t audio_loop_points_ = 0;
     std::size_t audio_loop_tags_ = 0;
-    std::size_t sequences_ = 0;
-    std::size_t tracks_ = 0;
-    std::size_t clips_ = 0;
-    std::size_t notes_ = 0;
-    std::size_t device_placements_ = 0;
-    std::size_t automation_lanes_ = 0;
-    std::size_t automation_points_ = 0;
-    std::size_t take_lanes_ = 0;
-    std::size_t takes_ = 0;
-    std::size_t take_comp_segments_ = 0;
     std::size_t locators_ = 0;
     std::size_t representations_ = 0;
     ProjectSnapshotSummary summary_;
@@ -103,284 +98,38 @@ class StructuralScanner {
 
     void set_error(PersistenceErrorCode code, std::size_t offset, std::uint64_t actual = 0,
                    std::uint64_t limit = 0, std::string path = {}) {
-        if (has_error_) return;
+        if (has_error_)
+            return;
         has_error_ = true;
         error_ = PersistenceError{code, offset, actual, limit, std::move(path)};
     }
 
-    void skip_space(std::size_t& position) const noexcept {
-        while (position < source_.size()) {
-            const auto value = source_[position];
-            if (value != ' ' && value != '\t' && value != '\r' && value != '\n')
-                break;
-            ++position;
+    bool adopt_reader_error() {
+        if (reader_.has_error()) {
+            const auto& error = reader_.error();
+            set_error(error.code, error.byte_offset, error.actual, error.limit, error.path);
         }
-    }
-
-    static int hex_digit(char value) noexcept {
-        if (value >= '0' && value <= '9')
-            return value - '0';
-        if (value >= 'a' && value <= 'f')
-            return value - 'a' + 10;
-        if (value >= 'A' && value <= 'F')
-            return value - 'A' + 10;
-        return -1;
-    }
-
-    bool scan_string(std::size_t& position, std::string* captured = nullptr,
-                     std::size_t capture_limit = 128) {
-        if (position >= source_.size() || source_[position] != '"') {
-            set_error(PersistenceErrorCode::InvalidJson, position);
-            return false;
-        }
-        ++position;
-        while (position < source_.size()) {
-            const auto byte = static_cast<unsigned char>(source_[position++]);
-            if (byte == '"')
-                return true;
-            if (byte < 0x20) {
-                set_error(PersistenceErrorCode::InvalidJson, position - 1);
-                return false;
-            }
-            if (byte != '\\') {
-                if (captured && captured->size() < capture_limit)
-                    captured->push_back(static_cast<char>(byte));
-                continue;
-            }
-            if (position >= source_.size()) {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-            const auto escape = source_[position++];
-            char decoded = '\0';
-            bool has_decoded_byte = true;
-            switch (escape) {
-            case '"':
-                decoded = '"';
-                break;
-            case '\\':
-                decoded = '\\';
-                break;
-            case '/':
-                decoded = '/';
-                break;
-            case 'b':
-                decoded = '\b';
-                break;
-            case 'f':
-                decoded = '\f';
-                break;
-            case 'n':
-                decoded = '\n';
-                break;
-            case 'r':
-                decoded = '\r';
-                break;
-            case 't':
-                decoded = '\t';
-                break;
-            case 'u': {
-                if (source_.size() - position < 4) {
-                    set_error(PersistenceErrorCode::InvalidJson, position);
-                    return false;
-                }
-                std::uint32_t codepoint = 0;
-                for (int index = 0; index < 4; ++index) {
-                    const auto digit = hex_digit(source_[position++]);
-                    if (digit < 0) {
-                        set_error(PersistenceErrorCode::InvalidJson, position - 1);
-                        return false;
-                    }
-                    codepoint = codepoint * 16 + static_cast<std::uint32_t>(digit);
-                }
-                if (codepoint <= 0x7f)
-                    decoded = static_cast<char>(codepoint);
-                else {
-                    has_decoded_byte = false;
-                    if (captured)
-                        captured->resize(capture_limit);
-                }
-                break;
-            }
-            default:
-                set_error(PersistenceErrorCode::InvalidJson, position - 1);
-                return false;
-            }
-            if (captured && has_decoded_byte && captured->size() < capture_limit)
-                captured->push_back(decoded);
-        }
-        set_error(PersistenceErrorCode::InvalidJson, position);
         return false;
     }
 
+    void skip_space(std::size_t& position) const noexcept {
+        reader_.skip_space(position);
+    }
+    bool scan_string(std::size_t& position, std::string* captured = nullptr,
+                     std::size_t capture_limit = 128) {
+        return reader_.scan_string(position, captured, capture_limit) || adopt_reader_error();
+    }
     bool skip_value(std::size_t& position, std::size_t depth, Span& span) {
-        skip_space(position);
-        if (depth > limits_.max_depth) {
-            set_error(PersistenceErrorCode::LimitExceeded, position, depth, limits_.max_depth);
-            return false;
-        }
-        span.begin = position;
-        if (position >= source_.size()) {
-            set_error(PersistenceErrorCode::InvalidJson, position);
-            return false;
-        }
-        const auto first = source_[position];
-        if (first == '"') {
-            if (!scan_string(position))
-                return false;
-        } else if (first == '{') {
-            ++position;
-            skip_space(position);
-            if (position < source_.size() && source_[position] == '}') { ++position; }
-            else {
-                for (;;) {
-                    skip_space(position);
-                    if (!scan_string(position))
-                        return false;
-                    skip_space(position);
-                    if (position >= source_.size() || source_[position++] != ':') {
-                        set_error(PersistenceErrorCode::InvalidJson, position);
-                        return false;
-                    }
-                    Span child;
-                    if (!skip_value(position, depth + 1, child))
-                        return false;
-                    skip_space(position);
-                    if (position < source_.size() && source_[position] == '}') {
-                        ++position;
-                        break;
-                    }
-                    if (position >= source_.size() || source_[position++] != ',') {
-                        set_error(PersistenceErrorCode::InvalidJson, position);
-                        return false;
-                    }
-                }
-            }
-        } else if (first == '[') {
-            ++position;
-            skip_space(position);
-            if (position < source_.size() && source_[position] == ']') { ++position; }
-            else {
-                for (;;) {
-                    Span child;
-                    if (!skip_value(position, depth + 1, child))
-                        return false;
-                    skip_space(position);
-                    if (position < source_.size() && source_[position] == ']') {
-                        ++position;
-                        break;
-                    }
-                    if (position >= source_.size() || source_[position++] != ',') {
-                        set_error(PersistenceErrorCode::InvalidJson, position);
-                        return false;
-                    }
-                }
-            }
-        } else if (source_.substr(position, 4) == "true" || source_.substr(position, 4) == "null") {
-            position += 4;
-        } else if (source_.substr(position, 5) == "false") {
-            position += 5;
-        } else {
-            if (first == '-')
-                ++position;
-            if (position >= source_.size()) {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-            if (source_[position] == '0') {
-                ++position;
-            } else if (source_[position] >= '1' && source_[position] <= '9') {
-                while (position < source_.size() && source_[position] >= '0' &&
-                       source_[position] <= '9')
-                    ++position;
-            } else {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-            if (position < source_.size() && source_[position] == '.') {
-                ++position;
-                if (position >= source_.size() || source_[position] < '0' ||
-                    source_[position] > '9') {
-                    set_error(PersistenceErrorCode::InvalidJson, position);
-                    return false;
-                }
-                while (position < source_.size() && source_[position] >= '0' &&
-                       source_[position] <= '9')
-                    ++position;
-            }
-            if (position < source_.size() &&
-                (source_[position] == 'e' || source_[position] == 'E')) {
-                ++position;
-                if (position < source_.size() &&
-                    (source_[position] == '+' || source_[position] == '-'))
-                    ++position;
-                if (position >= source_.size() || source_[position] < '0' ||
-                    source_[position] > '9') {
-                    set_error(PersistenceErrorCode::InvalidJson, position);
-                    return false;
-                }
-                while (position < source_.size() && source_[position] >= '0' &&
-                       source_[position] <= '9')
-                    ++position;
-            }
-        }
-        span.end = position;
-        return true;
+        return reader_.skip_value(position, depth, span) || adopt_reader_error();
     }
-
     bool member(Span object, std::string_view wanted, Span& result, bool& found) {
-        found = false;
-        std::size_t position = object.begin;
-        skip_space(position);
-        if (position >= object.end || source_[position++] != '{')
-            return true;
-        skip_space(position);
-        if (position < object.end && source_[position] == '}')
-            return true;
-        for (;;) {
-            skip_space(position);
-            std::string key;
-            if (!scan_string(position, &key))
-                return false;
-            skip_space(position);
-            if (position >= object.end || source_[position++] != ':') {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-            Span value;
-            if (!skip_value(position, 1, value))
-                return false;
-            if (key == wanted) {
-                if (found) {
-                    set_error(PersistenceErrorCode::DuplicateKey, object.begin);
-                    return false;
-                }
-                found = true;
-                result = value;
-            }
-            skip_space(position);
-            if (position < object.end && source_[position] == '}')
-                break;
-            if (position >= object.end || source_[position++] != ',') {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-        }
-        return true;
+        return reader_.member(object, wanted, result, found) || adopt_reader_error();
     }
-
     bool string_value(Span span, std::string& value) {
-        value.clear();
-        std::size_t position = span.begin;
-        if (!scan_string(position, &value))
-            return false;
-        return position == span.end;
+        return reader_.string_value(span, value) || adopt_reader_error();
     }
-
     bool u32_value(Span span, std::uint32_t& value) const noexcept {
-        const auto raw = source_.substr(span.begin, span.end - span.begin);
-        const auto parsed = std::from_chars(raw.data(), raw.data() + raw.size(), value);
-        return parsed.ec == std::errc{} && parsed.ptr == raw.data() + raw.size();
+        return reader_.u32_value(span, value);
     }
 
     bool exact_envelope_keys(Span object, bool& exact) {
@@ -442,9 +191,12 @@ class StructuralScanner {
             !member(value, "data", data, has_data))
             return false;
         valid_shape = false;
-        if (!has_type) return true;
-        if (!string_value(type_span, type)) return false;
-        if (!has_version || !has_data) return true;
+        if (!has_type)
+            return true;
+        if (!string_value(type_span, type))
+            return false;
+        if (!has_version || !has_data)
+            return true;
         valid_shape = exact_keys && u32_value(version_span, version) && data.begin < data.end &&
                       source_[data.begin] == '{';
         return true;
@@ -457,7 +209,8 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, offset, 0, 0, path);
             return false;
         }
-        if (version >= minimum_version && version <= maximum_version) return true;
+        if (version >= minimum_version && version <= maximum_version)
+            return true;
         set_error(PersistenceErrorCode::UnsupportedSchemaVersion, offset, version, maximum_version,
                   path);
         return false;
@@ -515,11 +268,12 @@ class StructuralScanner {
         std::size_t index = 0;
         for (;;) {
             skip_space(position);
-            if (count >= maximum) {
-                set_error(PersistenceErrorCode::LimitExceeded, position, count + 1, maximum, path);
+            const auto increment = detail::bounded_increment(count, maximum);
+            if (!increment) {
+                set_error(PersistenceErrorCode::LimitExceeded, position, increment.actual, maximum,
+                          path);
                 return false;
             }
-            ++count;
             Span element;
             if (!skip_value(position, 1, element) || !visit(element, index))
                 return false;
@@ -545,7 +299,8 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, "", value.begin)) return false;
+        if (!require_structural_shape(valid_shape, version, "", value.begin))
+            return false;
         Span id;
         Span name;
         Span next;
@@ -576,78 +331,38 @@ class StructuralScanner {
             return false;
         }
         if (has_assets &&
-            !governed_array(assets, assets_, limits_.max_assets, "/data/assets",
+            !governed_array(assets, counts_.assets, limits_.max_assets, "/data/assets",
                             [&](Span element, std::size_t index) {
                                 return walk_asset(element, "/data/assets/" + std::to_string(index));
                             }))
             return false;
         if (has_sequences &&
-            !governed_array(sequences, sequences_, limits_.max_sequences, "/data/sequences",
+            !governed_array(sequences, counts_.sequences, limits_.max_sequences, "/data/sequences",
                             [&](Span element, std::size_t index) {
                                 return walk_sequence(element,
                                                      "/data/sequences/" + std::to_string(index));
                             }))
             return false;
-        if (!registry_) return true;
+        if (!registry_)
+            return true;
 
-        auto parse_scalar = [&](Span span, std::string path)
-            -> runtime::Result<std::shared_ptr<const ParsedJson>, PersistenceError> {
-            auto parsed = parse_json(source_.substr(span.begin, span.end - span.begin), limits_);
-            if (!parsed) {
-                auto error = parsed.error();
-                error.byte_offset += span.begin;
-                error.path = std::move(path);
-                return runtime::Err(std::move(error));
-            }
-            return parsed;
-        };
-        auto parsed_id = parse_scalar(id, "/data/id");
-        auto parsed_name = parse_scalar(name, "/data/name");
-        auto parsed_next = parse_scalar(next, "/data/next_item_id");
-        auto parsed_root = parse_scalar(root, "/data/root_sequence_id");
-        if (!parsed_id || !parsed_name || !parsed_next || !parsed_root) {
-            const auto& error = !parsed_id     ? parsed_id.error()
-                                : !parsed_name ? parsed_name.error()
-                                : !parsed_next ? parsed_next.error()
-                                               : parsed_root.error();
-            set_error(error.code, error.byte_offset, error.actual, error.limit, error.path);
-            return false;
-        }
-        auto decoded_id = parse_canonical_u64_string(parsed_id.value()->root(), "/data/id");
-        auto decoded_next =
-            parse_canonical_u64_string(parsed_next.value()->root(), "/data/next_item_id");
-        auto decoded_root =
-            parse_canonical_u64_string(parsed_root.value()->root(), "/data/root_sequence_id");
-        if (!decoded_id || !decoded_next || !decoded_root ||
-            parsed_name.value()->root().kind != JsonValue::Kind::String) {
-            const auto absolute = [](PersistenceError error, Span span) {
-                error.byte_offset += span.begin; return error;
-            };
-            const PersistenceError error =
-                !decoded_id     ? absolute(decoded_id.error(), id)
-                : !decoded_next ? absolute(decoded_next.error(), next)
-                : !decoded_root ? absolute(decoded_root.error(), root)
-                                : PersistenceError{PersistenceErrorCode::UnexpectedType, name.begin,
-                                                   0, 0, "/data/name"};
-            set_error(error.code, error.byte_offset, error.actual, error.limit, error.path);
+        std::uint64_t decoded_id = 0;
+        std::uint64_t decoded_next = 0;
+        std::uint64_t decoded_root = 0;
+        std::string decoded_name;
+        if (!reader_.canonical_u64(id, decoded_id, "/data/id") ||
+            !reader_.decoded_string(name, decoded_name, "/data/name") ||
+            !reader_.canonical_u64(next, decoded_next, "/data/next_item_id") ||
+            !reader_.canonical_u64(root, decoded_root, "/data/root_sequence_id")) {
+            adopt_reader_error();
             return false;
         }
         summary_.schema_version = version;
-        summary_.project_id = ItemId{decoded_id.value()};
-        summary_.name = parsed_name.value()->root().scalar;
-        summary_.next_item_id = decoded_next.value();
-        summary_.root_sequence_id = ItemId{decoded_root.value()};
-        summary_.counts.assets = assets_;
-        summary_.counts.sequences = sequences_;
-        summary_.counts.tracks = tracks_;
-        summary_.counts.clips = clips_;
-        summary_.counts.notes = notes_;
-        summary_.counts.device_placements = device_placements_;
-        summary_.counts.automation_lanes = automation_lanes_;
-        summary_.counts.automation_points = automation_points_;
-        summary_.counts.take_lanes = take_lanes_;
-        summary_.counts.takes = takes_;
-        summary_.counts.take_comp_segments = take_comp_segments_;
+        summary_.project_id = ItemId{decoded_id};
+        summary_.name = std::move(decoded_name);
+        summary_.next_item_id = decoded_next;
+        summary_.root_sequence_id = ItemId{decoded_root};
+        summary_.counts = counts_;
         return true;
     }
 
@@ -691,11 +406,10 @@ class StructuralScanner {
             return false;
         if (has_representations &&
             !governed_array(representations, representations_, limits_.max_representations,
-                            path + "/data/representations",
-                            [&](Span element, std::size_t index) {
-                                return walk_representation(
-                                    element,
-                                    path + "/data/representations/" + std::to_string(index));
+                            path + "/data/representations", [&](Span element, std::size_t index) {
+                                return walk_representation(element, path +
+                                                                        "/data/representations/" +
+                                                                        std::to_string(index));
                             }))
             return false;
         Span loop_info;
@@ -789,7 +503,7 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
-        return governed_array(tracks, tracks_, limits_.max_tracks, path + "/data/tracks",
+        return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
                                                     path + "/data/tracks/" + std::to_string(index));
@@ -871,14 +585,14 @@ class StructuralScanner {
              !require_member(freeze, "sample_rate", ObjectShape, data_path + "/freeze") ||
              !require_member(freeze, "source_start", StringShape, data_path + "/freeze")))
             return false;
-        if (!governed_array(clips, clips_, limits_.max_clips, path + "/data/clips",
+        if (!governed_array(clips, counts_.clips, limits_.max_clips, path + "/data/clips",
                             [&](Span element, std::size_t index) {
                                 return walk_clip(element,
                                                  path + "/data/clips/" + std::to_string(index));
                             }))
             return false;
         if (has_automation &&
-            !governed_array(automation, automation_lanes_, limits_.max_automation_lanes,
+            !governed_array(automation, counts_.automation_lanes, limits_.max_automation_lanes,
                             path + "/data/automation_lanes", [&](Span element, std::size_t index) {
                                 return walk_automation_lane(element, path +
                                                                          "/data/automation_lanes/" +
@@ -886,18 +600,18 @@ class StructuralScanner {
                             }))
             return false;
         if (has_devices &&
-            !governed_array(devices, device_placements_, limits_.max_device_placements,
+            !governed_array(devices, counts_.device_placements, limits_.max_device_placements,
                             path + "/data/device_chain", [&](Span element, std::size_t index) {
                                 return walk_device_placement(element, path + "/data/device_chain/" +
                                                                           std::to_string(index));
                             }))
             return false;
         return !has_take_lanes ||
-               governed_array(take_lanes, take_lanes_, limits_.max_take_lanes,
-                               path + "/data/take_lanes", [&](Span element, std::size_t index) {
-                                   return walk_take_lane(element, path + "/data/take_lanes/" +
-                                                                      std::to_string(index));
-                               });
+               governed_array(take_lanes, counts_.take_lanes, limits_.max_take_lanes,
+                              path + "/data/take_lanes", [&](Span element, std::size_t index) {
+                                  return walk_take_lane(element, path + "/data/take_lanes/" +
+                                                                     std::to_string(index));
+                              });
     }
 
     bool walk_take_lane(Span value, const std::string& path) {
@@ -922,7 +636,7 @@ class StructuralScanner {
         bool has_takes = false;
         if (!member(data, "takes", takes, has_takes) || !has_takes)
             return false;
-        if (!governed_array(takes, takes_, limits_.max_takes, data_path + "/takes",
+        if (!governed_array(takes, counts_.takes, limits_.max_takes, data_path + "/takes",
                             [&](Span element, std::size_t index) {
                                 return walk_take(element,
                                                  data_path + "/takes/" + std::to_string(index));
@@ -939,7 +653,7 @@ class StructuralScanner {
         }
         return !has_comp ||
                governed_array(
-                   comp, take_comp_segments_, limits_.max_take_comp_segments,
+                   comp, counts_.take_comp_segments, limits_.max_take_comp_segments,
                    data_path + "/comp_segments", [&](Span segment, std::size_t index) {
                        const auto segment_path =
                            data_path + "/comp_segments/" + std::to_string(index);
@@ -999,8 +713,8 @@ class StructuralScanner {
             !member(data, "target", target, has_target) || !has_points || !has_target)
             return false;
         if (!governed_array(
-                points, automation_points_, limits_.max_automation_points, data_path + "/points",
-                [&](Span point, std::size_t index) {
+                points, counts_.automation_points, limits_.max_automation_points,
+                data_path + "/points", [&](Span point, std::size_t index) {
                     const auto point_path = data_path + "/points/" + std::to_string(index);
                     return require_member(point, "curvature_bits", StringShape, point_path) &&
                            require_member(point, "id", StringShape, point_path) &&
@@ -1108,7 +822,7 @@ class StructuralScanner {
             return false;
         }
         return governed_array(
-            notes, notes_, limits_.max_notes, path + "/data/content/data/notes",
+            notes, counts_.notes, limits_.max_notes, path + "/data/content/data/notes",
             [&](Span note, std::size_t index) {
                 const auto note_path = path + "/data/content/data/notes/" + std::to_string(index);
                 if (!has_shape(note, ObjectShape)) {
@@ -1129,8 +843,8 @@ class StructuralScanner {
 runtime::Result<StructuralPreflightSuccess, PersistenceError>
 preflight_timeline_structure(std::string_view json, const DecodeLimits& limits) {
     if (json.size() > limits.max_input_bytes)
-        return fail<StructuralPreflightSuccess>(
-            PersistenceErrorCode::LimitExceeded, 0, json.size(), limits.max_input_bytes);
+        return fail<StructuralPreflightSuccess>(PersistenceErrorCode::LimitExceeded, 0, json.size(),
+                                                limits.max_input_bytes);
     return StructuralScanner(json, limits).run();
 }
 runtime::Result<ProjectSnapshotSummary, PersistenceError>
@@ -1139,8 +853,8 @@ peek_project_summary(std::string_view json, const SchemaRegistry& registry,
     if (const auto invalid = detail::validate_structural_registry(registry))
         return fail<ProjectSnapshotSummary>(*invalid, 0, 0, 0, "/");
     if (json.size() > limits.max_input_bytes)
-        return fail<ProjectSnapshotSummary>(
-            PersistenceErrorCode::LimitExceeded, 0, json.size(), limits.max_input_bytes);
+        return fail<ProjectSnapshotSummary>(PersistenceErrorCode::LimitExceeded, 0, json.size(),
+                                            limits.max_input_bytes);
     return StructuralScanner(json, limits, &registry).peek();
 }
 } // namespace pulp::timeline

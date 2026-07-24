@@ -70,6 +70,34 @@ class SourceClosureTests(unittest.TestCase):
     def test_valid_fixture_passes(self) -> None:
         self.assertEqual(self.check(), [])
 
+    def test_shared_playback_manifest_passes_and_remains_complete(self) -> None:
+        manifest = self.root / "core" / "playback" / "PulpPlaybackSources.cmake"
+        manifest.write_text(
+            "set(_PULP_PLAYBACK_SOURCE_FILES\n    transport.cpp\n)\n",
+            encoding="utf-8")
+        for filename, prefix in (("PulpWam.cmake", "WAM"),
+                                 ("PulpWclap.cmake", "WCLAP")):
+            root = f"_PULP_{prefix}_ROOT"
+            variable = f"_PULP_{prefix}_PLAYBACK_SOURCES"
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"set(_PULP_{prefix}_CORE_SOURCES\n",
+                f'pulp_resolve_playback_sources("${{{root}}}" {variable})\n'
+                f"set(_PULP_{prefix}_CORE_SOURCES\n")
+            self.mutate(
+                f"tools/cmake/{filename}",
+                f"    ${{{root}}}/core/playback/src/transport.cpp\n",
+                f"    ${{{variable}}}\n")
+        self.assertEqual(self.check(), [])
+
+        manifest.write_text(
+            "set(_PULP_PLAYBACK_SOURCE_FILES\n)\n", encoding="utf-8")
+        failures = self.check()
+        self.assertEqual(
+            sum("missing core/playback/src/transport.cpp" in failure
+                for failure in failures),
+            2)
+
     def test_identical_omission_in_both_lists_fails(self) -> None:
         for filename in ("PulpWam.cmake", "PulpWclap.cmake"):
             self.mutate(f"tools/cmake/{filename}",

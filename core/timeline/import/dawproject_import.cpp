@@ -1,36 +1,30 @@
 #include <pulp/timeline/dawproject_import.hpp>
 
-#include <pulp/audio/wav_decoder.hpp>
-#include <pulp/runtime/crypto.hpp>
+#include "dawproject_import_support.hpp"
+#include "dawproject_media_sealer.hpp"
+
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 
 #include <pugixml.hpp>
 
-#include <cctype>
-#include <cerrno>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
-#include <clocale>
-#else
-#include <locale.h>
-#endif
-
 namespace pulp::timeline {
 namespace {
 
+using detail::has_attribute;
+using detail::parse_number;
+using detail::require_double;
+using detail::require_int;
 using runtime::Err;
 using runtime::Ok;
 
@@ -39,32 +33,7 @@ using ImportResult = runtime::Result<Project, DawProjectImportError>;
 constexpr double kPpq = static_cast<double>(timebase::kTicksPerQuarter);
 
 DawProjectImportError err(DawProjectImportErrorCode code, std::string message) {
-    return DawProjectImportError{code, std::move(message), {}};
-}
-
-bool package_path_is_lexically_safe(std::string_view path) {
-    if (path.empty() || path.front() == '/' || path.front() == '\\')
-        return false;
-    if (path.size() >= 2 && std::isalpha(static_cast<unsigned char>(path.front())) &&
-        path[1] == ':')
-        return false;
-    std::size_t component_begin = 0;
-    for (std::size_t index = 0; index <= path.size(); ++index) {
-        if (index != path.size() && path[index] != '/' && path[index] != '\\')
-            continue;
-        if (path.substr(component_begin, index - component_begin) == "..")
-            return false;
-        component_begin = index + 1;
-    }
-    return true;
-}
-
-bool declared_duration_matches_frames(long double declared_frames,
-                                      std::uint64_t actual_frames) noexcept {
-    if (!std::isfinite(declared_frames) || actual_frames == 0)
-        return false;
-    const auto actual = static_cast<long double>(actual_frames);
-    return declared_frames >= actual - 0.5L && declared_frames < actual + 0.5L;
+    return detail::import_error(code, std::move(message));
 }
 
 std::optional<std::int64_t> beats_to_ticks(double beats) noexcept {
@@ -111,7 +80,7 @@ struct IdSource {
 class Importer {
   public:
     Importer(DawProjectMediaResolver media_resolver, const DawProjectImportLimits& limits)
-        : media_resolver_(std::move(media_resolver)), limits_(limits) {}
+        : media_(std::move(media_resolver), limits, ids_.next), limits_(limits) {}
     ImportResult run(const pugi::xml_node& project);
 
   private:
@@ -124,13 +93,8 @@ class Importer {
     std::optional<DawProjectImportError> read_notes(const pugi::xml_node& notes, ClipContent& out);
     std::optional<DawProjectImportError> read_audio(const pugi::xml_node& audio, ClipContent& out);
 
-    // Resolve a MediaAsset for an <Audio>, deduplicating by sealed content
-    // identity while retaining every package path as a resolution hint.
-    std::optional<DawProjectImportError> resolve_asset(const pugi::xml_node& audio,
-                                                       ItemId& asset_id_out,
-                                                       std::uint64_t& frame_count_out);
-
     IdSource ids_;
+    detail::DawProjectMediaSealer media_;
     double tempo_bpm_ = 120.0;
     std::int32_t meter_num_ = 4;
     std::int32_t meter_den_ = 4;
@@ -146,77 +110,11 @@ class Importer {
     std::unordered_map<std::string, ItemId> track_by_daw_id_;
     std::unordered_map<std::uint64_t, std::vector<Clip>> clips_by_track_;
 
-    std::unordered_map<std::string, std::string> hash_by_path_;
-    std::unordered_map<std::string, ItemId> asset_by_hash_;
-    std::vector<MediaAsset> assets_;
     std::size_t clip_count_ = 0;
     std::size_t note_count_ = 0;
-    std::size_t media_resolver_calls_ = 0;
-    std::uint64_t resolved_media_bytes_ = 0;
     std::int64_t max_end_tick_ = 0;
-    DawProjectMediaResolver media_resolver_;
     DawProjectImportLimits limits_;
 };
-
-// --- attribute helpers ------------------------------------------------------
-
-bool has_attr(const pugi::xml_node& node, const char* name) {
-    return !node.attribute(name).empty();
-}
-
-template <typename Value> bool parse_number(const pugi::xml_attribute& attribute, Value& out) {
-    const std::string_view text = attribute.as_string();
-    if constexpr (std::is_floating_point_v<Value>) {
-        const std::string buffer(text);
-        errno = 0;
-        char* end = nullptr;
-        double value = 0.0;
-#if defined(_WIN32)
-        static _locale_t c_locale = ::_create_locale(LC_ALL, "C");
-        if (c_locale == nullptr)
-            return false;
-        value = ::_strtod_l(buffer.c_str(), &end, c_locale);
-#else
-        static ::locale_t c_locale = ::newlocale(LC_ALL_MASK, "C", static_cast<::locale_t>(0));
-        if (c_locale == static_cast<::locale_t>(0))
-            return false;
-        const ::locale_t previous = ::uselocale(c_locale);
-        value = std::strtod(buffer.c_str(), &end);
-        ::uselocale(previous);
-#endif
-        if (errno == ERANGE || end == buffer.c_str() || end != buffer.c_str() + buffer.size())
-            return false;
-        out = value;
-        return true;
-    } else {
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), out);
-        return error == std::errc{} && end == text.data() + text.size();
-    }
-}
-
-std::optional<DawProjectImportError> require_double(const pugi::xml_node& node, const char* name,
-                                                    const char* context, double& out) {
-    auto attr = node.attribute(name);
-    if (attr.empty())
-        return err(DawProjectImportErrorCode::MissingAttribute,
-                   std::string(context) + " is missing required attribute '" + name + "'");
-    if (!parse_number(attr, out))
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   std::string(context) + " has invalid numeric attribute '" + name + "'");
-    return std::nullopt;
-}
-
-std::optional<DawProjectImportError> require_int(const pugi::xml_node& node, const char* name,
-                                                 const char* context, long long& out) {
-    auto attr = node.attribute(name);
-    if (attr.empty())
-        return err(DawProjectImportErrorCode::MissingAttribute,
-                   std::string(context) + " is missing required attribute '" + name + "'");
-    if (!parse_number(attr, out))
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   std::string(context) + " has invalid integer attribute '" + name + "'");
-    return std::nullopt;
-}
 
 std::optional<DawProjectImportError> reject_unsupported_play_start(const pugi::xml_node& node,
                                                                    const char* context) {
@@ -363,7 +261,8 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
 
         // The DAWproject display name is the human label; fall back to the id
         // when an exporter omits it.
-        std::string name = has_attr(track, "name") ? track.attribute("name").as_string() : daw_id;
+        std::string name =
+            has_attribute(track, "name") ? track.attribute("name").as_string() : daw_id;
 
         ItemId id = ids_.take();
         track_by_daw_id_.emplace(daw_id, id);
@@ -605,139 +504,6 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
     return std::nullopt;
 }
 
-std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_node& audio,
-                                                             ItemId& asset_id_out,
-                                                             std::uint64_t& frame_count_out) {
-    auto file = audio.child("File");
-    if (!file)
-        return err(DawProjectImportErrorCode::UnsupportedFeature,
-                   "<Audio> without a <File> reference is not supported");
-    auto path_attr = file.attribute("path");
-    if (path_attr.empty())
-        return err(DawProjectImportErrorCode::MissingAttribute,
-                   "<File> is missing required attribute 'path'");
-    const std::string_view path_view = path_attr.as_string();
-    if (path_view.empty())
-        return err(DawProjectImportErrorCode::InvalidValue, "<File path> must not be empty");
-    if (path_view.size() > limits_.max_package_path_bytes)
-        return err(DawProjectImportErrorCode::LimitExceeded,
-                   "<File path> exceeds max_package_path_bytes");
-    if (!package_path_is_lexically_safe(path_view))
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "<File path> must be a safe package-relative path");
-    std::string path(path_view);
-
-    double duration_sec = 0.0, sample_rate = 0.0;
-    std::optional<long long> declared_channels;
-    if (auto e = require_double(audio, "duration", "<Audio>", duration_sec))
-        return e;
-    if (auto e = require_double(audio, "sampleRate", "<Audio>", sample_rate))
-        return e;
-    if (!std::isfinite(duration_sec) || !(duration_sec > 0.0))
-        return err(DawProjectImportErrorCode::InvalidValue, "<Audio duration> must be positive");
-    if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
-        return err(DawProjectImportErrorCode::InvalidValue, "<Audio sampleRate> must be positive");
-    const auto channels_attribute = audio.attribute("channels");
-    if (!channels_attribute.empty()) {
-        long long channels = 0;
-        if (!parse_number(channels_attribute, channels) || channels <= 0 ||
-            channels > std::numeric_limits<std::uint16_t>::max())
-            return err(DawProjectImportErrorCode::InvalidValue,
-                       "<Audio channels> must be an integer in the supported channel domain");
-        declared_channels = channels;
-    }
-    const auto declared_frames =
-        static_cast<long double>(duration_sec) * static_cast<long double>(sample_rate);
-    if (!std::isfinite(declared_frames) || declared_frames <= 0.0L)
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "<Audio> duration exceeds the supported frame domain");
-
-    if (!media_resolver_)
-        return err(DawProjectImportErrorCode::MissingMediaBytes,
-                   "media bytes are required to seal '" + path + "'");
-    if (media_resolver_calls_ >= limits_.max_media_resolver_calls)
-        return err(DawProjectImportErrorCode::LimitExceeded,
-                   "media resolver call count exceeds max_media_resolver_calls");
-    ++media_resolver_calls_;
-    const auto bytes = media_resolver_(path);
-    if (!bytes)
-        return err(DawProjectImportErrorCode::MissingMediaBytes,
-                   "media resolver did not provide '" + path + "'");
-    const auto byte_count = static_cast<std::uint64_t>(bytes->size());
-    if (byte_count > limits_.max_media_bytes_per_resolver_call)
-        return err(DawProjectImportErrorCode::LimitExceeded,
-                   "resolved media '" + path + "' exceeds max_media_bytes_per_resolver_call");
-    if (resolved_media_bytes_ > limits_.max_total_media_bytes ||
-        byte_count > limits_.max_total_media_bytes - resolved_media_bytes_)
-        return err(DawProjectImportErrorCode::LimitExceeded,
-                   "resolved media exceeds max_total_media_bytes");
-    resolved_media_bytes_ += byte_count;
-    const auto info = audio::inspect_wav(*bytes);
-    if (!info)
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "media resolver provided an invalid or unsupported WAV for '" + path + "'");
-    if (sample_rate != static_cast<double>(info->sample_rate))
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "<Audio sampleRate> does not match resolved media '" + path + "'");
-    if (declared_channels &&
-        static_cast<std::uint64_t>(*declared_channels) != info->num_channels)
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "<Audio channels> does not match resolved media '" + path + "'");
-    if (!declared_duration_matches_frames(declared_frames, info->num_frames))
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "<Audio duration> does not match resolved media '" + path + "'");
-
-    auto hash = ContentHash::from_hex(runtime::sha256_hex(bytes->data(), bytes->size()));
-    if (!hash)
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "failed to derive a content hash for '" + path + "'");
-    const auto hash_hex = hash->to_hex();
-    if (auto it = hash_by_path_.find(path); it != hash_by_path_.end() && it->second != hash_hex)
-        return err(DawProjectImportErrorCode::InvalidValue,
-                   "package path resolved to different content for '" + path + "'");
-
-    if (auto it = asset_by_hash_.find(hash_hex); it != asset_by_hash_.end()) {
-        for (auto& asset : assets_) {
-            if (asset.id != it->second)
-                continue;
-            if (asset.frame_count != info->num_frames ||
-                asset.sample_rate != timebase::RationalRate{info->sample_rate, 1})
-                return err(DawProjectImportErrorCode::InvalidValue,
-                           "content-identical media has inconsistent audio metadata for '" + path +
-                               "'");
-            const AssetLocator locator{AssetLocatorKind::PackageRelative, path};
-            if (std::find(asset.locators.begin(), asset.locators.end(), locator) ==
-                asset.locators.end())
-                asset.locators.push_back(locator);
-            hash_by_path_.emplace(path, hash_hex);
-            asset_id_out = asset.id;
-            frame_count_out = asset.frame_count;
-            return std::nullopt;
-        }
-        return err(DawProjectImportErrorCode::ModelRejected,
-                   "internal content-hash index lost resolved media '" + path + "'");
-    }
-    if (assets_.size() >= limits_.max_media_assets)
-        return err(DawProjectImportErrorCode::LimitExceeded,
-                   "DAWproject media asset count exceeds max_media_assets");
-
-    ItemId asset_id = ids_.take();
-    MediaAsset asset;
-    asset.id = asset_id;
-    asset.name = path;
-    asset.frame_count = info->num_frames;
-    asset.sample_rate = timebase::RationalRate{info->sample_rate, 1};
-    asset.content_hash = *hash;
-    asset.storage_policy = AssetStoragePolicy::External;
-    asset.locators.push_back(AssetLocator{AssetLocatorKind::PackageRelative, path});
-    frame_count_out = info->num_frames;
-    assets_.push_back(std::move(asset));
-    hash_by_path_.emplace(path, hash_hex);
-    asset_by_hash_.emplace(hash_hex, asset_id);
-    asset_id_out = asset_id;
-    return std::nullopt;
-}
-
 std::optional<DawProjectImportError> Importer::read_audio(const pugi::xml_node& audio,
                                                           ClipContent& out) {
     if (auto e = reject_unsupported_audio_playback(audio))
@@ -761,7 +527,7 @@ std::optional<DawProjectImportError> Importer::read_audio(const pugi::xml_node& 
     }
     ItemId asset_id;
     std::uint64_t frame_count = 0;
-    if (auto e = resolve_asset(audio, asset_id, frame_count))
+    if (auto e = media_.seal(audio, asset_id, frame_count))
         return e;
     // Reference the whole asset from the clip. Sub-range playback (playStart /
     // warps) is a follow-up.
@@ -856,7 +622,7 @@ ImportResult Importer::run(const pugi::xml_node& project) {
     input.id = ids_.take();
     input.name = "DAWproject";
     input.root_sequence_id = sequence_id;
-    input.assets = std::move(assets_);
+    input.assets = media_.take_assets();
     input.sequences.push_back(std::move(sequence.value()));
     input.tempo_map = std::move(tempo.value());
     input.meter_map = std::move(meter.value());
@@ -900,7 +666,7 @@ import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver medi
 
     // Accept major version 1 only. A missing version attribute is tolerated (some
     // exporters omit it); a present one must be 1.x.
-    if (has_attr(root, "version")) {
+    if (has_attribute(root, "version")) {
         std::string_view version = root.attribute("version").as_string();
         if (version.substr(0, 2) != "1.")
             return Err(

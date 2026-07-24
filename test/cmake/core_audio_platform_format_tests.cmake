@@ -53,28 +53,26 @@ pulp_add_test_suite(pulp-test-audio-tools LIBRARIES pulp::tool-audio)
 
 # MCP server protocol tests
 add_executable(pulp-test-mcp-server test_mcp_server.cpp)
-# mcp_tools.cpp (included into the test TU) reads the agent-request queue via the
-# choc-only agent_request_queue unit; compile that TU + its include dir in rather
-# than linking all of pulp::inspect (which would drag in the GPU/Skia chain),
-# matching how pulp-mcp itself consumes it.
-target_sources(pulp-test-mcp-server PRIVATE
-    "${CMAKE_SOURCE_DIR}/inspect/src/agent_request_queue.cpp")
 target_link_libraries(pulp-test-mcp-server PRIVATE
-    pulp::tool-audio
-    pulp::tool-timeline
+    pulp-mcp-core
     Catch2::Catch2WithMain)
-target_include_directories(pulp-test-mcp-server PRIVATE
-    "${CMAKE_SOURCE_DIR}/inspect/include")
 target_compile_definitions(pulp-test-mcp-server PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-# test_mcp_server.cpp #include's ../tools/mcp/pulp_mcp.cpp directly (via
-# `#define main pulp_mcp_main_for_test`), so it picks up the same
-# generated version header pulp-mcp itself sees. The generated header
-# lives under the binary tree's tools/mcp/ directory.
 target_include_directories(pulp-test-mcp-server PRIVATE
-    "${CMAKE_BINARY_DIR}/tools/mcp")
-add_dependencies(pulp-test-mcp-server pulp-mcp)
+    "${CMAKE_SOURCE_DIR}/inspect/include")
 catch_discover_tests(pulp-test-mcp-server)
+
+# Timeline MCP operations have their own bounded suite so media/render fixtures
+# do not keep expanding the legacy protocol test translation unit.
+add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
+target_sources(pulp-test-mcp-timeline-tools PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/mcp/mcp_timeline_tools.cpp")
+target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
+    pulp::audio
+    pulp::timeline
+    pulp::tool-timeline
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mcp-timeline-tools)
 
 # MIDI tests
 pulp_add_test_suite(pulp-test-midi LIBRARIES pulp::midi)

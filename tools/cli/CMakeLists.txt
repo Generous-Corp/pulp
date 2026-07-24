@@ -225,7 +225,7 @@ if(PULP_BUILD_TESTS)
     target_compile_definitions(pulp-test-cli-timeline PRIVATE
         PULP_CLI_BIN="$<TARGET_FILE:pulp-cli>")
     target_link_libraries(pulp-test-cli-timeline PRIVATE
-        pulp::audio pulp::timeline Catch2::Catch2WithMain)
+        pulp::audio pulp::timeline pulp::tool-timeline Catch2::Catch2WithMain)
     add_dependencies(pulp-test-cli-timeline pulp-cli)
     add_test(NAME pulp-test-cli-timeline COMMAND pulp-test-cli-timeline)
 

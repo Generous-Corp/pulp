@@ -347,6 +347,8 @@ pulp_add_test_suite(pulp-test-runtime
     SOURCES test_runtime.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::runtime)
 
+pulp_add_test_suite(pulp-test-durable-file-replacement LIBRARIES pulp::runtime)
+
 # Lock-free realtime/control-thread occurrence signals (pad flashes, UI triggers).
 pulp_add_test_suite(pulp-test-activity-channel
     LIBRARIES pulp::runtime

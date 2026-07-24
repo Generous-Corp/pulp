@@ -9,6 +9,7 @@ add_library(pulp-timeline
     src/identity_directory.cpp
     src/id_remap.cpp
     src/journal.cpp
+    src/json_span_reader.cpp
     src/model.cpp
     src/transaction.cpp
     src/transaction_automation_internal.cpp
@@ -28,6 +29,8 @@ add_library(pulp-timeline
     src/serialize_automation_decode.cpp
     src/serialize_decode_support.cpp
     src/serialize_decode.cpp
+    src/serialize_project_decode.cpp
+    src/serialize_command_decode.cpp
     src/serialize_encode.cpp
     src/serialize_release.cpp
     src/snapshot_equivalence.cpp
@@ -42,9 +45,13 @@ add_library(pulp-timeline
     # importer depends on pugixml (via runtime) and is a native authoring/import
     # concern, so keeping it in import/ keeps pugixml out of the wasm plugin.
     import/dawproject_import.cpp
+    import/dawproject_import_support.cpp
+    import/dawproject_media_sealer.cpp
     # Native crash-consistent storage is deliberately outside src/: browser
     # timeline builds consume the in-memory JournalSink seam but have no native
     # filesystem durability primitive.
+    native/file_journal_codec.cpp
+    native/file_journal_native_io.cpp
     native/file_journal.cpp
 )
 add_library(pulp::timeline ALIAS pulp-timeline)

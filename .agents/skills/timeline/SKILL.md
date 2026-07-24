@@ -1,12 +1,31 @@
 ---
 name: timeline
-description: Pulp immutable timeline model and automation curves, typed command transactions, bounded journal and undo, durable assets, schema registry, and exact JSON persistence.
+description: Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. Use for sequencers, arrangements, clips or notes, tempo and meter maps, automation, takes and comps, freeze, capture-to-timeline workflows, durable journals, project persistence, DAWproject import, and agent-driven timeline operations.
 ---
 
 # Timeline document model
 
-Use this skill when changing `core/timeline` document types or their construction
-invariants.
+## Choose the surface
+
+- Use MCP for agent-driven project inspection, command application, validation,
+  explanation, and render. Its five operations are `pulp_timeline_project_open`,
+  `pulp_timeline_command_apply`, `pulp_timeline_validate`,
+  `pulp_timeline_explain`, and `pulp_timeline_render`.
+- Use `pulp seq` and `pulp render` for shell scripts, CI, and human-operated
+  headless workflows. Prefer `seq apply` with typed command envelopes over
+  inventing one-off mutation flags.
+- Use the C++ SDK when embedding an editor, transport, compiler, renderer,
+  recorder, or durable session. Keep document mutation in `DocumentSession`,
+  playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
+  immutable programs and transport snapshots, and capture publication as
+  ordinary timeline commands.
+- Use the generated schema surfaces to discover command/document shapes; do
+  not hand-copy schema vocabularies into a client.
+
+Start with `project_open` or `seq validate` when the source is unfamiliar.
+Apply edits as one expected-revision transaction, validate the result, use
+`explain` to inspect playback lowering/PDC, then render only when an audio
+artifact is needed. Never modify canonical project JSON text directly.
 
 ## Contracts
 
@@ -390,8 +409,8 @@ types. An empty Command domain emits the object-valued reject-all schema
 the registry defines one. JSON Schema forbids an empty `enum`, and the released
 MCP Tool wire contract requires property schemas to be objects rather than
 boolean schemas; omitting the enum would accidentally accept an unbounded
-string. Registering these definitions in the live MCP server is a separate
-integration step.
+string. The live MCP server consumes this generated artifact for both
+advertisement and exact-five operation dispatch.
 
 ```
 python3 core/timeline/tools/schema_mcp_emit.py \
@@ -445,11 +464,12 @@ opt-in Audio Quality Lab tool is installed.
 
 ## Scope boundary
 
-This subsystem owns the durable `JournalSink` ordering seam and native
-`FileJournal`, but not package/container I/O, publication, playback or
-automation delivery, launch slots, comping, nesting, device implementations,
-routing, audio, format adapters, or UI. Add those in their owning modules
-instead of widening the command and persistence core opportunistically.
+This subsystem owns authored take/comp state, the durable `JournalSink`
+ordering seam, and native `FileJournal`, but not package/container I/O,
+publication, realtime playback or automation delivery, launch slots, nesting,
+device implementations, routing, audio, format adapters, or UI. Add those in
+their owning modules instead of widening the command and persistence core
+opportunistically.
 
 ## Validation
 
@@ -474,40 +494,7 @@ reference type.
 
 ## Foreign-format import (interop)
 
-`import_dawproject_xml` (`core/timeline/import/dawproject_import.cpp`) builds a
-`Project` from a DAWproject `project.xml` for a documented linear subset
-(single tempo/meter, flat tracks, beats-timed `<Notes>`/`<Audio>` clips). It
-consumes only the model's public construction API — a pure consumer, it never
-changes the model layout. Gotchas for extending it or adding another importer:
-
-- **It lives in `import/`, not `src/`, on purpose.** The web
-  timeline-source-closure gate sweeps every `core/timeline/src/*.cpp` into the
-  WAM/WebCLAP wasm DSP lanes, and those lanes do NOT link `pulp-runtime`. The
-  importer needs pugixml (a runtime internal), so putting it under `src/` would
-  drag pugixml into the wasm plugin. Keep foreign-format / heavy-dependency
-  interop code out of `src/`.
-- **The whole library is `-fno-exceptions -fno-rtti`.** pugixml's DOM API
-  compiles clean under those flags; its XPath API does not (it throws). Parse
-  with DOM traversal (`node.child()/children()/attribute()`), never
-  `select_nodes`. The `runtime::XmlDocument` wrapper only exposes XPath-string
-  scraping, too weak to correlate a clip with its parent lane's `track` — use
-  pugixml directly (add `external/pugixml` as a PRIVATE include; its object code
-  already ships inside `pulp::runtime`).
-- **Fail closed, never silent-drop.** A clip/track/note the parser cannot map
-  must produce a descriptive error, not a skipped element. Out-of-subset content
-  (`<Warps>`, nested group tracks, `timeUnit="seconds"`, unknown timelines) is
-  rejected explicitly. When iterating `children()`, skip non-element nodes
-  before matching tag names.
-- **Seal media identity at the import boundary.** DAWproject references audio
-  by package path. Reject rooted, drive-qualified, or parent-traversing paths
-  before invoking `DawProjectMediaResolver`; a resolver is an untrusted-I/O
-  boundary, not the place to repair an unsafe locator. Hash the returned media
-  bytes, inspect their WAV metadata, and require that metadata to match the XML
-  before preserving the path as a `PackageRelative` locator hint. Deduplicate
-  assets by that sealed content hash, retaining each distinct safe locator and
-  rejecting path instability or conflicting metadata.
-- **Bound the import before growth.** Apply `DawProjectImportLimits` before
-  constructing the XML DOM and before growing structural, locator, asset, or
-  media-processing state. Legacy resolver callbacks own their returned-vector
-  allocation, so untrusted package readers must enforce the same per-call byte
-  ceiling while reading the package entry.
+Read [references/dawproject-import.md](references/dawproject-import.md) before
+changing the DAWproject importer or adding another foreign-format importer. It
+defines the native/web source boundary, parser constraints, fail-closed subset,
+sealed media identity, and pre-growth resource limits.

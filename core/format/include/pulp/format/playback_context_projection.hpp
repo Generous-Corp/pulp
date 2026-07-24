@@ -78,6 +78,10 @@ project_process_context(const playback::TransportSnapshot& snapshot,
     context.transport_validity.set(TransportField::Bar);
     if (snapshot.loop.enabled)
         context.transport_validity.set(TransportField::LoopRange);
+    if (options.host_time_ns != 0)
+        context.transport_validity.set(TransportField::HostTime);
+    if (options.frame_rate != FrameRate::unknown)
+        context.transport_validity.set(TransportField::FrameRate);
     return context;
 }
 

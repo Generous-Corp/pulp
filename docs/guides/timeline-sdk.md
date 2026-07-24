@@ -56,6 +56,107 @@ host targets enter the closure.
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.
 
+## Optional plugin-format adapter
+
+`Pulp::sequence` is an exported integration layer for applications that need to
+present a compiled timeline as a VST3, AU, or CLAP processor. It is not part of
+the engine-only dependency closure above:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS sequence)
+target_link_libraries(my_sequence_plugin PRIVATE Pulp::sequence)
+```
+
+`pulp::sequence::SequenceProcessor` adapts a caller-owned
+`PlaybackProgramStore` to `pulp::format::Processor`. It projects host transport
+into the timeline clock, executes the compiled track graph, and emits rendered
+audio and MIDI without owning the project, compiler, media resolver, plugin
+host, editor, or device I/O. The caller must publish a compatible immutable
+program before processing and rebuild it away from the audio thread when the
+document changes.
+
+Choose `Pulp::timebase`, `Pulp::timeline`, and `Pulp::playback` for an editor,
+standalone application, or custom host integration. Choose `Pulp::sequence`
+only at the plugin-format boundary; it intentionally adds the heavier
+`Pulp::format`, `Pulp::graph`, and `Pulp::state` closure required by a
+format-facing processor.
+
+## Ownership and state flow
+
+Timeline applications move immutable values through a small set of owners:
+
+1. `Project` is the canonical document snapshot. Model values do not mutate in
+   place.
+2. `DocumentSession` owns the current snapshot, revision, command journal, and
+   undo/redo state. A `WriterToken` supplies ordered transaction and command
+   identities.
+3. `JournalSink` acknowledges a complete transaction only after it is durable.
+   Native applications can open a `FileJournal` and restore the returned
+   checkpoint and revision into a session.
+4. `PlaybackProgramCompiler` lowers one immutable snapshot plus its resolved
+   media into a `PlaybackProgramStore`. Compilation and media resolution stay
+   off the audio thread.
+5. `MasterTransport` creates each callback's `TransportSnapshot`. Renderers read
+   one pinned playback-program block and that transport snapshot without
+   allocating.
+
+The editing portion of that flow is intentionally explicit:
+
+```cpp
+auto registry = pulp::timeline::make_builtin_timeline_registry();
+auto decoded = pulp::timeline::deserialize_project(project_json, registry.value());
+auto session = pulp::timeline::DocumentSession::create(std::move(decoded).value());
+auto writer = session.value()->register_writer();
+
+pulp::timeline::Transaction edit;
+edit.id = writer.value().allocate_transaction_id();
+edit.expected_revision = session.value()->revision();
+edit.commands.push_back({
+    writer.value().allocate_command_id(),
+    pulp::timeline::SetRecordArm{{2}, {3}, false, true},
+});
+
+auto committed = session.value()->submit(writer.value(), std::move(edit));
+if (committed) {
+    auto snapshot = committed.value().snapshot;
+    auto revision = committed.value().revision;
+    auto dirty = committed.value().dirty;
+    // Send these immutable values to the background playback compiler.
+}
+```
+
+For native crash-consistent storage, call `FileJournal::open()` first. Use
+`DocumentSession::restore()` when it recovered an existing file, or
+`DocumentSession::create()` with its sink for a new file. Do not write the
+project beside the session independently; the journal sink is the durability
+boundary.
+
+`pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
+load/edit/compile/render path for headless workflows. Their source-tree
+CLI/MCP facade uses `pulp::tools::timeline::ProjectSource` to distinguish
+inline JSON from native file paths; that tooling facade is not part of the
+installed SDK. Installed embedders should deserialize through
+`pulp::timeline`, compile through `pulp::playback`, and render through the
+public playback program APIs described above.
+
+## Takes, comps, freeze, and capture
+
+- A `TakeLane` owns recorded `Take` values and its comp segments. Selecting an
+  active lane makes that comp the track's playback source.
+- `TrackFreeze` selects a sealed media artifact and its render-plan identity.
+  The original clips and device chain remain document state, but playback uses
+  the selected freeze until it is cleared.
+- `CaptureEngine` is the realtime recorder. Prepare its capacities off-thread,
+  enqueue bounded commands, and drain completed take handles away from the
+  callback.
+- `materialize_midi_capture()` and the recording-commit helpers convert
+  completed capture data into ordinary timeline commands. Submit those commands
+  through `DocumentSession`; capture never mutates the project directly.
+
+The application owns device I/O, media-file publication, and plugin/device
+instantiation. The timeline owns editing intent and durable identity; playback
+owns immutable compiled artifacts; capture owns bounded callback-time buffers.
+
 ## Sample-rate conversion
 
 Audio clips, take-comp segments, and frozen tracks may use a different sample

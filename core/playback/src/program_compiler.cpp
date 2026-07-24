@@ -240,19 +240,23 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                              : std::span<const AudioClipRendererProgram>{};
             if (converter_clip_index_ < clips.size()) {
                 const auto& clip = clips[converter_clip_index_++];
-                if (clip.sample_rate_converter) {
+                const auto& sample_rate_converter =
+                    clip.conversion_artifact->sample_rate_converter();
+                if (sample_rate_converter) {
                     const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
                     auto seeded = sample_rate_converters_.seed(
-                        source_rate, request_->tempo_map->sample_rate(), clip.sample_rate_converter,
+                        source_rate, request_->tempo_map->sample_rate(), sample_rate_converter,
                         clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});
                 }
-                if (clip.host_rate_converter) {
+                const auto& host_rate_converter =
+                    clip.conversion_artifact->host_rate_converter();
+                if (host_rate_converter) {
                     auto seeded = sample_rate_converters_.seed_host(
                         clip.audio, clip.source_start, clip.source_frame_count,
-                        clip.host_rate_converter, clip.id, clip.asset_id, request_->audio_limits);
+                        host_rate_converter, clip.id, clip.asset_id, request_->audio_limits);
                     if (!seeded)
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});

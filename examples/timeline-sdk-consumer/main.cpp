@@ -8,7 +8,7 @@ int main() {
     using namespace pulp;
 
     playback::AudioClipRendererProgram renderer_program;
-    if (renderer_program.sample_rate_converter)
+    if (renderer_program.uses_sample_rate_conversion())
         return 1;
 
     auto sequence = timeline::Sequence::create(

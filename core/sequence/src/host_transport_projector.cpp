@@ -155,8 +155,13 @@ HostTransportProjector::project(const format::ProcessContext& context,
     }
 
     const auto frames = static_cast<std::uint32_t>(context.num_samples);
+    if (!context.transport_validity.empty() &&
+        !context.has_transport(format::TransportField::SamplePosition))
+        return HostTransportProjectionError::InvalidHostBeatClock;
     const timebase::SamplePosition host_start{context.position_samples};
     const bool use_host_beat_clock = has_host_beat_clock(context);
+    if (loop.enabled && !context.transport_validity.empty() && !use_host_beat_clock)
+        return HostTransportProjectionError::InvalidHostBeatClock;
     timebase::TickPosition host_tick_start;
     if (use_host_beat_clock &&
         (!std::isfinite(context.position_beats) ||

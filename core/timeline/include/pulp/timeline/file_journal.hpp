@@ -21,6 +21,7 @@ enum class FileJournalErrorCode : std::uint8_t {
     PersistenceError,
     AlreadyOpen,
     AliasedPath,
+    DurabilityUncertain,
 };
 
 struct FileJournalError {
@@ -67,8 +68,7 @@ class FileJournal final : public JournalSink {
     runtime::Result<bool, JournalSinkError>
     checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept override;
     runtime::Result<bool, JournalSinkError>
-    validate_restore(const Project& snapshot,
-                     DocumentRevision durable_revision) noexcept override;
+    validate_restore(const Project& snapshot, DocumentRevision durable_revision) noexcept override;
 
   private:
     struct Impl;

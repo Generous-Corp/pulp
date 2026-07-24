@@ -3,6 +3,7 @@
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
+#include <pulp/tools/timeline/agent.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -97,7 +98,7 @@ void write_text(const std::filesystem::path& path, std::string_view text) {
 }
 
 std::string quote(const std::filesystem::path& path) {
-    std::string value = path.string();
+    std::string value = tools::timeline::filesystem_path_to_utf8(path);
 #ifdef _WIN32
     return "\"" + value + "\"";
 #else
@@ -173,6 +174,32 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
         R"([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])");
 
     const auto cli = quote(PULP_CLI_BIN);
+    const auto braced_project_path = temp.path() / "{project.json";
+    const auto braced_validate_path = temp.path() / "braced-validate.json";
+    write_text(braced_project_path, project_json(source_path));
+    REQUIRE(run_cli(cli + " seq validate " + quote(braced_project_path) + " > " +
+                    quote(braced_validate_path)) == 0);
+    REQUIRE(read_text(braced_validate_path).find(R"("ok":true)") != std::string::npos);
+
+    const auto unicode_project_path =
+        temp.path() / tools::timeline::filesystem_path_from_utf8("proyecto-\xE9\x9F\xB3.json");
+    const auto unicode_command_path =
+        temp.path() / tools::timeline::filesystem_path_from_utf8("comandos-\xCE\xA9.json");
+    const auto unicode_output_path =
+        temp.path() / tools::timeline::filesystem_path_from_utf8("cambiado-\xE9\x9F\xB3.json");
+    const auto unicode_result_path =
+        temp.path() / tools::timeline::filesystem_path_from_utf8("resultado-\xCE\xA9.json");
+    write_text(unicode_project_path, project_json(source_path));
+    write_text(unicode_command_path, read_text(command_path));
+    REQUIRE(run_cli(cli + " seq validate " + quote(unicode_project_path) + " > " +
+                    quote(unicode_result_path)) == 0);
+    REQUIRE(run_cli(cli + " seq explain " + quote(unicode_project_path) + " > " +
+                    quote(unicode_result_path)) == 0);
+    REQUIRE(run_cli(cli + " seq apply " + quote(unicode_project_path) + " " +
+                    quote(unicode_command_path) + " --out " + quote(unicode_output_path) +
+                    " > " + quote(unicode_result_path)) == 0);
+    REQUIRE(std::filesystem::is_regular_file(unicode_output_path));
+
     REQUIRE(run_cli(cli + " seq validate " + quote(project_path) + " > " + quote(validate_path)) ==
             0);
     REQUIRE(run_cli(cli + " seq explain " + quote(project_path) + " > " + quote(explain_path)) ==
@@ -192,9 +219,8 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     if (acl_result == linux_acl_test::InstallResult::Installed) {
         const auto expected_acl = linux_acl_test::read(acl_path);
         REQUIRE(expected_acl);
-        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
-                        quote(command_path) + " --out " + quote(acl_path) +
-                        " > /dev/null") == 0);
+        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) +
+                        " --out " + quote(acl_path) + " > /dev/null") == 0);
         REQUIRE(linux_acl_test::read(acl_path) == expected_acl);
     }
 #endif
@@ -238,23 +264,20 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
 
     const auto blocked_output = temp.path() / "blocked-output.json";
     REQUIRE(std::filesystem::create_directory(blocked_output));
-    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
-                    quote(command_path) + " --out " + quote(blocked_output) +
-                    " > " + quote(command_result_path)) == 1);
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) +
+                    " --out " + quote(blocked_output) + " > " + quote(command_result_path)) == 1);
     REQUIRE(std::filesystem::is_directory(blocked_output));
 
     const auto linked_target = temp.path() / "linked-target.json";
     const auto linked_output = temp.path() / "linked-output.json";
     write_text(linked_target, "preserve target");
     std::error_code symlink_error;
-    std::filesystem::create_symlink(linked_target.filename(), linked_output,
-                                    symlink_error);
+    std::filesystem::create_symlink(linked_target.filename(), linked_output, symlink_error);
     if (!symlink_error) {
-        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " +
-                        quote(command_path) + " --out " + quote(linked_output) +
-                        " > " + quote(command_result_path)) == 1);
-        REQUIRE(std::filesystem::is_symlink(
-            std::filesystem::symlink_status(linked_output)));
+        REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) +
+                        " --out " + quote(linked_output) + " > " + quote(command_result_path)) ==
+                1);
+        REQUIRE(std::filesystem::is_symlink(std::filesystem::symlink_status(linked_output)));
         REQUIRE(read_text(linked_target) == "preserve target");
     }
 

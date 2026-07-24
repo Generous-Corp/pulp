@@ -14,6 +14,9 @@
 
 namespace pulp_mcp {
 
+std::string parse_pulp_toml_sdk_version(const std::string& body);
+std::string parse_cmake_project_version(const std::string& body);
+
 // The minimum SDK version a given tool requires, or empty if the tool
 // has no floor. Keyed by MCP tool name (e.g. "pulp_build").
 std::string min_sdk_for_tool(const std::string& name);

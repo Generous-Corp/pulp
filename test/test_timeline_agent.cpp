@@ -69,6 +69,15 @@ void write_text_file(const std::filesystem::path& path, std::string_view text) {
     REQUIRE(stream.good());
 }
 
+void write_wav_file_native(const std::filesystem::path& path,
+                           const audio::AudioFileData& audio) {
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    REQUIRE(stream);
+    REQUIRE(audio::write_wav_stream(stream, audio, audio::WavBitDepth::Float32));
+    stream.close();
+    REQUIRE(stream.good());
+}
+
 void require_no_render_temporaries(const std::filesystem::path& directory,
                                    const std::filesystem::path& destination) {
     const auto prefix = destination.filename().string() + ".tmp.";
@@ -89,7 +98,9 @@ std::string project_json(const std::filesystem::path& source, std::uint64_t fram
                          : std::nullopt,
         {track}));
     if (locators.empty())
-        locators.push_back({AssetLocatorKind::ExternalUri, source.string()});
+        locators.push_back(
+            {AssetLocatorKind::ExternalUri,
+             tools::timeline::filesystem_path_to_utf8(source)});
     MediaAsset asset{{5},
                      "source.wav",
                      frame_count,
@@ -181,6 +192,79 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE_THAT(changed_audio->channels[0][0], WithinAbs(0.375f, 1e-7f));
 }
 
+TEST_CASE("timeline agent accepts explicit inline and file project sources") {
+    const auto json = empty_project_json();
+    const auto inline_source = tools::timeline::ProjectSource::inline_json(json);
+    REQUIRE(tools::timeline::validate(inline_source));
+
+    TempDirectory temp;
+    const auto project_path = temp.path() / "project.json";
+    write_text_file(project_path, json);
+    const auto file_source = tools::timeline::ProjectSource::file(project_path);
+    REQUIRE(file_source.kind() == tools::timeline::ProjectSourceKind::File);
+    REQUIRE(file_source.file_path() == project_path);
+    REQUIRE(tools::timeline::validate(file_source));
+
+    const auto unicode_project_path =
+        temp.path() /
+        tools::timeline::filesystem_path_from_utf8("proyecto-\xE9\x9F\xB3-\xCE\xA9.json");
+    write_text_file(unicode_project_path, json);
+    REQUIRE(tools::timeline::validate(tools::timeline::ProjectSource::auto_detect(
+        tools::timeline::filesystem_path_to_utf8(unicode_project_path))));
+
+#ifdef _WIN32
+    const std::filesystem::path native_path{L"C:\\timeline-\u03a9\\project.json"};
+#else
+    const std::filesystem::path native_path{"/tmp/timeline-\xCE\xA9/project.json"};
+#endif
+    REQUIRE(tools::timeline::ProjectSource::file(native_path).file_path() == native_path);
+    REQUIRE(tools::timeline::filesystem_path_from_utf8(
+                tools::timeline::filesystem_path_to_utf8(native_path)) == native_path);
+
+    const auto wrong_kind =
+        tools::timeline::ProjectSource::file(std::filesystem::path{"{\"not\":\"a path\"}"});
+    const auto rejected = tools::timeline::validate(wrong_kind);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.json.find(R"("stage":"open")") != std::string::npos);
+}
+
+#ifndef _WIN32
+TEST_CASE("timeline agent rejects native paths that cannot be represented in JSON") {
+    const std::filesystem::path invalid_native_path{std::string("timeline-\xFF.json")};
+    REQUIRE_THROWS_AS(tools::timeline::filesystem_path_to_utf8(invalid_native_path),
+                      std::invalid_argument);
+
+    const auto rejected =
+        tools::timeline::validate(tools::timeline::ProjectSource::file(invalid_native_path));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(parse_json(rejected.json));
+    REQUIRE(rejected.json.find(R"("path":)") == std::string::npos);
+}
+#endif
+
+TEST_CASE("timeline agent preserves native non-ASCII render and UTF-8 asset paths") {
+    TempDirectory temp;
+    const auto unicode_directory =
+        temp.path() / tools::timeline::filesystem_path_from_utf8("m\xC3\xBAsica-\xCE\xA9");
+    REQUIRE(std::filesystem::create_directories(unicode_directory));
+    const auto source_path =
+        unicode_directory /
+        tools::timeline::filesystem_path_from_utf8("fuente-\xE9\x9F\xB3.wav");
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.5f)};
+    write_wav_file_native(source_path, source);
+
+    const auto output_path =
+        unicode_directory /
+        tools::timeline::filesystem_path_from_utf8("salida-\xE6\xB8\xB2\xE6\x9F\x93.wav");
+    const auto rendered = tools::timeline::render(project_json(source_path), output_path);
+    REQUIRE(rendered);
+    REQUIRE(std::filesystem::is_regular_file(output_path));
+    REQUIRE(rendered.json.find(pulp::timeline::quote_json_string(
+                tools::timeline::filesystem_path_to_utf8(output_path))) != std::string::npos);
+}
+
 TEST_CASE("timeline agent render constructs every output channel") {
     TempDirectory temp;
     audio::AudioFileData source;
@@ -193,8 +277,7 @@ TEST_CASE("timeline agent render constructs every output channel") {
     REQUIRE(tools::timeline::render(project_json(source_path), output_path.string()));
 #ifndef _WIN32
     REQUIRE(std::filesystem::status(output_path).permissions() ==
-            (std::filesystem::perms::owner_read |
-             std::filesystem::perms::owner_write));
+            (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
 #endif
     const auto rendered = audio::read_audio_file(output_path.string());
     REQUIRE(rendered);

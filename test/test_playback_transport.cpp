@@ -558,6 +558,8 @@ TEST_CASE("format projection maps common fields and keeps transitions range-loca
     REQUIRE(first.is_tail_drain);
     REQUIRE(first.host_time_ns == 42);
     REQUIRE(first.frame_rate == format::FrameRate::fps_24);
+    REQUIRE(first.has_transport(format::TransportField::HostTime));
+    REQUIRE(first.has_transport(format::TransportField::FrameRate));
 
     const auto second = format::project_process_context(snapshot, snapshot.ranges[1]);
     REQUIRE(second.transport_jump);
@@ -567,6 +569,8 @@ TEST_CASE("format projection maps common fields and keeps transitions range-loca
     REQUIRE_FALSE(second.time_sig_changed);
     REQUIRE(second.host_time_ns == 0);
     REQUIRE(second.frame_rate == format::FrameRate::unknown);
+    REQUIRE_FALSE(second.has_transport(format::TransportField::HostTime));
+    REQUIRE_FALSE(second.has_transport(format::TransportField::FrameRate));
 }
 
 TEST_CASE("seek projection is a jump and a start never implies reset") {

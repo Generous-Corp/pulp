@@ -28,6 +28,8 @@ endif()
 # Repo root = two levels up from tools/cmake/.
 get_filename_component(_PULP_WAM_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 include(${CMAKE_CURRENT_LIST_DIR}/PulpPortableWav.cmake)
+include(${_PULP_WAM_ROOT}/core/playback/PulpPlaybackSources.cmake)
+pulp_resolve_playback_sources("${_PULP_WAM_ROOT}" _PULP_WAM_PLAYBACK_SOURCES)
 pulp_resolve_portable_wav(
     "${_PULP_WAM_ROOT}"
     _PULP_WAM_WAV_SOURCES
@@ -88,6 +90,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/identity_directory.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/id_remap.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/journal.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/json_span_reader.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/model.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_codegen.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/schema_json.cpp
@@ -101,6 +104,8 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_automation_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_decode_support.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_decode.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/serialize_project_decode.cpp
+    ${_PULP_WAM_ROOT}/core/timeline/src/serialize_command_decode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_encode.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/serialize_release.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/snapshot_equivalence.cpp
@@ -115,25 +120,7 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_track_state_internal.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/transaction_reduction_support.cpp
     ${_PULP_WAM_ROOT}/core/timeline/src/undo.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/audio_renderer.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/automation_cursor.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/automation_program.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/automation_program_compiler.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/automation_recording.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/capture_engine.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/compile_executor.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/external_sync_output.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/external_sync_timecode.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/midi_capture_materializer.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/note_renderer.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/program_compiler.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/recording_commit.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/stable_renderer_shell.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/track_automation_compiler.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/track_automation_program.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/track_automation_renderer.cpp
-    ${_PULP_WAM_ROOT}/core/playback/src/transport.cpp
+    ${_PULP_WAM_PLAYBACK_SOURCES}
     ${_PULP_WAM_WAV_SOURCES}
     ${_PULP_WAM_ROOT}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${_PULP_WAM_ROOT}/core/runtime/src/runtime.cpp

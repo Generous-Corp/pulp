@@ -841,16 +841,15 @@ lane targeting remains document-model state, while audio-thread cursors and
 per-block event coalescing belong to `pulp::playback`; neither concern is folded
 into the curve container.
 
-`automation_lane.hpp` provides an unattached immutable binding from one curve
-to a format-neutral device-placement identity and opaque 32-bit parameter ID.
-Construction validates only the lane and placement IDs via `ItemId::valid()`
-(neither zero nor the exhausted `UINT64_MAX` sentinel): it does not prove that
-the placement exists in a Project, register global identity, clamp plain-domain
-values, or consult plugin metadata. The lane is not yet attached to a Track,
-persisted, reachable through commands or `DocumentSession`, or delivered to a
-host graph.
-`pulp::playback` can compile and exercise this standalone value without
-implying document attachment.
+`automation_lane.hpp` provides an immutable binding from one curve to a
+format-neutral device-placement identity and opaque 32-bit parameter ID.
+Standalone construction validates the lane and placement IDs via
+`ItemId::valid()` (neither zero nor the exhausted `UINT64_MAX` sentinel);
+Track attachment additionally proves the placement exists, enforces unique
+placement/parameter targets, and registers lane and point identities in the
+Project. Lanes persist in snapshots and are reachable through typed commands
+and `DocumentSession`. `pulp::playback` compiles attached lanes into immutable
+cursor programs, while host-graph parameter delivery remains outside Timeline.
 
 `device_placement.hpp` defines the durable identity of one logical placement in
 a Track-owned device chain. The chain preserves authored processing order
@@ -881,7 +880,7 @@ name while preserving `next_item_id` as the durable no-reuse boundary.
 canonical decimal strings, malformed or oversized input is rejected under
 `DecodeLimits`, and unknown extension envelopes retain their exact validated
 bytes for lossless ordinary re-save. `SerializedSnapshot` flags those opaque
-opaque objects so callers can surface compatibility risk.
+objects so callers can surface compatibility risk.
 `peek_project_summary()` uses the caller's load `SchemaRegistry`, validates the
 complete structural envelope, and reports project identity, name, root, and
 supported-object counts without constructing a `Project` or resolving
@@ -986,8 +985,9 @@ on loop/seek/adoption and rejects tempo-map or monotonic-generation mismatches.
 retains its exact tempo-map and lane-program owners in lane-ItemId order. The
 grouping rejects duplicate lane identities and duplicate device-parameter
 targets while allowing unchanged lanes to retain older generations and instance
-tokens. It is compiled playback data, not proof of Timeline document attachment;
-the future track compiler owns authored-lane dirty tracking and reuse decisions.
+tokens. It is compiled playback data, not proof of Timeline document
+attachment; `PlaybackProgramCompiler` owns authored-lane dirty tracking and
+reuse decisions.
 This layer deliberately does not know graph nodes or `ParameterEventQueue`; a
 host binding must aggregate all lanes for a device, apply one global queue
 budget, and inject one batch.
@@ -1032,6 +1032,32 @@ program must name the same compiled tempo-map identity, and overlapping logical
 notes on one channel/pitch are reference-counted so the physical note-off waits
 for the last overlap. Timeline commands and persistence preserve the clip gain
 and fade properties consumed by the audio compiler.
+
+## sequence
+
+Format-facing integration for publishing an immutable timeline playback program
+as a Pulp processor.
+
+**Link:** `pulp::sequence` · **Include prefix:** `<pulp/sequence/...>`
+
+`SequenceProcessor` adapts a caller-owned `PlaybackProgramStore` to
+`pulp::format::Processor`. It projects host transport into timeline ticks and
+executes the compiled track graph for VST3, AU, or CLAP adapters. It does not
+own project editing, playback compilation, media resolution, a plugin host,
+device I/O, or an editor.
+
+```cpp
+#include <pulp/sequence/sequence_processor.hpp>
+
+pulp::playback::PlaybackProgramStore programs;
+pulp::sequence::SequenceProcessor processor(programs);
+```
+
+This is deliberately a heavier boundary than the engine-only
+`pulp::timebase`/`pulp::timeline`/`pulp::playback` stack: linking it also brings
+the format, graph, and state integration needed by a plugin processor. Publish
+compatible immutable programs from a control or worker thread; the audio
+callback only consumes the current program and host transport.
 
 ## format
 

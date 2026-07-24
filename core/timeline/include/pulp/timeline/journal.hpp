@@ -33,6 +33,7 @@ enum class JournalSinkError : std::uint8_t {
     Closed,
     IoError,
     InvalidState,
+    DurabilityUncertain,
 };
 
 class JournalSink {
@@ -66,8 +67,8 @@ class JournalSink {
     /// snapshot and revision before a session attaches to it. Only Ok(true)
     /// permits attachment. This operation must not mutate or truncate durable
     /// state.
-    virtual runtime::Result<bool, JournalSinkError>
-    validate_restore(const Project&, DocumentRevision) noexcept {
+    virtual runtime::Result<bool, JournalSinkError> validate_restore(const Project&,
+                                                                     DocumentRevision) noexcept {
         return runtime::Result<bool, JournalSinkError>(
             runtime::Err(JournalSinkError::InvalidState));
     }

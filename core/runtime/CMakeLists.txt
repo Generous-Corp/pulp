@@ -90,6 +90,7 @@ target_sources(pulp-runtime PRIVATE
     src/simd.cpp
     src/memory_mapped_file.cpp
     src/temporary_file.cpp
+    src/durable_file_replacement.cpp
     src/dynamic_library.cpp
     src/udev_monitor.cpp
     src/child_process.cpp

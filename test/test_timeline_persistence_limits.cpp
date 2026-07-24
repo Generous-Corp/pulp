@@ -40,6 +40,32 @@ TEST_CASE("Timeline project summary scans metadata and counts without resolving 
     REQUIRE_FALSE(invalid_utf8_summary.has_value());
     REQUIRE(invalid_utf8_summary.error().code == PersistenceErrorCode::InvalidUtf8);
 
+    auto invalid_project_name = snapshot;
+    const auto project_name = invalid_project_name.find(R"("name":"mixed")");
+    REQUIRE(project_name != std::string::npos);
+    const auto project_name_byte = project_name + std::string_view(R"("name":")").size();
+    invalid_project_name[project_name_byte] = static_cast<char>(0xc0);
+    auto invalid_project_name_summary = peek_project_summary(invalid_project_name, registry);
+    REQUIRE_FALSE(invalid_project_name_summary.has_value());
+    REQUIRE(invalid_project_name_summary.error().code == PersistenceErrorCode::InvalidUtf8);
+    REQUIRE(invalid_project_name_summary.error().path == "/data/name");
+    REQUIRE(invalid_project_name_summary.error().byte_offset == project_name_byte);
+
+    auto escaped_project_name = snapshot;
+    escaped_project_name.replace(project_name, std::string_view(R"("name":"mixed")").size(),
+                                 R"("name":"\u20ac")");
+    DecodeLimits escaped_name_limit;
+    escaped_name_limit.max_string_bytes = 1;
+    auto escaped_project_name_summary =
+        peek_project_summary(escaped_project_name, registry, escaped_name_limit);
+    REQUIRE_FALSE(escaped_project_name_summary.has_value());
+    REQUIRE(escaped_project_name_summary.error().code == PersistenceErrorCode::LimitExceeded);
+    REQUIRE(escaped_project_name_summary.error().path == "/data/name");
+    REQUIRE(escaped_project_name_summary.error().actual == 3);
+    REQUIRE(escaped_project_name_summary.error().limit == 1);
+    REQUIRE(escaped_project_name_summary.error().byte_offset ==
+            escaped_project_name.find(R"("\u20ac")"));
+
     auto invalid_surrogate = snapshot;
     invalid_surrogate.replace(asset_name, std::string_view("\"name\":\"source.wav\"").size(),
                               R"("name":"\uD800")");

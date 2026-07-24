@@ -4,6 +4,49 @@
 
 #include <memory>
 
+namespace pulp::audio {
+class PreparedSampleRateConversion;
+class PreparedVariableRateConversion;
+}
+
+namespace pulp::playback {
+
+class AudioClipConversionArtifact {
+  public:
+    AudioClipConversionArtifact(
+        std::shared_ptr<const audio::AudioFileData> source, std::uint64_t source_start,
+        std::uint64_t source_frames, double source_frames_per_timeline_frame,
+        std::shared_ptr<const audio::PreparedSampleRateConversion> sample_rate_converter,
+        std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter) noexcept
+        : source_(std::move(source)), source_start_(source_start), source_frames_(source_frames),
+          source_frames_per_timeline_frame_(source_frames_per_timeline_frame),
+          sample_rate_converter_(std::move(sample_rate_converter)),
+          host_rate_converter_(std::move(host_rate_converter)) {}
+
+    bool matches(const std::shared_ptr<const audio::AudioFileData>& source,
+                 std::uint64_t source_start, std::uint64_t source_frames,
+                 double source_frames_per_timeline_frame, bool requires_host) const noexcept;
+
+    const std::shared_ptr<const audio::PreparedSampleRateConversion>&
+    sample_rate_converter() const noexcept {
+        return sample_rate_converter_;
+    }
+    const std::shared_ptr<const audio::PreparedVariableRateConversion>&
+    host_rate_converter() const noexcept {
+        return host_rate_converter_;
+    }
+
+  private:
+    std::shared_ptr<const audio::AudioFileData> source_;
+    std::uint64_t source_start_ = 0;
+    std::uint64_t source_frames_ = 0;
+    double source_frames_per_timeline_frame_ = 1.0;
+    std::shared_ptr<const audio::PreparedSampleRateConversion> sample_rate_converter_;
+    std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter_;
+};
+
+} // namespace pulp::playback
+
 namespace pulp::playback::detail {
 
 class AudioSampleRateConverterCache {
@@ -55,6 +98,14 @@ class AudioSampleRateConverterCache {
                                         const timebase::CompiledTempoMap&,
                                         const DecodedAudioAssetPool&, const AudioRendererLimits&,
                                         AudioSampleRateConverterCache&);
+    runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
+    get(timebase::RationalRate source, timebase::RationalRate target, timeline::ItemId item,
+        timeline::ItemId related_item, const AudioRendererLimits& limits);
+    runtime::Result<std::shared_ptr<const audio::PreparedVariableRateConversion>,
+                    AudioRendererError>
+    get_host(std::shared_ptr<const audio::AudioFileData> source, std::uint64_t source_start,
+             std::uint64_t source_frames, timeline::ItemId item, timeline::ItemId related_item,
+             const AudioRendererLimits& limits);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

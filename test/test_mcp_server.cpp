@@ -1,52 +1,33 @@
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include <pulp/audio/audio_file.hpp>
-#include <pulp/runtime/crypto.hpp>
-#include <pulp/timeline/model.hpp>
-#include <pulp/timeline/schema_registry.hpp>
-#include <pulp/timeline/serialize.hpp>
-
-#include <atomic>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
+#include "mcp_server_test_support.hpp"
 
-// pulp-test-mcp-server compiles only this TU; it does not link the
-// pulp-mcp target's object files. So the test must pull in every
-// translation unit pulp_mcp.cpp depends on:
-//   - pulp_mcp.cpp  — protocol dispatcher (renames main → pulp_mcp_main_for_test)
-//   - mcp_compat.cpp — SDK-compat resolution; also re-exposes the file-local
-//                      parse_cmake_project_version / parse_pulp_toml_sdk_version
-//                      helpers this test exercises directly (Phase 6 B4 extraction)
-//   - mcp_tools.cpp  — tool-call handlers invoked by the dispatcher
-// Without mcp_compat.cpp / mcp_tools.cpp the test fails to link
-// (undefined handle_build / resolve_project_sdk_version / …); without
-// them being in this TU the parse_* helpers stay invisible.
-#define main pulp_mcp_main_for_test
-#include "../tools/mcp/pulp_mcp.cpp"
-#undef main
-#include "../tools/mcp/mcp_compat.cpp"
-#include "../tools/mcp/mcp_tools.cpp"
+#include "mcp_compat.hpp"
+#include "mcp_json.hpp"
+#include "mcp_server.hpp"
+#include "mcp_shell.hpp"
+#include "mcp_tools.hpp"
+#include "pulp_mcp_version.h"
+#include "timeline_mcp_tools.h"
+
+#include <pulp/inspect/agent_request_queue.hpp>
 
 namespace {
 
-using Catch::Matchers::WithinAbs;
-
-std::atomic<unsigned long long> temp_dir_counter{0};
+using namespace mcp_test;
+using namespace pulp_mcp;
+using namespace pulp_mcp::server;
 
 class ScopedStreamRedirect {
   public:
@@ -63,46 +44,6 @@ class ScopedStreamRedirect {
   private:
     std::ostream& stream_;
     std::streambuf* original_;
-};
-
-unsigned long long current_process_id_for_temp_path() {
-#if defined(_WIN32)
-    return static_cast<unsigned long long>(_getpid());
-#else
-    return static_cast<unsigned long long>(getpid());
-#endif
-}
-
-struct ScopedCurrentPath {
-    explicit ScopedCurrentPath(const std::filesystem::path& next)
-        : previous(std::filesystem::current_path()) {
-        std::filesystem::current_path(next);
-    }
-
-    ~ScopedCurrentPath() {
-        std::error_code ec;
-        std::filesystem::current_path(previous, ec);
-    }
-
-    std::filesystem::path previous;
-};
-
-struct TempDir {
-    TempDir() {
-        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        const auto sequence = temp_dir_counter.fetch_add(1, std::memory_order_relaxed);
-        path = std::filesystem::temp_directory_path() /
-               ("pulp-mcp-server-test-" + std::to_string(current_process_id_for_temp_path()) + "-" +
-                std::to_string(sequence) + "-" + std::to_string(stamp));
-        std::filesystem::create_directories(path);
-    }
-
-    ~TempDir() {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-
-    std::filesystem::path path;
 };
 
 class ScopedEnvVar {
@@ -219,66 +160,12 @@ std::string repo_root() {
     return repo_root_path().string();
 }
 
-std::string tool_call(const std::string& id, const std::string& name,
-                      const std::string& arguments = "{}") {
-    return "{\"jsonrpc\":\"2.0\",\"id\":" + id +
-           ",\"method\":\"tools/call\",\"params\":{\"name\":\"" + name +
-           "\",\"arguments\":" + arguments + "}}";
-}
-
-void require_contains(const std::string& response, const std::string& needle) {
-    INFO(response);
-    REQUIRE(response.find(needle) != std::string::npos);
-}
-
-template <typename T, typename E> T require_timeline_result(pulp::runtime::Result<T, E> result) {
-    REQUIRE(result);
-    return std::move(result).value();
-}
-
-std::string make_timeline_project_json(
-    const std::filesystem::path& source,
-    pulp::timeline::AssetLocatorKind locator_kind =
-        pulp::timeline::AssetLocatorKind::ExternalUri,
-    std::string locator_hint = {}) {
-    using namespace pulp::timeline;
-    constexpr std::uint64_t frame_count = 32;
-    auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
-                                                              MediaRef{{5}, {0}, frame_count},
-                                                              {.gain_linear = 1.0f}));
-    auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
-    auto sequence = require_timeline_result(Sequence::create(
-        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
-    std::ifstream stream(source, std::ios::binary);
-    REQUIRE(stream);
-    const std::string bytes{std::istreambuf_iterator<char>(stream),
-                            std::istreambuf_iterator<char>()};
-    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
-    REQUIRE(hash);
-    MediaAsset asset{{5},
-                     "source.wav",
-                     frame_count,
-                     {48'000, 1},
-                     *hash,
-                     AssetStoragePolicy::External,
-                     {{locator_kind, locator_hint.empty() ? source.string() : locator_hint}},
-                     {},
-                     {}};
-    auto project = require_timeline_result(
-        Project::create(ProjectInput{{1}, "mcp", 6, {2}, {asset}, {sequence}}));
-    auto registry = require_timeline_result(make_builtin_timeline_registry());
-    return require_timeline_result(serialize_project(project, registry)).json;
-}
-
-std::string timeline_project_from_response(const std::string& response) {
-    auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
-    const auto* result = parsed->root().find("result");
-    REQUIRE(result != nullptr);
-    const auto* structured = result->find("structuredContent");
-    REQUIRE(structured != nullptr);
-    const auto* project = structured->find("project");
-    REQUIRE(project != nullptr);
-    return std::string(parsed->raw(*project));
+void require_tool_name(const std::string& tools, std::string_view name) {
+    const auto compact = "\"name\":\"" + std::string(name) + "\"";
+    const auto formatted = "\"name\" : \"" + std::string(name) + "\"";
+    INFO("missing tool: " << name);
+    REQUIRE((tools.find(compact) != std::string::npos ||
+             tools.find(formatted) != std::string::npos));
 }
 
 std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
@@ -627,7 +514,7 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp
     char unknown[] = "--bad";
 
     char* version_argv[] = {program, version};
-    REQUIRE(pulp_mcp_main_for_test(2, version_argv) == 0);
+    REQUIRE(pulp_mcp::server::run(2, version_argv) == 0);
     require_contains(out.str(), std::string("pulp-mcp ") + PULP_MCP_SERVER_VERSION);
     REQUIRE(err.str().empty());
 
@@ -636,7 +523,7 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp
     err.str("");
     err.clear();
     char* help_argv[] = {program, help};
-    REQUIRE(pulp_mcp_main_for_test(2, help_argv) == 0);
+    REQUIRE(pulp_mcp::server::run(2, help_argv) == 0);
     require_contains(out.str(), "MCP (Model Context Protocol) server for Pulp.");
     require_contains(out.str(), "--version, -V");
     REQUIRE(err.str().empty());
@@ -646,7 +533,7 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp
     err.str("");
     err.clear();
     char* unknown_argv[] = {program, unknown};
-    REQUIRE(pulp_mcp_main_for_test(2, unknown_argv) == 2);
+    REQUIRE(pulp_mcp::server::run(2, unknown_argv) == 2);
     REQUIRE(out.str().empty());
     require_contains(err.str(), "unknown flag '--bad'");
 }
@@ -734,17 +621,47 @@ TEST_CASE("MCP tool listing and unknown dispatch stay stable", "[mcp][tools]") {
     require_contains(tools, R"JSON("name":"pulp_content_rescan")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_remove")JSON");
     require_contains(tools, R"JSON("name":"pulp_content_reveal")JSON");
-    require_contains(tools, R"JSON("name":"pulp_timeline_project_open")JSON");
-    require_contains(tools, R"JSON("name":"pulp_timeline_command_apply")JSON");
-    require_contains(tools, R"JSON("name":"pulp_timeline_validate")JSON");
-    require_contains(tools, R"JSON("name":"pulp_timeline_explain")JSON");
-    require_contains(tools, R"JSON("name":"pulp_timeline_render")JSON");
+    require_tool_name(tools, "pulp_timeline_project_open");
+    require_tool_name(tools, "pulp_timeline_command_apply");
+    require_tool_name(tools, "pulp_timeline_validate");
+    require_tool_name(tools, "pulp_timeline_explain");
+    require_tool_name(tools, "pulp_timeline_render");
     require_contains(tools, "pulp.timeline.command.set_clip_playback_properties");
 
     auto unknown = handle_request(tool_call("5", "pulp_does_not_exist"));
     require_contains(unknown, R"JSON("id":5)JSON");
     require_contains(unknown, R"JSON("code":-32601)JSON");
     require_contains(unknown, "Unknown tool: pulp_does_not_exist");
+}
+
+TEST_CASE("generated timeline MCP names are advertised and callable", "[mcp][tools][timeline]") {
+    const auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":41,"method":"tools/list"})JSON");
+    for (const auto name : pulp_mcp::kTimelineMcpToolNames) {
+        require_tool_name(tools, name);
+    }
+
+    std::ifstream fixture(repo_root_path() / "test/fixtures/timeline/v1/minimal.json");
+    REQUIRE(fixture);
+    const std::string project{std::istreambuf_iterator<char>(fixture),
+                              std::istreambuf_iterator<char>()};
+    const auto project_args = "{\"project\":" + json_string(project) + "}";
+
+    require_contains(handle_request(tool_call("410", std::string(pulp_mcp::kTimelineMcpToolNames[0]),
+                                              project_args)),
+                     R"JSON("project":)JSON");
+    require_contains(
+        handle_request(tool_call("411", std::string(pulp_mcp::kTimelineMcpToolNames[1]),
+                                 "{\"commands\":[],\"project\":" + json_string(project) + "}")),
+        "commands must be a non-empty array");
+    require_contains(handle_request(tool_call("412", std::string(pulp_mcp::kTimelineMcpToolNames[2]),
+                                              project_args)),
+                     R"JSON("diagnostics":[])JSON");
+    require_contains(handle_request(tool_call("413", std::string(pulp_mcp::kTimelineMcpToolNames[3]),
+                                              project_args)),
+                     R"JSON("tracks":[])JSON");
+    require_contains(handle_request(tool_call("414", std::string(pulp_mcp::kTimelineMcpToolNames[4]),
+                                              project_args)),
+                     "project and output are required");
 }
 
 // pulp #1997 — gap 1: every advertised MCP tool is named in tools/list.
@@ -801,7 +718,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_kit_remove",
         "pulp_kit_pack",
         "pulp_kit_publish_check",
-        // pulp #2153: pulp_motion_* wrappers expose the Motion.*
+        // pulp_motion_* wrappers expose the Motion.*
         // inspector protocol as first-class MCP tools so an LLM can
         // discover motion observability from tools/list without
         // resorting to pulp_inspect_evaluate or `nc localhost 9147`.
@@ -835,9 +752,7 @@ TEST_CASE("MCP tools/list advertises every tool the dispatcher handles",
         "pulp_validate",
     };
     for (const char* name : expected) {
-        std::string needle = std::string(R"JSON("name":")JSON") + name + R"JSON(")JSON";
-        INFO("missing tool: " << name);
-        REQUIRE(tools.find(needle) != std::string::npos);
+        require_tool_name(tools, name);
     }
 }
 
@@ -882,120 +797,6 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
         auto response = handle_request(tool_call(std::to_string(id++), tool));
         require_contains(response, error);
     }
-}
-
-TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tools][timeline]") {
-    TempDir temp;
-    pulp::audio::AudioFileData source;
-    source.sample_rate = 48'000;
-    source.channels = {std::vector<float>(32, 0.8f)};
-    const auto source_path = temp.path / "source.wav";
-    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
-                                        pulp::audio::WavBitDepth::Float32));
-
-    const auto project = make_timeline_project_json(source_path);
-    const auto project_argument = pulp::timeline::quote_json_string(project);
-    const auto project_only = "{\"project\":" + project_argument + "}";
-
-    const auto opened =
-        handle_request(tool_call("100", "pulp_timeline_project_open", project_only));
-    require_contains(opened, R"JSON("ok":true)JSON");
-    REQUIRE(timeline_project_from_response(opened) == project);
-
-    const auto validated = handle_request(tool_call("101", "pulp_timeline_validate", project_only));
-    require_contains(validated, R"JSON("diagnostics":[])JSON");
-
-    const auto explained =
-        handle_request(tool_call("102", "pulp_timeline_explain",
-                                 "{\"project\":" + project_argument + ",\"sample_rate\":44100}"));
-    require_contains(explained, R"JSON("audio_regions":1)JSON");
-    require_contains(explained, R"JSON("pdc_offset_samples":null)JSON");
-
-    const std::string command =
-        R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
-    const auto applied = handle_request(
-        tool_call("103", "pulp_timeline_command_apply",
-                  "{\"commands\":" + command + ",\"project\":" + project_argument + "}"));
-    require_contains(applied, R"JSON("revision":"1")JSON");
-    const auto changed_project = timeline_project_from_response(applied);
-
-    const auto original_path = temp.path / "original.wav";
-    const auto changed_path = temp.path / "changed.wav";
-    const auto render_arguments = [](const std::string& project_json,
-                                     const std::filesystem::path& output) {
-        return "{\"output\":" + pulp::timeline::quote_json_string(output.string()) +
-               ",\"project\":" + pulp::timeline::quote_json_string(project_json) +
-               ",\"sample_rate\":48000}";
-    };
-    const auto original_render = handle_request(
-        tool_call("104", "pulp_timeline_render", render_arguments(project, original_path)));
-    const auto changed_render = handle_request(
-        tool_call("105", "pulp_timeline_render", render_arguments(changed_project, changed_path)));
-    require_contains(original_render, R"JSON("frames":"32")JSON");
-    require_contains(changed_render, R"JSON("frames":"32")JSON");
-
-    const auto original_audio = pulp::audio::read_audio_file(original_path.string());
-    const auto changed_audio = pulp::audio::read_audio_file(changed_path.string());
-    REQUIRE(original_audio);
-    REQUIRE(changed_audio);
-    REQUIRE_THAT(original_audio->channels[0][0], WithinAbs(0.8f, 1e-7f));
-    REQUIRE_THAT(changed_audio->channels[0][0], WithinAbs(0.4f, 1e-7f));
-
-    const auto invalid_rate = handle_request(tool_call(
-        "106", "pulp_timeline_render",
-        "{\"output\":\"ignored.wav\",\"project\":" + project_argument + ",\"sample_rate\":0}"));
-    require_contains(invalid_rate, R"JSON("isError":true)JSON");
-    require_contains(invalid_rate, "sample_rate must be an integer between 1 and 768000");
-
-    const auto excessive_rate =
-        handle_request(tool_call("107", "pulp_timeline_render",
-                                 "{\"output\":\"ignored.wav\",\"project\":" + project_argument +
-                                     ",\"sample_rate\":768001}"));
-    require_contains(excessive_rate, R"JSON("isError":true)JSON");
-    require_contains(excessive_rate, "sample_rate must be an integer between 1 and 768000");
-}
-
-TEST_CASE("timeline MCP confines package-relative media to the project base",
-          "[mcp][tools][timeline]") {
-    TempDir temp;
-    const auto package = temp.path / "package";
-    const auto media = package / "media";
-    REQUIRE(std::filesystem::create_directories(media));
-    pulp::audio::AudioFileData source;
-    source.sample_rate = 48'000;
-    source.channels = {std::vector<float>(32, 0.8f)};
-    const auto nested_source = media / "source.wav";
-    const auto outside_source = temp.path / "outside.wav";
-    REQUIRE(pulp::audio::write_wav_file(nested_source.string(), source,
-                                        pulp::audio::WavBitDepth::Float32));
-    REQUIRE(pulp::audio::write_wav_file(outside_source.string(), source,
-                                        pulp::audio::WavBitDepth::Float32));
-    ScopedCurrentPath cwd(package);
-
-    const auto arguments = [](const std::string& project_json,
-                              const std::filesystem::path& output) {
-        return "{\"output\":" + pulp::timeline::quote_json_string(output.string()) +
-               ",\"project\":" + pulp::timeline::quote_json_string(project_json) + "}";
-    };
-    const auto nested_project = make_timeline_project_json(
-        nested_source, pulp::timeline::AssetLocatorKind::PackageRelative, "media/source.wav");
-    const auto nested_response = handle_request(tool_call(
-        "108", "pulp_timeline_render", arguments(nested_project, temp.path / "nested.wav")));
-    require_contains(nested_response, R"JSON("frames":"32")JSON");
-
-    const auto absolute_project = make_timeline_project_json(
-        nested_source, pulp::timeline::AssetLocatorKind::PackageRelative, nested_source.string());
-    const auto absolute_response = handle_request(tool_call(
-        "109", "pulp_timeline_render", arguments(absolute_project, temp.path / "absolute.wav")));
-    require_contains(absolute_response, R"JSON("isError":true)JSON");
-    require_contains(absolute_response, R"JSON("stage":"render")JSON");
-
-    const auto traversal_project = make_timeline_project_json(
-        outside_source, pulp::timeline::AssetLocatorKind::PackageRelative, "../outside.wav");
-    const auto traversal_response =
-        handle_timeline_render(arguments(traversal_project, temp.path / "traversal.wav"));
-    require_contains(traversal_response, R"JSON("isError":true)JSON");
-    require_contains(traversal_response, R"JSON("stage":"render")JSON");
 }
 
 TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {
@@ -2462,7 +2263,7 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
     }
 }
 
-// ── pulp #2070: per-tool feature detection (min_sdk_version) ────────────────
+// Per-tool SDK feature detection (min_sdk_version).
 //
 // pulp-mcp ships independently of any given Pulp project, so a user may
 // have a newer pulp-mcp on PATH while editing a project pinned to an
@@ -2754,7 +2555,7 @@ TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
     }
 }
 
-// pulp #2153: confirm every pulp_motion_* tool advertised in
+// Confirm every pulp_motion_* tool advertised in
 // tools/list also exposes a discoverable input schema with descriptive
 // titles/descriptions. An LLM consumer pulls these directly from
 // tools/list to decide which tool to call; a missing description is

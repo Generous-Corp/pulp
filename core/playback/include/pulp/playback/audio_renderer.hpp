@@ -16,15 +16,11 @@
 #include <span>
 #include <vector>
 
-namespace pulp::audio {
-class PreparedSampleRateConversion;
-class PreparedVariableRateConversion;
-}
-
 namespace pulp::playback {
 
 class PlaybackProgram;
 class ProgramCompilerTask;
+class AudioClipConversionArtifact;
 
 enum class AudioRendererErrorCode : std::uint8_t {
     InvalidIdentity,
@@ -86,18 +82,21 @@ struct AudioClipRendererProgram {
     std::uint64_t source_frame_count = 0;
     std::uint64_t renderable_timeline_frames = 0;
     double source_frames_per_timeline_frame = 1.0;
-    std::shared_ptr<const audio::PreparedSampleRateConversion> sample_rate_converter;
+    std::shared_ptr<const AudioClipConversionArtifact> conversion_artifact;
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
     SourceKind source_kind = SourceKind::ArrangementClip;
     std::uint32_t source_ordinal = 0;
     TimeDomain time_domain = TimeDomain::Absolute;
-    std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter;
     timebase::TickPosition musical_tick_start{};
     timebase::TickPosition musical_tick_end{};
 
     std::int64_t timeline_end() const noexcept;
+    bool uses_sample_rate_conversion() const noexcept;
+    bool uses_host_rate_conversion() const noexcept;
+    bool shares_sample_rate_conversion_with(const AudioClipRendererProgram& other) const noexcept;
+    bool shares_host_rate_conversion_with(const AudioClipRendererProgram& other) const noexcept;
 };
 
 class AudioTrackRendererProgram {
