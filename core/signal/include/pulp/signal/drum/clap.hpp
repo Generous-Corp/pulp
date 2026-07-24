@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pulp::signal::drum {
 
@@ -29,8 +30,17 @@ namespace pulp::signal::drum {
 /// renders identically for a given parameter set.
 ///
 /// This voice is mono. The alternating left-right placement some hardware
-/// claps use is a spatialisation of the burst train rather than part of its
-/// synthesis, and belongs to whatever pans the voice.
+/// claps use is width gloss rather than part of the clap's identity -- the
+/// burst timing and the tail fusion are what make it a clap, and both survive
+/// a mono sum -- so panning belongs to whatever places the voice.
+///
+/// What a mono sum does cost is decorrelation. Identically spaced, identically
+/// signed bursts are coherent with each other, so summing them combs: the train
+/// acquires a faint pitch at one over the gap that no single burst has. Two
+/// controls exist to break that up, and at least one of them wants to be on:
+/// `set_gap_jitter` varies the spacing per burst, and
+/// `set_alternate_polarity` flips every other burst. Both stay deterministic,
+/// so a render is still reproducible.
 ///
 /// RT contract: `prepare()` allocates nothing; every other method allocates
 /// nothing and takes no locks.
@@ -60,6 +70,17 @@ public:
     /// hands lose energy each time they meet, and a train at constant level
     /// reads as a machine rather than a person.
     void set_burst_falloff(double ratio) { falloff_ = std::clamp(ratio, 0.2, 1.5); }
+
+    /// How much each gap varies from the nominal spacing, 0 to 1. Perfectly
+    /// even bursts comb against each other and give the train a pitch; hands
+    /// are never that regular anyway. Driven by a fixed sequence, so this adds
+    /// irregularity without costing reproducibility.
+    void set_gap_jitter(double amount) { gap_jitter_ = std::clamp(amount, 0.0, 1.0); }
+
+    /// Invert every other burst. A cheaper decorrelation than jitter and free
+    /// of any timing change: opposite-signed bursts cannot reinforce each
+    /// other's comb even at exactly even spacing.
+    void set_alternate_polarity(bool alternate) { alternate_polarity_ = alternate; }
 
     /// Level and decay of the tail that fuses the train.
     void set_tail_level(double level) { tail_level_ = std::max(level, 0.0); }
@@ -101,6 +122,8 @@ protected:
         next_burst_ = 0;
         samples_until_burst_ = 0;
         burst_gain_ = 1.0;
+        burst_sign_ = 1.0;
+        jitter_state_ = kJitterSeed;
     }
 
     void on_note_on(float velocity) override {
@@ -131,10 +154,12 @@ protected:
         // Fire the first burst immediately and schedule the rest; the tail runs
         // from the same instant so it is already present under burst one.
         burst_gain_ = 1.0;
+        burst_sign_ = 1.0;
+        jitter_state_ = kJitterSeed;
         burst_env_.trigger();
         tail_env_.trigger();
         next_burst_ = 1;
-        samples_until_burst_ = spacing_samples_;
+        samples_until_burst_ = next_gap();
     }
 
     bool on_is_active() const override {
@@ -146,14 +171,16 @@ protected:
             if (next_burst_ < burst_count_) {
                 if (--samples_until_burst_ <= 0) {
                     burst_gain_ *= falloff_;
+                    if (alternate_polarity_) burst_sign_ = -burst_sign_;
                     burst_env_.trigger();
                     ++next_burst_;
-                    samples_until_burst_ = spacing_samples_;
+                    samples_until_burst_ = next_gap();
                 }
             }
 
             const double filtered = filter_.process(noise_.process());
-            const double train = filtered * burst_env_.process() * burst_gain_;
+            const double train =
+                filtered * burst_env_.process() * burst_gain_ * burst_sign_;
             const double tail_env = tail_env_.process();
             const double room = filtered * tail_env * tail_level_;
 
@@ -171,10 +198,32 @@ protected:
     }
 
 private:
+    // A fixed seed for the gap sequence, kept separate from the voice's audio
+    // noise so that changing the jitter does not also change the noise the
+    // bursts are made of.
+    static constexpr std::uint32_t kJitterSeed = 0x2545F491u;
+
+    // Next gap in samples, perturbed by up to +/- half the jitter amount.
+    int next_gap() {
+        if (gap_jitter_ <= 0.0) return spacing_samples_;
+        jitter_state_ ^= jitter_state_ << 13;
+        jitter_state_ ^= jitter_state_ >> 17;
+        jitter_state_ ^= jitter_state_ << 5;
+        const double bipolar =
+            static_cast<double>(jitter_state_) * (1.0 / 2147483648.0) - 1.0;
+        const double scaled =
+            static_cast<double>(spacing_samples_) * (1.0 + 0.5 * gap_jitter_ * bipolar);
+        return std::max(1, static_cast<int>(scaled));
+    }
+
     int burst_count_ = 4;
     double spacing_ms_ = 11.0;
     double burst_decay_ms_ = 6.0;
     double falloff_ = 0.82;
+    // On by default: an unjittered train combs audibly, and a clap that needs
+    // a control turned on to stop sounding wrong is a clap with a bad default.
+    double gap_jitter_ = 0.35;
+    bool alternate_polarity_ = false;
     double tail_level_ = 0.35;
     double tail_decay_ms_ = 180.0;
     double cutoff_hz_ = 1400.0;
@@ -196,6 +245,8 @@ private:
     int next_burst_ = 0;
     int samples_until_burst_ = 0;
     double burst_gain_ = 1.0;
+    double burst_sign_ = 1.0;
+    std::uint32_t jitter_state_ = kJitterSeed;
 };
 
 }  // namespace pulp::signal::drum

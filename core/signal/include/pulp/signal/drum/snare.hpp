@@ -43,7 +43,9 @@ public:
     SnareVoice() {
         VelocityResponse r;
         r.level_db = 16.0f;
-        r.bend_octaves = 0.3f;
+        // Tension, not portamento: a struck head tightens slightly under a
+        // harder strike, and that is all this is meant to convey.
+        r.bend_octaves = 0.08f;
         r.brightness_octaves = 1.2f;
         // A harder snare hit puts proportionally more into the wires than into
         // the shell -- which is why a rimshot is nearly all snap.

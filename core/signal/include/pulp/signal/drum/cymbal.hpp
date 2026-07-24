@@ -224,7 +224,10 @@ private:
 
             // A comb's feedback reaching -60 dB after `decay_ms` means losing
             // that much per round trip, and the trip rate is the comb's own
-            // frequency -- so this is derived rather than dialled.
+            // frequency -- so this is derived rather than dialled, and stays
+            // meaningful when the tuning moves. (Jot's law, applied per comb: a
+            // raw coefficient would mean very different decay lengths at
+            // different comb frequencies.) The modal tilt sits on top of it.
             const double trips = std::max(0.001 * decay_ms_ * f, 1.0);
             const double tilt = std::pow(decay_tilt_, static_cast<double>(c));
             feedback_[index] =

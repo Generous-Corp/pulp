@@ -19,6 +19,17 @@ namespace pulp::signal::drum {
 /// All four responses are zero-cost when left at their defaults except
 /// `level_db`, so a voice that genuinely wants level-only velocity says so by
 /// leaving the others at zero rather than by omitting the wiring.
+///
+/// **There is deliberately no decay term.** Velocity must not shorten a note:
+/// a soft hit is a shallower swoop of the same length, not a shorter one. A
+/// voice that genuinely wants velocity-dependent decay has to expose that as
+/// its own explicit parameter, so it is a stated design choice rather than
+/// something that arrives as a side effect of this struct growing a field.
+///
+/// Bend depths are meant to convey tension, not portamento: a fraction of an
+/// octave is the house default, and the one voice that goes to 1.5 octaves
+/// (the Simmons-style tom) is being extreme on purpose, because the laser
+/// sweep *is* that instrument.
 struct VelocityResponse {
     /// Attenuation at velocity 0, in decibels below a full-velocity hit.
     float level_db = 18.0f;

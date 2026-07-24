@@ -459,6 +459,7 @@ TEST_CASE("The clap renders a burst train", "[signal][drum][clap]") {
     voice.set_burst_spacing_ms(12.0);
     voice.set_burst_decay_ms(4.0);
     voice.set_tail_level(0.0);
+    voice.set_gap_jitter(0.0);
 
     const auto y = hit(voice, 1.0f, 24000);
     const auto envelope = envelope_of(y, 2.0);
@@ -493,6 +494,9 @@ TEST_CASE("Each burst is quieter than the one before it",
     voice.set_burst_decay_ms(4.0);
     voice.set_burst_falloff(0.7);
     voice.set_tail_level(0.0);
+    // Jitter off: this measures level per burst by slicing at the nominal gap,
+    // which only lines up when the gaps are nominal.
+    voice.set_gap_jitter(0.0);
 
     const auto y = hit(voice, 1.0f, 24000);
     const int spacing = static_cast<int>(0.012 * kFs);
@@ -529,6 +533,98 @@ TEST_CASE("The tail runs from the first burst and outlasts the train",
     REQUIRE(audible_length(wet, 1e-4) > audible_length(dry, 1e-4) * 2);
 }
 
+TEST_CASE("Gap jitter breaks the train's regularity without breaking its count",
+          "[signal][drum][clap]") {
+    // Evenly spaced identical bursts comb against each other and give the train
+    // a pitch it should not have. Jitter is the cheap fix, and it must not cost
+    // a burst or make the voice non-reproducible.
+    auto gaps_for = [](double jitter) {
+        ClapVoice voice;
+        voice.prepare(kFs);
+        voice.set_burst_count(5);
+        voice.set_burst_spacing_ms(12.0);
+        voice.set_burst_decay_ms(3.0);
+        voice.set_tail_level(0.0);
+        voice.set_gap_jitter(jitter);
+        // Equal-height bursts, so an onset is detected at the same point in
+        // each burst's attack. With the default falloff the later, quieter
+        // bursts cross a fixed threshold slightly later, which shows up as
+        // timing spread that is really detection spread.
+        voice.set_burst_falloff(1.0);
+
+        const auto y = hit(voice, 1.0f, 24000);
+        const auto envelope = envelope_of(y, 1.0);
+        std::vector<int> onsets;
+        bool armed = true;
+        const double high = peak(y) * 0.4;
+        const double low = peak(y) * 0.1;
+        for (std::size_t i = 0; i < envelope.size(); ++i) {
+            if (armed && envelope[i] > high) {
+                onsets.push_back(static_cast<int>(i));
+                armed = false;
+            } else if (!armed && envelope[i] < low) {
+                armed = true;
+            }
+        }
+        return onsets;
+    };
+
+    const auto even = gaps_for(0.0);
+    const auto jittered = gaps_for(0.8);
+    REQUIRE(even.size() == 5);
+    REQUIRE(jittered.size() == 5);
+
+    // Even spacing means every gap is the same; jitter means they are not.
+    auto spread = [](const std::vector<int>& onsets) {
+        int smallest = 1 << 30, largest = 0;
+        for (std::size_t i = 1; i < onsets.size(); ++i) {
+            const int gap = onsets[i] - onsets[i - 1];
+            smallest = std::min(smallest, gap);
+            largest = std::max(largest, gap);
+        }
+        return largest - smallest;
+    };
+    // Each burst is noise, so an onset lands wherever that burst happens to be
+    // loud first -- a handful of samples of detection spread even when the
+    // timing is exact. The jittered case is an order of magnitude beyond it.
+    REQUIRE(spread(even) < 20);
+    REQUIRE(spread(jittered) > 40);
+
+    // ...and it stays reproducible.
+    REQUIRE(gaps_for(0.8) == jittered);
+}
+
+TEST_CASE("Alternating polarity flips every other burst",
+          "[signal][drum][clap]") {
+    // The other decorrelation route, and the one that costs no timing change:
+    // opposite-signed bursts cannot reinforce each other's comb.
+    auto first_two_signs = [](bool alternate) {
+        ClapVoice voice;
+        voice.prepare(kFs);
+        voice.set_burst_count(2);
+        voice.set_burst_spacing_ms(12.0);
+        voice.set_burst_decay_ms(3.0);
+        voice.set_tail_level(0.0);
+        voice.set_gap_jitter(0.0);
+        voice.set_alternate_polarity(alternate);
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto plain = first_two_signs(false);
+    const auto flipped = first_two_signs(true);
+
+    // The first burst is identical either way; the second is inverted.
+    const std::size_t gap = static_cast<std::size_t>(0.012 * kFs);
+    for (std::size_t i = 0; i < gap / 2; ++i) {
+        REQUIRE(plain[i] == flipped[i]);
+    }
+    double correlation = 0.0;
+    for (std::size_t i = gap; i < gap * 2; ++i) {
+        correlation += static_cast<double>(plain[i]) * flipped[i];
+    }
+    REQUIRE(correlation < 0.0);
+}
+
 TEST_CASE("A clap renders identically for the same parameters",
           "[signal][drum][clap]") {
     ClapVoice voice;
@@ -546,6 +642,7 @@ TEST_CASE("A single-burst clap is still a valid voice",
     voice.prepare(kFs);
     voice.set_burst_count(1);
     voice.set_tail_level(0.0);
+    voice.set_gap_jitter(0.0);
     const auto y = hit(voice, 1.0f, 24000);
     REQUIRE(peak(y) > 1e-3);
     const auto envelope = envelope_of(y, 2.0);

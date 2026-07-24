@@ -57,7 +57,10 @@ public:
     KickVoice() {
         VelocityResponse r;
         r.level_db = 14.0f;
-        r.bend_octaves = 0.6f;
+        // Deliberately small. An 808-family kick barely moves in pitch with how
+        // hard it is hit -- its velocity story is level and click tone, and a
+        // bend deep enough to hear reads as portamento rather than as tension.
+        r.bend_octaves = 0.15f;
         r.brightness_octaves = 1.5f;
         set_velocity_response(r);
 
@@ -84,6 +87,10 @@ public:
     /// Depth of the downward pitch sweep, in octaves, and how quickly it
     /// settles. Applies to the oscillator body; the circuit body produces its
     /// sweep from the network and ignores these.
+    ///
+    /// Octaves rather than a linear multiplier, so the sweep composes
+    /// additively with the velocity bend, which is also in octaves. A depth
+    /// quoted in the multiplier form converts as `octaves = log2(1 + amount)`.
     void set_pitch_sweep_octaves(double octaves) {
         pitch_sweep_oct_ = std::clamp(octaves, 0.0, 6.0);
     }
@@ -146,6 +153,24 @@ public:
 
     /// Width of the trigger pulse into the pulse shaper, in milliseconds.
     void set_circuit_pulse_ms(double ms) { circuit_pulse_ms_ = std::clamp(ms, 0.2, 20.0); }
+
+    /// How hard the trigger drives the network, 0 to 1.
+    ///
+    /// Unlike most drive controls this one is not a taste control layered on
+    /// top of a working circuit -- it moves the network through the only range
+    /// in which it behaves at all, so the control is mapped across that window
+    /// rather than across an arbitrary one.
+    ///
+    /// At 0 the ring only just pushes the transistor past its conduction knee,
+    /// so the pitch drop is at its weakest. Below that window the drop stops
+    /// happening entirely, which is why 0 is the floor. At 1 the op-amp is
+    /// approaching its supply rail, so the ring begins to flatten into a
+    /// square. Both ends are audible character rather than faults, and they are
+    /// reachable on purpose: clamping the range to the middle would remove the
+    /// two sounds the circuit is most recognisable for.
+    void set_circuit_drive(double amount) {
+        circuit_drive_ = std::clamp(amount, 0.0, 1.0);
+    }
 
     /// Disconnect the leakage path that produces the pitch sigh. Proves the
     /// sigh is emergent rather than scripted, and is a usable sound in itself.
@@ -325,7 +350,9 @@ private:
             if (shunt_remaining_ == 0) circuit_.set_attack_shunt(false);
         }
 
-        const auto ring = circuit_.process(diode * kPulseVolts, feedback_z_, 0.0);
+        const double drive_volts =
+            kPulseVoltsMin + circuit_drive_ * (kPulseVoltsMax - kPulseVoltsMin);
+        const auto ring = circuit_.process(diode * drive_volts, feedback_z_, 0.0);
 
         // One sample of delay breaks the delay-free loop. The sign is negative
         // because the network already subtracts its feedback injection, so a
@@ -366,7 +393,12 @@ private:
     // its 15 V rail and the ring becomes a square wave. This value keeps the
     // network inside the range the model was fitted over, and the output scale
     // brings its volts back to the range the rest of the voice works in.
-    static constexpr double kPulseVolts = 1.0;
+    // Measured bounds of the window the network behaves in. Below the low end
+    // the ring never reaches the -0.556 V conduction knee and the pitch drop
+    // silently does not happen; above the high end the op-amp sits on its 15 V
+    // rail. `set_circuit_drive` maps its 0..1 across exactly this span.
+    static constexpr double kPulseVoltsMin = 1.0;
+    static constexpr double kPulseVoltsMax = 1.7;
     static constexpr double kCircuitOutputScale = 0.1;
     static constexpr double kShaperHz = 120.0;
     static constexpr double kToneHz = 4000.0;
@@ -391,6 +423,7 @@ private:
     double fm_ratio_ = 1.0;
 
     double circuit_feedback_ = 0.85;
+    double circuit_drive_ = 0.3;
     double circuit_attack_ms_ = 4.0;
     double circuit_pulse_ms_ = 2.0;
 
