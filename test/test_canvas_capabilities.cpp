@@ -46,6 +46,7 @@ constexpr CanvasCapability kAllCaps[] = {
     CanvasCapability::sksl_post_effect,
     CanvasCapability::box_shadow_gaussian,
     CanvasCapability::scene_cache,
+    CanvasCapability::retained_layer_cache,
 };
 
 }  // namespace
@@ -127,6 +128,13 @@ TEST_CASE("SkiaCanvas advertises the full faithful capability set",
     // scene_cache landed with FU-3: Skia records via SkPictureRecorder and
     // replays via drawPicture, so it now advertises the capability.
     REQUIRE(canvas.supports(CanvasCapability::scene_cache));
+    // A standalone canvas owns a private store. It can reuse a layer while
+    // this instance lives, but cannot promise that a host-created replacement
+    // will inherit it.
+    REQUIRE_FALSE(canvas.supports(CanvasCapability::retained_layer_cache));
+    auto retained_store = SkiaCanvas::create_retained_layer_store();
+    SkiaCanvas retained_canvas(surface->getCanvas(), nullptr, retained_store);
+    REQUIRE(retained_canvas.supports(CanvasCapability::retained_layer_cache));
     // The alias agrees with the enum query.
     REQUIRE(canvas.supports_image_draw());
 }
@@ -162,6 +170,7 @@ TEST_CASE("CoreGraphicsCanvas advertises only image capability",
     REQUIRE_FALSE(canvas.supports(CanvasCapability::bloom_layer));
     REQUIRE_FALSE(canvas.supports(CanvasCapability::box_shadow_gaussian));
     REQUIRE_FALSE(canvas.supports(CanvasCapability::scene_cache));
+    REQUIRE_FALSE(canvas.supports(CanvasCapability::retained_layer_cache));
 
     CGContextRelease(ctx);
 }

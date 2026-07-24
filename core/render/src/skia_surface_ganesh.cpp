@@ -85,6 +85,8 @@ public:
         emscripten_set_webglcontextrestored_callback(selector_.c_str(), nullptr, EM_FALSE, nullptr);
 
         canvas_.reset();
+        // Release Ganesh images before abandoning their owning context.
+        retained_layers_.reset();
         frame_surface_.reset();
         offscreen_surface_.reset();
         if (context_) {
@@ -156,6 +158,9 @@ public:
         runtime::log_warn("SkiaSurface(WebGL): the WebGL2 context was LOST — the UI is "
                           "frozen until the browser restores it.");
         canvas_.reset();
+        // Context loss destroys every GPU resource. A restored context starts
+        // with an empty retained cache, so old handles fail layer_valid().
+        retained_layers_ = canvas::SkiaCanvas::create_retained_layer_store();
         frame_surface_.reset();
         offscreen_surface_.reset();
         if (context_) {
@@ -235,7 +240,8 @@ public:
         }
         if (!sk_canvas) return nullptr;
 
-        canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, /*recorder*/ nullptr);
+        canvas_ = std::make_unique<canvas::SkiaCanvas>(
+            sk_canvas, /*recorder*/ nullptr, retained_layers_);
         canvas_->set_gpu_upload_context(context_.get());
         return canvas_.get();
     }
@@ -249,6 +255,11 @@ public:
     }
 
     void resize(uint32_t width, uint32_t height, float scale) override {
+        if (scale != scale_) {
+            canvas_.reset();
+            retained_layers_ =
+                canvas::SkiaCanvas::create_retained_layer_store();
+        }
         width_ = width;
         height_ = height;
         scale_ = scale;
@@ -353,6 +364,8 @@ private:
     sk_sp<SkSurface> frame_surface_;
     sk_sp<SkSurface> offscreen_surface_;
 
+    std::shared_ptr<canvas::SkiaCanvas::RetainedLayerStore> retained_layers_ =
+        canvas::SkiaCanvas::create_retained_layer_store();
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 };
 

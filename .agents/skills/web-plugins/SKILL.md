@@ -227,7 +227,11 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   an empty panel, which reads as a render bug.
 - **WebGL context loss is a normal event.** Lost → the surface reports
   unavailable and the rAF loop keeps pumping; restored → Ganesh is rebuilt and
-  repaints. Any GPU resource cached above the surface must survive that cycle.
+  repaints. Ganesh cacheable `LayerHandle`s are retired on loss because their
+  textures belong to the dead context; retained-layer callers must recheck
+  `layer_valid()` and record a replacement. Any GPU resource cached above the
+  surface must either survive that cycle independently or follow the same
+  explicit invalidation/rebuild rule.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
@@ -613,7 +617,9 @@ Every full-canvas editor MUST handle these, all learned the hard way on SuperCon
   `ResizeObserver`, so the backing store stays stale and the canvas goes blurry/mis-scaled.
   The shared web layer (`web_input.cpp`) arms a re-arming `matchMedia("(resolution: Ndppx)")`
   listener that re-runs the resize (which re-reads dpr) on each DPR change. Browser text-zoom
-  DOES change the CSS size, so it is already covered by the ResizeObserver.
+  DOES change the CSS size, so it is already covered by the ResizeObserver. The Ganesh surface
+  also retires rasterized cacheable `LayerHandle`s when DPR changes; callers rebuild them after
+  `layer_valid()` turns false rather than scaling an old-density texture.
 - **iOS file picker:** the page's `<input type=file>` must NOT be `display:none`/`hidden`
   (iOS Safari drops `.click()` on it) — hide it visually instead. See its own landmine above.
 - **Page scroll over the canvas:** opt into `touch-action: pan-y` after mount so a vertical

@@ -43,6 +43,9 @@ public:
         : gpu_(gpu), width_(width), height_(height), scale_(scale) {}
 
     ~SkiaSurfaceImpl() override {
+        // Release retained GPU images while their recorder/context are alive.
+        canvas_.reset();
+        retained_layers_.reset();
         if (context_) {
             // Drain any outstanding GpuStats finished-with-stats callbacks
             // before `this` dies — they capture `this` as their context, so a
@@ -118,7 +121,8 @@ public:
             frame_surface_.reset();
             SkCanvas* sk_canvas = scene_surface_->getCanvas();
             if (!sk_canvas) return nullptr;
-            canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, recorder_.get());
+            canvas_ = std::make_unique<canvas::SkiaCanvas>(
+                sk_canvas, recorder_.get(), retained_layers_);
             return canvas_.get();
         }
 
@@ -174,7 +178,8 @@ public:
 
         if (!sk_canvas) return nullptr;
 
-        canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, recorder_.get());
+        canvas_ = std::make_unique<canvas::SkiaCanvas>(
+            sk_canvas, recorder_.get(), retained_layers_);
         return canvas_.get();
     }
 
@@ -222,6 +227,13 @@ public:
     }
 
     void resize(uint32_t width, uint32_t height, float scale) override {
+        if (scale != scale_) {
+            // Retained layers are rasterized at record-time device density.
+            // Force callers to rebuild them at the new backing scale.
+            canvas_.reset();
+            retained_layers_ =
+                canvas::SkiaCanvas::create_retained_layer_store();
+        }
         width_ = width;
         height_ = height;
         scale_ = scale;
@@ -416,6 +428,11 @@ private:
     // drawn here and RETAINED across frames; end_frame blits it to the drawable.
     bool persistent_scene_ = false;
     sk_sp<SkSurface> scene_surface_;
+
+    // Cacheable layer textures belong to the renderer, not the short-lived
+    // SkiaCanvas wrapper constructed around each frame's target surface.
+    std::shared_ptr<canvas::SkiaCanvas::RetainedLayerStore> retained_layers_ =
+        canvas::SkiaCanvas::create_retained_layer_store();
 
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 

@@ -104,10 +104,14 @@ Works on both Skia (SkCanvas::saveLayer) and CoreGraphics (CGContextBeginTranspa
 `save_layer()` is a **scope**: the only way back into it is to re-run the drawing
 that filled it, which defeats the point of caching it. `begin_layer()` /
 `end_layer()` return a **`LayerHandle`** you can keep **across frames** and
-re-composite without redrawing its contents.
+re-composite without redrawing its contents. Query
+`canvas.supports(CanvasCapability::retained_layer_cache)` before selecting
+this path on an arbitrary backend. Always call `layer_valid()` as shown:
+explicit invalidation, a backing-scale change, or GPU context loss can retire
+the cached texture.
 
 ```cpp
-if (!cached_) {
+if (!canvas.layer_valid(cached_)) {
     canvas.begin_layer(bounds, /*cacheable=*/true);
     paint_expensive_subtree(canvas);
     cached_ = canvas.end_layer();     // seals it; keep the handle

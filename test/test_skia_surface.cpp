@@ -142,6 +142,139 @@ TEST_CASE("SkiaSurface multiple frame cycles", "[render][skia]") {
 #endif
 }
 
+TEST_CASE("SkiaSurface retains cacheable layers across frame canvases",
+          "[render][skia][layer-cache]") {
+#ifdef PULP_HAS_SKIA
+    auto gpu = GpuSurface::create_dawn();
+    if (!gpu) SKIP("Dawn GPU surface unavailable");
+
+    GpuSurface::Config gpu_config{};
+    gpu_config.width = 100;
+    gpu_config.height = 100;
+    if (!gpu->initialize(gpu_config))
+        SKIP("Dawn adapter initialization failed");
+
+    auto skia = SkiaSurface::create(*gpu, {.width = 100, .height = 100});
+    if (!skia || !skia->is_available())
+        SKIP("Skia Graphite surface unavailable");
+
+    REQUIRE(gpu->begin_frame());
+    auto* first_frame = skia->begin_frame();
+    REQUIRE(first_frame != nullptr);
+    REQUIRE(first_frame->supports(
+        pulp::canvas::CanvasCapability::retained_layer_cache));
+
+    first_frame->begin_layer({0.0f, 0.0f, 100.0f, 100.0f},
+                             /*cacheable=*/true);
+    first_frame->set_fill_color(
+        pulp::canvas::Color::rgba8(255, 0, 0));
+    first_frame->fill_rect(0.0f, 0.0f, 100.0f, 100.0f);
+    const auto cached = first_frame->end_layer();
+    REQUIRE(cached);
+    REQUIRE(first_frame->layer_valid(cached));
+    first_frame->draw_layer(cached);
+
+    skia->end_frame();
+    gpu->end_frame();
+
+    REQUIRE(gpu->begin_frame());
+    auto* second_frame = skia->begin_frame();
+    REQUIRE(second_frame != nullptr);
+
+    // SkiaSurface wraps each frame in a fresh SkiaCanvas. The renderer-owned
+    // retained-layer store must keep both the handle and its SkImage alive.
+    REQUIRE(second_frame->layer_valid(cached));
+    second_frame->set_fill_color(
+        pulp::canvas::Color::rgba8(0, 0, 255));
+    second_frame->fill_rect(0.0f, 0.0f, 100.0f, 100.0f);
+    second_frame->draw_layer(cached);
+
+    std::vector<uint8_t> pixels;
+    uint32_t pixel_width = 0;
+    uint32_t pixel_height = 0;
+    REQUIRE(skia->read_current_rgba(
+        pixels, pixel_width, pixel_height));
+    REQUIRE(pixel_width == 100);
+    REQUIRE(pixel_height == 100);
+    const size_t center =
+        (static_cast<size_t>(50) * pixel_width + 50u) * 4u;
+    REQUIRE(pixels.at(center) > 200);
+    REQUIRE(pixels.at(center + 1) < 50);
+    REQUIRE(pixels.at(center + 2) < 50);
+
+    skia->end_frame();
+    gpu->end_frame();
+
+    // Moving the renderer to a new DPI retires the old-density texture.
+    skia->resize(100, 100, 2.0f);
+    REQUIRE(gpu->begin_frame());
+    auto* scaled_frame = skia->begin_frame();
+    REQUIRE(scaled_frame != nullptr);
+    REQUIRE_FALSE(scaled_frame->layer_valid(cached));
+    skia->end_frame();
+    gpu->end_frame();
+#else
+    REQUIRE(true);
+#endif
+}
+
+TEST_CASE("SkiaCanvas retained stores isolate handles and open layers",
+          "[render][skia][layer-cache]") {
+#ifdef PULP_HAS_SKIA
+    const auto info = SkImageInfo::MakeN32Premul(32, 32);
+    auto surface_a = SkSurfaces::Raster(info);
+    auto surface_b = SkSurfaces::Raster(info);
+    REQUIRE(surface_a);
+    REQUIRE(surface_b);
+
+    auto store_a =
+        pulp::canvas::SkiaCanvas::create_retained_layer_store();
+    auto store_b =
+        pulp::canvas::SkiaCanvas::create_retained_layer_store();
+    pulp::canvas::SkiaCanvas canvas_a(
+        surface_a->getCanvas(), nullptr, store_a);
+    pulp::canvas::SkiaCanvas canvas_b(
+        surface_b->getCanvas(), nullptr, store_b);
+
+    canvas_a.begin_layer({0, 0, 16, 16}, true);
+    canvas_a.fill_rect(0, 0, 16, 16);
+    const auto layer_a = canvas_a.end_layer();
+    canvas_b.begin_layer({0, 0, 16, 16}, true);
+    canvas_b.fill_rect(0, 0, 16, 16);
+    const auto layer_b = canvas_b.end_layer();
+
+    REQUIRE(layer_a);
+    REQUIRE(layer_b);
+    REQUIRE(layer_a != layer_b);
+    REQUIRE(canvas_a.layer_valid(layer_a));
+    REQUIRE_FALSE(canvas_a.layer_valid(layer_b));
+    REQUIRE_FALSE(canvas_b.layer_valid(layer_a));
+
+    // Invalidating an open ancestor cancels it without releasing the surface
+    // that the nested layer's previous_canvas still points into.
+    const auto outer = canvas_a.begin_layer({0, 0, 32, 32}, true);
+    const auto inner = canvas_a.begin_layer({0, 0, 8, 8}, true);
+    canvas_a.invalidate_layer(outer);
+    const auto sealed_inner = canvas_a.end_layer();
+    REQUIRE(sealed_inner == inner);
+    canvas_a.draw_layer(sealed_inner);
+    REQUIRE_FALSE(canvas_a.end_layer());
+    REQUIRE_FALSE(canvas_a.layer_valid(outer));
+
+    pulp::canvas::Canvas::LayerHandle abandoned;
+    {
+        pulp::canvas::SkiaCanvas unbalanced(
+            surface_a->getCanvas(), nullptr, store_a);
+        abandoned = unbalanced.begin_layer({0, 0, 4, 4}, true);
+    }
+    pulp::canvas::SkiaCanvas after_unwind(
+        surface_a->getCanvas(), nullptr, store_a);
+    REQUIRE_FALSE(after_unwind.layer_valid(abandoned));
+#else
+    REQUIRE(true);
+#endif
+}
+
 TEST_CASE("SkiaSurface resize", "[render][skia]") {
 #ifdef PULP_HAS_SKIA
     auto gpu = GpuSurface::create_dawn();
