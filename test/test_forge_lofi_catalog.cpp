@@ -18,8 +18,18 @@
 //   * Trim    — a dB setting attenuates/boosts by exactly that many dB.
 //   * Ping-pong — an impulse in one channel produces echoes that alternate
 //                 sides, asserted as a per-echo L:R energy ratio.
+//   * Reverb — mix injection exposes a wet tail, decay changes its duration,
+//                and the normalized maximum-decay path respects its gain bound.
+//   * Compressor — a loud sine above threshold is measurably reduced, the
+//                reduction grows with ratio, and a slow release pumps (gain
+//                reduction recovers slowly over time).
+//   * Gate — signal below threshold is attenuated to near-silence, above
+//                threshold passes, and the hold time keeps it open after the
+//                key drops below threshold.
 //
-// Plus one RT-allocation probe over every node's process path.
+// Plus one RT-allocation probe over every node's process path, and a boundedness
+// check proving the dynamics nodes never expand (so the Forge output guard stays
+// transparent).
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -642,6 +652,311 @@ TEST_CASE("Forge lo-fi: ping-pong echoes alternate left and right",
     }
 }
 
+// ── Reverb: mix injection exposes the wet tail ────────────────────────────
+TEST_CASE("Forge lo-fi: injecting reverb mix switches from dry impulse to wet tail",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    auto render = [](float mix) {
+        BakedFixture fx(lofi::make_reverb_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kReverbDecay, 1.0f)));
+        REQUIRE(q.push(immediate(lofi::kReverbDamping, 0.2f)));
+        REQUIRE(q.push(immediate(lofi::kReverbMix, mix)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        std::vector<float> impulse(kFrames, 0.0f);
+        impulse[0] = 1.0f;
+        std::vector<float> stream = run_block(*fx.result.processor, impulse);
+        const std::vector<float> silence(kFrames, 0.0f);
+        for (int b = 0; b < 80; ++b) {
+            const auto block = run_block(*fx.result.processor, silence);
+            stream.insert(stream.end(), block.begin(), block.end());
+        }
+        return stream;
+    };
+
+    const auto dry = render(0.0f);
+    const auto wet = render(1.0f);
+    CHECK(dry.front() == Catch::Approx(1.0f));
+    CHECK(peak(std::vector<float>(dry.begin() + 1, dry.end())) < 1e-7f);
+    CHECK(std::fabs(wet.front()) < 1e-7f);  // the first wet tap is delayed
+    CHECK(peak(std::vector<float>(wet.begin() + kFrames, wet.end())) > 1e-3f);
+}
+
+// ── Reverb: decay injection controls tail duration ───────────────────────
+TEST_CASE("Forge lo-fi: injecting reverb decay changes the measured tail energy",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    auto late_tail_energy = [](float decay) {
+        BakedFixture fx(lofi::make_reverb_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kReverbDecay, decay)));
+        REQUIRE(q.push(immediate(lofi::kReverbDamping, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kReverbMix, 1.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        std::vector<float> impulse(kFrames, 0.0f);
+        impulse[0] = 1.0f;
+        run_block(*fx.result.processor, impulse);
+        const std::vector<float> silence(kFrames, 0.0f);
+        double energy = 0.0;
+        // Compare a window around 0.5 s: a 0.1 s RT60 tail is effectively gone,
+        // while a 2 s RT60 tail still has plainly measurable energy.
+        constexpr int kWindowStartBlock = 180;
+        constexpr int kWindowEndBlock = 210;
+        for (int b = 1; b <= kWindowEndBlock; ++b) {
+            const auto out = run_block(*fx.result.processor, silence);
+            if (b >= kWindowStartBlock) {
+                for (float v : out) energy += static_cast<double>(v) * v;
+            }
+        }
+        return energy;
+    };
+
+    const double short_tail = late_tail_energy(0.1f);
+    const double long_tail = late_tail_energy(2.0f);
+    INFO("reverb late energy short=" << short_tail << " long=" << long_tail);
+    CHECK(long_tail > 1e-8);
+    CHECK(long_tail > short_tail * 100.0);
+}
+
+// ── Reverb: maximum-decay steady input respects Forge's 2x contract ──────
+TEST_CASE("Forge lo-fi: normalized reverb stays finite and within its declared gain",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    BakedFixture fx(lofi::make_reverb_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kReverbDecay, 10.0f)));
+    REQUIRE(q.push(immediate(lofi::kReverbDamping, 0.0f)));
+    REQUIRE(q.push(immediate(lofi::kReverbMix, 1.0f)));
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    const std::vector<float> unity(kFrames, 1.0f);
+    float max_output = 0.0f;
+    float final_mean = 0.0f;
+    // Eight seconds reaches >99% of the raw FDN's DC steady state at 10 s RT60.
+    const int blocks = static_cast<int>(8.0 * kSr / kFrames);
+    for (int b = 0; b < blocks; ++b) {
+        const auto out = run_block(*fx.result.processor, unity);
+        for (float v : out) {
+            REQUIRE(std::isfinite(v));
+            max_output = std::max(max_output, std::fabs(v));
+        }
+        if (b == blocks - 1) {
+            for (float v : out) final_mean += v / static_cast<float>(kFrames);
+        }
+    }
+    INFO("reverb max=" << max_output << " final mean=" << final_mean);
+    CHECK(final_mean > 0.5f);  // exercised the formerly ~35x buildup, not only startup
+    CHECK(max_output <= 2.0f);
+}
+
+// ── Compressor: level reduction above threshold, growing with ratio ──────
+TEST_CASE("Forge lo-fi: compressor reduces a loud sine and reduction grows with ratio",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // Peak output level of a −6 dBFS sine (amp 0.5) after the envelope settles,
+    // at threshold −18 dB and a given ratio. The classic transfer function is
+    // out_db = threshold + (in_db − threshold)/ratio for in above threshold, so a
+    // −6 dBFS peak → −18 + (−6 − −18)/ratio. Measured at ratio 4 that is −15 dBFS.
+    auto settled_peak = [&](float ratio) {
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -18.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, ratio)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, 80.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto tone = sine(kFrames, /*freq=*/220.0, /*amp=*/0.5f);
+        // Settle well past the 80 ms release so the peak-riding envelope is steady.
+        return peak(settle(*fx.result.processor, tone, /*blocks=*/120));
+    };
+
+    const float in_peak = 0.5f;  // −6 dBFS
+    const float r1 = settled_peak(1.0f);
+    const float r2 = settled_peak(2.0f);
+    const float r4 = settled_peak(4.0f);
+    const float r20 = settled_peak(20.0f);
+    auto db = [](float x) { return 20.0f * std::log10(std::max(x, 1e-9f)); };
+    INFO("in=" << db(in_peak) << " dBFS  r1=" << db(r1) << " r2=" << db(r2)
+               << " r4=" << db(r4) << " r20=" << db(r20) << " dBFS");
+
+    // ratio 1 → bit-transparent (no reduction).
+    CHECK(db(r1) == Catch::Approx(db(in_peak)).margin(0.5));
+    // ratio 4 → the −15 dBFS claim (±2 dB for the peak-riding envelope).
+    CHECK(db(r4) == Catch::Approx(-15.0f).margin(2.0f));
+    // Reduction is monotonic in ratio — this ordering is the negative control:
+    // if the ratio knob were ignored, all four peaks would be equal and it fails.
+    CHECK(r1 > r2);
+    CHECK(r2 > r4);
+    CHECK(r4 > r20);
+    // A loud input above threshold is measurably quieter at a musical ratio.
+    CHECK(r4 < in_peak * 0.6f);  // > ~4.4 dB of gain reduction
+}
+
+// ── Compressor: a slow release pumps (gain reduction recovers over time) ──
+TEST_CASE("Forge lo-fi: compressor slow release pumps on a burst-then-quiet input",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // Drum-loop-shaped input: a loud burst opens deep gain reduction, then a quiet
+    // below-threshold probe tone reveals the gain recovering. The number of blocks
+    // the probe needs to climb back to half its recovered level measures the
+    // release-driven pump: a slow release keeps the signal ducked far longer.
+    auto recovery_blocks = [&](float release_ms) {
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -18.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, 8.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, release_ms)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        // Engage: 12 blocks of a loud sine (amp 0.9, ~−0.9 dBFS) settles the
+        // envelope deep into gain reduction.
+        const auto burst = sine(kFrames, /*freq=*/500.0, /*amp=*/0.9f);
+        settle(*fx.result.processor, burst, /*blocks=*/12);
+
+        // Probe: a quiet sine (amp 0.1, −20 dBFS, below threshold → no reduction
+        // of its own). Record its per-block RMS as the gain recovers.
+        const auto probe = sine(kFrames, /*freq=*/500.0, /*amp=*/0.1f);
+        std::vector<float> traj;
+        for (int b = 0; b < 90; ++b) traj.push_back(rms(run_block(*fx.result.processor, probe)));
+        const float recovered = traj.back();  // fully-recovered probe level
+        for (int b = 0; b < static_cast<int>(traj.size()); ++b) {
+            if (traj[static_cast<std::size_t>(b)] >= 0.5f * recovered) return b;
+        }
+        return static_cast<int>(traj.size());
+    };
+
+    const int fast = recovery_blocks(10.0f);
+    const int slow = recovery_blocks(120.0f);
+    INFO("recovery blocks: fast(10ms)=" << fast << " slow(120ms)=" << slow);
+    CHECK(fast < 8);          // a fast release recovers almost immediately
+    CHECK(slow > fast * 2);   // the slow release pumps — ducked far longer
+    CHECK(slow < 90);         // but it does recover (not a stuck gain)
+}
+
+// ── Gate: below threshold is silenced, above threshold passes ─────────────
+TEST_CASE("Forge lo-fi: gate attenuates below threshold and passes above it",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    BakedFixture fx(lofi::make_gate_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kGateThresholdDb, -40.0f)));
+    REQUIRE(q.push(immediate(lofi::kGateAttackMs, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kGateHoldMs, 5.0f)));   // short hold: closes on the quiet tone
+    REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 40.0f)));
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    // Loud tone (amp 0.5, −6 dBFS, above −40) passes.
+    const auto loud = sine(kFrames, /*freq=*/300.0, /*amp=*/0.5f);
+    const float loud_rms = rms(settle(*fx.result.processor, loud, /*blocks=*/8));
+
+    // Quiet tone (amp 0.006, ≈ −44 dBFS, below −40) is gated to near-silence.
+    const auto quiet = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+    const float quiet_in = rms(quiet);
+    const float quiet_rms = rms(settle(*fx.result.processor, quiet, /*blocks=*/80));
+
+    INFO("loud in=" << rms(loud) << " out=" << loud_rms
+                    << "  quiet in=" << quiet_in << " out=" << quiet_rms);
+    CHECK(loud_rms > rms(loud) * 0.9f);       // above threshold passes ~unattenuated
+    // Below threshold is silenced — this is the negative control: without wired
+    // attenuation, out would equal in and this fails.
+    CHECK(quiet_rms < quiet_in * 0.01f);      // > 40 dB of attenuation
+}
+
+// ── Gate: the hold time keeps the gate open after the key drops ───────────
+TEST_CASE("Forge lo-fi: gate hold keeps a baked gate open through a quiet tail",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    // A loud burst opens the gate, then a quiet below-threshold tail follows. With
+    // a long hold the tail passes for the hold window; with no hold the gate closes
+    // immediately. Measure the tail RMS well inside the long-hold window.
+    auto tail_after_burst = [&](float hold_ms) {
+        BakedFixture fx(lofi::make_gate_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kGateThresholdDb, -40.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateAttackMs, 1.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateHoldMs, hold_ms)));
+        REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 40.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+        // Open the gate with a loud burst (amp 0.5, above −40).
+        const auto burst = sine(kFrames, /*freq=*/300.0, /*amp=*/0.5f);
+        settle(*fx.result.processor, burst, /*blocks=*/6);
+
+        // Quiet tail (amp 0.006, below −40). Average its RMS over blocks 5..20
+        // (~13–53 ms) — inside a 200 ms hold, past a 40 ms release.
+        const auto tail = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+        double acc = 0.0;
+        int cnt = 0;
+        for (int b = 0; b < 21; ++b) {
+            const float r = rms(run_block(*fx.result.processor, tail));
+            if (b >= 5) { acc += r; ++cnt; }
+        }
+        return static_cast<float>(acc / cnt);
+    };
+
+    const auto tail = sine(kFrames, /*freq=*/300.0, /*amp=*/0.006f);
+    const float tail_in = rms(tail);
+    const float open = tail_after_burst(200.0f);  // hold keeps it open
+    const float closed = tail_after_burst(0.0f);  // no hold → closes at once
+    INFO("tail in=" << tail_in << "  hold=200ms=" << open << "  hold=0=" << closed);
+    CHECK(open > tail_in * 0.5f);   // held open — the quiet tail passes
+    CHECK(open > closed * 5.0f);    // hold-dependent: the negative control for hold
+    CHECK(closed < tail_in * 0.2f); // with no hold the tail is gated
+}
+
+// ── Boundedness: the dynamics nodes never expand, at extreme settings ─────
+// Both nodes only ever apply a gain ≤ 1 (the compressor has no makeup; the gate
+// floors at −80 dB), so a hot input can never diverge — the property that keeps
+// the Forge runtime output guard transparent. (The guard itself lives in the
+// Forge repo; here we prove the node output it wraps stays finite and bounded.)
+TEST_CASE("Forge lo-fi: dynamics nodes keep output finite and bounded at extremes",
+          "[host][baked][param-injection][forge][forge-lofi]") {
+    const auto hot = sine(kFrames, /*freq=*/1000.0, /*amp=*/0.99f);
+    const float hot_peak = peak(hot);
+
+    {
+        // Max-ratio compressor, lowest threshold, fastest attack.
+        BakedFixture fx(lofi::make_compressor_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kCompThresholdDb, -60.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompRatio, 20.0f)));
+        REQUIRE(q.push(immediate(lofi::kCompAttackMs, 0.1f)));
+        REQUIRE(q.push(immediate(lofi::kCompReleaseMs, 10.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto out = settle(*fx.result.processor, hot, /*blocks=*/40);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        CHECK(peak(out) <= hot_peak + 1e-4f);  // never expands past the input
+    }
+    {
+        // Gate at extremes: highest threshold, fastest attack, no hold.
+        BakedFixture fx(lofi::make_gate_node());
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kGateThresholdDb, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateAttackMs, 0.1f)));
+        REQUIRE(q.push(immediate(lofi::kGateHoldMs, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kGateReleaseMs, 10.0f)));
+        REQUIRE(inj.inject(q) == InjectStatus::Ok);
+        const auto out = settle(*fx.result.processor, hot, /*blocks=*/40);
+        for (float v : out) REQUIRE(std::isfinite(v));
+        CHECK(peak(out) <= hot_peak + 1e-4f);  // gain ≤ 1 always
+    }
+}
+
 // ── RT safety: every node's inject + process path is allocation-free ─────
 TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog node",
           "[host][baked][param-injection][forge][forge-lofi][rt]") {
@@ -668,6 +983,19 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
     cases.push_back({lofi::make_trim_node(), 1, lofi::kTrimGainDb, -6.0f});
     cases.push_back({lofi::make_ping_pong_node(), 2, lofi::kPingPongTimeMs, 120.0f,
                      /*output_channels=*/2});
+    cases.push_back({lofi::make_reverb_node(), 1, lofi::kReverbDecay, 1.0f});
+    cases.push_back({lofi::make_compressor_node(), 1, lofi::kCompThresholdDb, -18.0f});
+    cases.push_back({lofi::make_gate_node(), 1, lofi::kGateThresholdDb, -40.0f});
+    cases.push_back({lofi::make_lfo_node(), 1, lofi::kLfoRateHz, 2.0f});
+    cases.push_back({lofi::make_vca_node(), 2, lofi::kVcaGain, 1.0f});
+    cases.push_back({lofi::make_env_follower_node(), 1, lofi::kEnvAttackMs, 10.0f});
+    cases.push_back({lofi::make_filter_cv_node(), 2, lofi::kFilterCvBaseHz, 800.0f});
+    cases.push_back({lofi::make_delay_cv_node(), 2, lofi::kDelayCvBaseMs, 12.0f});
+    cases.push_back({lofi::make_auto_pan_node(), 2, lofi::kAutoPanDepth, 1.0f,
+                     /*output_channels=*/2});
+    cases.push_back({lofi::make_width_node(), 2, lofi::kWidthAmount, 1.0f,
+                     /*output_channels=*/2});
+    cases.push_back({lofi::make_phaser_node(), 1, lofi::kPhaserDepth, 0.7f});
 
     for (auto& c : cases) {
         BakedFixture fx(c.type, c.input_channels, c.output_channels);
@@ -715,4 +1043,407 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
         CHECK(alloc_count == 0);
         CHECK(alloc_bytes == 0);
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// CV primitive pack — control-signal-as-audio-port composition proofs.
+//
+// The unlock: an lfo/env_follower emits a UNIPOLAR control signal on its audio
+// output; a vca/filter_cv/delay_cv reads that control on a dedicated CV INPUT
+// PORT. Modulation is ordinary graph topology, so tremolo/auto-wah/chorus/pump
+// are COMPOSITIONS. These tests measure the composed effect numerically and pair
+// each with a negative control that swaps the CV source for a DC constant — if
+// the CV port were not load-bearing the positive case would look identical.
+// ═════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Bake + prepare an already-wired graph; returns the LowerResult (owns the
+// baked Processor). in_ch/out_ch are the descriptor bus arity.
+LowerResult bake_and_prepare(SignalGraph& g, int in_ch, int out_ch) {
+    g.set_canonical_executor_routing_enabled(true);
+    REQUIRE(g.prepare(kSr, kFrames));
+    LowerResult r = bake(g);
+    REQUIRE(r.accepted);
+    REQUIRE(r.processor);
+    REQUIRE(r.reason == LowerRejectReason::None);
+    pulp::format::PrepareContext pc;
+    pc.sample_rate = kSr;
+    pc.max_buffer_size = kFrames;
+    pc.input_channels = in_ch;
+    pc.output_channels = out_ch;
+    r.processor->prepare(pc);
+    return r;
+}
+
+BakedGraphProcessor& as_baked(LowerResult& r) {
+    return *static_cast<BakedGraphProcessor*>(r.processor.get());
+}
+
+// Render `total` samples in kFrames blocks, feeding `feed` (one vector per input
+// channel, each >= total), returning the concatenated mono output.
+std::vector<float> run_stream(pulp::format::Processor& proc,
+                              const std::vector<std::vector<float>>& feed, int total) {
+    const int nch = static_cast<int>(feed.size());
+    std::vector<float> out;
+    out.reserve(static_cast<std::size_t>(total));
+    std::vector<std::vector<float>> blk(static_cast<std::size_t>(nch),
+                                        std::vector<float>(kFrames, 0.0f));
+    for (int start = 0; start < total; start += kFrames) {
+        for (int c = 0; c < nch; ++c)
+            for (int k = 0; k < kFrames; ++k) {
+                const int idx = start + k;
+                blk[static_cast<std::size_t>(c)][static_cast<std::size_t>(k)] =
+                    idx < total ? feed[static_cast<std::size_t>(c)][static_cast<std::size_t>(idx)] : 0.0f;
+            }
+        const auto o = run_block(proc, blk);
+        const int n = std::min(kFrames, total - start);
+        for (int k = 0; k < n; ++k) out.push_back(o[static_cast<std::size_t>(k)]);
+    }
+    return out;
+}
+
+std::vector<float> dc(int n, float v) { return std::vector<float>(static_cast<std::size_t>(n), v); }
+
+bool inj_ok(ParamInjector& inj, pulp::state::ParameterEventQueue& q) {
+    return inj.inject(q) == InjectStatus::Ok;
+}
+
+// Settle a stateful node fed a multi-channel block; returns the last block.
+std::vector<float> settle_multi(pulp::format::Processor& proc,
+                                const std::vector<std::vector<float>>& feed, int blocks = 8) {
+    std::vector<float> out;
+    for (int b = 0; b < blocks; ++b) out = run_block(proc, feed);
+    return out;
+}
+
+// Dominant frequency (Hz) in [fmin, fmax]: argmax of a Goertzel magnitude sweep
+// over the mean-removed signal. Accurate for a clean periodic control signal.
+float dominant_freq(const std::vector<float>& x, double sr, double fmin, double fmax,
+                    double step = 0.05) {
+    double mean = 0.0;
+    for (float v : x) mean += v;
+    mean /= static_cast<double>(x.size());
+    const int N = static_cast<int>(x.size());
+    const double kTwoPi = 6.28318530717958647692;
+    double best_f = fmin, best_mag = -1.0;
+    for (double f = fmin; f <= fmax; f += step) {
+        double re = 0.0, im = 0.0;
+        const double w = kTwoPi * f / sr;
+        for (int k = 0; k < N; ++k) {
+            const double s = x[static_cast<std::size_t>(k)] - mean;
+            re += s * std::cos(w * k);
+            im -= s * std::sin(w * k);
+        }
+        const double mag = re * re + im * im;
+        if (mag > best_mag) { best_mag = mag; best_f = f; }
+    }
+    return static_cast<float>(best_f);
+}
+
+float vmin(const std::vector<float>& x) { return *std::min_element(x.begin(), x.end()); }
+float vmax(const std::vector<float>& x) { return *std::max_element(x.begin(), x.end()); }
+
+// Goertzel magnitude of `x` at frequency `f`.
+float goertzel_mag(const std::vector<float>& x, double sr, double f) {
+    const double kTwoPi = 6.28318530717958647692;
+    const double w = kTwoPi * f / sr;
+    double re = 0.0, im = 0.0;
+    for (int k = 0; k < static_cast<int>(x.size()); ++k) {
+        re += x[static_cast<std::size_t>(k)] * std::cos(w * k);
+        im -= x[static_cast<std::size_t>(k)] * std::sin(w * k);
+    }
+    return static_cast<float>(std::sqrt(re * re + im * im));
+}
+
+// Spectral centroid (Hz) over a fixed set of partials, from their Goertzel
+// magnitudes — robust and level-independent (unlike a coarse linear-bin sweep,
+// which under-weights a sub-bin fundamental).
+float partials_centroid(const std::vector<float>& x, double sr,
+                        const std::vector<double>& partials) {
+    double num = 0.0, den = 0.0;
+    for (double f : partials) {
+        const double m = goertzel_mag(x, sr, f);
+        num += f * m;
+        den += m;
+    }
+    return den > 0.0 ? static_cast<float>(num / den) : 0.0f;
+}
+
+
+}  // namespace
+
+// ── LFO smoke: a 0-input custom source bakes and oscillates ───────────────
+// Directly answers the composition-doc's unverified item: executor behavior for
+// a 0-input custom node. Bakes `lfo → out`, renders 1 s, asserts a [0,1] control
+// signal oscillating at the injected rate.
+TEST_CASE("Forge CV: a 0-input LFO source bakes and emits a rate-accurate control signal",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    SignalGraph g;
+    const auto lfo_type = lofi::make_lfo_node();
+    REQUIRE(g.register_custom_node_type(lfo_type));
+    const auto lfo = g.add_custom_node(lofi::kLfoTypeId, 1, "LFO");
+    REQUIRE(lfo != 0);
+    const auto out = g.add_output_node(1, "Out");
+    REQUIRE(g.connect(lfo, 0, out, 0));
+    LowerResult r = bake_and_prepare(g, /*in_ch=*/1, /*out_ch=*/1);
+
+    ParamInjector inj = as_baked(r).claim_param_injection(lfo);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kLfoRateHz, 5.0f)));
+    REQUIRE(q.push(immediate(lofi::kLfoDepth, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kLfoShape, 0.0f)));  // sine
+    REQUIRE(inj.inject(q) == InjectStatus::Ok);
+
+    const int total = static_cast<int>(kSr);  // 1 second
+    const auto y = run_stream(*r.processor, {dc(total, 0.0f)}, total);
+    const float f = dominant_freq(y, kSr, 1.0, 12.0);
+    INFO("lfo est freq=" << f << " min=" << vmin(y) << " max=" << vmax(y));
+    CHECK(f == Catch::Approx(5.0f).margin(0.25f));  // 5 ±0.25 Hz
+    CHECK(vmin(y) >= 0.0f);                          // unipolar
+    CHECK(vmax(y) <= 1.0f);
+    CHECK(vmax(y) - vmin(y) > 0.9f);                 // full-depth swing
+}
+
+// ── Tremolo: lfo → vca produces measurable amplitude modulation ───────────
+TEST_CASE("Forge CV: tremolo (lfo → vca) amplitude-modulates at the LFO rate",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    const auto lfo_type = lofi::make_lfo_node();
+    const auto vca_type = lofi::make_vca_node();
+
+    // Populate `g` with the tremolo graph; returns the LFO node id (the CV source).
+    auto build = [&](SignalGraph& g, bool cv_wired) {
+        REQUIRE(g.register_custom_node_type(lfo_type));
+        REQUIRE(g.register_custom_node_type(vca_type));
+        const auto in = g.add_input_node(2, "In");   // ch0 = signal, ch1 = DC key
+        const auto lfo = g.add_custom_node(lofi::kLfoTypeId, 1, "LFO");
+        const auto vca = g.add_custom_node(lofi::kVcaTypeId, 1, "VCA");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, vca, 0));           // signal → VCA.0
+        if (cv_wired)
+            REQUIRE(g.connect(lfo, 0, vca, 1));      // LFO CV → VCA.1  (tremolo)
+        else
+            REQUIRE(g.connect(in, 1, vca, 1));       // DC → VCA.1      (control)
+        REQUIRE(g.connect(vca, 0, out, 0));
+        return lfo;
+    };
+
+    const int total = static_cast<int>(kSr);  // 1 s
+    // Carrier: DC 1.0 on ch0 so the VCA output IS the gain envelope; ch1 = DC 1.0.
+    const std::vector<std::vector<float>> feed{dc(total, 1.0f), dc(total, 1.0f)};
+
+    // Positive: LFO drives the CV port.
+    SignalGraph gp;
+    const auto lfo_p = build(gp, /*cv_wired=*/true);
+    LowerResult rp = bake_and_prepare(gp, 2, 1);
+    {
+        ParamInjector li = as_baked(rp).claim_param_injection(lfo_p);
+        REQUIRE(li.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kLfoRateHz, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kLfoDepth, 1.0f)));
+        REQUIRE(inj_ok(li, q));
+    }
+    const auto yp = run_stream(*rp.processor, feed, total);
+    const float fp = dominant_freq(yp, kSr, 1.0, 12.0);
+    const float depth_index = (vmax(yp) - vmin(yp)) / (vmax(yp) + vmin(yp) + 1e-9f);
+    INFO("tremolo freq=" << fp << " AM index=" << depth_index
+                         << " min=" << vmin(yp) << " max=" << vmax(yp));
+    CHECK(fp == Catch::Approx(5.0f).margin(0.25f));  // AM at the LFO rate
+    CHECK(depth_index > 0.9f);                        // deep tremolo (near 100%)
+
+    // Negative control: same graph, CV port fed a DC constant → no modulation.
+    SignalGraph gn;
+    build(gn, /*cv_wired=*/false);
+    LowerResult rn = bake_and_prepare(gn, 2, 1);
+    const auto yn = run_stream(*rn.processor, feed, total);
+    INFO("no-CV control: min=" << vmin(yn) << " max=" << vmax(yn));
+    CHECK(vmax(yn) - vmin(yn) < 0.01f);  // flat — the CV port is load-bearing
+}
+
+// ── Auto-wah: env_follower → filter_cv cutoff tracks input level ──────────
+TEST_CASE("Forge CV: auto-wah (env_follower → filter_cv) centroid tracks input level",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    const auto env_type = lofi::make_env_follower_node();
+    const auto filt_type = lofi::make_filter_cv_node();
+
+    // A bright source (broadband-ish: sum of harmonics) so the moving cutoff
+    // shifts the spectral centroid measurably.
+    auto bright = [&](int n, float amp) {
+        std::vector<float> v(static_cast<std::size_t>(n), 0.0f);
+        for (int k = 0; k < n; ++k) {
+            const double t = static_cast<double>(k) / kSr;
+            v[static_cast<std::size_t>(k)] = amp * static_cast<float>(
+                (std::sin(2 * M_PI * 200 * t) + std::sin(2 * M_PI * 1200 * t) +
+                 std::sin(2 * M_PI * 4000 * t)) / 3.0);
+        }
+        return v;
+    };
+
+    auto centroid_at = [&](float amp, bool env_wired) {
+        SignalGraph g;
+        REQUIRE(g.register_custom_node_type(env_type));
+        REQUIRE(g.register_custom_node_type(filt_type));
+        const auto in = g.add_input_node(2, "In");  // ch0 = signal, ch1 = DC-0 key
+        const auto env = g.add_custom_node(lofi::kEnvFollowerTypeId, 1, "Env");
+        const auto filt = g.add_custom_node(lofi::kFilterCvTypeId, 1, "Filt");
+        const auto out = g.add_output_node(1, "Out");
+        REQUIRE(g.connect(in, 0, filt, 0));          // signal → filter.0
+        if (env_wired) {
+            REQUIRE(g.connect(in, 0, env, 0));       // signal → env
+            REQUIRE(g.connect(env, 0, filt, 1));     // env CV → filter cutoff
+        } else {
+            REQUIRE(g.connect(in, 1, filt, 1));      // DC 0 → cutoff CV (base only)
+        }
+        REQUIRE(g.connect(filt, 0, out, 0));
+        LowerResult r = bake_and_prepare(g, 2, 1);
+        {   // A low base with a clean (near-Butterworth) lowpass: quiet sits at
+            // ~200 Hz, a loud envelope opens ~4.5 octaves above it.
+            ParamInjector fi = as_baked(r).claim_param_injection(filt);
+            REQUIRE(fi.valid());
+            pulp::state::ParameterEventQueue q;
+            REQUIRE(q.push(immediate(lofi::kFilterCvBaseHz, 400.0f)));
+            REQUIRE(q.push(immediate(lofi::kFilterCvAmountOct, 4.0f)));
+            REQUIRE(q.push(immediate(lofi::kFilterCvResonance, 1.0f)));
+            REQUIRE(inj_ok(fi, q));
+        }
+        if (env_wired) {
+            ParamInjector ei = as_baked(r).claim_param_injection(env);
+            REQUIRE(ei.valid());
+            pulp::state::ParameterEventQueue q;
+            REQUIRE(q.push(immediate(lofi::kEnvAttackMs, 5.0f)));
+            REQUIRE(q.push(immediate(lofi::kEnvReleaseMs, 60.0f)));
+            REQUIRE(q.push(immediate(lofi::kEnvSensitivity, 1.5f)));
+            REQUIRE(inj_ok(ei, q));
+        }
+        const int total = static_cast<int>(kSr / 2);  // 0.5 s, let ballistics settle
+        const std::vector<std::vector<float>> feed{bright(total, amp), dc(total, 0.0f)};
+        const auto y = run_stream(*r.processor, feed, total);
+        // Centroid over the settled tail (skip the attack transient), measured
+        // at the source's three partials — a clean, level-independent readout of
+        // where the moving cutoff sits.
+        const std::vector<float> tail(y.end() - 8192, y.end());
+        return partials_centroid(tail, kSr, {200.0, 1200.0, 4000.0});
+    };
+
+    const float quiet = centroid_at(0.04f, /*env_wired=*/true);
+    const float loud  = centroid_at(0.9f,  /*env_wired=*/true);
+    INFO("auto-wah centroid quiet=" << quiet << " loud=" << loud
+                                    << " octaves=" << std::log2(loud / quiet));
+    CHECK(loud > quiet * 2.0f);   // >= 1 octave brighter when driven loud
+
+    // Negative control: no env edge → cutoff stays at base → centroid ~level-independent.
+    const float flat_quiet = centroid_at(0.04f, /*env_wired=*/false);
+    const float flat_loud  = centroid_at(0.9f,  /*env_wired=*/false);
+    INFO("no-env control quiet=" << flat_quiet << " loud=" << flat_loud);
+    CHECK(flat_loud < flat_quiet * 1.4f);  // barely moves without the CV edge
+}
+
+// ── Node-level CV port proofs (CV fed from an input channel, deterministic) ──
+
+// VCA: gain CV on port 1 scales the signal on port 0.
+TEST_CASE("Forge CV: VCA multiplies its signal by the port-1 gain CV",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_vca_node(), /*input_channels=*/2);
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    REQUIRE(inj.inject(immediate(lofi::kVcaGain, 1.0f)) == InjectStatus::Ok);
+
+    const std::vector<float> sig(kFrames, 0.5f);
+    const std::vector<float> cv_zero(kFrames, 0.0f);
+    const std::vector<float> cv_one(kFrames, 1.0f);
+    const auto off = run_block(*fx.result.processor, {sig, cv_zero});
+    const auto on = run_block(*fx.result.processor, {sig, cv_one});
+    for (float v : off) CHECK(v == Catch::Approx(0.0f).margin(1e-6));   // CV 0 → silence
+    for (float v : on) CHECK(v == Catch::Approx(0.5f).margin(1e-6));    // CV 1 → passthrough
+}
+
+// filter_cv: cutoff CV on port 1 opens the lowpass (a high tone passes more).
+TEST_CASE("Forge CV: filter_cv cutoff CV on port 1 sweeps the lowpass",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_filter_cv_node(), /*input_channels=*/2);
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kFilterCvBaseHz, 300.0f)));
+    REQUIRE(q.push(immediate(lofi::kFilterCvAmountOct, 5.0f)));  // CV 1 → ~9.6 kHz
+    REQUIRE(q.push(immediate(lofi::kFilterCvResonance, 1.0f)));
+    REQUIRE(inj_ok(inj, q));
+
+    const auto tone = sine(kFrames, 6000.0, 0.8f);  // above the base cutoff
+    const std::vector<float> cv_lo(kFrames, 0.0f);  // cutoff = base (300 Hz)
+    const std::vector<float> cv_hi(kFrames, 1.0f);  // cutoff opens ~5 oct
+    const float closed = rms(settle_multi(*fx.result.processor, {tone, cv_lo}));
+    const float open = rms(settle_multi(*fx.result.processor, {tone, cv_hi}));
+    INFO("filter_cv closed=" << closed << " open=" << open);
+    CHECK(open > closed * 3.0f);   // the CV opens the filter for the 6 kHz tone
+}
+
+// delay_cv: time CV on port 1 moves the read tap (echo latency changes).
+TEST_CASE("Forge CV: delay_cv time CV on port 1 moves the delay tap",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    auto latency_for = [&](float cv_val) {
+        BakedFixture fx(lofi::make_delay_cv_node(), /*input_channels=*/2);
+        ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+        REQUIRE(inj.valid());
+        pulp::state::ParameterEventQueue q;
+        REQUIRE(q.push(immediate(lofi::kDelayCvBaseMs, 5.0f)));
+        REQUIRE(q.push(immediate(lofi::kDelayCvDepthMs, 20.0f)));  // CV 1 → +20 ms
+        REQUIRE(q.push(immediate(lofi::kDelayCvFeedback, 0.0f)));
+        REQUIRE(q.push(immediate(lofi::kDelayCvMix, 1.0f)));       // fully wet
+        REQUIRE(inj_ok(inj, q));
+
+        // Impulse on ch0; constant CV on ch1. Find the wet-tap peak sample index.
+        std::vector<float> impulse(kFrames, 0.0f);
+        impulse[0] = 1.0f;
+        const std::vector<float> cv(kFrames, cv_val);
+        // Render enough blocks to cover a 25 ms tap (~1200 samples).
+        std::vector<float> stream;
+        const std::vector<std::vector<float>> first{impulse, cv};
+        auto o = run_block(*fx.result.processor, first);
+        stream.insert(stream.end(), o.begin(), o.end());
+        for (int b = 0; b < 12; ++b) {
+            o = run_block(*fx.result.processor, {std::vector<float>(kFrames, 0.0f), cv});
+            stream.insert(stream.end(), o.begin(), o.end());
+        }
+        int peak_idx = 0;
+        float peak_v = 0.0f;
+        for (int k = 0; k < static_cast<int>(stream.size()); ++k)
+            if (std::fabs(stream[static_cast<std::size_t>(k)]) > peak_v) {
+                peak_v = std::fabs(stream[static_cast<std::size_t>(k)]);
+                peak_idx = k;
+            }
+        return peak_idx;
+    };
+
+    const int lat_lo = latency_for(0.0f);  // ~5 ms  → ~240 samples
+    const int lat_hi = latency_for(1.0f);  // ~25 ms → ~1200 samples
+    INFO("delay_cv tap lo=" << lat_lo << " hi=" << lat_hi << " samples");
+    CHECK(lat_hi > lat_lo + 500);  // the injected time CV moved the tap far later
+}
+
+// ── env_follower invert: a loud input DUCKS the CV (pump primitive) ───────
+TEST_CASE("Forge CV: env_follower invert emits a ducking CV for pumping",
+          "[host][baked][param-injection][forge][forge-cv]") {
+    BakedFixture fx(lofi::make_env_follower_node());
+    ParamInjector inj = fx.baked().claim_param_injection(fx.custom_node);
+    REQUIRE(inj.valid());
+    pulp::state::ParameterEventQueue q;
+    REQUIRE(q.push(immediate(lofi::kEnvAttackMs, 5.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvReleaseMs, 60.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvSensitivity, 1.0f)));
+    REQUIRE(q.push(immediate(lofi::kEnvInvert, 1.0f)));  // duck
+    REQUIRE(inj_ok(inj, q));
+
+    // Quiet first from a fresh instance (env = 0 → CV = 1); then a loud input
+    // ducks it. 60 silent blocks (160 ms) >> the 60 ms release, so the quiet
+    // measurement is fully settled regardless of order.
+    const auto quiet = settle(*fx.result.processor, dc(kFrames, 0.0f), 60);
+    const auto loud = settle(*fx.result.processor, sine(kFrames, 200.0, 0.9f), 40);
+    const float loud_cv = rms(loud);
+    const float quiet_cv = rms(quiet);
+    INFO("inverted env: loud_cv=" << loud_cv << " quiet_cv=" << quiet_cv);
+    CHECK(quiet_cv > 0.9f);          // silence → CV near 1 (full gain)
+    CHECK(loud_cv < quiet_cv * 0.5f);  // loud input ducks the CV down
 }
