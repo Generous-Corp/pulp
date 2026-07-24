@@ -1235,6 +1235,19 @@ TEST_CASE("fixed sample-rate conversion kernels and cache storage obey the aggre
     REQUIRE(compiled.error().code == AudioRendererErrorCode::CapacityExceeded);
 }
 
+TEST_CASE("fixed sample-rate conversion rejects a zero cache budget before preparation") {
+    const auto data = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
+    auto clip = absolute_media_clip(100, 0, 8, 3, 0, 8);
+    auto track = take(Track::create({10}, "zero fixed rate bytes", {clip}));
+    auto project = project_with_tracks({track}, {{3, "44k", 8, {44'100, 1}}});
+    AudioRendererLimits limits;
+    limits.max_sample_rate_converter_bytes = 0;
+    auto compiled =
+        compile_audio_clip_program(clip, *project, *map_120(), *pool({{3, data}}), limits);
+    REQUIRE_FALSE(compiled);
+    REQUIRE(compiled.error().code == AudioRendererErrorCode::CapacityExceeded);
+}
+
 TEST_CASE("fixed sample-rate conversion preparation yields within compiler work slices") {
     const auto data = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
     auto clip = absolute_media_clip(100, 0, 8, 3, 0, 8);

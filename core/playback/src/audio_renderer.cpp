@@ -49,18 +49,32 @@ struct detail::AudioSampleRateConverterCache::Impl {
     }
 
     template <typename T>
-    static std::uint64_t vector_storage_bytes(const std::vector<T>& values) noexcept {
-        if (values.capacity() >
+    static std::uint64_t vector_storage_bytes_for_capacity(std::size_t capacity) noexcept {
+        if (capacity >
             (std::numeric_limits<std::uint64_t>::max() - audio::kConverterAllocationOverhead) /
                 sizeof(T))
             return std::numeric_limits<std::uint64_t>::max();
-        return values.capacity() * sizeof(T) +
-               (values.capacity() != 0 ? audio::kConverterAllocationOverhead : 0u);
+        return capacity * sizeof(T) +
+               (capacity != 0 ? audio::kConverterAllocationOverhead : 0u);
+    }
+
+    template <typename T>
+    static std::uint64_t vector_storage_bytes(const std::vector<T>& values) noexcept {
+        return vector_storage_bytes_for_capacity<T>(values.capacity());
     }
 
     std::uint64_t cache_storage_bytes() const noexcept {
         return saturating_add(vector_storage_bytes(entries),
                               vector_storage_bytes(host_rate_entries));
+    }
+
+    std::uint64_t required_bytes_with_capacities(std::uint64_t additional,
+                                                 std::size_t entry_capacity,
+                                                 std::size_t host_capacity) const noexcept {
+        const auto storage =
+            saturating_add(vector_storage_bytes_for_capacity<Entry>(entry_capacity),
+                           vector_storage_bytes_for_capacity<HostRateEntry>(host_capacity));
+        return saturating_add(saturating_add(converter_bytes, storage), additional);
     }
 
     std::uint64_t required_bytes(std::uint64_t additional = 0) const noexcept {
@@ -127,8 +141,9 @@ struct detail::AudioSampleRateConverterCache::Impl {
             }
             const auto estimated_bytes =
                 audio::PreparedSampleRateConversion::estimated_prepared_bytes();
-            entries.reserve(entries.size() + 1u);
-            const auto required = required_bytes(estimated_bytes);
+            const auto required = required_bytes_with_capacities(
+                estimated_bytes, std::max(entries.capacity(), entries.size() + 1u),
+                host_rate_entries.capacity());
             if (required > limits.max_sample_rate_converter_bytes) {
                 return runtime::Err(AudioRendererError{
                     AudioRendererErrorCode::CapacityExceeded,
@@ -138,6 +153,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                     limits.max_sample_rate_converter_bytes,
                 });
             }
+            entries.reserve(entries.size() + 1u);
             fixed_rate_source = source;
             fixed_rate_target = target;
             fixed_rate_builder = std::make_unique<audio::SampleRateConversionBuilder>(cutoff);
@@ -197,8 +213,9 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converters,
             });
         }
-        entries.reserve(entries.size() + 1u);
-        const auto required = required_bytes(converter->prepared_bytes());
+        const auto required = required_bytes_with_capacities(
+            converter->prepared_bytes(), std::max(entries.capacity(), entries.size() + 1u),
+            host_rate_entries.capacity());
         if (required > limits.max_sample_rate_converter_bytes) {
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
@@ -208,6 +225,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converter_bytes,
             });
         }
+        entries.reserve(entries.size() + 1u);
         converter_bytes += converter->prepared_bytes();
         entries.push_back({source, target, converter});
         return runtime::Ok(std::move(converter));
@@ -241,9 +259,12 @@ struct detail::AudioSampleRateConverterCache::Impl {
             }
             const auto bytes = audio::PreparedVariableRateConversion::prepared_bytes(
                 source_frames, source->channels.size());
-            host_rate_entries.reserve(host_rate_entries.size() + 1u);
-            const auto required =
-                bytes ? required_bytes(*bytes) : std::numeric_limits<std::uint64_t>::max();
+            const auto required = bytes
+                                      ? required_bytes_with_capacities(
+                                            *bytes, entries.capacity(),
+                                            std::max(host_rate_entries.capacity(),
+                                                     host_rate_entries.size() + 1u))
+                                      : std::numeric_limits<std::uint64_t>::max();
             if (!bytes || required > limits.max_sample_rate_converter_bytes) {
                 return runtime::Err(AudioRendererError{
                     AudioRendererErrorCode::CapacityExceeded,
@@ -253,6 +274,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                     limits.max_sample_rate_converter_bytes,
                 });
             }
+            host_rate_entries.reserve(host_rate_entries.size() + 1u);
             host_rate_source = source;
             host_rate_source_start = source_start;
             host_rate_source_frames = source_frames;
@@ -326,8 +348,9 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converters,
             });
         }
-        host_rate_entries.reserve(host_rate_entries.size() + 1u);
-        const auto required = required_bytes(converter->prepared_bytes());
+        const auto required = required_bytes_with_capacities(
+            converter->prepared_bytes(), entries.capacity(),
+            std::max(host_rate_entries.capacity(), host_rate_entries.size() + 1u));
         if (required > limits.max_sample_rate_converter_bytes) {
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
@@ -337,6 +360,7 @@ struct detail::AudioSampleRateConverterCache::Impl {
                 limits.max_sample_rate_converter_bytes,
             });
         }
+        host_rate_entries.reserve(host_rate_entries.size() + 1u);
         converter_bytes += converter->prepared_bytes();
         host_rate_entries.push_back({std::move(source), source_start, source_frames, converter});
         return runtime::Ok(std::move(converter));

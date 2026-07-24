@@ -403,6 +403,8 @@ DocumentSession::create_impl(Project checkpoint, DocumentRevision checkpoint_rev
         auto validated = attachment == SinkAttachment::Initialize
                              ? journal_sink->checkpoint(checkpoint, checkpoint_revision)
                              : journal_sink->validate_restore(checkpoint, checkpoint_revision);
+        if (validated && validated.value() && attachment == SinkAttachment::Initialize)
+            validated = journal_sink->validate_restore(checkpoint, checkpoint_revision);
         if (!validated || !validated.value()) {
             TransactionError value;
             value.code = ConflictCode::JournalDurability;

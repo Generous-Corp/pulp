@@ -515,6 +515,24 @@ TEST_CASE("Timeline file journal rejects a checkpoint snapshot from another stat
     REQUIRE(velocity(recovered.checkpoint) == 2000);
 }
 
+TEST_CASE("Timeline session creation rejects a sink at a newer durable revision") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    auto opened = open_journal(temporary.path, fallback);
+    {
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto edit =
+            session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+        REQUIRE(session->submit(writer, std::move(edit)));
+    }
+
+    auto rejected = DocumentSession::create(fallback, {}, opened.sink);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+}
+
 TEST_CASE("Timeline file journal preserves newer revisions when checkpointing a prefix") {
     TemporaryJournal temporary;
     const auto fallback = make_project();

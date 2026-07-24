@@ -362,6 +362,26 @@ TEST_CASE("DAWproject audio import validates metadata against resolved WAV bytes
         REQUIRE(result.error().message.find("duration") != std::string::npos);
     }
 
+    SECTION("channel mismatch") {
+        const auto offset = xml.find(R"(channels="2")");
+        REQUIRE(offset != std::string::npos);
+        xml.replace(offset, std::string_view(R"(channels="2")").size(), R"(channels="1")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("channels") != std::string::npos);
+    }
+
+    SECTION("invalid channel declaration") {
+        const auto offset = xml.find(R"(channels="2")");
+        REQUIRE(offset != std::string::npos);
+        xml.replace(offset, std::string_view(R"(channels="2")").size(), R"(channels="0")");
+        auto result = import_dawproject_xml(xml, fixture_media_resolver());
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("channels") != std::string::npos);
+    }
+
     SECTION("huge finite duration") {
         const auto audio = xml.find("<Audio");
         REQUIRE(audio != std::string::npos);

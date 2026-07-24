@@ -628,6 +628,7 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     std::string path(path_view);
 
     double duration_sec = 0.0, sample_rate = 0.0;
+    std::optional<long long> declared_channels;
     if (auto e = require_double(audio, "duration", "<Audio>", duration_sec))
         return e;
     if (auto e = require_double(audio, "sampleRate", "<Audio>", sample_rate))
@@ -636,6 +637,15 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
         return err(DawProjectImportErrorCode::InvalidValue, "<Audio duration> must be positive");
     if (!std::isfinite(sample_rate) || !(sample_rate > 0.0))
         return err(DawProjectImportErrorCode::InvalidValue, "<Audio sampleRate> must be positive");
+    const auto channels_attribute = audio.attribute("channels");
+    if (!channels_attribute.empty()) {
+        long long channels = 0;
+        if (!parse_number(channels_attribute, channels) || channels <= 0 ||
+            channels > std::numeric_limits<std::uint16_t>::max())
+            return err(DawProjectImportErrorCode::InvalidValue,
+                       "<Audio channels> must be an integer in the supported channel domain");
+        declared_channels = channels;
+    }
     const auto declared_frames =
         static_cast<long double>(duration_sec) * static_cast<long double>(sample_rate);
     if (!std::isfinite(declared_frames) || declared_frames <= 0.0L)
@@ -669,6 +679,10 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     if (sample_rate != static_cast<double>(info->sample_rate))
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<Audio sampleRate> does not match resolved media '" + path + "'");
+    if (declared_channels &&
+        static_cast<std::uint64_t>(*declared_channels) != info->num_channels)
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "<Audio channels> does not match resolved media '" + path + "'");
     if (!declared_duration_matches_frames(declared_frames, info->num_frames))
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<Audio duration> does not match resolved media '" + path + "'");
