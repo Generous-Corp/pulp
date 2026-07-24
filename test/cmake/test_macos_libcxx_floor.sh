@@ -52,6 +52,41 @@ print("x86_64", platforms["macos-x64"]["floor"], sep="\t")
 PY
 )
 
+macos_15_4_sdk=""
+for candidate in \
+    "${sdk_path}" \
+    "/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk" \
+    "$(xcode-select -p)/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.sdk"; do
+    if [[ -d "${candidate}" && "$(basename "${candidate}")" == "MacOSX15.4.sdk" ]]; then
+        macos_15_4_sdk="${candidate}"
+        break
+    fi
+done
+
+if [[ -n "${macos_15_4_sdk}" ]]; then
+    for arch in arm64 x86_64; do
+        error_log="${scratch}/known_bad_${arch}.log"
+        if "${compiler}" \
+            -std=c++20 \
+            -arch "${arch}" \
+            -mmacosx-version-min=13.3 \
+            -isysroot "${macos_15_4_sdk}" \
+            -fno-color-diagnostics \
+            -fsyntax-only "${probe}" 2>"${error_log}"; then
+            echo "macOS 15.4 SDK unexpectedly compiled std::format for ${arch} at known-bad floor 13.3" >&2
+            exit 1
+        fi
+        if ! grep -q "'to_chars' is unavailable: introduced in macOS 13.4" "${error_log}"; then
+            echo "macOS 15.4 SDK probe for ${arch} failed for an unexpected reason:" >&2
+            sed -n '1,80p' "${error_log}" >&2
+            exit 1
+        fi
+        echo "macOS 15.4 SDK rejects known-bad std::format floor 13.3 for ${arch}"
+    done
+else
+    echo "macOS 15.4 SDK not installed; skipping the 13.3 lower-bound rejection probe"
+fi
+
 # Negative control: prove this compiler invocation reports a malformed source
 # instead of treating every probe as successful.
 printf '%s\n' 'int main( {' > "${broken}"
