@@ -241,6 +241,10 @@ flags:
     paths:
       - core/playback/
     carryforward: true
+  sequence:
+    paths:
+      - core/sequence/
+    carryforward: true
   platform:
     paths:
       - core/platform/
@@ -433,6 +437,9 @@ component_management:
     - component_id: playback
       name: playback
       paths: ["core/playback/**"]
+    - component_id: sequence
+      name: sequence
+      paths: ["core/sequence/**"]
     - component_id: platform
       name: platform
       paths:
