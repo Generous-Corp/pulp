@@ -489,3 +489,95 @@ TEST_CASE("PluginScanner LV2 URI extraction handles manifest variants and safe f
         REQUIRE(plugin.path.find(scratch.path.string()) == 0);
     }
 }
+
+// ── Direct Audio Unit identities ─────────────────────────────────────────
+
+TEST_CASE("AU component identities build a loadable PluginInfo without scanning",
+          "[host][scanner][au]") {
+    PluginInfo info;
+
+    SECTION("MIDI instruments take no audio input and accept MIDI") {
+        REQUIRE(plugin_info_from_au_identity("aumu:Vas7:RoCl", info));
+        REQUIRE(info.format == PluginFormat::AudioUnit);
+        REQUIRE(info.unique_id == "aumu:Vas7:RoCl");
+        REQUIRE(info.name == "aumu:Vas7:RoCl");
+        // The identity is the whole descriptor: nothing here needs a path,
+        // which is what lets the caller skip discovery entirely.
+        REQUIRE(info.path.empty());
+        REQUIRE(info.is_instrument);
+        REQUIRE_FALSE(info.is_effect);
+        REQUIRE(info.num_inputs == 0);
+        REQUIRE(info.num_outputs == 2);
+        REQUIRE(info.supports_midi_in);
+    }
+
+    SECTION("generators are sources but are not MIDI instruments") {
+        REQUIRE(plugin_info_from_au_identity("augn:Tone:Pulp", info));
+        REQUIRE_FALSE(info.is_instrument);
+        REQUIRE_FALSE(info.is_effect);
+        REQUIRE(info.num_inputs == 0);
+        REQUIRE_FALSE(info.supports_midi_in);
+    }
+
+    SECTION("both effect types keep a stereo input pair") {
+        for (const char* identity : {"aufx:Dist:Pulp", "aumf:Arpg:Pulp"}) {
+            INFO("identity: " << identity);
+            REQUIRE(plugin_info_from_au_identity(identity, info));
+            REQUIRE(info.is_effect);
+            REQUIRE_FALSE(info.is_instrument);
+            REQUIRE(info.num_inputs == 2);
+            REQUIRE_FALSE(info.supports_midi_in);
+        }
+    }
+
+    SECTION("a reused descriptor is replaced, not overlaid") {
+        // Callers tell "load by identity" from "load by bundle" by testing
+        // path.empty(), so a leftover path from a previous scan result would
+        // route them down the wrong branch.
+        PluginInfo reused;
+        reused.path = "/Library/Audio/Plug-Ins/VST3/Stale.vst3";
+        reused.name = "Stale";
+        reused.manufacturer = "Nobody";
+        reused.category = "Fx";
+        reused.features = {"audio-effect"};
+        reused.has_editor = true;
+
+        REQUIRE(plugin_info_from_au_identity("aumu:Vas7:RoCl", reused));
+        REQUIRE(reused.path.empty());
+        REQUIRE(reused.name == "aumu:Vas7:RoCl");
+        REQUIRE(reused.manufacturer.empty());
+        REQUIRE(reused.category.empty());
+        REQUIRE(reused.features.empty());
+        REQUIRE_FALSE(reused.has_editor);
+    }
+
+    SECTION("anything that is not a well-formed hostable identity is rejected") {
+        // Rejection matters as much as acceptance: the demo falls through to a
+        // scan on false, so a parser that accepted these would silently skip
+        // discovery for VST3/CLAP ids and report "no suitable plugin found".
+        const char* rejected[]{
+            "",                       // no id at all
+            "aumu:Vas7",              // truncated
+            "aumu:Vas7:RoCl:Extra",   // over-long
+            "aumu-Vas7-RoCl",         // wrong separators
+            "aumu:Vas:7RoCl",         // separators in the wrong columns
+            "aumu::Vas7:RoC",         // separator inside a field
+            // Both separators land in the right columns here, so only a
+            // per-field check rejects them.
+            "aumu:Va:7:RoCl",         // extra separator inside SUBT
+            "aumu:Vas7::oCl",         // extra separator inside MANU
+            "auxx:Vas7:RoCl",         // not a hostable component type
+            "AUMU:Vas7:RoCl",         // OSTypes are case-sensitive
+            "com.example.plugin",     // a CLAP-style id
+        };
+        for (const char* identity : rejected) {
+            INFO("identity: " << identity);
+            PluginInfo untouched;
+            REQUIRE_FALSE(plugin_info_from_au_identity(identity, untouched));
+            // A rejected identity must leave the descriptor alone so the
+            // caller's fallback path sees a clean PluginInfo.
+            REQUIRE(untouched.unique_id.empty());
+            REQUIRE(untouched.name.empty());
+        }
+    }
+}
