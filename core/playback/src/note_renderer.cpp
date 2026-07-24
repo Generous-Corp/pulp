@@ -214,19 +214,38 @@ NoteRenderResult ArrangementNoteRenderer::process(
         const auto& range = transport.ranges[range_index];
         if (range.discontinuity && !flush(range.sample_offset)) break;
 
-        auto cursor = std::lower_bound(events.begin(), events.end(), range.timeline_sample_start,
+        const auto search_sample =
+            range.host_beat_mapping
+                ? transport.tempo_map->ticks_to_samples(range.timeline_tick_start)
+                : range.timeline_sample_start;
+        const auto mapped_end_sample =
+            range.host_beat_mapping
+                ? transport.tempo_map->ticks_to_samples(range.timeline_tick_end)
+                : range.timeline_sample_start;
+        auto cursor = std::lower_bound(
+            events.begin(), events.end(), search_sample,
             [](const NoteProgramEvent& event, timebase::SamplePosition sample) {
                 return event.sample < sample;
             });
         last_cursor = static_cast<std::int64_t>(cursor - events.begin());
         for (; cursor != events.end(); ++cursor) {
             std::uint32_t local_offset = 0;
-            if (!detail::note_event_offset_in_range(cursor->sample,
-                                                    range.timeline_sample_start,
-                                                    range.frame_count,
-                                                    local_offset)) {
-                if (cursor->sample >= range.timeline_sample_start) break;
-                continue;
+            if (range.host_beat_mapping) {
+                if (cursor->sample > mapped_end_sample)
+                    break;
+                if (cursor->tick < range.timeline_tick_start ||
+                    !(cursor->tick < range.timeline_tick_end))
+                    continue;
+                if (!host_mapped_output_offset_for_tick(range, cursor->tick, local_offset))
+                    continue;
+            } else {
+                if (!detail::note_event_offset_in_range(cursor->sample,
+                                                        range.timeline_sample_start,
+                                                        range.frame_count,
+                                                        local_offset)) {
+                    if (cursor->sample >= range.timeline_sample_start) break;
+                    continue;
+                }
             }
             const auto block_offset = range.sample_offset + local_offset;
             if (!emit(*cursor, block_offset)) {

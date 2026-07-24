@@ -68,6 +68,56 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
     return expected_offset == transport.frame_count;
 }
 
+long double host_mapped_document_sample_at_output_offset(
+    const TransportRange& range, const timebase::CompiledTempoMap& tempo_map,
+    std::uint32_t output_offset) noexcept {
+    if (range.frame_count == 0)
+        return static_cast<long double>(
+            tempo_map.ticks_to_samples(range.timeline_tick_start).value);
+    const auto clamped = std::min(output_offset, range.frame_count);
+    const auto fraction = static_cast<long double>(clamped) /
+                          static_cast<long double>(range.frame_count);
+    const auto tick_span = static_cast<long double>(range.timeline_tick_end.value) -
+                           static_cast<long double>(range.timeline_tick_start.value);
+    const auto fractional_tick =
+        static_cast<long double>(range.timeline_tick_start.value) + tick_span * fraction;
+    if (fractional_tick <=
+        static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
+        return static_cast<long double>(
+            tempo_map.ticks_to_samples(
+                {std::numeric_limits<std::int64_t>::min()}).value);
+    if (fractional_tick >=
+        static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+        return static_cast<long double>(
+            tempo_map.ticks_to_samples(
+                {std::numeric_limits<std::int64_t>::max()}).value);
+    return tempo_map.fractional_ticks_to_samples(fractional_tick);
+}
+
+bool host_mapped_output_offset_for_tick(const TransportRange& range,
+                                        timebase::TickPosition document_tick,
+                                        std::uint32_t& output_offset) noexcept {
+    if (!range.host_beat_mapping || range.frame_count == 0 ||
+        !(range.timeline_tick_start < range.timeline_tick_end))
+        return false;
+    if (document_tick < range.timeline_tick_start ||
+        !(document_tick < range.timeline_tick_end))
+        return false;
+    const auto tick_offset = static_cast<long double>(document_tick.value) -
+                             static_cast<long double>(range.timeline_tick_start.value);
+    const auto tick_span = static_cast<long double>(range.timeline_tick_end.value) -
+                           static_cast<long double>(range.timeline_tick_start.value);
+    const auto projected =
+        tick_offset * static_cast<long double>(range.frame_count) / tick_span;
+    const auto floored = std::floor(projected);
+    output_offset =
+        floored <= 0.0L
+            ? 0u
+            : static_cast<std::uint32_t>(std::min<long double>(
+                  floored, static_cast<long double>(range.frame_count - 1)));
+    return true;
+}
+
 TransportError MasterTransport::prepare(const timebase::CompiledTempoMap& tempo_map,
                                         const MasterTransportConfig& config) noexcept {
     reset();

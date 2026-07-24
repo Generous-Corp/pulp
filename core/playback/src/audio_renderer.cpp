@@ -175,6 +175,17 @@ float envelope(const AudioClipRendererProgram& clip, std::uint64_t relative) noe
     return value;
 }
 
+float envelope(const AudioClipRendererProgram& clip, long double relative) noexcept {
+    auto value = static_cast<long double>(clip.gain_linear);
+    if (clip.fade_in_frames != 0 && relative < clip.fade_in_frames)
+        value *= relative / static_cast<long double>(clip.fade_in_frames);
+    const auto remaining =
+        std::max(0.0L, static_cast<long double>(clip.timeline_frame_count - 1u) - relative);
+    if (clip.fade_out_frames != 0 && remaining < clip.fade_out_frames)
+        value *= remaining / static_cast<long double>(clip.fade_out_frames);
+    return static_cast<float>(value);
+}
+
 float source_sample(const AudioClipRendererProgram& clip, std::size_t output_channel,
                     std::size_t output_channels, std::uint64_t frame, std::uint64_t next_frame,
                     float fraction, double source_position) noexcept {
@@ -375,6 +386,55 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
                                              static_cast<long double>(source_offset))
                         : 0.0f;
                 destination[output_start + frame] +=
+                    source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
+                                  fraction, static_cast<double>(source_position)) *
+                    envelope(*clip, relative);
+            }
+        }
+    }
+}
+
+void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
+                                   const TransportRange& range,
+                                   const timebase::CompiledTempoMap& tempo_map,
+                                   audio::BufferView<float> output) noexcept {
+    const auto clips = track.clips();
+    for (std::uint32_t output_frame = 0; output_frame < range.frame_count; ++output_frame) {
+        const auto document_position =
+            host_mapped_document_sample_at_output_offset(range, tempo_map, output_frame);
+        auto clip = std::lower_bound(
+            clips.begin(), clips.end(), document_position,
+            [](const AudioClipRendererProgram& candidate, long double value) {
+                return static_cast<long double>(candidate.timeline_end()) <= value;
+            });
+        for (; clip != clips.end() &&
+               static_cast<long double>(clip->timeline_start) <= document_position;
+             ++clip) {
+            const auto media_end =
+                clip->timeline_start +
+                static_cast<std::int64_t>(
+                    std::min(clip->timeline_frame_count, clip->renderable_timeline_frames));
+            if (document_position >= static_cast<long double>(media_end))
+                continue;
+            const auto relative =
+                document_position - static_cast<long double>(clip->timeline_start);
+            const auto source_position =
+                relative * static_cast<long double>(clip->source_frames_per_timeline_frame);
+            const auto source_offset =
+                std::min(static_cast<std::uint64_t>(std::floor(source_position)),
+                         clip->source_frame_count - 1u);
+            const auto source_frame = clip->source_start + source_offset;
+            const auto source_last = clip->source_start + clip->source_frame_count - 1u;
+            const auto next_frame = std::min(source_frame + 1u, source_last);
+            const auto fraction =
+                source_offset + 1u < clip->source_frame_count
+                    ? static_cast<float>(source_position -
+                                         static_cast<long double>(source_offset))
+                    : 0.0f;
+            const auto destination_frame =
+                static_cast<std::size_t>(range.sample_offset + output_frame);
+            for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+                output.channel(channel)[destination_frame] +=
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
                                   fraction, static_cast<double>(source_position)) *
                     envelope(*clip, relative);
@@ -778,8 +838,15 @@ AudioRenderStatus ArrangementAudioRenderer::process(const PlaybackProgram& progr
         if (provider.selected != ProviderKind::Arrangement ||
             !provider.available(ProviderKind::Arrangement) || !track->audio_program())
             continue;
-        for (std::uint8_t index = 0; index < transport.range_count; ++index)
-            render_track(*track->audio_program(), transport.ranges[index], output);
+        for (std::uint8_t index = 0; index < transport.range_count; ++index) {
+            const auto& range = transport.ranges[index];
+            if (range.host_beat_mapping) {
+                render_host_beat_mapped_track(*track->audio_program(), range, program.tempo_map(),
+                                              output);
+            } else {
+                render_track(*track->audio_program(), range, output);
+            }
+        }
         rendered = rendered || !track->audio_program()->clips().empty();
     }
     return rendered ? AudioRenderStatus::Rendered : AudioRenderStatus::Silent;
@@ -835,8 +902,14 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
 
     AudioRenderStatus status = AudioRenderStatus::Silent;
     if (transport.is_playing && arrangement_selected && audio_program != nullptr) {
-        for (std::uint8_t index = 0; index < transport.range_count; ++index)
-            render_track(*audio_program, transport.ranges[index], output);
+        for (std::uint8_t index = 0; index < transport.range_count; ++index) {
+            const auto& range = transport.ranges[index];
+            if (range.host_beat_mapping) {
+                render_host_beat_mapped_track(*audio_program, range, program.tempo_map(), output);
+            } else {
+                render_track(*audio_program, range, output);
+            }
+        }
         if (!audio_program->clips().empty())
             status = AudioRenderStatus::Rendered;
     }
@@ -847,8 +920,12 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
     carry.valid = true;
     if (transport.range_count != 0) {
         const auto& last = transport.ranges[transport.range_count - 1];
-        carry.source_sample = {last.timeline_sample_start.value +
-                               static_cast<std::int64_t>(last.frame_count)};
+        carry.source_sample =
+            last.host_beat_mapping
+                ? program.tempo_map().ticks_to_samples(last.timeline_tick_end)
+                : timebase::SamplePosition{
+                      last.timeline_sample_start.value +
+                      static_cast<std::int64_t>(last.frame_count)};
         carry.timeline_tick = last.timeline_tick_end;
         carry.loop_iteration += transport.range_count > 1 ? 1u : 0u;
     }

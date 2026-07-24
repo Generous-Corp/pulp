@@ -305,6 +305,95 @@ TEST_CASE("tempo mapped musical audio placement resolves to exact samples") {
     REQUIRE_THAT(at_clip.storage[0][0], WithinAbs(0.25f, 1e-7f));
 }
 
+TEST_CASE("audio renderer maps host 60 BPM frames into a 120 BPM document") {
+    constexpr auto mapped_duration = kTicksPerQuarter / 480;
+    constexpr auto mapped_half = mapped_duration / 2;
+    std::vector<float> ramp(50);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(frame + 1);
+    const auto data = audio_data({ramp});
+    auto clip = musical_media_clip(
+        100, kTicksPerQuarter, mapped_duration, 3, ramp.size(),
+        {.gain_linear = 1.0f, .fade_in_duration = mapped_half, .fade_out_duration = 0});
+    auto track = take(Track::create({10}, "host mapped", {clip}));
+    auto project = project_with_tracks({track}, {{3, "ramp", ramp.size(), {48'000, 1}}});
+    const auto map = map_120();
+    const auto assets = pool({{3, data}});
+    CompiledFixture compiled(project, map, assets);
+    auto program = compiled.store.read();
+
+    auto mapped = snapshot(*program, 100, 48'000);
+    mapped.ranges[0].timeline_tick_start = {kTicksPerQuarter};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter + mapped_duration};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output stretched(1, 100);
+    AudioRenderStatus status = AudioRenderStatus::InvalidProgram;
+    std::size_t allocations = 1;
+    {
+        test::ScopedRtProcessProbe probe;
+        status = ArrangementAudioRenderer::process(*program, mapped, stretched.view());
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(status == AudioRenderStatus::Rendered);
+    REQUIRE(allocations == 0);
+    REQUIRE_THAT(stretched.storage[0][0], WithinAbs(0.0f, 1e-7f));
+    REQUIRE_THAT(stretched.storage[0][25], WithinAbs(6.75f, 1e-6f));
+    REQUIRE_THAT(stretched.storage[0][50], WithinAbs(26.0f, 1e-6f));
+    REQUIRE_THAT(stretched.storage[0][99], WithinAbs(50.0f, 1e-6f));
+
+    mapped.range_count = 2;
+    mapped.ranges[0].frame_count = 50;
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter + mapped_half};
+    mapped.ranges[1] = mapped.ranges[0];
+    mapped.ranges[1].sample_offset = 50;
+    mapped.ranges[1].discontinuity = true;
+    Output looped(1, 100);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, looped.view()) ==
+            AudioRenderStatus::Rendered);
+    REQUIRE_THAT(looped.storage[0][49], WithinAbs(24.99f, 1e-5f));
+    REQUIRE_THAT(looped.storage[0][50], WithinAbs(0.0f, 1e-7f));
+    REQUIRE_THAT(looped.storage[0][75], WithinAbs(6.75f, 1e-6f));
+}
+
+TEST_CASE("host-mapped audio follows a document tempo ramp instead of endpoint interpolation") {
+    const std::array points{
+        TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
+        TempoPoint{{2 * kTicksPerQuarter}, 180.0},
+    };
+    const auto map = shared_compiled_tempo_map(points, RationalRate{48'000, 1});
+    const auto document_frames = static_cast<std::uint64_t>(
+        map->ticks_to_samples({2 * kTicksPerQuarter}).value);
+    REQUIRE(document_frames > 0);
+    std::vector<float> ramp(document_frames);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(
+            static_cast<double>(frame) / static_cast<double>(document_frames));
+
+    const auto data = audio_data({ramp});
+    auto clip =
+        musical_media_clip(100, 0, 2 * kTicksPerQuarter, 3, document_frames);
+    auto track = take(Track::create({10}, "tempo ramp", {clip}));
+    auto project = project_with_tracks(
+        {track}, {{3, "tempo-ramp.wav", document_frames, {48'000, 1}}});
+    CompiledFixture compiled(project, map, pool({{3, data}}));
+    auto program = compiled.store.read();
+
+    auto mapped = snapshot(*program, 4);
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {2 * kTicksPerQuarter};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output output(1, 4);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+            AudioRenderStatus::Rendered);
+
+    const auto midpoint_sample = map->ticks_to_samples({kTicksPerQuarter}).value;
+    const auto expected =
+        static_cast<float>(static_cast<double>(midpoint_sample) /
+                           static_cast<double>(document_frames));
+    REQUIRE_THAT(output.storage[0][2], WithinAbs(expected, 2e-6f));
+    REQUIRE(std::abs(output.storage[0][2] - 0.5f) > 0.05f);
+}
+
 TEST_CASE("one bounded compiler pass publishes note and audio payloads for a mixed track") {
     const auto map = map_120();
     auto notes = take(NoteContent::create({{{101}, {0}, {kTicksPerQuarter / 4}, 0x8000, 64, 1}}));

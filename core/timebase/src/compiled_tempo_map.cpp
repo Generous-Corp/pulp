@@ -160,6 +160,47 @@ SamplePosition CompiledTempoMap::ticks_to_samples(TickPosition tick) const noexc
     return ticks_to_samples_in_segment(tick, segment_for_tick(tick));
 }
 
+long double CompiledTempoMap::fractional_ticks_to_samples(long double tick) const noexcept {
+    constexpr auto minimum =
+        static_cast<long double>(std::numeric_limits<std::int64_t>::min());
+    constexpr auto maximum =
+        static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (!std::isfinite(tick))
+        return tick < 0.0L ? minimum : maximum;
+    if (tick <= minimum)
+        return static_cast<long double>(
+            ticks_to_samples({std::numeric_limits<std::int64_t>::min()}).value);
+    if (tick >= maximum)
+        return static_cast<long double>(
+            ticks_to_samples({std::numeric_limits<std::int64_t>::max()}).value);
+
+    const TickPosition containing_tick{static_cast<std::int64_t>(std::floor(tick))};
+    const auto& segment = segments_[segment_for_tick(containing_tick)];
+    const auto delta_ticks = tick - static_cast<long double>(segment.start_tick.value);
+    const auto scale =
+        sample_rate_.as_long_double() * 60.0L /
+        static_cast<long double>(kTicksPerQuarter);
+    long double offset = 0.0L;
+    if (delta_ticks < 0.0L || segment.curve == TempoCurve::Constant ||
+        segment.end_tick.value == segment.start_tick.value ||
+        segment.start_bpm == segment.end_bpm) {
+        offset = delta_ticks * scale /
+                 static_cast<long double>(segment.start_bpm);
+    } else {
+        const auto length =
+            static_cast<long double>(segment.end_tick.value - segment.start_tick.value);
+        const auto slope =
+            (static_cast<long double>(segment.end_bpm) -
+             static_cast<long double>(segment.start_bpm)) /
+            length;
+        const auto relative_tempo_change =
+            slope * delta_ticks / static_cast<long double>(segment.start_bpm);
+        offset = scale * std::log1p(relative_tempo_change) / slope;
+    }
+    return std::clamp(static_cast<long double>(segment.start_sample.value) + offset,
+                      minimum, maximum);
+}
+
 SamplePosition
 CompiledTempoMap::ticks_to_samples_in_segment(TickPosition tick,
                                               std::size_t segment_index) const noexcept {

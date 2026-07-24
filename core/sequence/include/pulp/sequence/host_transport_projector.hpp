@@ -42,6 +42,7 @@ class HostTransportProjector {
     bool has_expected_sample_ = false;
     bool first_block_ = true;
     bool previous_playing_ = false;
+    bool previous_host_beat_mapping_ = false;
 };
 
 } // namespace pulp::sequence

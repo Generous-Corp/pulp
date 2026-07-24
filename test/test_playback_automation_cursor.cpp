@@ -31,6 +31,11 @@ std::shared_ptr<const CompiledTempoMap> constant_map() {
     return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
 }
 
+std::shared_ptr<const CompiledTempoMap> constant_map(double bpm) {
+    const std::array points{TempoPoint{{0}, bpm}};
+    return shared_compiled_tempo_map(points, RationalRate{48'000, 1});
+}
+
 AutomationPoint point(const CompiledTempoMap& map, std::uint64_t id, std::int64_t sample,
                       float value,
                       AutomationInterpolation interpolation = AutomationInterpolation::Continuous,
@@ -149,6 +154,214 @@ TEST_CASE("automation cursor evaluates tempo ramps in musical tick space") {
     const auto sample_fraction = static_cast<float>(32.0 / static_cast<double>(endpoint_sample));
     REQUIRE(midpoint->value == tick_fraction);
     REQUIRE(midpoint->value != sample_fraction);
+}
+
+TEST_CASE("host-beat-mapped automation follows host frames through a document tempo mismatch") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {kTicksPerQuarter}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 24'000;
+    snapshot.block_index = 0;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_sample_start = {96'000};
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {kTicksPerQuarter / 2};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 3> events{};
+    AutomationCursor cursor;
+    AutomationCursorResult result;
+    std::size_t allocations = 0;
+    {
+        test::ScopedRtProcessProbe probe;
+        result = cursor.process(*compiled, snapshot, events);
+        allocations = probe.allocation_count();
+    }
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(allocations == 0);
+    REQUIRE(result.candidate_points == snapshot.frame_count);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1].sample_offset == 8'000);
+    REQUIRE(events[1].value == 1.0f / 6.0f);
+    REQUIRE(events[2].sample_offset == 16'000);
+    REQUIRE(events[2].value == 1.0f / 3.0f);
+}
+
+TEST_CASE("host-beat-mapped automation preserves authored knots under output coalescing") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {kTicksPerQuarter / 4}, 1.0f},
+         AutomationPoint{{12}, {kTicksPerQuarter / 2}, 0.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 24'000;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {kTicksPerQuarter / 2};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{12'000, 1.0f, AutomationTransition::LinearRamp});
+}
+
+TEST_CASE("host-beat-mapped automation includes knots in the final output-frame cell") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {39}, 1.0f},
+         AutomationPoint{{12}, {40}, 0.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 4;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {40};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{3, 1.0f, AutomationTransition::LinearRamp});
+}
+
+TEST_CASE("host-beat-mapped automation evaluates fractional ticks without sample quantization") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {3}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 2;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {3};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Ok);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{1, 0.5f, AutomationTransition::LinearRamp});
+}
+
+TEST_CASE("host-beat-mapped automation remains safe at the positive tick edge") {
+    const auto maximum = std::numeric_limits<std::int64_t>::max();
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {maximum - 4}, 0.0f},
+         AutomationPoint{{11}, {maximum - 1}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 4;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {maximum - 4};
+    snapshot.ranges[0].timeline_tick_end = {maximum};
+    snapshot.ranges[0].host_beat_mapping = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1] == AutomationBlockEvent{3, 1.0f, AutomationTransition::LinearRamp});
+}
+
+TEST_CASE("automation cursor preserves document position across mapped and legacy ranges") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {kTicksPerQuarter}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+    AutomationCursor cursor;
+    std::array<AutomationBlockEvent, 4> events{};
+
+    TransportSnapshot mapped;
+    mapped.tempo_map = map.get();
+    mapped.sample_rate = map->sample_rate();
+    mapped.frame_count = 24'000;
+    mapped.block_index = 0;
+    mapped.is_playing = true;
+    mapped.range_count = 1;
+    mapped.ranges[0].frame_count = mapped.frame_count;
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter / 2};
+    mapped.ranges[0].host_beat_mapping = true;
+    REQUIRE(cursor.process(*compiled, mapped, events).code == AutomationCursorCode::Coalesced);
+
+    TransportSnapshot legacy;
+    legacy.tempo_map = map.get();
+    legacy.sample_rate = map->sample_rate();
+    legacy.frame_count = 16;
+    legacy.block_index = 1;
+    legacy.is_playing = true;
+    legacy.range_count = 1;
+    legacy.ranges[0].frame_count = legacy.frame_count;
+    legacy.ranges[0].timeline_sample_start = map->ticks_to_samples({kTicksPerQuarter / 2});
+    legacy.ranges[0].timeline_tick_start = {kTicksPerQuarter / 2};
+    legacy.ranges[0].timeline_tick_end =
+        map->samples_to_ticks({legacy.ranges[0].timeline_sample_start.value + 16});
+    const auto legacy_result = cursor.process(*compiled, legacy, events);
+    REQUIRE(legacy_result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(legacy_result.adoption == AutomationProgramAdoption::Unchanged);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE(events[0].value ==
+            *curve.value_at(map->samples_to_ticks(legacy.ranges[0].timeline_sample_start)));
+
+    mapped.block_index = 2;
+    mapped.ranges[0].timeline_tick_start = {3 * kTicksPerQuarter / 4};
+    mapped.ranges[0].timeline_tick_end = {kTicksPerQuarter};
+    const auto remapped_result = cursor.process(*compiled, mapped, events);
+    REQUIRE(remapped_result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(remapped_result.adoption == AutomationProgramAdoption::Unchanged);
+    REQUIRE(events[0].sample_offset == 0);
+    REQUIRE(events[0].value == 0.75f);
 }
 
 TEST_CASE("automation cursor coalesces deterministically to the caller budget") {

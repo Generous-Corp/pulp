@@ -91,6 +91,10 @@ class CompiledTempoMap {
     TickPosition samples_to_ticks(SamplePosition sample) const noexcept;
     SampleToTickResult resolve_sample(SamplePosition sample) const noexcept;
     SamplePosition ticks_to_samples(TickPosition tick) const noexcept;
+    /// Continuous counterpart to ticks_to_samples() for render-time interpolation.
+    /// Uses the same compiled segment anchors and curve equations without rounding
+    /// the result to an integer sample.
+    long double fractional_ticks_to_samples(long double tick) const noexcept;
     double tempo_at_tick(TickPosition tick) const noexcept;
 
     RationalRate sample_rate() const noexcept {

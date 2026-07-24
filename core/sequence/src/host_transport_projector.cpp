@@ -34,6 +34,55 @@ bool beats_to_ticks(double beats, timebase::TickPosition& result) noexcept {
     return true;
 }
 
+bool valid_host_beat_clock(const format::ProcessContext& context) noexcept {
+    return context.has_transport(format::TransportField::BeatPosition) &&
+           context.has_transport(format::TransportField::Tempo) &&
+           std::isfinite(context.position_beats) && std::isfinite(context.tempo_bpm) &&
+           context.tempo_bpm > 0.0;
+}
+
+timebase::TickPosition advance_at_host_tempo(timebase::TickPosition start,
+                                             std::uint32_t frames, double sample_rate,
+                                             double tempo_bpm) noexcept {
+    const auto delta = static_cast<long double>(frames) *
+                       static_cast<long double>(tempo_bpm) *
+                       static_cast<long double>(timebase::kTicksPerQuarter) /
+                       (60.0L * static_cast<long double>(sample_rate));
+    const auto maximum = static_cast<long double>(std::numeric_limits<std::int64_t>::max());
+    if (delta >= maximum - static_cast<long double>(start.value))
+        return {std::numeric_limits<std::int64_t>::max()};
+    return {start.value + static_cast<std::int64_t>(std::llround(delta))};
+}
+
+bool sample_at_host_beat(timebase::SamplePosition anchor_sample, double anchor_beat,
+                         double target_beat, double sample_rate, double tempo_bpm,
+                         timebase::SamplePosition& result) noexcept {
+    const auto delta = static_cast<long double>(target_beat - anchor_beat) *
+                       static_cast<long double>(sample_rate) * 60.0L /
+                       static_cast<long double>(tempo_bpm);
+    const auto sample = static_cast<long double>(anchor_sample.value) + delta;
+    if (!std::isfinite(sample) ||
+        sample < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
+        sample > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+        return false;
+    result.value = static_cast<std::int64_t>(std::llround(sample));
+    return true;
+}
+
+std::uint64_t frames_between_host_beats(double start, double end, double sample_rate,
+                                        double tempo_bpm) noexcept {
+    if (!(end > start))
+        return 0;
+    const auto frames = static_cast<long double>(end - start) *
+                        static_cast<long double>(sample_rate) * 60.0L /
+                        static_cast<long double>(tempo_bpm);
+    if (!std::isfinite(frames) || frames <= 0.0L)
+        return 0;
+    if (frames >= static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+        return std::numeric_limits<std::uint64_t>::max();
+    return static_cast<std::uint64_t>(std::ceil(frames));
+}
+
 timebase::SamplePosition add_frames(timebase::SamplePosition position,
                                     std::uint32_t frames) noexcept {
     constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
@@ -105,9 +154,18 @@ HostTransportProjector::project(const format::ProcessContext& context,
 
     const auto frames = static_cast<std::uint32_t>(context.num_samples);
     const timebase::SamplePosition host_start{context.position_samples};
+    bool use_host_beat_clock = valid_host_beat_clock(context);
+    timebase::TickPosition host_tick_start;
+    if (use_host_beat_clock && !beats_to_ticks(context.position_beats, host_tick_start)) {
+        use_host_beat_clock = false;
+        host_tick_start = tempo_map_->samples_to_ticks(host_start);
+    }
+    const bool mapping_transition =
+        !first_block_ && use_host_beat_clock != previous_host_beat_mapping_;
     const bool inferred_jump =
         has_expected_sample_ && context.is_playing && host_start != expected_next_sample_;
-    const bool discontinuity = context.reset_requested || context.transport_jump || inferred_jump;
+    const bool discontinuity =
+        context.reset_requested || context.transport_jump || inferred_jump || mapping_transition;
 
     snapshot = {};
     snapshot.tempo_map = tempo_map_;
@@ -120,23 +178,28 @@ HostTransportProjector::project(const format::ProcessContext& context,
     snapshot.transport_changed = context.transport_changed;
     snapshot.transport_started =
         context.transport_started || (context.is_playing && (first_block_ || !previous_playing_));
-    snapshot.reset_requested = context.reset_requested || inferred_jump;
+    snapshot.reset_requested = context.reset_requested || inferred_jump || mapping_transition;
     snapshot.time_sig_changed =
         context.time_sig_changed || (!first_block_ && meter != previous_meter_);
 
     auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
                           timebase::SamplePosition timeline_start, bool range_discontinuity,
+                          const timebase::TickPosition* forced_start = nullptr,
                           const timebase::TickPosition* forced_end = nullptr) {
         auto& range = snapshot.ranges[index];
         range.sample_offset = offset;
         range.frame_count = count;
         range.timeline_sample_start = timeline_start;
-        range.timeline_tick_start = tempo_map_->samples_to_ticks(timeline_start);
+        range.timeline_tick_start =
+            forced_start != nullptr ? *forced_start : tempo_map_->samples_to_ticks(timeline_start);
         range.timeline_tick_end =
             context.is_playing
                 ? (forced_end != nullptr
                        ? *forced_end
-                       : tempo_map_->samples_to_ticks(add_frames(timeline_start, count)))
+                       : use_host_beat_clock
+                             ? advance_at_host_tempo(range.timeline_tick_start, count,
+                                                     context.sample_rate, context.tempo_bpm)
+                             : tempo_map_->samples_to_ticks(add_frames(timeline_start, count)))
                 : range.timeline_tick_start;
         if (range.timeline_tick_end < range.timeline_tick_start)
             range.timeline_tick_end = range.timeline_tick_start;
@@ -145,29 +208,52 @@ HostTransportProjector::project(const format::ProcessContext& context,
             context.is_playing ? monotonic_ + (range.timeline_tick_end - range.timeline_tick_start)
                                : monotonic_;
         range.bar_start = bar_at_tick(range.timeline_tick_start, meter);
-        range.tempo_bpm = tempo_map_->tempo_at_tick(range.timeline_tick_start);
+        range.tempo_bpm = use_host_beat_clock
+                              ? context.tempo_bpm
+                              : tempo_map_->tempo_at_tick(range.timeline_tick_start);
         range.tempo_changed = index == 0 ? context.tempo_changed
                                          : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = range_discontinuity;
+        range.host_beat_mapping = use_host_beat_clock;
         monotonic_ = range.monotonic_end;
     };
 
     if (!context.is_playing || !loop.enabled) {
-        make_range(0, 0, frames, host_start, discontinuity);
+        make_range(0, 0, frames, host_start, discontinuity,
+                   use_host_beat_clock ? &host_tick_start : nullptr);
         snapshot.range_count = 1;
         expected_next_sample_ = context.is_playing ? add_frames(host_start, frames) : host_start;
     } else {
-        const auto loop_start = tempo_map_->ticks_to_samples(loop.start);
-        const auto loop_end = tempo_map_->ticks_to_samples(loop.end);
-        const auto loop_length = sample_distance(loop_start, loop_end);
+        auto loop_start = tempo_map_->ticks_to_samples(loop.start);
+        auto loop_end = tempo_map_->ticks_to_samples(loop.end);
+        std::uint64_t loop_length = sample_distance(loop_start, loop_end);
+        if (use_host_beat_clock) {
+            if (!sample_at_host_beat(host_start, context.position_beats,
+                                     context.loop_start_beats, context.sample_rate,
+                                     context.tempo_bpm, loop_start) ||
+                !sample_at_host_beat(host_start, context.position_beats,
+                                     context.loop_end_beats, context.sample_rate,
+                                     context.tempo_bpm, loop_end))
+                return HostTransportProjectionError::InvalidLoop;
+            loop_length = frames_between_host_beats(
+                context.loop_start_beats, context.loop_end_beats, context.sample_rate,
+                context.tempo_bpm);
+        }
         if (loop_length == 0)
             return HostTransportProjectionError::InvalidLoop;
-        if (host_start.value >= loop_end.value) {
-            make_range(0, 0, frames, host_start, discontinuity);
+        if ((use_host_beat_clock && !(host_tick_start < loop.end)) ||
+            (!use_host_beat_clock && host_start.value >= loop_end.value)) {
+            make_range(0, 0, frames, host_start, discontinuity,
+                       use_host_beat_clock ? &host_tick_start : nullptr);
             snapshot.range_count = 1;
             expected_next_sample_ = add_frames(host_start, frames);
         } else {
-            const auto until_wrap = sample_distance(host_start, loop_end);
+            const auto until_wrap =
+                use_host_beat_clock
+                    ? frames_between_host_beats(context.position_beats,
+                                                context.loop_end_beats, context.sample_rate,
+                                                context.tempo_bpm)
+                    : sample_distance(host_start, loop_end);
             const auto first_count =
                 static_cast<std::uint32_t>(std::min<std::uint64_t>(frames, until_wrap));
             const auto remaining = frames - first_count;
@@ -176,11 +262,13 @@ HostTransportProjector::project(const format::ProcessContext& context,
             if (first_count > 0) {
                 const auto* forced_end =
                     static_cast<std::uint64_t>(first_count) == until_wrap ? &loop.end : nullptr;
-                make_range(0, 0, first_count, host_start, discontinuity, forced_end);
+                make_range(0, 0, first_count, host_start, discontinuity,
+                           use_host_beat_clock ? &host_tick_start : nullptr, forced_end);
                 snapshot.range_count = 1;
             }
             if (remaining > 0) {
-                make_range(snapshot.range_count, first_count, remaining, loop_start, true);
+                make_range(snapshot.range_count, first_count, remaining, loop_start, true,
+                           &loop.start);
                 ++snapshot.range_count;
                 expected_next_sample_ =
                     remaining == loop_length ? loop_start : add_frames(loop_start, remaining);
@@ -197,6 +285,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
     previous_meter_ = meter;
     previous_loop_ = loop;
     previous_playing_ = context.is_playing;
+    previous_host_beat_mapping_ = use_host_beat_clock;
     first_block_ = false;
     return HostTransportProjectionError::None;
 }
@@ -212,6 +301,7 @@ void HostTransportProjector::reset() noexcept {
     has_expected_sample_ = false;
     first_block_ = true;
     previous_playing_ = false;
+    previous_host_beat_mapping_ = false;
 }
 
 } // namespace pulp::sequence

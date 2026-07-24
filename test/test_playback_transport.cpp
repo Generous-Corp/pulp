@@ -182,6 +182,64 @@ TEST_CASE("variable blocks equal one continuous block across a tempo ramp") {
     REQUIRE(last.ranges[0].monotonic_end == one.ranges[0].monotonic_end);
 }
 
+TEST_CASE("host-mapped document samples follow the compiled tempo map per output frame") {
+    TransportRange range;
+    range.frame_count = 4;
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {2 * kTicksPerQuarter};
+    range.host_beat_mapping = true;
+
+    SECTION("linear tempo ramp") {
+        const std::array points{
+            TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
+            TempoPoint{{2 * kTicksPerQuarter}, 180.0},
+        };
+        const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+        const auto midpoint =
+            host_mapped_document_sample_at_output_offset(range, map, 2);
+        REQUIRE(midpoint ==
+                Catch::Approx(static_cast<double>(
+                    map.ticks_to_samples({kTicksPerQuarter}).value)));
+
+        const auto affine_midpoint =
+            (static_cast<long double>(map.ticks_to_samples({0}).value) +
+             static_cast<long double>(
+                 map.ticks_to_samples({2 * kTicksPerQuarter}).value)) /
+            2.0L;
+        REQUIRE(std::abs(midpoint - affine_midpoint) > 1.0L);
+    }
+
+    SECTION("hard tempo-point crossing") {
+        const std::array points{
+            TempoPoint{{0}, 60.0},
+            TempoPoint{{kTicksPerQuarter}, 180.0},
+        };
+        const auto map = require_compiled_tempo_map(points, RationalRate{48'000, 1});
+        const auto midpoint =
+            host_mapped_document_sample_at_output_offset(range, map, 2);
+        REQUIRE(midpoint ==
+                Catch::Approx(static_cast<double>(
+                    map.ticks_to_samples({kTicksPerQuarter}).value)));
+
+        const auto affine_midpoint =
+            (static_cast<long double>(map.ticks_to_samples({0}).value) +
+             static_cast<long double>(
+                 map.ticks_to_samples({2 * kTicksPerQuarter}).value)) /
+            2.0L;
+        REQUIRE(std::abs(midpoint - affine_midpoint) > 1.0L);
+    }
+
+    SECTION("fractional tick preserves sub-sample position") {
+        const auto map = constant_map();
+        range.timeline_tick_end = {3};
+        range.frame_count = 2;
+        const auto mapped =
+            host_mapped_document_sample_at_output_offset(range, map, 1);
+        const auto expected = 1.5 * 48'000.0 / (2.0 * kTicksPerQuarter);
+        REQUIRE(mapped == Catch::Approx(expected));
+    }
+}
+
 TEST_CASE("tempo query and transport cross a ramp analytically") {
     const std::array points{
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},

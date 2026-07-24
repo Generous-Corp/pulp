@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -48,6 +49,46 @@ void require_same_midi(const midi::MidiBuffer& expected, const midi::MidiBuffer&
         REQUIRE(actual[index].sample_offset == expected[index].sample_offset);
         REQUIRE(actual[index].message == expected[index].message);
     }
+}
+
+std::shared_ptr<const Project> host_tempo_note_project() {
+    NoteEvent event;
+    event.id = {101};
+    event.start = {2 * kTicksPerQuarter};
+    event.duration = {kTicksPerQuarter / 4};
+    event.velocity = 0xffff;
+    event.pitch = 60;
+    auto content = take(NoteContent::create({event}));
+    auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
+    auto track = take(Track::create({10}, "host-tempo notes", {std::move(clip)}));
+    auto sequence = take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter},
+                                         {std::move(track)}));
+    return std::make_shared<const Project>(
+        take(Project::create(ProjectInput{{1}, "host tempo", 1'000, {2}, {},
+                                         {std::move(sequence)}})));
+}
+
+std::shared_ptr<const Project> host_tempo_same_sample_boundary_project() {
+    NoteEvent ending;
+    ending.id = {101};
+    ending.start = {kTicksPerQuarter};
+    ending.duration = {kTicksPerQuarter};
+    ending.velocity = 0xffff;
+    ending.pitch = 60;
+    NoteEvent starting;
+    starting.id = {102};
+    starting.start = {2 * kTicksPerQuarter - 1};
+    starting.duration = {kTicksPerQuarter / 4};
+    starting.velocity = 0xffff;
+    starting.pitch = 61;
+    auto content = take(NoteContent::create({ending, starting}));
+    auto clip = take(Clip::create({100}, {0}, {4 * kTicksPerQuarter}, std::move(content)));
+    auto track = take(Track::create({10}, "same-sample boundary", {std::move(clip)}));
+    auto sequence = take(Sequence::create({2}, "root", TickDuration{4 * kTicksPerQuarter},
+                                         {std::move(track)}));
+    return std::make_shared<const Project>(
+        take(Project::create(ProjectInput{{1}, "boundary", 1'000, {2}, {},
+                                         {std::move(sequence)}})));
 }
 
 } // namespace
@@ -128,6 +169,373 @@ TEST_CASE("host transport projection re-anchors after an exact second loop wrap"
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE_FALSE(projected.reset_requested);
     REQUIRE_FALSE(projected.ranges[0].discontinuity);
+}
+
+TEST_CASE("host transport projection anchors blocks and seeks to a valid host beat clock") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 24'000) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 24'000;
+    context.is_playing = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = 2.0;
+    context.position_samples = 96'000;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value == 2 * kTicksPerQuarter);
+    REQUIRE(projected.ranges[0].timeline_tick_end.value == 5 * kTicksPerQuarter / 2);
+    REQUIRE(projected.ranges[0].tempo_bpm == 60.0);
+
+    context.position_beats = 2.5;
+    context.position_samples = 120'000;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value == 5 * kTicksPerQuarter / 2);
+    REQUIRE(projected.ranges[0].timeline_tick_end.value == 3 * kTicksPerQuarter);
+    REQUIRE_FALSE(projected.reset_requested);
+
+    context.position_beats = 1.0;
+    context.position_samples = 48'000;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value == kTicksPerQuarter);
+    REQUIRE(projected.reset_requested);
+    REQUIRE(projected.ranges[0].discontinuity);
+}
+
+TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 16'000) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 16'000;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = 1.75;
+    // Deliberately use a sample/beat origin that cannot be derived by assuming
+    // the current host tempo has applied since beat zero.
+    context.position_samples = 100'000;
+    context.loop_start_beats = 1.0;
+    context.loop_end_beats = 2.0;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::LoopRange);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[0].frame_count == 12'000);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value == 7 * kTicksPerQuarter / 4);
+    REQUIRE(projected.ranges[0].timeline_tick_end.value == 2 * kTicksPerQuarter);
+    REQUIRE(projected.ranges[1].sample_offset == 12'000);
+    REQUIRE(projected.ranges[1].frame_count == 4'000);
+    REQUIRE(projected.ranges[1].timeline_sample_start.value == 64'000);
+    REQUIRE(projected.ranges[1].timeline_tick_start.value == kTicksPerQuarter);
+    REQUIRE(projected.ranges[1].timeline_tick_end.value ==
+            kTicksPerQuarter + kTicksPerQuarter / 12);
+    REQUIRE(projected.ranges[1].discontinuity);
+
+    context.num_samples = 1'000;
+    context.position_beats = 1.0 + 4'000.0 / 48'000.0;
+    context.position_samples = 68'000;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value ==
+            kTicksPerQuarter + kTicksPerQuarter / 12);
+}
+
+TEST_CASE("host beat-domain loop projection keeps the final fractional frame cell") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 15) == sequence::HostTransportProjectionError::None);
+
+    constexpr double sample_rate = 48'000.0;
+    constexpr double loop_start_beats = 1.0;
+    const double loop_end_beats = loop_start_beats + 100.4 / sample_rate;
+    format::ProcessContext context;
+    context.sample_rate = sample_rate;
+    context.num_samples = 15;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = loop_end_beats - 10.4 / sample_rate;
+    context.position_samples = 100'000;
+    context.loop_start_beats = loop_start_beats;
+    context.loop_end_beats = loop_end_beats;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::LoopRange);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[0].frame_count == 11);
+    REQUIRE(projected.ranges[0].timeline_tick_end == projected.loop.end);
+    REQUIRE(projected.ranges[1].sample_offset == 11);
+    REQUIRE(projected.ranges[1].frame_count == 4);
+    REQUIRE(projected.ranges[1].timeline_sample_start.value == 99'910);
+    REQUIRE(projected.ranges[1].timeline_tick_start == projected.loop.start);
+
+    context.num_samples = 8;
+    context.position_beats = loop_start_beats + 4.0 / sample_rate;
+    context.position_samples = 99'914;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE_FALSE(projected.ranges[0].discontinuity);
+    REQUIRE(projected.range_count == 1);
+    REQUIRE(projected.ranges[0].timeline_sample_start.value == 99'914);
+    REQUIRE(projected.ranges[0].timeline_tick_start ==
+            TickPosition{static_cast<std::int64_t>(
+                std::llround(context.position_beats * static_cast<double>(kTicksPerQuarter)))});
+}
+
+TEST_CASE("host beat-domain projection falls back when beat clock validity is absent or invalid") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 24'000;
+    context.position_beats = 2.0;
+    context.tempo_bpm = 60.0;
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start ==
+            map->samples_to_ticks({context.position_samples}));
+    REQUIRE(projected.ranges[0].tempo_bpm == 120.0);
+
+    context.position_samples = 24'032;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.tempo_bpm = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start ==
+            map->samples_to_ticks({context.position_samples}));
+    REQUIRE(projected.ranges[0].tempo_bpm == 120.0);
+
+    context.position_samples = 24'064;
+    context.position_beats = std::numeric_limits<double>::max();
+    context.tempo_bpm = 60.0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_start ==
+            map->samples_to_ticks({context.position_samples}));
+    REQUIRE(projected.ranges[0].tempo_bpm == 120.0);
+
+    context.position_samples = 24'096;
+    context.position_beats = 1.0;
+    context.tempo_bpm = 60.0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].host_beat_mapping);
+    REQUIRE(projected.reset_requested);
+    REQUIRE(projected.ranges[0].discontinuity);
+    REQUIRE(projected.ranges[0].timeline_tick_start.value == kTicksPerQuarter);
+}
+
+TEST_CASE("embedded sequence processor schedules program-beat notes on the host beat clock") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(host_tempo_note_project(), map, take(DecodedAudioAssetPool::create({})), 1);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    state::StateStore state;
+    embedded.define_parameters(state);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 64'000,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    auto process = [&](format::ProcessContext context, std::uint32_t frames,
+                       midi::MidiBuffer& output) {
+        Buffer silence(1, frames);
+        Buffer audio_output(1, frames);
+        auto output_view = audio_output.view();
+        midi::MidiBuffer input;
+        context.sample_rate = 48'000.0;
+        context.num_samples = static_cast<int>(frames);
+        embedded.process(output_view, silence.const_view(), input, output, context);
+        REQUIRE(embedded.ready());
+        REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    };
+
+    SECTION("mismatched host tempo maps beat two into the current output block") {
+        midi::MidiBuffer output;
+        output.reserve(16);
+        output.set_realtime_capacity_limit(true);
+        format::ProcessContext context;
+        context.is_playing = true;
+        context.tempo_bpm = 60.0;
+        context.position_beats = 1.75;
+        context.position_samples = 84'000;
+        context.transport_validity.set(format::TransportField::BeatPosition);
+        context.transport_validity.set(format::TransportField::Tempo);
+        process(context, 16'000, output);
+
+        REQUIRE(output.size() == 1);
+        REQUIRE(output[0].is_note_on());
+        REQUIRE(output[0].sample_offset >= 11'998);
+        REQUIRE(output[0].sample_offset <= 12'000);
+    }
+
+    SECTION("exact host range boundaries retain half-open note scheduling") {
+        midi::MidiBuffer output;
+        output.reserve(16);
+        output.set_realtime_capacity_limit(true);
+        format::ProcessContext before;
+        before.is_playing = true;
+        before.tempo_bpm = 60.0;
+        before.position_beats = 2.0 - 100.0 / 48'000.0;
+        before.position_samples = 95'900;
+        before.transport_validity.set(format::TransportField::BeatPosition);
+        before.transport_validity.set(format::TransportField::Tempo);
+        process(before, 100, output);
+        REQUIRE(output.empty());
+
+        format::ProcessContext at;
+        at.is_playing = true;
+        at.tempo_bpm = 60.0;
+        at.position_beats = 2.0;
+        at.position_samples = 96'000;
+        at.transport_validity.set(format::TransportField::BeatPosition);
+        at.transport_validity.set(format::TransportField::Tempo);
+        process(at, 100, output);
+        REQUIRE(output.size() == 1);
+        REQUIRE(output[0].is_note_on());
+        REQUIRE(output[0].sample_offset == 0);
+    }
+
+    SECTION("loop wrap maps the same program beat after the host loop restart") {
+        midi::MidiBuffer output;
+        output.reserve(16);
+        output.set_realtime_capacity_limit(true);
+        format::ProcessContext context;
+        context.is_playing = true;
+        context.is_looping = true;
+        context.tempo_bpm = 60.0;
+        context.position_beats = 2.25;
+        context.position_samples = 108'000;
+        context.loop_start_beats = 1.5;
+        context.loop_end_beats = 2.5;
+        context.transport_validity.set(format::TransportField::BeatPosition);
+        context.transport_validity.set(format::TransportField::Tempo);
+        context.transport_validity.set(format::TransportField::LoopRange);
+        process(context, 40'000, output);
+
+        REQUIRE(output.size() == 1);
+        REQUIRE(output[0].is_note_on());
+        REQUIRE(output[0].sample_offset >= 35'998);
+        REQUIRE(output[0].sample_offset <= 36'000);
+    }
+
+    SECTION("fallback-to-host mapping transition is a discontinuity and still schedules") {
+        midi::MidiBuffer output;
+        output.reserve(16);
+        output.set_realtime_capacity_limit(true);
+        format::ProcessContext fallback;
+        fallback.is_playing = true;
+        fallback.position_samples = 41'968;
+        process(fallback, 32, output);
+        REQUIRE(output.empty());
+
+        format::ProcessContext mapped;
+        mapped.is_playing = true;
+        mapped.tempo_bpm = 60.0;
+        mapped.position_beats = 1.75;
+        mapped.position_samples = 42'000;
+        mapped.transport_validity.set(format::TransportField::BeatPosition);
+        mapped.transport_validity.set(format::TransportField::Tempo);
+        process(mapped, 16'000, output);
+
+        REQUIRE(embedded.last_observation().discontinuity);
+        REQUIRE(output.size() == 1);
+        REQUIRE(output[0].sample_offset >= 11'998);
+        REQUIRE(output[0].sample_offset <= 12'000);
+    }
+}
+
+TEST_CASE("host-mapped note scheduling scans same-sample events through the exact tick end") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(host_tempo_same_sample_boundary_project(), map,
+                     take(DecodedAudioAssetPool::create({})), 1);
+    const auto compiled = programs.store.read();
+    REQUIRE(compiled);
+    const auto* compiled_track = compiled->find_track({10});
+    REQUIRE(compiled_track != nullptr);
+    REQUIRE(compiled_track->arrangement_note_events().size() == 4);
+    const auto events = compiled_track->arrangement_note_events();
+    REQUIRE(events[1].sample == events[2].sample);
+    REQUIRE(events[1].tick == TickPosition{2 * kTicksPerQuarter});
+    REQUIRE(events[2].tick == TickPosition{2 * kTicksPerQuarter - 1});
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    state::StateStore state;
+    embedded.define_parameters(state);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 48'000,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer silence(1, 48'000);
+    Buffer audio_output(1, 48'000);
+    midi::MidiBuffer input;
+    midi::MidiBuffer output;
+    output.reserve(16);
+    output.set_realtime_capacity_limit(true);
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 48'000;
+    context.is_playing = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = 1.0;
+    context.position_samples = 48'000;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 48'000) ==
+            sequence::HostTransportProjectionError::None);
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.ranges[0].timeline_tick_end ==
+            TickPosition{2 * kTicksPerQuarter});
+    std::uint32_t boundary_offset = 0;
+    REQUIRE(host_mapped_output_offset_for_tick(
+        projected.ranges[0], TickPosition{2 * kTicksPerQuarter - 1},
+        boundary_offset));
+    REQUIRE(boundary_offset == 47'999);
+    auto audio_output_view = audio_output.view();
+    const auto silence_view = silence.const_view();
+    embedded.process(audio_output_view, silence_view, input, output, context);
+
+    REQUIRE(embedded.ready());
+    REQUIRE(output.size() == 2);
+    REQUIRE(output[0].is_note_on());
+    REQUIRE(output[0].data()[1] == 60);
+    REQUIRE(output[0].sample_offset == 0);
+    REQUIRE(output[1].is_note_on());
+    REQUIRE(output[1].data()[1] == 61);
+    REQUIRE(output[1].sample_offset == 47'999);
 }
 
 TEST_CASE("embedded sequence processor matches offline and desktop event streams "
