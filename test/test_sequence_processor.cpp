@@ -374,6 +374,40 @@ TEST_CASE("host beat-domain loop projection keeps the final fractional frame cel
                 std::llround(context.position_beats * static_cast<double>(kTicksPerQuarter)))});
 }
 
+TEST_CASE("host beat-domain loop projection clamps a ceil-rounded complete loop") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 112) == sequence::HostTransportProjectionError::None);
+
+    constexpr double sample_rate = 48'000.0;
+    constexpr double loop_start_beats = 1.0;
+    const double loop_end_beats = loop_start_beats + 100.4 / sample_rate;
+    format::ProcessContext context;
+    context.sample_rate = sample_rate;
+    context.num_samples = 112;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = loop_end_beats - 10.4 / sample_rate;
+    context.position_samples = 100'000;
+    context.loop_start_beats = loop_start_beats;
+    context.loop_end_beats = loop_end_beats;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+    context.transport_validity.set(format::TransportField::LoopRange);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[0].frame_count == 11);
+    REQUIRE(projected.ranges[1].frame_count == 101);
+    REQUIRE(projected.ranges[1].timeline_tick_end == projected.loop.end);
+    REQUIRE(projected.ranges[1].host_tick_end ==
+            Catch::Approx(loop_end_beats * static_cast<double>(kTicksPerQuarter)));
+}
+
 TEST_CASE("host beat-domain loop admission keeps a sub-tick final cell") {
     const auto map = tempo_map();
     sequence::HostTransportProjector projector;

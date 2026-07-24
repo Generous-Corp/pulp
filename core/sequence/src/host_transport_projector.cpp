@@ -296,12 +296,16 @@ HostTransportProjector::project(const format::ProcessContext& context,
                 snapshot.range_count = 1;
             }
             if (remaining > 0) {
+                const bool completes_loop = remaining == loop_length;
                 make_range(snapshot.range_count, first_count, remaining, loop_start, true,
-                           &loop.start, nullptr, context.loop_start_beats);
+                           &loop.start, completes_loop ? &loop.end : nullptr,
+                           context.loop_start_beats,
+                           completes_loop ? context.loop_end_beats
+                                          : std::numeric_limits<double>::quiet_NaN());
                 ++snapshot.range_count;
                 expected_next_sample_ =
-                    remaining == loop_length ? loop_start : add_frames(loop_start, remaining);
-                next_pending_discontinuity = remaining == loop_length;
+                    completes_loop ? loop_start : add_frames(loop_start, remaining);
+                next_pending_discontinuity = completes_loop;
             } else if (first_count > 0 && static_cast<std::uint64_t>(first_count) == until_wrap) {
                 expected_next_sample_ = loop_start;
                 next_pending_discontinuity = true;
