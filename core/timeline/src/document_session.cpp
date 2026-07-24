@@ -229,7 +229,7 @@ struct DocumentSession::Impl {
         auto initial_snapshot = detail::JournalAccess::prepare_append(journal, *current->snapshot);
         if (journal_sink) {
             auto durable = journal_sink->append_batch(journal_entry);
-            if (!durable) {
+            if (!durable || !durable.value()) {
                 journal_sink_failed = true;
                 return failure<CommitResult>(
                     error(ConflictCode::JournalDurability, transaction, current_revision));
@@ -383,7 +383,7 @@ DocumentSession::create_impl(Project checkpoint, DocumentRevision checkpoint_rev
         auto validated = attachment == SinkAttachment::Initialize
                              ? journal_sink->checkpoint(checkpoint, checkpoint_revision)
                              : journal_sink->validate_restore(checkpoint, checkpoint_revision);
-        if (!validated) {
+        if (!validated || !validated.value()) {
             TransactionError value;
             value.code = ConflictCode::JournalDurability;
             return failure<std::unique_ptr<DocumentSession>>(value);
@@ -532,7 +532,7 @@ bool DocumentSession::checkpoint(DocumentRevision durable_revision) {
     if (!snapshot)
         return false;
     auto durable = impl_->journal_sink->checkpoint(*snapshot, durable_revision);
-    if (!durable) {
+    if (!durable || !durable.value()) {
         impl_->journal_sink_failed = true;
         return false;
     }

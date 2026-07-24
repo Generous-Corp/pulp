@@ -236,7 +236,11 @@ template <typename T, typename E> T require_timeline_result(pulp::runtime::Resul
     return std::move(result).value();
 }
 
-std::string make_timeline_project_json(const std::filesystem::path& source) {
+std::string make_timeline_project_json(
+    const std::filesystem::path& source,
+    pulp::timeline::AssetLocatorKind locator_kind =
+        pulp::timeline::AssetLocatorKind::ExternalUri,
+    std::string locator_hint = {}) {
     using namespace pulp::timeline;
     constexpr std::uint64_t frame_count = 32;
     auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
@@ -257,7 +261,7 @@ std::string make_timeline_project_json(const std::filesystem::path& source) {
                      {48'000, 1},
                      *hash,
                      AssetStoragePolicy::External,
-                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     {{locator_kind, locator_hint.empty() ? source.string() : locator_hint}},
                      {},
                      {}};
     auto project = require_timeline_result(
@@ -949,6 +953,49 @@ TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tool
                                      ",\"sample_rate\":768001}"));
     require_contains(excessive_rate, R"JSON("isError":true)JSON");
     require_contains(excessive_rate, "sample_rate must be an integer between 1 and 768000");
+}
+
+TEST_CASE("timeline MCP confines package-relative media to the project base",
+          "[mcp][tools][timeline]") {
+    TempDir temp;
+    const auto package = temp.path / "package";
+    const auto media = package / "media";
+    REQUIRE(std::filesystem::create_directories(media));
+    pulp::audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.8f)};
+    const auto nested_source = media / "source.wav";
+    const auto outside_source = temp.path / "outside.wav";
+    REQUIRE(pulp::audio::write_wav_file(nested_source.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
+    REQUIRE(pulp::audio::write_wav_file(outside_source.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
+    ScopedCurrentPath cwd(package);
+
+    const auto arguments = [](const std::string& project_json,
+                              const std::filesystem::path& output) {
+        return "{\"output\":" + pulp::timeline::quote_json_string(output.string()) +
+               ",\"project\":" + pulp::timeline::quote_json_string(project_json) + "}";
+    };
+    const auto nested_project = make_timeline_project_json(
+        nested_source, pulp::timeline::AssetLocatorKind::PackageRelative, "media/source.wav");
+    const auto nested_response = handle_request(tool_call(
+        "108", "pulp_timeline_render", arguments(nested_project, temp.path / "nested.wav")));
+    require_contains(nested_response, R"JSON("frames":"32")JSON");
+
+    const auto absolute_project = make_timeline_project_json(
+        nested_source, pulp::timeline::AssetLocatorKind::PackageRelative, nested_source.string());
+    const auto absolute_response = handle_request(tool_call(
+        "109", "pulp_timeline_render", arguments(absolute_project, temp.path / "absolute.wav")));
+    require_contains(absolute_response, R"JSON("isError":true)JSON");
+    require_contains(absolute_response, R"JSON("stage":"render")JSON");
+
+    const auto traversal_project = make_timeline_project_json(
+        outside_source, pulp::timeline::AssetLocatorKind::PackageRelative, "../outside.wav");
+    const auto traversal_response =
+        handle_timeline_render(arguments(traversal_project, temp.path / "traversal.wav"));
+    require_contains(traversal_response, R"JSON("isError":true)JSON");
+    require_contains(traversal_response, R"JSON("stage":"render")JSON");
 }
 
 TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {

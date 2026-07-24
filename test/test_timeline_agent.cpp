@@ -313,6 +313,7 @@ TEST_CASE("timeline agent does not load offline media from non-root sequences") 
     const auto rendered = audio::read_audio_file(output_path.string());
     REQUIRE(rendered);
     REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+
 }
 
 TEST_CASE("timeline agent rejects path-derived hashes as media identity") {
@@ -353,6 +354,144 @@ TEST_CASE("timeline agent tries later media locators after a stale existing hint
     const auto rendered = audio::read_audio_file(output_path.string());
     REQUIRE(rendered);
     REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+
+}
+
+TEST_CASE("timeline agent renders package-relative media beneath the project directory") {
+    TempDirectory temp;
+    const auto package = temp.path() / "package";
+    const auto media = package / "media";
+    REQUIRE(std::filesystem::create_directories(media));
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = media / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto project_path = package / "project.json";
+    write_text_file(project_path,
+                    project_json(source_path, 32, file_hash(source_path), true,
+                                 {{AssetLocatorKind::PackageRelative, "media/source.wav"}}));
+
+    const auto output_path = temp.path() / "output.wav";
+    REQUIRE(tools::timeline::render(project_path.string(), output_path.string()));
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+
+    const auto missing_project_path = package / "missing-project.json";
+    write_text_file(missing_project_path,
+                    project_json(source_path, 32, file_hash(source_path), true,
+                                 {{AssetLocatorKind::PackageRelative, "media/missing.wav"}}));
+    const auto missing = tools::timeline::render(missing_project_path.string(),
+                                                 (temp.path() / "missing.wav").string());
+    REQUIRE_FALSE(missing);
+    REQUIRE(missing.json.find(R"("stage":"render")") != std::string::npos);
+}
+
+TEST_CASE("timeline agent rejects rooted package-relative media hints") {
+    TempDirectory temp;
+    const auto package = temp.path() / "package";
+    REQUIRE(std::filesystem::create_directory(package));
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = package / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    std::vector<std::string> rooted_hints{source_path.string(), R"(\source.wav)", "C:source.wav"};
+#ifndef _WIN32
+    REQUIRE(std::filesystem::copy_file(source_path, package / R"(\source.wav)"));
+    REQUIRE(std::filesystem::copy_file(source_path, package / "C:source.wav"));
+#endif
+    for (std::size_t index = 0; index < rooted_hints.size(); ++index) {
+        const auto project_path = package / ("rooted-" + std::to_string(index) + ".json");
+        write_text_file(
+            project_path,
+            project_json(source_path, 32, file_hash(source_path), true,
+                         {{AssetLocatorKind::PackageRelative, rooted_hints[index]}}));
+        const auto result = tools::timeline::render(
+            project_path.string(), (temp.path() / ("output-" + std::to_string(index) + ".wav"))
+                                       .string());
+        INFO(rooted_hints[index]);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+    }
+}
+
+TEST_CASE("timeline agent rejects parent traversal in either package path syntax") {
+    TempDirectory temp;
+    const auto package = temp.path() / "package";
+    REQUIRE(std::filesystem::create_directory(package));
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto outside_path = temp.path() / "outside.wav";
+    REQUIRE(audio::write_wav_file(outside_path.string(), source, audio::WavBitDepth::Float32));
+#ifndef _WIN32
+    REQUIRE(std::filesystem::copy_file(outside_path, package / R"(..\outside.wav)"));
+#endif
+
+    const std::vector<std::string> traversal_hints{"../outside.wav", R"(..\outside.wav)"};
+    for (std::size_t index = 0; index < traversal_hints.size(); ++index) {
+        const auto project_path = package / ("traversal-" + std::to_string(index) + ".json");
+        write_text_file(
+            project_path,
+            project_json(outside_path, 32, file_hash(outside_path), true,
+                         {{AssetLocatorKind::PackageRelative, traversal_hints[index]}}));
+        const auto result = tools::timeline::render(
+            project_path.string(), (temp.path() / ("output-" + std::to_string(index) + ".wav"))
+                                       .string());
+        INFO(traversal_hints[index]);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+    }
+}
+
+TEST_CASE("timeline agent rejects package-relative media symlinks that escape the package") {
+    TempDirectory temp;
+    const auto package = temp.path() / "package";
+    REQUIRE(std::filesystem::create_directory(package));
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto outside_path = temp.path() / "outside.wav";
+    REQUIRE(audio::write_wav_file(outside_path.string(), source, audio::WavBitDepth::Float32));
+    std::error_code symlink_error;
+    std::filesystem::create_symlink(outside_path, package / "linked.wav", symlink_error);
+    if (symlink_error)
+        SKIP("file symlinks are unavailable in this environment");
+
+    const auto project_path = package / "project.json";
+    write_text_file(project_path,
+                    project_json(outside_path, 32, file_hash(outside_path), true,
+                                 {{AssetLocatorKind::PackageRelative, "linked.wav"}}));
+    const auto result =
+        tools::timeline::render(project_path.string(), (temp.path() / "output.wav").string());
+    REQUIRE_FALSE(result);
+    REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+}
+
+TEST_CASE("timeline agent enforces durable hashes for confined package-relative media") {
+    TempDirectory temp;
+    const auto package = temp.path() / "package";
+    REQUIRE(std::filesystem::create_directory(package));
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = package / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto expected_hash = file_hash(source_path);
+    const auto project_path = package / "project.json";
+    write_text_file(project_path,
+                    project_json(source_path, 32, expected_hash, true,
+                                 {{AssetLocatorKind::PackageRelative, "source.wav"}}));
+
+    source.channels[0][0] = 0.25f;
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto result =
+        tools::timeline::render(project_path.string(), (temp.path() / "output.wav").string());
+    REQUIRE_FALSE(result);
+    REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
 }
 
 TEST_CASE("timeline agent derives duration-less render length from active content") {

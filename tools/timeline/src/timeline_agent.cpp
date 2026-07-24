@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -96,6 +97,53 @@ std::optional<std::string> read_file(const fs::path& path,
         if (stream.peek() != std::ifstream::traits_type::eof())
             return std::nullopt;
         return bytes;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool package_relative_hint_is_lexically_safe(std::string_view hint) {
+    if (hint.empty() || hint.front() == '/' || hint.front() == '\\')
+        return false;
+    if (hint.size() >= 2 && std::isalpha(static_cast<unsigned char>(hint[0])) &&
+        hint[1] == ':')
+        return false;
+
+    std::size_t component_begin = 0;
+    for (std::size_t index = 0; index <= hint.size(); ++index) {
+        if (index != hint.size() && hint[index] != '/' && hint[index] != '\\')
+            continue;
+        if (hint.substr(component_begin, index - component_begin) == "..")
+            return false;
+        component_begin = index + 1;
+    }
+    return true;
+}
+
+bool path_is_beneath(const fs::path& base, const fs::path& candidate) {
+    auto base_component = base.begin();
+    auto candidate_component = candidate.begin();
+    for (; base_component != base.end() && candidate_component != candidate.end();
+         ++base_component, ++candidate_component) {
+        if (*base_component != *candidate_component)
+            return false;
+    }
+    return base_component == base.end() && candidate_component != candidate.end();
+}
+
+std::optional<fs::path> resolve_package_relative_asset(const fs::path& canonical_base,
+                                                       std::string_view hint) {
+    if (!package_relative_hint_is_lexically_safe(hint))
+        return std::nullopt;
+    try {
+        const fs::path relative(hint);
+        if (relative.has_root_name() || relative.has_root_directory() || relative.is_absolute())
+            return std::nullopt;
+        std::error_code error;
+        auto candidate = fs::canonical(canonical_base / relative, error);
+        if (error || !path_is_beneath(canonical_base, candidate))
+            return std::nullopt;
+        return candidate;
     } catch (...) {
         return std::nullopt;
     }
@@ -445,6 +493,8 @@ load_assets(const LoadedProject& project,
     std::vector<DecodedAudioAsset> decoded;
     decoded.reserve(reachable_asset_ids.size());
     std::uint64_t decoded_pcm_bytes = 0;
+    std::error_code package_base_error;
+    const auto canonical_package_base = fs::canonical(project.base_directory, package_base_error);
     for (const auto& asset : project.value.assets()) {
         if (!reachable_asset_ids.contains(asset.id.value))
             continue;
@@ -454,10 +504,24 @@ load_assets(const LoadedProject& project,
         for (const auto& locator : asset.locators) {
             if (locator.hint.empty())
                 continue;
-            fs::path candidate(locator.hint);
-            if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative ||
-                candidate.is_relative())
-                candidate = project.base_directory / candidate;
+            fs::path candidate;
+            if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative) {
+                if (package_base_error)
+                    continue;
+                auto resolved =
+                    resolve_package_relative_asset(canonical_package_base, locator.hint);
+                if (!resolved)
+                    continue;
+                candidate = std::move(*resolved);
+            } else {
+                try {
+                    candidate = fs::path(locator.hint);
+                } catch (...) {
+                    continue;
+                }
+                if (candidate.is_relative())
+                    candidate = project.base_directory / candidate;
+            }
             std::error_code error;
             if (!fs::is_regular_file(candidate, error))
                 continue;

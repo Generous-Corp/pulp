@@ -71,6 +71,8 @@ class ProbeJournalSink final : public JournalSink {
             return pulp::runtime::Result<bool, JournalSinkError>(
                 pulp::runtime::Err(JournalSinkError::IoError));
         }
+        if (!acknowledge_append)
+            return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(false));
         entries.push_back(entry);
         return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
     }
@@ -81,17 +83,30 @@ class ProbeJournalSink final : public JournalSink {
         if (fail_checkpoint)
             return pulp::runtime::Result<bool, JournalSinkError>(
                 pulp::runtime::Err(JournalSinkError::IoError));
+        if (!acknowledge_checkpoint)
+            return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(false));
         checkpoints.push_back(durable_revision);
         checkpoint_snapshots.push_back(snapshot);
         return pulp::runtime::Result<bool, JournalSinkError>(pulp::runtime::Ok(true));
+    }
+
+    pulp::runtime::Result<bool, JournalSinkError>
+    validate_restore(const Project&, DocumentRevision) noexcept override {
+        ++validate_restore_calls;
+        return pulp::runtime::Result<bool, JournalSinkError>(
+            pulp::runtime::Ok(acknowledge_restore));
     }
 
     DocumentSession* session = nullptr;
     bool fail_append = false;
     bool append_before_failure = false;
     bool fail_checkpoint = false;
+    bool acknowledge_append = true;
+    bool acknowledge_checkpoint = true;
+    bool acknowledge_restore = true;
     std::size_t append_calls = 0;
     std::size_t checkpoint_calls = 0;
+    std::size_t validate_restore_calls = 0;
     DocumentRevision revision_observed_during_append{};
     std::vector<JournalEntry> entries;
     std::vector<DocumentRevision> checkpoints;
@@ -133,6 +148,41 @@ TEST_CASE("Timeline journal sink failure rejects session creation") {
     REQUIRE(sink->checkpoints.empty());
 }
 
+TEST_CASE("Timeline journal sink requires an affirmative attachment acknowledgement") {
+    SECTION("initial checkpoint") {
+        auto sink = std::make_shared<ProbeJournalSink>();
+        sink->acknowledge_checkpoint = false;
+
+        auto rejected = DocumentSession::create(make_project(), {}, sink);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+        REQUIRE(sink->checkpoint_calls == 1);
+        REQUIRE(sink->checkpoints.empty());
+
+        sink->acknowledge_checkpoint = true;
+        auto recovered = DocumentSession::create(make_project(), {}, sink);
+        REQUIRE(recovered);
+        REQUIRE(sink->checkpoint_calls == 2);
+        REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    }
+
+    SECTION("restore validation") {
+        auto sink = std::make_shared<ProbeJournalSink>();
+        sink->acknowledge_restore = false;
+
+        auto rejected = DocumentSession::restore(make_project(), {7}, {}, sink);
+        REQUIRE_FALSE(rejected);
+        REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+        REQUIRE(sink->validate_restore_calls == 1);
+
+        sink->acknowledge_restore = true;
+        auto recovered = DocumentSession::restore(make_project(), {7}, {}, sink);
+        REQUIRE(recovered);
+        REQUIRE(recovered.value()->revision() == DocumentRevision{7});
+        REQUIRE(sink->validate_restore_calls == 2);
+    }
+}
+
 TEST_CASE("Timeline journal sink failure poisons the session after an ambiguous append") {
     auto sink = std::make_shared<ProbeJournalSink>();
     sink->fail_append = true;
@@ -157,6 +207,41 @@ TEST_CASE("Timeline journal sink failure poisons the session after an ambiguous 
     REQUIRE(session->revision().value == 0);
     REQUIRE(sink->append_calls == 1);
     REQUIRE(sink->entries.size() == 1);
+}
+
+TEST_CASE("Timeline journal sink Ok false rejects append before publication") {
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    sink->acknowledge_append = false;
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto retry = edit;
+
+    auto rejected = session->submit(writer, std::move(edit));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(velocity(*session->snapshot()) == 1000);
+    REQUIRE(session->journal().entries().empty());
+    REQUIRE_FALSE(session->can_undo());
+    REQUIRE(sink->append_calls == 1);
+    REQUIRE(sink->entries.empty());
+
+    sink->acknowledge_append = true;
+    auto poisoned = session->submit(writer, std::move(retry));
+    REQUIRE_FALSE(poisoned);
+    REQUIRE(poisoned.error().code == ConflictCode::JournalDurability);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(sink->append_calls == 1);
+
+    auto recovered = std::move(DocumentSession::create(make_project(), {}, sink)).value();
+    auto recovered_writer = std::move(recovered->register_writer()).value();
+    auto recovered_edit = session_transaction(
+        recovered_writer, {},
+        {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(recovered->submit(recovered_writer, std::move(recovered_edit)));
+    REQUIRE(recovered->revision() == DocumentRevision{1});
+    REQUIRE(velocity(*recovered->snapshot()) == 2000);
 }
 
 TEST_CASE("Timeline journal checkpoint truncates only after the sink accepts it") {
@@ -191,6 +276,33 @@ TEST_CASE("Timeline journal checkpoint truncates only after the sink accepts it"
     auto collided = session->submit(writer, std::move(collision));
     REQUIRE_FALSE(collided);
     REQUIRE(collided.error().code == ConflictCode::TransactionIdCollision);
+}
+
+TEST_CASE("Timeline journal sink Ok false preserves checkpoint recovery state") {
+    const auto initial = make_project();
+    auto sink = std::make_shared<ProbeJournalSink>();
+    auto session = std::move(DocumentSession::create(initial, {}, sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+    sink->acknowledge_checkpoint = false;
+
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
+    REQUIRE(sink->checkpoints == std::vector<DocumentRevision>{{0}});
+    REQUIRE(session->revision() == DocumentRevision{1});
+    REQUIRE(velocity(*session->snapshot()) == 2000);
+    REQUIRE(session->journal().base_revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().size() == 1);
+    REQUIRE(session->can_undo());
+
+    const auto replayed = session->journal().replay(initial, {});
+    REQUIRE(replayed);
+    REQUIRE(velocity(replayed.value()) == 2000);
+
+    sink->acknowledge_checkpoint = true;
+    REQUIRE_FALSE(session->checkpoint({1}));
+    REQUIRE(sink->checkpoint_calls == 2);
 }
 
 TEST_CASE("Timeline journal replay reproduces the committed document") {
