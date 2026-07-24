@@ -25,9 +25,9 @@ pulp_add_plugin(<target>
     PROCESSOR_FACTORY <function-name>
     UI_SCRIPT       <path>
     CONTENT_CAPABILITIES <capability-list>
-    CONTENT_KINDS   <presets|themes|samples|wavetables...>
-    CONTENT_HOT_RELOAD_KINDS <presets|themes|samples|wavetables...>
-    CONTENT_MANUAL_RESCAN_KINDS <presets|themes|samples|wavetables...>
+    CONTENT_KINDS   <presets|themes|samples|sample-banks|wavetables...>
+    CONTENT_HOT_RELOAD_KINDS <presets|themes|samples|sample-banks|wavetables...>
+    CONTENT_MANUAL_RESCAN_KINDS <presets|themes|samples|sample-banks|wavetables...>
 )
 ```
 
@@ -50,7 +50,7 @@ pulp_add_plugin(<target>
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
 | `UI_SCRIPT` | No | -- | Path to a JavaScript UI entry file. Pulp applies it to created format targets via `PULP_UI_SCRIPT_PATH`; the Standalone macOS lane owns runtime validation for live JS/theme reload. |
 | `CONTENT_CAPABILITIES` | No | -- | Runtime content capabilities the plugin actually consumes, such as `content.presets.v1`. Use this when the plugin can load installed content packs. Must be paired with `CONTENT_KINDS`. |
-| `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `wavetables`. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
+| `CONTENT_KINDS` | No | -- | Content kinds accepted by the plugin: `presets`, `themes`, `samples`, `sample-banks`, `wavetables`. Use capability `content.sample-banks.v1` for the generic `pulp.sample-bank.v1` contract. This lets users and agents reject mismatched packs before install. Must be paired with `CONTENT_CAPABILITIES`. |
 | `CONTENT_HOT_RELOAD_KINDS` | No | -- | Accepted content kinds the plugin can refresh immediately after install/update. Each value must also appear in `CONTENT_KINDS`. |
 | `CONTENT_MANUAL_RESCAN_KINDS` | No | -- | Accepted content kinds that require an in-app rescan action but not a full restart. Each value must also appear in `CONTENT_KINDS`. |
 

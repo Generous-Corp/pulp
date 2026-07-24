@@ -2597,3 +2597,20 @@ validate before atomically writing canonical schema-v3 JSON. `render` must keep
 the profile, fixture, WAV, and report paths distinct, execute record-commit as
 its separately reported transaction, and emit a deterministic evidence report
 through the same production profile/runtime path that consumers use.
+
+## `content validate` verifies sample banks against real files
+
+`pulp content validate` checks `exports.sampleBanks` by parsing each
+`pulp.sample-bank.v1` manifest and then verifying every referenced audio file:
+paths stay confined to the content-pack root, symlinks are rejected, and each
+lowercase SHA-256 must match the bytes on disk. Keep that logic in
+`pulp::audio::validate_sample_bank_content`; the CLI should only marshal paths
+and report issues.
+
+**A packed `.pulpcontent` archive cannot be validated in place.** Hash and
+path-confinement checks need real files, so the archive is extracted to a
+temporary root first and validated there. Skipping the extraction silently
+downgrades a bank to "declared but unverified" — a pack whose audio does not
+match its manifest would then install cleanly. Mirror any verb or flag change in
+`docs/status/cli-commands.yaml`, `docs/reference/cli.md`, and the `content`
+skill.

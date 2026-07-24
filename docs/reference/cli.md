@@ -2307,7 +2307,7 @@ Developer notes:
 
 Validate and install data-only content packs for installed plugins.
 
-Use `pulp content` for end-user data such as presets, themes, samples, and wavetables. Plugin authors get a standard expansion-pack format instead of custom installers. Users get validation, an explicit install target, and removal that leaves their own presets alone. Agents can reject mismatched packs before install because plugins declare the content kinds they actually support.
+Use `pulp content` for end-user data such as presets, themes, samples, sample banks, and wavetables. Plugin authors get a standard expansion-pack format instead of custom installers. Users get validation, an explicit install target, and removal that leaves their own presets alone. Agents can reject mismatched packs before install because plugins declare the content kinds they actually support.
 
 Keep the three lanes distinct:
 
@@ -2320,6 +2320,16 @@ The workflow is validate, preview, approve, install/update. Install, update, and
 `preview` reads the trusted `pulp.plugin-runtime.json` emitted by the plugin and reports compatibility, target plugin, accepted content kinds, and hot-reload/rescan/restart policy. `update` takes an explicit local path, not a registry name or URL, and rolls back a replaced version on failure. Content commands copy data only; they never run package CMake, JavaScript, scripts, dynamic libraries, or remote fetches. Removal deletes only the installed content-pack root, not user-created presets or edits.
 
 Plugins opt in with `ContentRegistry` or `PresetManager`. Prefer declaring content support in CMake with `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`; that generates the `pulp.plugin-runtime.json` used by agents, previews, and `ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+Generic bundled-audio consumers declare capability
+`content.sample-banks.v1`, kind `sample-banks`, and consume
+`exports.sampleBanks`. A strict `pulp.sample-bank.v1` manifest maps
+hash-verified relative audio paths to zones. `SampleBankMaterializer` performs
+filesystem verification and decode off the audio thread, then returns one
+lifetime owner for its `SampleAssetView`, `SamplePool`, and `SampleZoneMap`
+readers. Namespaced `extensions` objects at bank, sample, and zone scope are
+preserved across parse/write so edit documents, analysis markers, and advanced
+loop metadata can evolve without destructive flattening.
 
 ```cmake
 pulp_add_plugin(MySynth

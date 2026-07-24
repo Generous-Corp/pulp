@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 
 namespace pulp::runtime {
@@ -40,6 +41,11 @@ std::vector<uint8_t> sha256(std::string_view data);
 /// Compute SHA-256 hash as hex string (64 chars).
 std::string sha256_hex(const uint8_t* data, size_t size);
 std::string sha256_hex(std::string_view data);
+
+/// Stream a file through SHA-256 without retaining its contents in memory.
+/// Returns nullopt when the file cannot be read or exceeds max_bytes.
+std::optional<std::string> sha256_file_hex(const std::filesystem::path& path,
+                                           std::uint64_t max_bytes);
 
 /// Compute SHA-1 hash. Returns 20-byte digest. (Legacy protocols only —
 /// e.g., WebSocket handshake per RFC 6455.)

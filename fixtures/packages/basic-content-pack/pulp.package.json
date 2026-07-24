@@ -9,7 +9,7 @@
   },
   "kind": ["content-pack"],
   "audience": ["end-user", "agent"],
-  "description": "Fixture preset, theme, sample, and wavetable content pack.",
+  "description": "Fixture preset, theme, sample-bank, sample, and wavetable content pack.",
   "requires": {
     "pulp": ">=0.395.0",
     "platforms": ["macOS", "Windows", "Linux"]
@@ -18,18 +18,20 @@
     "content.presets.v1",
     "content.themes.v1",
     "content.samples.v1",
+    "content.sample-banks.v1",
     "content.wavetables.v1"
   ],
   "exports": {
     "presets": ["presets"],
     "themes": ["themes"],
     "samples": ["samples"],
+    "sampleBanks": ["sample-banks"],
     "wavetables": ["wavetables"],
     "licenses": ["licenses/LICENSE.txt"]
   },
   "content": {
     "pluginIds": ["dev.pulp.fixtures.content-target"],
-    "kinds": ["presets", "themes", "samples", "wavetables"]
+    "kinds": ["presets", "themes", "samples", "sample-banks", "wavetables"]
   },
   "dependencies": {
     "pulp": [],

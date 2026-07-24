@@ -96,6 +96,7 @@
         "presets": { "type": "array", "items": { "type": "string" } },
         "themes": { "type": "array", "items": { "type": "string" } },
         "samples": { "type": "array", "items": { "type": "string" } },
+        "sampleBanks": { "type": "array", "items": { "type": "string" } },
         "wavetables": { "type": "array", "items": { "type": "string" } },
         "licenses": { "type": "array", "items": { "type": "string" } },
         "sourceFiles": { "type": "array", "items": { "type": "string" } },
