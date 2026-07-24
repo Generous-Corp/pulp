@@ -39,7 +39,7 @@ template <typename SampleType = float> class SincResamplerT {
     /// transparent with linear phase interpolation), `beta` the Kaiser shape
     /// (≈ 8–10 for deep stopband; higher = more rejection, wider transition),
     /// and `cutoff` the normalized source-Nyquist cutoff in `(0, 1]`. Values
-        /// outside that interval are clamped.
+    /// outside that interval are clamped.
     void build(int half_width = 16, int phases = 512, double beta = 9.0, double cutoff = 1.0) {
         half_ = half_width;
         phases_ = phases;
@@ -109,6 +109,9 @@ template <typename SampleType = float> class SincResamplerT {
     /// lies within `[0, len)`; out-of-range taps are clamped to the edge so
     /// boundary reads degrade gracefully rather than read out of bounds.
     SampleType read(const SampleType* src, int len, double pos) const {
+        if (src == nullptr || len <= 0 || !ready() || !std::isfinite(pos))
+            return SampleType{0};
+        pos = std::clamp(pos, 0.0, static_cast<double>(len - 1));
         const int taps = 2 * half_;
         const long i0 = static_cast<long>(std::floor(pos));
         const double frac = pos - static_cast<double>(i0);

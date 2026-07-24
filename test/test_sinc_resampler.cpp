@@ -2,9 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <pulp/signal/sinc_resampler.hpp>
 #include <cmath>
 #include <limits>
+#include <pulp/signal/sinc_resampler.hpp>
 #include <vector>
 
 using namespace pulp::signal;
@@ -15,7 +15,8 @@ constexpr double kPi = 3.14159265358979323846;
 std::vector<float> sine(double cycles_per_sample, int n, double phase = 0.0) {
     std::vector<float> v(static_cast<size_t>(n));
     for (int i = 0; i < n; ++i)
-        v[static_cast<size_t>(i)] = static_cast<float>(std::sin(2.0 * kPi * cycles_per_sample * i + phase));
+        v[static_cast<size_t>(i)] =
+            static_cast<float>(std::sin(2.0 * kPi * cycles_per_sample * i + phase));
     return v;
 }
 } // namespace
@@ -29,8 +30,7 @@ TEST_CASE("SincResampler reproduces samples at integer positions", "[signal][sin
                      WithinAbs(x[static_cast<size_t>(i)], 1e-4f));
 }
 
-TEST_CASE("SincResampler preserves a constant (kernel ~ partition of unity)",
-          "[signal][sinc]") {
+TEST_CASE("SincResampler preserves a constant (kernel ~ partition of unity)", "[signal][sinc]") {
     SincResampler rs;
     rs.build();
     std::vector<float> dc(400, 0.7f);
@@ -38,8 +38,7 @@ TEST_CASE("SincResampler preserves a constant (kernel ~ partition of unity)",
         REQUIRE_THAT(rs.read(dc.data(), 400, 200.0 + frac), WithinAbs(0.7f, 2e-3f));
 }
 
-TEST_CASE("SincResampler interpolates a band-limited sine accurately",
-          "[signal][sinc]") {
+TEST_CASE("SincResampler interpolates a band-limited sine accurately", "[signal][sinc]") {
     SincResampler rs;
     rs.build();
     const double f = 0.07; // well below Nyquist
@@ -63,8 +62,7 @@ TEST_CASE("SincResampler interpolates a band-limited sine accurately",
     REQUIRE(sinc_err < lin_err * 0.2); // and far better than linear
 }
 
-TEST_CASE("SincResampler apply() matches read() for a gathered neighbourhood",
-          "[signal][sinc]") {
+TEST_CASE("SincResampler apply() matches read() for a gathered neighbourhood", "[signal][sinc]") {
     SincResampler rs;
     rs.build();
     const int half = rs.half_width();
@@ -92,6 +90,19 @@ TEST_CASE("SincResampler stays bounded at buffer edges", "[signal][sinc]") {
         REQUIRE(std::isfinite(y));
         REQUIRE(std::abs(y) < 2.0f);
     }
+}
+
+TEST_CASE("SincResampler rejects invalid source domains", "[signal][sinc]") {
+    SincResampler rs;
+    rs.build();
+
+    REQUIRE(rs.read(nullptr, 0, 0.0) == 0.0f);
+    REQUIRE(rs.read(nullptr, -1, 0.0) == 0.0f);
+
+    constexpr float sample = 0.25f;
+    REQUIRE(rs.read(&sample, 1, std::numeric_limits<double>::quiet_NaN()) == 0.0f);
+    REQUIRE_THAT(rs.read(&sample, 1, -1.0e300), WithinAbs(0.25f, 1.0e-6f));
+    REQUIRE_THAT(rs.read(&sample, 1, 1.0e300), WithinAbs(0.25f, 1.0e-6f));
 }
 
 TEST_CASE("SincResampler clamps invalid reconstruction cutoffs", "[signal][sinc]") {

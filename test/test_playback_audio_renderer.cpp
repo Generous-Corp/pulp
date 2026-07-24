@@ -1,4 +1,5 @@
 #include <pulp/audio/analysis/audio_spectrum.hpp>
+#include <pulp/audio/sample_rate_conversion.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/timeline/transaction.hpp>
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -1156,4 +1158,15 @@ TEST_CASE("audio render entry point is allocation free and fails closed") {
     REQUIRE(ArrangementAudioRenderer::process(*narrow_program, snapshot(*narrow_program, 64),
                                               output.view()) ==
             AudioRenderStatus::CapacityExceeded);
+}
+
+TEST_CASE("prepared sample-rate conversion rejects invalid source domains") {
+    const audio::PreparedSampleRateConversion converter(1.0);
+    REQUIRE(converter.read({}, 0.0) == 0.0f);
+
+    constexpr std::array source{0.25f};
+    REQUIRE_THAT(converter.read(source, -1.0e300), WithinAbs(0.25f, 1.0e-6f));
+    REQUIRE_THAT(converter.read(source, 1.0e300), WithinAbs(0.25f, 1.0e-6f));
+    REQUIRE(converter.read(source, std::numeric_limits<double>::quiet_NaN()) == 0.0f);
+    REQUIRE(converter.read(source, std::numeric_limits<double>::infinity()) == 0.0f);
 }

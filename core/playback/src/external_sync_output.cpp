@@ -200,7 +200,8 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
         result.code = ExternalSyncOutputCode::InvalidTransport;
         return result;
     }
-    if (!transport.sample_rate.valid()) {
+    if (!transport.sample_rate.valid() ||
+        transport.sample_rate.normalized() != transport.tempo_map->sample_rate().normalized()) {
         result.code = ExternalSyncOutputCode::InvalidSampleRate;
         return result;
     }

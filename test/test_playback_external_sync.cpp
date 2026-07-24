@@ -183,6 +183,20 @@ TEST_CASE("external sync emits sample-accurate clock and MTC", "[playback][exter
                                                      3'200, 3'600, 4'000, 4'400});
 }
 
+TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
+          "[playback][external-sync]") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, {.max_buffer_size = 64, .initially_playing = true}) ==
+            TransportError::None);
+    auto snapshot = block(transport, 64);
+    snapshot.sample_rate = {44'100, 1};
+    midi::MidiBuffer output;
+    REQUIRE(ExternalSyncOutput{}.process(snapshot, output).code ==
+            ExternalSyncOutputCode::InvalidSampleRate);
+    REQUIRE(output.empty());
+}
+
 TEST_CASE("external sync sends song position and continue after a locate",
           "[playback][external-sync]") {
     const auto map = constant_map();

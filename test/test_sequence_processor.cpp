@@ -104,6 +104,32 @@ TEST_CASE("host transport projection preserves authoritative positions outside a
     REQUIRE_FALSE(projected.ranges[0].discontinuity);
 }
 
+TEST_CASE("host transport projection re-anchors after an exact second loop wrap") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 96) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 96;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.loop_start_beats = 0.0;
+    context.loop_end_beats = 64.0 / 24'000.0;
+    context.position_samples = 32;
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[1].timeline_sample_start.value == 0);
+    REQUIRE(projected.ranges[1].frame_count == 64);
+
+    context.num_samples = 32;
+    context.position_samples = 0;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE_FALSE(projected.ranges[0].discontinuity);
+}
+
 TEST_CASE("embedded sequence processor matches offline and desktop event streams "
           "across a loop wrap") {
     const auto map = tempo_map();

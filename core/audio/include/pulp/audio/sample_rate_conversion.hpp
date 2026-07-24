@@ -2,6 +2,9 @@
 
 #include <pulp/signal/sinc_resampler.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <span>
 
 namespace pulp::audio {
@@ -17,6 +20,11 @@ class PreparedSampleRateConversion {
     }
 
     float read(std::span<const float> source, double position) const noexcept {
+        if (source.empty() ||
+            source.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+            !std::isfinite(position))
+            return 0.0f;
+        position = std::clamp(position, 0.0, static_cast<double>(source.size() - 1));
         return kernel_.read(source.data(), static_cast<int>(source.size()), position);
     }
 

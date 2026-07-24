@@ -269,12 +269,14 @@ void CaptureEngine::monitor_inputs(const audio::BufferView<const float>& input,
         const auto& track = config_.tracks[track_index];
         float peak = 0.0f;
         for (std::uint32_t channel = 0; channel < track.channel_count; ++channel) {
-            const auto source = input.channel(track.input_channel + channel);
+            const auto source =
+                input.channel(static_cast<std::size_t>(track.input_channel) + channel);
             for (std::uint32_t frame = 0; frame < frames; ++frame)
                 peak = std::max(peak, std::abs(source[frame]));
             if (!track.monitor)
                 continue;
-            auto destination = output.channel(track.output_channel + channel);
+            auto destination =
+                output.channel(static_cast<std::size_t>(track.output_channel) + channel);
             for (std::uint32_t frame = 0; frame < frames; ++frame)
                 destination[frame] += source[frame];
         }
@@ -364,7 +366,7 @@ void CaptureEngine::append_audio(TakeSlot& slot, const CaptureTrackConfig& track
     const auto available = config_.maximum_take_frames - slot.frame_count;
     const auto copied = static_cast<std::uint32_t>(std::min<std::uint64_t>(frames, available));
     for (std::uint32_t channel = 0; channel < track.channel_count; ++channel) {
-        const auto source = input.channel(track.input_channel + channel);
+        const auto source = input.channel(static_cast<std::size_t>(track.input_channel) + channel);
         auto* destination = slot.audio.data() +
                             static_cast<std::size_t>(channel) *
                                 static_cast<std::size_t>(config_.maximum_take_frames) +
@@ -522,10 +524,12 @@ CaptureProcessResult CaptureEngine::process(const audio::BufferView<const float>
         monitor_output.num_samples() < transport.frame_count)
         return CaptureProcessResult::InvalidBuffers;
     for (const auto& track : config_.tracks) {
-        if (static_cast<std::size_t>(track.input_channel) + track.channel_count >
-                input.num_channels() ||
-            static_cast<std::size_t>(track.output_channel) + track.channel_count >
-                monitor_output.num_channels())
+        const auto input_channel = static_cast<std::size_t>(track.input_channel);
+        const auto output_channel = static_cast<std::size_t>(track.output_channel);
+        if (input_channel > input.num_channels() ||
+            track.channel_count > input.num_channels() - input_channel ||
+            output_channel > monitor_output.num_channels() ||
+            track.channel_count > monitor_output.num_channels() - output_channel)
             return CaptureProcessResult::InvalidBuffers;
     }
     if (!valid_transport_ranges(transport) || transport.sample_rate != config_.sample_rate)

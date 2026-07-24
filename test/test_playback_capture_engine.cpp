@@ -269,3 +269,39 @@ TEST_CASE("capture engine rejects aggregate preallocation beyond its explicit bu
                                    excessive_tracks.tracks.front());
     REQUIRE_FALSE(engine.prepare(excessive_tracks));
 }
+
+TEST_CASE("capture engine rejects overflowing channel ranges before indexing") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    prepare_transport(transport, map, 1);
+    midi::MidiBuffer midi;
+
+    SECTION("input range") {
+        auto config = capture_config(1);
+        config.tracks[0].input_channel = std::numeric_limits<std::uint32_t>::max();
+        config.tracks[0].armed = false;
+        config.tracks[0].monitor = false;
+        CaptureEngine engine;
+        REQUIRE(engine.prepare(config));
+
+        const audio::BufferView<const float> no_input(nullptr, 0, 1);
+        audio::Buffer<float> output(1, 1);
+        auto output_view = output.view();
+        REQUIRE(engine.process(no_input, output_view, midi, next_block(transport, 1)) ==
+                CaptureProcessResult::InvalidBuffers);
+    }
+
+    SECTION("output range") {
+        auto config = capture_config(1);
+        config.tracks[0].output_channel = std::numeric_limits<std::uint32_t>::max();
+        config.tracks[0].armed = false;
+        config.tracks[0].monitor = false;
+        CaptureEngine engine;
+        REQUIRE(engine.prepare(config));
+
+        audio::Buffer<float> input(1, 1);
+        audio::BufferView<float> no_output(nullptr, 0, 1);
+        REQUIRE(engine.process(read_view(input), no_output, midi, next_block(transport, 1)) ==
+                CaptureProcessResult::InvalidBuffers);
+    }
+}

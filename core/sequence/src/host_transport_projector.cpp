@@ -182,7 +182,8 @@ HostTransportProjector::project(const format::ProcessContext& context,
             if (remaining > 0) {
                 make_range(snapshot.range_count, first_count, remaining, loop_start, true);
                 ++snapshot.range_count;
-                expected_next_sample_ = add_frames(loop_start, remaining);
+                expected_next_sample_ =
+                    remaining == loop_length ? loop_start : add_frames(loop_start, remaining);
             } else if (first_count > 0 && add_frames(host_start, first_count) == loop_end) {
                 expected_next_sample_ = loop_start;
             } else {
