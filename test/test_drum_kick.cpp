@@ -179,6 +179,25 @@ TEST_CASE("A voice reports itself finished once its layers have decayed",
     REQUIRE_FALSE(voice.is_active());
 }
 
+TEST_CASE("A voice whose layers are silent still finishes",
+          "[signal][drum][voice]") {
+    // A layer at zero level must not report itself active. It renders nothing,
+    // so it never advances the envelope that would eventually clear the flag,
+    // and a voice that asked it would stay active forever -- an idle kit that
+    // never leaves the CPU and a choke group that never frees its voice.
+    KickVoice voice;
+    init(voice, KickBody::oscillator);
+    voice.set_click_level(0.0);
+    voice.set_noise_level(0.0);
+    voice.set_sub_level(0.0);
+    voice.set_body_decay_ms(60.0);
+    voice.note_on(1.0f);
+    REQUIRE(voice.is_active());
+
+    render(voice, static_cast<int>(kFs));
+    REQUIRE_FALSE(voice.is_active());
+}
+
 TEST_CASE("Choking fades rather than cutting", "[signal][drum][voice]") {
     // An instant cut is a step edge, which is broadband and audible as a click
     // exactly where a choke group fires. The fade is what stops that.

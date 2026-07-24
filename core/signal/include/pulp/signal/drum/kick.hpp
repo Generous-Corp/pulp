@@ -2,8 +2,10 @@
 
 #include <pulp/signal/bridged_t_resonator.hpp>
 #include <pulp/signal/decay_envelope.hpp>
+#include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/noise_source.hpp>
+#include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/two_pole_resonator.hpp>
 
 #include <algorithm>
@@ -58,6 +60,14 @@ public:
         r.bend_octaves = 0.6f;
         r.brightness_octaves = 1.5f;
         set_velocity_response(r);
+
+        // A kick without a beater click reads as a sine with an envelope, so
+        // the click is on by default; the noise and sub layers are additions a
+        // caller opts into.
+        click_.set_level(0.3);
+        click_.set_cutoff_hz(4000.0);
+        click_.set_decay_ms(2.0);
+        noise_layer_.set_decay_ms(60.0);
     }
 
     // -- Shared controls -----------------------------------------------------
@@ -82,18 +92,18 @@ public:
     /// Level of the attack click, and the corner of the one-pole that tones
     /// it. A click is a noise burst through a lowpass: lowering the corner
     /// turns a beater tick into a thump.
-    void set_click_level(double level) { click_level_ = std::max(level, 0.0); }
-    void set_click_tone_hz(double hz) { click_tone_hz_ = std::clamp(hz, 100.0, 18000.0); }
-    void set_click_decay_ms(double ms) { click_decay_ms_ = std::clamp(ms, 0.2, 100.0); }
+    void set_click_level(double level) { click_.set_level(level); }
+    void set_click_tone_hz(double hz) { click_.set_cutoff_hz(hz); }
+    void set_click_decay_ms(double ms) { click_.set_decay_ms(ms); }
 
     /// Level and decay of the noise layer.
-    void set_noise_level(double level) { noise_level_ = std::max(level, 0.0); }
-    void set_noise_decay_ms(double ms) { noise_decay_ms_ = std::clamp(ms, 1.0, 2000.0); }
+    void set_noise_level(double level) { noise_layer_.set_level(level); }
+    void set_noise_decay_ms(double ms) { noise_layer_.set_decay_ms(ms); }
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
     /// Level of the sub layer, a sine an octave below the body gated by the
     /// body's own envelope.
-    void set_sub_level(double level) { sub_level_ = std::max(level, 0.0); }
+    void set_sub_level(double level) { sub_.set_level(level); }
 
     /// The saturation and degradation stage the voice ends with.
     OutputStage& output() { return output_; }
@@ -146,32 +156,34 @@ protected:
         noise_.prepare(sample_rate);
         body_env_.set_sample_rate(sample_rate);
         pitch_env_.set_sample_rate(sample_rate);
-        click_env_.set_sample_rate(sample_rate);
-        noise_env_.set_sample_rate(sample_rate);
+        click_.prepare(sample_rate);
+        noise_layer_.prepare(sample_rate);
+        sub_.prepare(sample_rate);
         resonator_.set_sample_rate(sample_rate);
         circuit_.prepare(sample_rate);
         output_.prepare(sample_rate);
-        update_click_filter();
-        update_tone_filter();
+        shaper_.prepare(static_cast<float>(sample_rate));
+        shaper_.set_cutoff(static_cast<float>(kShaperHz));
+        tone_.prepare(static_cast<float>(sample_rate));
+        tone_.set_cutoff(static_cast<float>(kToneHz));
     }
 
     void on_reset() override {
         body_env_.reset();
         pitch_env_.reset();
-        click_env_.reset();
-        noise_env_.reset();
+        click_.reset();
+        noise_layer_.reset();
+        sub_.reset();
         resonator_.reset();
         circuit_.reset();
         circuit_.set_attack_shunt(false);
         output_.reset();
         noise_.reset();
+        shaper_.reset();
+        tone_.reset();
         phase_ = 0.0;
         mod_phase_ = 0.0;
-        sub_phase_ = 0.0;
-        click_lp_ = 0.0;
-        tone_lp_ = 0.0;
         feedback_z_ = 0.0;
-        pulse_shaper_ = 0.0;
         ring_level_ = 0.0;
         pulse_remaining_ = 0;
         shunt_remaining_ = 0;
@@ -196,29 +208,15 @@ protected:
         body_env_.set_decay_t60_ms(body_decay_ms_);
         body_env_.trigger();
 
-        click_env_.set_attack_ms(0.0);
-        click_env_.set_decay_time_constant_ms(click_decay_ms_);
-        click_env_.trigger();
-
-        noise_env_.set_attack_ms(0.2);
-        noise_env_.set_decay_t60_ms(noise_decay_ms_);
-        noise_env_.trigger();
-
-        update_click_filter();
-        update_tone_filter();
-
-        // The click's tone filter is part of the strike, not part of the body,
-        // so it starts fresh on every hit. Leaving its state behind would make
-        // a hit depend on how long ago the previous one was, which is the same
-        // non-determinism the noise reseed above exists to remove. The circuit
-        // body's own state is deliberately *not* cleared here -- see below.
-        click_lp_ = 0.0;
+        // Velocity brightens the click by moving its cutoff, not by scaling it.
+        click_.trigger(brightness_);
+        noise_layer_.trigger();
+        sub_.trigger();
 
         switch (body_mode_) {
             case KickBody::oscillator:
                 phase_ = 0.0;
                 mod_phase_ = 0.0;
-                sub_phase_ = 0.0;
                 break;
 
             case KickBody::resonant:
@@ -246,15 +244,13 @@ protected:
 
     bool on_is_active() const override {
         if (body_mode_ == KickBody::circuit) {
-            return body_env_.is_active() || click_env_.is_active() ||
-                   noise_env_.is_active() || pulse_remaining_ > 0 ||
-                   ring_level_ > kRingSilenceLevel;
+            return body_env_.is_active() || layers_active() ||
+                   pulse_remaining_ > 0 || ring_level_ > kRingSilenceLevel;
         }
         if (body_mode_ == KickBody::resonant) {
-            return resonator_.is_ringing() || click_env_.is_active() ||
-                   noise_env_.is_active() || excite_remaining_ > 0;
+            return resonator_.is_ringing() || layers_active() || excite_remaining_ > 0;
         }
-        return body_env_.is_active() || click_env_.is_active() || noise_env_.is_active();
+        return body_env_.is_active() || layers_active();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -268,29 +264,9 @@ protected:
                 case KickBody::circuit:    body = render_circuit_body(); break;
             }
 
-            // The click is a noise burst through a one-pole. Velocity brightens
-            // it by moving the corner, which is what a harder beater strike
-            // does; scaling its level alone would not change its character.
-            const double click_env = click_env_.process();
-            double click = 0.0;
-            if (click_env > 0.0) {
-                click_lp_ += click_a_ * (static_cast<double>(noise_.white()) - click_lp_);
-                click = click_lp_ * click_env * click_level_;
-            }
-
-            const double noise_env = noise_env_.process();
-            const double noise = noise_env > 0.0
-                                     ? static_cast<double>(noise_.process()) * noise_env *
-                                           noise_level_
-                                     : 0.0;
-
-            double sub = 0.0;
-            if (sub_level_ > 0.0) {
-                sub_phase_ += 0.5 * tune_hz_ / sample_rate();
-                if (sub_phase_ >= 1.0) sub_phase_ -= 1.0;
-                sub = std::sin(2.0 * 3.14159265358979323846 * sub_phase_) * body_env *
-                      sub_level_;
-            }
+            const double click = click_.process(static_cast<double>(noise_.white()));
+            const double noise = noise_layer_.process(static_cast<double>(noise_.process()));
+            const double sub = sub_.process(tune_hz_, body_env);
 
             const double mixed = body + click + noise + sub;
             out[i] += static_cast<float>(
@@ -339,10 +315,10 @@ private:
             pulse = 1.0;
             --pulse_remaining_;
         }
-        pulse_shaper_ += shaper_a_ * (pulse - pulse_shaper_);
-        const double diode = pulse_shaper_ >= 0.0
-                                 ? pulse_shaper_
-                                 : kDiodeVt * (std::exp(pulse_shaper_ / kDiodeVt) - 1.0);
+        const double shaped = shaper_.process_lowpass(static_cast<float>(pulse));
+        const double diode = shaped >= 0.0
+                                 ? shaped
+                                 : kDiodeVt * (std::exp(shaped / kDiodeVt) - 1.0);
 
         if (shunt_remaining_ > 0) {
             --shunt_remaining_;
@@ -361,8 +337,8 @@ private:
         feedback_z_ = -circuit_feedback_ * kMaxLoopGain * kFeedbackKnee *
                       std::tanh(kSwellGain * ring.vbt / kFeedbackKnee);
 
-        tone_lp_ += tone_a_ * (ring.vbt - tone_lp_);
-        const double out = tone_lp_ * kCircuitOutputScale;
+        const double out =
+            tone_.process_lowpass(static_cast<float>(ring.vbt)) * kCircuitOutputScale;
 
         // The loop can hold a ring at almost constant amplitude, so "has the
         // voice finished" cannot be read from a single sample -- it crosses
@@ -377,15 +353,7 @@ private:
         return 2.0 * std::fabs(2.0 * normalised - 1.0) - 1.0;
     }
 
-    void update_click_filter() {
-        const double fc = std::min(click_tone_hz_ * brightness_, 0.45 * sample_rate());
-        click_a_ = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * fc / sample_rate());
-    }
-
-    void update_tone_filter() {
-        shaper_a_ = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * kShaperHz / sample_rate());
-        tone_a_ = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * kToneHz / sample_rate());
-    }
+    bool layers_active() const { return click_.is_active() || noise_layer_.is_active(); }
 
     // Circuit-body constants. The pulse amplitude and output scale convert
     // between the network's volts and the +/-1 the rest of the voice works in;
@@ -418,12 +386,6 @@ private:
     double body_decay_ms_ = 400.0;
     double pitch_sweep_oct_ = 2.0;
     double pitch_sweep_ms_ = 30.0;
-    double click_level_ = 0.3;
-    double click_tone_hz_ = 4000.0;
-    double click_decay_ms_ = 2.0;
-    double noise_level_ = 0.0;
-    double noise_decay_ms_ = 60.0;
-    double sub_level_ = 0.0;
     bool triangle_ = false;
     double fm_amount_ = 0.0;
     double fm_ratio_ = 1.0;
@@ -435,8 +397,9 @@ private:
     NoiseSource noise_;
     DecayEnvelope64 body_env_;
     DecayEnvelope64 pitch_env_;
-    DecayEnvelope64 click_env_;
-    DecayEnvelope64 noise_env_;
+    ClickLayer click_;
+    NoiseLayer noise_layer_;
+    SubLayer sub_;
     TwoPoleResonator resonator_;
     BridgedTResonator circuit_;
     OutputStage output_;
@@ -445,15 +408,11 @@ private:
     double bend_octaves_ = 2.0;
     double brightness_ = 1.0;
 
+    TptFilter shaper_;
+    TptFilter tone_;
+
     double phase_ = 0.0;
     double mod_phase_ = 0.0;
-    double sub_phase_ = 0.0;
-    double click_lp_ = 0.0;
-    double click_a_ = 0.0;
-    double tone_lp_ = 0.0;
-    double tone_a_ = 0.0;
-    double shaper_a_ = 0.0;
-    double pulse_shaper_ = 0.0;
     double feedback_z_ = 0.0;
     double ring_level_ = 0.0;
     int pulse_remaining_ = 0;

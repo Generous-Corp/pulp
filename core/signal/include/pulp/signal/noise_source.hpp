@@ -104,6 +104,14 @@ public:
     SampleType white() { return static_cast<SampleType>(white_next()); }
 
 private:
+    // These poles are deliberately open-coded rather than built from
+    // TptFilterT, which is the repository's shared one-pole. They are not
+    // standalone filters: their weights are derived from the same
+    // impulse-invariant coefficient the recurrence uses, and the whole bank is
+    // normalised as one. TptFilterT pre-warps its corner through a tangent,
+    // which would move the top pole enough to tilt the slope the bank exists
+    // to produce. Anywhere a one-pole stands alone, use TptFilterT.
+    //
     // Pink is approximated by summing one-pole lowpasses whose corners are
     // spaced by a constant ratio, each weighted by 1/sqrt(fc). Between two
     // adjacent corners the sum falls by exactly the corner ratio over exactly
@@ -190,6 +198,13 @@ private:
     // beats hand-tuning a table of per-colour constants: the same code stays
     // correct when the sample rate, the pole layout, or the colour set changes.
     void measure_normalisation() {
+        // White needs no measurement -- the generator's own range is the
+        // target -- and it is the default, so the common path costs nothing.
+        if (color_ == NoiseColor::white) {
+            norm_ = 1.0;
+            return;
+        }
+
         constexpr int kBurst = 16384;
         // Discard a lead-in so the slowest one-pole is past its step response
         // before any sample is counted.

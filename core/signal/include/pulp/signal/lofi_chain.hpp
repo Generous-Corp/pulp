@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/tpt_filter.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -98,7 +99,7 @@ public:
     void reset() {
         phase_ = 1.0;  // latch on the first sample rather than emitting a zero
         held_ = 0.0;
-        lp_state_ = 0.0;
+        smoother_.reset();
         rng_ = seed_;
     }
 
@@ -112,9 +113,8 @@ public:
             held_ = static_cast<double>(input);
         }
         phase_ += step_ * (1.0 + jitter_ * next_jitter());
-        if (lp_a_ >= 1.0) return static_cast<SampleType>(held_);
-        lp_state_ = snap_to_zero(lp_state_ + lp_a_ * (held_ - lp_state_));
-        return static_cast<SampleType>(lp_state_);
+        if (bypass_smoothing_) return static_cast<SampleType>(held_);
+        return smoother_.process_lowpass(static_cast<SampleType>(held_));
     }
 
 private:
@@ -128,16 +128,15 @@ private:
     void update() {
         const double rate = std::min(hold_rate_, sample_rate_);
         step_ = rate / sample_rate_;
-        if (smoothing_ <= 0.0) {
-            lp_a_ = 1.0;  // bypass
-        } else {
+        smoother_.prepare(static_cast<SampleType>(sample_rate_));
+        bypass_smoothing_ = smoothing_ <= 0.0;
+        if (!bypass_smoothing_) {
             // Sweep the corner from the host Nyquist down to the hold rate's
-            // Nyquist, so smoothing=1 removes every image and smoothing just
-            // above zero barely touches the top of the band.
+            // Nyquist, so smoothing=1 thins the images the most and smoothing
+            // just above zero barely touches the top of the band.
             const double top = 0.5 * sample_rate_;
             const double bottom = 0.5 * rate;
-            const double fc = top * std::pow(bottom / top, smoothing_);
-            lp_a_ = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * fc / sample_rate_);
+            smoother_.set_cutoff(static_cast<SampleType>(top * std::pow(bottom / top, smoothing_)));
         }
     }
 
@@ -149,8 +148,8 @@ private:
     double step_ = 1.0;
     double phase_ = 1.0;
     double held_ = 0.0;
-    double lp_a_ = 1.0;
-    double lp_state_ = 0.0;
+    TptFilterT<SampleType> smoother_;
+    bool bypass_smoothing_ = true;
 
     std::uint32_t seed_ = default_seed;
     std::uint32_t rng_ = default_seed;

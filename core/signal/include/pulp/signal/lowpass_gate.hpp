@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/tpt_filter.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -80,7 +81,7 @@ public:
 
     void reset() {
         control_ = 0.0;
-        lp_state_ = 0.0;
+        gate_filter_.reset();
     }
 
     /// Current smoothed control value in [0, 1]. Exposed because a voice often
@@ -104,12 +105,12 @@ public:
         // The corner sweeps geometrically with the control, because pitch and
         // brightness are heard geometrically: a linear sweep spends nearly all
         // its travel in the top octave and sounds like it does nothing.
-        const double fc = closed_limit_ * std::pow(open_limit_ / closed_limit_, control_);
-        const double a = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * fc / sample_rate_);
-        lp_state_ = snap_to_zero(lp_state_ + a * (x - lp_state_));
+        gate_filter_.set_cutoff(static_cast<SampleType>(
+            closed_limit_ * std::pow(open_limit_ / closed_limit_, control_)));
+        const double filtered = gate_filter_.process_lowpass(static_cast<SampleType>(x));
 
         // Mirror of the amplitude blend: colour 0 leaves the signal unfiltered.
-        x = x + colour_ * (lp_state_ - x);
+        x = x + colour_ * (filtered - x);
         return static_cast<SampleType>(x);
     }
 
@@ -117,6 +118,7 @@ private:
     void update() {
         rise_a_ = 1.0 - std::exp(-1.0 / std::max(0.001 * rise_ms_ * sample_rate_, 1e-9));
         fall_a_ = 1.0 - std::exp(-1.0 / std::max(0.001 * fall_ms_ * sample_rate_, 1e-9));
+        gate_filter_.prepare(static_cast<SampleType>(sample_rate_));
         const double nyquist = 0.49 * sample_rate_;
         open_limit_ = std::min(open_hz_, nyquist);
         closed_limit_ = std::min(closed_hz_, nyquist);
@@ -136,7 +138,7 @@ private:
     double closed_limit_ = 60.0;
 
     double control_ = 0.0;
-    double lp_state_ = 0.0;
+    TptFilterT<SampleType> gate_filter_;
 };
 
 using LowpassGate = LowpassGateT<float>;

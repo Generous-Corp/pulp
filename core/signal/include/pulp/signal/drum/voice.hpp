@@ -1,125 +1,12 @@
 #pragma once
 
-#include <pulp/signal/lofi_chain.hpp>
+#include <pulp/signal/drum/output_stage.hpp>
+#include <pulp/signal/drum/velocity.hpp>
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 
 namespace pulp::signal::drum {
-
-/// How hard a hit changes the sound, beyond changing how loud it is.
-///
-/// Velocity that only scales amplitude is the single most common reason a
-/// synthesised drum sounds synthetic. A real drum struck harder is not the
-/// same sound turned up: the head deflects further so the pitch bends further
-/// before settling, the stick excites more high partials, and the balance
-/// between the body and the noise the strike makes shifts toward the noise.
-/// Turning one knob cannot reproduce that, which is why this struct exists and
-/// why every voice in this namespace consumes it rather than reading velocity
-/// directly.
-///
-/// All four responses are zero-cost when left at their defaults except
-/// `level_db`, so a voice that genuinely wants level-only velocity says so by
-/// leaving the others at zero rather than by omitting the wiring.
-struct VelocityResponse {
-    /// Attenuation at velocity 0, in decibels below a full-velocity hit.
-    float level_db = 18.0f;
-
-    /// Extra pitch-envelope depth at full velocity, in octaves. A harder
-    /// strike deflects the head further, so the pitch starts higher and falls
-    /// through a wider range.
-    float bend_octaves = 0.0f;
-
-    /// Extra exciter brightness at full velocity, in octaves of filter corner.
-    float brightness_octaves = 0.0f;
-
-    /// Shift toward the noise layer at full velocity, 0 to 1. A harder strike
-    /// puts proportionally more energy into the transient than into the body.
-    float noise_balance = 0.0f;
-
-    /// Amplitude multiplier for `velocity` in [0, 1].
-    float gain(float velocity) const {
-        const float v = std::clamp(velocity, 0.0f, 1.0f);
-        return std::pow(10.0f, (level_db * (v - 1.0f)) / 20.0f);
-    }
-
-    /// Pitch-envelope depth to add, in octaves.
-    float bend(float velocity) const {
-        return bend_octaves * std::clamp(velocity, 0.0f, 1.0f);
-    }
-
-    /// Multiplier to apply to an exciter or filter frequency.
-    float brightness_scale(float velocity) const {
-        return std::exp2(brightness_octaves * std::clamp(velocity, 0.0f, 1.0f));
-    }
-
-    /// Amount to add to a body-versus-noise balance in [0, 1].
-    float noise_shift(float velocity) const {
-        return noise_balance * std::clamp(velocity, 0.0f, 1.0f);
-    }
-};
-
-/// The output stage every percussion voice ends with: saturate, then degrade,
-/// then set the level.
-///
-/// The order is not arbitrary and is not left to each voice to remember.
-/// Saturation before quantisation means the quantiser sees a signal that
-/// already fills its range, which is what makes a low bit depth sound like a
-/// drum machine rather than like a fault; the reverse order quantises a small
-/// signal and then amplifies its error. The output level is applied last so it
-/// is a clean gain and does not change how hard the voice drives its own
-/// distortion.
-///
-/// RT contract: `prepare()` and the setters allocate nothing. `process()`
-/// allocates nothing and takes no locks.
-template <typename SampleType = float>
-class OutputStageT {
-public:
-    void prepare(double sample_rate) {
-        lofi_.set_sample_rate(sample_rate);
-        reset();
-    }
-
-    void reset() { lofi_.reset(); }
-
-    /// Saturation amount, 0 (clean) to 1. Maps to a pre-gain of 1 to 10 into a
-    /// tanh, so the control reaches obvious distortion without the top of its
-    /// range being a dead zone.
-    void set_drive(double amount) { drive_ = std::clamp(amount, 0.0, 1.0); }
-
-    /// Wavefolding amount, 0 to 1. Folding runs before saturation because a
-    /// folder generates the partials and the saturator then limits them; the
-    /// other way round the limiter removes what the folder was for.
-    void set_fold(double amount) { fold_ = std::clamp(amount, 0.0, 1.0); }
-
-    /// Output gain, linear.
-    void set_level(double level) { level_ = std::max(level, 0.0); }
-
-    /// The degradation stages, exposed so a voice can configure bit depth,
-    /// hold rate, and dead zone without this class proxying five setters.
-    LofiChainT<SampleType>& lofi() { return lofi_; }
-    const LofiChainT<SampleType>& lofi() const { return lofi_; }
-
-    SampleType process(SampleType input) {
-        double x = static_cast<double>(input);
-        if (fold_ > 0.0) {
-            const double k = 1.0 + fold_ * 4.0;
-            x = std::sin(0.5 * 3.14159265358979323846 * k * x);
-        }
-        if (drive_ > 0.0) {
-            x = std::tanh((1.0 + drive_ * 9.0) * x);
-        }
-        x = static_cast<double>(lofi_.process(static_cast<SampleType>(x)));
-        return static_cast<SampleType>(x * level_);
-    }
-
-private:
-    LofiChainT<SampleType> lofi_;
-    double drive_ = 0.0;
-    double fold_ = 0.0;
-    double level_ = 1.0;
-};
 
 /// The lifecycle every percussion voice shares.
 ///
@@ -265,8 +152,5 @@ private:
     float choke_step_ = 1.0f;
     float scratch_[kScratchSamples]{};
 };
-
-using OutputStage = OutputStageT<float>;
-using OutputStage64 = OutputStageT<double>;
 
 }  // namespace pulp::signal::drum
