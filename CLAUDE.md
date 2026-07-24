@@ -1672,10 +1672,12 @@ macOS runs on **local Macs + GitHub-hosted**, in this order:
 2. **M5 Mac** (`pulp-build-m5`, `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON`) — local
    overflow when the Studio runners are saturated
    (>= `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` busy).
-3. **GitHub-hosted `macos-15`** — sanitizers, coverage, release-cli, and the
+3. **GitHub-hosted macOS** — sanitizers, coverage, release-cli, and the
    build-overflow fallback (each via its own `PULP_SANITIZER_*` /
-   `PULP_COVERAGE_MACOS` var, all `macos-15`). Clean per run, so the ODR-prone
-   lanes stay OFF the warm self-hosted build dirs.
+   `PULP_COVERAGE_MACOS` var). UBSan uses `macos-26` so it runs against the
+   current Apple Clang/libc++ toolchain; the other live macOS routes use
+   `macos-15`. Clean per run, so the ODR-prone lanes stay OFF the warm
+   self-hosted build dirs.
 4. **Namespace macOS cloud** — break-glass ONLY, operator-dispatched, never
    automatic.
 
@@ -1692,7 +1694,8 @@ heavier lanes (release-cli, sanitizers) means wiring each lane its OWN dedicated
 `runs-on` var pointing at the local labels — **not** the Namespace var — paired
 with auto-cleaning the warm `build-<key>` dirs on churn (see the
 `pulp-runner-ops` skill, since warm-dir ODR is why those lanes stay on
-GitHub-hosted today). Until that lands, they stay on `macos-15`.
+GitHub-hosted today). Until that lands, they stay on their reviewed hosted
+labels (`macos-26` for UBSan and `macos-15` for the other live routes).
 
 See `docs/guides/local-ci.md` for setup.
 

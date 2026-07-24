@@ -586,6 +586,10 @@ export interface SvgPathProps extends BaseProps {
     fillGradient?: string;
     /// Stroke color as hex or `"none"`.
     stroke?: string;
+    /// Gradient stroke as a CSS `linear-gradient(...)` string. When set
+    /// (non-empty), it overrides the solid `stroke` color at paint time.
+    /// Unparseable input falls back to the solid stroke.
+    strokeGradient?: string;
     /// Stroke width in widget-local units. Defaults to 1.
     strokeWidth?: number;
 }

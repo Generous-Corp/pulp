@@ -115,6 +115,10 @@ enum class PromotedChildHitPolicy {
 PromotedChildHitPolicy promoted_widget_child_hit_policy(const IRNode& child,
                                                         const ResolvedNativeNode& resolved_child);
 
+// Canonical pre-resolution normalization shared by every native lane. Returns
+// a copy so callers never mutate the imported IR they were handed.
+DesignIR prepare_native_design_ir(const DesignIR& ir);
+
 ResolvedNativeNode resolve_design_ir_native(const DesignIR& ir,
                                             const IRAssetManifest& manifest);
 

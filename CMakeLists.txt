@@ -8,7 +8,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMacOsArch.cmake)  # macOS ar
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpMinOs.cmake)
 
 project(Pulp
-    VERSION 0.748.0
+    VERSION 0.750.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/Generous-Corp/pulp"
     LANGUAGES CXX C
@@ -396,7 +396,7 @@ if(PULP_BUILD_TESTS AND NOT ANDROID AND NOT IOS)
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
-    include(Catch)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCatch.cmake")
     set(_CATCH_DISCOVER_TESTS_SCRIPT
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCatchAddTests.cmake"
         CACHE INTERNAL "Pulp path to CatchAddTests.cmake helper file" FORCE)

@@ -671,6 +671,15 @@ void SvgPathWidget::clear_stroke() {
     has_stroke_ = false;
 }
 
+void SvgPathWidget::set_stroke_gradient(std::string css_linear_gradient) {
+    stroke_gradient_ = std::move(css_linear_gradient);
+    has_stroke_ = true;  // gradient is a stroke source — enable stroking.
+}
+
+void SvgPathWidget::clear_stroke_gradient() {
+    stroke_gradient_.clear();
+}
+
 void SvgPathWidget::set_stroke_width(float w) {
     stroke_width_ = std::max(0.0f, w);
 }
@@ -760,9 +769,29 @@ void SvgPathWidget::paint(canvas::Canvas& canvas) {
         }
     }
     if (has_stroke_ && stroke_width_ > 0) {
-        canvas.set_stroke_color(stroke_color_);
-        canvas.set_line_width(stroke_width_);
-        canvas.stroke_current_path();
+        // Gradient stroke mirrors the gradient fill above: parsed against
+        // the viewBox-space rect (the active transform maps it to the
+        // visible area), wins over the solid while set, and an unparseable
+        // string silently falls back to the solid stroke color.
+        bool stroke_gradient_applied = false;
+        if (!stroke_gradient_.empty()) {
+            auto pg = parse_svg_linear_gradient(stroke_gradient_, vw, vh);
+            if (pg) {
+                canvas.set_stroke_gradient_linear(pg->x0, pg->y0, pg->x1, pg->y1,
+                                                  pg->colors.data(),
+                                                  pg->positions.data(),
+                                                  static_cast<int>(pg->colors.size()));
+                canvas.set_line_width(stroke_width_);
+                canvas.stroke_current_path();
+                canvas.clear_stroke_gradient();
+                stroke_gradient_applied = true;
+            }
+        }
+        if (!stroke_gradient_applied) {
+            canvas.set_stroke_color(stroke_color_);
+            canvas.set_line_width(stroke_width_);
+            canvas.stroke_current_path();
+        }
     }
 
     canvas.restore();

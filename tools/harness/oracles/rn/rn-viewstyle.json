@@ -722,6 +722,7 @@
       "setSvgFillGradient",
       "setSvgPath",
       "setSvgStroke",
+      "setSvgStrokeGradient",
       "setSvgStrokeWidth",
       "setSvgViewBox",
       "setText",

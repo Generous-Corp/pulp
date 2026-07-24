@@ -1756,6 +1756,45 @@ TEST_CASE("generate_pulp_js bridge_native_js mode produces Pulp API", "[view][im
     REQUIRE(js.find("void 0;") != std::string::npos);
 }
 
+TEST_CASE("generate_pulp_js lowers explicit per-child margins to setFlex",
+          "[view][import][issue-env-chip]") {
+    // The fig lane reconciles a flowing vector's stroke-inflated ink box back
+    // to Figma's node layout box with negative margins (the Env chip's 12px
+    // arrow carries a 2px stroke; its 14.14px ink pushed the "env" label
+    // 2.14px right). The IR carried the margins and the native lane applied
+    // them, but the JS codegen dropped them — so the envelope said one thing
+    // and the render did another.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Row";
+    ir.root.layout.display = "flex";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.style.width = 48.0f;
+    ir.root.style.height = 16.0f;
+
+    IRNode icon;
+    icon.type = "frame";
+    icon.name = "icon";
+    icon.style.width = 14.14f;
+    icon.style.height = 8.14f;
+    icon.layout.margin_left = -1.14f;
+    icon.layout.margin_right = -1.0f;
+    icon.layout.margin_top = -1.0f;
+    icon.layout.margin_bottom = -1.14f;
+    ir.root.children.push_back(icon);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("'margin_left', -1.14") != std::string::npos);
+    REQUIRE(js.find("'margin_right', -1") != std::string::npos);
+    REQUIRE(js.find("'margin_top', -1") != std::string::npos);
+    REQUIRE(js.find("'margin_bottom', -1.14") != std::string::npos);
+}
+
 TEST_CASE("generate_pulp_js sprite knob emits an interactive single-frame strip + core-fit",
           "[view][import][sprite]") {
     // Interactive sprite knobs (task #22): in sprite mode a recognized knob
@@ -2783,6 +2822,41 @@ TEST_CASE("native codegen keeps a synthesized primitive's gradient off its box",
     REQUIRE(js.find("setOpacity('") != std::string::npos);
 }
 
+TEST_CASE("a synthesized ellipse carries its gradient stroke onto the path",
+          "[view][import][stroke-gradient]") {
+    // The knob-base rim: an ELLIPSE with a fill and a GRADIENT_LINEAR stroke.
+    // The decoder lowers the stroke to strokeGradient/strokeWidth (captured as
+    // svg_stroke_gradient / svg_stroke_width even though the node has no path
+    // yet), synthesize_primitive_paths grows the path, and codegen must emit
+    // the stroke pair beside the fill — this stroke used to be dropped with
+    // "no solid paint to flatten to".
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.style.width = 200.0f;
+
+    IRNode base;
+    base.type = "ellipse";
+    base.name = "Base";
+    base.style.width = 22.0f;
+    base.style.height = 22.0f;
+    base.style.background_color = "#2a2b2dcc";
+    base.attributes["svg_stroke_gradient"] =
+        "linear-gradient(180deg, #ffffff40 0%, #31313140 100%)";
+    base.attributes["svg_stroke_width"] = "0.94";
+    ir.root.children.push_back(base);
+
+    const auto js = native_js(ir);
+    INFO(js);
+
+    REQUIRE(js.find("createSvgPath('") != std::string::npos);
+    REQUIRE(js.find("setSvgFill('") != std::string::npos);
+    REQUIRE(js.find("setSvgStrokeGradient('") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #31313140 100%)")
+            != std::string::npos);
+    REQUIRE(js.find("setSvgStrokeWidth(") != std::string::npos);
+}
+
 TEST_CASE("native codegen paints a gradient behind a transparent image",
           "[view][import][visual-overrides]") {
     DesignIR ir;
@@ -3171,4 +3245,21 @@ TEST_CASE("generated C++ carries rgba() colors like the materializer does",
     hex_ir.root.style.background_color = "#1a1a2e";
     const auto hex_gen = pulp::view::generate_pulp_cpp(hex_ir, manifest);
     CHECK(hex_gen.source.find("rgba8(26, 26, 46, 255)") != std::string::npos);
+}
+
+TEST_CASE("generated JS opts its layout pass into sub-pixel geometry",
+          "[view][import][subpixel]") {
+    // Imported designs replay geometry the design tool solved at fractional
+    // coordinates; Yoga's whole-pixel rounding visibly de-centered every
+    // knob ring in "A Channel FX" relative to its body ellipse. The bundle
+    // must opt out — typeof-guarded so it still loads on runtimes that
+    // predate setSubpixelLayout and on web-compat DOM hosts.
+    DesignIR ir;
+    ir.source = DesignSource::figma_plugin;
+    ir.root.type = "frame";
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
+                    "setSubpixelLayout('', true);") != std::string::npos);
 }

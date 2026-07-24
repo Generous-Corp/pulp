@@ -1465,6 +1465,62 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     REQUIRE_FALSE(arr.has_value());
 }
 
+TEST_CASE("a path's fill rule survives the IR JSON round-trip",
+          "[view][import][svg][fill-rule]") {
+    using namespace pulp::view;
+
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes. Figma bakes subtracted icons as SAME-direction contours under an
+    // evenodd declaration (the reference "Sub" speaker cabinet is five such
+    // subpaths), so a dropped rule fills the icon solid — silently, since a
+    // solid slab raises no error. The fig decoder writes `fillRule` and the
+    // bridge has setSvgFillRule; this asserts the middle links.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Donut",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z M5 5 L15 5 L15 15 L5 15 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#ff0000",
+          "fillRule": "evenodd"
+        }, {
+          "type": "path", "name": "Slab",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#00ff00",
+          "fillRule": "nonzero"
+        }, {
+          "type": "path", "name": "Junk",
+          "pathData": "M0 0 L20 0 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#0000ff",
+          "fillRule": "bogus"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 3);
+    REQUIRE(ir.root.children[0].attributes.at("svg_fill_rule") == "evenodd");
+    REQUIRE(ir.root.children[1].attributes.at("svg_fill_rule") == "nonzero");
+    // An unrecognized value stays unset — the widget default (nonzero) is
+    // better than propagating a token no consumer understands.
+    REQUIRE(ir.root.children[2].attributes.count("svg_fill_rule") == 0);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    // evenodd reaches the generated JS; nonzero is the widget default and is
+    // deliberately NOT emitted — one setSvgFillRule, for the donut only.
+    size_t calls = 0;
+    for (auto pos = js.find("setSvgFillRule("); pos != std::string::npos;
+         pos = js.find("setSvgFillRule(", pos + 1))
+        ++calls;
+    REQUIRE(calls == 1);
+    REQUIRE(js.find("'evenodd'") != std::string::npos);
+}
+
 TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
           "[view][import][svg]") {
     using namespace pulp::view;
@@ -1508,6 +1564,67 @@ TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
     REQUIRE(js.find("setSvgFillGradient(") != std::string::npos);
     REQUIRE(js.find("linear-gradient(180deg, #ffffff 0%, #000000 100%)") !=
             std::string::npos);
+}
+
+TEST_CASE("a stroke's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg][stroke-gradient]") {
+    using namespace pulp::view;
+
+    // The stroke mirror of the fill-gradient round-trip above — this is how a
+    // Figma knob rim's GRADIENT_LINEAR stroke reaches setSvgStrokeGradient.
+    // The second node is the OTHER decoder shape: an ellipse primitive with NO
+    // authored path (its path is synthesized later by synthesize_primitive_
+    // paths), whose stroke channels must be captured anyway — gating the
+    // capture on path_data dropped the knob-base rim before synthesis ran.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Rim",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "none",
+          "stroke": "#50505000",
+          "strokeGradient": "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)",
+          "strokeWidth": 1.88
+        }, {
+          "type": "ellipse", "name": "Base",
+          "strokeGradient": "linear-gradient(0deg, #ffffff40, #00000000)",
+          "strokeWidth": 0.94
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 2);
+    const auto& rim = ir.root.children[0].attributes;
+    // Carried BESIDE the solid fallback, not instead of it — the widget falls
+    // back to the solid when the gradient string won't parse.
+    REQUIRE(rim.at("svg_stroke_gradient") ==
+            "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)");
+    REQUIRE(rim.at("svg_stroke") == "#50505000");
+    REQUIRE(rim.at("svg_stroke_width").substr(0, 4) == "1.88");
+
+    const auto& base = ir.root.children[1].attributes;
+    REQUIRE(base.count("path_data") == 0);   // synthesized later, not authored
+    REQUIRE(base.at("svg_stroke_gradient") ==
+            "linear-gradient(0deg, #ffffff40, #00000000)");
+    REQUIRE(base.at("svg_stroke_width").substr(0, 4) == "0.94");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgStrokeGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #00000000 100%)") !=
+            std::string::npos);
+    // Emission order pins the resolve order: the solid fallback first, the
+    // gradient after it (setSvgStroke clears a stale gradient slot).
+    const auto solid_pos = js.find("setSvgStroke('");
+    const auto grad_pos = js.find("setSvgStrokeGradient('");
+    REQUIRE(solid_pos != std::string::npos);
+    REQUIRE(solid_pos < grad_pos);
 }
 
 TEST_CASE("a control's art layers stay art, and are not each promoted to a control",

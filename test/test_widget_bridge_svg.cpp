@@ -23,7 +23,10 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/screenshot_compare.hpp>
 #include <chrono>
+#include <optional>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
@@ -77,6 +80,44 @@ TEST_CASE("WidgetBridge createSvgPath produces an SvgPathWidget the bridge can a
     REQUIRE(w->fill_color().b8() == 0);
 }
 
+TEST_CASE("WidgetBridge setSvgStrokeGradient round-trips onto SvgPathWidget",
+          "[view][bridge][stroke-gradient]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgPath('rim', '')");
+    bridge.load_script("setSvgPath('rim', 'M0 5 L10 5')");
+    // Codegen emission order: solid fallback first, gradient second — the
+    // gradient must win (setSvgStroke clears any stale gradient, so order
+    // matters and is pinned here).
+    bridge.load_script("setSvgStroke('rim', '#00ff00')");
+    bridge.load_script(
+        "setSvgStrokeGradient('rim', 'linear-gradient(to right, #ff0000, #0000ff)')");
+    bridge.load_script("setSvgStrokeWidth('rim', 1.88)");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("rim"));
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_stroke());
+    REQUIRE(w->stroke_gradient() == "linear-gradient(to right, #ff0000, #0000ff)");
+    REQUIRE_THAT(w->stroke_width(), WithinAbs(1.88f, 1e-4f));
+    // The solid fallback survives beside the gradient.
+    REQUIRE(w->stroke_color().g8() == 255);
+
+    // A LATER solid stroke clears the gradient slot (stale-slot rule).
+    bridge.load_script("setSvgStroke('rim', '#123456')");
+    REQUIRE(w->stroke_gradient().empty());
+
+    // Empty string clears the gradient without disabling the stroke.
+    bridge.load_script(
+        "setSvgStrokeGradient('rim', 'linear-gradient(to right, red, blue)')");
+    REQUIRE_FALSE(w->stroke_gradient().empty());
+    bridge.load_script("setSvgStrokeGradient('rim', '')");
+    REQUIRE(w->stroke_gradient().empty());
+    REQUIRE(w->has_stroke());
+}
+
 TEST_CASE("WidgetBridge setSvgFill 'none' disables fill",
           "[view][bridge][issue-965]") {
     ScriptEngine engine;
@@ -117,6 +158,76 @@ TEST_CASE("WidgetBridge setSvgFillRule selects winding rule on SvgPathWidget",
     // Any non-"evenodd" token resets to nonzero.
     bridge.load_script("setSvgFillRule('ring', 'nonzero')");
     REQUIRE(w->fill_rule() == pulp::canvas::FillRule::nonzero);
+}
+
+TEST_CASE("evenodd renders a same-direction donut with a visible hole",
+          "[view][bridge][svg][fill-rule]") {
+    // The raster proof behind the Figma fill-rule import fix: a subtracted
+    // icon arrives from the .fig decoder as SAME-direction nested contours
+    // under an evenodd declaration (the reference design's "Sub" speaker
+    // cabinet). Nonzero fills that solid; only the carried rule opens the
+    // hole. Both renders sample the same pixel so the pair proves the rule —
+    // not the path, the backend, or the sampling — is what flips it.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Outer and inner square both clockwise — the hole exists only under
+    // evenodd, exactly like Figma's baked ODD geometry.
+    bridge.load_script("createSvgPath('donut', '')");
+    bridge.load_script(
+        "setSvgPath('donut', 'M2 2 L30 2 L30 30 L2 30 Z M10 10 L22 10 L22 22 L10 22 Z')");
+    bridge.load_script("setSvgViewBox('donut', 32, 32)");
+    bridge.load_script("setSvgFill('donut', '#ff0000')");
+
+    auto* w = dynamic_cast<SvgPathWidget*>(bridge.widget("donut"));
+    REQUIRE(w != nullptr);
+
+    // The screenshot backend composites onto an opaque background and renders
+    // at its own pixel ratio, so the hole is proven by DIFFERENCE between the
+    // two rules' renders, not by absolute pixel values: the hole region flips
+    // from the fill red to the background, the ring region stays the fill.
+    auto crop_at = [](const std::vector<uint8_t>& png, uint32_t design_x,
+                      uint32_t design_y) -> std::vector<uint8_t> {
+        auto full = analyze_screenshot_content(png);
+        if (!full.valid || full.width < 32) return {};
+        const uint32_t scale = full.width / 32u;
+        return crop_png(png, design_x * scale, design_y * scale,
+                        4u * scale, 4u * scale);
+    };
+
+    const auto nonzero_png = render_to_png(*w, 32, 32, 1.0f, ScreenshotBackend::skia);
+    if (nonzero_png.empty())
+        SKIP("Skia raster screenshot backend unavailable on this platform");
+
+    bridge.load_script("setSvgFillRule('donut', 'evenodd')");
+    REQUIRE(w->fill_rule() == pulp::canvas::FillRule::evenodd);
+    const auto evenodd_png = render_to_png(*w, 32, 32, 1.0f, ScreenshotBackend::skia);
+    REQUIRE_FALSE(evenodd_png.empty());
+
+    // Hole region (design 14..18): solid under nonzero, background under
+    // evenodd — the two renders must visibly disagree here.
+    const auto hole_nonzero = crop_at(nonzero_png, 14, 14);
+    const auto hole_evenodd = crop_at(evenodd_png, 14, 14);
+    REQUIRE_FALSE(hole_nonzero.empty());
+    REQUIRE_FALSE(hole_evenodd.empty());
+    const auto hole = compare_screenshots(hole_nonzero, hole_evenodd);
+    REQUIRE(hole.valid);
+    REQUIRE(hole.similarity < 0.5f);
+
+    // Ring region (design 4..8): painted under BOTH rules — the control that
+    // proves the rule opened the hole rather than clearing the whole fill.
+    const auto ring_nonzero = crop_at(nonzero_png, 4, 4);
+    const auto ring_evenodd = crop_at(evenodd_png, 4, 4);
+    const auto ring = compare_screenshots(ring_nonzero, ring_evenodd);
+    REQUIRE(ring.valid);
+    REQUIRE(ring.similarity > 0.95f);
+    // And the ring is actually the fill, not background: it differs from the
+    // evenodd hole (fill vs background), so the fill really painted.
+    const auto ring_vs_hole = compare_screenshots(ring_evenodd, hole_evenodd);
+    REQUIRE(ring_vs_hole.valid);
+    REQUIRE(ring_vs_hole.similarity < 0.5f);
 }
 
 // canvasRect / canvasStrokeRect must honor the active fill /

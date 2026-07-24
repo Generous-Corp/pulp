@@ -436,6 +436,7 @@ void View::prepare_for_reuse() {
     bounds_ = Rect{};
     visible_ = true;
     opacity_ = 1.0f;
+    subpixel_layout_ = false;
 
     // Accessibility identity from the previous binding must not leak into the
     // next occupant of this slot.

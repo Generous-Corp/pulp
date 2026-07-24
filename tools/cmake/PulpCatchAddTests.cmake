@@ -31,7 +31,7 @@ function(catch_discover_tests_impl)
     ""
     ""
     "TEST_TARGET;TEST_EXECUTABLE;TEST_WORKING_DIR;TEST_OUTPUT_DIR;TEST_OUTPUT_PREFIX;TEST_OUTPUT_SUFFIX;TEST_PREFIX;TEST_REPORTER;TEST_SPEC;TEST_SUFFIX;TEST_LIST;CTEST_FILE"
-    "TEST_EXTRA_ARGS;TEST_PROPERTIES;TEST_EXECUTOR;TEST_DL_PATHS;TEST_DL_FRAMEWORK_PATHS"
+    "TEST_EXTRA_ARGS;TEST_PROPERTIES;TEST_LABELS;TEST_EXECUTOR;TEST_DL_PATHS;TEST_DL_FRAMEWORK_PATHS"
     ${ARGN}
   )
 
@@ -40,6 +40,7 @@ function(catch_discover_tests_impl)
   set(spec ${_TEST_SPEC})
   set(extra_args ${_TEST_EXTRA_ARGS})
   set(properties ${_TEST_PROPERTIES})
+  set(labels ${_TEST_LABELS})
   set(reporter ${_TEST_REPORTER})
   set(output_dir ${_TEST_OUTPUT_DIR})
   set(output_prefix ${_TEST_OUTPUT_PREFIX})
@@ -187,12 +188,22 @@ function(catch_discover_tests_impl)
       "${reporter_arg}"
       "${output_dir_arg}"
     )
-    add_command(set_tests_properties
-      "${fallback_name}"
-      PROPERTIES
-      WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
-      ${properties}
-    )
+    if(labels)
+      add_command(set_tests_properties
+        "${fallback_name}"
+        PROPERTIES
+        WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
+        ${properties}
+        LABELS "${labels}"
+      )
+    else()
+      add_command(set_tests_properties
+        "${fallback_name}"
+        PROPERTIES
+        WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
+        ${properties}
+      )
+    endif()
 
     if(environment_modifications)
       add_command(set_tests_properties
@@ -233,12 +244,22 @@ function(catch_discover_tests_impl)
       "${reporter_arg}"
       "${output_dir_arg}"
     )
-    add_command(set_tests_properties
-      "${prefix}${test}${suffix}"
-      PROPERTIES
-      WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
-      ${properties}
-    )
+    if(labels)
+      add_command(set_tests_properties
+        "${prefix}${test}${suffix}"
+        PROPERTIES
+        WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
+        ${properties}
+        LABELS "${labels}"
+      )
+    else()
+      add_command(set_tests_properties
+        "${prefix}${test}${suffix}"
+        PROPERTIES
+        WORKING_DIRECTORY "${_TEST_WORKING_DIR}"
+        ${properties}
+      )
+    endif()
 
     if(environment_modifications)
       add_command(set_tests_properties
@@ -255,6 +276,10 @@ function(catch_discover_tests_impl)
 endfunction()
 
 if(CMAKE_SCRIPT_MODE_FILE)
+  set(_pulp_label_args)
+  if(TEST_LABELS)
+    list(APPEND _pulp_label_args TEST_LABELS ${TEST_LABELS})
+  endif()
   catch_discover_tests_impl(
     TEST_TARGET ${TEST_TARGET}
     TEST_EXECUTABLE ${TEST_EXECUTABLE}
@@ -263,6 +288,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     TEST_SPEC ${TEST_SPEC}
     TEST_EXTRA_ARGS ${TEST_EXTRA_ARGS}
     TEST_PROPERTIES ${TEST_PROPERTIES}
+    ${_pulp_label_args}
     TEST_PREFIX ${TEST_PREFIX}
     TEST_SUFFIX ${TEST_SUFFIX}
     TEST_LIST ${TEST_LIST}

@@ -1276,30 +1276,51 @@ IRNode parse_ir_node(const choc::value::ValueView& obj) {
             }
         }
     }
+    auto capture_color = [&](const char* src, const char* dst) {
+        if (node.attributes.count(dst)) return;
+        if (obj.hasObjectMember(src) && obj[src].isString()) {
+            auto v = std::string(obj[src].toString());
+            if (!v.empty()) node.attributes[dst] = std::move(v);
+        }
+    };
+    // Stroke channels are captured UNCONDITIONALLY, not path_data-gated like
+    // the fill family below: a primitive that will only GROW its path later
+    // (synthesize_primitive_paths — e.g. an ellipse knob base with a
+    // GRADIENT_LINEAR rim stroke) has no path at parse time, and gating the
+    // capture on one dropped its stroke before synthesis could ever paint it.
+    // The svg_* attributes are inert on nodes that never gain a path.
+    capture_color("stroke", "svg_stroke");
+    capture_color("strokeGradient", "svg_stroke_gradient");
+    if (!node.attributes.count("svg_stroke_width")) {
+        for (const char* k : {"strokeWidth", "stroke_width"}) {
+            if (obj.hasObjectMember(k)) {
+                float sw = get_float(obj, k, 0.0f);
+                if (sw > 0.0f) { node.attributes["svg_stroke_width"] = std::to_string(sw); break; }
+            }
+        }
+    }
     if (node.attributes.count("path_data")) {
         if (!node.attributes.count("svg_viewbox") &&
             obj.hasObjectMember("viewBox") && obj["viewBox"].isString()) {
             auto v = std::string(obj["viewBox"].toString());
             if (!v.empty()) node.attributes["svg_viewbox"] = std::move(v);
         }
-        auto capture_color = [&](const char* src, const char* dst) {
-            if (node.attributes.count(dst)) return;
-            if (obj.hasObjectMember(src) && obj[src].isString()) {
-                auto v = std::string(obj[src].toString());
-                if (!v.empty()) node.attributes[dst] = std::move(v);
-            }
-        };
         capture_color("fill", "svg_fill");
         // A path's own gradient paint. Carried beside `fill` rather than
         // instead of it: SvgPathWidget prefers the gradient and falls back to
         // the solid only when the string won't parse.
         capture_color("fillGradient", "svg_fill_gradient");
-        capture_color("stroke", "svg_stroke");
-        if (!node.attributes.count("svg_stroke_width")) {
-            for (const char* k : {"strokeWidth", "stroke_width"}) {
-                if (obj.hasObjectMember(k)) {
-                    float sw = get_float(obj, k, 0.0f);
-                    if (sw > 0.0f) { node.attributes["svg_stroke_width"] = std::to_string(sw); break; }
+        // The winding rule decides which regions of a multi-subpath path are
+        // holes; Figma bakes subtracted icons as same-direction contours under
+        // evenodd, so dropping this fills them solid. Only the two SVG values
+        // are meaningful — anything else stays unset (= the nonzero default).
+        if (!node.attributes.count("svg_fill_rule")) {
+            for (const char* k : {"fillRule", "fill_rule", "fill-rule"}) {
+                if (!obj.hasObjectMember(k) || !obj[k].isString()) continue;
+                auto v = std::string(obj[k].toString());
+                if (v == "evenodd" || v == "nonzero") {
+                    node.attributes["svg_fill_rule"] = std::move(v);
+                    break;
                 }
             }
         }

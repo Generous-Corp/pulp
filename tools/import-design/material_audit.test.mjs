@@ -74,8 +74,11 @@ test('a gradient stroke carried onto the path as fillGradient is emitted, not dr
     { node_id: '0:1', name: 'Oval', type: 'VECTOR',
       declared: { stroke: [{ type: 'GRADIENT_LINEAR', opacity: 1, color_alpha: 1 }] } },
   ]);
-  // Same node, but its stroke gradient reached the path as fillGradient.
+  // Same node, but its stroke gradient reached the path as fillGradient. The
+  // band is a real emitted path — the check requires path_data so a non-path
+  // node's fill gradient can never masquerade as a stroke.
   const env = envelope([{ node_id: '0:1', name: 'Oval', style: {},
+                          path_data: 'M0 0 L2 0 L2 20 L0 20 Z',
                           fillGradient: 'linear-gradient(0deg, #ffffff3d, #00000000)' }]);
 
   const out = auditMaterials(m, env, []);
@@ -112,6 +115,29 @@ test('a non-uniform corner radius collapsed to one number is a partial drop', ()
   assert.deepEqual(auditMaterials(materials([
     { node_id: '0:1', name: 'Square', type: 'FRAME', declared: { corner_radius: [0, 0, 0, 0] } },
   ]), envelope([{ node_id: '0:1', name: 'Square', style: {} }]), []).findings, []);
+
+  // Exact per-corner output is the preferred representation for asymmetric
+  // radii and must count as emitted rather than as a silent drop.
+  const exact = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'Card', style: {
+      border_top_left_radius: 8,
+      border_top_right_radius: 8,
+      border_bottom_right_radius: 0,
+      border_bottom_left_radius: 0,
+    } },
+  ]), []);
+  assert.deepEqual(exact.findings, []);
+  assert.equal(exact.emittedCounts.corner_radius, 1);
+
+  const wrong = auditMaterials(m, envelope([
+    { node_id: '0:1', name: 'Card', style: {
+      border_top_left_radius: 8,
+      border_top_right_radius: 0,
+      border_bottom_right_radius: 8,
+      border_bottom_left_radius: 0,
+    } },
+  ]), []);
+  assert.equal(wrong.findings[0].property, 'corner_radius.per_corner');
 });
 
 test('the diagnosed arm applies to EVERY property, not just the one it was wired for', () => {

@@ -989,6 +989,16 @@ Contract (`core/view/platform/mac/plugin_view_host_mac.mm`, both the CPU
   pointer is never dereferenced: it is re-found *by identity* in the window's
   live view tree (`pulp_plugin_live_prior_responder`), so a freed responder
   degrades to nil instead of a dangling send (the file builds without ARC).
+- Run that same `syncKeyFocus` reconciliation on every dispatched host frame,
+  after the idle callback, in both the CPU and GPU display-link blocks. Focus
+  can clear without a following `NSEvent` (programmatic blur or a scripted
+  generation that fails after releasing its prompt field); event-only sync
+  leaves the editor first responder and swallows the DAW keyboard indefinitely.
+  The per-frame call is transition-guarded and idempotent. The
+  `[frame-tick]` case in `test_plugin_view_host_key_focus.mm` holds the real
+  display-link gate open, pumps the main run loop, and fails if the tick call
+  is removed; it soft-skips only when the host proves that no display-link tick
+  fired (supported headless macOS).
 - **The host's grab wins**: `resignFirstResponder` must end the focused
   widget's text input (`pulp_plugin_end_text_input`: clear the slot, then
   `on_focus_changed(false)` so the widget commits/closes its type-in).

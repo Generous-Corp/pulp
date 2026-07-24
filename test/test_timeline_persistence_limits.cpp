@@ -130,8 +130,12 @@ TEST_CASE("Timeline JSON rejects ambiguous malformed and oversized input") {
     auto duplicate_at_limit = parse_json(wide_object, limits);
     REQUIRE_FALSE(duplicate_at_limit.has_value());
     REQUIRE(duplicate_at_limit.error().code == PersistenceErrorCode::DuplicateKey);
-    REQUIRE_FALSE(parse_json(R"("\uD800")", limits).has_value());
-    REQUIRE(parse_json(R"("\uD800")", limits).error().code == PersistenceErrorCode::InvalidUtf8);
+    std::string lone_high_surrogate{"\""};
+    lone_high_surrogate.push_back('\\');
+    lone_high_surrogate += "uD800\"";
+    auto surrogate = parse_json(lone_high_surrogate, limits);
+    REQUIRE_FALSE(surrogate.has_value());
+    REQUIRE(surrogate.error().code == PersistenceErrorCode::InvalidUtf8);
 
     std::string invalid_utf8{"\""};
     invalid_utf8.push_back(static_cast<char>(0xc0));
