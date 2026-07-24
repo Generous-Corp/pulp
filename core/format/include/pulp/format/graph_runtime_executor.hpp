@@ -331,9 +331,19 @@ private:
 /// a pointer to its attached UmpBuffer; a reallocating vector would dangle it.
 class GraphRuntimeMidiScratch {
 public:
+    static constexpr std::size_t kDefaultEventCapacity = 1024;
+    static constexpr std::size_t kDefaultSysexCapacity = 128;
+    static constexpr std::size_t kDefaultSysexPayloadCapacity = 4096;
+
     // Off-RT: (re)allocate `node_count` in/out buffer pairs, each reserved to the
-    // fixed realtime capacities. Returns false on allocation failure.
-    bool reset(std::uint32_t node_count);
+    // requested realtime capacities. Returns false on allocation failure.
+    bool reset(std::uint32_t node_count,
+               std::size_t event_capacity = kDefaultEventCapacity,
+               std::size_t sysex_capacity = kDefaultSysexCapacity,
+               std::size_t sysex_payload_capacity = kDefaultSysexPayloadCapacity);
+    bool reset(std::span<const std::size_t> event_capacities,
+               std::size_t sysex_capacity = kDefaultSysexCapacity,
+               std::size_t sysex_payload_capacity = kDefaultSysexPayloadCapacity);
     void clear() noexcept;
 
     std::uint32_t node_count() const noexcept { return node_count_; }

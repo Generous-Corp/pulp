@@ -124,10 +124,79 @@ struct RemoveAsset {
     ItemId asset_id;
 };
 
+// A take lane enters (or leaves) a track as one owned identity subtree: the
+// lane plus every take it carries. Each take's MediaRef::asset_id must already
+// name a project asset — the recorder emits CreateAsset first, in the same or an
+// earlier transaction — so replay reproduces takes as pinned references.
+struct InsertTakeLane {
+    ItemId sequence_id;
+    ItemId track_id;
+    TakeLane lane;
+};
+
+struct RemoveTakeLane {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+};
+
+struct InsertTake {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+    Take take;
+};
+
+struct RemoveTake {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+    ItemId take_id;
+};
+
+// Record-arm is document intent, not an identity: expected/replacement gate the
+// edit on the current value so concurrent writers cannot silently clobber it.
+struct SetRecordArm {
+    ItemId sequence_id;
+    ItemId track_id;
+    bool expected = false;
+    bool replacement = false;
+};
+
+// Zero selects the arrangement. A non-zero value selects one existing take
+// lane as the track's active playlist/comp. Segment selections and their
+// derived render artifact can extend that lane without changing this seam.
+struct SetActiveTakeLane {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId expected_lane_id;
+    ItemId replacement_lane_id;
+};
+
+// Replaces one lane's canonical segment comp under an exact optimistic gate.
+// Both values make undo and deterministic journal replay self-contained.
+struct SetTakeComp {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId lane_id;
+    std::vector<TakeCompSegment> expected;
+    std::vector<TakeCompSegment> replacement;
+};
+
+// Publishes or clears a pre-rendered track artifact under an exact optimistic
+// gate. CreateAsset normally precedes this command in the same transaction.
+struct SetTrackFreeze {
+    ItemId sequence_id;
+    ItemId track_id;
+    std::optional<TrackFreeze> expected;
+    std::optional<TrackFreeze> replacement;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
-                 RemoveAsset>;
+                 RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
+                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze>;
 
 struct CommandEnvelope {
     CommandId id;
@@ -145,6 +214,7 @@ struct Transaction {
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept;
 bool equivalent(const Clip& lhs, const Clip& rhs) noexcept;
 bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept;
+bool equivalent(const TakeLane& lhs, const TakeLane& rhs) noexcept;
 bool equivalent(const Command& lhs, const Command& rhs) noexcept;
 bool equivalent(const Transaction& lhs, const Transaction& rhs) noexcept;
 std::size_t retained_size(const Command& command) noexcept;

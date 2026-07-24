@@ -123,6 +123,14 @@ enum Command {
     #[command(disable_help_flag = true)]
     Bake(PkgTailArgs),
 
+    /// Inspect and edit canonical timeline projects. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Seq(PkgTailArgs),
+
+    /// Render a canonical timeline project to a WAV file. Delegates to C++.
+    #[command(disable_help_flag = true)]
+    Render(PkgTailArgs),
+
     /// Unified development loop: delegates live-watch workflows to
     /// `pulp-cpp`, with a Rust one-shot fallback.
     Dev(PkgTailArgs),
@@ -636,6 +644,22 @@ fn real_main() -> Result<(), ExitCode> {
             map_exit(pulp_rs::fallthrough::delegate_or_stub(
                 &argv,
                 "pulp bake is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
+        Command::Seq(args) => {
+            let mut argv = vec!["seq".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp seq is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
+            ))
+        }
+        Command::Render(args) => {
+            let mut argv = vec!["render".to_owned()];
+            argv.extend(args.tail);
+            map_exit(pulp_rs::fallthrough::delegate_or_stub(
+                &argv,
+                "pulp render is implemented by the C++ delegate. Build/install pulp-cpp to use it.",
             ))
         }
         Command::Dev(args) => {

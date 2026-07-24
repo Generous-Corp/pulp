@@ -841,16 +841,15 @@ lane targeting remains document-model state, while audio-thread cursors and
 per-block event coalescing belong to `pulp::playback`; neither concern is folded
 into the curve container.
 
-`automation_lane.hpp` provides an unattached immutable binding from one curve
-to a format-neutral device-placement identity and opaque 32-bit parameter ID.
-Construction validates only the lane and placement IDs via `ItemId::valid()`
-(neither zero nor the exhausted `UINT64_MAX` sentinel): it does not prove that
-the placement exists in a Project, register global identity, clamp plain-domain
-values, or consult plugin metadata. The lane is not yet attached to a Track,
-persisted, reachable through commands or `DocumentSession`, or delivered to a
-host graph.
-`pulp::playback` can compile and exercise this standalone value without
-implying document attachment.
+`automation_lane.hpp` provides an immutable binding from one curve to a
+format-neutral device-placement identity and opaque 32-bit parameter ID.
+Standalone construction validates the lane and placement IDs via
+`ItemId::valid()` (neither zero nor the exhausted `UINT64_MAX` sentinel);
+Track attachment additionally proves the placement exists, enforces unique
+placement/parameter targets, and registers lane and point identities in the
+Project. Lanes persist in snapshots and are reachable through typed commands
+and `DocumentSession`. `pulp::playback` compiles attached lanes into immutable
+cursor programs, while host-graph parameter delivery remains outside Timeline.
 
 `device_placement.hpp` defines the durable identity of one logical placement in
 a Track-owned device chain. The chain preserves authored processing order
@@ -861,18 +860,57 @@ configuration needed for project save/load will be future document-owned state
 keyed by placement identity.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
-hints and alternate representations. `schema_registry.hpp` provides an explicit
+hints and alternate representations. An audio asset may also carry typed
+`AudioLoopInfo`: musical length and meter, one-shot intent, MIDI root note,
+half-open in/out markers, manual or analyzer-suggested loop points, and tags.
+Tempo is intentionally derived from musical length, frame count, and sample
+rate instead of being stored as a second value that can drift. Loop metadata is
+canonicalized at project construction and remains asset-description state; it
+does not make Timeline responsible for sample traversal or rendering.
+`schema_registry.hpp` provides an explicit
 immutable registry with typed extension codecs and bounded per-version
-migrations. `serialize.hpp` reads and writes deterministic JSON snapshots:
-64-bit values are canonical decimal strings, malformed or oversized input is
-rejected under `DecodeLimits`, and unknown extension envelopes retain their
-exact validated bytes for lossless re-save. `SerializedSnapshot` flags those
-opaque objects so callers can surface compatibility risk. This is snapshot JSON
-only; it does not read or write ZIP/package containers.
+migrations. `schema_release.hpp` exposes release-labeled structural version
+maps, and `serialize_project_for_release()` uses them to produce canonical
+snapshots for `v0.736.0`, `v0.744.0`, or `v0.748.0`. Older-release export fails
+when it would discard populated device, automation, take, audio-loop, or
+extension state.
+It removes inactive identity tombstones for kinds the target release cannot
+name while preserving `next_item_id` as the durable no-reuse boundary.
+`serialize.hpp` reads and writes deterministic JSON snapshots: 64-bit values are
+canonical decimal strings, malformed or oversized input is rejected under
+`DecodeLimits`, and unknown extension envelopes retain their exact validated
+bytes for lossless ordinary re-save. `SerializedSnapshot` flags those opaque
+objects so callers can surface compatibility risk.
+`peek_project_summary()` uses the caller's load `SchemaRegistry`, validates the
+complete structural envelope, and reports project identity, name, root, and
+supported-object counts without constructing a `Project` or resolving
+references; it is the bounded project-browser and load-admission tier. This is
+snapshot JSON only; it does not read or write ZIP/package containers.
 
-This surface intentionally excludes durable journal sinks, package I/O,
-playback, document-attached automation lanes and delivery, launch slots, takes,
-nesting, device implementation and routing, and UI.
+`journal.hpp` defines the optional `JournalSink` persistence seam. A session
+publishes a transaction only after the sink reports its complete batch durable,
+and installs a checkpoint before discarding the covered in-memory entries.
+Because a failed write can have reached storage before its error is observable,
+any sink error poisons that session for subsequent durable writes. Sink
+callbacks run under the session writer lock and must not call lock-taking APIs
+on the originating `DocumentSession`.
+
+`file_journal.hpp` provides the native crash-consistent implementation. It
+writes canonical snapshots as versioned, checksummed frames and completes each
+append only after a platform durability fence. Recovery accepts only a valid
+frame prefix, discards and reports a torn trailing frame, and fails closed on
+earlier corruption. A checkpoint at the current durable revision replaces the
+file through a synced temporary sibling and atomic rename; checkpointing an
+older prefix preserves the newer durable frames already on disk. Recovered
+sessions resume at their stored nonzero `DocumentRevision` only after the sink
+validates an exact canonical-serialization/revision match without mutating
+durable state. Symlink paths share one canonical lock identity. Multiply linked
+journal files are rejected because atomic checkpoint replacement cannot
+preserve hard-link identity. Package containers remain outside this module
+surface.
+
+This surface intentionally excludes package I/O, playback delivery, launch
+slots, nesting, device implementation and routing, and UI.
 
 ## playback
 
@@ -947,8 +985,9 @@ on loop/seek/adoption and rejects tempo-map or monotonic-generation mismatches.
 retains its exact tempo-map and lane-program owners in lane-ItemId order. The
 grouping rejects duplicate lane identities and duplicate device-parameter
 targets while allowing unchanged lanes to retain older generations and instance
-tokens. It is compiled playback data, not proof of Timeline document attachment;
-the future track compiler owns authored-lane dirty tracking and reuse decisions.
+tokens. It is compiled playback data, not proof of Timeline document
+attachment; `PlaybackProgramCompiler` owns authored-lane dirty tracking and
+reuse decisions.
 This layer deliberately does not know graph nodes or `ParameterEventQueue`; a
 host binding must aggregate all lanes for a device, apply one global queue
 budget, and inject one batch.
@@ -957,10 +996,12 @@ MediaRef clips use an immutable `DecodedAudioAssetPool`. Complete WAV bytes can
 be decoded into this pool through the bounded no-file-I/O decoder, then the
 ordinary incremental compiler lowers source ranges, musical or absolute clip
 placement, gain, and fades into each `TrackProgram`. The renderer uses bounded
-stateless linear sample-rate conversion so media retains its native wall-clock
-speed; musical anchoring uses the tempo map for placement and extent but does
-not silently introduce warp or time-stretch. A later quality pass decides
-whether linear SRC should be upgraded. Missing media, metadata mismatches,
+64-tap, 512-phase Kaiser-windowed sinc sample-rate conversion so media retains
+its native wall-clock speed while strongly suppressing out-of-band content
+before downsampling. Program compilation builds and shares one immutable
+kernel per source/target rate pair; equal-rate media keeps an exact bypass.
+Musical anchoring uses the tempo map for placement and extent but does not
+silently introduce warp or time-stretch. Missing media, metadata mismatches,
 invalid ranges, and capacity excesses reject compilation.
 
 `ArrangementAudioRenderer::process()` consumes the same pinned
@@ -991,6 +1032,32 @@ program must name the same compiled tempo-map identity, and overlapping logical
 notes on one channel/pitch are reference-counted so the physical note-off waits
 for the last overlap. Timeline commands and persistence preserve the clip gain
 and fade properties consumed by the audio compiler.
+
+## sequence
+
+Format-facing integration for publishing an immutable timeline playback program
+as a Pulp processor.
+
+**Link:** `pulp::sequence` · **Include prefix:** `<pulp/sequence/...>`
+
+`SequenceProcessor` adapts a caller-owned `PlaybackProgramStore` to
+`pulp::format::Processor`. It projects host transport into timeline ticks and
+executes the compiled track graph for VST3, AU, or CLAP adapters. It does not
+own project editing, playback compilation, media resolution, a plugin host,
+device I/O, or an editor.
+
+```cpp
+#include <pulp/sequence/sequence_processor.hpp>
+
+pulp::playback::PlaybackProgramStore programs;
+pulp::sequence::SequenceProcessor processor(programs);
+```
+
+This is deliberately a heavier boundary than the engine-only
+`pulp::timebase`/`pulp::timeline`/`pulp::playback` stack: linking it also brings
+the format, graph, and state integration needed by a plugin processor. Publish
+compatible immutable programs from a control or worker thread; the audio
+callback only consumes the current program and host transport.
 
 ## format
 

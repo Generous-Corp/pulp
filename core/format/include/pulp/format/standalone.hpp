@@ -123,6 +123,7 @@ struct StandaloneConfig {
     int time_sig_numerator = 4;
     int time_sig_denominator = 4;
     bool transport_playing = true;  // default-on so MIDI/tempo plugins are immediately useful
+    bool transport_recording = false;
 };
 
 namespace detail {

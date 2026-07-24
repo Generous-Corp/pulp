@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -401,13 +402,6 @@ void copy_io_bus(graph::GraphRuntimeNodeKind kind,
     }
 }
 
-// Fixed realtime MIDI capacities for the routed per-node scratch buffers. Match
-// the host graph's per-node MIDI block storage so the routed path never drops an
-// event the legacy walk would have kept.
-constexpr std::size_t kRoutedMidiEventCapacity = 1024;
-constexpr std::size_t kRoutedMidiSysexCapacity = 128;
-constexpr std::size_t kRoutedMidiSysexPayloadCapacity = 4096;
-
 // Run ONE node of the routing walk: gather its audio / MIDI / automation inputs,
 // then either copy the I/O bus (AudioInput/AudioOutput) or invoke its binding.
 // Returns the error code (None on success). This is the per-node seam shared by
@@ -516,22 +510,40 @@ GraphRuntimeExecutorErrorCode run_routed_node(
 
 } // namespace
 
-bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count) {
-    clear();
+bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count, std::size_t event_capacity,
+                                    std::size_t sysex_capacity,
+                                    std::size_t sysex_payload_capacity) {
+    if (event_capacity == 0)
+        return false;
     try {
-        slots_.reserve(node_count);
-        for (std::uint32_t i = 0; i < node_count; ++i) {
+        std::vector<std::size_t> event_capacities(node_count, event_capacity);
+        return reset(event_capacities, sysex_capacity, sysex_payload_capacity);
+    } catch (...) {
+        clear();
+        return false;
+    }
+}
+
+bool GraphRuntimeMidiScratch::reset(std::span<const std::size_t> event_capacities,
+                                    std::size_t sysex_capacity,
+                                    std::size_t sysex_payload_capacity) {
+    clear();
+    if (event_capacities.size() > std::numeric_limits<std::uint32_t>::max() ||
+        std::any_of(event_capacities.begin(), event_capacities.end(),
+                    [](std::size_t capacity) { return capacity == 0; }))
+        return false;
+    try {
+        slots_.reserve(event_capacities.size());
+        for (const auto event_capacity : event_capacities) {
             auto slot = std::make_unique<Slot>();
-            slot->in_buffer.reserve(kRoutedMidiEventCapacity, kRoutedMidiSysexCapacity,
-                                    kRoutedMidiSysexPayloadCapacity);
+            slot->in_buffer.reserve(event_capacity, sysex_capacity, sysex_payload_capacity);
             slot->in_buffer.set_realtime_capacity_limit(true);
-            slot->in_ump.reserve(kRoutedMidiEventCapacity);
+            slot->in_ump.reserve(event_capacity);
             slot->in_ump.set_realtime_capacity_limit(true);
             slot->in_buffer.attach_ump(&slot->in_ump);
-            slot->out_buffer.reserve(kRoutedMidiEventCapacity, kRoutedMidiSysexCapacity,
-                                     kRoutedMidiSysexPayloadCapacity);
+            slot->out_buffer.reserve(event_capacity, sysex_capacity, sysex_payload_capacity);
             slot->out_buffer.set_realtime_capacity_limit(true);
-            slot->out_ump.reserve(kRoutedMidiEventCapacity);
+            slot->out_ump.reserve(event_capacity);
             slot->out_ump.set_realtime_capacity_limit(true);
             slot->out_buffer.attach_ump(&slot->out_ump);
             slots_.push_back(std::move(slot));
@@ -540,7 +552,7 @@ bool GraphRuntimeMidiScratch::reset(std::uint32_t node_count) {
         clear();
         return false;
     }
-    node_count_ = node_count;
+    node_count_ = static_cast<std::uint32_t>(event_capacities.size());
     return true;
 }
 

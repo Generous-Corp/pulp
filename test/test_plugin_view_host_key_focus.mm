@@ -34,6 +34,7 @@
 #include <pulp/view/view.hpp>
 
 #if defined(__APPLE__)
+#include <atomic>
 #include <new>
 #include <stdexcept>
 
@@ -200,10 +201,10 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while
 
             root.release_input_focus();
             [pulp_view syncKeyFocus];
-            // Contract: with no field focused the editor RESIGNS — a plugin must not
-            // hold the DAW keyboard, or transport keys (Space/R) + the host's
-            // Musical Typing die while the editor is open.
-            REQUIRE(window.firstResponder != pulp_view);
+            // Contract: with no field focused the editor restores the responder
+            // that routed the DAW keyboard before the type-in. `nil` is not enough:
+            // Logic's Musical Typing remains silent until its responder is restored.
+            REQUIRE(window.firstResponder == host_field);
             REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
         }
 
@@ -241,6 +242,98 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while
             [pulp_view syncKeyFocus];  // wants=false → no grab, no fight
             REQUIRE(window.firstResponder == host_field);
         }
+
+        host->detach();
+        host.reset();
+        [window close];
+    }
+}
+
+// The event-independent focus-sync contract. syncKeyFocus is invoked on every
+// discrete key/mouse event AND — the fix this pins — on the host's frame tick
+// (the CVDisplayLink main-thread block in MacPluginViewHost / MacGpuPluginViewHost).
+// That extra cadence matters when the focus slot clears WITHOUT a following
+// event: a generation that FAILS (the JS pump releases the prompt field but no
+// key/mouse event follows) or any programmatic blur. Without a tick-driven sync
+// the editor stays first responder after such a clear and swallows the DAW's
+// Musical Typing until close/reopen. Here we clear the slot PROGRAMMATICALLY (no
+// NSEvent) and prove the actual CPU host frame tick resigns first responder and
+// hands the keyboard back. A no-op idle callback deliberately holds the
+// display-link gate open; pumping the main run loop lets its queued tick run.
+// This makes the regression test discriminate the call-site wiring: deleting
+// the frame-tick sync leaves the editor stuck and fails the assertion below.
+// The GPU host mirrors the identical override and call site.
+TEST_CASE("PluginViewHost (mac CPU) — a programmatic focus clear (no event) "
+          "hands the keyboard back on the next syncKeyFocus tick",
+          "[plugin-view-host][key-focus][mac][cpu][frame-tick]") {
+    @autoreleasepool {
+        FocusGuard guard;
+
+        NSWindow* window =
+            [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 200)
+                                        styleMask:NSWindowStyleMaskBorderless
+                                          backing:NSBackingStoreBuffered
+                                            defer:NO];
+        if (!window || !window.contentView) {
+            SUCCEED("No Cocoa window — frame-tick focus-sync test skipped.");
+            return;
+        }
+
+        FocusRecordingView root;
+        PluginViewHost::Options opts;
+        opts.size = {400u, 200u};
+        opts.use_gpu = false;
+        auto host = PluginViewHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        host->attach_to_parent((__bridge void*)window.contentView);
+        std::atomic<int> frame_ticks{0};
+        host->set_idle_callback([&] {
+            frame_ticks.fetch_add(1, std::memory_order_relaxed);
+        });
+
+        NSView* pulp_view = find_pulp_plugin_view(window.contentView);
+        REQUIRE(pulp_view != nil);
+
+        PulpTestHostField* host_field =
+            [[PulpTestHostField alloc] initWithFrame:NSMakeRect(0, 0, 10, 10)];
+        [window.contentView addSubview:host_field];
+        REQUIRE([window makeFirstResponder:host_field]);
+
+        // A text field is focused and the editor holds first responder — the
+        // mid-type state right before a doomed generation resolves.
+        root.claim_input_focus();
+        [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == pulp_view);  // positive control: keyboard held
+        REQUIRE([pulp_view acceptsFirstResponder]);
+
+        // The generation FAILS: the slot is released programmatically, with NO
+        // key/mouse event delivered. First responder is UNCHANGED at this instant
+        // (the editor still holds it) — exactly the stuck state the old,
+        // event-only sync left behind.
+        root.release_input_focus();
+        REQUIRE(View::focused_input_ == nullptr);
+        REQUIRE(window.firstResponder == pulp_view);   // still stuck pre-tick
+
+        // Let the display-link callback queue and execute a main-thread frame
+        // tick. No key/mouse event and no direct syncKeyFocus call occurs here.
+        const int ticks_before_release =
+            frame_ticks.load(std::memory_order_relaxed);
+        NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
+        while (window.firstResponder == pulp_view &&
+               deadline.timeIntervalSinceNow > 0.0) {
+            [[NSRunLoop mainRunLoop]
+                runMode:NSDefaultRunLoopMode
+                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
+        if (frame_ticks.load(std::memory_order_relaxed) == ticks_before_release) {
+            SUCCEED("No active CVDisplayLink — frame-tick focus-sync test skipped.");
+            host->detach();
+            host.reset();
+            [window close];
+            return;
+        }
+        REQUIRE(window.firstResponder == host_field);
+        REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
 
         host->detach();
         host.reset();
@@ -305,6 +398,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a focused non-text widget does NOT steal
 
         root.release_input_focus();
         [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == host_field);
         host->detach();
         host.reset();
         [window close];

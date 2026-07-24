@@ -141,7 +141,21 @@ def extract_mcp_tools(mcp_cpp: Path) -> set[str]:
     if not mcp_cpp.exists():
         return set()
     content = mcp_cpp.read_text()
-    return set(re.findall(r'"name"\s*:\s*"(pulp_\w+)"', content))
+    tools = set(re.findall(r'"name"\s*:\s*"(pulp_\w+)"', content))
+
+    repo = mcp_cpp.parent.parent.parent
+    timeline_artifact = repo / "core" / "timeline" / "schema" / "timeline_mcp_tools.json"
+    if timeline_artifact.exists():
+        document = json.loads(timeline_artifact.read_text())
+        generated_tools = document.get("tools", [])
+        tools.update(
+            tool["name"]
+            for tool in generated_tools
+            if isinstance(tool, dict)
+            and isinstance(tool.get("name"), str)
+            and tool["name"].startswith("pulp_")
+        )
+    return tools
 
 
 # ── Baseline ────────────────────────────────────────────────────────────

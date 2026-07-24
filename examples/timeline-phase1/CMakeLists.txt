@@ -1,6 +1,7 @@
 add_library(pulp-timeline-phase1-examples STATIC
     timeline_example_engine.cpp
     timeline_audio_player.cpp
+    timeline_multitrack_arrangement.cpp
     timeline_step_pattern_content.cpp
     timeline_step_sequencer.cpp
 )
@@ -21,6 +22,7 @@ target_link_libraries(pulp-timeline-phase1-examples PUBLIC
 add_library(pulp-timeline-phase1-examples-noexcept OBJECT
     timeline_example_engine.cpp
     timeline_audio_player.cpp
+    timeline_multitrack_arrangement.cpp
     timeline_step_pattern_content.cpp
     timeline_step_sequencer.cpp
 )
@@ -43,6 +45,10 @@ add_executable(pulp-timeline-step-sequencer main_step_sequencer.cpp)
 target_link_libraries(pulp-timeline-step-sequencer PRIVATE
     pulp-timeline-phase1-examples pulp::standalone)
 
+add_executable(pulp-timeline-multitrack-arrangement main_multitrack_arrangement.cpp)
+target_link_libraries(pulp-timeline-multitrack-arrangement PRIVATE
+    pulp-timeline-phase1-examples)
+
 if(PULP_BUILD_TESTS)
     add_test(NAME timeline-audio-player-headless-run
         COMMAND pulp-timeline-audio-player --headless)
@@ -52,4 +58,8 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-timeline-step-sequencer --headless)
     set_tests_properties(timeline-step-sequencer-headless-run PROPERTIES
         LABELS "examples;timeline;headless" TIMEOUT 10)
+    add_test(NAME timeline-multitrack-arrangement-headless-run
+        COMMAND pulp-timeline-multitrack-arrangement)
+    set_tests_properties(timeline-multitrack-arrangement-headless-run PROPERTIES
+        LABELS "examples;timeline;headless;pdc" TIMEOUT 30)
 endif()

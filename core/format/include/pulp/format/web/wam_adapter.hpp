@@ -100,6 +100,7 @@ struct WamParamInfo {
 // into ProcessContext at the top of every process(). Shared by both the single-
 // plugin bridge and the chain rack.
 struct WamTransport {
+    bool valid = false;
     bool is_playing = false;
     double tempo_bpm = 120.0;
     double position_beats = 0.0;

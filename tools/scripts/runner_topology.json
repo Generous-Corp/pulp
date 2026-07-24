@@ -5,6 +5,7 @@
     "ubuntu-latest",
     "ubuntu-24.04",
     "ubuntu-22.04",
+    "macos-26",
     "macos-15",
     "macos-14",
     "macos-13",
@@ -135,8 +136,8 @@
     },
     {
       "variable": "PULP_SANITIZER_UBSAN_RUNS_ON_JSON",
-      "purpose": "UBSan lane \u2014 GitHub-hosted, clean per run.",
-      "expect": "macos-15",
+      "purpose": "UBSan lane \u2014 GitHub-hosted on the current Apple Clang/libc++ toolchain, clean per run.",
+      "expect": "macos-26",
       "provisioning": "github-hosted",
       "severity": "advisory"
     },

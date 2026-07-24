@@ -58,7 +58,9 @@ if(_PULP_NODE_FOR_TESTS)
              COMMAND ${_PULP_NODE_FOR_TESTS}
                      ${CMAKE_SOURCE_DIR}/tools/scripts/test_bundle_threejs_for_jsc.mjs)
     set_tests_properties(pulp_bundle_threejs_for_jsc_smoke PROPERTIES
-        TIMEOUT 30
+        # The script provisions esbuild in a temporary package before running
+        # five bundle cases, so cold or contended CI hosts need more than 30s.
+        TIMEOUT 120
         LABELS "ios-d3b;node;threejs")
 endif()
 

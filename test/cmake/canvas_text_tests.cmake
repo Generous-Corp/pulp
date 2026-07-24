@@ -197,7 +197,10 @@ if(PULP_HAS_SKIA AND APPLE AND PULP_ENABLE_GPU)
     target_include_directories(pulp-test-subtree-cache-gpu PRIVATE
         ${SKIA_INCLUDE_DIRS})
     catch_discover_tests(pulp-test-subtree-cache-gpu
-        PROPERTIES RESOURCE_LOCK pulp_gpu)
+        # This live-GPU replay proof is environment-sensitive on ephemeral
+        # macOS CI VMs. Keep it in push/nightly coverage while the required
+        # PR and merge-group lanes exclude the existing `slow` label.
+        PROPERTIES RESOURCE_LOCK pulp_gpu LABELS slow)
 
     # Persistent-scene mode — live-GPU cross-frame retention proof (FU-2).
     # Drives an offscreen Dawn+Skia surface with set_persistent_scene(true) for

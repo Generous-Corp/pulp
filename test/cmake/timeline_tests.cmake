@@ -9,7 +9,8 @@ pulp_add_test_suite(pulp-test-timeline-model
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
     SOURCES test_timeline_dawproject_import.cpp
-    LIBRARIES pulp::timeline)
+        test_timeline_dawproject_import_runtime.cpp
+    LIBRARIES pulp::playback pulp::dawproject-import)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
@@ -20,6 +21,22 @@ pulp_add_test_suite(pulp-test-playback-transport
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::format ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-capture-engine
+    SOURCES test_playback_capture_engine.cpp test_playback_recording_commit.cpp
+        test_playback_automation_recording.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-standalone-recording
+    SOURCES test_standalone_recording.cpp
+        $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+        $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
+    LIBRARIES pulp::standalone pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
+    COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+pulp_add_test_suite(pulp-test-playback-external-sync
+    SOURCES test_playback_external_sync.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-playback-program
     SOURCES test_playback_program.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -28,6 +45,19 @@ pulp_add_test_suite(pulp-test-playback-program
     COMPILE_DEFINITIONS
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
+if(PULP_BENCHMARK)
+    set(PULP_TIMELINE_SCALE_SANITIZED OFF)
+    if(PULP_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "(^|[ ;])-fsanitize")
+        set(PULP_TIMELINE_SCALE_SANITIZED ON)
+    endif()
+    pulp_add_test_suite(pulp-test-timeline-scale
+        SOURCES test_timeline_scale.cpp
+        LIBRARIES pulp::playback
+        LABELS performance
+        TIMEOUT 120
+        COMPILE_DEFINITIONS
+            $<$<BOOL:${PULP_TIMELINE_SCALE_SANITIZED}>:PULP_TEST_WITH_SANITIZER=1>)
+endif()
 pulp_add_test_suite(pulp-test-playback-note-renderer
     SOURCES test_playback_note_renderer.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -35,8 +65,12 @@ pulp_add_test_suite(pulp-test-playback-note-renderer
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 pulp_add_test_suite(pulp-test-playback-audio-renderer
-    SOURCES test_playback_audio_renderer.cpp harness/rt_allocation_probe.cpp
-    LIBRARIES pulp::playback pulp::audio pulp::timeline pulp::timebase pulp::runtime)
+    SOURCES test_playback_audio_renderer.cpp
+        test_playback_audio_renderer_conversion.cpp
+        test_playback_track_freeze.cpp
+        harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
+        pulp::runtime)
 pulp_add_test_suite(pulp-test-playback-automation-cursor
     SOURCES test_playback_automation_cursor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
@@ -59,20 +93,53 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
+if(Python3_Interpreter_FOUND)
+    add_test(NAME timeline-live-capture-verifier-self-test
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py
+            --self-test)
+    add_test(NAME timeline-live-capture-hardware
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py)
+    set_tests_properties(timeline-live-capture-hardware PROPERTIES
+        LABELS "hardware;validation"
+        SKIP_RETURN_CODE 77)
+    add_test(NAME timeline-sync-soak-verifier-self-test
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_sync_soak.py
+            --self-test)
+    add_test(NAME timeline-sync-hardware-soak
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_sync_soak.py)
+    set_tests_properties(timeline-sync-hardware-soak PROPERTIES
+        LABELS "hardware;validation"
+        SKIP_RETURN_CODE 77)
+endif()
+
 pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
+        test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
-pulp_add_test_suite(pulp-test-timeline-journal LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-journal
+    SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp
+        harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-undo LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-registry LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-agent
+    SOURCES test_timeline_agent.cpp
+    LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
+        test_timeline_asset_loop_info.cpp
+        test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
+        test_timeline_release_serialization.cpp
         test_timeline_take_comp_persistence.cpp
     LIBRARIES pulp::timeline)
 target_compile_definitions(pulp-test-timeline-persistence PRIVATE
@@ -88,10 +155,34 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
         test_timeline_graph_automation_delivery.cpp
         test_timeline_graph_binding_lifecycle.cpp
         test_timeline_graph_binding_publication.cpp
+        test_host_transport_projector.cpp
+        test_sequence_processor.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
-    LIBRARIES pulp::host pulp::native-components ${CMAKE_DL_LIBS}
+    LIBRARIES pulp::host pulp::sequence pulp::native-components ${CMAKE_DL_LIBS}
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
+
+# MIDI controller -> parameter value scaling, and the DoD proof that a hardware
+# CC maps to any parameter with zero driver code. The routing/learn foundation
+# lives in core/state (pulp::state); the proof links pulp::timeline to drive the
+# engine's own DeviceParameterTarget parameter identity, showing the engine's
+# automatable parameters are the same ParamID space the map already reaches.
+pulp_add_test_suite(pulp-test-midi-parameter-map-scaling
+    SOURCES test_midi_parameter_map_scaling.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::state pulp::timeline)
+
+# The multitrack/PDC proof is also registered separately from the aggregate
+# example suite. That keeps the Phase-2 gate independent of standalone-editor
+# linkage and lets no-JS engine builds exercise the proof directly.
+pulp_add_test_suite(pulp-test-timeline-multitrack-pdc
+    SOURCES
+        ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_multitrack_arrangement.cpp
+        ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp
+        harness/rt_allocation_probe.cpp
+    INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/examples/timeline-phase1
+        ${CMAKE_SOURCE_DIR}/test
+    LIBRARIES pulp::format pulp::host pulp::playback pulp::timeline
+        pulp::timebase pulp::native-components ${CMAKE_DL_LIBS})
 
 if(Python3_Interpreter_FOUND)
     # Playback is engine-core: format/host/view may consume it, but it may not
@@ -161,9 +252,21 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME timeline-schema-js-selftest
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_js_emit.py)
+
+    # MCP tool-defs drift gate: same shared drift check, pointed at the MCP
+    # projection's emitter + committed artifact.
+    add_test(NAME timeline-mcp-drift
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/schema_drift_check.py
+            --artifact ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_mcp_tools.json
+            --emit-cmd "${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/core/timeline/tools/schema_mcp_emit.py --manifest ${CMAKE_SOURCE_DIR}/core/timeline/schema/timeline_schema.json")
+    add_test(NAME timeline-mcp-selftest
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_mcp_emit.py)
 endif()
 
 add_library(pulp-test-timeline-no-exceptions OBJECT
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/asset_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
@@ -179,16 +282,25 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_release.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/take_lane_schema_migrations.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/take_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
@@ -207,12 +319,14 @@ endif()
 add_executable(pulp-test-timeline-phase1-examples
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_example_engine.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_audio_player.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_multitrack_arrangement.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_pattern_content.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/timeline_step_sequencer.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_examples.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_codec.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_edits.cpp
     ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_phase1_standalone.cpp
+    ${CMAKE_SOURCE_DIR}/examples/timeline-phase1/test_timeline_multitrack_arrangement.cpp
     ${CMAKE_SOURCE_DIR}/test/harness/rt_allocation_probe.cpp)
 target_link_libraries(pulp-test-timeline-phase1-examples PRIVATE
     pulp::format pulp::host pulp::playback pulp::timeline pulp::timebase

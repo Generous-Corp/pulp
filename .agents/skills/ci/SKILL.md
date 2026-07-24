@@ -948,6 +948,14 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   exactly to the failing CTest cases and leave comments explaining the
   alternate coverage path; do not use sanitizer excludes to hide new targeted
   coverage tests.
+- **UBSan is pinned to `macos-26`, not `macos-15`.** Xcode 16.4's Apple
+  Clang/libc++ combination reported invalid `std::__shared_weak_count` vptrs
+  while destroying ordinary persistent timeline trees, even though the same
+  exact tests passed under ASan and under current Apple Clang UBSan. A full
+  `macos-26` control ran every timeline model, persistence, graph-binding, and
+  example test without that signature. Keep the lane on the current hosted
+  toolchain; do not suppress `vptr` or rewrite the shared ownership model to
+  accommodate the stale runtime.
 - **Flaky-lane retry (de-flaking).** The ASan/UBSan/TSan lanes
   (`sanitizers.yml`) and the coverage lanes (`scripts/run_coverage.sh`) run
   ctest with `--repeat until-pass:2`. Timing-sensitive tests intermittently
@@ -2568,6 +2576,14 @@ the Build-and-Test workflow manually. Preserve that split: slow configure
 smokes like `cmake-ios-auv3-configure` can legitimately take many minutes
 on the single self-hosted Mac and should not block PR validation after the
 classify gate has already decided a native build is needed.
+
+Pulp's `tools/cmake/PulpCatch.cmake` accepts a first-class multi-value
+`catch_discover_tests(... LABELS "a;b;c")` argument, keeping the list separate from
+generic CTest property pairs. Catch2 v3.7.1 otherwise flattens that list in the
+generated `set_tests_properties` call, leaving only the first label and treating
+the rest as property names/values. Keep the Pulp wrapper and
+`PulpCatchAddTests.cmake` label finalization together; verify changes with the
+`cmake-catch-multilabel-properties` test and `ctest --show-only=json-v1`.
 
 ## Recovery + maintenance toolkit (>= v0.56.2)
 

@@ -1,6 +1,7 @@
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_json.hpp>
 
+#include "asset_validation.hpp"
 #include "identity_directory.hpp"
 #include "identity_transition.hpp"
 #include "project_state_access.hpp"
@@ -33,6 +34,25 @@ std::optional<ItemId> first_duplicate(const std::vector<T>& values, IdFn&& id_of
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
 
+bool valid_storage_policy(AssetStoragePolicy policy) noexcept {
+    switch (policy) {
+    case AssetStoragePolicy::External:
+    case AssetStoragePolicy::Embedded:
+    case AssetStoragePolicy::PreferEmbedded:
+        return true;
+    }
+    return false;
+}
+
+bool valid_locator_kind(AssetLocatorKind kind) noexcept {
+    switch (kind) {
+    case AssetLocatorKind::PackageRelative:
+    case AssetLocatorKind::ExternalUri:
+        return true;
+    }
+    return false;
+}
+
 // Validates a media asset and canonicalizes its representation order. Shared by
 // project construction and asset-append so both paths enforce the identical
 // sealed-identity invariant: an asset with an invalid or empty ContentHash is
@@ -42,39 +62,53 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
         return ModelError{ModelErrorCode::InvalidItemId, asset.id, {}};
     if (!asset.sample_rate.valid())
         return ModelError{ModelErrorCode::InvalidSampleRate, asset.id, {}};
+    asset.sample_rate = asset.sample_rate.normalized();
     if (!asset.content_hash.valid())
         return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+    if (!valid_storage_policy(asset.storage_policy))
+        return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
     for (const auto& locator : asset.locators)
-        if (locator.hint.empty())
+        if (!valid_locator_kind(locator.kind) || locator.hint.empty())
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     std::vector<std::string_view> roles;
     roles.reserve(asset.representations.size());
+    std::vector<ContentHash> hashes;
+    hashes.reserve(asset.representations.size() + 1);
+    hashes.push_back(asset.content_hash);
     for (const auto& representation : asset.representations) {
         if (!representation.content_hash.valid())
             return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+        if (!valid_storage_policy(representation.storage_policy))
+            return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
         if (representation.role.empty())
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
         roles.push_back(representation.role);
+        hashes.push_back(representation.content_hash);
         for (const auto& locator : representation.locators)
-            if (locator.hint.empty())
+            if (!valid_locator_kind(locator.kind) || locator.hint.empty())
                 return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     }
     std::sort(roles.begin(), roles.end());
     if (std::adjacent_find(roles.begin(), roles.end()) != roles.end())
         return ModelError{ModelErrorCode::DuplicateAssetRepresentation, asset.id, {}};
+    std::sort(hashes.begin(), hashes.end());
+    if (std::adjacent_find(hashes.begin(), hashes.end()) != hashes.end())
+        return ModelError{ModelErrorCode::DuplicateAssetRepresentation, asset.id, {}};
     std::sort(asset.representations.begin(), asset.representations.end(),
               [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
                   return lhs.role < rhs.role;
               });
+    if (asset.loop_info &&
+        !detail::validate_and_canonicalize(*asset.loop_info, asset.frame_count))
+        return ModelError{ModelErrorCode::InvalidAudioLoopInfo, asset.id, {}};
     return std::nullopt;
 }
 
 // Applies Insert / Deactivate / Reactivate identity mutations to a directory
 // copy. Shared by sequence replacement and asset mutation so identity
 // transitions have one enforcement path. Returns nullopt on success.
-std::optional<ModelError>
-apply_identity_mutations(detail::IdentityDirectory& identities,
-                         std::span<const IdentityMutation> mutations) {
+std::optional<ModelError> apply_identity_mutations(detail::IdentityDirectory& identities,
+                                                   std::span<const IdentityMutation> mutations) {
     for (const auto& change : mutations) {
         if (!change.item.valid())
             return ModelError{ModelErrorCode::InvalidItemId, change.item, {}};
@@ -106,6 +140,47 @@ apply_identity_mutations(detail::IdentityDirectory& identities,
         }
     }
     return std::nullopt;
+}
+
+template <typename Visitor>
+void visit_project_identities(const ProjectInput& input, Visitor&& visit) {
+    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
+                              ItemId clip = {}, ItemId lane = {}) {
+        return ItemLocation{
+            kind,     immediate_parent_id(kind, input.id, sequence, track, clip, lane),
+            sequence, track,
+            clip,     true};
+    };
+    visit(input.id, location(ItemKind::Project));
+    for (const auto& asset : input.assets)
+        visit(asset.id, location(ItemKind::Asset));
+    for (const auto& sequence : input.sequences) {
+        visit(sequence.id(), location(ItemKind::Sequence, sequence.id()));
+        for (const auto& track : sequence.tracks()) {
+            visit(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
+            for (const auto& device : track.device_chain())
+                visit(device.id, location(ItemKind::DevicePlacement, sequence.id(), track.id()));
+            for (const auto& lane : track.automation_lanes()) {
+                visit(lane.id(), location(ItemKind::AutomationLane, sequence.id(), track.id()));
+                for (const auto& point : lane.curve().points())
+                    visit(point.id, location(ItemKind::AutomationPoint, sequence.id(), track.id(),
+                                             {}, lane.id()));
+            }
+            for (const auto& take_lane : track.take_lanes()) {
+                visit(take_lane.id(), location(ItemKind::TakeLane, sequence.id(), track.id()));
+                for (const auto& take : take_lane.takes())
+                    visit(take.id(),
+                          location(ItemKind::Take, sequence.id(), track.id(), {}, take_lane.id()));
+            }
+            for (const auto& clip : track.clips()) {
+                visit(clip.id(), location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
+                if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
+                    for (const auto& note : notes->notes())
+                        visit(note.id,
+                              location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
+            }
+        }
+    }
 }
 
 } // namespace
@@ -172,63 +247,6 @@ runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent not
         return fail<NoteContent>(ModelErrorCode::MissingItem, note.id);
     *found = note;
     return create(std::move(replacement));
-}
-
-runtime::Result<Take, ModelError> Take::create(ItemId id, MediaRef media,
-                                               timebase::SamplePosition placement_start,
-                                               timebase::RationalRate sample_rate) {
-    if (!id.valid())
-        return fail<Take>(ModelErrorCode::InvalidItemId, id);
-    // The asset reference is external and its existence is validated where the
-    // take is attached to a Project. Here the take only guarantees a well-formed
-    // reference shape and a positive, playable region.
-    if (!media.asset_id.valid())
-        return fail<Take>(ModelErrorCode::InvalidTake, id, media.asset_id);
-    if (media.frame_count == 0 || placement_start.value < 0 || !sample_rate.valid())
-        return fail<Take>(ModelErrorCode::InvalidTake, id);
-    return runtime::Result<Take, ModelError>(
-        runtime::Ok(Take(id, media, placement_start, sample_rate)));
-}
-
-struct TakeLane::Data {
-    ItemId id;
-    std::string name;
-    std::vector<Take> takes;
-};
-
-runtime::Result<TakeLane, ModelError> TakeLane::create(ItemId id, std::string name,
-                                                       std::vector<Take> takes) {
-    if (!id.valid())
-        return fail<TakeLane>(ModelErrorCode::InvalidItemId, id);
-    for (const auto& take : takes)
-        if (!take.id().valid())
-            return fail<TakeLane>(ModelErrorCode::InvalidTake, take.id());
-    if (const auto duplicate = first_duplicate(takes, [](const Take& take) { return take.id(); }))
-        return fail<TakeLane>(ModelErrorCode::DuplicateTake, *duplicate);
-    std::sort(takes.begin(), takes.end(),
-              [](const Take& lhs, const Take& rhs) { return lhs.id() < rhs.id(); });
-    return runtime::Result<TakeLane, ModelError>(runtime::Ok(
-        TakeLane(std::make_shared<const Data>(Data{id, std::move(name), std::move(takes)}))));
-}
-
-ItemId TakeLane::id() const noexcept {
-    return data_->id;
-}
-
-const std::string& TakeLane::name() const noexcept {
-    return data_->name;
-}
-
-std::span<const Take> TakeLane::takes() const noexcept {
-    return data_->takes;
-}
-
-const Take* TakeLane::find_take(ItemId id) const noexcept {
-    const auto found = std::lower_bound(data_->takes.begin(), data_->takes.end(), id,
-                                        [](const Take& take, ItemId wanted) {
-                                            return take.id() < wanted;
-                                        });
-    return found != data_->takes.end() && found->id() == id ? &*found : nullptr;
 }
 
 runtime::Result<OpaqueContent, ModelError>
@@ -523,7 +541,6 @@ detail::ProjectStateAccess::restore_identities(Project project,
         }) != entries.end())
         return fail<Project>(ModelErrorCode::DuplicateItemId);
 
-    detail::IdentityDirectory restored;
     std::size_t active_index = 0;
     const auto find_entry = [&](ItemId id) -> const detail::IdentityRecord* {
         const auto found = std::lower_bound(entries.begin(), entries.end(), id,
@@ -575,8 +592,7 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.clip_id == entry.item;
             case ItemKind::Note:
                 return location.sequence_id.valid() && location.track_id.valid() &&
-                       location.clip_id.valid() &&
-                       location.sequence_id != location.track_id &&
+                       location.clip_id.valid() && location.sequence_id != location.track_id &&
                        location.sequence_id != location.clip_id &&
                        location.track_id != location.clip_id &&
                        entry.item != location.sequence_id && entry.item != location.track_id &&
@@ -669,10 +685,12 @@ detail::ProjectStateAccess::restore_identities(Project project,
         } else if (project.data_->identities.locate(entry.item)) {
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         }
-        restored.insert(entry.item, location);
     }
     if (active_index != active_entries.size())
         return fail<Project>(ModelErrorCode::InvalidSchemaIdentity);
+    if (entries.size() == active_entries.size())
+        return runtime::Ok(std::move(project));
+    auto restored = detail::IdentityDirectory::from_sorted_entries(entries);
     auto next_data = *project.data_;
     next_data.identities = std::move(restored);
     project.data_ = std::make_shared<const Project::Data>(std::move(next_data));
@@ -682,59 +700,30 @@ detail::ProjectStateAccess::restore_identities(Project project,
 runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     if (!input.id.valid())
         return fail<Project>(ModelErrorCode::InvalidItemId, input.id);
-    std::vector<ItemId> all_ids{input.id};
-    std::uint64_t maximum_id = input.id.value;
+
     for (auto& asset : input.assets) {
         if (const auto error = validate_media_asset(asset))
             return runtime::Result<Project, ModelError>(runtime::Err(*error));
-        all_ids.push_back(asset.id);
-        maximum_id = std::max(maximum_id, asset.id.value);
     }
-    for (const auto& sequence : input.sequences) {
-        all_ids.push_back(sequence.id());
-        maximum_id = std::max(maximum_id, sequence.id().value);
-        for (const auto& track : sequence.tracks()) {
-            all_ids.push_back(track.id());
-            maximum_id = std::max(maximum_id, track.id().value);
-            for (const auto& device : track.device_chain()) {
-                all_ids.push_back(device.id);
-                maximum_id = std::max(maximum_id, device.id.value);
-            }
-            for (const auto& lane : track.automation_lanes()) {
-                all_ids.push_back(lane.id());
-                maximum_id = std::max(maximum_id, lane.id().value);
-                for (const auto& point : lane.curve().points()) {
-                    all_ids.push_back(point.id);
-                    maximum_id = std::max(maximum_id, point.id.value);
-                }
-            }
-            for (const auto& take_lane : track.take_lanes()) {
-                all_ids.push_back(take_lane.id());
-                maximum_id = std::max(maximum_id, take_lane.id().value);
-                for (const auto& take : take_lane.takes()) {
-                    all_ids.push_back(take.id());
-                    maximum_id = std::max(maximum_id, take.id().value);
-                }
-            }
-            for (const auto& clip : track.clips()) {
-                all_ids.push_back(clip.id());
-                maximum_id = std::max(maximum_id, clip.id().value);
-                if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
-                    for (const auto& note : notes->notes()) {
-                        all_ids.push_back(note.id);
-                        maximum_id = std::max(maximum_id, note.id.value);
-                    }
-                }
-            }
-        }
-    }
-    std::sort(all_ids.begin(), all_ids.end());
-    if (const auto duplicate = std::adjacent_find(all_ids.begin(), all_ids.end());
-        duplicate != all_ids.end())
-        return fail<Project>(ModelErrorCode::DuplicateItemId, *duplicate);
+    std::size_t identity_count = 0;
+    visit_project_identities(input, [&](ItemId, ItemLocation) { ++identity_count; });
+    std::vector<detail::IdentityRecord> identity_entries;
+    identity_entries.reserve(identity_count);
+    visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
+        identity_entries.push_back({id, item_location});
+    });
+    std::sort(identity_entries.begin(), identity_entries.end(),
+              [](const auto& lhs, const auto& rhs) { return lhs.item < rhs.item; });
+    if (const auto duplicate = std::adjacent_find(
+            identity_entries.begin(), identity_entries.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.item == rhs.item; });
+        duplicate != identity_entries.end())
+        return fail<Project>(ModelErrorCode::DuplicateItemId, duplicate->item);
+    const auto maximum_id = identity_entries.back().item.value;
     if (input.next_item_id == 0 || input.next_item_id <= maximum_id)
         return fail<Project>(ModelErrorCode::NextItemIdNotMonotonic, {input.next_item_id},
                              {maximum_id});
+
     std::sort(input.assets.begin(), input.assets.end(),
               [](const MediaAsset& lhs, const MediaAsset& rhs) { return lhs.id < rhs.id; });
     std::sort(input.sequences.begin(), input.sequences.end(),
@@ -744,8 +733,8 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                          [](const Sequence& sequence, ItemId id) { return sequence.id() < id; });
     if (root == input.sequences.end() || root->id() != input.root_sequence_id)
         return fail<Project>(ModelErrorCode::MissingRootSequence, input.root_sequence_id);
-    const auto validate_media_ref = [&](const MediaRef& media, ItemId owner)
-        -> std::optional<ModelError> {
+    const auto validate_media_ref = [&](const MediaRef& media,
+                                        ItemId owner) -> std::optional<ModelError> {
         const auto found =
             std::lower_bound(input.assets.begin(), input.assets.end(), media.asset_id,
                              [](const MediaAsset& asset, ItemId id) { return asset.id < id; });
@@ -770,60 +759,30 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                 for (const auto& take : take_lane.takes())
                     if (const auto error = validate_media_ref(take.media(), take.id()))
                         return fail<Project>(error->code, error->item, error->related_item);
-        }
-    }
-    detail::IdentityDirectory identities;
-    auto add_identity = [&](ItemId id, ItemLocation location) { identities.insert(id, location); };
-    const auto location = [&](ItemKind kind, ItemId sequence = {}, ItemId track = {},
-                              ItemId clip = {}, ItemId lane = {}) {
-        return ItemLocation{kind, immediate_parent_id(kind, input.id, sequence, track, clip, lane),
-                            sequence, track, clip, true};
-    };
-    add_identity(input.id, location(ItemKind::Project));
-    for (const auto& asset : input.assets)
-        add_identity(asset.id, location(ItemKind::Asset));
-    for (const auto& sequence : input.sequences) {
-        add_identity(sequence.id(), location(ItemKind::Sequence, sequence.id()));
-        for (const auto& track : sequence.tracks()) {
-            add_identity(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
-            for (const auto& device : track.device_chain())
-                add_identity(device.id,
-                             location(ItemKind::DevicePlacement, sequence.id(), track.id()));
-            for (const auto& lane : track.automation_lanes()) {
-                add_identity(lane.id(),
-                             location(ItemKind::AutomationLane, sequence.id(), track.id()));
-                for (const auto& point : lane.curve().points())
-                    add_identity(point.id, location(ItemKind::AutomationPoint, sequence.id(),
-                                                    track.id(), {}, lane.id()));
-            }
-            for (const auto& take_lane : track.take_lanes()) {
-                add_identity(take_lane.id(),
-                             location(ItemKind::TakeLane, sequence.id(), track.id()));
-                for (const auto& take : take_lane.takes())
-                    add_identity(take.id(), location(ItemKind::Take, sequence.id(), track.id(), {},
-                                                     take_lane.id()));
-            }
-            for (const auto& clip : track.clips()) {
-                add_identity(clip.id(),
-                             location(ItemKind::Clip, sequence.id(), track.id(), clip.id()));
-                if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
-                    for (const auto& note : notes->notes())
-                        add_identity(note.id,
-                                     location(ItemKind::Note, sequence.id(), track.id(), clip.id()));
-                }
+            if (track.freeze()) {
+                if (const auto error = validate_media_ref(track.freeze()->media, track.id()))
+                    return fail<Project>(error->code, error->item, error->related_item);
+                const auto asset = std::lower_bound(
+                    input.assets.begin(), input.assets.end(), track.freeze()->media.asset_id,
+                    [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
+                if (asset == input.assets.end() ||
+                    asset->sample_rate.normalized() != track.freeze()->sample_rate.normalized())
+                    return fail<Project>(ModelErrorCode::IncompatibleSampleRate, track.id(),
+                                         track.freeze()->media.asset_id);
             }
         }
     }
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{.id = input.id,
-             .name = std::move(input.name),
-             .next_item_id = input.next_item_id,
-             .root_sequence_id = input.root_sequence_id,
-             .assets = std::move(input.assets),
-             .sequences = std::move(input.sequences),
-             .tempo_map = std::move(input.tempo_map),
-             .meter_map = std::move(input.meter_map),
-             .identities = std::move(identities)}))));
+    auto identities = detail::IdentityDirectory::from_sorted_entries(identity_entries);
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = input.id,
+                                                  .name = std::move(input.name),
+                                                  .next_item_id = input.next_item_id,
+                                                  .root_sequence_id = input.root_sequence_id,
+                                                  .assets = std::move(input.assets),
+                                                  .sequences = std::move(input.sequences),
+                                                  .tempo_map = std::move(input.tempo_map),
+                                                  .meter_map = std::move(input.meter_map),
+                                                  .identities = std::move(identities)}))));
 }
 
 ItemId Project::id() const noexcept {
@@ -924,23 +883,30 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
                          [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
     if (found == data_->assets.end() || found->id != asset_id)
         return fail<Project>(ModelErrorCode::MissingAsset, asset_id);
-    // Referential integrity: an asset that any clip still plays cannot be
-    // removed, or replay would resurrect a MediaRef pointing at a missing asset.
+    // Referential integrity: an asset that any clip or take still plays cannot
+    // be removed, or replay would resurrect a MediaRef pointing at a missing asset.
     for (const auto& sequence : data_->sequences)
-        for (const auto& track : sequence.tracks())
+        for (const auto& track : sequence.tracks()) {
             for (const auto& clip : track.clips())
                 if (const auto* media = std::get_if<MediaRef>(&clip.content());
                     media && media->asset_id == asset_id)
                     return fail<Project>(ModelErrorCode::MissingAsset, clip.id(), asset_id);
+            for (const auto& lane : track.take_lanes())
+                for (const auto& take : lane.takes())
+                    if (take.media().asset_id == asset_id)
+                        return fail<Project>(ModelErrorCode::MissingAsset, take.id(), asset_id);
+            if (track.freeze() && track.freeze()->media.asset_id == asset_id)
+                return fail<Project>(ModelErrorCode::MissingAsset, track.id(), asset_id);
+        }
     auto identities = data_->identities;
     if (const auto error = apply_identity_mutations(identities, mutations))
         return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto assets = data_->assets;
     assets.erase(assets.begin() + (found - data_->assets.begin()));
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->next_item_id, data_->root_sequence_id,
-             std::move(assets), data_->sequences, data_->tempo_map, data_->meter_map,
-             std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(
+        runtime::Ok(Project(std::make_shared<const Data>(Data{
+            data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, std::move(assets),
+            data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {

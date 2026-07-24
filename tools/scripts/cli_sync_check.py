@@ -14,7 +14,7 @@ SKIP_SLASH_COMMANDS = {
     "audio", "cache", "clean", "upgrade", "config", "export-tokens",
     "ci-local", "design-debug", "harness", "help", "add", "audit",
     "identity", "inspect", "import-design", "install", "version",
-    "sdk", "fetch", "list", "remove", "search", "suggest",
+    "sdk", "fetch", "list", "remove", "render", "search", "seq", "suggest",
     "target", "update",
     # `pulp macos` and `pulp overflow` are CI runner-pool operator
     # commands. They're covered by the CLI reference, `--help`, the

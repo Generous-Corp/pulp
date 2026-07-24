@@ -262,3 +262,13 @@ if(UNIX)
     add_test(NAME setup-source-cache
         COMMAND bash "${CMAKE_SOURCE_DIR}/tools/scripts/test_setup_source_cache.sh")
 endif()
+# Catch2 discovery must preserve multi-label lists as one CTest property value.
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME cmake-catch-multilabel-properties
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/scripts/test_catch_multilabel_properties.py)
+    set_tests_properties(cmake-catch-multilabel-properties PROPERTIES
+        LABELS "cmake;ci"
+        TIMEOUT 120)
+endif()

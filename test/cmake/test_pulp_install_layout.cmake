@@ -115,7 +115,7 @@ endif()
 # beside it, and PulpConfig.cmake must include PulpMinOs.cmake. Without all
 # three, a find_package(Pulp) consumer cannot resolve Pulp's floor and its
 # plugin silently inherits the build host's OS floor (e.g. a macOS-26 machine
-# ships a macOS-26-only plugin instead of Pulp's 13.3).
+# ships a macOS-26-only plugin instead of Pulp's 13.4).
 set(_installed_minos "${_pulp_cmake_dir}/PulpMinOs.cmake")
 if(NOT EXISTS "${_installed_minos}")
     message(FATAL_ERROR

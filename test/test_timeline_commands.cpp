@@ -164,7 +164,7 @@ TEST_CASE("Timeline command diagnostics preserve target and media failure kinds"
                                      {std::move(track).value()});
     REQUIRE(sequence);
     MediaAsset asset{{9}, "asset", 10, {48'000, 1}, content_hash(), AssetStoragePolicy::External,
-                     {},  {}};
+                     {},  {}, {}};
     auto with_asset =
         Project::create({{1}, "project", 10, {3}, {asset}, {std::move(sequence).value()}});
     REQUIRE(with_asset);
@@ -221,13 +221,17 @@ TEST_CASE("Timeline identity and clip indexes path copy at logarithmic scale") {
         REQUIRE(value);
         clips.push_back(std::move(value).value());
     }
+    const auto before_track_nodes = Track::index_stats().nodes_created;
     auto track = Track::create({4}, "large", std::move(clips));
     REQUIRE(track);
+    REQUIRE(Track::index_stats().nodes_created - before_track_nodes == 20000);
     auto sequence =
         Sequence::create({3}, "sequence", TickDuration{200000}, {std::move(track).value()});
     REQUIRE(sequence);
+    const auto before_project_nodes = Project::identity_stats().nodes_created;
     auto project = Project::create({{1}, "large", 10005, {3}, {}, {std::move(sequence).value()}});
     REQUIRE(project);
+    REQUIRE(Project::identity_stats().nodes_created - before_project_nodes == 10003);
     const auto before_nodes = Project::identity_stats().nodes_created;
     auto added = Clip::create({10005}, {160000}, {8}, EmptyContent{});
     REQUIRE(added);
@@ -252,4 +256,22 @@ TEST_CASE("Opaque semantic equality ignores admission limits") {
     REQUIRE(left);
     REQUIRE(right);
     REQUIRE(equivalent(left.value(), right.value()));
+}
+
+TEST_CASE("Asset commands include audio loop metadata in equality and retained size") {
+    AudioLoopInfo loop{
+        .musical_length = TickDuration{4 * kTicksPerQuarter},
+        .points = {{240, AudioLoopPointKind::Manual}, {480, AudioLoopPointKind::Automatic}},
+        .tags = {"drums", "warm"},
+    };
+    MediaAsset asset{{9}, "loop.wav", 960, {48'000, 1}, content_hash(),
+                     AssetStoragePolicy::External, {}, {}, loop};
+    const Command with_loop = CreateAsset{asset};
+    REQUIRE(equivalent(with_loop, Command{CreateAsset{asset}}));
+    REQUIRE(retained_size(with_loop) >=
+            2 * sizeof(AudioLoopPoint) + 2 * sizeof(std::string) + loop.tags[0].size() +
+                loop.tags[1].size());
+
+    asset.loop_info.reset();
+    REQUIRE_FALSE(equivalent(with_loop, Command{CreateAsset{asset}}));
 }

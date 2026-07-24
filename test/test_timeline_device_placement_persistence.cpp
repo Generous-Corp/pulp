@@ -38,7 +38,7 @@ SchemaRegistry registry_with_replaced_track_migration() {
     for (const auto& original : source.types()) {
         auto copy = original;
         if (copy.type_name == "pulp.timeline.track") {
-            REQUIRE(copy.upgrades.size() == 3);
+            REQUIRE(copy.upgrades.size() == 5);
             copy.upgrades[0].migrate = rewrite_track_identity;
         }
         REQUIRE(builder.register_type(std::move(copy)).has_value());
@@ -59,7 +59,7 @@ void require_invalid_identity(const std::string& snapshot) {
 TEST_CASE("Timeline device chains round trip in authored order") {
     const auto registry = builtins();
     const auto encoded = take(serialize_project(project_with_devices(), registry));
-    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
+    REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":6") !=
             std::string::npos);
     REQUIRE(encoded.json.find("\"type_name\":\"pulp.timeline.device_placement\"") !=
             std::string::npos);
@@ -145,7 +145,7 @@ TEST_CASE("Timeline permanent fixtures cover Track versions one and two") {
     const auto old_project = take(deserialize_project(fixture("v1/track.json"), registry));
     REQUIRE(old_project.sequences()[0].tracks()[0].device_chain().empty());
     const auto upgraded = take(serialize_project(old_project, registry));
-    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":4") !=
+    REQUIRE(upgraded.json.find("\"type_name\":\"pulp.timeline.track\",\"version\":6") !=
             std::string::npos);
 
     const auto current = take(deserialize_project(fixture("v2/device-chain.json"), registry));
@@ -192,7 +192,7 @@ TEST_CASE("Timeline device chain envelopes reject mislabeled structural versions
     };
 
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
-                        "pulp.timeline.track\",\"version\":5"),
+                        "pulp.timeline.track\",\"version\":7"),
            PersistenceErrorCode::UnsupportedSchemaVersion);
     reject(replace_once(current, "pulp.timeline.track\",\"version\":2",
                         "pulp.timeline.track\",\"version\":1"),
@@ -243,10 +243,11 @@ TEST_CASE("Timeline persistence restores device placement tombstones with Track 
 
     require_invalid_identity(
         replace_once(snapshot, "\"clip_id\":\"0\",\"id\":\"6\"", "\"clip_id\":\"4\",\"id\":\"6\""));
-    require_invalid_identity(replace_once(
-        snapshot,
-        "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"3\"",
-        "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"99\""));
+    require_invalid_identity(replace_once(snapshot,
+                                          "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_"
+                                          "id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"3\"",
+                                          "\"id\":\"6\",\"kind\":\"device_placement\",\"parent_"
+                                          "id\":\"3\",\"sequence_id\":\"2\",\"track_id\":\"99\""));
     require_invalid_identity(replace_once(snapshot, "\"parent_id\":\"3\",\"sequence_id\":\"2\"",
                                           "\"parent_id\":\"4\",\"sequence_id\":\"2\""));
 

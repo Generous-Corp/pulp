@@ -56,7 +56,8 @@ Project make_checkpoint(const CompiledTempoMap& map) {
     const auto content_hash = ContentHash::from_hex(std::string(64, 'a'));
     REQUIRE(content_hash);
     MediaAsset asset{
-        {30}, "golden.wav", 24, {48'000, 1}, *content_hash, AssetStoragePolicy::External, {}, {}};
+        {30}, "golden.wav", 24, {48'000, 1}, *content_hash, AssetStoragePolicy::External,
+        {},   {},           {}};
     return take(Project::create(ProjectInput{
         {1}, "journal replay golden", 31, {2}, {std::move(asset)}, {std::move(sequence)}}));
 }

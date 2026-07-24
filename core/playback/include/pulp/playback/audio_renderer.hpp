@@ -20,6 +20,7 @@ namespace pulp::playback {
 
 class PlaybackProgram;
 class ProgramCompilerTask;
+class AudioClipConversionArtifact;
 
 enum class AudioRendererErrorCode : std::uint8_t {
     InvalidIdentity,
@@ -31,6 +32,7 @@ enum class AudioRendererErrorCode : std::uint8_t {
     InvalidClipRange,
     InvalidFade,
     CapacityExceeded,
+    InvalidTakeComp,
 };
 
 struct AudioRendererError {
@@ -68,6 +70,9 @@ class DecodedAudioAssetPool {
 };
 
 struct AudioClipRendererProgram {
+    enum class SourceKind : std::uint8_t { ArrangementClip, TakeCompSegment, FrozenTrack };
+    enum class TimeDomain : std::uint8_t { Musical, Absolute };
+
     timeline::ItemId id;
     timeline::ItemId asset_id;
     std::shared_ptr<const audio::AudioFileData> audio;
@@ -77,11 +82,21 @@ struct AudioClipRendererProgram {
     std::uint64_t source_frame_count = 0;
     std::uint64_t renderable_timeline_frames = 0;
     double source_frames_per_timeline_frame = 1.0;
+    std::shared_ptr<const AudioClipConversionArtifact> conversion_artifact;
     float gain_linear = 1.0f;
     std::uint64_t fade_in_frames = 0;
     std::uint64_t fade_out_frames = 0;
+    SourceKind source_kind = SourceKind::ArrangementClip;
+    std::uint32_t source_ordinal = 0;
+    TimeDomain time_domain = TimeDomain::Absolute;
+    timebase::TickPosition musical_tick_start{};
+    timebase::TickPosition musical_tick_end{};
 
     std::int64_t timeline_end() const noexcept;
+    bool uses_sample_rate_conversion() const noexcept;
+    bool uses_host_rate_conversion() const noexcept;
+    bool shares_sample_rate_conversion_with(const AudioClipRendererProgram& other) const noexcept;
+    bool shares_host_rate_conversion_with(const AudioClipRendererProgram& other) const noexcept;
 };
 
 class AudioTrackRendererProgram {
@@ -109,6 +124,21 @@ runtime::Result<AudioClipRendererProgram, AudioRendererError>
 compile_audio_clip_program(const timeline::Clip& clip, const timeline::Project& project,
                            const timebase::CompiledTempoMap& tempo_map,
                            const DecodedAudioAssetPool& assets, const AudioRendererLimits& limits);
+
+/// Lowers one canonical take-comp selection to the same immutable audio-region
+/// artifact used by arrangement clips. The ordinal is stable within the
+/// owning lane snapshot and distinguishes repeated selections from one take.
+runtime::Result<AudioClipRendererProgram, AudioRendererError> compile_take_comp_segment_program(
+    const timeline::TakeLane& lane, std::size_t segment_index, const timeline::Project& project,
+    const timebase::CompiledTempoMap& tempo_map, const DecodedAudioAssetPool& assets,
+    const AudioRendererLimits& limits);
+
+/// Lowers a track's selected freeze artifact to one immutable audio region.
+runtime::Result<AudioClipRendererProgram, AudioRendererError>
+compile_track_freeze_program(const timeline::Track& track, const timeline::Project& project,
+                             const timebase::CompiledTempoMap& tempo_map,
+                             const DecodedAudioAssetPool& assets,
+                             const AudioRendererLimits& limits);
 
 runtime::Result<std::shared_ptr<const AudioTrackRendererProgram>, AudioRendererError>
 link_audio_track_program(timeline::ItemId track_id, std::vector<AudioClipRendererProgram> clips,
@@ -160,7 +190,9 @@ class ArrangementAudioTrackRenderer {
     RendererCarryState state_snapshot() const noexcept {
         return shell_.state_snapshot();
     }
-    void reset() noexcept { shell_.reset(); }
+    void reset() noexcept {
+        shell_.reset();
+    }
 
   private:
     StableRendererShell shell_;

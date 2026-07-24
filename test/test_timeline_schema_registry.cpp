@@ -1,8 +1,10 @@
+#include <pulp/timeline/command.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -103,6 +105,39 @@ TEST_CASE("Timeline schema registry is explicit immutable and deterministic") {
     REQUIRE(registry.value().types()[1].fields[0].name == "a");
     REQUIRE(registry.value().find(SchemaDomain::Content, "vendor.zed") != nullptr);
     REQUIRE(registry.value().find(SchemaDomain::Document, "vendor.zed") == nullptr);
+}
+
+TEST_CASE("Built-in command registry covers the complete mutation variant") {
+    constexpr std::array expected{
+        "pulp.timeline.command.create_asset",
+        "pulp.timeline.command.insert_automation_lane",
+        "pulp.timeline.command.insert_clip",
+        "pulp.timeline.command.insert_take",
+        "pulp.timeline.command.insert_take_lane",
+        "pulp.timeline.command.move_clip",
+        "pulp.timeline.command.remove_asset",
+        "pulp.timeline.command.remove_automation_lane",
+        "pulp.timeline.command.remove_clip",
+        "pulp.timeline.command.remove_take",
+        "pulp.timeline.command.remove_take_lane",
+        "pulp.timeline.command.set_active_take_lane",
+        "pulp.timeline.command.set_clip_playback_properties",
+        "pulp.timeline.command.set_meter_map",
+        "pulp.timeline.command.set_note_velocity",
+        "pulp.timeline.command.set_record_arm",
+        "pulp.timeline.command.set_take_comp",
+        "pulp.timeline.command.set_tempo_map",
+        "pulp.timeline.command.set_track_freeze",
+    };
+    static_assert(expected.size() == std::variant_size_v<Command>);
+
+    const auto registry = take_value(make_builtin_timeline_registry());
+    std::vector<std::string_view> actual;
+    for (const auto& schema : registry.types())
+        if (schema.domain == SchemaDomain::Command)
+            actual.push_back(schema.type_name);
+    REQUIRE(actual.size() == expected.size());
+    REQUIRE(std::equal(actual.begin(), actual.end(), expected.begin()));
 }
 
 TEST_CASE("Timeline schema builder rejects ambiguous registrations") {

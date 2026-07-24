@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 
@@ -17,7 +18,7 @@ struct EvaluatedPoint {
 };
 
 struct RangeTopology {
-    std::uint32_t mandatory = 1;
+    std::uint32_t mandatory = 0;
     std::uint32_t refinable = 0;
 };
 
@@ -55,9 +56,9 @@ void visit_unique_knots(std::span<const AutomationProgramSegment> segments,
     }
 }
 
-std::span<const AutomationProgramSegment>
-segments_intersecting(const AutomationProgram& program, const TransportRange& range,
-                      std::uint32_t frames) noexcept {
+std::span<const AutomationProgramSegment> segments_intersecting(const AutomationProgram& program,
+                                                                const TransportRange& range,
+                                                                std::uint32_t frames) noexcept {
     const auto segments = program.segments();
     const auto first = std::lower_bound(
         segments.begin(), segments.end(), range.timeline_sample_start,
@@ -73,6 +74,94 @@ segments_intersecting(const AutomationProgram& program, const TransportRange& ra
     return {first, last};
 }
 
+std::span<const AutomationProgramSegment>
+host_mapped_segments_intersecting(const AutomationProgram& program, const TransportRange& range,
+                                  std::uint32_t) noexcept {
+    const auto segments = program.segments();
+    if (range.has_precise_host_ticks) {
+        const auto start = static_cast<long double>(range.host_tick_start);
+        const auto end = static_cast<long double>(range.host_tick_end);
+        const auto first =
+            std::lower_bound(segments.begin(), segments.end(), start,
+                             [](const AutomationProgramSegment& segment, long double tick) {
+                                 return static_cast<long double>(segment.end_tick.value) < tick;
+                             });
+        const auto last =
+            std::lower_bound(first, segments.end(), end,
+                             [](const AutomationProgramSegment& segment, long double tick) {
+                                 return static_cast<long double>(segment.start_tick.value) < tick;
+                             });
+        return {first, last};
+    }
+    const auto first =
+        std::lower_bound(segments.begin(), segments.end(), range.timeline_tick_start,
+                         [](const AutomationProgramSegment& segment, timebase::TickPosition tick) {
+                             return segment.end_tick < tick;
+                         });
+    const auto last =
+        std::lower_bound(first, segments.end(), range.timeline_tick_end,
+                         [](const AutomationProgramSegment& segment, timebase::TickPosition tick) {
+                             return segment.start_tick < tick;
+                         });
+    return {first, last};
+}
+
+long double tick_offset_from(timebase::TickPosition origin, timebase::TickPosition tick) noexcept {
+    if (tick >= origin) {
+        return static_cast<long double>(static_cast<std::uint64_t>(tick.value) -
+                                        static_cast<std::uint64_t>(origin.value));
+    }
+    return -static_cast<long double>(static_cast<std::uint64_t>(origin.value) -
+                                     static_cast<std::uint64_t>(tick.value));
+}
+
+long double host_mapped_tick_offset_at_output_offset(const TransportRange& range,
+                                                     std::uint32_t output_offset) noexcept {
+    if (range.frame_count == 0)
+        return 0.0L;
+    const auto clamped = std::min(output_offset, range.frame_count);
+    const auto fraction =
+        static_cast<long double>(clamped) / static_cast<long double>(range.frame_count);
+    if (range.has_precise_host_ticks) {
+        const auto start = static_cast<long double>(range.host_tick_start);
+        const auto end = static_cast<long double>(range.host_tick_end);
+        return start - static_cast<long double>(range.timeline_tick_start.value) +
+               (end - start) * fraction;
+    }
+    return tick_offset_from(range.timeline_tick_start, range.timeline_tick_end) * fraction;
+}
+
+bool host_mapped_output_offset_for_tick_exact(const TransportRange& range,
+                                              timebase::TickPosition tick,
+                                              std::uint32_t& output_offset) noexcept {
+    if (!range.has_precise_host_ticks) {
+        if (range.frame_count == 0 || tick < range.timeline_tick_start ||
+            !(tick < range.timeline_tick_end))
+            return false;
+        const auto tick_offset = tick_offset_from(range.timeline_tick_start, tick);
+        const auto tick_span = tick_offset_from(range.timeline_tick_start, range.timeline_tick_end);
+        const auto projected =
+            tick_offset * static_cast<long double>(range.frame_count) / tick_span;
+        output_offset = static_cast<std::uint32_t>(std::min<long double>(
+            std::floor(projected), static_cast<long double>(range.frame_count - 1u)));
+        return true;
+    }
+    const auto tick_start = range.has_precise_host_ticks
+                                ? static_cast<long double>(range.host_tick_start)
+                                : static_cast<long double>(range.timeline_tick_start.value);
+    const auto tick_end = range.has_precise_host_ticks
+                              ? static_cast<long double>(range.host_tick_end)
+                              : static_cast<long double>(range.timeline_tick_end.value);
+    const auto requested_tick = static_cast<long double>(tick.value);
+    if (range.frame_count == 0 || requested_tick < tick_start || !(requested_tick < tick_end))
+        return false;
+    const auto projected = (requested_tick - tick_start) *
+                           static_cast<long double>(range.frame_count) / (tick_end - tick_start);
+    output_offset = static_cast<std::uint32_t>(std::min<long double>(
+        std::floor(projected), static_cast<long double>(range.frame_count - 1u)));
+    return true;
+}
+
 bool frame_offset_for(const TransportRange& range, std::uint32_t frames,
                       timebase::SamplePosition sample, std::uint32_t& offset) noexcept {
     if (sample < range.timeline_sample_start)
@@ -85,9 +174,94 @@ bool frame_offset_for(const TransportRange& range, std::uint32_t frames,
     return true;
 }
 
+template <typename Visitor>
+void visit_unique_host_knot_frames(std::span<const AutomationProgramSegment> segments,
+                                   const TransportRange& range, Visitor&& visitor) noexcept {
+    if (segments.empty())
+        return;
+    auto previous_tick = segments.front().start_tick;
+    auto previous_frame = std::numeric_limits<std::uint32_t>::max();
+    auto visit_tick = [&](timebase::TickPosition tick) noexcept {
+        std::uint32_t frame = 0;
+        if (host_mapped_output_offset_for_tick_exact(range, tick, frame) && frame != 0u &&
+            frame != previous_frame) {
+            previous_frame = frame;
+            visitor(frame);
+        }
+    };
+    visit_tick(previous_tick);
+    for (const auto& segment : segments) {
+        if (segment.end_tick == previous_tick)
+            continue;
+        previous_tick = segment.end_tick;
+        visit_tick(previous_tick);
+    }
+}
+
+struct HostMappedRefinableInterval {
+    std::uint32_t first = 0;
+    std::uint32_t count = 0;
+    std::uint32_t excluded_mandatory = std::numeric_limits<std::uint32_t>::max();
+};
+
+HostMappedRefinableInterval host_mapped_refinable_interval(const AutomationProgramSegment& segment,
+                                                           const TransportRange& range,
+                                                           std::uint32_t frames) noexcept {
+    HostMappedRefinableInterval interval;
+    if (frames <= 1u || segment.interpolation != timeline::AutomationInterpolation::Continuous ||
+        std::bit_cast<std::uint32_t>(segment.start_value) ==
+            std::bit_cast<std::uint32_t>(segment.end_value)) {
+        return interval;
+    }
+    const auto tick_span =
+        range.has_precise_host_ticks
+            ? static_cast<long double>(range.host_tick_end) -
+                  static_cast<long double>(range.host_tick_start)
+            : tick_offset_from(range.timeline_tick_start, range.timeline_tick_end);
+    const auto clipped_start =
+        range.has_precise_host_ticks
+            ? std::max(0.0L, static_cast<long double>(segment.start_tick.value) -
+                                 static_cast<long double>(range.host_tick_start))
+            : std::max(0.0L, tick_offset_from(range.timeline_tick_start, segment.start_tick));
+    const auto clipped_end =
+        range.has_precise_host_ticks
+            ? std::min(tick_span, static_cast<long double>(segment.end_tick.value) -
+                                      static_cast<long double>(range.host_tick_start))
+            : std::min(tick_span, tick_offset_from(range.timeline_tick_start, segment.end_tick));
+    if (!(clipped_start < clipped_end) || !(tick_span > 0.0L))
+        return interval;
+    const auto first =
+        std::floor(clipped_start * static_cast<long double>(frames) / tick_span) + 1.0L;
+    const auto last = std::ceil(clipped_end * static_cast<long double>(frames) / tick_span) - 1.0L;
+    if (first > last || first >= static_cast<long double>(frames))
+        return interval;
+    interval.first = static_cast<std::uint32_t>(std::max(1.0L, first));
+    const auto bounded_last =
+        static_cast<std::uint32_t>(std::min(last, static_cast<long double>(frames - 1u)));
+    if (interval.first > bounded_last)
+        return {};
+    interval.count = bounded_last - interval.first + 1u;
+    std::uint32_t mandatory = 0;
+    if (host_mapped_output_offset_for_tick_exact(range, segment.end_tick, mandatory) &&
+        mandatory >= interval.first && mandatory <= bounded_last) {
+        interval.excluded_mandatory = mandatory;
+        --interval.count;
+    }
+    return interval;
+}
+
+std::uint32_t host_mapped_refinement_frame(const HostMappedRefinableInterval& interval,
+                                           std::uint32_t rank) noexcept {
+    auto frame = interval.first + rank;
+    if (interval.excluded_mandatory != std::numeric_limits<std::uint32_t>::max() &&
+        frame >= interval.excluded_mandatory) {
+        ++frame;
+    }
+    return frame;
+}
+
 bool refinable_interval(const AutomationProgramSegment& segment, const TransportRange& range,
-                        std::uint32_t frames, std::uint32_t& first,
-                        std::uint32_t& count) noexcept {
+                        std::uint32_t frames, std::uint32_t& first, std::uint32_t& count) noexcept {
     if (segment.interpolation != timeline::AutomationInterpolation::Continuous ||
         std::bit_cast<std::uint32_t>(segment.start_value) ==
             std::bit_cast<std::uint32_t>(segment.end_value) ||
@@ -138,6 +312,18 @@ RangeTopology range_topology(const AutomationProgram& program, const TransportRa
     return topology;
 }
 
+RangeTopology host_mapped_range_topology(const AutomationProgram& program,
+                                         const TransportRange& range,
+                                         std::uint32_t frames) noexcept {
+    RangeTopology topology;
+    const auto segments = host_mapped_segments_intersecting(program, range, frames);
+    visit_unique_host_knot_frames(segments, range,
+                                  [&](std::uint32_t) noexcept { ++topology.mandatory; });
+    for (const auto& segment : segments)
+        topology.refinable += host_mapped_refinable_interval(segment, range, frames).count;
+    return topology;
+}
+
 std::uint32_t refinement_rank(std::uint32_t selection, std::uint32_t selected_count,
                               std::uint32_t candidate_count) noexcept {
     const auto numerator = static_cast<std::uint64_t>(selection + 1u) *
@@ -183,9 +369,89 @@ std::uint32_t populate_range_selection(const AutomationProgram& program,
         }
         candidates_before += count;
     }
-    std::sort(output.begin(), output.begin() + written,
-              [](const auto& lhs, const auto& rhs) { return lhs.sample_offset < rhs.sample_offset; });
+    std::sort(output.begin(), output.begin() + written, [](const auto& lhs, const auto& rhs) {
+        return lhs.sample_offset < rhs.sample_offset;
+    });
     return written;
+}
+
+std::uint32_t
+populate_host_mapped_range_selection(const AutomationProgram& program, const TransportRange& range,
+                                     std::uint32_t frames, std::uint32_t refinable_count,
+                                     std::uint32_t selected_refinements,
+                                     std::span<AutomationBlockEvent> output) noexcept {
+    std::uint32_t written = 0;
+    output[written++] = {range.sample_offset, 0.0f, AutomationTransition::Seed};
+    const auto segments = host_mapped_segments_intersecting(program, range, frames);
+    visit_unique_host_knot_frames(segments, range, [&](std::uint32_t frame) noexcept {
+        output[written++] = {range.sample_offset + frame, 0.0f, AutomationTransition::Immediate};
+    });
+    std::uint32_t next_rank = selected_refinements == 0
+                                  ? std::numeric_limits<std::uint32_t>::max()
+                                  : refinement_rank(0, selected_refinements, refinable_count);
+    std::uint32_t selected_refinement = 0;
+    std::uint32_t candidates_before = 0;
+    for (const auto& segment : segments) {
+        const auto interval = host_mapped_refinable_interval(segment, range, frames);
+        while (selected_refinement < selected_refinements &&
+               next_rank < candidates_before + interval.count) {
+            const auto frame =
+                host_mapped_refinement_frame(interval, next_rank - candidates_before);
+            output[written++] = {range.sample_offset + frame, 0.0f,
+                                 AutomationTransition::LinearRamp};
+            ++selected_refinement;
+            next_rank =
+                selected_refinement < selected_refinements
+                    ? refinement_rank(selected_refinement, selected_refinements, refinable_count)
+                    : std::numeric_limits<std::uint32_t>::max();
+        }
+        candidates_before += interval.count;
+    }
+    std::sort(output.begin(), output.begin() + written, [](const auto& lhs, const auto& rhs) {
+        return lhs.sample_offset < rhs.sample_offset;
+    });
+    return written;
+}
+
+bool host_mapped_mandatory_tick_at_frame(const AutomationProgram& program,
+                                         const TransportRange& range, std::uint32_t frame,
+                                         long double& document_tick_offset) noexcept {
+    const auto segments = program.segments();
+    const auto tick_span =
+        range.has_precise_host_ticks
+            ? static_cast<long double>(range.host_tick_end) -
+                  static_cast<long double>(range.host_tick_start)
+            : tick_offset_from(range.timeline_tick_start, range.timeline_tick_end);
+    auto host_offset_from_start = [&](timebase::TickPosition tick) noexcept {
+        return range.has_precise_host_ticks ? static_cast<long double>(tick.value) -
+                                                  static_cast<long double>(range.host_tick_start)
+                                            : tick_offset_from(range.timeline_tick_start, tick);
+    };
+    const auto upper_tick_offset = static_cast<long double>(frame + 1u) * tick_span /
+                                   static_cast<long double>(range.frame_count);
+    const auto upper =
+        std::lower_bound(segments.begin(), segments.end(), upper_tick_offset,
+                         [&](const AutomationProgramSegment& segment, long double value) {
+                             return host_offset_from_start(segment.end_tick) < value;
+                         });
+    if (upper != segments.begin()) {
+        const auto candidate = std::prev(upper)->end_tick;
+        std::uint32_t candidate_frame = 0;
+        if (host_mapped_output_offset_for_tick_exact(range, candidate, candidate_frame) &&
+            candidate_frame == frame) {
+            document_tick_offset = tick_offset_from(range.timeline_tick_start, candidate);
+            return true;
+        }
+    }
+    std::uint32_t candidate_frame = 0;
+    if (host_mapped_output_offset_for_tick_exact(range, segments.front().start_tick,
+                                                 candidate_frame) &&
+        candidate_frame == frame) {
+        document_tick_offset =
+            tick_offset_from(range.timeline_tick_start, segments.front().start_tick);
+        return true;
+    }
+    return false;
 }
 
 EvaluatedPoint evaluate(const AutomationProgram& program, timebase::SamplePosition sample,
@@ -219,12 +485,51 @@ EvaluatedPoint evaluate(const AutomationProgram& program, timebase::SamplePositi
             segment_index};
 }
 
+EvaluatedPoint evaluate_host_mapped(const AutomationProgram& program,
+                                    timebase::TickPosition tick_origin, long double tick_offset,
+                                    std::size_t& segment_index) noexcept {
+    const auto segments = program.segments();
+    while (segment_index + 1u < segments.size() &&
+           tick_offset >= tick_offset_from(tick_origin, segments[segment_index].end_tick)) {
+        ++segment_index;
+    }
+    if (tick_offset < tick_offset_from(tick_origin, segments.front().start_tick))
+        return {program.leading_value(), segment_index};
+
+    const auto& segment = segments[segment_index];
+    if (segment.start_tick == segment.end_tick)
+        return {segment.end_value, segment_index};
+    const auto segment_start = tick_offset_from(tick_origin, segment.start_tick);
+    const auto segment_end = tick_offset_from(tick_origin, segment.end_tick);
+    if (tick_offset <= segment_start) {
+        return {segment.start_value, segment_index};
+    }
+    if (tick_offset >= segment_end)
+        return {segment.end_value, segment_index};
+    if (segment.interpolation == timeline::AutomationInterpolation::Hold)
+        return {segment.start_value, segment_index};
+
+    const auto fraction =
+        std::clamp((tick_offset - segment_start) / (segment_end - segment_start), 0.0L, 1.0L);
+    const auto bend = static_cast<long double>(segment.curvature);
+    const auto quadratic =
+        bend >= 0.0L ? fraction * fraction : std::fma(-fraction, fraction, 2.0L * fraction);
+    const auto shaped = std::fma(std::abs(bend), quadratic - fraction, fraction);
+    return {static_cast<float>(std::fma(static_cast<long double>(segment.end_value) -
+                                            static_cast<long double>(segment.start_value),
+                                        shaped, static_cast<long double>(segment.start_value))),
+            segment_index};
+}
+
 AutomationTransition transition_between(std::span<const AutomationProgramSegment> segments,
-                                        std::size_t from, std::size_t to) noexcept {
+                                        std::size_t from, std::size_t to,
+                                        bool host_beat_mapping) noexcept {
     const auto last = std::min(to > from ? to - 1u : from, segments.size() - 1u);
     for (auto index = from; index <= last; ++index) {
-        if (segments[index].start_sample < segments[index].end_sample &&
-            segments[index].interpolation == timeline::AutomationInterpolation::Hold)
+        const auto has_extent = host_beat_mapping
+                                    ? segments[index].start_tick < segments[index].end_tick
+                                    : segments[index].start_sample < segments[index].end_sample;
+        if (has_extent && segments[index].interpolation == timeline::AutomationInterpolation::Hold)
             return AutomationTransition::Immediate;
     }
     return AutomationTransition::LinearRamp;
@@ -288,7 +593,10 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
     for (std::uint8_t index = 0; index < active_ranges; ++index) {
         const auto frames = transport.is_playing ? transport.ranges[index].frame_count : 1u;
         intersecting_segments +=
-            segments_intersecting(program, transport.ranges[index], frames).size();
+            (transport.ranges[index].host_beat_mapping
+                 ? host_mapped_segments_intersecting(program, transport.ranges[index], frames)
+                 : segments_intersecting(program, transport.ranges[index], frames))
+                .size();
         result.intersecting_segments = static_cast<std::uint32_t>(std::min<std::uint64_t>(
             intersecting_segments, std::numeric_limits<std::uint32_t>::max()));
         if (intersecting_segments > max_intersecting_segments) {
@@ -298,11 +606,15 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
     }
     std::array<RangeTopology, 2> topologies{};
     std::array<std::uint32_t, 2> selected_refinements{};
-    std::uint32_t mandatory_total = 0;
+    // Every active range emits a seed in addition to its mandatory knots.
+    std::uint32_t mandatory_total = active_ranges;
     std::uint32_t refinable_total = 0;
     for (std::uint8_t index = 0; index < active_ranges; ++index) {
         const auto frames = transport.is_playing ? transport.ranges[index].frame_count : 1u;
-        topologies[index] = range_topology(program, transport.ranges[index], frames);
+        topologies[index] =
+            transport.ranges[index].host_beat_mapping
+                ? host_mapped_range_topology(program, transport.ranges[index], frames)
+                : range_topology(program, transport.ranges[index], frames);
         mandatory_total += topologies[index].mandatory;
         refinable_total += topologies[index].refinable;
     }
@@ -340,10 +652,15 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
         const auto frames = transport.is_playing ? range.frame_count : 1u;
         selection_starts[range_index] = selected;
         const auto selection_count =
-            topologies[range_index].mandatory + selected_refinements[range_index];
-        selection_counts[range_index] = populate_range_selection(
-            program, range, frames, topologies[range_index].refinable,
-            selected_refinements[range_index], output.subspan(selected, selection_count));
+            1u + topologies[range_index].mandatory + selected_refinements[range_index];
+        selection_counts[range_index] =
+            range.host_beat_mapping
+                ? populate_host_mapped_range_selection(
+                      program, range, frames, topologies[range_index].refinable,
+                      selected_refinements[range_index], output.subspan(selected, selection_count))
+                : populate_range_selection(
+                      program, range, frames, topologies[range_index].refinable,
+                      selected_refinements[range_index], output.subspan(selected, selection_count));
         selected += selection_counts[range_index];
     }
 
@@ -359,9 +676,18 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
              ++selection) {
             const auto selected_point = output[selection];
             const auto frame = selected_point.sample_offset - range.sample_offset;
-            const auto sample = add_saturating(range.timeline_sample_start, frame);
-            const auto point = evaluate(program, sample, tempo,
-                                        selection == selection_starts[range_index], segment_index);
+            EvaluatedPoint point;
+            if (range.host_beat_mapping) {
+                auto document_tick_offset = host_mapped_tick_offset_at_output_offset(range, frame);
+                if (selected_point.transition == AutomationTransition::Immediate)
+                    (void)host_mapped_mandatory_tick_at_frame(program, range, frame,
+                                                              document_tick_offset);
+                point = evaluate_host_mapped(program, range.timeline_tick_start,
+                                             document_tick_offset, segment_index);
+            } else {
+                point = evaluate(program, add_saturating(range.timeline_sample_start, frame), tempo,
+                                 selection == selection_starts[range_index], segment_index);
+            }
             if (!have_previous) {
                 output[emitted++] = {selected_point.sample_offset, point.value,
                                      AutomationTransition::Seed};
@@ -370,7 +696,8 @@ AutomationCursorResult AutomationCursor::process(const AutomationProgram& progra
                 continue;
             }
             const auto transition =
-                transition_between(program.segments(), previous.segment_index, point.segment_index);
+                transition_between(program.segments(), previous.segment_index, point.segment_index,
+                                   range.host_beat_mapping);
             const bool unchanged = std::bit_cast<std::uint32_t>(previous.value) ==
                                    std::bit_cast<std::uint32_t>(point.value);
             const bool mandatory = selected_point.transition == AutomationTransition::Immediate;

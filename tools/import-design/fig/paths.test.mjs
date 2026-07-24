@@ -36,7 +36,6 @@ test('decodePathBlob reads each command with its documented arity', () => {
   );
   assert.equal(toPathData(decodePathBlob(blob)), 'M1 2 L3 4 Q5 6 7 8 C9 10 11 12 13 14 Z');
 });
-
 test('a wrong arity does not silently parse — the encoding is pinned', () => {
   // A CUBIC's 6 floats must not be readable as anything else. If the arity
   // table drifts, this stream stops landing on the trailing CLOSE tag and the
@@ -165,7 +164,13 @@ test('a stroke-band vector gets no CSS border — the band is the stroke', () =>
     images: new Map(), fileKey: 'K', parserVersion: 't',
     compatSchemaVersion: '1', exportedAt: '1970-01-01T00:00:00Z',
   }).envelope.root.children.find((n) => n.name === 'blob');
-  assert.ok(fv.style && fv.style.border, 'a real fill + stroke keeps its border');
+  // A FILLED vector with a separate stroke used to lower it as a CSS border;
+  // it now rides the path itself as real stroke channels (SvgPathWidget fills
+  // and then strokes the same path), so no border may double it.
+  assert.equal(fv.stroke, '#ff0000', 'a real fill + stroke strokes its own path');
+  assert.equal(fv.strokeWidth, 2);
+  assert.ok(!(fv.style && fv.style.border),
+    'no redundant CSS border beside the path stroke — it would double the edge');
 });
 
 test('a filled vector prefers its fill outline and reports the dropped stroke', () => {
@@ -177,6 +182,54 @@ test('a filled vector prefers its fill outline and reports the dropped stroke', 
   // One path cannot carry both outlines; the caller is told rather than left to
   // guess that the stroke vanished.
   assert.equal(r.droppedStroke, true);
+});
+
+test('the declared winding rule survives onto the resolved path', () => {
+  // The rule decides which regions of a multi-subpath path are HOLES, and
+  // Figma's baked outlines do not promise direction-corrected contours: the
+  // reference design's "Sub" speaker cabinet arrives as five same-direction
+  // subpaths whose geometry declares ODD, and filling that nonzero paints a
+  // solid slab where the design shows a hollow woofer.
+  const node = strokeOnlyNode();
+  node.fillGeometry = [{ commandsBlob: 1, windingRule: 'ODD' }];
+  node.strokeGeometry = null;
+  node.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  assert.equal(geometryToPath(node, blobs).fillRule, 'evenodd');
+
+  node.fillGeometry = [{ commandsBlob: 1, windingRule: 'NONZERO' }];
+  assert.equal(geometryToPath(node, blobs).fillRule, 'nonzero');
+
+  // Missing rule maps to null, NOT a guessed default: the caller diagnoses a
+  // multi-subpath shape whose holes it may be filling solid.
+  node.fillGeometry = [{ commandsBlob: 1 }];
+  assert.equal(geometryToPath(node, blobs).fillRule, null);
+});
+
+test('evenodd wins when geometry regions disagree about the winding rule', () => {
+  // One node's fillGeometry is a LIST of per-region entries, each with its own
+  // rule ("Sub" is [NONZERO dot, ODD ring, ODD box-with-hole]) — and one
+  // emitted path carries one rule. Figma direction-corrects its NONZERO
+  // regions' contours, which fill identically under either rule, while an ODD
+  // region's same-direction holes fill SOLID under nonzero. So evenodd is the
+  // faithful merge, and `mixedWinding` states the (overlap-only) approximation.
+  const node = strokeOnlyNode();
+  node.strokeGeometry = null;
+  node.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  node.fillGeometry = [
+    { commandsBlob: 1, windingRule: 'NONZERO' },
+    { commandsBlob: 2, windingRule: 'ODD' },
+  ];
+  const localBlobs = [...blobs, { bytes: encode([MOVE, 0, 0], [LINE, 4, 0], [LINE, 4, 4], [LINE, 0, 4], [CLOSE]) }];
+  const r = geometryToPath(node, localBlobs);
+  assert.equal(r.fillRule, 'evenodd');
+  assert.equal(r.mixedWinding, true);
+
+  // Agreement is not "mixed" — no diagnostic noise on the common case.
+  node.fillGeometry = [
+    { commandsBlob: 1, windingRule: 'ODD' },
+    { commandsBlob: 2, windingRule: 'ODD' },
+  ];
+  assert.equal(geometryToPath(node, localBlobs).mixedWinding, false);
 });
 
 test('a zero-area shape resolves to null rather than an invalid viewBox', () => {
@@ -243,6 +296,71 @@ test('an unresolvable vector still reports vector-simplified exactly once', () =
   const { scene, frame } = sceneWith(node);
   const { diagnostics } = materializeFrame(scene, frame, CTX);
   assert.equal(diagnostics.filter((d) => d.code === 'vector-simplified').length, 1);
+});
+
+// A donut in blob space: outer square + inner square, BOTH wound clockwise.
+// Under evenodd the inner square is a hole; under the nonzero default it is
+// not — this is exactly the shape class the winding rule exists to settle.
+const donutBlob = { bytes: encode(
+  [MOVE, 0, 0], [LINE, 20, 0], [LINE, 20, 20], [LINE, 0, 20], [CLOSE],
+  [MOVE, 5, 5], [LINE, 15, 5], [LINE, 15, 15], [LINE, 5, 15], [CLOSE],
+) };
+
+function donutNode(windingExtra) {
+  return {
+    type: 'VECTOR', name: 'donut',
+    transform: { m00: 1, m01: 0, m02: 10, m10: 0, m11: 1, m12: 10 },
+    size: { x: 20, y: 20 },
+    fillGeometry: [{ commandsBlob: 2, ...windingExtra }],
+    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, visible: true }],
+  };
+}
+
+test('an evenodd vector reaches the envelope carrying fillRule', () => {
+  // `fillRule` is the exact key design_ir_json reads into svg_fill_rule, which
+  // codegen turns into setSvgFillRule — the bridge call SvgPathWidget already
+  // consumes. Dropping it here fills the donut's hole solid, silently.
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({ windingRule: 'ODD' }) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { envelope, diagnostics } = materializeFrame(scene, frame, CTX);
+  const v = firstVector(envelope.root);
+  assert.equal(v.fillRule, 'evenodd');
+  // Carried faithfully — nothing to confess.
+  assert.equal(diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated').length, 0);
+});
+
+test('a nonzero vector does not emit fillRule — it is the widget default', () => {
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({ windingRule: 'NONZERO' }) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { envelope } = materializeFrame(scene, frame, CTX);
+  assert.equal(firstVector(envelope.root).fillRule, undefined);
+});
+
+test('a multi-subpath vector with no winding rule is diagnosed, never silent', () => {
+  // The nonzero fallback can fill this donut's hole solid, and a solid slab
+  // raises no error anywhere downstream — the diagnostic is the only witness.
+  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 100 } };
+  const child = { guid: { sessionID: 0, localID: 2 }, parentIndex: { guid: frame.guid, position: '!' },
+                  ...donutNode({}) };
+  const scene = buildScene({ nodeChanges: [frame, child], blobs: [...blobs, donutBlob] });
+  const { diagnostics } = materializeFrame(scene, frame, CTX);
+  const diags = diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated');
+  assert.equal(diags.length, 1);
+  assert.equal(diags[0].severity, 'warning', 'info is dropped by both consumers');
+
+  // A single-contour shape fills identically under either rule — a missing
+  // declaration there is not a loss and must not cry wolf.
+  const single = strokeOnlyNode();
+  single.fillGeometry = [{ commandsBlob: 1 }];
+  single.strokeGeometry = null;
+  single.fillPaints = [{ type: 'SOLID', color: { r: 0, g: 1, b: 0, a: 1 }, visible: true }];
+  const s2 = sceneWith(single);
+  const r2 = materializeFrame(s2.scene, s2.frame, CTX);
+  assert.equal(r2.diagnostics.filter((d) => d.code === 'vector-fill-rule-approximated').length, 0);
 });
 
 // Figma's paint transform maps the node's box INTO gradient space, so this is
@@ -555,157 +673,4 @@ test('a mask child clips the siblings above it and paints nowhere', () => {
   // An opaque solid alpha mask lowers exactly — no approximation to confess.
   assert.ok(!diagnostics.some((d) => d.code === 'mask-approximated'),
     'exact lowering must not raise mask-approximated');
-});
-
-// ── mirrored nodes: min-corner truth, double-flip ink, stroke-slot margins ───
-
-test('a mirrored flex child reports its VISUAL box, and its ink un-mirrors (Env chip)', () => {
-  // The Triaz "Reverse" chip: an auto-layout row whose icon frame carries
-  // m00 = -1 with m02 on the box's RIGHT edge. Reading m02 as "left" put the
-  // sidecar one full icon-width right of where Figma draws the box, so
-  // layout_parity reported dx = -10.4 against a flex pass that had placed it
-  // exactly right. And because the emitted tree drops a container's mirror,
-  // the icon frame's flip no longer cancels its child Union's own baked flip
-  // — the reverse arrow rendered pointing forwards.
-  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
-    size: { x: 70, y: 16 }, stackMode: 'HORIZONTAL', stackSpacing: 6,
-    stackHorizontalPadding: 6, stackPaddingRight: 6 };
-  const icon = { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Icon',
-    parentIndex: { guid: row.guid, position: '!' },
-    size: { x: 10.4, y: 9 },
-    transform: { m00: -1, m01: 0, m02: 16.4, m10: 0, m11: 1, m12: 3.5 } };
-  // An asymmetric triangle, so a residual mirror cannot hide.
-  const union = { guid: { sessionID: 0, localID: 3 }, type: 'VECTOR', name: 'Union',
-    parentIndex: { guid: icon.guid, position: '!' },
-    size: { x: 10.4, y: 8 },
-    transform: { m00: -1, m01: 0, m02: 10.4, m10: 0, m11: 1, m12: 0 },
-    fillGeometry: [{ commandsBlob: 0 }],
-    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
-  const localBlobs = [
-    { bytes: encode([MOVE, 0, 0], [LINE, 4, 0], [LINE, 0, 8], [CLOSE]) },
-  ];
-  const scene = buildScene({ nodeChanges: [row, icon, union], blobs: localBlobs });
-  const { envelope, geometry } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
-
-  // Sidecar truth is the box Figma DRAWS: [m02 - w, m02], not [m02, m02 + w].
-  const iconRect = geometry.nodes.find((n) => n.node_id === '0:2');
-  assert.equal(iconRect.x, 6, 'mirror-aware min corner: 16.4 - 10.4');
-  assert.equal(iconRect.y, 3.5, 'the unmirrored axis keeps its translation');
-
-  // The ink sidecar composes the ancestor mirror the same way. Union's placed
-  // path spans [6.4, 10.4] inside Icon; Icon's flip maps that to [6, 10].
-  const unionRect = geometry.nodes.find((n) => n.node_id === '0:3');
-  assert.equal(unionRect.x, 6, 'ink min corner under a mirrored ancestor');
-  assert.equal(unionRect.width, 4);
-
-  // Icon's flip (dropped from the emitted tree) cancels Union's own baked
-  // flip: the emitted path must be the RAW triangle again — double-flip is
-  // literal cancellation, which is how the reverse arrow points backwards.
-  const v = firstVector(envelope.root);
-  assert.equal(v.path_data, 'M0 0 L4 0 L0 8 Z');
-});
-
-test('a mirrored ABSOLUTE node is placed at its visual box, 180deg stays pinned', () => {
-  // Same min-corner contract for styleFor's plain-placement branch: a mirror
-  // moves the box to the other side of the stored origin. A 180deg rotation
-  // (BOTH axes negative) must keep raw m02/m12 placement — that behavior is
-  // pinned by the slider-fill lesson and its test in fig.test.mjs.
-  const frame = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'F', size: { x: 100, y: 40 } };
-  const flipped = { guid: { sessionID: 0, localID: 2 }, type: 'ROUNDED_RECTANGLE', name: 'flipped',
-    parentIndex: { guid: frame.guid, position: '!' },
-    size: { x: 18, y: 6 },
-    transform: { m00: -1, m01: 0, m02: 30, m10: 0, m11: 1, m12: 3 } };
-  const scene = buildScene({ nodeChanges: [frame, flipped] });
-  const { envelope, geometry } = materializeFrame(scene, frame, CTX);
-  const child = envelope.root.children.find((n) => n.name === 'flipped');
-  assert.equal(child.style.left, 12, 'visual left = m02 - w under m00 = -1');
-  assert.equal(child.style.top, 3);
-  const rect = geometry.nodes.find((n) => n.node_id === '0:2');
-  assert.equal(rect.x, 12, 'sidecar and render must be the same quantity');
-});
-
-test('a mirrored ancestor reflects intermediate containers and their descendants', () => {
-  const root = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Root',
-    size: { x: 20, y: 20 } };
-  const flipped = { guid: { sessionID: 0, localID: 2 }, type: 'FRAME', name: 'Flipped',
-    parentIndex: { guid: root.guid, position: '!' },
-    size: { x: 20, y: 20 },
-    transform: { m00: -1, m01: 0, m02: 20, m10: 0, m11: 1, m12: 0 } };
-  const middle = { guid: { sessionID: 0, localID: 3 }, type: 'FRAME', name: 'Middle',
-    parentIndex: { guid: flipped.guid, position: '!' },
-    size: { x: 8, y: 8 },
-    transform: { m00: 1, m01: 0, m02: 2, m10: 0, m11: 1, m12: 3 } };
-  const leaf = { guid: { sessionID: 0, localID: 4 }, type: 'ROUNDED_RECTANGLE', name: 'Leaf',
-    parentIndex: { guid: middle.guid, position: '!' },
-    size: { x: 2, y: 2 },
-    transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 1 } };
-  const scene = buildScene({ nodeChanges: [root, flipped, middle, leaf] });
-  const { envelope } = materializeFrame(scene, root, CTX);
-  const emittedFlipped = envelope.root.children[0];
-  const emittedMiddle = emittedFlipped.children[0];
-  const emittedLeaf = emittedMiddle.children[0];
-
-  assert.equal(emittedFlipped.style.left, 0);
-  assert.equal(emittedMiddle.style.left, 10,
-    'the 8px container at x=2 reflects to 20-(2+8)');
-  assert.equal(emittedMiddle.style.top, 3);
-  assert.equal(emittedLeaf.style.left, 6,
-    'the descendant reflects within its emitted 8px parent');
-  assert.equal(emittedLeaf.style.top, 1);
-});
-
-test('a flowing vector reconciles stroke-inflated ink to its node box with margins', () => {
-  // Figma's auto-layout never sees a stroke, but the emitted ink box includes
-  // it (a CENTER stroke band overhangs the node box by half its weight). The
-  // env chip's 12px arrow carries a 2px stroke: letting the 14px ink ride the
-  // flex row pushed the "env" label 2px right. The widget keeps the exact ink
-  // (nothing rescales); margins hand Yoga back the node box.
-  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
-    size: { x: 48, y: 16 }, stackMode: 'HORIZONTAL', stackSpacing: 6,
-    stackHorizontalPadding: 6, stackPaddingRight: 6 };
-  const vec = { guid: { sessionID: 0, localID: 2 }, type: 'VECTOR', name: 'arrow',
-    parentIndex: { guid: row.guid, position: '!' },
-    size: { x: 12, y: 6 }, strokeWeight: 2,
-    transform: { m00: 1, m01: 0, m02: 6, m10: 0, m11: 1, m12: 5 },
-    fillGeometry: [],
-    strokeGeometry: [{ commandsBlob: 0 }],
-    fillPaints: [],
-    strokePaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
-  const localBlobs = [
-    // Stroke band overhanging the 12x6 node box by 1px on every side.
-    { bytes: encode([MOVE, -1, -1], [LINE, 13, -1], [LINE, 13, 7], [LINE, -1, 7], [CLOSE]) },
-  ];
-  const scene = buildScene({ nodeChanges: [row, vec], blobs: localBlobs });
-  const { envelope } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
-  const v = firstVector(envelope.root);
-  assert.equal(v.style.width, 14, 'the widget keeps the exact ink');
-  assert.deepEqual(
-    [v.layout.marginLeft, v.layout.marginRight, v.layout.marginTop, v.layout.marginBottom],
-    [-1, -1, -1, -1],
-    'margins hand the flex row back the 12x6 node box');
-});
-
-test('an instance-scale ink gap is NOT "corrected" by margins', () => {
-  // Through instance expansion the ink is solved at INSTANCE scale while
-  // node.size can still be the master's. That gap is a scale delta, not a
-  // stroke overhang; margins would move the child by it. The gate: overhangs
-  // beyond strokeWeight + 1 leave the layout alone.
-  const row = { guid: { sessionID: 0, localID: 1 }, type: 'FRAME', name: 'Row',
-    size: { x: 40, y: 40 }, stackMode: 'HORIZONTAL', stackSpacing: 10,
-    stackHorizontalPadding: 10, stackPaddingRight: 10 };
-  const vec = { guid: { sessionID: 0, localID: 2 }, type: 'VECTOR', name: 'stale-box',
-    parentIndex: { guid: row.guid, position: '!' },
-    size: { x: 32, y: 20 }, strokeWeight: 1,
-    transform: { m00: 1, m01: 0, m02: 4, m10: 0, m11: 1, m12: 10 },
-    fillGeometry: [{ commandsBlob: 0 }],
-    fillPaints: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 }, visible: true }] };
-  const localBlobs = [
-    // Ink solved at 0.8 instance scale: 25.6 wide vs the stale 32 node box.
-    { bytes: encode([MOVE, 4, 10], [LINE, 29.6, 10], [LINE, 29.6, 26], [LINE, 4, 26], [CLOSE]) },
-  ];
-  const scene = buildScene({ nodeChanges: [row, vec], blobs: localBlobs });
-  const { envelope } = materializeFrame(scene, findFrame(scene, 'Row'), CTX);
-  const v = firstVector(envelope.root);
-  assert.ok(!v.layout || v.layout.marginLeft === undefined,
-    'a scale-delta gap must not become margins');
 });

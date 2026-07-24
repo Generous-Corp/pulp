@@ -48,6 +48,16 @@ NodePtr node(ItemId id, ItemLocation location, NodePtr left = {}, NodePtr right 
                                                 node_height, node_count);
 }
 
+NodePtr build_balanced(std::span<const IdentityRecord> entries, std::size_t begin,
+                       std::size_t end) {
+    if (begin == end)
+        return {};
+    const auto middle = begin + (end - begin) / 2;
+    auto left = build_balanced(entries, begin, middle);
+    auto right = build_balanced(entries, middle + 1, end);
+    return node(entries[middle].item, entries[middle].location, std::move(left), std::move(right));
+}
+
 NodePtr balance(ItemId id, ItemLocation location, NodePtr left, NodePtr right) {
     if (height(left) > height(right) + 1) {
         if (height(left->left) < height(left->right)) {
@@ -148,6 +158,12 @@ std::size_t shared(const NodePtr& root, const std::unordered_set<const IdentityN
 }
 
 } // namespace
+
+IdentityDirectory IdentityDirectory::from_sorted_entries(std::span<const IdentityRecord> entries) {
+    IdentityDirectory result;
+    result.root_ = build_balanced(entries, 0, entries.size());
+    return result;
+}
 
 bool IdentityDirectory::insert(ItemId id, ItemLocation location) {
     bool duplicate = false;

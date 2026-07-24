@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace pulp::timeline::detail {
@@ -19,6 +20,7 @@ struct IdentityRecord {
 // cheap; insert/update path-copy only an AVL search path.
 class IdentityDirectory {
   public:
+    static IdentityDirectory from_sorted_entries(std::span<const IdentityRecord> entries);
     bool insert(ItemId id, ItemLocation location);
     bool replace(ItemId id, ItemLocation location);
     std::optional<ItemLocation> locate(ItemId id) const noexcept;

@@ -45,7 +45,7 @@ static std::string read_file_text(const fs::path& p) {
     return ss.str();
 }
 
-static std::string parse_pulp_toml_sdk_version(const std::string& body) {
+std::string parse_pulp_toml_sdk_version(const std::string& body) {
     // Hand-rolled minimal TOML scan — pulp.toml is small and the
     // sdk_version key is either a top-level scalar or lives under the
     // generated [pulp] table. We deliberately do NOT pull in a TOML
@@ -85,7 +85,7 @@ static std::string parse_pulp_toml_sdk_version(const std::string& body) {
     return {};
 }
 
-static std::string parse_cmake_project_version(const std::string& body) {
+std::string parse_cmake_project_version(const std::string& body) {
     // Match `project(<name> ... VERSION x.y.z ...)`. CMakeLists.txt for
     // a Pulp project either calls `project(...)` directly or uses
     // `pulp_add_plugin(... VERSION "x.y.z" ...)`. Try both.

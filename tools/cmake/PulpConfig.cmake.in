@@ -221,4 +221,17 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpUtils.cmake")
 
+# CMake's generated check_required_components() macro expects one
+# Pulp_<component>_FOUND variable per requested component. The SDK exports all
+# configured targets in one package file, so component selection validates
+# target availability rather than loading a second target file.
+foreach(_pulp_component IN LISTS Pulp_FIND_COMPONENTS)
+    if(TARGET "Pulp::${_pulp_component}")
+        set("Pulp_${_pulp_component}_FOUND" TRUE)
+    else()
+        set("Pulp_${_pulp_component}_FOUND" FALSE)
+    endif()
+endforeach()
+unset(_pulp_component)
+
 check_required_components(Pulp)

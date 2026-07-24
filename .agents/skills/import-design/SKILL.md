@@ -626,11 +626,55 @@ it would outline the outline). But the generic stroke→`border` lowering
 so codegen filled the band AND stroked it — two parallel lines where the design
 has one (a triad-pad triangle and every stroked ring rendered doubled/too-thick;
 the button rings even read as dark filled discs). The fix tracks
-`vectorStrokeBand = resolved.paint === 'stroke'` and skips the border for those
-nodes only; a real filled vector with a separate stroke (`paint === 'fill'`)
-keeps its border. Covered by a materialize-level test in `fig/paths.test.mjs`
-(stroke band → no border; fill+stroke → border). One general fix cleared the
-triangle weight AND the transport △○□ button rings at once.
+`vectorStrokeExpressed` (band painted OR stroke channels lowered) and skips the
+border for those nodes. Covered by a materialize-level test in
+`fig/paths.test.mjs`. One general fix cleared the triangle weight AND the
+transport △○□ button rings at once.
+
+**Stroke survival — the four lanes a Figma stroke renders through** (the
+stroke-survival fix; `fig/scene.mjs` `lowerStrokeChannels` + `fig/paths.mjs`):
+
+1. **Stroke-only vector, CENTER align** — the baked `strokeGeometry` band is
+   exact (caps/joins/dashes realized in the outline); painted as a FILL in the
+   stroke color. Unchanged, still the faithful path.
+2. **Fill + stroke on one vector** — the stroke rides the SAME path as real
+   stroke channels (`stroke`/`strokeGradient`/`strokeWidth` →
+   `setSvgStroke`/`setSvgStrokeGradient`/`setSvgStrokeWidth`): SvgPathWidget
+   fills then strokes one path, and for CENTER align the fill outline IS the
+   stroke centerline, so this is exact. No CSS border (would double the edge).
+   Fractional widths survive (the border lane rounded to whole px).
+3. **INSIDE/OUTSIDE-aligned stroke bands are baked UNCLIPPED** — Figma's blob
+   holds the boundary outlined at ±weight (verified: a weight-2 INSIDE
+   `Polygon 5` carries a 4px band; render-time clipping against the fill
+   region is what trims it, and we don't clip). Filling that band verbatim
+   painted the XY-pad triangle fat and bright — a #373737 grey where Figma renders #2b2b2b. The
+   decoder now prefers the FILL outline + a centered stroke channel — right
+   width and color, half a weight off in position — and raises
+   `stroke-align-approximated`.
+4. **Gradient strokes** — `GRADIENT_LINEAR` lowers to the `strokeGradient`
+   channel end-to-end (`SvgPathWidget::set_stroke_gradient` →
+   `Canvas::set_stroke_gradient_linear`; solid composite kept beside it as the
+   parse-failure fallback). Works on vectors AND on ellipse primitives whose
+   path is synthesized later — `design_ir_json.cpp` captures the stroke
+   channels UNCONDITIONALLY (not path_data-gated) precisely so
+   `synthesize_primitive_paths` can grow the path afterwards.
+
+**Vector-network fallback.** Symbol children can carry EMPTY
+`fillGeometry`/`strokeGeometry` on the master AND every instance's derived
+data (the FX knobs' `Oval` rim), leaving only `vectorData.vectorNetworkBlob`.
+`paths.mjs` decodes that network (layout self-validated by exact byte
+consumption: 12-byte header + 12B vertices + 28B segments; tangents are
+vertex-relative control offsets) into the shape's CENTERLINE and marks the
+result `centerline: true` — the caller STROKES it via the channels above,
+never fills. Refused (→ existing plain-box diagnostic) when regions are
+present, any vertex joins 3+ segments, or the byte count is off. Never used
+for `BOOLEAN_OPERATION` (operand children are the faithful fallback).
+
+**Diagnostics carry the instance-path node id.** `pushDiag` records
+`node.__key || guidKey(node.guid)` — recording only the master guid attached
+every symbol-expanded diagnostic to the MASTER while the envelope/materials
+sidecar name the clone, so `material_audit`'s per-node join scored honest
+out-loud degradations as SILENT drops (diagnosed column read 0).
 
 ### Design contract (`pulp design compile`) — the token/widget allowlist
 
@@ -1651,6 +1695,87 @@ so codegen lowers it like any other path. Key facts / gotchas:
 - Source of truth: `compat.json imports/object-coverage` (these 9 types are now
   `codegen: handled`) + the `[object-coverage]` drift guard + the
   `[view][import][codegen][vector]` tests.
+
+### Vector fill rule (winding) — holes in multi-subpath icons
+
+A multi-subpath vector's WINDING RULE decides which regions are holes, and
+dropping it is perfectly silent: the icon fills as a solid slab, no parse
+error anywhere. The designers-pick "Sub" speaker cabinet (a box with a hollow
+woofer ring) was the sweep's worst dE2000 (~25) for exactly this reason.
+The rule now flows end to end; facts to keep intact:
+
+- **`.fig` geometry entries carry their own `windingRule` EACH.** A node's
+  `fillGeometry` is a LIST of per-region entries `{windingRule, commandsBlob,
+  styleID}` — and one node can MIX rules ("Sub" is `[NONZERO dot, ODD ring,
+  ODD box-with-hole]`). `paths.mjs` concatenates the blobs into one path, so
+  one rule must be chosen: **evenodd wins when any entry declares it.** Figma
+  direction-corrects the contours of its NONZERO regions (holes wind opposite
+  their outer — verified on real subtract bool-ops), and direction-corrected
+  nesting fills identically under either rule; an ODD region's SAME-direction
+  holes fill solid under nonzero. So evenodd is correct for both kinds. Do
+  NOT "fix" this to first-entry-wins — that re-fills the Sub woofer.
+- **Figma does NOT promise direction-corrected contours under ODD.** Never
+  assume nonzero is safe because "baked geometry reverses holes" — that holds
+  only for the NONZERO-declared entries.
+- **The wire:** decoder emits `fillRule: 'evenodd'` on the envelope node
+  (omitted for nonzero — widget default) → `design_ir_json.cpp` reads
+  `fillRule`/`fill_rule`/`fill-rule` into `attributes["svg_fill_rule"]`
+  (only `evenodd`/`nonzero` accepted) → JS codegen emits
+  `setSvgFillRule(id,'evenodd')`; baked C++ codegen emits
+  `->set_fill_rule(FillRule::evenodd)` (path case only — SvgRect/SvgLine have
+  no fill rule, and `emit_svg_paint` is shared, so the emission lives at the
+  svg_path call site); native materializer's `apply_svg_paint(SvgPathWidget&)`
+  reads `svg_fill_rule` + raw `fill-rule`/`fillRule`.
+- **Diagnostic:** `vector-fill-rule-approximated` (registered 'warning' —
+  'info' is dropped by both consumers) fires for mixed rules on one node and
+  for a MULTI-subpath vector with no declared rule (nonzero fallback may fill
+  its holes solid). Single-contour shapes stay silent — both rules fill them
+  identically.
+- **Raster-testing gotcha:** the Skia screenshot backend composites onto an
+  OPAQUE background and renders at its own pixel ratio (2x on Retina), so a
+  "hole is transparent" assertion always reads opaque, and design-space pixel
+  coords are wrong by the scale factor. Prove holes by DIFFERENCE between the
+  two rules' renders of the same path (see the donut test in
+  `test_widget_bridge_svg.cpp`).
+
+### Decoder-tail gaps: gradient-on-outline, null boolean-ops, per-corner radii
+
+Three small `.fig`-decoder gaps that each look downstream but are all in
+`scene.mjs`. The renderer/bridge/codegen already supported every one of
+them — only the decoder wasn't populating the channel. Facts to keep:
+
+- **A gradient-filled TEXT lowered to a glyph outline must set
+  `fillGradient`, not just flatten.** TEXT never takes the box branch (a text
+  fill is the glyph *color*, not a background), so when a label outlines
+  (missing/icon font) its linear gradient used to collapse to the first solid
+  — the sequencer's rainbow "GENERATE PATTERN" pill imported flat gray. The
+  glyph-outline branch now mirrors the VECTOR branch: `firstGradient(node.fillPaints)`
+  → `gradientPaintToCss` → `out.fillGradient`, with the flattened solid kept
+  as `out.fill` (the widget's parse-failure fallback). Only LINEAR lowers;
+  a radial returns null and the generic `gradient-approximated` diagnostic
+  below still fires. Same wire as the fill-gradient path:
+  `design_ir_json` reads `fillGradient`→`svg_fill_gradient` (path-gated) →
+  codegen `setSvgFillGradient`.
+- **A `BOOLEAN_OPERATION` with null geometry AND no size paints nothing —
+  skip it, don't emit a 0×0 slab.** The sequencer's two `Union` nodes
+  (`1:162`/`1:163`) carry a 0-byte geometry blob and `size:{x:null,y:null}`;
+  the box fallback emitted them as 0-sized frames still carrying their
+  `#ffffff26` fill, which `layout_parity` flagged as EXTRA. The guard in
+  `walk()` fires ONLY when `geometryToPath` resolves nothing AND width/height
+  are both non-positive, so a boolean op whose geometry *does* resolve (or
+  that has real extent) keeps its paths. Diagnostic `boolean-empty-skipped`
+  (registered 'warning', like `slice-skipped` — the skip is correct
+  rendering, but 'info' is dropped by both consumers).
+- **Omitted corner radii are SQUARE (0), not "inherit the others."** kiwi
+  drops zero fields, so a bottom-rounded panel arrives as
+  `{bottomLeft:2, bottomRight:2}` with the top corners absent. `cornerRadius()`
+  used to `.filter()` the absent corners out, which made the two present
+  corners look uniform and rounded ALL FOUR. It now NORMALIZES the four raw
+  fields (absent → 0) BEFORE collapsing, so it returns a single value only
+  when all four truly agree; otherwise `perCornerRadii()` carries the
+  asymmetric case to `border_{top,bottom}_{left,right}_radius`, which codegen
+  already lowers to `setCornerRadius(id, "TopLeft", r)`. MixerPanelFL keeps
+  `[0,0,2,2]`; Rectangle 1047 keeps `[3,0,0,3]`.
 
 ### Figma resize constraints → flex/position
 
@@ -4541,6 +4666,26 @@ Recognised **fader** and **meter** widgets are skinned to match the captured Fig
 
 Non-obvious rules in the import + native-codegen path. Each cost a real
 correctness bug before it was made explicit; treat them as invariants.
+
+- **Sub-pixel geometry survives end-to-end, through TWO former rounding
+  layers.** Concentric compositions (knob body ellipse + value-ring arc)
+  are aligned only at fractional coordinates: "A Channel FX" solves the
+  body at (7.51, 7.51, 22.53²) against ring arcs placed at 2-decimal
+  precision, and whole-pixel rounding moves siblings RELATIVE to each
+  other by up to ~0.7px/axis — every knob ring rendered visibly
+  off-center. The two layers that used to round: (1) the .fig decoder's
+  `styleFor` (scene.mjs) emitted `Math.round`ed left/top/width/height for
+  box-model nodes while the VECTOR_LIKE lane kept `round2` — both now use
+  `round2`; (2) Yoga's default pointScaleFactor of 1.0 re-rounded the
+  laid-out boxes — imported roots opt out via
+  `View::set_subpixel_layout(true)` (set by `build_native_view_tree` and
+  by the emitted `setSubpixelLayout('', true)` bridge call in generated
+  JS; discovered pass-wide in yoga_layout.cpp). When diagnosing a
+  "shape misregistered by <1px" report, check BOTH layers before touching
+  paint code — `--dump-layout` shows the post-Yoga truth, and integer-only
+  x/y/width/height there means the opt-out is not reaching the pass.
+  Fixing this also halved thumb_parity's bad-block count on
+  designers-pick (77 → 39).
 
 - **Text-editor value is `<textarea>`-only.** In `imported_widget_semantics`
   (design_import_native_common.cpp), a node's incidental display text
