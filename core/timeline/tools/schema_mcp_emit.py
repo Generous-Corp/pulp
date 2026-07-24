@@ -27,6 +27,7 @@ _REPO_ROOT = _THIS.parents[3]
 DEFAULT_MANIFEST = _REPO_ROOT / "core" / "timeline" / "schema" / "timeline_schema.json"
 
 GENERATOR_ID = "schema-mcp-emit"
+MAX_COMPILED_SAMPLE_RATE = 768_000
 TOOL_DEFS_VERSION = 1
 
 
@@ -58,7 +59,7 @@ def _sample_rate_property() -> dict:
     return {
         "type": "integer",
         "minimum": 1,
-        "maximum": 4_294_967_295,
+        "maximum": MAX_COMPILED_SAMPLE_RATE,
         "description": "Render sample rate in Hz. Defaults to 48000.",
     }
 

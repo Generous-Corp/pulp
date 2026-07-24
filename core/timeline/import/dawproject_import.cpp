@@ -37,7 +37,9 @@ std::int64_t beats_to_ticks(double beats) {
 // through every call site.
 struct IdSource {
     std::uint64_t next = 1;
-    ItemId take() { return ItemId{next++}; }
+    ItemId take() {
+        return ItemId{next++};
+    }
 };
 
 // Assembles the timeline Project from a parsed DAWproject document. Every method
@@ -45,6 +47,8 @@ struct IdSource {
 // import (fail closed); std::nullopt means success.
 class Importer {
   public:
+    explicit Importer(DawProjectMediaResolver media_resolver)
+        : media_resolver_(std::move(media_resolver)) {}
     ImportResult run(const pugi::xml_node& project);
 
   private:
@@ -52,18 +56,16 @@ class Importer {
     std::optional<DawProjectImportError> read_structure(const pugi::xml_node& project);
     std::optional<DawProjectImportError> read_arrangement(const pugi::xml_node& project);
     std::optional<DawProjectImportError> read_track_lanes(const pugi::xml_node& lanes);
-    std::optional<DawProjectImportError>
-    read_clip(const pugi::xml_node& clip, std::vector<Clip>& out);
-    std::optional<DawProjectImportError>
-    read_notes(const pugi::xml_node& notes, ClipContent& out);
-    std::optional<DawProjectImportError>
-    read_audio(const pugi::xml_node& audio, ClipContent& out);
+    std::optional<DawProjectImportError> read_clip(const pugi::xml_node& clip,
+                                                   std::vector<Clip>& out);
+    std::optional<DawProjectImportError> read_notes(const pugi::xml_node& notes, ClipContent& out);
+    std::optional<DawProjectImportError> read_audio(const pugi::xml_node& audio, ClipContent& out);
 
     // Resolve (deduplicating by package path) a MediaAsset for an <Audio>,
     // returning its id and frame count.
-    std::optional<DawProjectImportError>
-    resolve_asset(const pugi::xml_node& audio, ItemId& asset_id_out,
-                  std::uint64_t& frame_count_out);
+    std::optional<DawProjectImportError> resolve_asset(const pugi::xml_node& audio,
+                                                       ItemId& asset_id_out,
+                                                       std::uint64_t& frame_count_out);
 
     IdSource ids_;
     double tempo_bpm_ = 120.0;
@@ -84,6 +86,7 @@ class Importer {
     std::unordered_map<std::string, ItemId> asset_by_path_;
     std::vector<MediaAsset> assets_;
     std::int64_t max_end_tick_ = 0;
+    DawProjectMediaResolver media_resolver_;
 };
 
 // --- attribute helpers ------------------------------------------------------
@@ -173,8 +176,7 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
 
         // The DAWproject display name is the human label; fall back to the id
         // when an exporter omits it.
-        std::string name =
-            has_attr(track, "name") ? track.attribute("name").as_string() : daw_id;
+        std::string name = has_attr(track, "name") ? track.attribute("name").as_string() : daw_id;
 
         ItemId id = ids_.take();
         track_by_daw_id_.emplace(daw_id, id);
@@ -394,10 +396,14 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<Audio> resolves to a zero-length asset");
 
-    // The durable identity is the SHA-256 of the media bytes; those bytes live in
-    // the (not-yet-unzipped) container, so provisionally derive identity from the
-    // package path and preserve the path itself only as a resolution hint.
-    auto hash = ContentHash::from_hex(runtime::sha256_hex(path));
+    if (!media_resolver_)
+        return err(DawProjectImportErrorCode::MissingMediaBytes,
+                   "media bytes are required to seal '" + path + "'");
+    const auto bytes = media_resolver_(path);
+    if (!bytes)
+        return err(DawProjectImportErrorCode::MissingMediaBytes,
+                   "media resolver did not provide '" + path + "'");
+    auto hash = ContentHash::from_hex(runtime::sha256_hex(bytes->data(), bytes->size()));
     if (!hash)
         return err(DawProjectImportErrorCode::InvalidValue,
                    "failed to derive a content hash for '" + path + "'");
@@ -443,8 +449,8 @@ ImportResult Importer::run(const pugi::xml_node& project) {
     std::vector<Track> tracks;
     tracks.reserve(track_order_.size());
     for (auto& entry : track_order_) {
-        auto made = Track::create(entry.id, entry.name,
-                                  std::move(clips_by_track_.at(entry.id.value)));
+        auto made =
+            Track::create(entry.id, entry.name, std::move(clips_by_track_.at(entry.id.value)));
         if (made.is_err())
             return Err(DawProjectImportError{DawProjectImportErrorCode::ModelRejected,
                                              "model rejected track '" + entry.daw_id + "'",
@@ -491,6 +497,11 @@ ImportResult Importer::run(const pugi::xml_node& project) {
 
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml) {
+    return import_dawproject_xml(project_xml, {});
+}
+
+runtime::Result<Project, DawProjectImportError>
+import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver) {
     pugi::xml_document doc;
     auto parsed = doc.load_buffer(project_xml.data(), project_xml.size());
     if (!parsed)
@@ -499,20 +510,19 @@ import_dawproject_xml(std::string_view project_xml) {
 
     auto root = doc.document_element();
     if (!root || std::string_view(root.name()) != "Project")
-        return Err(err(DawProjectImportErrorCode::MissingRoot,
-                       "document root is not <Project>"));
+        return Err(err(DawProjectImportErrorCode::MissingRoot, "document root is not <Project>"));
 
     // Accept major version 1 only. A missing version attribute is tolerated (some
     // exporters omit it); a present one must be 1.x.
     if (has_attr(root, "version")) {
         std::string_view version = root.attribute("version").as_string();
         if (version.substr(0, 2) != "1.")
-            return Err(err(DawProjectImportErrorCode::UnsupportedVersion,
-                           std::string("unsupported DAWproject version '") + std::string(version) +
-                               "'"));
+            return Err(
+                err(DawProjectImportErrorCode::UnsupportedVersion,
+                    std::string("unsupported DAWproject version '") + std::string(version) + "'"));
     }
 
-    Importer importer;
+    Importer importer{std::move(media_resolver)};
     return importer.run(root);
 }
 

@@ -58,20 +58,27 @@ ContentHash file_hash(const std::filesystem::path& path) {
     return *hash;
 }
 
-std::string project_json(const std::filesystem::path& source,
-                         std::uint64_t frame_count = 32, ContentHash content_hash = {}) {
+std::string project_json(const std::filesystem::path& source, std::uint64_t frame_count = 32,
+                         ContentHash content_hash = {}, bool include_duration = true,
+                         std::vector<AssetLocator> locators = {}) {
     auto clip = take(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
                                            MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
     auto track = take(Track::create({3}, "audio", {clip}));
     auto sequence = take(Sequence::create(
-        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
+        {2}, "root", std::nullopt,
+        include_duration ? std::optional<AbsoluteTimelineDuration>{AbsoluteTimelineDuration{
+                               frame_count, {48'000, 1}}}
+                         : std::nullopt,
+        {track}));
+    if (locators.empty())
+        locators.push_back({AssetLocatorKind::ExternalUri, source.string()});
     MediaAsset asset{{5},
                      "source.wav",
                      frame_count,
                      {48'000, 1},
                      content_hash.valid() ? content_hash : file_hash(source),
                      AssetStoragePolicy::External,
-                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     std::move(locators),
                      {},
                      {}};
     auto project = take(Project::create(ProjectInput{{1}, "agent", 6, {2}, {asset}, {sequence}}));
@@ -80,10 +87,14 @@ std::string project_json(const std::filesystem::path& source,
 }
 
 std::string empty_project_json(std::uint64_t frame_count = 32) {
-    auto sequence = take(
-        Sequence::create({2}, "root", std::nullopt,
-                         AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {}));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt,
+                                          AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {}));
     auto project = take(Project::create(ProjectInput{{1}, "empty", 3, {2}, {}, {sequence}}));
+    auto registry = take(make_builtin_timeline_registry());
+    return take(serialize_project(project, registry)).json;
+}
+
+std::string project_to_json(const Project& project) {
     auto registry = take(make_builtin_timeline_registry());
     return take(serialize_project(project, registry)).json;
 }
@@ -168,10 +179,15 @@ TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     REQUIRE_FALSE(invalid_rate);
     REQUIRE(invalid_rate.exit_code == 2);
     REQUIRE(invalid_rate.json.find(R"("stage":"explain")") != std::string::npos);
+    REQUIRE(tools::timeline::explain(empty_project_json(), 768'000));
+    const auto excessive_rate = tools::timeline::explain(empty_project_json(), 768'001);
+    REQUIRE_FALSE(excessive_rate);
+    REQUIRE(excessive_rate.exit_code == 2);
+    REQUIRE(excessive_rate.json.find("768000") != std::string::npos);
 
     TempDirectory temp;
     const auto oversized = tools::timeline::render(empty_project_json(200'000'000),
-                                                    (temp.path() / "large.wav").string());
+                                                   (temp.path() / "large.wav").string());
     REQUIRE_FALSE(oversized);
     REQUIRE(oversized.json.find("in-memory render budget") != std::string::npos);
 }
@@ -192,20 +208,120 @@ TEST_CASE("timeline agent refuses media whose bytes do not match its durable ide
     REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
 }
 
-TEST_CASE("timeline agent resolves provisionally identified DAWproject media") {
+TEST_CASE("timeline agent rejects path-derived hashes as media identity") {
     TempDirectory temp;
     audio::AudioFileData source;
     source.sample_rate = 48'000;
     source.channels = {std::vector<float>(32, 0.75f)};
     const auto source_path = temp.path() / "source.wav";
     REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
-    auto provisional =
-        ContentHash::from_hex(runtime::sha256_hex(source_path.string()));
+    auto provisional = ContentHash::from_hex(runtime::sha256_hex(source_path.string()));
     REQUIRE(provisional);
+
+    const auto result = tools::timeline::render(project_json(source_path, 32, *provisional),
+                                                (temp.path() / "output.wav").string());
+    REQUIRE_FALSE(result);
+    REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
+}
+
+TEST_CASE("timeline agent tries later media locators after a stale existing hint") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    source.channels[0][0] = 0.25f;
+    const auto stale_path = temp.path() / "stale.wav";
+    REQUIRE(audio::write_wav_file(stale_path.string(), source, audio::WavBitDepth::Float32));
+
+    std::vector<AssetLocator> locators{
+        {AssetLocatorKind::ExternalUri, stale_path.string()},
+        {AssetLocatorKind::ExternalUri, source_path.string()},
+    };
+    const auto output_path = temp.path() / "output.wav";
+    REQUIRE(tools::timeline::render(
+        project_json(source_path, 32, file_hash(source_path), true, std::move(locators)),
+        output_path.string()));
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+}
+
+TEST_CASE("timeline agent derives duration-less render length from active content") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto output_path = temp.path() / "output.wav";
+    const auto result =
+        tools::timeline::render(project_json(source_path, 32, {}, false), output_path.string());
+    REQUIRE(result);
+    REQUIRE(result.json.find(R"("frames":"32")") != std::string::npos);
+    REQUIRE(audio::read_audio_file(output_path.string()));
+}
+
+TEST_CASE("timeline agent derives duration-less render length from musical clips") {
+    auto notes =
+        take(NoteContent::create({{{5}, {0}, {timebase::kTicksPerQuarter}, 0x8000, 60, 0}}));
+    auto clip = take(Clip::create({4}, {0}, {2 * timebase::kTicksPerQuarter}, std::move(notes)));
+    auto track = take(Track::create({3}, "notes", {std::move(clip)}));
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, {std::move(track)}));
+    auto project =
+        take(Project::create(ProjectInput{{1}, "musical", 6, {2}, {}, {std::move(sequence)}}));
+
+    TempDirectory temp;
+    const auto output_path = temp.path() / "output.wav";
+    const auto result =
+        tools::timeline::render(project_to_json(project), output_path.string(), 48'000);
+    REQUIRE(result);
+    REQUIRE(result.json.find(R"("frames":"48000")") != std::string::npos);
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE(rendered->num_frames() == 48'000);
+}
+
+TEST_CASE("timeline agent derives duration-less render length from a selected freeze") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto hash = file_hash(source_path);
+
+    auto hidden_arrangement = take(Clip::create_absolute(
+        {4}, {48'000}, 32, {48'000, 1}, MediaRef{{5}, {0}, 32}, {.gain_linear = 1.0f}));
+    TrackFreeze freeze{MediaRef{{5}, {0}, 32}, {0}, {48'000, 1}, hash};
+    auto track = take(Track::create(TrackInput{
+        .id = {3},
+        .name = "frozen",
+        .clips = {std::move(hidden_arrangement)},
+        .freeze = freeze,
+    }));
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, {std::move(track)}));
+    MediaAsset asset{{5},
+                     "source.wav",
+                     32,
+                     {48'000, 1},
+                     hash,
+                     AssetStoragePolicy::External,
+                     {{AssetLocatorKind::ExternalUri, source_path.string()}},
+                     {},
+                     {}};
+    auto project = take(Project::create(
+        ProjectInput{{1}, "freeze", 6, {2}, {std::move(asset)}, {std::move(sequence)}}));
 
     const auto output_path = temp.path() / "output.wav";
     const auto result =
-        tools::timeline::render(project_json(source_path, 32, *provisional), output_path.string());
+        tools::timeline::render(project_to_json(project), output_path.string(), 48'000);
     REQUIRE(result);
-    REQUIRE(audio::read_audio_file(output_path.string()));
+    REQUIRE(result.json.find(R"("frames":"32")") != std::string::npos);
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE(rendered->num_frames() == 32);
 }

@@ -950,6 +950,71 @@ TEST_CASE("audio compiler bounds distinct sample-rate conversion kernels") {
     REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
 }
 
+TEST_CASE("incremental audio compilation shares and globally bounds conversion kernels") {
+    const auto data_44 = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
+    const auto data_48 = audio_data({std::vector<float>(8, 1.0f)}, 48'000);
+    const auto data_96 = audio_data({std::vector<float>(8, 1.0f)}, 96'000);
+    auto assets = pool({{3, data_44}, {4, data_44}, {5, data_48}, {6, data_96}});
+    auto map = map_120();
+    auto make_project = [](std::uint64_t second_asset) {
+        auto clean = take(Track::create({10}, "clean", {absolute_media_clip(100, 0, 8, 3, 0, 8)}));
+        auto dirty = take(
+            Track::create({20}, "dirty", {absolute_media_clip(200, 8, 8, second_asset, 0, 8)}));
+        return project_with_tracks({clean, dirty}, {{3, "44-a", 8, {44'100, 1}},
+                                                    {4, "44-b", 8, {44'100, 1}},
+                                                    {5, "48", 8, {48'000, 1}},
+                                                    {6, "96", 8, {96'000, 1}}});
+    };
+
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest first;
+    first.project = make_project(5);
+    first.sequence_id = {2};
+    first.tempo_map = map;
+    first.document_revision = 1;
+    first.dirty.all = true;
+    first.audio_assets = assets;
+    first.audio_limits.max_sample_rate_converters = 1;
+    REQUIRE(compiler.submit(std::move(first)));
+    REQUIRE(store.read()->document_revision() == 1);
+
+    SECTION("a second distinct pair exceeds the whole-program limit") {
+        ProgramCompileRequest second;
+        second.project = make_project(6);
+        second.sequence_id = {2};
+        second.tempo_map = map;
+        second.document_revision = 2;
+        second.dirty.tracks = {{20}};
+        second.audio_assets = assets;
+        second.audio_limits.max_sample_rate_converters = 1;
+        REQUIRE(compiler.submit(std::move(second)));
+        REQUIRE(compiler.status().has_error);
+        REQUIRE(compiler.status().last_error.audio_detail ==
+                AudioRendererErrorCode::CapacityExceeded);
+        REQUIRE(store.read()->document_revision() == 1);
+    }
+
+    SECTION("a reused pair shares the seeded converter") {
+        ProgramCompileRequest second;
+        second.project = make_project(4);
+        second.sequence_id = {2};
+        second.tempo_map = map;
+        second.document_revision = 2;
+        second.dirty.tracks = {{20}};
+        second.audio_assets = assets;
+        second.audio_limits.max_sample_rate_converters = 1;
+        REQUIRE(compiler.submit(std::move(second)));
+        auto published = store.read();
+        REQUIRE(published->document_revision() == 2);
+        const auto& clean = published->find_track({10})->audio_program()->clips().front();
+        const auto& dirty = published->find_track({20})->audio_program()->clips().front();
+        REQUIRE(clean.sample_rate_converter);
+        REQUIRE(clean.sample_rate_converter == dirty.sample_rate_converter);
+    }
+}
+
 TEST_CASE("compiler invalidation covers global clip counts assets and exact tempo identity") {
     auto make_project = [](bool extra_dirty_clip) {
         std::vector<Clip> dirty{absolute_media_clip(100, 0, 8, 3, 0, 8)};

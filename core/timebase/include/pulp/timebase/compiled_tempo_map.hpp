@@ -5,10 +5,13 @@
 #include <pulp/timebase/tick.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
 namespace pulp::timebase {
+
+inline constexpr std::uint32_t kMaximumCompiledSampleRate = 768'000;
 
 enum class TempoCurve {
     Constant,
@@ -47,7 +50,9 @@ class TempoMap {
         return create(points);
     }
 
-    std::span<const TempoPoint> points() const noexcept { return points_; }
+    std::span<const TempoPoint> points() const noexcept {
+        return points_;
+    }
     constexpr auto operator<=>(const TempoMap&) const = default;
 
   private:
@@ -130,14 +135,18 @@ class CompiledTempoMap {
 class TempoCursor {
   public:
     TempoCursor() = default;
-    explicit TempoCursor(const CompiledTempoMap& map) noexcept { reset(map); }
+    explicit TempoCursor(const CompiledTempoMap& map) noexcept {
+        reset(map);
+    }
 
     void reset(const CompiledTempoMap& map) noexcept;
     SampleToTickResult seek(SamplePosition sample) noexcept;
     SampleToTickResult advance(SamplePosition sample) noexcept;
     double tempo_at_tick(TickPosition tick) noexcept;
 
-    std::size_t segment_index() const noexcept { return segment_index_; }
+    std::size_t segment_index() const noexcept {
+        return segment_index_;
+    }
 
   private:
     const CompiledTempoMap* map_ = nullptr;

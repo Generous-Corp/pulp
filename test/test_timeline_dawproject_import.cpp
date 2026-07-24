@@ -1,6 +1,7 @@
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/note_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/dawproject_import.hpp>
 #include <pulp/timeline/model.hpp>
 
@@ -25,6 +26,19 @@ using namespace pulp::timeline;
 using namespace pulp::timebase;
 
 namespace {
+
+const std::vector<std::uint8_t>& fixture_media_bytes() {
+    static const std::vector<std::uint8_t> bytes{'b', 'a', 's', 's', '-', 'm', 'e', 'd', 'i', 'a'};
+    return bytes;
+}
+
+DawProjectMediaResolver fixture_media_resolver() {
+    return [](std::string_view path) -> std::optional<std::vector<std::uint8_t>> {
+        if (path != "audio/bass.wav")
+            return std::nullopt;
+        return fixture_media_bytes();
+    };
+}
 
 // Beats are quarter notes; positions convert through the canonical PPQ.
 constexpr std::int64_t kBeat = kTicksPerQuarter;
@@ -128,7 +142,8 @@ PlaybackTrace play_imported_project(std::shared_ptr<const Project> project,
 } // namespace
 
 TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
-    auto result = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"));
+    auto result = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"),
+                                        fixture_media_resolver());
     REQUIRE(result.has_value());
     const Project& project = result.value();
 
@@ -155,6 +170,8 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     REQUIRE(asset.frame_count == 88200); // 2.0s * 44100
     REQUIRE(asset.sample_rate == RationalRate{44100, 1});
     REQUIRE(asset.content_hash.valid());
+    REQUIRE(asset.content_hash.to_hex() ==
+            runtime::sha256_hex(fixture_media_bytes().data(), fixture_media_bytes().size()));
     REQUIRE(asset.locators.size() == 1);
     REQUIRE(asset.locators[0].kind == AssetLocatorKind::PackageRelative);
     REQUIRE(asset.locators[0].hint == "audio/bass.wav");
@@ -188,6 +205,13 @@ TEST_CASE("DAWproject import maps the linear subset into the timeline model") {
     // Sequence duration spans the latest clip end (8 beats on both tracks).
     REQUIRE(sequence.duration().has_value());
     REQUIRE(sequence.duration()->value == 8 * kBeat);
+}
+
+TEST_CASE("DAWproject audio import requires media bytes to seal durable identity") {
+    auto result = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"));
+    REQUIRE_FALSE(result);
+    REQUIRE(result.error().code == DawProjectImportErrorCode::MissingMediaBytes);
+    REQUIRE(result.error().message.find("audio/bass.wav") != std::string::npos);
 }
 
 TEST_CASE("DAWproject import fails closed on an out-of-subset clip (no silent drop)") {
@@ -289,7 +313,8 @@ TEST_CASE("DAWproject import accepts an empty project with defaults") {
 }
 
 TEST_CASE("DAWproject imported arrangement plays identically across block schedules") {
-    auto imported = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"));
+    auto imported = import_dawproject_xml(read_fixture("linear_subset.dawproject.xml"),
+                                          fixture_media_resolver());
     REQUIRE(imported);
     auto project = std::make_shared<const Project>(std::move(imported).value());
 

@@ -94,10 +94,10 @@ def main() -> int:
         "sample_rate"
     ]
     check(
-        "explain and render expose the same uint32 sample-rate override",
+        "explain and render expose the same supported sample-rate override",
         explain_rate == render_rate
         and explain_rate["minimum"] == 1
-        and explain_rate["maximum"] == 4_294_967_295,
+        and explain_rate["maximum"] == gen.MAX_COMPILED_SAMPLE_RATE,
     )
 
     defs = manifest["$defs"]

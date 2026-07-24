@@ -53,6 +53,35 @@ struct detail::AudioSampleRateConverterCache::Impl {
         return runtime::Ok(std::move(converter));
     }
 
+    runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
+    seed(timebase::RationalRate source, timebase::RationalRate target,
+         std::shared_ptr<const audio::PreparedSampleRateConversion> converter,
+         timeline::ItemId item, timeline::ItemId related_item, const AudioRendererLimits& limits) {
+        source = source.normalized();
+        target = target.normalized();
+        if (source == target)
+            return runtime::Ok(std::shared_ptr<const audio::PreparedSampleRateConversion>{});
+        if (!converter)
+            return runtime::Err(
+                AudioRendererError{AudioRendererErrorCode::InvalidAsset, item, related_item});
+        const auto found = std::find_if(entries.begin(), entries.end(), [&](const Entry& entry) {
+            return entry.source == source && entry.target == target;
+        });
+        if (found != entries.end())
+            return runtime::Ok(found->converter);
+        if (entries.size() >= limits.max_sample_rate_converters) {
+            return runtime::Err(AudioRendererError{
+                AudioRendererErrorCode::CapacityExceeded,
+                item,
+                related_item,
+                entries.size() + 1u,
+                limits.max_sample_rate_converters,
+            });
+        }
+        entries.push_back({source, target, converter});
+        return runtime::Ok(std::move(converter));
+    }
+
     std::vector<Entry> entries;
 };
 
@@ -63,6 +92,13 @@ detail::AudioSampleRateConverterCache::AudioSampleRateConverterCache(
     AudioSampleRateConverterCache&&) noexcept = default;
 detail::AudioSampleRateConverterCache& detail::AudioSampleRateConverterCache::operator=(
     AudioSampleRateConverterCache&&) noexcept = default;
+runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
+detail::AudioSampleRateConverterCache::seed(
+    timebase::RationalRate source, timebase::RationalRate target,
+    std::shared_ptr<const audio::PreparedSampleRateConversion> converter, timeline::ItemId item,
+    timeline::ItemId related_item, const AudioRendererLimits& limits) {
+    return impl_->seed(source, target, std::move(converter), item, related_item, limits);
+}
 
 namespace {
 
@@ -408,8 +444,9 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
     if (!resolved)
         return runtime::Err(resolved.error());
-    if (resolved->decoded->audio->sample_rate > 768'000u ||
-        tempo_map.sample_rate().as_long_double() > 768'000.0L)
+    if (resolved->decoded->audio->sample_rate > timebase::kMaximumCompiledSampleRate ||
+        tempo_map.sample_rate().as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               clip.id(), media->asset_id);
 
@@ -444,7 +481,8 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
         fade_in_frames = positive_distance(start, tempo_map.ticks_to_samples(fade_in_tick).value);
         fade_out_frames = positive_distance(tempo_map.ticks_to_samples(fade_out_tick).value, end);
     } else {
-        if (clip.absolute_sample_rate().as_long_double() > 768'000.0L)
+        if (clip.absolute_sample_rate().as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate))
             return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                                   clip.id(), media->asset_id);
         const auto projected_start =
@@ -520,8 +558,11 @@ detail::compile_take_comp_segment_program_cached(
         return runtime::Err(resolved.error());
     const auto source_rate = take->sample_rate().normalized();
     const auto timeline_rate = tempo_map.sample_rate().normalized();
-    if (source_rate != resolved->source_rate || source_rate.as_long_double() > 768'000.0L ||
-        timeline_rate.as_long_double() > 768'000.0L)
+    if (source_rate != resolved->source_rate ||
+        source_rate.as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate) ||
+        timeline_rate.as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               take->id(), take->media().asset_id);
     auto converter =
@@ -580,8 +621,11 @@ detail::compile_track_freeze_program_cached(const timeline::Track& track,
         return runtime::Err(resolved.error());
     const auto source_rate = freeze.sample_rate.normalized();
     const auto timeline_rate = tempo_map.sample_rate().normalized();
-    if (source_rate != resolved->source_rate || source_rate.as_long_double() > 768'000.0L ||
-        timeline_rate.as_long_double() > 768'000.0L)
+    if (source_rate != resolved->source_rate ||
+        source_rate.as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate) ||
+        timeline_rate.as_long_double() >
+            static_cast<long double>(timebase::kMaximumCompiledSampleRate))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
                                               track.id(), freeze.media.asset_id);
     auto converter =

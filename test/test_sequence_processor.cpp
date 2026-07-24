@@ -63,7 +63,7 @@ TEST_CASE("host transport projection fails closed for unsupported loop density "
     context.num_samples = 32;
     context.is_playing = true;
     context.is_looping = true;
-    context.loop_end_beats = 0.001;
+    context.loop_end_beats = 0.0005;
     TransportSnapshot projected;
     REQUIRE(projector.project(context, projected) ==
             sequence::HostTransportProjectionError::LoopTooShortForBlock);
@@ -76,6 +76,32 @@ TEST_CASE("host transport projection fails closed for unsupported loop density "
     context.position_samples = std::numeric_limits<std::int64_t>::max();
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE_FALSE(projected.reset_requested);
+}
+
+TEST_CASE("host transport projection preserves authoritative positions outside an active loop") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.loop_start_beats = 0.0;
+    context.loop_end_beats = 64.0 / 24'000.0;
+    context.position_samples = 128;
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 1);
+    REQUIRE(projected.ranges[0].timeline_sample_start.value == 128);
+
+    context.position_samples = 160;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 1);
+    REQUIRE(projected.ranges[0].timeline_sample_start.value == 160);
+    REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE_FALSE(projected.ranges[0].discontinuity);
 }
 
 TEST_CASE("embedded sequence processor matches offline and desktop event streams "

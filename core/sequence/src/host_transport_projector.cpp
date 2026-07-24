@@ -162,33 +162,32 @@ HostTransportProjector::project(const format::ProcessContext& context,
         const auto loop_length = sample_distance(loop_start, loop_end);
         if (loop_length == 0)
             return HostTransportProjectionError::InvalidLoop;
-        if (loop_length < frames)
-            return HostTransportProjectionError::LoopTooShortForBlock;
-
-        auto normalized_start = host_start;
-        bool normalized_discontinuity = discontinuity;
-        if (normalized_start.value >= loop_end.value) {
-            normalized_start = loop_start;
-            normalized_discontinuity = true;
-        }
-        const auto until_wrap = sample_distance(normalized_start, loop_end);
-        const auto first_count =
-            static_cast<std::uint32_t>(std::min<std::uint64_t>(frames, until_wrap));
-        if (first_count > 0) {
-            const auto* forced_end =
-                static_cast<std::uint64_t>(first_count) == until_wrap ? &loop.end : nullptr;
-            make_range(0, 0, first_count, normalized_start, normalized_discontinuity, forced_end);
+        if (host_start.value >= loop_end.value) {
+            make_range(0, 0, frames, host_start, discontinuity);
             snapshot.range_count = 1;
-        }
-        const auto remaining = frames - first_count;
-        if (remaining > 0) {
-            make_range(snapshot.range_count, first_count, remaining, loop_start, true);
-            ++snapshot.range_count;
-            expected_next_sample_ = add_frames(loop_start, remaining);
-        } else if (first_count > 0 && add_frames(normalized_start, first_count) == loop_end) {
-            expected_next_sample_ = loop_start;
+            expected_next_sample_ = add_frames(host_start, frames);
         } else {
-            expected_next_sample_ = add_frames(normalized_start, first_count);
+            const auto until_wrap = sample_distance(host_start, loop_end);
+            const auto first_count =
+                static_cast<std::uint32_t>(std::min<std::uint64_t>(frames, until_wrap));
+            const auto remaining = frames - first_count;
+            if (remaining > loop_length)
+                return HostTransportProjectionError::LoopTooShortForBlock;
+            if (first_count > 0) {
+                const auto* forced_end =
+                    static_cast<std::uint64_t>(first_count) == until_wrap ? &loop.end : nullptr;
+                make_range(0, 0, first_count, host_start, discontinuity, forced_end);
+                snapshot.range_count = 1;
+            }
+            if (remaining > 0) {
+                make_range(snapshot.range_count, first_count, remaining, loop_start, true);
+                ++snapshot.range_count;
+                expected_next_sample_ = add_frames(loop_start, remaining);
+            } else if (first_count > 0 && add_frames(host_start, first_count) == loop_end) {
+                expected_next_sample_ = loop_start;
+            } else {
+                expected_next_sample_ = add_frames(host_start, first_count);
+            }
         }
     }
 

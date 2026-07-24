@@ -1,4 +1,5 @@
 #include <pulp/audio/audio_file.hpp>
+#include <pulp/runtime/crypto.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -51,13 +52,19 @@ class TempDirectory {
     std::filesystem::path path_;
 };
 
-ContentHash test_hash() {
-    auto hash = ContentHash::from_hex(std::string(64, 'b'));
+ContentHash file_hash(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    REQUIRE(stream);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto hash = ContentHash::from_hex(runtime::sha256_hex(bytes));
     REQUIRE(hash);
     return *hash;
 }
 
-std::string project_json(const std::filesystem::path& source) {
+std::string project_json(const std::filesystem::path& source,
+                         AssetLocatorKind locator_kind = AssetLocatorKind::ExternalUri,
+                         std::string locator_hint = {}) {
     constexpr std::uint64_t frame_count = 24;
     auto clip = take(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
                                            MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
@@ -68,9 +75,9 @@ std::string project_json(const std::filesystem::path& source) {
                      "source.wav",
                      frame_count,
                      {48'000, 1},
-                     test_hash(),
+                     file_hash(source),
                      AssetStoragePolicy::External,
-                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     {{locator_kind, locator_hint.empty() ? source.string() : locator_hint}},
                      {},
                      {}};
     auto project = take(Project::create(ProjectInput{{1}, "cli", 6, {2}, {asset}, {sequence}}));
@@ -149,6 +156,7 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     const auto original_wav = temp.path() / "original.wav";
     const auto changed_wav = temp.path() / "changed.wav";
     write_text(project_path, project_json(source_path));
+    write_text(changed_path, "sentinel");
     write_text(
         command_path,
         R"([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])");
@@ -162,6 +170,7 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) +
                     " --out " + quote(changed_path) + " > " + quote(command_result_path)) == 0);
     REQUIRE(std::filesystem::is_regular_file(changed_path));
+    REQUIRE(read_text(changed_path) != "sentinel");
 
     REQUIRE(run_cli(cli + " render " + quote(project_path) + " --out " + quote(original_wav)) == 0);
     REQUIRE(run_cli(cli + " render " + quote(changed_path) + " --out " + quote(changed_wav)) == 0);
@@ -174,4 +183,16 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
 
     REQUIRE(run_cli(cli + " render " + quote(project_path) + " --out " + quote(original_wav) +
                     " --sample-rate 0") == 2);
+    REQUIRE(run_cli(cli + " render " + quote(project_path) + " --out " + quote(original_wav) +
+                    " --sample-rate 768001") == 2);
+
+    const auto package_project = temp.path() / "package-project.json";
+    write_text(package_project,
+               project_json(source_path, AssetLocatorKind::PackageRelative, "source.wav"));
+    const auto moved_directory = temp.path() / "moved";
+    REQUIRE(std::filesystem::create_directory(moved_directory));
+    const auto moved_project = moved_directory / "changed.json";
+    REQUIRE(run_cli(cli + " seq apply " + quote(package_project) + " " + quote(command_path) +
+                    " --out " + quote(moved_project) + " > " + quote(command_result_path)) == 2);
+    REQUIRE_FALSE(std::filesystem::exists(moved_project));
 }

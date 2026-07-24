@@ -15,6 +15,11 @@ class AudioSampleRateConverterCache {
     AudioSampleRateConverterCache(const AudioSampleRateConverterCache&) = delete;
     AudioSampleRateConverterCache& operator=(const AudioSampleRateConverterCache&) = delete;
 
+    runtime::Result<std::shared_ptr<const audio::PreparedSampleRateConversion>, AudioRendererError>
+    seed(timebase::RationalRate source, timebase::RationalRate target,
+         std::shared_ptr<const audio::PreparedSampleRateConversion> converter,
+         timeline::ItemId item, timeline::ItemId related_item, const AudioRendererLimits& limits);
+
   private:
     friend runtime::Result<AudioClipRendererProgram, AudioRendererError>
     compile_audio_clip_program_cached(const timeline::Clip&, const timeline::Project&,

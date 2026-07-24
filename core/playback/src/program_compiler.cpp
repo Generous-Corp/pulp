@@ -22,6 +22,7 @@ class ProgramCompilerTask final : public CompileTask {
   private:
     enum class Stage {
         Capture,
+        SeedConverterCache,
         CompileTracks,
         SortTrackNotes,
         SortTrackAudioIds,
@@ -45,6 +46,8 @@ class ProgramCompilerTask final : public CompileTask {
     ProgramGeneration generation_ = 0;
     bool all_dirty_ = false;
     std::size_t track_index_ = 0;
+    std::size_t converter_track_index_ = 0;
+    std::size_t converter_clip_index_ = 0;
     std::size_t clip_index_ = 0;
     std::size_t note_index_ = 0;
     bool clip_started_ = false;
@@ -216,11 +219,44 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         tracks_.reserve(sequence_->tracks().size());
         merge_buffer_.reserve(sequence_->tracks().size());
-        stage_ = Stage::CompileTracks;
+        stage_ = Stage::SeedConverterCache;
     }
 
     std::size_t work = 0;
     while (std::chrono::steady_clock::now() < budget.deadline && work < budget.max_work_units) {
+        if (stage_ == Stage::SeedConverterCache) {
+            const auto& live = core_->store.live();
+            if (all_dirty_ || !live || converter_track_index_ == sequence_->tracks().size()) {
+                stage_ = Stage::CompileTracks;
+                continue;
+            }
+            const auto& track = sequence_->tracks()[converter_track_index_];
+            const bool dirty = std::binary_search(request_->dirty.tracks.begin(),
+                                                  request_->dirty.tracks.end(), track.id());
+            const auto* old = dirty ? nullptr : live->find_track_owner(track.id());
+            const auto* audio_program =
+                old && (*old)->audio_program() ? (*old)->audio_program() : nullptr;
+            const auto clips = audio_program ? audio_program->clips()
+                                             : std::span<const AudioClipRendererProgram>{};
+            if (converter_clip_index_ < clips.size()) {
+                const auto& clip = clips[converter_clip_index_++];
+                if (clip.sample_rate_converter) {
+                    const auto source_rate = timebase::RationalRate{clip.audio->sample_rate, 1};
+                    auto seeded = sample_rate_converters_.seed(
+                        source_rate, request_->tempo_map->sample_rate(), clip.sample_rate_converter,
+                        clip.id, clip.asset_id, request_->audio_limits);
+                    if (!seeded)
+                        return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
+                                     request_->document_revision, seeded.error().code});
+                }
+                ++work;
+                continue;
+            }
+            converter_clip_index_ = 0;
+            ++converter_track_index_;
+            ++work;
+            continue;
+        }
         if (stage_ == Stage::CompileTracks) {
             if (track_index_ == sequence_->tracks().size()) {
                 track_merge_.reset(merge_buffer_);

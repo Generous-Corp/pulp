@@ -49,16 +49,18 @@ using Catch::Matchers::WithinAbs;
 std::atomic<unsigned long long> temp_dir_counter{0};
 
 class ScopedStreamRedirect {
-public:
+  public:
     ScopedStreamRedirect(std::ostream& stream, std::streambuf* replacement)
         : stream_(stream), original_(stream.rdbuf(replacement)) {}
 
-    ~ScopedStreamRedirect() { stream_.rdbuf(original_); }
+    ~ScopedStreamRedirect() {
+        stream_.rdbuf(original_);
+    }
 
     ScopedStreamRedirect(const ScopedStreamRedirect&) = delete;
     ScopedStreamRedirect& operator=(const ScopedStreamRedirect&) = delete;
 
-private:
+  private:
     std::ostream& stream_;
     std::streambuf* original_;
 };
@@ -90,8 +92,7 @@ struct TempDir {
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         const auto sequence = temp_dir_counter.fetch_add(1, std::memory_order_relaxed);
         path = std::filesystem::temp_directory_path() /
-               ("pulp-mcp-server-test-" +
-                std::to_string(current_process_id_for_temp_path()) + "-" +
+               ("pulp-mcp-server-test-" + std::to_string(current_process_id_for_temp_path()) + "-" +
                 std::to_string(sequence) + "-" + std::to_string(stamp));
         std::filesystem::create_directories(path);
     }
@@ -105,9 +106,8 @@ struct TempDir {
 };
 
 class ScopedEnvVar {
-public:
-    ScopedEnvVar(std::string name, std::string value)
-        : name_(std::move(name)) {
+  public:
+    ScopedEnvVar(std::string name, std::string value) : name_(std::move(name)) {
         if (const char* previous = std::getenv(name_.c_str())) {
             had_previous_ = true;
             previous_ = previous;
@@ -138,7 +138,7 @@ public:
     ScopedEnvVar(const ScopedEnvVar&) = delete;
     ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
 
-private:
+  private:
     std::string name_;
     std::string previous_;
     bool had_previous_ = false;
@@ -155,10 +155,9 @@ private:
 // who launched the test. (The pre-push hook and local_diff_cover.sh scrub the
 // same vars; this is the in-process belt-and-suspenders for other runners.)
 void clear_inherited_git_env() {
-    for (const char* var : {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
-                            "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
-                            "GIT_PREFIX", "GIT_NAMESPACE",
-                            "GIT_QUARANTINE_PATH"}) {
+    for (const char* var :
+         {"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
+          "GIT_PREFIX", "GIT_NAMESPACE", "GIT_QUARANTINE_PATH"}) {
 #if defined(_WIN32)
         _putenv_s(var, "");
 #else
@@ -175,14 +174,16 @@ bool has_repo_markers(const std::filesystem::path& candidate) {
 std::filesystem::path normalize_path(const std::filesystem::path& path) {
     std::error_code ec;
     auto normalized = std::filesystem::weakly_canonical(path, ec);
-    if (!ec) return normalized;
+    if (!ec)
+        return normalized;
     return std::filesystem::absolute(path);
 }
 
 std::filesystem::path find_repo_root() {
 #ifdef PULP_SOURCE_DIR
     auto configured = std::filesystem::path(PULP_SOURCE_DIR);
-    if (has_repo_markers(configured)) return normalize_path(configured);
+    if (has_repo_markers(configured))
+        return normalize_path(configured);
 #endif
 
     std::vector<std::filesystem::path> seeds = {
@@ -195,11 +196,13 @@ std::filesystem::path find_repo_root() {
     }
 
     for (auto seed : seeds) {
-        if (std::filesystem::is_regular_file(seed)) seed = seed.parent_path();
-        for (auto candidate = seed; !candidate.empty();
-             candidate = candidate.parent_path()) {
-            if (has_repo_markers(candidate)) return normalize_path(candidate);
-            if (candidate == candidate.root_path()) break;
+        if (std::filesystem::is_regular_file(seed))
+            seed = seed.parent_path();
+        for (auto candidate = seed; !candidate.empty(); candidate = candidate.parent_path()) {
+            if (has_repo_markers(candidate))
+                return normalize_path(candidate);
+            if (candidate == candidate.root_path())
+                break;
         }
     }
 
@@ -216,8 +219,7 @@ std::string repo_root() {
     return repo_root_path().string();
 }
 
-std::string tool_call(const std::string& id,
-                      const std::string& name,
+std::string tool_call(const std::string& id, const std::string& name,
                       const std::string& arguments = "{}") {
     return "{\"jsonrpc\":\"2.0\",\"id\":" + id +
            ",\"method\":\"tools/call\",\"params\":{\"name\":\"" + name +
@@ -229,8 +231,7 @@ void require_contains(const std::string& response, const std::string& needle) {
     REQUIRE(response.find(needle) != std::string::npos);
 }
 
-template <typename T, typename E>
-T require_timeline_result(pulp::runtime::Result<T, E> result) {
+template <typename T, typename E> T require_timeline_result(pulp::runtime::Result<T, E> result) {
     REQUIRE(result);
     return std::move(result).value();
 }
@@ -238,13 +239,12 @@ T require_timeline_result(pulp::runtime::Result<T, E> result) {
 std::string make_timeline_project_json(const std::filesystem::path& source) {
     using namespace pulp::timeline;
     constexpr std::uint64_t frame_count = 32;
-    auto clip = require_timeline_result(
-        Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
-                              MediaRef{{5}, {0}, frame_count}, {.gain_linear = 1.0f}));
+    auto clip = require_timeline_result(Clip::create_absolute({4}, {0}, frame_count, {48'000, 1},
+                                                              MediaRef{{5}, {0}, frame_count},
+                                                              {.gain_linear = 1.0f}));
     auto track = require_timeline_result(Track::create({3}, "audio", {clip}));
-    auto sequence = require_timeline_result(
-        Sequence::create({2}, "root", std::nullopt,
-                         AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
+    auto sequence = require_timeline_result(Sequence::create(
+        {2}, "root", std::nullopt, AbsoluteTimelineDuration{frame_count, {48'000, 1}}, {track}));
     std::ifstream stream(source, std::ios::binary);
     REQUIRE(stream);
     const std::string bytes{std::istreambuf_iterator<char>(stream),
@@ -290,12 +290,11 @@ std::filesystem::path make_fake_pulp_cli(const std::filesystem::path& root) {
            << "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n";
 #endif
     script.close();
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
     return cli;
 }
 
@@ -312,29 +311,36 @@ std::filesystem::path make_package_workflow_fake_pulp_cli(const std::filesystem:
            << "log=" << shell_quote(log_path.string()) << "\n"
            << "printf '%s\\n' \"$*\" >> \"$log\"\n"
            << "case \"$1 $2\" in\n"
-           << "  'kit search') echo '{\"ok\":true,\"lane\":\"kit\",\"results\":[{\"id\":\"dev.pulp.fixtures.basic-ui-kit\",\"lane\":\"kit\"}]}' ;;\n"
-           << "  'kit inspect') echo '{\"ok\":true,\"summary\":{\"id\":\"dev.pulp.fixtures.basic-ui-kit\"}}' ;;\n"
-           << "  'kit plan') echo '{\"ok\":true,\"actions\":[{\"kind\":\"lock-entry\"},{\"kind\":\"generated-cmake\"}]}' ;;\n"
+           << "  'kit search') echo "
+              "'{\"ok\":true,\"lane\":\"kit\",\"results\":[{\"id\":\"dev.pulp.fixtures.basic-ui-"
+              "kit\",\"lane\":\"kit\"}]}' ;;\n"
+           << "  'kit inspect') echo "
+              "'{\"ok\":true,\"summary\":{\"id\":\"dev.pulp.fixtures.basic-ui-kit\"}}' ;;\n"
+           << "  'kit plan') echo "
+              "'{\"ok\":true,\"actions\":[{\"kind\":\"lock-entry\"},{\"kind\":\"generated-cmake\"}]"
+              "}' ;;\n"
            << "  'kit apply') echo 'OK: Applied kit dev.pulp.fixtures.basic-ui-kit' ;;\n"
-           << "  'content validate') echo '{\"ok\":true,\"content\":{\"id\":\"dev.pulp.fixtures.basic-content-pack\"}}' ;;\n"
-           << "  'content preview') echo '{\"ok\":true,\"requires_restart\":false,\"install_policy\":[{\"kind\":\"presets\",\"policy\":\"manual-rescan\"}]}' ;;\n"
-           << "  'content install') echo 'OK: Installed content pack dev.pulp.fixtures.basic-content-pack' ;;\n"
+           << "  'content validate') echo "
+              "'{\"ok\":true,\"content\":{\"id\":\"dev.pulp.fixtures.basic-content-pack\"}}' ;;\n"
+           << "  'content preview') echo "
+              "'{\"ok\":true,\"requires_restart\":false,\"install_policy\":[{\"kind\":\"presets\","
+              "\"policy\":\"manual-rescan\"}]}' ;;\n"
+           << "  'content install') echo 'OK: Installed content pack "
+              "dev.pulp.fixtures.basic-content-pack' ;;\n"
            << "  'validate --json') echo '{\"ok\":true,\"reports\":[]}' ;;\n"
            << "  *) echo \"fake-pulp $*\" ;;\n"
            << "esac\n";
 #endif
     script.close();
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
     return cli;
 }
 
-std::filesystem::path make_fake_command(const std::filesystem::path& dir,
-                                        const std::string& name,
+std::filesystem::path make_fake_command(const std::filesystem::path& dir, const std::string& name,
                                         const std::string& label) {
     std::filesystem::create_directories(dir);
     const auto command = dir / name;
@@ -348,21 +354,19 @@ std::filesystem::path make_fake_command(const std::filesystem::path& dir,
            << "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n";
 #endif
     script.close();
-    std::filesystem::permissions(
-        command,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(command,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
     return command;
 }
 
 } // namespace
 
 TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
-    const auto escaped = json_string(std::string("quote \" slash \\ newline\nreturn\rtab\tunit")
-                                     + static_cast<char>(0x01)
-                                     + static_cast<char>(0x1f));
+    const auto escaped = json_string(std::string("quote \" slash \\ newline\nreturn\rtab\tunit") +
+                                     static_cast<char>(0x01) + static_cast<char>(0x1f));
     require_contains(escaped, "\\\"");
     require_contains(escaped, "\\\\");
     require_contains(escaped, "\\n");
@@ -371,14 +375,13 @@ TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
     require_contains(escaped, "\\u0001");
     require_contains(escaped, "\\u001f");
 
-    const std::string payload =
-        "{"
-        "\"int\":7,\"intWs\":42  ,\"intTab\":42\t,"
-        "\"partialInt\":12junk,\"badInt\":\"abc\","
-        "\"dbl\":1.25,\"dblWs\":2.5  ,\"dblTab\":2.5\t,"
-        "\"partialDbl\":3.14oops,\"badDbl\":\"nope\","
-        "\"yes\":true,\"no\":false,\"maybe\":\"??\",\"nil\":null"
-        "}";
+    const std::string payload = "{"
+                                "\"int\":7,\"intWs\":42  ,\"intTab\":42\t,"
+                                "\"partialInt\":12junk,\"badInt\":\"abc\","
+                                "\"dbl\":1.25,\"dblWs\":2.5  ,\"dblTab\":2.5\t,"
+                                "\"partialDbl\":3.14oops,\"badDbl\":\"nope\","
+                                "\"yes\":true,\"no\":false,\"maybe\":\"??\",\"nil\":null"
+                                "}";
 
     REQUIRE(extract_int(payload, "int", 3) == 7);
     REQUIRE(extract_int(payload, "intWs", 3) == 42);
@@ -403,18 +406,16 @@ TEST_CASE("MCP JSON helpers escape and parse primitive fields", "[mcp][json]") {
     REQUIRE(extract_bool(payload, "nil", true));
 }
 
-TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
-          "[mcp][json]") {
-    const std::string payload =
-        "{"
-        "\"message\":\"hello \\\"pulp\\\"\","
-        "\"negative\":-12,\"positive\":+7,"
-        "\"floatExp\":6.25e-2,\"badFloat\":6.25e-2x,"
-        "\"truthy\":true,\"falsy\":false,"
-        "\"word\":\"true\",\"array\":[1,2],"
-        "\"spaced\":  5 \n,"
-        "\"tabbed\":\t9\t"
-        "}";
+TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars", "[mcp][json]") {
+    const std::string payload = "{"
+                                "\"message\":\"hello \\\"pulp\\\"\","
+                                "\"negative\":-12,\"positive\":+7,"
+                                "\"floatExp\":6.25e-2,\"badFloat\":6.25e-2x,"
+                                "\"truthy\":true,\"falsy\":false,"
+                                "\"word\":\"true\",\"array\":[1,2],"
+                                "\"spaced\":  5 \n,"
+                                "\"tabbed\":\t9\t"
+                                "}";
 
     REQUIRE(extract_string(payload, "message") == R"(hello \"pulp\")");
     REQUIRE(extract_string(payload, "negative").empty());
@@ -444,8 +445,7 @@ TEST_CASE("MCP JSON helpers preserve raw tokens and reject partial scalars",
     REQUIRE_FALSE(extract_bool(payload, "array", false));
 }
 
-TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
-          "[mcp][json]") {
+TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated", "[mcp][json]") {
     const std::string payload =
         R"({"tool":"pulp_build","tool_extra":"wrong","text":"a \"quoted\" value","n":17})";
 
@@ -459,8 +459,7 @@ TEST_CASE("MCP JSON helpers keep adjacent keys and string escapes isolated",
     require_contains(wrapped, R"("text":"{\"ok\":true,\"value\":\"x\"}")");
 }
 
-TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct",
-          "[mcp][json]") {
+TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct", "[mcp][json]") {
     const std::string payload =
         R"({"id":5,"id2":99,"id_text":"5","method":"tools/call","methodExtra":"wrong"})";
 
@@ -472,8 +471,7 @@ TEST_CASE("MCP JSON helpers keep numeric-looking keys distinct",
     REQUIRE(extract_raw(payload, "missing").empty());
 }
 
-TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
-          "[mcp][json]") {
+TEST_CASE("MCP JSON-RPC envelopes escape structured payloads", "[mcp][json]") {
     const auto error = json_error("null", -32602, "bad \"arg\"\nline");
     require_contains(error, R"JSON("jsonrpc":"2.0")JSON");
     require_contains(error, R"JSON("id":null)JSON");
@@ -484,18 +482,18 @@ TEST_CASE("MCP JSON-RPC envelopes escape structured payloads",
     const auto result = json_result("7", R"JSON({"ok":true,"count":3})JSON");
     REQUIRE(result == R"JSON({"jsonrpc":"2.0","id":7,"result":{"ok":true,"count":3}})JSON");
 
-    const auto payload = json_tool_payload(
-        R"JSON({"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
+    const auto payload =
+        json_tool_payload(R"JSON({"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
     require_contains(payload, R"JSON("content":[{"type":"text","text":")JSON");
     require_contains(payload, R"JSON(\"text\":\"a \\\"quoted\\\" value\")JSON");
-    require_contains(payload,
-                     R"JSON("structuredContent":{"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
+    require_contains(
+        payload,
+        R"JSON("structuredContent":{"ok":true,"text":"a \"quoted\" value","items":[1,2]})JSON");
     REQUIRE(payload.find('\n') == std::string::npos);
     REQUIRE(payload.find(R"JSON("isError")JSON") == std::string::npos);
 }
 
-TEST_CASE("MCP shell_quote keeps shell arguments atomic",
-          "[mcp][shell]") {
+TEST_CASE("MCP shell_quote keeps shell arguments atomic", "[mcp][shell]") {
 #if defined(_WIN32)
     REQUIRE(shell_quote(R"(C:\Program Files\Pulp\pulp.exe)") ==
             R"("C:\Program Files\Pulp\pulp.exe")");
@@ -507,8 +505,7 @@ TEST_CASE("MCP shell_quote keeps shell arguments atomic",
 #endif
 }
 
-TEST_CASE("MCP CLI resolver finds Windows multi-config delegates",
-          "[mcp][shell]") {
+TEST_CASE("MCP CLI resolver finds Windows multi-config delegates", "[mcp][shell]") {
     TempDir project;
     const auto cli = project.path / "build" / "tools" / "cli" / "Release" / "pulp-cpp.exe";
     std::filesystem::create_directories(cli.parent_path());
@@ -517,8 +514,7 @@ TEST_CASE("MCP CLI resolver finds Windows multi-config delegates",
     REQUIRE(pulp_mcp::resolve_cli_binary(project.path) == cli);
 }
 
-TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
-          "[mcp][shell]") {
+TEST_CASE("MCP shell exec returns stdout and failure diagnostics", "[mcp][shell]") {
 #if defined(_WIN32)
     auto ok = exec("cmd /c echo|set /p=pulp-mcp");
 #else
@@ -534,8 +530,7 @@ TEST_CASE("MCP shell exec returns stdout and failure diagnostics",
     REQUIRE(failed.find("Command failed with status") != std::string::npos);
 }
 
-TEST_CASE("MCP find_project_root walks upward and reports absence",
-          "[mcp][shell]") {
+TEST_CASE("MCP find_project_root walks upward and reports absence", "[mcp][shell]") {
     TempDir temp;
     auto project = temp.path / "project";
     auto nested = project / "plugins" / "demo";
@@ -570,15 +565,15 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     // tools/mcp/pulp_mcp_version.h.in). Hard-coding "0.1.0" caused
     // every CLI release to look identical from the plugin side.
     require_contains(initialize, R"JSON("serverInfo":{"name":"pulp-mcp","version":")JSON");
-    require_contains(initialize,
-                     std::string(R"JSON("version":")JSON")
-                     + PULP_MCP_SERVER_VERSION + R"JSON("}})JSON");
+    require_contains(initialize, std::string(R"JSON("version":")JSON") + PULP_MCP_SERVER_VERSION +
+                                     R"JSON("}})JSON");
 
     auto ping = handle_request(R"JSON({"jsonrpc":"2.0","id":2,"method":"ping"})JSON");
     require_contains(ping, R"JSON("id":2)JSON");
     require_contains(ping, R"JSON("result":{})JSON");
 
-    REQUIRE(handle_request(R"JSON({"jsonrpc":"2.0","method":"notifications/initialized"})JSON").empty());
+    REQUIRE(handle_request(R"JSON({"jsonrpc":"2.0","method":"notifications/initialized"})JSON")
+                .empty());
 
     auto unknown = handle_request(R"JSON({"jsonrpc":"2.0","id":3,"method":"nope"})JSON");
     require_contains(unknown, R"JSON("id":3)JSON");
@@ -586,8 +581,7 @@ TEST_CASE("MCP protocol handles initialize ping notification and unknown methods
     require_contains(unknown, "Method not found: nope");
 }
 
-TEST_CASE("MCP pulp_minos tool measures a binary and validates its arg",
-          "[mcp][minos]") {
+TEST_CASE("MCP pulp_minos tool measures a binary and validates its arg", "[mcp][minos]") {
     // A project root so handle_minos gets past its "not in a Pulp project"
     // guard and exercises the full body (resolve CLI, shell out, return).
     TempDir temp;
@@ -617,8 +611,7 @@ TEST_CASE("MCP pulp_minos tool measures a binary and validates its arg",
     require_contains(err, "binary is required");
 }
 
-TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
-          "[mcp][main]") {
+TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop", "[mcp][main]") {
     std::ostringstream out;
     std::ostringstream err;
     ScopedStreamRedirect capture_out(std::cout, out.rdbuf());
@@ -664,8 +657,7 @@ TEST_CASE("pulp-mcp flag-only invocations do not enter the JSON-RPC loop",
 //
 // Pulp #2087 follow-up (B4 first cut): the bug shipped because there
 // was no protocol-shape test. The full B4 split is queued separately.
-TEST_CASE("MCP wire output never contains embedded newlines",
-          "[mcp][protocol][issue-2091]") {
+TEST_CASE("MCP wire output never contains embedded newlines", "[mcp][protocol][issue-2091]") {
     const std::vector<std::string> requests = {
         // initialize — large multi-key response.
         R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON",
@@ -687,8 +679,7 @@ TEST_CASE("MCP wire output never contains embedded newlines",
     }
 }
 
-TEST_CASE("MCP JSON scalar extraction rejects partial typed values",
-          "[mcp][json]") {
+TEST_CASE("MCP JSON scalar extraction rejects partial typed values", "[mcp][json]") {
     const std::string payload =
         R"JSON({"whole":12,"partial":"12x","truth":true,"lie":false,"nil":null,"float":3.25,"badFloat":"3.25x","quoted":"hello \"pulp\""})JSON";
 
@@ -889,40 +880,38 @@ TEST_CASE("MCP tools report required argument errors before side effects", "[mcp
     }
 }
 
-TEST_CASE("timeline MCP operations edit and render inline projects",
-          "[mcp][tools][timeline]") {
+TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tools][timeline]") {
     TempDir temp;
     pulp::audio::AudioFileData source;
     source.sample_rate = 48'000;
     source.channels = {std::vector<float>(32, 0.8f)};
     const auto source_path = temp.path / "source.wav";
-    REQUIRE(pulp::audio::write_wav_file(
-        source_path.string(), source, pulp::audio::WavBitDepth::Float32));
+    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
 
     const auto project = make_timeline_project_json(source_path);
     const auto project_argument = pulp::timeline::quote_json_string(project);
     const auto project_only = "{\"project\":" + project_argument + "}";
 
-    const auto opened = handle_request(
-        tool_call("100", "pulp_timeline_project_open", project_only));
+    const auto opened =
+        handle_request(tool_call("100", "pulp_timeline_project_open", project_only));
     require_contains(opened, R"JSON("ok":true)JSON");
     REQUIRE(timeline_project_from_response(opened) == project);
 
-    const auto validated =
-        handle_request(tool_call("101", "pulp_timeline_validate", project_only));
+    const auto validated = handle_request(tool_call("101", "pulp_timeline_validate", project_only));
     require_contains(validated, R"JSON("diagnostics":[])JSON");
 
-    const auto explained = handle_request(tool_call(
-        "102", "pulp_timeline_explain",
-        "{\"project\":" + project_argument + ",\"sample_rate\":44100}"));
+    const auto explained =
+        handle_request(tool_call("102", "pulp_timeline_explain",
+                                 "{\"project\":" + project_argument + ",\"sample_rate\":44100}"));
     require_contains(explained, R"JSON("audio_regions":1)JSON");
     require_contains(explained, R"JSON("pdc_offset_samples":null)JSON");
 
     const std::string command =
         R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
-    const auto applied = handle_request(tool_call(
-        "103", "pulp_timeline_command_apply",
-        "{\"commands\":" + command + ",\"project\":" + project_argument + "}"));
+    const auto applied = handle_request(
+        tool_call("103", "pulp_timeline_command_apply",
+                  "{\"commands\":" + command + ",\"project\":" + project_argument + "}"));
     require_contains(applied, R"JSON("revision":"1")JSON");
     const auto changed_project = timeline_project_from_response(applied);
 
@@ -934,10 +923,10 @@ TEST_CASE("timeline MCP operations edit and render inline projects",
                ",\"project\":" + pulp::timeline::quote_json_string(project_json) +
                ",\"sample_rate\":48000}";
     };
-    const auto original_render = handle_request(tool_call(
-        "104", "pulp_timeline_render", render_arguments(project, original_path)));
-    const auto changed_render = handle_request(tool_call(
-        "105", "pulp_timeline_render", render_arguments(changed_project, changed_path)));
+    const auto original_render = handle_request(
+        tool_call("104", "pulp_timeline_render", render_arguments(project, original_path)));
+    const auto changed_render = handle_request(
+        tool_call("105", "pulp_timeline_render", render_arguments(changed_project, changed_path)));
     require_contains(original_render, R"JSON("frames":"32")JSON");
     require_contains(changed_render, R"JSON("frames":"32")JSON");
 
@@ -950,10 +939,16 @@ TEST_CASE("timeline MCP operations edit and render inline projects",
 
     const auto invalid_rate = handle_request(tool_call(
         "106", "pulp_timeline_render",
-        "{\"output\":\"ignored.wav\",\"project\":" + project_argument +
-            ",\"sample_rate\":0}"));
+        "{\"output\":\"ignored.wav\",\"project\":" + project_argument + ",\"sample_rate\":0}"));
     require_contains(invalid_rate, R"JSON("isError":true)JSON");
-    require_contains(invalid_rate, "sample_rate must be a positive integer");
+    require_contains(invalid_rate, "sample_rate must be an integer between 1 and 768000");
+
+    const auto excessive_rate =
+        handle_request(tool_call("107", "pulp_timeline_render",
+                                 "{\"output\":\"ignored.wav\",\"project\":" + project_argument +
+                                     ",\"sample_rate\":768001}"));
+    require_contains(excessive_rate, R"JSON("isError":true)JSON");
+    require_contains(excessive_rate, "sample_rate must be an integer between 1 and 768000");
 }
 
 TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools][mcp-set-param]") {
@@ -969,8 +964,7 @@ TEST_CASE("pulp_inspect_set_param dispatch builds a typed payload", "[mcp][tools
     require_contains(response, R"JSON("content")JSON");
 }
 
-TEST_CASE("pulp_audio_compare validates its arguments before shelling out",
-          "[mcp][tools][audio]") {
+TEST_CASE("pulp_audio_compare validates its arguments before shelling out", "[mcp][tools][audio]") {
     // Each invocation drives one guard branch in handle_audio_compare so the
     // typed validation fails fast (with an actionable message) instead of
     // spawning the delegated command on bad input.
@@ -986,26 +980,26 @@ TEST_CASE("pulp_audio_compare validates its arguments before shelling out",
     // Profile is now passed THROUGH to the Python `_AXES` registry (the single source of truth for
     // the valid set, which grows as axes are added); the MCP only rejects an option-looking value.
     // reference_role stays a small closed set validated locally.
-    require_contains(
-        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"-x"})JSON"),
-        "profile must be an axis name, not an option");
+    require_contains(call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"-x"})JSON"),
+                     "profile must be an axis name, not an option");
     require_contains(
         call(R"JSON({"reference":"a.wav","candidate":"b.wav","reference_role":"truth"})JSON"),
         "reference_role must be peer or golden");
     // A newer axis (not in the old hardcoded pair) flows straight through to a well-formed result.
     require_contains(
-        call(R"JSON({"reference":"/nope/a.wav","candidate":"/nope/b.wav","profile":"noise-roughness"})JSON"),
+        call(
+            R"JSON({"reference":"/nope/a.wav","candidate":"/nope/b.wav","profile":"noise-roughness"})JSON"),
         R"JSON("jsonrpc":"2.0")JSON");
     // Threshold is passed through to the Python registry (the per-axis source of truth: a
     // fraction for tonal-balance, dB for added-hf); the MCP guards only the universal invariant
     // that it is a finite positive magnitude. A negative threshold is rejected here...
-    require_contains(
-        call(R"JSON({"reference":"a.wav","candidate":"b.wav","threshold":-0.5})JSON"),
-        "threshold must be a finite positive number");
+    require_contains(call(R"JSON({"reference":"a.wav","candidate":"b.wav","threshold":-0.5})JSON"),
+                     "threshold must be a finite positive number");
     // ...but a dB-scale threshold (e.g. 3.0, valid for added-hf) is NO LONGER rejected by a
     // hardcoded (0,1) fraction bound — it flows through to the delegated tool.
     require_contains(
-        call(R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"added-hf","threshold":3.0})JSON"),
+        call(
+            R"JSON({"reference":"a.wav","candidate":"b.wav","profile":"added-hf","threshold":3.0})JSON"),
         R"JSON("jsonrpc":"2.0")JSON");
 }
 
@@ -1056,32 +1050,30 @@ TEST_CASE("MCP project-root dependent tools reject non-project directories", "[m
     require_contains(compare, "Error: not in a Pulp project");
 }
 
-TEST_CASE("MCP audio probe JSON validates frames before shelling out",
-          "[mcp][tools][audio]") {
+TEST_CASE("MCP audio probe JSON validates frames before shelling out", "[mcp][tools][audio]") {
     ScopedCurrentPath cwd(repo_root_path());
 
-    auto zero_frames = handle_request(tool_call(
-        "45", "pulp_audio_probe_json", R"JSON({"frames":0})JSON"));
+    auto zero_frames =
+        handle_request(tool_call("45", "pulp_audio_probe_json", R"JSON({"frames":0})JSON"));
     require_contains(zero_frames, R"JSON("id":45)JSON");
     require_contains(zero_frames, "Error: frames must be a positive integer");
     REQUIRE(zero_frames.find("Unknown tool") == std::string::npos);
 
-    auto string_frames = handle_request(tool_call(
-        "46", "pulp_audio_probe_json", R"JSON({"frames":"90"})JSON"));
+    auto string_frames =
+        handle_request(tool_call("46", "pulp_audio_probe_json", R"JSON({"frames":"90"})JSON"));
     require_contains(string_frames, R"JSON("id":46)JSON");
     require_contains(string_frames, "Error: frames must be a positive integer");
     REQUIRE(string_frames.find("Unknown tool") == std::string::npos);
 
-    auto option_target = handle_request(tool_call(
-        "49", "pulp_audio_probe_json", R"JSON({"target":"--watch"})JSON"));
+    auto option_target =
+        handle_request(tool_call("49", "pulp_audio_probe_json", R"JSON({"target":"--watch"})JSON"));
     require_contains(option_target, R"JSON("id":49)JSON");
     require_contains(option_target,
                      "Error: target must be a standalone target name, not an option");
     REQUIRE(option_target.find("Unknown tool") == std::string::npos);
 }
 
-TEST_CASE("MCP audio probe JSON reports missing project roots",
-          "[mcp][tools][audio]") {
+TEST_CASE("MCP audio probe JSON reports missing project roots", "[mcp][tools][audio]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
@@ -1095,44 +1087,39 @@ TEST_CASE("MCP audio scope validates parameters before shelling out",
           "[mcp][tools][audio][scope]") {
     ScopedCurrentPath cwd(repo_root_path());
 
-    auto zero_frames = handle_request(tool_call(
-        "61", "pulp_audio_scope", R"JSON({"frames":0})JSON"));
+    auto zero_frames =
+        handle_request(tool_call("61", "pulp_audio_scope", R"JSON({"frames":0})JSON"));
     require_contains(zero_frames, R"JSON("id":61)JSON");
     require_contains(zero_frames, "Error: frames must be a positive integer");
 
-    auto zero_window = handle_request(tool_call(
-        "62", "pulp_audio_scope", R"JSON({"window":0})JSON"));
+    auto zero_window =
+        handle_request(tool_call("62", "pulp_audio_scope", R"JSON({"window":0})JSON"));
     require_contains(zero_window, "Error: window must be a positive integer");
 
-    auto bad_channel = handle_request(tool_call(
-        "63", "pulp_audio_scope", R"JSON({"channel":-1})JSON"));
+    auto bad_channel =
+        handle_request(tool_call("63", "pulp_audio_scope", R"JSON({"channel":-1})JSON"));
     require_contains(bad_channel, "Error: channel must be a non-negative integer");
 
-    auto bad_trigger = handle_request(tool_call(
-        "64", "pulp_audio_scope", R"JSON({"trigger":"smooth"})JSON"));
-    require_contains(bad_trigger,
-                     "Error: trigger must be one of none, raw, off, rising-zero");
+    auto bad_trigger =
+        handle_request(tool_call("64", "pulp_audio_scope", R"JSON({"trigger":"smooth"})JSON"));
+    require_contains(bad_trigger, "Error: trigger must be one of none, raw, off, rising-zero");
 
-    auto option_target = handle_request(tool_call(
-        "65", "pulp_audio_scope", R"JSON({"target":"--watch"})JSON"));
+    auto option_target =
+        handle_request(tool_call("65", "pulp_audio_scope", R"JSON({"target":"--watch"})JSON"));
     require_contains(option_target,
                      "Error: target must be a standalone target name, not an option");
 
-    auto live_and_offline = handle_request(tool_call(
-        "67", "pulp_audio_scope",
-        R"JSON({"target":"Demo","input_wav":"in.wav"})JSON"));
-    require_contains(live_and_offline,
-                     "Error: target and input_wav are mutually exclusive");
+    auto live_and_offline = handle_request(
+        tool_call("67", "pulp_audio_scope", R"JSON({"target":"Demo","input_wav":"in.wav"})JSON"));
+    require_contains(live_and_offline, "Error: target and input_wav are mutually exclusive");
 
-    auto png_without_offline = handle_request(tool_call(
-        "68", "pulp_audio_scope", R"JSON({"png_path":"scope.png"})JSON"));
-    require_contains(png_without_offline,
-                     "Error: png_path is only supported with input_wav");
+    auto png_without_offline =
+        handle_request(tool_call("68", "pulp_audio_scope", R"JSON({"png_path":"scope.png"})JSON"));
+    require_contains(png_without_offline, "Error: png_path is only supported with input_wav");
     REQUIRE(option_target.find("Unknown tool") == std::string::npos);
 }
 
-TEST_CASE("MCP build and test handlers quote project paths and filters",
-          "[mcp][tools][shell]") {
+TEST_CASE("MCP build and test handlers quote project paths and filters", "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("PATH-injected POSIX fake tools are only used on non-Windows");
 #else
@@ -1157,8 +1144,8 @@ TEST_CASE("MCP build and test handlers quote project paths and filters",
     REQUIRE(build_response.find("[With]") == std::string::npos);
     REQUIRE(build_response.find("[Spaces/build]") == std::string::npos);
 
-    auto test_response = handle_request(tool_call(
-        "42", "pulp_test", R"JSON({"filter":"MCP protocol's edge"})JSON"));
+    auto test_response =
+        handle_request(tool_call("42", "pulp_test", R"JSON({"filter":"MCP protocol's edge"})JSON"));
     require_contains(test_response, R"JSON("id":42)JSON");
     require_contains(test_response, "fake-ctest [--test-dir] [" + canonical_build + "]");
     require_contains(test_response, "[--output-on-failure] [-R] [MCP protocol's edge]");
@@ -1166,8 +1153,7 @@ TEST_CASE("MCP build and test handlers quote project paths and filters",
 #endif
 }
 
-TEST_CASE("MCP docs_search and create quote user arguments",
-          "[mcp][tools][shell]") {
+TEST_CASE("MCP docs_search and create quote user arguments", "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1188,45 +1174,55 @@ TEST_CASE("MCP docs_search and create quote user arguments",
 
     ScopedCurrentPath cwd(project);
 
-    auto docs_search = handle_request(tool_call(
-        "43", "pulp_docs_search", R"JSON({"query":"gain staging's guide"})JSON"));
+    auto docs_search = handle_request(
+        tool_call("43", "pulp_docs_search", R"JSON({"query":"gain staging's guide"})JSON"));
     require_contains(docs_search, R"JSON("id":43)JSON");
     require_contains(docs_search, "fake-pulp [docs] [search] [gain staging's guide]");
     REQUIRE(docs_search.find("[gain] [staging") == std::string::npos);
 
-    auto kit_validate = handle_request(tool_call(
-        "45", "pulp_kit_validate", R"JSON({"path":"fixtures/packages/basic ui's kit","strict":true})JSON"));
+    auto kit_validate = handle_request(
+        tool_call("45", "pulp_kit_validate",
+                  R"JSON({"path":"fixtures/packages/basic ui's kit","strict":true})JSON"));
     require_contains(kit_validate, R"JSON("id":45)JSON");
-    require_contains(kit_validate, "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json] [--strict]");
+    require_contains(
+        kit_validate,
+        "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json] [--strict]");
     REQUIRE(kit_validate.find("[fixtures/packages/basic] [ui") == std::string::npos);
 
     auto kit_umbrella = handle_request(tool_call(
-        "48", "pulp_kit", R"JSON({"subcommand":"validate","path":"fixtures/packages/basic ui's kit"})JSON"));
+        "48", "pulp_kit",
+        R"JSON({"subcommand":"validate","path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_umbrella, R"JSON("id":48)JSON");
-    require_contains(kit_umbrella, "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json]");
+    require_contains(kit_umbrella,
+                     "fake-pulp [kit] [validate] [fixtures/packages/basic ui's kit] [--json]");
 
-    auto kit_preview_alias = handle_request(tool_call(
-        "52", "pulp_kit", R"JSON({"subcommand":"preview","path":"fixtures/packages/basic ui's kit"})JSON"));
+    auto kit_preview_alias = handle_request(
+        tool_call("52", "pulp_kit",
+                  R"JSON({"subcommand":"preview","path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_preview_alias, R"JSON("id":52)JSON");
-    require_contains(kit_preview_alias, "Error: use kit plan; preview is reserved for content compatibility checks");
+    require_contains(kit_preview_alias,
+                     "Error: use kit plan; preview is reserved for content compatibility checks");
     REQUIRE(kit_preview_alias.find("[kit] [plan]") == std::string::npos);
 
     auto kit_inspect = handle_request(tool_call(
         "46", "pulp_kit_inspect", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_inspect, R"JSON("id":46)JSON");
-    require_contains(kit_inspect, "fake-pulp [kit] [inspect] [fixtures/packages/basic ui's kit] [--json]");
+    require_contains(kit_inspect,
+                     "fake-pulp [kit] [inspect] [fixtures/packages/basic ui's kit] [--json]");
 
-    auto kit_plan = handle_request(tool_call(
-        "49", "pulp_kit_plan", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
+    auto kit_plan = handle_request(
+        tool_call("49", "pulp_kit_plan", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_plan, R"JSON("id":49)JSON");
-    require_contains(kit_plan, "fake-pulp [kit] [plan] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_plan,
+                     "fake-pulp [kit] [plan] [fixtures/packages/basic ui's kit] [--project]");
     require_contains(kit_plan, "[--json]");
     REQUIRE(kit_plan.find("[fixtures/packages/basic] [ui") == std::string::npos);
 
     auto kit_verify = handle_request(tool_call(
         "50", "pulp_kit_verify", R"JSON({"path":"fixtures/packages/basic ui's kit"})JSON"));
     require_contains(kit_verify, R"JSON("id":50)JSON");
-    require_contains(kit_verify, "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_verify,
+                     "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
     require_contains(kit_verify, "[--json]");
     REQUIRE(kit_verify.find("[fixtures/packages/basic] [ui") == std::string::npos);
 
@@ -1234,8 +1230,11 @@ TEST_CASE("MCP docs_search and create quote user arguments",
         "51", "pulp_kit_verify",
         R"JSON({"path":"fixtures/packages/basic ui's kit","execute_screenshots":true,"screenshot_backend":"skia","screenshot_output_dir":"artifacts/kit shots"})JSON"));
     require_contains(kit_verify_screenshots, R"JSON("id":51)JSON");
-    require_contains(kit_verify_screenshots, "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
-    require_contains(kit_verify_screenshots, "[--json] [--execute-screenshots] [--screenshot-backend] [skia] [--screenshot-output-dir] [artifacts/kit shots]");
+    require_contains(kit_verify_screenshots,
+                     "fake-pulp [kit] [verify] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_verify_screenshots,
+                     "[--json] [--execute-screenshots] [--screenshot-backend] [skia] "
+                     "[--screenshot-output-dir] [artifacts/kit shots]");
     REQUIRE(kit_verify_screenshots.find("[artifacts/kit] [shots]") == std::string::npos);
 
     auto kit_apply_missing_yes = handle_request(tool_call(
@@ -1243,20 +1242,22 @@ TEST_CASE("MCP docs_search and create quote user arguments",
     require_contains(kit_apply_missing_yes, R"JSON("id":54)JSON");
     require_contains(kit_apply_missing_yes, "Error: yes=true is required");
 
-    auto kit_apply = handle_request(tool_call(
-        "55", "pulp_kit_apply", R"JSON({"path":"fixtures/packages/basic ui's kit","yes":true})JSON"));
+    auto kit_apply = handle_request(
+        tool_call("55", "pulp_kit_apply",
+                  R"JSON({"path":"fixtures/packages/basic ui's kit","yes":true})JSON"));
     require_contains(kit_apply, R"JSON("id":55)JSON");
-    require_contains(kit_apply, "fake-pulp [kit] [apply] [fixtures/packages/basic ui's kit] [--project]");
+    require_contains(kit_apply,
+                     "fake-pulp [kit] [apply] [fixtures/packages/basic ui's kit] [--project]");
     require_contains(kit_apply, "[--yes]");
     REQUIRE(kit_apply.find("[fixtures/packages/basic] [ui") == std::string::npos);
 
-    auto kit_remove_missing_yes = handle_request(tool_call(
-        "56", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture"})JSON"));
+    auto kit_remove_missing_yes =
+        handle_request(tool_call("56", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture"})JSON"));
     require_contains(kit_remove_missing_yes, R"JSON("id":56)JSON");
     require_contains(kit_remove_missing_yes, "Error: yes=true is required");
 
-    auto kit_remove = handle_request(tool_call(
-        "57", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture","yes":true})JSON"));
+    auto kit_remove = handle_request(
+        tool_call("57", "pulp_kit_remove", R"JSON({"id":"dev.pulp.fixture","yes":true})JSON"));
     require_contains(kit_remove, R"JSON("id":57)JSON");
     require_contains(kit_remove, "fake-pulp [kit] [remove] [dev.pulp.fixture] [--project]");
     require_contains(kit_remove, "[--yes]");
@@ -1265,46 +1266,60 @@ TEST_CASE("MCP docs_search and create quote user arguments",
         "58", "pulp_kit_pack",
         R"JSON({"path":"fixtures/packages/basic ui's kit","output":"dist/basic ui's kit.pulpkit"})JSON"));
     require_contains(kit_pack, R"JSON("id":58)JSON");
-    require_contains(kit_pack, "fake-pulp [kit] [pack] [fixtures/packages/basic ui's kit] [--json] [--output] [dist/basic ui's kit.pulpkit]");
+    require_contains(kit_pack, "fake-pulp [kit] [pack] [fixtures/packages/basic ui's kit] [--json] "
+                               "[--output] [dist/basic ui's kit.pulpkit]");
     REQUIRE(kit_pack.find("[dist/basic] [ui") == std::string::npos);
 
     auto kit_publish = handle_request(tool_call(
         "59", "pulp_kit_publish_check",
         R"JSON({"path":"fixtures/packages/basic ui's kit","registry_manifest":"registry/signed manifest's.json"})JSON"));
     require_contains(kit_publish, R"JSON("id":59)JSON");
-    require_contains(kit_publish, "fake-pulp [kit] [publish] [fixtures/packages/basic ui's kit] [--dry-run] [--json] [--registry-manifest] [registry/signed manifest's.json]");
+    require_contains(kit_publish,
+                     "fake-pulp [kit] [publish] [fixtures/packages/basic ui's kit] [--dry-run] "
+                     "[--json] [--registry-manifest] [registry/signed manifest's.json]");
     REQUIRE(kit_publish.find("[fixtures/packages/basic] [ui") == std::string::npos);
 
     auto kit_search = handle_request(tool_call(
         "58", "pulp_kit_search",
         R"JSON({"query":"basic ui","root":"fixtures/packages with spaces","kind":"ui-kit","lane":"kit"})JSON"));
     require_contains(kit_search, R"JSON("id":58)JSON");
-    require_contains(kit_search, "fake-pulp [kit] [search] [basic ui] [--root] [fixtures/packages with spaces] [--kind] [ui-kit] [--lane] [kit] [--json]");
+    require_contains(kit_search, "fake-pulp [kit] [search] [basic ui] [--root] [fixtures/packages "
+                                 "with spaces] [--kind] [ui-kit] [--lane] [kit] [--json]");
     REQUIRE(kit_search.find("[basic] [ui]") == std::string::npos);
 
     auto kit_init = handle_request(tool_call(
         "47", "pulp_kit_init",
         R"JSON({"kind":"ui-kit","id":"dev.pulp.fixture","name":"Fixture UI","dir":"tmp/kit dir","force":true})JSON"));
     require_contains(kit_init, R"JSON("id":47)JSON");
-    require_contains(kit_init, "fake-pulp [kit] [init] [--kind] [ui-kit] [--id] [dev.pulp.fixture] [--name] [Fixture UI] [--dir] [tmp/kit dir] [--force]");
+    require_contains(kit_init, "fake-pulp [kit] [init] [--kind] [ui-kit] [--id] [dev.pulp.fixture] "
+                               "[--name] [Fixture UI] [--dir] [tmp/kit dir] [--force]");
     REQUIRE(kit_init.find("[Fixture] [UI]") == std::string::npos);
 
-    auto content_validate = handle_request(tool_call(
-        "59", "pulp_content_validate", R"JSON({"path":"packs/basic content's pack.pulpcontent"})JSON"));
+    auto content_validate =
+        handle_request(tool_call("59", "pulp_content_validate",
+                                 R"JSON({"path":"packs/basic content's pack.pulpcontent"})JSON"));
     require_contains(content_validate, R"JSON("id":59)JSON");
-    require_contains(content_validate, "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
+    require_contains(
+        content_validate,
+        "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
     REQUIRE(content_validate.find("[packs/basic] [content") == std::string::npos);
 
     auto content_umbrella = handle_request(tool_call(
-        "60", "pulp_content", R"JSON({"subcommand":"validate","path":"packs/basic content's pack.pulpcontent"})JSON"));
+        "60", "pulp_content",
+        R"JSON({"subcommand":"validate","path":"packs/basic content's pack.pulpcontent"})JSON"));
     require_contains(content_umbrella, R"JSON("id":60)JSON");
-    require_contains(content_umbrella, "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
+    require_contains(
+        content_umbrella,
+        "fake-pulp [content] [validate] [packs/basic content's pack.pulpcontent] [--json]");
 
     auto content_preview = handle_request(tool_call(
         "70", "pulp_content_preview",
         R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin_runtime":"bundles/My Plugin/pulp.plugin-runtime.json","plugin":"dev.pulp fixture"})JSON"));
     require_contains(content_preview, R"JSON("id":70)JSON");
-    require_contains(content_preview, "fake-pulp [content] [preview] [packs/basic content's pack.pulpcontent] [--plugin-runtime] [bundles/My Plugin/pulp.plugin-runtime.json] [--json] [--plugin] [dev.pulp fixture]");
+    require_contains(
+        content_preview,
+        "fake-pulp [content] [preview] [packs/basic content's pack.pulpcontent] [--plugin-runtime] "
+        "[bundles/My Plugin/pulp.plugin-runtime.json] [--json] [--plugin] [dev.pulp fixture]");
     REQUIRE(content_preview.find("[My] [Plugin]") == std::string::npos);
     REQUIRE(content_preview.find("[dev.pulp] [fixture]") == std::string::npos);
 
@@ -1318,7 +1333,9 @@ TEST_CASE("MCP docs_search and create quote user arguments",
         "62", "pulp_content_install",
         R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture","root":"tmp/content root","yes":true})JSON"));
     require_contains(content_install, R"JSON("id":62)JSON");
-    require_contains(content_install, "fake-pulp [content] [install] [packs/basic content's pack.pulpcontent] [--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
+    require_contains(content_install,
+                     "fake-pulp [content] [install] [packs/basic content's pack.pulpcontent] "
+                     "[--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
     REQUIRE(content_install.find("[dev.pulp] [fixture]") == std::string::npos);
 
     auto content_update_missing_yes = handle_request(tool_call(
@@ -1331,21 +1348,27 @@ TEST_CASE("MCP docs_search and create quote user arguments",
         "69", "pulp_content_update",
         R"JSON({"path":"packs/basic content's pack.pulpcontent","plugin":"dev.pulp fixture","root":"tmp/content root","yes":true})JSON"));
     require_contains(content_update, R"JSON("id":69)JSON");
-    require_contains(content_update, "fake-pulp [content] [update] [packs/basic content's pack.pulpcontent] [--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
+    require_contains(content_update,
+                     "fake-pulp [content] [update] [packs/basic content's pack.pulpcontent] "
+                     "[--plugin] [dev.pulp fixture] [--yes] [--root] [tmp/content root]");
     REQUIRE(content_update.find("[dev.pulp] [fixture]") == std::string::npos);
 
-    auto content_list = handle_request(tool_call(
-        "63", "pulp_content_list", R"JSON({"plugin":"dev.pulp fixture","root":"tmp/content root"})JSON"));
+    auto content_list = handle_request(
+        tool_call("63", "pulp_content_list",
+                  R"JSON({"plugin":"dev.pulp fixture","root":"tmp/content root"})JSON"));
     require_contains(content_list, R"JSON("id":63)JSON");
-    require_contains(content_list, "fake-pulp [content] [list] [--json] [--plugin] [dev.pulp fixture] [--root] [tmp/content root]");
+    require_contains(content_list, "fake-pulp [content] [list] [--json] [--plugin] [dev.pulp "
+                                   "fixture] [--root] [tmp/content root]");
 
-    auto content_rescan = handle_request(tool_call(
-        "67", "pulp_content_rescan", R"JSON({"root":"tmp/content root"})JSON"));
+    auto content_rescan = handle_request(
+        tool_call("67", "pulp_content_rescan", R"JSON({"root":"tmp/content root"})JSON"));
     require_contains(content_rescan, R"JSON("id":67)JSON");
-    require_contains(content_rescan, "fake-pulp [content] [rescan] [--json] [--root] [tmp/content root]");
+    require_contains(content_rescan,
+                     "fake-pulp [content] [rescan] [--json] [--root] [tmp/content root]");
 
-    auto content_remove_missing_yes = handle_request(tool_call(
-        "64", "pulp_content_remove", R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture"})JSON"));
+    auto content_remove_missing_yes = handle_request(
+        tool_call("64", "pulp_content_remove",
+                  R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture"})JSON"));
     require_contains(content_remove_missing_yes, R"JSON("id":64)JSON");
     require_contains(content_remove_missing_yes, "Error: yes=true is required");
 
@@ -1353,26 +1376,30 @@ TEST_CASE("MCP docs_search and create quote user arguments",
         "65", "pulp_content_remove",
         R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture","version":"0.1.0","root":"tmp/content root","yes":true})JSON"));
     require_contains(content_remove, R"JSON("id":65)JSON");
-    require_contains(content_remove, "fake-pulp [content] [remove] [dev.pulp.content] [--plugin] [dev.pulp fixture] [--yes] [--version] [0.1.0] [--root] [tmp/content root]");
+    require_contains(content_remove,
+                     "fake-pulp [content] [remove] [dev.pulp.content] [--plugin] [dev.pulp "
+                     "fixture] [--yes] [--version] [0.1.0] [--root] [tmp/content root]");
 
     auto content_reveal = handle_request(tool_call(
         "66", "pulp_content_reveal",
         R"JSON({"id":"dev.pulp.content","plugin":"dev.pulp fixture","version":"0.1.0","root":"tmp/content root"})JSON"));
     require_contains(content_reveal, R"JSON("id":66)JSON");
-    require_contains(content_reveal, "fake-pulp [content] [reveal] [dev.pulp.content] [--plugin] [dev.pulp fixture] [--version] [0.1.0] [--root] [tmp/content root]");
+    require_contains(content_reveal,
+                     "fake-pulp [content] [reveal] [dev.pulp.content] [--plugin] [dev.pulp "
+                     "fixture] [--version] [0.1.0] [--root] [tmp/content root]");
 
-    auto create = handle_request(tool_call(
-        "44", "pulp_create",
-        R"JSON({"name":"Tape Echo","type":"effect","manufacturer":"ACME Audio"})JSON"));
+    auto create = handle_request(
+        tool_call("44", "pulp_create",
+                  R"JSON({"name":"Tape Echo","type":"effect","manufacturer":"ACME Audio"})JSON"));
     require_contains(create, R"JSON("id":44)JSON");
-    require_contains(create, "fake-create [Tape Echo] [--type] [effect] [--manufacturer] [ACME Audio]");
+    require_contains(create,
+                     "fake-create [Tape Echo] [--type] [effect] [--manufacturer] [ACME Audio]");
     REQUIRE(create.find("[Tape] [Echo]") == std::string::npos);
     REQUIRE(create.find("[ACME] [Audio]") == std::string::npos);
 #endif
 }
 
-TEST_CASE("MCP docs_check runs the project docs check script",
-          "[mcp][tools][docs]") {
+TEST_CASE("MCP docs_check runs the project docs check script", "[mcp][tools][docs]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -1417,45 +1444,42 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
         script << "#!/bin/sh\n"
                << "printf 'iVBORfakePackageWorkflowPng'\n";
         script.close();
-        std::filesystem::permissions(
-            screenshot,
-            std::filesystem::perms::owner_exec |
-                std::filesystem::perms::owner_read |
-                std::filesystem::perms::owner_write,
-            std::filesystem::perm_options::add);
+        std::filesystem::permissions(screenshot,
+                                     std::filesystem::perms::owner_exec |
+                                         std::filesystem::perms::owner_read |
+                                         std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::add);
     }
 
-    const auto previous_path = std::getenv("PATH") ? std::string(std::getenv("PATH")) : std::string{};
+    const auto previous_path =
+        std::getenv("PATH") ? std::string(std::getenv("PATH")) : std::string{};
     ScopedEnvVar path_env("PATH", bin.string() + ":" + previous_path);
     ScopedCurrentPath cwd(project);
     const auto effective_project = std::filesystem::current_path().string();
 
-    auto search = handle_request(tool_call(
-        "101", "pulp_kit_search",
-        R"JSON({"query":"basic","root":"fixtures/packages","lane":"kit"})JSON"));
+    auto search = handle_request(
+        tool_call("101", "pulp_kit_search",
+                  R"JSON({"query":"basic","root":"fixtures/packages","lane":"kit"})JSON"));
     require_contains(search, R"JSON("id":101)JSON");
     require_contains(search, "dev.pulp.fixtures.basic-ui-kit");
 
     auto inspect = handle_request(tool_call(
-        "102", "pulp_kit_inspect",
-        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+        "102", "pulp_kit_inspect", R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
     require_contains(inspect, R"JSON("id":102)JSON");
     require_contains(inspect, "dev.pulp.fixtures.basic-ui-kit");
 
-    auto plan = handle_request(tool_call(
-        "103", "pulp_kit_plan",
-        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+    auto plan = handle_request(
+        tool_call("103", "pulp_kit_plan", R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
     require_contains(plan, R"JSON("id":103)JSON");
     require_contains(plan, R"JSON(\"kind\":\"lock-entry\")JSON");
 
-    auto apply_missing_yes = handle_request(tool_call(
-        "104", "pulp_kit_apply",
-        R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
+    auto apply_missing_yes = handle_request(
+        tool_call("104", "pulp_kit_apply", R"JSON({"path":"fixtures/packages/basic-ui-kit"})JSON"));
     require_contains(apply_missing_yes, "Error: yes=true is required after reviewing the kit plan");
 
-    auto apply = handle_request(tool_call(
-        "105", "pulp_kit_apply",
-        R"JSON({"path":"fixtures/packages/basic-ui-kit","yes":true})JSON"));
+    auto apply = handle_request(
+        tool_call("105", "pulp_kit_apply",
+                  R"JSON({"path":"fixtures/packages/basic-ui-kit","yes":true})JSON"));
     require_contains(apply, "OK: Applied kit dev.pulp.fixtures.basic-ui-kit");
 
     auto build = handle_request(tool_call("106", "pulp_build"));
@@ -1464,14 +1488,14 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
     auto validate = handle_request(tool_call("107", "pulp_validate"));
     require_contains(validate, R"JSON(\"ok\":true)JSON");
 
-    auto screenshot = handle_request(tool_call(
-        "108", "pulp_screenshot", R"JSON({"demo":true})JSON"));
+    auto screenshot =
+        handle_request(tool_call("108", "pulp_screenshot", R"JSON({"demo":true})JSON"));
     require_contains(screenshot, R"JSON("mimeType":"image/png")JSON");
     require_contains(screenshot, "iVBORfakePackageWorkflowPng");
 
-    auto content_validate = handle_request(tool_call(
-        "109", "pulp_content_validate",
-        R"JSON({"path":"fixtures/packages/basic-content-pack"})JSON"));
+    auto content_validate =
+        handle_request(tool_call("109", "pulp_content_validate",
+                                 R"JSON({"path":"fixtures/packages/basic-content-pack"})JSON"));
     require_contains(content_validate, "dev.pulp.fixtures.basic-content-pack");
 
     auto content_preview = handle_request(tool_call(
@@ -1488,21 +1512,27 @@ TEST_CASE("MCP package workflow preserves inspect plan approve apply gates",
     auto content_install = handle_request(tool_call(
         "112", "pulp_content_install",
         R"JSON({"path":"fixtures/packages/basic-content-pack","plugin":"dev.pulp.fixtures.content-target","root":"content-root","yes":true})JSON"));
-    require_contains(content_install, "OK: Installed content pack dev.pulp.fixtures.basic-content-pack");
+    require_contains(content_install,
+                     "OK: Installed content pack dev.pulp.fixtures.basic-content-pack");
 
     std::ifstream log_stream(log);
     const std::string log_text((std::istreambuf_iterator<char>(log_stream)),
                                std::istreambuf_iterator<char>());
     require_contains(log_text, "kit search basic --root fixtures/packages --lane kit --json");
     require_contains(log_text, "kit inspect fixtures/packages/basic-ui-kit --json");
-    require_contains(log_text, "kit plan fixtures/packages/basic-ui-kit --project " + effective_project + " --json");
-    require_contains(log_text, "kit apply fixtures/packages/basic-ui-kit --project " + effective_project + " --yes");
+    require_contains(log_text, "kit plan fixtures/packages/basic-ui-kit --project " +
+                                   effective_project + " --json");
+    require_contains(log_text, "kit apply fixtures/packages/basic-ui-kit --project " +
+                                   effective_project + " --yes");
     require_contains(log_text, "validate --json");
     require_contains(log_text, "content validate fixtures/packages/basic-content-pack --json");
-    require_contains(log_text, "content preview fixtures/packages/basic-content-pack --plugin-runtime pulp.plugin-runtime.json --json --plugin dev.pulp.fixtures.content-target");
-    require_contains(log_text, "content install fixtures/packages/basic-content-pack --plugin dev.pulp.fixtures.content-target --yes --root content-root");
-    REQUIRE(log_text.find("kit apply fixtures/packages/basic-ui-kit --project " + effective_project + " --json")
-            == std::string::npos);
+    require_contains(log_text,
+                     "content preview fixtures/packages/basic-content-pack --plugin-runtime "
+                     "pulp.plugin-runtime.json --json --plugin dev.pulp.fixtures.content-target");
+    require_contains(log_text, "content install fixtures/packages/basic-content-pack --plugin "
+                               "dev.pulp.fixtures.content-target --yes --root content-root");
+    REQUIRE(log_text.find("kit apply fixtures/packages/basic-ui-kit --project " +
+                          effective_project + " --json") == std::string::npos);
 #endif
 }
 
@@ -1520,15 +1550,15 @@ TEST_CASE("MCP status reports import-design defaults", "[mcp][tools]") {
 
     auto response = handle_request(tool_call("21", "pulp_status"));
     require_contains(response,
-                     "Import design defaults: --mode baked (config:import_design.default_mode), --emit ir-json (implied by config:import_design.default_mode)");
+                     "Import design defaults: --mode baked (config:import_design.default_mode), "
+                     "--emit ir-json (implied by config:import_design.default_mode)");
 }
 
-TEST_CASE("MCP status quotes project roots before reading Git branch",
-          "[mcp][tools][shell]") {
+TEST_CASE("MCP status quotes project roots before reading Git branch", "[mcp][tools][shell]") {
 #if defined(_WIN32)
     SKIP("POSIX shell quoting assertion is only used on non-Windows");
 #else
-    clear_inherited_git_env();  // never let an inherited GIT_DIR hijack `git -C`
+    clear_inherited_git_env(); // never let an inherited GIT_DIR hijack `git -C`
     TempDir scratch;
     const auto project = scratch.path / "Project With Spaces And 'Quotes'";
     std::filesystem::create_directories(project / "core");
@@ -1536,10 +1566,11 @@ TEST_CASE("MCP status quotes project roots before reading Git branch",
     std::filesystem::create_directories(project / "build");
     std::ofstream(project / "CMakeLists.txt") << "project(FakePulp VERSION 1.2.3)\n";
 
+    REQUIRE(std::system(("git -C " + shell_quote(project.string()) + " init --quiet").c_str()) ==
+            0);
     REQUIRE(std::system(("git -C " + shell_quote(project.string()) +
-                         " init --quiet").c_str()) == 0);
-    REQUIRE(std::system(("git -C " + shell_quote(project.string()) +
-                         " checkout -b mcp-status-quoted-root --quiet").c_str()) == 0);
+                         " checkout -b mcp-status-quoted-root --quiet")
+                            .c_str()) == 0);
 
     ScopedCurrentPath cwd(project);
     auto response = handle_request(tool_call("37", "pulp_status"));
@@ -1562,10 +1593,11 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
     // A "sentinel" repo standing in for the source worktree. If isolation
     // breaks, the temp-repo git commands below would land here.
     TempDir sentinel;
+    REQUIRE(std::system(
+                ("git -C " + shell_quote(sentinel.path.string()) + " init --quiet").c_str()) == 0);
     REQUIRE(std::system(("git -C " + shell_quote(sentinel.path.string()) +
-                         " init --quiet").c_str()) == 0);
-    REQUIRE(std::system(("git -C " + shell_quote(sentinel.path.string()) +
-                         " symbolic-ref HEAD refs/heads/sentinel-main").c_str()) == 0);
+                         " symbolic-ref HEAD refs/heads/sentinel-main")
+                            .c_str()) == 0);
 
     // Simulate the hook environment: export GIT_DIR/GIT_WORK_TREE at the
     // sentinel, exactly what a parent `git` process would inject.
@@ -1579,20 +1611,21 @@ TEST_CASE("temp-repo git stays isolated despite an inherited GIT_DIR",
 
     // Now a temp-repo git op must target the temp repo, not the sentinel.
     TempDir project;
+    REQUIRE(std::system(
+                ("git -C " + shell_quote(project.path.string()) + " init --quiet").c_str()) == 0);
     REQUIRE(std::system(("git -C " + shell_quote(project.path.string()) +
-                         " init --quiet").c_str()) == 0);
-    REQUIRE(std::system(("git -C " + shell_quote(project.path.string()) +
-                         " checkout -b isolated-branch --quiet").c_str()) == 0);
+                         " checkout -b isolated-branch --quiet")
+                            .c_str()) == 0);
 
     // The project's own repo was created and switched (proves the temp-repo
     // git commands actually ran against the temp repo).
     REQUIRE(std::filesystem::exists(project.path / ".git" / "HEAD"));
     // The sentinel repo is untouched: it still has no isolated-branch.
-    const int sentinel_has_branch = std::system(
-        ("git -C " + shell_quote(sentinel.path.string()) +
-         " rev-parse --verify --quiet refs/heads/isolated-branch >/dev/null")
-            .c_str());
-    REQUIRE(sentinel_has_branch != 0);  // sentinel must NOT have the branch
+    const int sentinel_has_branch =
+        std::system(("git -C " + shell_quote(sentinel.path.string()) +
+                     " rev-parse --verify --quiet refs/heads/isolated-branch >/dev/null")
+                        .c_str());
+    REQUIRE(sentinel_has_branch != 0); // sentinel must NOT have the branch
 #endif
 }
 
@@ -1628,8 +1661,9 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
 
         auto response = handle_request(tool_call("23", "pulp_status"));
-        require_contains(response,
-                         "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
+        require_contains(
+            response,
+            "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
         require_contains(response, "--emit ir-json (config:import_design.default_emit)");
         REQUIRE(response.find("[other]") == std::string::npos);
         REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
@@ -1648,8 +1682,7 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
 
         auto response = handle_request(tool_call("24", "pulp_status"));
         require_contains(response, "--mode baked (config:import_design.default_mode)");
-        require_contains(response,
-                         "--emit ir-json (implied by config:import_design.default_mode)");
+        require_contains(response, "--emit ir-json (implied by config:import_design.default_mode)");
         REQUIRE(response.find("built-in") == std::string::npos);
         REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
     }
@@ -1666,8 +1699,9 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "");
 
         auto response = handle_request(tool_call("25", "pulp_status"));
-        require_contains(response,
-                         "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
+        require_contains(
+            response,
+            "Import design defaults: --mode baked (implied by config:import_design.default_emit)");
         require_contains(response, "--emit cpp (config:import_design.default_emit)");
         REQUIRE(response.find("--mode live") == std::string::npos);
         REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
@@ -1705,8 +1739,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "CPP");
 
         auto response = handle_request(tool_call("27", "pulp_status"));
-        require_contains(response,
-                         "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(
+            response, "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
         require_contains(response, "--emit cpp (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
         REQUIRE(response.find("config:import_design.default_mode") == std::string::npos);
         REQUIRE(response.find("config:import_design.default_emit") == std::string::npos);
@@ -1719,8 +1753,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "IR-JSON");
 
         auto response = handle_request(tool_call("28", "pulp_status"));
-        require_contains(response,
-                         "Import design defaults: --mode live (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(
+            response, "Import design defaults: --mode live (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
         require_contains(response, "--emit ir-json (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
         REQUIRE(response.find("implied by") == std::string::npos);
         REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
@@ -1796,8 +1830,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
         ScopedEnvVar emit_env("PULP_IMPORT_DESIGN_DEFAULT_EMIT", "  \"CPP\"  ");
 
         auto response = handle_request(tool_call("29", "pulp_status"));
-        require_contains(response,
-                         "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+        require_contains(
+            response, "Import design defaults: --mode baked (env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
         require_contains(response, "--emit cpp (env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
         REQUIRE(response.find("Import design defaults: invalid") == std::string::npos);
     }
@@ -1816,7 +1850,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
 
         auto response = handle_request(tool_call("30", "pulp_status"));
         require_contains(response,
-                         "Import design defaults: invalid (import_design.default_mode must be one of: live, baked from env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
+                         "Import design defaults: invalid (import_design.default_mode must be one "
+                         "of: live, baked from env:PULP_IMPORT_DESIGN_DEFAULT_MODE)");
         REQUIRE(response.find("--emit cpp") == std::string::npos);
         REQUIRE(response.find("config:import_design.default_mode") == std::string::npos);
     }
@@ -1829,7 +1864,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
 
         auto response = handle_request(tool_call("31", "pulp_status"));
         require_contains(response,
-                         "Import design defaults: invalid (import_design.default_emit must be one of: js, ir-json, cpp from env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
+                         "Import design defaults: invalid (import_design.default_emit must be one "
+                         "of: js, ir-json, cpp from env:PULP_IMPORT_DESIGN_DEFAULT_EMIT)");
         REQUIRE(response.find("--mode baked") == std::string::npos);
         REQUIRE(response.find("--emit") == std::string::npos);
         REQUIRE(response.find("config:") == std::string::npos);
@@ -1848,7 +1884,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
 
         auto response = handle_request(tool_call("32", "pulp_status"));
         require_contains(response,
-                         "Import design defaults: invalid (import_design.default_emit must be one of: js, ir-json, cpp from config:import_design.default_emit)");
+                         "Import design defaults: invalid (import_design.default_emit must be one "
+                         "of: js, ir-json, cpp from config:import_design.default_emit)");
         REQUIRE(response.find("--emit python") == std::string::npos);
         REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_EMIT") == std::string::npos);
         REQUIRE(response.find("implied by") == std::string::npos);
@@ -1868,7 +1905,8 @@ TEST_CASE("MCP status resolves import-design defaults from config and env",
 
         auto response = handle_request(tool_call("33", "pulp_status"));
         require_contains(response,
-                         "Import design defaults: invalid (import_design.default_mode must be one of: live, baked from config:import_design.default_mode)");
+                         "Import design defaults: invalid (import_design.default_mode must be one "
+                         "of: live, baked from config:import_design.default_mode)");
         require_contains(response, "Pulp Project:");
         REQUIRE(response.find("--mode native") == std::string::npos);
         REQUIRE(response.find("env:PULP_IMPORT_DESIGN_DEFAULT_MODE") == std::string::npos);
@@ -1965,14 +2003,12 @@ TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable tex
 
     ScopedCurrentPath cwd(project.path);
 
-    auto evaluate = handle_request(tool_call(
-        "50", "pulp_inspect_evaluate",
-        R"JSON({"expression":"window.title + ' ok'"})JSON"));
+    auto evaluate = handle_request(tool_call("50", "pulp_inspect_evaluate",
+                                             R"JSON({"expression":"window.title + ' ok'"})JSON"));
     require_contains(evaluate, R"JSON("id":50)JSON");
     require_contains(evaluate, "fake-pulp [inspect] [--command] [Runtime.evaluate] [--params]");
     require_contains(evaluate, R"JSON([{\"expression\":\"window.title + ' ok'\"}])JSON");
-    REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON")
-            == std::string::npos);
+    REQUIRE(evaluate.find(R"JSON([Runtime.evaluate] [{\"expression\")JSON") == std::string::npos);
 
     auto screenshot = handle_request(tool_call("51", "pulp_inspect_screenshot"));
     require_contains(screenshot, R"JSON("id":51)JSON");
@@ -1983,8 +2019,7 @@ TEST_CASE("MCP inspect screenshot and evaluate wrappers preserve unavailable tex
 #endif
 }
 
-TEST_CASE("MCP validate only passes --all for the explicit all flag",
-          "[mcp][tools][validate]") {
+TEST_CASE("MCP validate only passes --all for the explicit all flag", "[mcp][tools][validate]") {
 #if defined(_WIN32)
     SKIP("fake extensionless pulp CLI is only executable through popen on POSIX");
 #else
@@ -2000,32 +2035,31 @@ TEST_CASE("MCP validate only passes --all for the explicit all flag",
     require_contains(default_response, "fake-pulp [validate] [--json]");
     REQUIRE(default_response.find("[--all]") == std::string::npos);
 
-    auto all_response = handle_request(tool_call(
-        "51", "pulp_validate", R"JSON({"all":true})JSON"));
+    auto all_response = handle_request(tool_call("51", "pulp_validate", R"JSON({"all":true})JSON"));
     require_contains(all_response, R"JSON("id":51)JSON");
     require_contains(all_response, "fake-pulp [validate] [--json] [--all]");
 
-    auto false_with_other_true = handle_request(tool_call(
-        "52", "pulp_validate", R"JSON({"all":false,"json":true})JSON"));
+    auto false_with_other_true =
+        handle_request(tool_call("52", "pulp_validate", R"JSON({"all":false,"json":true})JSON"));
     require_contains(false_with_other_true, R"JSON("id":52)JSON");
     require_contains(false_with_other_true, "fake-pulp [validate] [--json]");
     REQUIRE(false_with_other_true.find("[--all]") == std::string::npos);
     REQUIRE(false_with_other_true.find("[--screenshot]") == std::string::npos);
 
-    auto string_true = handle_request(tool_call(
-        "53", "pulp_validate", R"JSON({"all":"true"})JSON"));
+    auto string_true =
+        handle_request(tool_call("53", "pulp_validate", R"JSON({"all":"true"})JSON"));
     require_contains(string_true, R"JSON("id":53)JSON");
     require_contains(string_true, "fake-pulp [validate] [--json]");
     REQUIRE(string_true.find("[--all]") == std::string::npos);
 
-    auto screenshot_response = handle_request(tool_call(
-        "54", "pulp_validate", R"JSON({"screenshot":true})JSON"));
+    auto screenshot_response =
+        handle_request(tool_call("54", "pulp_validate", R"JSON({"screenshot":true})JSON"));
     require_contains(screenshot_response, R"JSON("id":54)JSON");
     require_contains(screenshot_response, "fake-pulp [validate] [--json] [--screenshot]");
     REQUIRE(screenshot_response.find("[--all]") == std::string::npos);
 
-    auto screenshot_false = handle_request(tool_call(
-        "55", "pulp_validate", R"JSON({"screenshot":false})JSON"));
+    auto screenshot_false =
+        handle_request(tool_call("55", "pulp_validate", R"JSON({"screenshot":false})JSON"));
     require_contains(screenshot_false, R"JSON("id":55)JSON");
     require_contains(screenshot_false, "fake-pulp [validate] [--json]");
     REQUIRE(screenshot_false.find("[--screenshot]") == std::string::npos);
@@ -2058,19 +2092,19 @@ TEST_CASE("MCP audio probe JSON wraps pulp run and returns structured content",
                << "  esac\n"
                << "  shift\n"
                << "done\n"
-               << "printf '{\"stage\":\"standalone_output_boundary\",\"frames\":%s,\"target_seen\":%s,\"callbacks\":7}' \"$frames\" \"$target_seen\" > \"$out\"\n";
+               << "printf "
+                  "'{\"stage\":\"standalone_output_boundary\",\"frames\":%s,\"target_seen\":%s,"
+                  "\"callbacks\":7}' \"$frames\" \"$target_seen\" > \"$out\"\n";
     }
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
 
     ScopedCurrentPath cwd(project.path);
-    auto response = handle_request(tool_call(
-        "47", "pulp_audio_probe_json",
-        R"JSON({"target":"Special Target","frames":42})JSON"));
+    auto response = handle_request(tool_call("47", "pulp_audio_probe_json",
+                                             R"JSON({"target":"Special Target","frames":42})JSON"));
     require_contains(response, R"JSON("id":47)JSON");
     require_contains(response, R"JSON("structuredContent")JSON");
     require_contains(response, R"JSON("stage": "standalone_output_boundary")JSON");
@@ -2118,14 +2152,17 @@ TEST_CASE("MCP audio scope wraps pulp audio scope and returns structured content
                << "  esac\n"
                << "  shift\n"
                << "done\n"
-               << "printf '{\"schema\":\"pulp.audio.scope.v1\",\"frames\":%s,\"window\":%s,\"trigger\":\"%s\",\"channel\":%s,\"target_seen\":%s,\"input_wav\":\"%s\",\"png_path\":\"%s\"}' \"$frames\" \"$window\" \"$trigger\" \"$channel\" \"$target_seen\" \"$input_wav\" \"$png_path\" > \"$out\"\n";
+               << "printf "
+                  "'{\"schema\":\"pulp.audio.scope.v1\",\"frames\":%s,\"window\":%s,\"trigger\":\"%"
+                  "s\",\"channel\":%s,\"target_seen\":%s,\"input_wav\":\"%s\",\"png_path\":\"%s\"}'"
+                  " \"$frames\" \"$window\" \"$trigger\" \"$channel\" \"$target_seen\" "
+                  "\"$input_wav\" \"$png_path\" > \"$out\"\n";
     }
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
 
     ScopedCurrentPath cwd(project.path);
     auto response = handle_request(tool_call(
@@ -2144,18 +2181,17 @@ TEST_CASE("MCP audio scope wraps pulp audio scope and returns structured content
     const auto png = project.path / "scope.png";
     auto offline = handle_request(tool_call(
         "69", "pulp_audio_scope",
-        std::string(R"JSON({"input_wav":"tone.wav","window":256,"trigger":"rising-zero","channel":1,"png_path":")JSON") +
+        std::string(
+            R"JSON({"input_wav":"tone.wav","window":256,"trigger":"rising-zero","channel":1,"png_path":")JSON") +
             png.string() + R"JSON("})JSON"));
     require_contains(offline, R"JSON("id":69)JSON");
     require_contains(offline, R"JSON("input_wav": "tone.wav")JSON");
-    require_contains(offline, std::string(R"JSON("png_path": ")JSON") +
-                                  png.string());
+    require_contains(offline, std::string(R"JSON("png_path": ")JSON") + png.string());
     REQUIRE(std::filesystem::exists(png));
 #endif
 }
 
-TEST_CASE("MCP audio probe JSON rejects malformed child output",
-          "[mcp][tools][audio]") {
+TEST_CASE("MCP audio probe JSON rejects malformed child output", "[mcp][tools][audio]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -2176,12 +2212,11 @@ TEST_CASE("MCP audio probe JSON rejects malformed child output",
                << "done\n"
                << "printf 'not-json' > \"$out\"\n";
     }
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
 
     ScopedCurrentPath cwd(project.path);
     auto response = handle_request(tool_call("48", "pulp_audio_probe_json"));
@@ -2192,8 +2227,7 @@ TEST_CASE("MCP audio probe JSON rejects malformed child output",
 #endif
 }
 
-TEST_CASE("MCP audio probe JSON reports child runs that write no JSON",
-          "[mcp][tools][audio]") {
+TEST_CASE("MCP audio probe JSON reports child runs that write no JSON", "[mcp][tools][audio]") {
 #if defined(_WIN32)
     SKIP("POSIX fake script assertions are only used on non-Windows");
 #else
@@ -2209,12 +2243,11 @@ TEST_CASE("MCP audio probe JSON reports child runs that write no JSON",
         script << "#!/bin/sh\n"
                << "printf 'probe script ran without output file\\n'\n";
     }
-    std::filesystem::permissions(
-        cli,
-        std::filesystem::perms::owner_exec |
-            std::filesystem::perms::owner_read |
-            std::filesystem::perms::owner_write,
-        std::filesystem::perm_options::add);
+    std::filesystem::permissions(cli,
+                                 std::filesystem::perms::owner_exec |
+                                     std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::add);
 
     ScopedCurrentPath cwd(project.path);
     auto response = handle_request(tool_call("55", "pulp_audio_probe_json"));
@@ -2269,9 +2302,8 @@ TEST_CASE("MCP audio tools return structured diagnostics without a project root"
     require_contains(list, "clap_music_audioset_v1");
     REQUIRE(list.find(R"JSON("code":-32601)JSON") == std::string::npos);
 
-    auto activate = handle_request(tool_call(
-        "63", "pulp_audio_model_activate",
-        R"JSON({"model_id":"definitely_missing_model"})JSON"));
+    auto activate = handle_request(tool_call("63", "pulp_audio_model_activate",
+                                             R"JSON({"model_id":"definitely_missing_model"})JSON"));
     require_contains(activate, R"JSON("id":63)JSON");
     require_contains(activate, R"JSON("structuredContent")JSON");
     require_contains(activate, R"JSON("ok": false)JSON");
@@ -2290,39 +2322,38 @@ TEST_CASE("MCP audio excerpt-find validates request fields through the handler",
         file << "not needed for pre-audio validation";
     }
 
-    auto only_text = handle_request(tool_call(
-        "64", "pulp_audio_excerpt_find",
-        R"JSON({"text":"texture"})JSON"));
+    auto only_text =
+        handle_request(tool_call("64", "pulp_audio_excerpt_find", R"JSON({"text":"texture"})JSON"));
     require_contains(only_text, R"JSON("id":64)JSON");
     require_contains(only_text, "Error: text and input_path are required");
     REQUIRE(only_text.find(R"JSON("structuredContent")JSON") == std::string::npos);
 
-    auto only_input = handle_request(tool_call(
-        "65", "pulp_audio_excerpt_find",
-        std::string(R"JSON({"input_path":")JSON") + input.string() + R"JSON("})JSON"));
+    auto only_input = handle_request(
+        tool_call("65", "pulp_audio_excerpt_find",
+                  std::string(R"JSON({"input_path":")JSON") + input.string() + R"JSON("})JSON"));
     require_contains(only_input, R"JSON("id":65)JSON");
     require_contains(only_input, "Error: text and input_path are required");
 
-    auto bad_top = handle_request(tool_call(
-        "66", "pulp_audio_excerpt_find",
-        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
-            + R"JSON(","top":0})JSON"));
+    auto bad_top =
+        handle_request(tool_call("66", "pulp_audio_excerpt_find",
+                                 std::string(R"JSON({"text":"texture","input_path":")JSON") +
+                                     input.string() + R"JSON(","top":0})JSON"));
     require_contains(bad_top, R"JSON("id":66)JSON");
     require_contains(bad_top, R"JSON("structuredContent")JSON");
     require_contains(bad_top, R"JSON("ok": false)JSON");
     require_contains(bad_top, "top and max_candidates_per_file must be >= 1");
 
-    auto bad_window = handle_request(tool_call(
-        "67", "pulp_audio_excerpt_find",
-        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
-            + R"JSON(","window_ms":0})JSON"));
+    auto bad_window =
+        handle_request(tool_call("67", "pulp_audio_excerpt_find",
+                                 std::string(R"JSON({"text":"texture","input_path":")JSON") +
+                                     input.string() + R"JSON(","window_ms":0})JSON"));
     require_contains(bad_window, R"JSON("id":67)JSON");
     require_contains(bad_window, "window_ms and hop_ms must be >= 1");
 
-    auto unknown_model = handle_request(tool_call(
-        "68", "pulp_audio_excerpt_find",
-        std::string(R"JSON({"text":"texture","input_path":")JSON") + input.string()
-            + R"JSON(","model_id":"missing_model"})JSON"));
+    auto unknown_model =
+        handle_request(tool_call("68", "pulp_audio_excerpt_find",
+                                 std::string(R"JSON({"text":"texture","input_path":")JSON") +
+                                     input.string() + R"JSON(","model_id":"missing_model"})JSON"));
     require_contains(unknown_model, R"JSON("id":68)JSON");
     require_contains(unknown_model, R"JSON("query": "texture")JSON");
     require_contains(unknown_model, "unknown model_id: missing_model");
@@ -2335,10 +2366,10 @@ TEST_CASE("MCP audio read-bundle reports missing bundles as structured content",
     ScopedEnvVar pulp_home("PULP_HOME", home.path.string());
     TempDir temp;
 
-    auto response = handle_request(tool_call(
-        "69", "pulp_audio_read_bundle",
-        std::string(R"JSON({"bundle_path":")JSON")
-            + (temp.path / "missing-bundle").string() + R"JSON("})JSON"));
+    auto response =
+        handle_request(tool_call("69", "pulp_audio_read_bundle",
+                                 std::string(R"JSON({"bundle_path":")JSON") +
+                                     (temp.path / "missing-bundle").string() + R"JSON("})JSON"));
 
     require_contains(response, R"JSON("id":69)JSON");
     require_contains(response, R"JSON("structuredContent")JSON");
@@ -2370,12 +2401,12 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
     // Each pair: (MCP tool name, inspector protocol method it must
     // call). If a refactor removes either side, this test fails loudly.
     const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_inspect_dom",         "DOM.getDocument"},
-        {"pulp_inspect_params",      "State.getParameters"},
-        {"pulp_inspect_screenshot",  "Capture.screenshot"},
-        {"pulp_inspect_evaluate",    "Runtime.evaluate"},
+        {"pulp_inspect_dom", "DOM.getDocument"},
+        {"pulp_inspect_params", "State.getParameters"},
+        {"pulp_inspect_screenshot", "Capture.screenshot"},
+        {"pulp_inspect_evaluate", "Runtime.evaluate"},
         {"pulp_inspect_performance", "Performance.getMetrics"},
-        {"pulp_inspect_audio",       "Audio.getConfig"},
+        {"pulp_inspect_audio", "Audio.getConfig"},
     };
     for (const auto& [tool, method] : mappings) {
         INFO("inspector tool=" << tool << " method=" << method);
@@ -2393,7 +2424,7 @@ TEST_CASE("MCP inspector tools map to expected inspector protocol methods",
 // instead of running the newer behavior the project author didn't pin.
 
 TEST_CASE("compare_semver orders pulp version triples", "[mcp][compat][issue-2070]") {
-    REQUIRE(compare_semver("0.99.0", "0.100.0") < 0);   // 99 < 100 by numeric, not lex
+    REQUIRE(compare_semver("0.99.0", "0.100.0") < 0); // 99 < 100 by numeric, not lex
     REQUIRE(compare_semver("0.100.0", "0.99.0") > 0);
     REQUIRE(compare_semver("1.0.0", "1.0.0") == 0);
     REQUIRE(compare_semver("1.0.0", "0.999.999") > 0);
@@ -2404,8 +2435,7 @@ TEST_CASE("compare_semver orders pulp version triples", "[mcp][compat][issue-207
     REQUIRE(compare_semver("0.99.0", "not-a-version") == 0);
 }
 
-TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
-          "[mcp][compat][issue-2070]") {
+TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools", "[mcp][compat][issue-2070]") {
     // Default for any tool not in TOOL_MIN_SDK_TABLE: no floor. This
     // preserves pre-#2070 behavior — only tools that explicitly opt in
     // get gated.
@@ -2414,14 +2444,12 @@ TEST_CASE("min_sdk_for_tool defaults to 0.0.0 for unlisted tools",
     REQUIRE(min_sdk_for_tool("a_tool_that_does_not_exist") == "0.0.0");
 }
 
-TEST_CASE("min_sdk_for_tool reports explicit floors for listed tools",
-          "[mcp][compat]") {
+TEST_CASE("min_sdk_for_tool reports explicit floors for listed tools", "[mcp][compat]") {
     REQUIRE(min_sdk_for_tool("pulp_audio_render") == "0.513.0");
     REQUIRE(min_sdk_for_tool("pulp_audio_plugin_inspect") == "0.671.0");
 }
 
-TEST_CASE("pulp_compat reports versions and tool min_sdk map",
-          "[mcp][compat][issue-2070]") {
+TEST_CASE("pulp_compat reports versions and tool min_sdk map", "[mcp][compat][issue-2070]") {
     // Run from a project root so resolve_project_sdk_version() finds
     // the in-tree CMakeLists.txt VERSION (the source-tree fallback).
     ScopedCurrentPath cwd(repo_root());
@@ -2429,9 +2457,8 @@ TEST_CASE("pulp_compat reports versions and tool min_sdk map",
     auto response = handle_request(tool_call("70", "pulp_compat"));
     require_contains(response, R"JSON("id":70)JSON");
     // Build version comes from PULP_MCP_SERVER_VERSION (generated header).
-    require_contains(response,
-                     std::string(R"JSON("pulp_mcp_version":")JSON")
-                     + PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
+    require_contains(response, std::string(R"JSON("pulp_mcp_version":")JSON") +
+                                   PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
     // MCP wire protocol — independent of build version, tracks upstream spec.
     require_contains(response, R"JSON("mcp_protocol_version":"2024-11-05")JSON");
     // Should not be null when invoked from a Pulp project root.
@@ -2444,19 +2471,16 @@ TEST_CASE("pulp_compat reports versions and tool min_sdk map",
     require_contains(response, R"JSON("pulp_audio_plugin_inspect":"0.671.0")JSON");
 }
 
-TEST_CASE("pulp_audio_render is gated for older pinned project SDKs",
-          "[mcp][compat][audio]") {
+TEST_CASE("pulp_audio_render is gated for older pinned project SDKs", "[mcp][compat][audio]") {
     TempDir scratch;
     const auto project = scratch.path / "old-project";
     std::filesystem::create_directories(project / "core");
-    std::ofstream(project / "CMakeLists.txt")
-        << "cmake_minimum_required(VERSION 3.24)\n"
-        << "project(OldPulpProject VERSION 0.512.0)\n";
+    std::ofstream(project / "CMakeLists.txt") << "cmake_minimum_required(VERSION 3.24)\n"
+                                              << "project(OldPulpProject VERSION 0.512.0)\n";
 
     ScopedCurrentPath cwd(project);
     auto response = handle_request(tool_call(
-        "72", "pulp_audio_render",
-        R"JSON({"plugin":"Demo.clap","duration_frames":64})JSON"));
+        "72", "pulp_audio_render", R"JSON({"plugin":"Demo.clap","duration_frames":64})JSON"));
     require_contains(response, R"JSON("id":72)JSON");
     require_contains(response, R"JSON("isError":true)JSON");
     require_contains(response, R"JSON("tool":"pulp_audio_render")JSON");
@@ -2474,9 +2498,8 @@ TEST_CASE("pulp_compat handles missing project root by emitting null",
     ScopedCurrentPath cwd(temp.path);
     auto response = handle_request(tool_call("71", "pulp_compat"));
     // Build + protocol versions still resolve.
-    require_contains(response,
-                     std::string(R"JSON("pulp_mcp_version":")JSON")
-                     + PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
+    require_contains(response, std::string(R"JSON("pulp_mcp_version":")JSON") +
+                                   PULP_MCP_SERVER_VERSION + R"JSON(")JSON");
     require_contains(response, R"JSON("mcp_protocol_version":"2024-11-05")JSON");
     // project_sdk explicitly null so clients can tell "no project"
     // apart from "project pinned to 0.0.0".
@@ -2513,41 +2536,39 @@ TEST_CASE("parse_cmake_project_version extracts VERSION from project()",
     const auto version = pulp_mcp::parse_cmake_project_version(buf.str());
     // Must look like x.y.z.
     int dots = 0;
-    for (char c : version) if (c == '.') ++dots;
+    for (char c : version)
+        if (c == '.')
+            ++dots;
     INFO("parsed CMakeLists.txt version='" << version << "'");
     REQUIRE(dots == 2);
     REQUIRE_FALSE(version.empty());
 }
 
-TEST_CASE("parse_cmake_project_version handles plugin VERSION fallback",
-          "[mcp][compat]") {
+TEST_CASE("parse_cmake_project_version handles plugin VERSION fallback", "[mcp][compat]") {
     REQUIRE(pulp_mcp::parse_cmake_project_version(
                 "cmake_minimum_required(VERSION 3.25)\n"
                 "pulp_add_plugin(MyPlugin VERSION \"1.2.3\")\n") == "1.2.3");
 
-    REQUIRE(pulp_mcp::parse_cmake_project_version(
-                "pulp_add_plugin(\n"
-                "  MyPlugin\n"
-                "  FORMAT VST3\n"
-                "  VERSION 2.3.4\n"
-                ")\n") == "2.3.4");
+    REQUIRE(pulp_mcp::parse_cmake_project_version("pulp_add_plugin(\n"
+                                                  "  MyPlugin\n"
+                                                  "  FORMAT VST3\n"
+                                                  "  VERSION 2.3.4\n"
+                                                  ")\n") == "2.3.4");
 
     REQUIRE(pulp_mcp::parse_cmake_project_version(
                 "project(Product VERSION 4.5.6)\n"
                 "pulp_add_plugin(MyPlugin VERSION \"1.2.3\")\n") == "4.5.6");
 
-    REQUIRE(pulp_mcp::parse_cmake_project_version(
-                "pulp_add_plugin(MyPlugin NAME Only)\n").empty());
-    REQUIRE(pulp_mcp::parse_cmake_project_version(
-                "pulp_add_plugin(MyPlugin VERSION \"1.2\")\n").empty());
-    REQUIRE(pulp_mcp::parse_cmake_project_version(
-                "pulp_add_plugin(MyPlugin VERSION \"1.2.3.4\")\n").empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version("pulp_add_plugin(MyPlugin NAME Only)\n").empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version("pulp_add_plugin(MyPlugin VERSION \"1.2\")\n")
+                .empty());
+    REQUIRE(pulp_mcp::parse_cmake_project_version("pulp_add_plugin(MyPlugin VERSION \"1.2.3.4\")\n")
+                .empty());
     REQUIRE(pulp_mcp::parse_cmake_project_version(
                 "pulp_add_plugin(MyPlugin VERSION \"1.2.3-beta\")\n") == "1.2.3");
 }
 
-TEST_CASE("compare_semver tolerates metadata and leading zeroes",
-          "[mcp][compat]") {
+TEST_CASE("compare_semver tolerates metadata and leading zeroes", "[mcp][compat]") {
     REQUIRE(compare_semver("1.2.3-alpha", "1.2.3") == 0);
     REQUIRE(compare_semver("1.2.4+build", "1.2.3") > 0);
     REQUIRE(compare_semver("01.002.0003", "1.2.3") == 0);
@@ -2571,15 +2592,18 @@ TEST_CASE("MCP tools/list response contains no embedded newlines (wire-safe)",
     // This test re-applies that strip and verifies the wire form is
     // single-line + parseable.
     auto strip_newlines = [](std::string s) {
-        std::string out; out.reserve(s.size());
-        for (char c : s) if (c != '\n' && c != '\r') out += c;
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s)
+            if (c != '\n' && c != '\r')
+                out += c;
         return out;
     };
 
-    auto initialize_wire = strip_newlines(handle_request(
-        R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON"));
-    auto tools_list_wire = strip_newlines(handle_request(
-        R"JSON({"jsonrpc":"2.0","id":2,"method":"tools/list"})JSON"));
+    auto initialize_wire =
+        strip_newlines(handle_request(R"JSON({"jsonrpc":"2.0","id":1,"method":"initialize"})JSON"));
+    auto tools_list_wire =
+        strip_newlines(handle_request(R"JSON({"jsonrpc":"2.0","id":2,"method":"tools/list"})JSON"));
 
     REQUIRE(initialize_wire.find('\n') == std::string::npos);
     REQUIRE(initialize_wire.find('\r') == std::string::npos);
@@ -2607,12 +2631,8 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
 
     // Tools that take no params at all — invoke with empty arguments.
     const auto no_param_tools = {
-        "pulp_motion_snapshot",
-        "pulp_motion_list_traces",
-        "pulp_motion_play",
-        "pulp_motion_pause",
-        "pulp_motion_enable_cost",
-        "pulp_motion_disable_cost",
+        "pulp_motion_snapshot", "pulp_motion_list_traces", "pulp_motion_play",
+        "pulp_motion_pause",    "pulp_motion_enable_cost", "pulp_motion_disable_cost",
     };
     int id = 80;
     for (const char* tool : no_param_tools) {
@@ -2634,21 +2654,19 @@ TEST_CASE("MCP pulp_motion_* tools route to the motion dispatch arm",
     require_contains(start_trace, "Error: not in a Pulp project");
     REQUIRE(start_trace.find("Unknown tool") == std::string::npos);
 
-    auto stop_trace = handle_request(tool_call(
-        std::to_string(id++), "pulp_motion_stop_trace",
-        R"JSON({"trace_id":1})JSON"));
+    auto stop_trace = handle_request(
+        tool_call(std::to_string(id++), "pulp_motion_stop_trace", R"JSON({"trace_id":1})JSON"));
     require_contains(stop_trace, "Error: not in a Pulp project");
     REQUIRE(stop_trace.find("Unknown tool") == std::string::npos);
 
-    auto load_fixture = handle_request(tool_call(
-        std::to_string(id++), "pulp_motion_load_fixture",
-        R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
+    auto load_fixture =
+        handle_request(tool_call(std::to_string(id++), "pulp_motion_load_fixture",
+                                 R"JSON({"path":"/tmp/example.motion.jsonl"})JSON"));
     require_contains(load_fixture, "Error: not in a Pulp project");
     REQUIRE(load_fixture.find("Unknown tool") == std::string::npos);
 
-    auto scrub_to = handle_request(tool_call(
-        std::to_string(id++), "pulp_motion_scrub_to",
-        R"JSON({"frame":42})JSON"));
+    auto scrub_to = handle_request(
+        tool_call(std::to_string(id++), "pulp_motion_scrub_to", R"JSON({"frame":42})JSON"));
     require_contains(scrub_to, "Error: not in a Pulp project");
     REQUIRE(scrub_to.find("Unknown tool") == std::string::npos);
 }
@@ -2671,16 +2689,16 @@ TEST_CASE("MCP pulp_motion_* tools map to expected Motion.* methods",
     const std::string src = buf.str();
 
     const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_motion_start_trace",   "Motion.startTrace"},
-        {"pulp_motion_stop_trace",    "Motion.stopTrace"},
-        {"pulp_motion_snapshot",      "Motion.snapshot"},
-        {"pulp_motion_list_traces",   "Motion.listTraces"},
-        {"pulp_motion_load_fixture",  "Motion.loadFixture"},
-        {"pulp_motion_scrub_to",      "Motion.scrubTo"},
-        {"pulp_motion_play",          "Motion.play"},
-        {"pulp_motion_pause",         "Motion.pause"},
-        {"pulp_motion_enable_cost",   "Motion.enableCost"},
-        {"pulp_motion_disable_cost",  "Motion.disableCost"},
+        {"pulp_motion_start_trace", "Motion.startTrace"},
+        {"pulp_motion_stop_trace", "Motion.stopTrace"},
+        {"pulp_motion_snapshot", "Motion.snapshot"},
+        {"pulp_motion_list_traces", "Motion.listTraces"},
+        {"pulp_motion_load_fixture", "Motion.loadFixture"},
+        {"pulp_motion_scrub_to", "Motion.scrubTo"},
+        {"pulp_motion_play", "Motion.play"},
+        {"pulp_motion_pause", "Motion.pause"},
+        {"pulp_motion_enable_cost", "Motion.enableCost"},
+        {"pulp_motion_disable_cost", "Motion.disableCost"},
     };
     for (const auto& [tool, method] : mappings) {
         INFO("motion tool=" << tool << " method=" << method);
@@ -2703,10 +2721,10 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
     // assert both by searching for the tool name's name-key window
     // and validating the immediate vicinity.
     const auto tools_with_required_params = {
-        std::pair{"pulp_motion_start_trace",  "view_name"},
-        std::pair{"pulp_motion_stop_trace",   "trace_id"},
+        std::pair{"pulp_motion_start_trace", "view_name"},
+        std::pair{"pulp_motion_stop_trace", "trace_id"},
         std::pair{"pulp_motion_load_fixture", "path"},
-        std::pair{"pulp_motion_scrub_to",     "frame"},
+        std::pair{"pulp_motion_scrub_to", "frame"},
     };
     for (const auto& [tool, required] : tools_with_required_params) {
         INFO("tool with required param: " << tool << " requires " << required);
@@ -2734,12 +2752,8 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
 
     // Param-less tools still need a description + an inputSchema object.
     const auto param_less_tools = {
-        "pulp_motion_snapshot",
-        "pulp_motion_list_traces",
-        "pulp_motion_play",
-        "pulp_motion_pause",
-        "pulp_motion_enable_cost",
-        "pulp_motion_disable_cost",
+        "pulp_motion_snapshot", "pulp_motion_list_traces", "pulp_motion_play",
+        "pulp_motion_pause",    "pulp_motion_enable_cost", "pulp_motion_disable_cost",
     };
     for (const char* tool : param_less_tools) {
         INFO("param-less tool: " << tool);
@@ -2752,8 +2766,7 @@ TEST_CASE("MCP pulp_motion_* tools carry discoverable input schemas",
     }
 }
 
-TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm",
-          "[mcp][tools][trace]") {
+TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm", "[mcp][tools][trace]") {
     TempDir temp;
     ScopedCurrentPath cwd(temp.path);
 
@@ -2771,21 +2784,19 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm",
         REQUIRE(response.find("Unknown tool") == std::string::npos);
     }
 
-    auto start = handle_request(tool_call(
-        std::to_string(id++), "pulp_trace_start",
-        R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
+    auto start =
+        handle_request(tool_call(std::to_string(id++), "pulp_trace_start",
+                                 R"JSON({"categories":["dsp","render"],"ring_mb":32})JSON"));
     require_contains(start, "Error: not in a Pulp project");
     REQUIRE(start.find("Unknown tool") == std::string::npos);
 
-    auto query = handle_request(tool_call(
-        std::to_string(id++), "pulp_trace_query",
-        R"JSON({"sql":"select 1","format":"json"})JSON"));
+    auto query = handle_request(tool_call(std::to_string(id++), "pulp_trace_query",
+                                          R"JSON({"sql":"select 1","format":"json"})JSON"));
     require_contains(query, "Error: not in a Pulp project");
     REQUIRE(query.find("Unknown tool") == std::string::npos);
 
-    auto explain = handle_request(tool_call(
-        std::to_string(id++), "pulp_trace_explain",
-        R"JSON({"question":"why is startup slow?"})JSON"));
+    auto explain = handle_request(tool_call(std::to_string(id++), "pulp_trace_explain",
+                                            R"JSON({"question":"why is startup slow?"})JSON"));
     require_contains(explain, "Error: not in a Pulp project");
     REQUIRE(explain.find("Unknown tool") == std::string::npos);
 }
@@ -2794,8 +2805,7 @@ TEST_CASE("MCP pulp_trace_* tools route to the trace dispatch arm",
 // inspector method names. Source-text assertion mirrors the motion mapping
 // test; the round-trip itself lands at TraceInspector::handle, covered by
 // test_trace_inspector.cpp.
-TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods",
-          "[mcp][tools][trace]") {
+TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods", "[mcp][tools][trace]") {
     auto src_path = repo_root_path() / "tools" / "mcp" / "pulp_mcp.cpp";
     REQUIRE(std::filesystem::exists(src_path));
 
@@ -2805,11 +2815,9 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods",
     const std::string src = buf.str();
 
     const std::pair<const char*, const char*> mappings[] = {
-        {"pulp_trace_start",    "Trace.startSession"},
-        {"pulp_trace_stop",     "Trace.stopSession"},
-        {"pulp_trace_snapshot", "Trace.snapshot"},
-        {"pulp_trace_query",    "Trace.query"},
-        {"pulp_trace_explain",  "Trace.explain"},
+        {"pulp_trace_start", "Trace.startSession"}, {"pulp_trace_stop", "Trace.stopSession"},
+        {"pulp_trace_snapshot", "Trace.snapshot"},  {"pulp_trace_query", "Trace.query"},
+        {"pulp_trace_explain", "Trace.explain"},
     };
     for (const auto& [tool, method] : mappings) {
         INFO("trace tool=" << tool << " method=" << method);
@@ -2818,8 +2826,7 @@ TEST_CASE("MCP pulp_trace_* tools map to expected Trace.* methods",
     }
 }
 
-TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas",
-          "[mcp][tools][trace]") {
+TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas", "[mcp][tools][trace]") {
     auto tools = handle_request(R"JSON({"jsonrpc":"2.0","id":98,"method":"tools/list"})JSON");
 
     // pulp_trace_explain is the only trace tool with a required param.
@@ -2839,8 +2846,8 @@ TEST_CASE("MCP pulp_trace_* tools carry discoverable input schemas",
 
     // Every trace tool needs a description + an inputSchema object.
     const auto all_trace_tools = {
-        "pulp_trace_start",  "pulp_trace_stop", "pulp_trace_snapshot",
-        "pulp_trace_query",  "pulp_trace_explain",
+        "pulp_trace_start", "pulp_trace_stop",    "pulp_trace_snapshot",
+        "pulp_trace_query", "pulp_trace_explain",
     };
     for (const char* tool : all_trace_tools) {
         INFO("trace tool: " << tool);
@@ -2866,32 +2873,27 @@ TEST_CASE("parse_pulp_toml_sdk_version extracts the top-level scalar",
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("min_sdk_version = \"0.50.0\"\n").empty());
     // When both are present, the top-level wins.
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-        "min_sdk_version = \"0.50.0\"\nsdk_version = \"0.99.0\"\n") == "0.99.0");
+                "min_sdk_version = \"0.50.0\"\nsdk_version = \"0.99.0\"\n") == "0.99.0");
     // SDK-mode projects generated by `pulp create` put the pin under
     // [pulp]; unrelated section-local sdk_version keys describe something
     // else and must not be accepted.
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("[pulp]\nsdk_version = \"1.2.3\"\n") == "1.2.3");
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-        "[pulp]\nsdk_version = \"1.2.3\"\n") == "1.2.3");
+                "[pulp]\nsdk_version = \"1.2.3\"\n[dependency]\nsdk_version = \"9.9.9\"\n") ==
+            "1.2.3");
+    REQUIRE(
+        pulp_mcp::parse_pulp_toml_sdk_version("[dependency]\nsdk_version = \"9.9.9\"\n").empty());
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-        "[pulp]\nsdk_version = \"1.2.3\"\n[dependency]\nsdk_version = \"9.9.9\"\n") == "1.2.3");
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-        "[dependency]\nsdk_version = \"9.9.9\"\n").empty());
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-        "sdk_version = \"1.2.3\"\n[dependency]\nsdk_version = \"9.9.9\"\n") == "1.2.3");
+                "sdk_version = \"1.2.3\"\n[dependency]\nsdk_version = \"9.9.9\"\n") == "1.2.3");
 }
 
-TEST_CASE("parse_pulp_toml_sdk_version rejects ambiguous sdk pins",
-          "[mcp][compat]") {
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-                "[pulp.extra]\nsdk_version = \"9.9.9\"\n").empty());
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-                "sdk_version = '1.2.3'\n").empty());
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-                "sdk_version = 1.2.3\n").empty());
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-                "sdk_versionish = \"1.2.3\"\n").empty());
-    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
-                "sdk_version = \"1.2.3\n").empty());
+TEST_CASE("parse_pulp_toml_sdk_version rejects ambiguous sdk pins", "[mcp][compat]") {
+    REQUIRE(
+        pulp_mcp::parse_pulp_toml_sdk_version("[pulp.extra]\nsdk_version = \"9.9.9\"\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("sdk_version = '1.2.3'\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("sdk_version = 1.2.3\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("sdk_versionish = \"1.2.3\"\n").empty());
+    REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version("sdk_version = \"1.2.3\n").empty());
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
                 "[pulp]\nsdk_version = \"2.3.4\" # generated pin\n") == "2.3.4");
     REQUIRE(pulp_mcp::parse_pulp_toml_sdk_version(
@@ -2929,7 +2931,7 @@ TEST_CASE("pulp_inspect_pending_requests returns a project's unconsumed queue",
     auto resp = handle_request(tool_call("81", "pulp_inspect_pending_requests", args()));
     require_contains(resp, "make it airy");
     require_contains(resp, "synth-panel");
-    REQUIRE(resp.find("already handled") == std::string::npos);  // consumed → filtered
+    REQUIRE(resp.find("already handled") == std::string::npos); // consumed → filtered
 
     fs::remove_all(dir, ec);
 }

@@ -10,9 +10,7 @@ namespace {
 
 constexpr double kMinimumBpm = 1.0;
 constexpr double kMaximumBpm = 1'000.0;
-constexpr long double kMaximumSampleRate = 768'000.0L;
-constexpr long double kInt64MaximumRoundingBoundary =
-    9'223'372'036'854'775'807.5L;
+constexpr long double kInt64MaximumRoundingBoundary = 9'223'372'036'854'775'807.5L;
 
 std::int64_t rounded_and_clamped(long double value) noexcept {
     constexpr auto minimum = static_cast<long double>(std::numeric_limits<std::int64_t>::min());
@@ -68,13 +66,13 @@ TempoMap::create(std::span<const TempoPoint> points) noexcept {
 }
 
 runtime::Result<CompiledTempoMap, TempoMapError>
-CompiledTempoMap::compile(std::span<const TempoPoint> points,
-                          RationalRate sample_rate) noexcept {
+CompiledTempoMap::compile(std::span<const TempoPoint> points, RationalRate sample_rate) noexcept {
     auto editable = TempoMap::create(points);
     if (!editable)
         return runtime::Err(editable.error());
     const auto normalized_rate = sample_rate.normalized();
-    if (!normalized_rate.valid() || normalized_rate.as_long_double() > kMaximumSampleRate)
+    if (!normalized_rate.valid() ||
+        normalized_rate.as_long_double() > static_cast<long double>(kMaximumCompiledSampleRate))
         return runtime::Err(TempoMapError::InvalidSampleRate);
 
     std::vector<Segment> segments;
@@ -98,8 +96,7 @@ CompiledTempoMap::compile(std::span<const TempoPoint> points,
                 duration >= kInt64MaximumRoundingBoundary)
                 return runtime::Err(TempoMapError::SampleRangeExceeded);
             const auto rounded_duration = static_cast<std::int64_t>(std::llround(duration));
-            if (anchor.value >
-                std::numeric_limits<std::int64_t>::max() - rounded_duration)
+            if (anchor.value > std::numeric_limits<std::int64_t>::max() - rounded_duration)
                 return runtime::Err(TempoMapError::SampleRangeExceeded);
             anchor.value += rounded_duration;
         }
@@ -163,10 +160,10 @@ SamplePosition CompiledTempoMap::ticks_to_samples(TickPosition tick) const noexc
     return ticks_to_samples_in_segment(tick, segment_for_tick(tick));
 }
 
-SamplePosition CompiledTempoMap::ticks_to_samples_in_segment(
-    TickPosition tick, std::size_t segment_index) const noexcept {
-    while (segment_index + 1 < segments_.size() &&
-           tick >= segments_[segment_index + 1].start_tick)
+SamplePosition
+CompiledTempoMap::ticks_to_samples_in_segment(TickPosition tick,
+                                              std::size_t segment_index) const noexcept {
+    while (segment_index + 1 < segments_.size() && tick >= segments_[segment_index + 1].start_tick)
         ++segment_index;
     while (segment_index > 0 && tick < segments_[segment_index].start_tick)
         --segment_index;
@@ -183,8 +180,8 @@ double CompiledTempoMap::tempo_at_tick(TickPosition tick) const noexcept {
         return segment.start_bpm;
     }
 
-    const auto offset = static_cast<long double>(tick.value) -
-                        static_cast<long double>(segment.start_tick.value);
+    const auto offset =
+        static_cast<long double>(tick.value) - static_cast<long double>(segment.start_tick.value);
     const auto length = static_cast<long double>(segment.end_tick.value) -
                         static_cast<long double>(segment.start_tick.value);
     const auto fraction = std::clamp(offset / length, 0.0L, 1.0L);
@@ -202,8 +199,9 @@ SampleToTickResult CompiledTempoMap::resolve_sample(SamplePosition sample) const
     return resolve_sample_in_segment(sample, segment_index);
 }
 
-SampleToTickResult CompiledTempoMap::resolve_sample_in_segment(
-    SamplePosition sample, std::size_t segment_index) const noexcept {
+SampleToTickResult
+CompiledTempoMap::resolve_sample_in_segment(SamplePosition sample,
+                                            std::size_t segment_index) const noexcept {
     const auto& segment = segments_[segment_index];
     const auto delta_samples = static_cast<long double>(sample.value) -
                                static_cast<long double>(segment.start_sample.value);

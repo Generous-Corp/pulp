@@ -68,8 +68,7 @@ std::optional<std::string> read_file(const fs::path& path,
         if (!stream)
             return std::nullopt;
         std::string bytes(static_cast<std::size_t>(size), '\0');
-        if (size != 0 &&
-            !stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
+        if (size != 0 && !stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
             return std::nullopt;
         if (stream.peek() != std::ifstream::traits_type::eof())
             return std::nullopt;
@@ -117,8 +116,9 @@ load_assets(const LoadedProject& project) {
     decoded.reserve(project.value.assets().size());
     std::uint64_t decoded_pcm_bytes = 0;
     for (const auto& asset : project.value.assets()) {
-        fs::path resolved;
-        std::string resolved_hint;
+        std::optional<std::string> bytes;
+        bool found_regular = false;
+        bool found_unreadable = false;
         for (const auto& locator : asset.locators) {
             if (locator.hint.empty())
                 continue;
@@ -127,44 +127,30 @@ load_assets(const LoadedProject& project) {
                 candidate.is_relative())
                 candidate = project.base_directory / candidate;
             std::error_code error;
-            if (fs::is_regular_file(candidate, error)) {
-                resolved = std::move(candidate);
-                resolved_hint = locator.hint;
+            if (!fs::is_regular_file(candidate, error))
+                continue;
+            found_regular = true;
+            const auto remaining_bytes = kMaxAssetWorkingSetBytes - decoded_pcm_bytes;
+            auto candidate_bytes = read_file(candidate, remaining_bytes);
+            if (!candidate_bytes || candidate_bytes->size() >= remaining_bytes) {
+                found_unreadable = true;
+                continue;
+            }
+            if (pulp::runtime::sha256_hex(*candidate_bytes) == asset.content_hash.to_hex()) {
+                bytes = std::move(candidate_bytes);
                 break;
             }
         }
-        if (resolved.empty()) {
+        if (!bytes) {
             AudioRendererError error;
-            error.code = AudioRendererErrorCode::MissingDecodedAsset;
+            error.code = found_unreadable
+                             ? AudioRendererErrorCode::CapacityExceeded
+                             : (found_regular ? AudioRendererErrorCode::InvalidAsset
+                                              : AudioRendererErrorCode::MissingDecodedAsset);
             error.item = asset.id;
             return runtime::Err(error);
         }
         const auto remaining_bytes = kMaxAssetWorkingSetBytes - decoded_pcm_bytes;
-        const auto bytes = read_file(resolved, remaining_bytes);
-        if (!bytes) {
-            AudioRendererError error;
-            error.code = AudioRendererErrorCode::CapacityExceeded;
-            error.item = asset.id;
-            return runtime::Err(error);
-        }
-        const auto expected_hash = asset.content_hash.to_hex();
-        const auto actual_hash = pulp::runtime::sha256_hex(*bytes);
-        // DAWproject XML import cannot seal media until its package is
-        // extracted, so that importer uses the package path hash as an explicit
-        // provisional identity. Every other identity must match the bytes.
-        const auto provisional_hash = pulp::runtime::sha256_hex(resolved_hint);
-        if (actual_hash != expected_hash && provisional_hash != expected_hash) {
-            AudioRendererError error;
-            error.code = AudioRendererErrorCode::InvalidAsset;
-            error.item = asset.id;
-            return runtime::Err(error);
-        }
-        if (bytes->size() >= remaining_bytes) {
-            AudioRendererError error;
-            error.code = AudioRendererErrorCode::CapacityExceeded;
-            error.item = asset.id;
-            return runtime::Err(error);
-        }
         pulp::audio::WavDecodeLimits limits;
         limits.max_output_bytes = remaining_bytes - bytes->size();
         const auto byte_span = std::span<const std::uint8_t>(
@@ -225,8 +211,23 @@ compile_project(const LoadedProject& loaded, std::uint32_t sample_rate) {
     return runtime::Ok(std::move(result));
 }
 
+void extend_absolute_frame(std::uint64_t& frames, timebase::SamplePosition start,
+                           std::uint64_t count, timebase::RationalRate rate,
+                           std::uint32_t sample_rate) {
+    if (!rate.valid())
+        return;
+    const auto end = static_cast<long double>(start.value) + static_cast<long double>(count);
+    const auto scaled = end * static_cast<long double>(sample_rate) *
+                        static_cast<long double>(rate.denominator) /
+                        static_cast<long double>(rate.numerator);
+    if (scaled > 0.0L &&
+        scaled <= static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+        frames = std::max(frames, static_cast<std::uint64_t>(std::ceil(scaled)));
+}
+
 std::uint64_t render_frame_count(const pulp::timeline::Sequence& sequence,
-                                 const CompiledTempoMap& tempo_map, std::uint32_t sample_rate) {
+                                 const CompiledTempoMap& tempo_map, const PlaybackProgram& program,
+                                 std::uint32_t sample_rate) {
     std::uint64_t frames = 0;
     if (const auto duration = sequence.duration()) {
         const auto samples = tempo_map.ticks_to_samples({duration->value});
@@ -234,12 +235,30 @@ std::uint64_t render_frame_count(const pulp::timeline::Sequence& sequence,
             frames = static_cast<std::uint64_t>(samples.value);
     }
     if (const auto duration = sequence.absolute_duration()) {
-        const long double scaled = static_cast<long double>(duration->sample_count) * sample_rate *
-                                   duration->sample_rate.denominator /
-                                   duration->sample_rate.numerator;
-        if (scaled > 0.0L &&
-            scaled <= static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
-            frames = std::max(frames, static_cast<std::uint64_t>(std::ceil(scaled)));
+        extend_absolute_frame(frames, {}, duration->sample_count, duration->sample_rate,
+                              sample_rate);
+    }
+    for (const auto& track : program.tracks()) {
+        if (!track->audio_program())
+            continue;
+        for (const auto& clip : track->audio_program()->clips())
+            if (clip.timeline_end() > 0)
+                frames = std::max(frames, static_cast<std::uint64_t>(clip.timeline_end()));
+    }
+    for (const auto& track : sequence.tracks()) {
+        if (track.freeze() || track.active_take_lane_id().valid())
+            continue;
+        for (const auto& clip : track.clips()) {
+            if (clip.time_anchor() == pulp::timeline::ClipTimeAnchor::Musical) {
+                const auto end = tempo_map.ticks_to_samples(clip.end()).value;
+                if (end > 0)
+                    frames = std::max(frames, static_cast<std::uint64_t>(end));
+            } else {
+                extend_absolute_frame(frames, clip.absolute_start(),
+                                      clip.absolute_duration_samples(), clip.absolute_sample_rate(),
+                                      sample_rate);
+            }
+        }
     }
     return frames;
 }
@@ -313,8 +332,8 @@ OperationResult validate(std::string_view project) {
 }
 
 OperationResult explain(std::string_view project, std::uint32_t sample_rate) {
-    if (sample_rate == 0)
-        return failure("explain", "sample_rate must be positive", {}, 2);
+    if (sample_rate == 0 || sample_rate > timebase::kMaximumCompiledSampleRate)
+        return failure("explain", "sample_rate must be between 1 and 768000", {}, 2);
     auto registry = pulp::timeline::make_builtin_timeline_registry();
     if (!registry)
         return failure("registry", "could not construct the built-in schema registry");
@@ -361,8 +380,8 @@ OperationResult explain(std::string_view project, std::uint32_t sample_rate) {
 
 OperationResult render(std::string_view project, std::string_view output,
                        std::uint32_t sample_rate) {
-    if (sample_rate == 0 || output.empty())
-        return failure("render", "output and a positive sample_rate are required", {}, 2);
+    if (sample_rate == 0 || sample_rate > timebase::kMaximumCompiledSampleRate || output.empty())
+        return failure("render", "output and sample_rate between 1 and 768000 are required", {}, 2);
     auto registry = pulp::timeline::make_builtin_timeline_registry();
     if (!registry)
         return failure("registry", "could not construct the built-in schema registry");
@@ -376,7 +395,11 @@ OperationResult render(std::string_view project, std::string_view output,
         loaded.value().value.find_sequence(loaded.value().value.root_sequence_id());
     if (!sequence)
         return failure("render", "root sequence is missing");
-    const auto frames = render_frame_count(*sequence, *compiled.value()->tempo_map, sample_rate);
+    auto program = compiled.value()->store.read();
+    if (!program)
+        return failure("render", "compiled program was not published");
+    const auto frames =
+        render_frame_count(*sequence, *compiled.value()->tempo_map, *program, sample_rate);
     if (frames == 0 || frames > std::numeric_limits<std::size_t>::max())
         return failure("render", "sequence duration is empty or too large");
 

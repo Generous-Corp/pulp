@@ -1,6 +1,9 @@
 #include "cli_common.hpp"
 
+#include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/schema_json.hpp>
+#include <pulp/timeline/schema_registry.hpp>
+#include <pulp/timeline/serialize.hpp>
 #include <pulp/tools/timeline/agent.hpp>
 
 #include <charconv>
@@ -13,6 +16,16 @@
 #include <optional>
 #include <string_view>
 #include <system_error>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -63,12 +76,12 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) {
         return false;
     }
     std::error_code error;
-    fs::rename(temporary, destination, error);
-    if (!error)
-        return true;
 #ifdef _WIN32
-    fs::remove(destination, error);
-    error.clear();
+    if (::MoveFileExW(temporary.c_str(), destination.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return true;
+    error = std::error_code(static_cast<int>(::GetLastError()), std::system_category());
+#else
     fs::rename(temporary, destination, error);
     if (!error)
         return true;
@@ -81,7 +94,7 @@ std::optional<std::uint32_t> parse_sample_rate(std::string_view text) {
     std::uint64_t value = 0;
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size() || value == 0 ||
-        value > std::numeric_limits<std::uint32_t>::max())
+        value > pulp::timebase::kMaximumCompiledSampleRate)
         return std::nullopt;
     return static_cast<std::uint32_t>(value);
 }
@@ -94,6 +107,45 @@ std::optional<std::string> project_member(std::string_view response) {
     if (!project)
         return std::nullopt;
     return std::string(parsed.value()->raw(*project));
+}
+
+bool has_package_relative_locator(std::string_view project_json) {
+    auto registry = pulp::timeline::make_builtin_timeline_registry();
+    if (!registry)
+        return true;
+    auto project = pulp::timeline::deserialize_project(project_json, registry.value());
+    if (!project)
+        return true;
+    for (const auto& asset : project.value().assets()) {
+        for (const auto& locator : asset.locators)
+            if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative)
+                return true;
+        for (const auto& representation : asset.representations)
+            for (const auto& locator : representation.locators)
+                if (locator.kind == pulp::timeline::AssetLocatorKind::PackageRelative)
+                    return true;
+    }
+    return false;
+}
+
+std::optional<fs::path> normalized_parent(const fs::path& path) {
+    std::error_code error;
+    auto absolute = fs::absolute(path, error);
+    if (error)
+        return std::nullopt;
+    auto parent = absolute.lexically_normal().parent_path();
+    auto canonical = fs::weakly_canonical(parent, error);
+    return error ? std::optional<fs::path>{parent} : std::optional<fs::path>{canonical};
+}
+
+bool same_parent_directory(const fs::path& left, const fs::path& right) {
+    const auto left_parent = normalized_parent(left);
+    const auto right_parent = normalized_parent(right);
+    if (!left_parent || !right_parent)
+        return false;
+    std::error_code error;
+    const bool equivalent = fs::equivalent(*left_parent, *right_parent, error);
+    return error ? *left_parent == *right_parent : equivalent;
 }
 
 int bad_seq_usage(std::string_view message) {
@@ -132,7 +184,7 @@ int cmd_seq(const std::vector<std::string>& args) {
                 return bad_seq_usage("unknown explain option: " + args[2]);
             const auto parsed = parse_sample_rate(args[3]);
             if (!parsed)
-                return bad_seq_usage("--sample-rate must be a positive 32-bit integer");
+                return bad_seq_usage("--sample-rate must be between 1 and 768000");
             sample_rate = *parsed;
         }
         return emit(pulp::tools::timeline::explain(args[1], sample_rate));
@@ -156,6 +208,12 @@ int cmd_seq(const std::vector<std::string>& args) {
         if (!result || output.empty())
             return emit(std::move(result));
         const auto project = project_member(result.json);
+        if (project && has_package_relative_locator(*project) &&
+            !same_parent_directory(args[1], output)) {
+            std::cerr << "pulp seq: --out cannot move a project with package-relative media; "
+                         "write beside the input project\n";
+            return 2;
+        }
         if (!project || !write_text_atomic(output, *project)) {
             std::cerr << "pulp seq: could not write project: " << output << "\n";
             return 1;
@@ -189,7 +247,7 @@ int cmd_render(const std::vector<std::string>& args) {
             }
             const auto parsed = parse_sample_rate(args[index]);
             if (!parsed) {
-                std::cerr << "pulp render: --sample-rate must be a positive 32-bit integer\n";
+                std::cerr << "pulp render: --sample-rate must be between 1 and 768000\n";
                 return 2;
             }
             sample_rate = *parsed;
