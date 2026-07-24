@@ -246,6 +246,7 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
                        AssetStoragePolicy::Embedded,
                        {{AssetLocatorKind::PackageRelative, "media/proxy.wav"}}}},
                      {}};
+    const auto valid_asset = asset;
     auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {}));
     auto project = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
     REQUIRE(project.has_value());
@@ -262,6 +263,55 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
     auto duplicate = Project::create(ProjectInput{{1}, "project", 4, {3}, {asset}, {sequence}});
     REQUIRE_FALSE(duplicate.has_value());
     REQUIRE(duplicate.error().code == ModelErrorCode::DuplicateAssetRepresentation);
+
+    auto invalid_policy = valid_asset;
+    invalid_policy.storage_policy = static_cast<AssetStoragePolicy>(0xff);
+    auto bad_policy =
+        Project::create(ProjectInput{{1}, "project", 4, {3}, {invalid_policy}, {sequence}});
+    REQUIRE_FALSE(bad_policy);
+    REQUIRE(bad_policy.error().code == ModelErrorCode::InvalidAssetStoragePolicy);
+
+    auto invalid_representation_policy = valid_asset;
+    invalid_representation_policy.representations[0].storage_policy =
+        static_cast<AssetStoragePolicy>(0xff);
+    auto bad_representation_policy = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {invalid_representation_policy}, {sequence}});
+    REQUIRE_FALSE(bad_representation_policy);
+    REQUIRE(bad_representation_policy.error().code ==
+            ModelErrorCode::InvalidAssetStoragePolicy);
+
+    auto invalid_locator = valid_asset;
+    invalid_locator.locators[0].kind = static_cast<AssetLocatorKind>(0xff);
+    auto bad_locator_kind =
+        Project::create(ProjectInput{{1}, "project", 4, {3}, {invalid_locator}, {sequence}});
+    REQUIRE_FALSE(bad_locator_kind);
+    REQUIRE(bad_locator_kind.error().code == ModelErrorCode::InvalidAssetLocator);
+
+    auto invalid_representation_locator = valid_asset;
+    invalid_representation_locator.representations[0].locators[0].kind =
+        static_cast<AssetLocatorKind>(0xff);
+    auto bad_representation_locator = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {invalid_representation_locator}, {sequence}});
+    REQUIRE_FALSE(bad_representation_locator);
+    REQUIRE(bad_representation_locator.error().code == ModelErrorCode::InvalidAssetLocator);
+
+    auto primary_hash_reused = valid_asset;
+    primary_hash_reused.representations[0].content_hash =
+        primary_hash_reused.content_hash;
+    auto duplicate_primary_hash = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {primary_hash_reused}, {sequence}});
+    REQUIRE_FALSE(duplicate_primary_hash);
+    REQUIRE(duplicate_primary_hash.error().code ==
+            ModelErrorCode::DuplicateAssetRepresentation);
+
+    auto representation_hash_reused = valid_asset;
+    representation_hash_reused.representations.push_back(
+        {"analysis", content_hash('c'), AssetStoragePolicy::External, {}});
+    auto duplicate_representation_hash = Project::create(
+        ProjectInput{{1}, "project", 4, {3}, {representation_hash_reused}, {sequence}});
+    REQUIRE_FALSE(duplicate_representation_hash);
+    REQUIRE(duplicate_representation_hash.error().code ==
+            ModelErrorCode::DuplicateAssetRepresentation);
 }
 
 TEST_CASE("Timeline registered content remaps while opaque content fails closed") {

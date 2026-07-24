@@ -666,6 +666,37 @@ TEST_CASE("CreateAsset with an invalid content hash is rejected fail closed") {
     REQUIRE(session->journal().entries().empty());
 }
 
+TEST_CASE("CreateAsset rejects invalid media enums and duplicate representation hashes") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto next_before = session->snapshot()->next_item_id();
+
+    auto invalid_policy = make_recorded_asset({next_before}, hash_of('e'));
+    invalid_policy.storage_policy = static_cast<AssetStoragePolicy>(0xff);
+    auto rejected_policy =
+        session->submit(writer, session_transaction(writer, {}, {CreateAsset{invalid_policy}}));
+    REQUIRE_FALSE(rejected_policy);
+    REQUIRE(rejected_policy.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected_policy.error().model_error);
+    REQUIRE(rejected_policy.error().model_error->code ==
+            ModelErrorCode::InvalidAssetStoragePolicy);
+
+    auto duplicate_hash = make_recorded_asset({next_before}, hash_of('e'));
+    duplicate_hash.representations[0].content_hash = duplicate_hash.content_hash;
+    auto rejected_hash =
+        session->submit(writer, session_transaction(writer, {}, {CreateAsset{duplicate_hash}}));
+    REQUIRE_FALSE(rejected_hash);
+    REQUIRE(rejected_hash.error().code == ConflictCode::ModelInvariant);
+    REQUIRE(rejected_hash.error().model_error);
+    REQUIRE(rejected_hash.error().model_error->code ==
+            ModelErrorCode::DuplicateAssetRepresentation);
+
+    REQUIRE(session->snapshot()->assets().empty());
+    REQUIRE(session->snapshot()->next_item_id() == next_before);
+    REQUIRE(session->revision() == DocumentRevision{});
+    REQUIRE(session->journal().entries().empty());
+}
+
 TEST_CASE("Journal replay reproduces a created asset byte-identically") {
     const auto checkpoint = make_project();
     auto session = std::move(DocumentSession::create(checkpoint)).value();

@@ -64,6 +64,7 @@ enum class ModelErrorCode : std::uint8_t {
     OverlappingTakeComp,
     ActiveCompTakeRemoval,
     InvalidAudioLoopInfo,
+    InvalidAssetStoragePolicy,
 };
 
 struct ModelError {

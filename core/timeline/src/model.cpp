@@ -34,6 +34,25 @@ std::optional<ItemId> first_duplicate(const std::vector<T>& values, IdFn&& id_of
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
 
+bool valid_storage_policy(AssetStoragePolicy policy) noexcept {
+    switch (policy) {
+    case AssetStoragePolicy::External:
+    case AssetStoragePolicy::Embedded:
+    case AssetStoragePolicy::PreferEmbedded:
+        return true;
+    }
+    return false;
+}
+
+bool valid_locator_kind(AssetLocatorKind kind) noexcept {
+    switch (kind) {
+    case AssetLocatorKind::PackageRelative:
+    case AssetLocatorKind::ExternalUri:
+        return true;
+    }
+    return false;
+}
+
 // Validates a media asset and canonicalizes its representation order. Shared by
 // project construction and asset-append so both paths enforce the identical
 // sealed-identity invariant: an asset with an invalid or empty ContentHash is
@@ -46,23 +65,34 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
     asset.sample_rate = asset.sample_rate.normalized();
     if (!asset.content_hash.valid())
         return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+    if (!valid_storage_policy(asset.storage_policy))
+        return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
     for (const auto& locator : asset.locators)
-        if (locator.hint.empty())
+        if (!valid_locator_kind(locator.kind) || locator.hint.empty())
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     std::vector<std::string_view> roles;
     roles.reserve(asset.representations.size());
+    std::vector<ContentHash> hashes;
+    hashes.reserve(asset.representations.size() + 1);
+    hashes.push_back(asset.content_hash);
     for (const auto& representation : asset.representations) {
         if (!representation.content_hash.valid())
             return ModelError{ModelErrorCode::InvalidContentHash, asset.id, {}};
+        if (!valid_storage_policy(representation.storage_policy))
+            return ModelError{ModelErrorCode::InvalidAssetStoragePolicy, asset.id, {}};
         if (representation.role.empty())
             return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
         roles.push_back(representation.role);
+        hashes.push_back(representation.content_hash);
         for (const auto& locator : representation.locators)
-            if (locator.hint.empty())
+            if (!valid_locator_kind(locator.kind) || locator.hint.empty())
                 return ModelError{ModelErrorCode::InvalidAssetLocator, asset.id, {}};
     }
     std::sort(roles.begin(), roles.end());
     if (std::adjacent_find(roles.begin(), roles.end()) != roles.end())
+        return ModelError{ModelErrorCode::DuplicateAssetRepresentation, asset.id, {}};
+    std::sort(hashes.begin(), hashes.end());
+    if (std::adjacent_find(hashes.begin(), hashes.end()) != hashes.end())
         return ModelError{ModelErrorCode::DuplicateAssetRepresentation, asset.id, {}};
     std::sort(asset.representations.begin(), asset.representations.end(),
               [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
