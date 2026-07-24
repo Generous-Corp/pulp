@@ -72,6 +72,28 @@ dependency to the closure, and exposes
 `pulp::timeline::import_dawproject_xml`. Applications that only create or
 deserialize native Pulp projects do not link that importer implementation.
 
+The importer intentionally accepts a bounded linear subset rather than silently
+approximating an arbitrary DAW session:
+
+- DAWproject major version 1, one tempo and meter, flat tracks, and
+  beats-timed `<Notes>` or `<Audio>` clips are supported.
+- Nested group tracks, `<Warps>`, seconds-timed lanes, unknown timeline
+  constructs, and unsupported clips/tracks/notes fail the whole import.
+- Audio imports require a caller-supplied package-media resolver. Rooted,
+  drive-qualified, and parent-traversing paths are rejected; resolved WAV bytes
+  are size-bounded, inspected, hashed, and retained only as sealed
+  `MediaAsset`s with safe package-relative locator hints.
+- `DawProjectImportLimits` bounds XML bytes, tracks, clips, notes, media assets,
+  resolver calls, locator length, and per-call/total media bytes before
+  importer-owned collections grow.
+
+The import function consumes the `project.xml` entry, not the `.dawproject` ZIP
+container itself. Package readers and resolver allocations remain application
+responsibilities. See
+`test/fixtures/timeline/dawproject/linear_subset.dawproject.xml` for a
+representative supported document; malformed or out-of-subset input returns a
+typed `DawProjectImportError` rather than a partial project.
+
 ## Optional plugin-format adapter
 
 `Pulp::sequence` is an exported integration layer for applications that need to
@@ -155,23 +177,108 @@ installed SDK. Installed embedders should deserialize through
 `pulp::timeline`, compile through `pulp::playback`, and render through the
 public playback program APIs described above.
 
+## One typed edit through CLI and MCP
+
+Start by asking the installed CLI for the generated schema, then validate the
+source before editing:
+
+```bash
+pulp seq schema > timeline-schema.json
+pulp seq validate song.pulpseq.json
+```
+
+Commands are versioned envelopes. For example, this `commands.json` arms track
+`6` in sequence `5` only if it is currently unarmed:
+
+```json
+[
+  {
+    "data": {
+      "expected": false,
+      "replacement": true,
+      "sequence_id": "5",
+      "track_id": "6"
+    },
+    "type_name": "pulp.timeline.command.set_record_arm",
+    "version": 1
+  }
+]
+```
+
+Apply the complete batch transactionally, then inspect and render the result:
+
+```bash
+pulp seq apply song.pulpseq.json commands.json --out armed.pulpseq.json
+pulp seq validate armed.pulpseq.json
+pulp seq explain armed.pulpseq.json --sample-rate 48000
+pulp render armed.pulpseq.json --out armed.wav --sample-rate 48000
+```
+
+The equivalent agent flow calls `pulp_timeline_project_open`, passes the same
+envelope array to `pulp_timeline_command_apply`, then calls
+`pulp_timeline_validate`, `pulp_timeline_explain`, and optionally
+`pulp_timeline_render`. MCP accepts the project as a path or inline canonical
+JSON; its `commands` argument is the JSON array itself, not a filename. The
+generated schema is the source of truth for document and command shapes.
+
+These headless surfaces edit existing canonical projects. Realtime device I/O,
+capture-buffer ownership, plugin instantiation, and durable `FileJournal`
+sessions are embedding APIs, not hidden CLI or MCP operations.
+
 ## Takes, comps, freeze, and capture
 
-- A `TakeLane` owns recorded `Take` values and its comp segments. Selecting an
-  active lane makes that comp the track's playback source.
-- `TrackFreeze` selects a sealed media artifact and its render-plan identity.
-  The original clips and device chain remain document state, but playback uses
-  the selected freeze until it is cleared.
-- `CaptureEngine` is the realtime recorder. Prepare its capacities off-thread,
-  enqueue bounded commands, and drain completed take handles away from the
-  callback.
-- `materialize_midi_capture()` and the recording-commit helpers convert
-  completed capture data into ordinary timeline commands. Submit those commands
-  through `DocumentSession`; capture never mutates the project directly.
+The document types live in `<pulp/timeline/model.hpp>` and their mutations in
+`<pulp/timeline/command.hpp>`. A `TakeLane` owns recorded `Take` values and an
+ordered non-overlapping comp selection. `SetActiveTakeLane` chooses that comp as
+the track source; zero selects the original arrangement. Removing an active lane
+or a take referenced by the comp fails closed.
+
+`TrackFreeze` selects a sealed media artifact plus a render-plan content hash.
+Publish a freeze in one transaction ordered as `CreateAsset` followed by
+`SetTrackFreeze`. The authored clips, takes, automation, and device chain stay in
+the document for thaw; playback merely selects the frozen artifact. Clear the
+freeze before removing its asset. Replay never re-renders a freeze.
+
+The realtime recorder is `<pulp/playback/capture_engine.hpp>`:
+
+1. Build a `CaptureEngineConfig` with explicit track, block, take-frame,
+   take-slot, MIDI-event, and total preallocation limits, then call `prepare()`
+   away from the callback.
+2. Enqueue `Start`, `Stop`, `Cancel`, and `ReleaseTake` commands from the
+   control side. The callback calls `process()` with the same
+   `TransportSnapshot` used for playback.
+3. Drain `CaptureEvent`s away from the callback. A completed
+   `CaptureTakeHandle` remains immutable until `ReleaseTake`; copy its audio or
+   MIDI before releasing it. Queue drops and capacity failures are observable
+   in `CaptureEngineStats`.
+4. Use `<pulp/playback/recording_commit.hpp>` to
+   `seal_recording_take()` (or `seal_retrospective_take()`) into WAV bytes, a
+   content-hashed asset, a take, and ordered `CreateAsset`/take commands. Use
+   `<pulp/playback/midi_capture_materializer.hpp>` to
+   `materialize_midi_capture()` against the exact capture-rate tempo map.
+5. Publish those ordinary commands through `DocumentSession`, then publish the
+   media bytes through application-owned storage. Capture never mutates the
+   project or journal directly.
 
 The application owns device I/O, media-file publication, and plugin/device
 instantiation. The timeline owns editing intent and durable identity; playback
 owns immutable compiled artifacts; capture owns bounded callback-time buffers.
+
+## Durable journals
+
+Include `<pulp/timeline/file_journal.hpp>` for native crash-consistent sessions.
+`FileJournal::open()` returns the sink, recovered checkpoint, nonzero revision,
+and whether it repaired a torn trailing frame. Restore that exact
+checkpoint/revision with `DocumentSession::restore()`, or create a new session
+with the sink. A transaction is not published until the sink reports its whole
+frame durable.
+
+Checkpoint only a revision the application has durably acknowledged. A sink
+error is ambiguous—it may have reached storage—so the session rejects later
+durable writes instead of guessing. Recovery discards only a torn final frame
+and fails on earlier corruption. Symlink aliases share one lock identity, while
+multiply linked journal files are rejected because atomic replacement cannot
+preserve their identity.
 
 ## Sample-rate conversion
 

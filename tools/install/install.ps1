@@ -16,7 +16,9 @@ $ErrorActionPreference = "Stop"
 
 $Repo = "Generous-Corp/pulp"
 $InstallDir = if ($env:PULP_INSTALL_DIR) { $env:PULP_INSTALL_DIR } else { "$env:USERPROFILE\.pulp\bin" }
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $Version = if ($env:PULP_VERSION) { $env:PULP_VERSION } else { "latest" }
+$NoModifyPath = $env:PULP_NO_MODIFY_PATH -eq "1"
 
 # ── Platform detection ───────────────────────────────────────────────────────
 
@@ -80,17 +82,50 @@ try {
         $InstalledVersion = & $PulpExe --version 2>$null
         Write-Host "Installed: pulp $InstalledVersion" -ForegroundColor Green
     }
+
+    $PulpMcpExe = Join-Path $InstallDir "pulp-mcp.exe"
+    if ((Test-Path $PulpMcpExe) -and (-not $NoModifyPath)) {
+        $PulpRegistryKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Software\Pulp")
+        try {
+            $CurrentUserMcp = [Environment]::GetEnvironmentVariable("PULP_MCP_BINARY", "User")
+            $ManagedMcp = $PulpRegistryKey.GetValue(
+                "ManagedPulpMcpBinary",
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $ShouldManageMcp = (-not $CurrentUserMcp) -or
+                ($ManagedMcp -and ($CurrentUserMcp -eq $ManagedMcp))
+            if ($ShouldManageMcp) {
+                [Environment]::SetEnvironmentVariable("PULP_MCP_BINARY", $PulpMcpExe, "User")
+                $PulpRegistryKey.SetValue(
+                    "ManagedPulpMcpBinary",
+                    $PulpMcpExe,
+                    [Microsoft.Win32.RegistryValueKind]::String)
+                $env:PULP_MCP_BINARY = $PulpMcpExe
+                Write-Host "Configured PULP_MCP_BINARY for the Claude Code plugin" -ForegroundColor Green
+            } else {
+                Write-Host "Preserved user-managed PULP_MCP_BINARY=$CurrentUserMcp"
+            }
+        } finally {
+            $PulpRegistryKey.Dispose()
+        }
+    } elseif ((Test-Path $PulpMcpExe) -and $NoModifyPath) {
+        Write-Host "Set PULP_MCP_BINARY=$PulpMcpExe before starting Claude Code"
+    }
 } finally {
     Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 }
 
 # ── PATH ─────────────────────────────────────────────────────────────────────
 
-$CurrentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-if ($CurrentPath -notlike "*$InstallDir*") {
-    [Environment]::SetEnvironmentVariable("PATH", "$InstallDir;$CurrentPath", "User")
-    $env:PATH = "$InstallDir;$env:PATH"
-    Write-Host "Added $InstallDir to user PATH" -ForegroundColor Green
+if (-not $NoModifyPath) {
+    $CurrentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($CurrentPath -notlike "*$InstallDir*") {
+        [Environment]::SetEnvironmentVariable("PATH", "$InstallDir;$CurrentPath", "User")
+        $env:PATH = "$InstallDir;$env:PATH"
+        Write-Host "Added $InstallDir to user PATH" -ForegroundColor Green
+    }
+} else {
+    Write-Host "Skipped user environment changes (PULP_NO_MODIFY_PATH=1)"
 }
 
 # ── Done ─────────────────────────────────────────────────────────────────────

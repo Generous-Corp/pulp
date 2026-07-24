@@ -45,7 +45,9 @@ std::string shell_quote(const std::string& s) {
 #else
     std::string out = "\"";
     for (char c : s) {
-        if (c == '\\' || c == '"') out += '\\';
+        // Inside POSIX double quotes, backslash, quote, dollar, and backtick
+        // retain special meaning unless escaped.
+        if (c == '\\' || c == '"' || c == '$' || c == '`') out += '\\';
         out += c;
     }
     out += "\"";

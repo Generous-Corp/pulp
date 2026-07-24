@@ -20,10 +20,12 @@ SOURCES = {
 def lane_text(prefix: str, target: str) -> str:
     root = f"_PULP_{prefix}_ROOT"
     sources = f"_PULP_{prefix}_CORE_SOURCES"
+    timeline = f"_PULP_{prefix}_TIMELINE_SOURCES"
     return f"""\
+pulp_resolve_timeline_sources("${{{root}}}" {timeline})
 set({sources}
     ${{{root}}}/core/timebase/src/compiled_time.cpp
-    ${{{root}}}/core/timeline/src/model.cpp
+    ${{{timeline}}}
     ${{{root}}}/core/playback/src/transport.cpp
     ${{{root}}}/core/audio/src/rolling_audio_capture_buffer.cpp
     ${{{root}}}/core/runtime/src/sha256.cpp
@@ -48,6 +50,10 @@ class SourceClosureTests(unittest.TestCase):
             path = self.root / source
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("// fixture\n", encoding="utf-8")
+        timeline_manifest = self.root / "core" / "timeline" / "PulpTimelineSources.cmake"
+        timeline_manifest.write_text(
+            "set(_PULP_TIMELINE_PORTABLE_SOURCE_FILES\n    model.cpp\n)\n",
+            encoding="utf-8")
         cmake = self.root / "tools" / "cmake"
         cmake.mkdir(parents=True)
         (cmake / "PulpWam.cmake").write_text(
@@ -113,6 +119,15 @@ class SourceClosureTests(unittest.TestCase):
         failures = self.check()
         self.assertEqual(sum("missing core/timeline/src/future.cpp" in failure
                              for failure in failures), 2)
+
+    def test_timeline_manifest_must_be_consumed(self) -> None:
+        self.mutate(
+            "tools/cmake/PulpWam.cmake",
+            "    ${_PULP_WAM_TIMELINE_SOURCES}\n",
+            "    ${_PULP_WAM_ROOT}/core/timeline/src/model.cpp\n")
+        self.assertTrue(any(
+            "WAM: shared timeline source manifest is not consumed" in failure
+            for failure in self.check()))
 
     def test_recording_commit_portable_dependencies_are_required(self) -> None:
         for filename in ("PulpWam.cmake", "PulpWclap.cmake"):

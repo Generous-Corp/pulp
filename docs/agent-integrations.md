@@ -76,6 +76,18 @@ The plugin extends Claude Code with:
   `pulp_inspect_evaluate` and `pulp_inspect_screenshot` currently
   return explicit unavailable errors until script-engine and
   host-capture wiring lands.
+  Timeline projects have five native tools:
+  `pulp_timeline_project_open`, `pulp_timeline_command_apply`,
+  `pulp_timeline_validate`, `pulp_timeline_explain`, and
+  `pulp_timeline_render`. They share the implementation used by `pulp seq` and
+  `pulp render`; the [Timeline SDK guide](guides/timeline-sdk.md) shows the
+  end-to-end typed-command workflow and which realtime features remain C++ SDK
+  responsibilities.
+- **Timeline skill**: requests about arrangements, clips, tempo/meter,
+  automation, takes and comps, freeze, capture, journals, playback, or
+  DAWproject import load the subsystem playbook. The skill selects CLI, MCP, or
+  C++ rather than implying that realtime capture or device I/O is an MCP
+  operation.
 - **Setup hook**: when a Claude Code session starts in a project that
   has the plugin installed but `pulp` is not on PATH, prints a
   one-time install banner. Informational, never blocks the session.

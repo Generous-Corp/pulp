@@ -97,13 +97,15 @@ server.
 
 Install the CLI first. The plugin's MCP server is `pulp-mcp`, which ships with
 the CLI tarball (above) into `~/.pulp/bin/`. The plugin itself contains no
-binaries; it locates `pulp-mcp` on `$PATH`. If you install the plugin before the
-CLI, `/mcp` will report `pulp-mcp: cannot locate binary`. Run
+binaries; the CLI installer sets `PULP_MCP_BINARY` to its full path rather than
+depending on Claude Code's inherited `PATH`. If you install the plugin before
+the CLI, `/mcp` reports that `PULP_MCP_BINARY` is missing. Restart the shell
+after installation, then run
 `pulp doctor` to confirm `pulp-mcp` is found and matches your CLI version.
 
 Building from a source checkout instead? The repo's project-local MCP server
-uses the binary from your build tree. See [Build from source](#build-from-source).
-No CLI install is needed.
+uses `PULP_MCP_BINARY` to select your build-tree executable. See
+[Build from source](#build-from-source). No CLI install is needed.
 
 </details>
 
@@ -118,6 +120,12 @@ The full status inventory lives in the
 - **GPU Accelerated Native UI:** scripted UIs render with [Dawn](https://dawn.googlesource.com/dawn) + [Skia](https://skia.org/) and QuickJS, with modern Flexbox/Grid layout through [Yoga](https://www.yogalayout.dev/).
 - **Design import:** bring in screens from Claude Design, Figma `.fig` files, Figma REST/file JSON, React/JSX, Stitch, v0, and Pencil/OpenPencil, plus token systems from DESIGN.md exports. See [Importing Designs](docs/guides/importing-designs.md).
 - **DSP:** processors, realtime [SignalGraph](docs/reference/signal-graph.md) node graphs, MIDI, audio file I/O, sidechains, headless processing, signed `.pulpbake` graph artifacts, and DSP hot reload for reloadable plugins. See [DSP Hot-Reload](docs/guides/dsp-hot-reload.md).
+- **Creative Timeline Engine:** immutable arrangements, tempo/meter maps,
+  automation, takes and comps, track freeze, bounded recording capture,
+  crash-consistent journals, deterministic playback/rendering, and a bounded
+  DAWproject importer. Use it through the
+  [C++ SDK](docs/guides/timeline-sdk.md), `pulp seq` / `pulp render`, or the
+  Claude plugin's Timeline MCP tools and skill.
 - **Testing and inspection:** [Audio Inspector](docs/guides/audio-inspector.md), optional [Audio Quality Lab](docs/guides/audio-quality-lab.md) with ViSQOL, PEAQ, AQUA-Tk, and aubio adapters, golden-file audio tests, headless screenshots, visual regression, motion traces, and MCP tools for agent-driven validation.
 - **Migration and interop:** embed Pulp's GPU front end in existing [JUCE](docs/guides/juce-embed.md) or [iPlug2](docs/guides/juce-embed.md#iplug2) projects, or import existing projects into Pulp. The iPlug2 importer is public; the JUCE importer is in private beta.
 - **Shipping:** macOS signing/notarization, DMG/PKG packaging, Sparkle appcasts, release assets, and `pulp ship` commands.
@@ -139,6 +147,8 @@ Three commands from zero to a working native plugin for your platform.
 - [Capabilities Reference](docs/reference/capabilities.md) — full feature inventory with status
 - [Module Reference](docs/reference/modules.md) — module-by-module API docs
 - [CLI Reference](docs/reference/cli.md) — all `pulp` commands
+- [Creative Timeline Engine SDK](docs/guides/timeline-sdk.md) — embed,
+  edit, persist, play, import, and automate timeline projects
 - [CI & Local CI](docs/guides/local-ci.md) — local and cloud CI setup
 - [Shipping Guide](docs/guides/shipping.md) — signing, notarization, packaging
 
@@ -166,12 +176,12 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1
 **Prerequisites:** CMake 3.24+, C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+), git-lfs.
 
 **Claude Code users:** this checkout ships a project-local `.mcp.json` that
-exposes a `pulp` MCP server (build/test/inspect tools) backed by the source
-build. The build above produces `build/tools/mcp/pulp-mcp`, which the server
-auto-detects — so enable the `pulp` MCP server *after* your first build.
-Before that there's no binary to run and `/mcp` reports `pulp: failed to
-connect`; no released-CLI or Claude-plugin install is needed for the
-source-tree server. Run `pulp doctor` to confirm.
+exposes a `pulp` MCP server (build/test/inspect tools). After the build above,
+launch Claude Code with
+`PULP_MCP_BINARY="$PWD/build/tools/mcp/pulp-mcp" claude` (or the corresponding
+Windows `.exe` path). Before that there is no source binary to run and `/mcp`
+reports `pulp: failed to connect`; no released-CLI or Claude-plugin install is
+needed for the source-tree server. Run `pulp doctor` to confirm.
 
 </details>
 

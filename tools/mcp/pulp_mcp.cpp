@@ -582,7 +582,7 @@ int pulp_mcp::server::run(int argc, char* argv[]) {
                 << "pulp-mcp " << PULP_MCP_SERVER_VERSION << "\n"
                 << "MCP (Model Context Protocol) server for Pulp.\n"
                 << "Speaks JSON-RPC 2.0 over stdin/stdout — normally\n"
-                << "invoked by .mcp.json via tools/mcp/pulp-mcp-launcher.\n"
+                << "invoked by .mcp.json using the PULP_MCP_BINARY path.\n"
                 << "\n"
                 << "Flags:\n"
                 << "  --version, -V   Print version and exit\n"
