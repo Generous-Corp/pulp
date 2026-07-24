@@ -311,61 +311,107 @@ double slew_seconds(Character character) {
 // 1 — Engine-time accuracy
 // ═══════════════════════════════════════════════════════════════════════════
 
-TEST_CASE("character delay places repeats at the requested time", "[character-delay][time]") {
-    for (auto character : {Character::clean, Character::diffusion, Character::tape}) {
+TEST_CASE("every character places its repeat at the requested time",
+          "[character-delay][time]") {
+    // R1, onset form. Delay time is measured from the ONSET of a short windowed
+    // burst, referenced to the stimulus's own onset so the burst's rise time
+    // cancels — one recipe for every character, with no character-conditional
+    // test logic.
+    //
+    // Onset rather than peak because the peak does not measure the delay for
+    // three of the five. Through a compander the peak measures the expander's
+    // ~10 ms attack: a bare impulse comes back with its peak displaced a fixed
+    // ~4.6 ms whatever the delay is set to, which at a 10 ms delay reads as a
+    // 46% error that has nothing to do with the clock grid. Through the
+    // diffuser the peak sits somewhere inside a smear that moves with the
+    // character macro. Where a repeat BEGINS is what the delay time sets, and
+    // for the linear characters onset and peak agree anyway.
+    struct Case {
+        Character character;
+        double amount;
+        bool relative_tolerance;  // clocked characters get +-2%, the rest +-1 ms
+    };
+    const Case cases[] = {
+        {Character::clean, 0.0, false},
+        {Character::diffusion, 0.5, false},
+        {Character::tape, 0.0, false},
+        {Character::bbd, 0.5, true},
+        {Character::vintage_digital, 0.5, true},
+    };
+
+    for (const auto& c : cases) {
         for (double time_ms : {10.0, 100.0, 350.0, 1000.0, 2000.0}) {
             Engine delay;
-            configure(delay, character, time_ms, 0.0, 0.0);
-            settle(delay, 4.0 * slew_seconds(character) + 0.05);
+            configure(delay, c.character, time_ms, 0.0, c.amount);
+            settle(delay, 4.0 * slew_seconds(c.character) + 0.4);
 
-            auto buffers = impulse_left(static_cast<int>(kSr * (time_ms * 0.002 + 0.2)));
+            const int frames = static_cast<int>(kSr * (time_ms * 0.002 + 0.3));
+            auto buffers = burst_left(frames, 1000.0, 0.002);
+            const int stimulus_onset = onset_index(buffers.left, 0.05);
             render(delay, buffers);
-
-            // Diffusion is measured at the ONSET of its repeat rather than at
-            // the peak. Its whole purpose is to smear a repeat across an
-            // allpass chain, so the loudest sample sits somewhere inside the
-            // cluster and moves with the character macro; where the repeat
-            // BEGINS is what the delay time actually sets.
-            const int index =
-                character == Character::diffusion
-                    ? onset_index(buffers.left, 0.05)
-                    : peak_index(buffers.left, 1, static_cast<int>(buffers.left.size()));
+            const int measured = onset_index(buffers.left, 0.05) - stimulus_onset;
             const double expected = time_ms * 0.001 * kSr;
+            const double tolerance = c.relative_tolerance ? 0.02 * expected : 0.001 * kSr;
 
-            INFO("character index " << static_cast<int>(character) << ", time " << time_ms
-                                    << " ms, repeat at " << index << ", expected " << expected);
-            REQUIRE(index > 0);
-            CHECK(std::abs(index - expected) <= 0.001 * kSr);  // +-1 ms
+            INFO("character index " << static_cast<int>(c.character) << ", time " << time_ms
+                                    << " ms, onset at " << measured << ", expected " << expected);
+            REQUIRE(measured > 0);
+            CHECK(std::abs(measured - expected) <= tolerance);
         }
     }
 }
 
-TEST_CASE("clocked characters place repeats within the clock grid's tolerance",
-          "[character-delay][time]") {
-    // A bare impulse through a compander measures the expander's attack, not
-    // the bucket chain, so the clocked characters are measured from the ONSET
-    // of a short burst: the onset is set by the line, the envelope that follows
-    // it by the compander.
+TEST_CASE("reverse keeps the requested delay time on the clocked characters",
+          "[character-delay][time][reverse]") {
+    // BBD and Vintage own a line the segmenter cannot replace, so in reverse the
+    // two delays add. If the line kept the requested time the total would be
+    // double it — and the layer above multiplies milliseconds trusting the
+    // module, so every tempo-synced patch would land in the wrong place. The
+    // line is therefore pinned short (kReverseLineMs) and the segment carries
+    // the requested time.
+    //
+    // Measured DIFFERENTIALLY against Clean, which has no line of its own in
+    // reverse. An absolute measurement would be meaningless here: a reversed
+    // segment plays back-to-front, so a transient's delay sweeps the whole range
+    // [1, 2L] depending where in the segment cycle it lands, and a burst at the
+    // start of a segment comes back at ~2L however the line is configured. The
+    // difference between two characters driven identically cancels that.
+    const double time_ms = 400.0;
+    // One settle duration for every character, long enough for the slowest
+    // transport. It has to be IDENTICAL across characters, not merely
+    // sufficient: a reversed segment is a cycle, so a different settle length
+    // starts the burst at a different phase within it, and phase alone moves the
+    // measured onset by up to a full segment — which would swamp the effect
+    // under test.
+    const double kSettleSeconds = 4.0 * (cd::kTimeSlewTapeMs * 0.001) + 0.5;
+    auto onset_for = [&](Character character) {
+        Engine delay;
+        configure(delay, character, time_ms, 0.0, 0.5);
+        delay.set_reverse(true);
+        delay.reset();
+        settle(delay, kSettleSeconds);
+
+        auto buffers = burst_left(static_cast<int>(kSr * 3.0), 700.0, 0.01, 0.7f);
+        render(delay, buffers);
+        REQUIRE(all_finite(buffers.left));
+        return onset_index(buffers.left, 0.05);
+    };
+
+    const int reference = onset_for(Character::clean);
+    REQUIRE(reference > 0);
+
     for (auto character : {Character::bbd, Character::vintage_digital}) {
-        for (double time_ms : {10.0, 50.0, 350.0, 1000.0}) {
-            Engine delay;
-            configure(delay, character, time_ms, 0.0, 0.5);
-            settle(delay, 4.0 * slew_seconds(character) + 0.4);
-
-            const int frames = static_cast<int>(kSr * (time_ms * 0.002 + 0.3));
-            auto buffers = burst_left(frames, 1000.0, 0.002);
-            // The stimulus's own onset by the same rule, so the burst's rise
-            // time cancels out of the measurement.
-            const int stimulus_onset = onset_index(buffers.left, 0.05);
-            render(delay, buffers);
-            const int index = onset_index(buffers.left, 0.05) - stimulus_onset;
-            const double expected = time_ms * 0.001 * kSr;
-
-            INFO("character index " << static_cast<int>(character) << ", time " << time_ms
-                                    << " ms, onset at " << index << ", expected " << expected);
-            REQUIRE(index > 0);
-            CHECK(std::abs(index - expected) <= 0.02 * expected);  // +-2%
-        }
+        const int measured = onset_for(character);
+        REQUIRE(measured > 0);
+        const double added_ms =
+            1000.0 * static_cast<double>(measured - reference) / kSr;
+        INFO("character index " << static_cast<int>(character) << " adds " << added_ms
+                                << " ms over Clean; the pinned line is " << cd::kReverseLineMs
+                                << " ms and the requested time is " << time_ms << " ms");
+        // The character's own line adds about kReverseLineMs, not the requested
+        // time. The generous upper bound is what distinguishes "short pinned
+        // line" from "line still running at the requested time".
+        CHECK(added_ms < 0.25 * time_ms);
     }
 }
 
@@ -689,10 +735,11 @@ TEST_CASE("vintage band-limits to its internal rate", "[character-delay][vintage
     configure(delay, Character::vintage_digital, 200.0, 0.0, 0.5);
     settle(delay, 1.0);
 
+    // The reported edge must be the table's fraction of the reported internal
+    // rate — a real relationship, not a value compared against itself.
     const double edge = delay.vintage_band_edge_hz();
     INFO("reported band edge " << edge);
-    CHECK(edge == Catch::Approx(cd::kVintageAntiAliasFraction * delay.vintage_band_edge_hz() /
-                                cd::kVintageAntiAliasFraction));
+    CHECK(edge == Catch::Approx(cd::kVintageAntiAliasFraction * delay.vintage_internal_rate_hz()));
 
     auto response_at = [&](double hz) {
         Engine probe;
@@ -902,6 +949,12 @@ TEST_CASE("reverse with feedback alternates direction", "[character-delay][rever
 // ═══════════════════════════════════════════════════════════════════════════
 
 TEST_CASE("freeze holds the loop and rejects new input", "[character-delay][freeze][slow]") {
+    // The tone is pinned at 900 Hz on purpose. A frozen Clean loop's decay is
+    // set by the in-loop 20 Hz DC-removal highpass, so the result depends
+    // entirely on the test frequency: at a 250 ms delay that is ~120
+    // recirculations in 30 s, over which a 220 Hz tone loses 4.2 dB and a 900 Hz
+    // tone loses 0.3 dB — from identical, correct code. The criterion is only
+    // reproducible with the tone well above the highpass corner.
     Engine delay;
     configure(delay, Character::clean, 250.0, 0.4, 0.0);
 

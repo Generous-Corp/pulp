@@ -227,6 +227,25 @@ inline constexpr double kDiffusionLoopLpHz = 9000.0;
 /// [32–256]
 inline constexpr int kReverseFadeSamples = 96;
 
+/// Delay the CLOCK-DOMAIN characters' own line runs at while reverse is
+/// engaged, in milliseconds. [design parameter, 10–50]
+///
+/// BBD and Vintage own a delay line the reverse segmenter cannot replace, so in
+/// reverse the segmenter sits at the character's input and the two delays add.
+/// Letting the clocked line keep the requested time would make the total twice
+/// what the caller asked for, which breaks every tempo-synced patch — the layer
+/// above multiplies milliseconds and trusts the module. So the segment takes the
+/// full requested time and the line runs at this fixed, short value: long enough
+/// for the compander and the quantizer to imprint each pass, short enough that
+/// the total stays ≈ the requested time.
+///
+/// Tonal consequence, deliberate and flagged for the listening pass: the
+/// bandwidth law ties usable passband to clock rate, so a 30 ms line sits near
+/// the bright end and reverse-BBD is brighter than forward-BBD at the same time
+/// setting. Wanting a darker reverse is a kBbdBandwidthMaxHz data change, not a
+/// logic change.
+inline constexpr double kReverseLineMs = 30.0;
+
 // ── Ducking ───────────────────────────────────────────────────────────────
 // [all design parameters]
 inline constexpr double kDuckAttackS = 0.005;   // 1–20 ms

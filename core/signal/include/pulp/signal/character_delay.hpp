@@ -285,6 +285,9 @@ public:
     double bbd_bandwidth_hz() const noexcept { return channels_[0].bbd.bandwidth_hz(); }
     std::size_t bbd_stages() const noexcept { return channels_[0].bbd.stages(); }
     double vintage_band_edge_hz() const noexcept { return channels_[0].vintage.band_edge_hz(); }
+    double vintage_internal_rate_hz() const noexcept {
+        return channels_[0].vintage.internal_rate_hz();
+    }
     double slewed_time_ms(int channel) const noexcept {
         return time_slew_[static_cast<std::size_t>(channel)].current();
     }
@@ -420,8 +423,13 @@ private:
                 }
                 break;
             case Character::bbd:
+                // In reverse the segmenter carries the requested time and the
+                // clocked line runs short and fixed, so the two delays sum to
+                // roughly the requested time rather than double it.
                 for (std::size_t c = 0; c < channels_.size(); ++c)
-                    channels_[c].bbd.update(amount, time_slew_[c].current() * 0.001);
+                    channels_[c].bbd.update(amount, reverse_on_
+                                                        ? chardelay::kReverseLineMs * 0.001
+                                                        : time_slew_[c].current() * 0.001);
                 break;
             case Character::vintage_digital:
                 for (auto& channel : channels_) channel.vintage.update(amount);
@@ -508,8 +516,10 @@ private:
             case Character::bbd: {
                 // Clock-domain characters own their own line, so reverse runs
                 // at the character's INPUT instead of replacing the line. The
-                // repeats still carry the character; the trade is that in
-                // reverse the total delay is the segment plus the clocked line.
+                // segment carries the requested time and the line is shortened
+                // to kReverseLineMs so the two delays sum to about the
+                // requested time — see that constant for why the alternative
+                // (both at full time) is unacceptable.
                 const double v = reverse_on_
                                      ? channel.reverse.process(x, base_samples, 0.0)
                                      : x;
@@ -519,7 +529,9 @@ private:
                 const double v = reverse_on_
                                      ? channel.reverse.process(x, base_samples, 0.0)
                                      : x;
-                return channel.vintage.process(v, time_ms * 0.001);
+                const double line_ms =
+                    reverse_on_ ? chardelay::kReverseLineMs : time_ms;
+                return channel.vintage.process(v, line_ms * 0.001);
             }
         }
         return 0.0;
