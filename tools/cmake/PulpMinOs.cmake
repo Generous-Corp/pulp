@@ -3,10 +3,11 @@
 # Included BEFORE project() so CMAKE_OSX_DEPLOYMENT_TARGET is set before the
 # compiler is configured (CMake requires it there). Pulp's macOS floor is the
 # MAX minimum among everything it links: Skia and Dawn (prebuilt) plus libcxx
-# (the toolchain C++ runtime — its std::format/std::to_chars(float) is gated at
-# macOS 13.3 in the Apple SDK, which is what actually sets the floor above
-# Google's 13.0 deps target). V8 counts only when PULP_JS_ENGINE=v8 (kept low, so
-# it never raises the floor unless it is the highest).
+# (the toolchain C++ runtime — the macOS 15.4 SDK gates the floating-point
+# std::to_chars overloads reached through std::format at macOS 13.4, which is
+# what actually sets the floor above Google's 13.0 deps target). V8 counts only
+# when PULP_JS_ENGINE=v8 (kept low, so it never raises the floor unless it is the
+# highest).
 #
 # The numbers come from tools/deps/min_os.json (regenerate with
 # tools/scripts/measure_min_os.py after any Skia/Dawn/V8 pin bump). This replaces
@@ -60,8 +61,9 @@ function(_pulp_min_os_pin_macos)
   file(READ "${PULP_MIN_OS_JSON}" _json)
 
   # skia + dawn are always linked; libcxx is the toolchain C++ runtime, whose
-  # std::format/std::to_chars(float) availability sets the real floor above the
-  # Google deps target. V8 counts only when it is the selected JS engine.
+  # std::format/floating-point std::to_chars availability sets the real floor
+  # above the Google deps target. V8 counts only when it is the selected JS
+  # engine.
   set(_deps skia dawn libcxx)
   if(PULP_JS_ENGINE STREQUAL "v8")
     list(APPEND _deps v8)

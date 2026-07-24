@@ -129,6 +129,11 @@ pulp minos publish-runbook --to 0.640.0
 - **The floor can legitimately differ per repo.** GPU NAM's heavier deps may
   floor above a simple demo — the sweep reports each repo's own floor; a floor
   *above* the SDK floor is information, only a floor *below* is drift.
+- **Use the SDK's declared cross-toolchain floor.** Pulp currently pins macOS
+  13.4 because the macOS 15.4 SDK's libc++ makes the floating-point
+  `std::to_chars` overloads reached by `std::format` unavailable below 13.4.
+  Do not lower a consumer to 13.3 just because a newer SDK happens to compile
+  the same source there; `tools/deps/min_os.json` is authoritative.
 - **Measuring one binary's floor** (no registry needed) is the primitive under
   all of this: `pulp minos measure <path/to/binary>` — also exposed over MCP as
   `pulp_minos`. See `docs/guides/minimum-os-support.md`.

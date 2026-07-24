@@ -529,7 +529,7 @@ jobs:
           fi
           # No explicit CMAKE_OSX_DEPLOYMENT_TARGET here: tools/cmake/PulpMinOs.cmake
           # is included BEFORE project() and force-sets the floor to the max of every
-          # linked dependency's minimum per tools/deps/min_os.json (macOS 13.3, driven
+          # linked dependency's minimum per tools/deps/min_os.json (macOS 13.4, driven
           # by Apple's libc++ std::to_chars gate), for BOTH arches — so a macOS-15
           # runner cannot stamp a 15.0 floor that would lock out macOS 13/14 Intel
           # Macs. Passing 13.0 here would only trip PulpMinOs's "below the floor,
@@ -777,6 +777,38 @@ jobs:
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk
         shell: pwsh
+
+      # Carry the floor from the exact checkout that produced each macOS
+      # artifact. A workflow_dispatch backfill may build an old tag while the
+      # release job itself runs from current main, so the release job must not
+      # read compatibility metadata from its own checkout.
+      - name: Record macOS release floor
+        if: runner.os == 'macOS'
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          platform = os.environ["MATRIX_PLATFORM"]
+          manifest_key = {
+              "darwin-arm64": "macos-arm64",
+              "darwin-x64": "macos-x64",
+          }[platform]
+          manifest_path = Path("tools/deps/min_os.json")
+          floor = "12.0"  # Historical appcast floor for tags predating the manifest.
+          if manifest_path.exists():
+              platforms = json.loads(
+                  manifest_path.read_text(encoding="utf-8")
+              )["platforms"]
+              entry = platforms.get(manifest_key) or platforms.get("macos-arm64")
+              if entry is not None:
+                  floor = entry["floor"]
+          Path(f"pulp-{platform}.min-os").write_text(f"{floor}\n", encoding="utf-8")
+          PY
+        shell: bash
 
       - name: Attest CLI and SDK artifacts
         uses: actions/attest@v4
@@ -1148,17 +1180,29 @@ jobs:
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "HIGHLIGHTS_EOF" >> "$GITHUB_OUTPUT"
 
-      # The Sparkle feed is a pure function of the tag name and the current date
-      # — no enclosure, no download URL, no EdDSA signature, no dependency on any
-      # signed or notarized artifact. It used to be produced by sign-and-release
-      # and bolted onto the release afterwards, which is the ONLY reason
-      # publication was ever coupled to macOS signing/notarization. Writing it
-      # here removes that coupling entirely.
+      # The Sparkle feed is a pure function of the tag name, current date, and
+      # macOS floors carried by the built artifacts — no enclosure, no download
+      # URL, no EdDSA signature, no dependency on any signed or notarized
+      # artifact. It used to be produced by sign-and-release and bolted onto the
+      # release afterwards, which is the ONLY reason publication was ever
+      # coupled to macOS signing/notarization. Writing it here removes that
+      # coupling entirely.
       - name: Generate appcast.xml (Sparkle feed)
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
           DATE=$(date -u '+%a, %d %b %Y %H:%M:%S +0000')
+          ARM_FLOOR=artifacts/pulp-darwin-arm64/pulp-darwin-arm64.min-os
+          X64_FLOOR=artifacts/pulp-darwin-x64/pulp-darwin-x64.min-os
+          MACOS_MIN=$(python3 - "$ARM_FLOOR" "$X64_FLOOR" <<'PY'
+          import sys
+          from pathlib import Path
+
+          floors = [Path(path).read_text(encoding="utf-8").strip() for path in sys.argv[1:]]
+          print(max(floors, key=lambda value: tuple(int(part) for part in value.split("."))))
+          PY
+          )
+          rm "$ARM_FLOOR" "$X64_FLOOR"
           mkdir -p artifacts
           cat > artifacts/appcast.xml <<XMLEOF
           <?xml version="1.0" encoding="utf-8"?>
@@ -1169,7 +1213,7 @@ jobs:
                 <title>Version ${VERSION}</title>
                 <pubDate>${DATE}</pubDate>
                 <sparkle:version>${VERSION}</sparkle:version>
-                <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+                <sparkle:minimumSystemVersion>${MACOS_MIN}</sparkle:minimumSystemVersion>
               </item>
             </channel>
           </rss>
