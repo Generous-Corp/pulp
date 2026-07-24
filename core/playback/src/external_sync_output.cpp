@@ -230,7 +230,9 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
         first_range.has_precise_host_ticks
             ? static_cast<long double>(first_range.host_tick_start)
             : static_cast<long double>(first_tick.value);
-    if (config_.emit_midi_clock && transport.transport_started) {
+    const bool handled_transport_start =
+        config_.emit_midi_clock && transport.transport_started;
+    if (handled_transport_start) {
         if (first_position_tick != 0.0L) {
             if (!append_song_position(output, first_position_tick, 0,
                                       config_.max_messages_per_block, result) ||
@@ -249,7 +251,8 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
         const auto& range = transport.ranges[range_index];
         const auto range_end = timebase::SamplePosition{
             saturating_add(range.timeline_sample_start.value, range.frame_count)};
-        if (config_.emit_midi_clock && range.discontinuity) {
+        if (config_.emit_midi_clock && range.discontinuity &&
+            !(handled_transport_start && range_index == 0)) {
             const auto offset = bounded_offset(range.sample_offset);
             const auto position_tick =
                 range.has_precise_host_ticks

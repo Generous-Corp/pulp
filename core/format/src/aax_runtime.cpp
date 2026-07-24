@@ -223,14 +223,36 @@ void read_transport(AAX_ITransport* transport, ProcessContext* context) {
         context->transport_validity.set(TransportField::SamplePosition);
     }
 
-    int64_t tick_position = 0;
     uint32_t ticks_per_quarter = 0;
-    if (transport->GetCurrentTickPosition(&tick_position) == AAX_SUCCESS
-        && transport->GetTicksPerQuarter(&ticks_per_quarter) == AAX_SUCCESS
-        && ticks_per_quarter > 0)
-    {
-        context->position_beats = static_cast<double>(tick_position) / static_cast<double>(ticks_per_quarter);
+    const bool has_tick_resolution =
+        transport->GetTicksPerQuarter(&ticks_per_quarter) == AAX_SUCCESS &&
+        ticks_per_quarter > 0;
+
+    int64_t tick_position = 0;
+    if (transport->GetCurrentTickPosition(&tick_position) == AAX_SUCCESS &&
+        has_tick_resolution) {
+        context->position_beats =
+            static_cast<double>(tick_position) /
+            static_cast<double>(ticks_per_quarter);
         context->transport_validity.set(TransportField::BeatPosition);
+    }
+
+    bool is_looping = false;
+    int64_t loop_start_tick = 0;
+    int64_t loop_end_tick = 0;
+    if (transport->GetCurrentLoopPosition(
+            &is_looping, &loop_start_tick, &loop_end_tick) == AAX_SUCCESS) {
+        context->is_looping = is_looping;
+        context->transport_validity.set(TransportField::Looping);
+        if (is_looping && has_tick_resolution) {
+            context->loop_start_beats =
+                static_cast<double>(loop_start_tick) /
+                static_cast<double>(ticks_per_quarter);
+            context->loop_end_beats =
+                static_cast<double>(loop_end_tick) /
+                static_cast<double>(ticks_per_quarter);
+            context->transport_validity.set(TransportField::LoopRange);
+        }
     }
 }
 

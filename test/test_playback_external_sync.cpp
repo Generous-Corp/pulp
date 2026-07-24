@@ -342,6 +342,35 @@ TEST_CASE("external sync continues from a fractional host position that rounds t
     REQUIRE(output[1].data()[0] == 0xfb);
 }
 
+TEST_CASE("external sync does not duplicate a start that is also discontinuous",
+          "[playback][external-sync]") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.frame_count = 64;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    transport.transport_started = true;
+    auto& range = transport.ranges[0];
+    range.frame_count = 64;
+    range.timeline_tick_start = {kTicksPerQuarter};
+    range.timeline_tick_end = {kTicksPerQuarter + 1};
+    range.discontinuity = true;
+
+    midi::MidiBuffer output;
+    output.reserve(2);
+    output.set_realtime_capacity_limit();
+    ExternalSyncOutputConfig config;
+    config.emit_mtc = false;
+    config.max_messages_per_block = 2;
+    const auto result = ExternalSyncOutput(config).process(transport, output);
+    REQUIRE(result.code == ExternalSyncOutputCode::Complete);
+    REQUIRE(output.size() == 2);
+    REQUIRE(output[0].data()[0] == 0xf2);
+    REQUIRE(output[1].data()[0] == 0xfb);
+}
+
 TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
           "[playback][external-sync]") {
     const auto map = constant_map();
