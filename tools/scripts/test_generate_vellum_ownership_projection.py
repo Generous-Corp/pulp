@@ -62,7 +62,12 @@ class OwnershipProjectionTests(unittest.TestCase):
                 entry("core/canvas/src/skia_canvas.cpp", "framework-core"),
                 entry("core/canvas/src/scene.cpp", "optional"),
                 entry("core/render/src/sdl3_surface.cpp", "excluded"),
+                entry("core/view/src/screenshot_mac.mm", "unresolved"),
+                entry("core/view/platform/mac/window_host_mac.mm", "unresolved"),
+                entry("core/view/src/design_ir_json.cpp", "unresolved"),
+                entry("packages/pulp-import-ir/src/types.ts", "unresolved"),
                 entry("core/view/src/view.cpp", "unresolved"),
+                entry("core/view/src/layout.cpp", "framework-core"),
                 entry(
                     "tools/figma-plugin/schema/figma-plugin-export-v1.json",
                     "pulp-specific",
@@ -78,8 +83,12 @@ class OwnershipProjectionTests(unittest.TestCase):
         )
         self.assertEqual(slices["canvas-kernel"]["state"], "pulp-authoritative-untransferred")
         self.assertEqual(slices["canvas-kernel-deferred"]["state"], "excluded")
+        self.assertEqual(slices["capture-primitives-deferred"]["state"], "excluded")
+        self.assertEqual(slices["design-schema-compiler-deferred"]["state"], "excluded")
+        self.assertEqual(slices["macos-shell-deferred"]["state"], "excluded")
         self.assertEqual(slices["render-skia-dawn-deferred"]["state"], "excluded")
         self.assertEqual(slices["retained-ui-kernel"]["state"], "pulp-authoritative-untransferred")
+        self.assertEqual(slices["retained-ui-kernel-deferred"]["state"], "excluded")
         self.assertEqual(slices["legacy-figma-schema"]["state"], "pulp-only")
         for item in slices.values():
             if item["state"] == "pulp-authoritative-untransferred":
@@ -89,17 +98,23 @@ class OwnershipProjectionTests(unittest.TestCase):
         value = manifest([entry("core/view/src/view.cpp", "optional")])
         with self.assertRaisesRegex(projection_tool.ProjectionError, "forbidden optional"):
             projection_tool.build_projection(value)
+        value = manifest([entry("LICENSE.md", "unresolved")])
+        with self.assertRaisesRegex(projection_tool.ProjectionError, "forbidden unresolved"):
+            projection_tool.build_projection(value)
 
     def test_all_rows_have_one_owner_and_candidate_paths_do_not_overlap(self) -> None:
         value = manifest(
             [
                 entry("LICENSE.md", "framework-core"),
-                entry("core/view/src/view.cpp", "unresolved"),
+                entry("core/view/src/view.cpp", "framework-core"),
                 entry("external/fonts/Inter-Regular.ttf", "framework-core"),
             ]
         )
         projection = projection_tool.build_projection(value)
         with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "core/view/src/view.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("int view = 0;\n", encoding="utf-8")
             projection_tool.verify_projection(
                 repo=Path(temporary), manifest=value, projection=projection
             )
