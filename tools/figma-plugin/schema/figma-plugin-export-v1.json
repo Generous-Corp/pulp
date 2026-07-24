@@ -124,9 +124,11 @@
           "type": "string",
           "description": "Node kind. Pulp library widgets get specific kinds (knob, fader, meter, ...). Everything else is one of the generic types.",
           "enum": [
-            "frame", "text", "image", "vector", "button", "input",
+            "frame", "group", "container", "view", "text", "label",
+            "image", "vector", "path", "svg_path", "rectangle", "rect",
+            "ellipse", "circle", "button", "input", "slider",
             "knob", "fader", "meter", "xy_pad", "waveform", "spectrum",
-            "label", "panel", "col", "row"
+            "panel", "col", "row"
           ]
         },
         "name": { "type": "string" },
@@ -158,15 +160,15 @@
               "fontStyle": { "type": "string", "enum": ["normal", "italic"] },
               "color": { "type": "string" },
               "letterSpacing": { "type": "number" },
-              "textDecoration": { "type": "string", "enum": ["underline", "line-through"] }
+              "textDecoration": { "type": "string", "enum": ["none", "underline", "line-through"] }
             },
             "additionalProperties": false
           }
         },
         "audio_widget": {
           "type": "string",
-          "description": "Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.",
-          "enum": ["knob", "fader", "meter", "xy_pad", "waveform", "spectrum"]
+          "description": "Recognized Pulp audio-widget kind, or none as an explicit opt-out from name-based widget inference. Emitted at the node root when serialize.ts sees node.library_widget_kind or a synthetic-node opt-out. The C++ parser maps this onto IRNode.audio_widget (enum).",
+          "enum": ["none", "knob", "fader", "meter", "xy_pad", "waveform", "spectrum"]
         },
         "label": {
           "type": "string",

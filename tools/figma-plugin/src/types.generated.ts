@@ -11,18 +11,28 @@ export type Node = {
    */
   type:
     | "frame"
+    | "group"
+    | "container"
+    | "view"
     | "text"
+    | "label"
     | "image"
     | "vector"
+    | "path"
+    | "svg_path"
+    | "rectangle"
+    | "rect"
+    | "ellipse"
+    | "circle"
     | "button"
     | "input"
+    | "slider"
     | "knob"
     | "fader"
     | "meter"
     | "xy_pad"
     | "waveform"
     | "spectrum"
-    | "label"
     | "panel"
     | "col"
     | "row";
@@ -50,12 +60,12 @@ export type Node = {
     fontStyle?: "normal" | "italic";
     color?: string;
     letterSpacing?: number;
-    textDecoration?: "underline" | "line-through";
+    textDecoration?: "none" | "underline" | "line-through";
   }[];
   /**
-   * Recognized Pulp audio-widget kind. Emitted at the node root when serialize.ts sees node.library_widget_kind. The C++ parser maps this onto IRNode.audio_widget (enum). Equal to figma.library_widget_kind when present.
+   * Recognized Pulp audio-widget kind, or none as an explicit opt-out from name-based widget inference. Emitted at the node root when serialize.ts sees node.library_widget_kind or a synthetic-node opt-out. The C++ parser maps this onto IRNode.audio_widget (enum).
    */
-  audio_widget?: "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
+  audio_widget?: "none" | "knob" | "fader" | "meter" | "xy_pad" | "waveform" | "spectrum";
   /**
    * Audio-widget label. Root-level; maps to IRNode.audio_label.
    */
