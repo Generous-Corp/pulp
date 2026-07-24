@@ -108,3 +108,16 @@ pulp_add_test_suite(pulp-test-lowpass-gate
     SOURCES test_lowpass_gate.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-two-pole-resonator
+    SOURCES test_two_pole_resonator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# Percussion voices. These cover the shared lifecycle (additive render, faded
+# choke, velocity reaching timbre) alongside the voice's own behaviour, since
+# a voice that broke a lifecycle rule would still sound plausible in isolation.
+pulp_add_test_suite(pulp-test-drum-kick
+    SOURCES test_drum_kick.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
