@@ -19,6 +19,7 @@
 #include <pulp/signal/drum/hat.hpp>
 #include <pulp/signal/drum/kit.hpp>
 #include <pulp/signal/drum/snare.hpp>
+#include <pulp/signal/drum/tom.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -32,6 +33,7 @@ using pulp::signal::drum::ClapVoice;
 using pulp::signal::drum::HatVoice;
 using pulp::signal::drum::Kit;
 using pulp::signal::drum::SnareVoice;
+using pulp::signal::drum::TomVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
 
@@ -98,6 +100,32 @@ double high_fraction(const std::vector<float>& x, double split_hz) {
         high += hp * hp;
     }
     return high / (high + low + 1e-30);
+}
+
+// Frequency from the mean interval between upward zero crossings. Resolves a
+// slow drift that a per-window crossing count cannot.
+double period_frequency(const std::vector<float>& x, std::size_t from, std::size_t to) {
+    std::size_t first = 0, last = 0;
+    int intervals = -1;
+    for (std::size_t i = std::max<std::size_t>(from, 1); i < to && i < x.size(); ++i) {
+        if (x[i - 1] <= 0.0f && x[i] > 0.0f) {
+            if (intervals < 0) first = i;
+            last = i;
+            ++intervals;
+        }
+    }
+    if (intervals <= 0) return 0.0;
+    return kFs * static_cast<double>(intervals) / static_cast<double>(last - first);
+}
+
+// Crossings per second over a window. Coarse, but unambiguous during a fast
+// dive where a period estimate would average across the sweep.
+double crossing_rate(const std::vector<float>& x, std::size_t from, std::size_t to) {
+    int crossings = 0;
+    for (std::size_t i = from + 1; i < to && i < x.size(); ++i) {
+        if ((x[i - 1] <= 0.0f) != (x[i] <= 0.0f)) ++crossings;
+    }
+    return 0.5 * crossings * kFs / static_cast<double>(to - from);
 }
 
 // Sample index of the last sample whose magnitude exceeds `floor_level`, i.e.
@@ -544,6 +572,160 @@ TEST_CASE("A snare with a silenced layer still finishes",
         render(voice, static_cast<int>(kFs));
         INFO("silenced layer index " << silenced);
         REQUIRE_FALSE(voice.is_active());
+    }
+}
+
+// -- Tom ---------------------------------------------------------------------
+
+TEST_CASE("The tom's pitch dive finishes long before the note does",
+          "[signal][drum][tom]") {
+    // The defining property: two independent envelopes. Tying them together
+    // would take the level down with the swoop, which is the sound this voice
+    // exists to avoid.
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(110.0);
+    voice.set_bend_octaves(2.0);
+    voice.set_bend_ms(25.0);
+    voice.set_decay_ms(1500.0);
+    voice.set_noise_balance(0.0);
+    voice.set_click_level(0.0);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, static_cast<int>(kFs));
+
+    // The pitch has landed by ~150 ms.
+    const double settled = period_frequency(y, 7200, 24000);
+    REQUIRE(std::fabs(settled - 110.0) < 8.0);
+
+    // The decoupling itself: with the SAME bend, changing only the decay must
+    // change how long the note lasts and leave the pitch it arrives at alone.
+    // One shared envelope could not do that -- shortening the note would drag
+    // the swoop with it.
+    voice.set_decay_ms(120.0);
+    const auto brief = hit(voice, 1.0f, static_cast<int>(kFs));
+    REQUIRE(audible_length(y, 1e-4) > audible_length(brief, 1e-4) * 3);
+    REQUIRE(std::fabs(period_frequency(brief, 4800, 9600) - settled) < 8.0);
+}
+
+TEST_CASE("The tom's bend depth sets where the dive starts",
+          "[signal][drum][tom]") {
+    auto opening = [](double octaves) {
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(100.0);
+        voice.set_bend_octaves(octaves);
+        voice.set_bend_ms(40.0);
+        voice.set_noise_balance(0.0);
+        voice.set_click_level(0.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 24000);
+        return crossing_rate(y, 0, 960);
+    };
+
+    REQUIRE(opening(3.0) > opening(1.0) * 2.0);
+    REQUIRE(std::fabs(opening(0.0) - 100.0) < 20.0);
+}
+
+TEST_CASE("Velocity deepens the tom's dive rather than only raising its level",
+          "[signal][drum][tom][velocity]") {
+    // The clearest case of the velocity-to-timbre contract in the whole
+    // percussion set: a harder strike deflects the head further, so the pitch
+    // starts higher. A gain-only implementation would open at the same pitch.
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(100.0);
+    voice.set_bend_octaves(0.5);
+    voice.set_bend_ms(40.0);
+    voice.set_noise_balance(0.0);
+    voice.set_click_level(0.0);
+
+    const auto soft = hit(voice, 0.15f, 24000);
+    const auto loud = hit(voice, 1.0f, 24000);
+    REQUIRE(crossing_rate(loud, 0, 960) > crossing_rate(soft, 0, 960) * 1.4);
+
+    // ...and both land on the same tuning, because velocity moves the dive and
+    // not the pitch it arrives at.
+    REQUIRE(std::fabs(period_frequency(loud, 9600, 24000) -
+                      period_frequency(soft, 9600, 24000)) < 8.0);
+}
+
+TEST_CASE("Velocity does not change how long the tom rings",
+          "[signal][drum][tom][velocity]") {
+    // The negative control for the test above. Velocity is wired to the bend
+    // and the level; wiring it to the decay as well would make a soft hit a
+    // shorter note, which is not what a drum does.
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_decay_ms(400.0);
+    voice.set_noise_balance(0.0);
+    voice.set_click_level(0.0);
+
+    auto soft = hit(voice, 0.2f, static_cast<int>(kFs));
+    auto loud = hit(voice, 1.0f, static_cast<int>(kFs));
+    const double soft_length = audible_length(soft, peak(soft) * 1e-3);
+    const double loud_length = audible_length(loud, peak(loud) * 1e-3);
+    REQUIRE(std::fabs(soft_length - loud_length) < soft_length * 0.15);
+}
+
+TEST_CASE("The tom's noise balance reaches from oscillator to filtered noise",
+          "[signal][drum][tom]") {
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(120.0);
+    voice.set_bend_octaves(0.0);
+    voice.set_decay_ms(600.0);
+    voice.set_click_level(0.0);
+    voice.set_noise_cutoff_hz(4000.0);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    voice.set_noise_balance(0.0);
+    const auto tonal = hit(voice, 1.0f, 24000);
+    voice.set_noise_balance(1.0);
+    const auto noisy = hit(voice, 1.0f, 24000);
+
+    REQUIRE(tone_amplitude(tonal, 120.0) > tone_amplitude(noisy, 120.0) * 4.0);
+    REQUIRE(high_fraction(noisy, 1000.0) > high_fraction(tonal, 1000.0) * 2.0);
+}
+
+TEST_CASE("A resonant noise filter gives the noise a pitch",
+          "[signal][drum][tom]") {
+    // Why the noise path is four poles rather than two: at high resonance it
+    // rings, which is what lets one voice cover a snare-like sound without a
+    // second oscillator.
+    auto ring_at = [](double resonance) {
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.set_noise_balance(1.0);
+        voice.set_click_level(0.0);
+        voice.set_decay_ms(800.0);
+        voice.set_noise_cutoff_hz(900.0);
+        voice.set_noise_resonance(resonance);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 24000);
+        return tone_amplitude(y, 900.0) / (tone_amplitude(y, 300.0) + 1e-20);
+    };
+
+    REQUIRE(ring_at(0.95) > ring_at(0.0) * 2.0);
+}
+
+TEST_CASE("The tom stays finite at extreme settings", "[signal][drum][tom]") {
+    TomVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(1200.0);
+    voice.set_bend_octaves(6.0);
+    voice.set_bend_ms(0.5);
+    voice.set_decay_ms(4000.0);
+    voice.set_noise_balance(1.0);
+    voice.set_noise_resonance(1.0);
+    voice.set_click_level(2.0);
+    voice.output().set_drive(1.0);
+    voice.output().set_fold(1.0);
+
+    for (int repeat = 0; repeat < 6; ++repeat) {
+        const auto y = hit(voice, 1.0f, 12000);
+        for (float v : y) REQUIRE(std::isfinite(v));
+        REQUIRE(peak(y) < 20.0);
     }
 }
 
