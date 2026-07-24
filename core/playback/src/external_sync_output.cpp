@@ -80,6 +80,8 @@ std::int64_t first_quarter_at_or_after(timebase::SamplePosition sample,
     const long double quarter =
         static_cast<long double>(sample.value) * sample_rate.denominator * ratio.numerator * 4.0L /
         (static_cast<long double>(sample_rate.numerator) * ratio.denominator);
+    if (quarter >= static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+        return std::numeric_limits<std::int64_t>::max();
     auto candidate = static_cast<std::int64_t>(std::floor(quarter));
     while (quarter_frame_sample(candidate, sample_rate, frame_rate) < sample)
         ++candidate;

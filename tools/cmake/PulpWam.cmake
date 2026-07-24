@@ -119,10 +119,16 @@ set(_PULP_WAM_CORE_SOURCES
     ${_PULP_WAM_ROOT}/core/playback/src/automation_cursor.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/automation_program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/automation_program_compiler.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/automation_recording.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/capture_engine.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/compile_executor.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/external_sync_output.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/external_sync_timecode.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/midi_capture_materializer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/note_renderer.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/program_compiler.cpp
+    ${_PULP_WAM_ROOT}/core/playback/src/recording_commit.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/stable_renderer_shell.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/track_automation_compiler.cpp
     ${_PULP_WAM_ROOT}/core/playback/src/track_automation_program.cpp

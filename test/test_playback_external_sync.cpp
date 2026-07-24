@@ -473,6 +473,32 @@ TEST_CASE("external sync reports bounded-output overflow", "[playback][external-
     REQUIRE(output.dropped_sysex_count() > 0);
 }
 
+TEST_CASE("external sync saturates an out-of-range MTC quarter-frame index",
+          "[playback][external-sync]") {
+    const auto map = constant_map(120.0, {1, 10});
+    TransportSnapshot transport;
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.frame_count = 64;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    auto& range = transport.ranges[0];
+    range.frame_count = 64;
+    range.timeline_sample_start = {
+        std::numeric_limits<std::int64_t>::max() - 64};
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {1};
+
+    midi::MidiBuffer output;
+    output.reserve(8);
+    output.set_realtime_capacity_limit();
+    ExternalSyncOutputConfig config;
+    config.emit_midi_clock = false;
+    REQUIRE(ExternalSyncOutput(config).process(transport, output).code ==
+            ExternalSyncOutputCode::Complete);
+    REQUIRE(output.empty());
+}
+
 TEST_CASE("external sync applies a work limit even to an unbounded MIDI buffer",
           "[playback][external-sync]") {
     const auto map = constant_map(1'000.0);
