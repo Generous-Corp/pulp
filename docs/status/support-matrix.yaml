@@ -16,11 +16,12 @@ platforms:
       hardware (nightly-intel.yml Job A carries the native-silicon signal). skia-builder publishes all three mac Skia
       slices (mac-arm64, mac-x86_64, mac-universal); wgpu-native ships no universal
       dylib, so a universal build lipo's the two thin slices and ad-hoc re-signs the fat
-      dylib (tools/cmake/PulpWgpuUniversal.cmake). Minimum macOS 13.3 (Ventura),
+      dylib (tools/cmake/PulpWgpuUniversal.cmake). Minimum macOS 13.4 (Ventura),
       arch-independent. Skia/Dawn allow macOS 13.0 (Google's Chromium
       mac_deployment_target at the pinned milestone) on both arm64 and x86_64, but
-      Apple's libc++ gates std::to_chars(float) — reached via std::format in Pulp's
-      logging — at macOS 13.3, which sets the real floor. The per-dependency floor is
+      the macOS 15.4 SDK's libc++ gates the floating-point std::to_chars overloads
+      reached via std::format in Pulp's logging at macOS 13.4, which sets the real
+      cross-SDK floor. The per-dependency floor is
       tracked in tools/deps/min_os.json (macos-arm64 + macos-x64; Pulp targets the max
       of every linked dependency's minimum across all requested arches, libc++ included)
       and pinned into the build by tools/cmake/PulpMinOs.cmake.

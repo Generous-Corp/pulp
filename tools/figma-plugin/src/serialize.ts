@@ -75,11 +75,11 @@ export function serializeExport(
 
   // Multi-root: wrap in a synthetic frame so the schema's single-root contract holds.
   const root = roots.length === 1
-    ? toEnvelopeNode(roots[0])
-    : {
+      ? toEnvelopeNode(roots[0])
+      : {
         type: "frame",
         name: "<multi-export>",
-        figma_node_id: ctx.rootNodeId,
+        synthetic: true,
         style: {},
         layout: {},
         children: roots.map(toEnvelopeNode),
@@ -102,6 +102,13 @@ export function serializeExport(
       dimensions: ctx.tokens.dimensions,
       strings: ctx.tokens.strings,
     },
+    // The v1 envelope intentionally permits top-level extension fields while
+    // keeping the tokens object strict. This preserves validation by older v1
+    // schema readers and lets the importer normalize provenance into
+    // IRTokens::source_identity.
+    ...(Object.keys(ctx.tokens.sourceIdentity ?? {}).length > 0
+      ? { token_source_identity: ctx.tokens.sourceIdentity }
+      : {}),
     asset_manifest: {
       version: 1,
       assets: [

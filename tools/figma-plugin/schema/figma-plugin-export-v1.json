@@ -59,6 +59,21 @@
       },
       "additionalProperties": false
     },
+    "token_source_identity": {
+      "type": "object",
+      "description": "Forward-compatible v1 extension carrying original Figma variable provenance keyed by canonical DesignIR token path (for example colors.theme.brand.primary). The importer normalizes it to IRTokens.source_identity.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["sourceId", "sourceCollection", "sourceMode", "sourceAdapter"],
+        "properties": {
+          "sourceId": { "type": "string" },
+          "sourceCollection": { "type": "string" },
+          "sourceMode": { "type": "string" },
+          "sourceAdapter": { "type": "string", "const": "figma-plugin" }
+        },
+        "additionalProperties": false
+      }
+    },
     "asset_manifest": {
       "type": "object",
       "description": "Maps to IRAssetManifest after Phase 4 adds asset_manifest to DesignIR.",
@@ -87,7 +102,23 @@
     "node": {
       "type": "object",
       "description": "An IR node as emitted by serialize.ts::toEnvelopeNode. Semantic audio-widget data lives at the NODE ROOT (audio_widget/label/min/max/default + attributes.binding), NOT in nested audio/binding sub-objects. The C++ parser (core/view/src/design_ir_json.cpp::parse_ir_node) reads these root-level fields directly.",
-      "required": ["type", "name", "figma_node_id"],
+      "required": ["type", "name"],
+      "oneOf": [
+        {
+          "required": ["figma_node_id"],
+          "properties": {
+            "figma_node_id": { "type": "string", "pattern": "^[0-9]+:[0-9]+$" },
+            "synthetic": false
+          }
+        },
+        {
+          "required": ["synthetic"],
+          "properties": {
+            "synthetic": { "const": true },
+            "figma_node_id": false
+          }
+        }
+      ],
       "properties": {
         "type": {
           "type": "string",
@@ -99,6 +130,11 @@
           ]
         },
         "name": { "type": "string" },
+        "synthetic": {
+          "type": "boolean",
+          "const": true,
+          "description": "True only for an exporter-created structural wrapper. Synthetic nodes have no Figma source identity."
+        },
         "figma_node_id": {
           "type": "string",
           "pattern": "^[0-9]+:[0-9]+$",

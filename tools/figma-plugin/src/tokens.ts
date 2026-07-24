@@ -19,6 +19,15 @@ export interface ExtractedTokens {
   colors: Record<string, string>;
   dimensions: Record<string, number>;
   strings: Record<string, string>;
+  /// Canonical DesignIR token path → original Figma variable provenance.
+  /// The category prefix matches IRTokens.source_identity
+  /// ("colors.<name>", "dimensions.<name>", or "strings.<name>").
+  sourceIdentity: Record<string, {
+    sourceId: string;
+    sourceCollection: string;
+    sourceMode: string;
+    sourceAdapter: string;
+  }>;
   /// Map of Figma variable id → canonical token name. Lets style extraction
   /// emit token references where a variable is bound to a style property.
   variableIdToName: Record<string, string>;
@@ -29,8 +38,13 @@ export async function extractTokens(diagnostics: ExtractedDiagnostic[]): Promise
     colors: {},
     dimensions: {},
     strings: {},
+    sourceIdentity: {},
     variableIdToName: {},
   };
+  // Internal join ownership. A suffixed mode token can collide with another
+  // variable's canonical base name; this tells us whether an overwritten path
+  // was actually the previous variable's default (bindable) token.
+  const defaultIdentityKeyByVariableId: Record<string, string> = {};
 
   // Local collections first
   let localCollections: VariableCollection[] = [];
@@ -41,7 +55,7 @@ export async function extractTokens(diagnostics: ExtractedDiagnostic[]): Promise
   }
 
   for (const coll of localCollections) {
-    await ingestCollection(coll, out, diagnostics);
+    await ingestCollection(coll, out, diagnostics, defaultIdentityKeyByVariableId);
   }
 
   // Remote (library) collections — only those referenced by something in the
@@ -55,8 +69,10 @@ async function ingestCollection(
   coll: VariableCollection,
   out: ExtractedTokens,
   diagnostics: ExtractedDiagnostic[],
+  defaultIdentityKeyByVariableId: Record<string, string>,
 ): Promise<void> {
   const defaultModeId = coll.defaultModeId;
+  const modeSuffixes = buildModeSuffixes(coll.modes, defaultModeId);
   if (coll.modes.length > 1) {
     const defaultName = coll.modes.find((m) => m.modeId === defaultModeId)?.name ?? "?";
     diagnostics.push({
@@ -77,19 +93,39 @@ async function ingestCollection(
     }
     if (!v) continue;
     const baseName = canonicalName(coll.name, v.name);
-    // Style references bind to the default-mode (bare) token name.
-    out.variableIdToName[v.id] = baseName;
     for (const mode of coll.modes) {
       const raw = v.valuesByMode[mode.modeId];
       if (raw === undefined) continue;
       // Default mode keeps the bare name (back-compat + the name style refs
       // resolve to); every other mode is captured under "<name>.<mode>" so
       // light/dark (and any multi-mode) values survive import.
-      const slug = modeSlug(mode.name);
-      const name = mode.modeId === defaultModeId || slug.length === 0
+      const slug = modeSuffixes[mode.modeId] ?? modeSlug(mode.name);
+      const name = mode.modeId === defaultModeId
         ? baseName
         : `${baseName}.${slug}`;
-      await assignToken(out, name, raw, v.resolvedType, mode.modeId);
+      const identityKey = await assignToken(out, name, raw, v.resolvedType, mode.modeId);
+      if (identityKey) {
+        const previousOwner = out.sourceIdentity[identityKey]?.sourceId;
+        if (previousOwner && previousOwner !== v.id &&
+            defaultIdentityKeyByVariableId[previousOwner] === identityKey) {
+          delete out.variableIdToName[previousOwner];
+          delete defaultIdentityKeyByVariableId[previousOwner];
+        }
+        out.sourceIdentity[identityKey] = {
+          sourceId: v.id,
+          sourceCollection: coll.name,
+          sourceMode: mode.name,
+          sourceAdapter: "figma-plugin",
+        };
+        if (mode.modeId === defaultModeId) {
+          // A property binding names the default-mode token. Keep the join map
+          // fail-closed: an invalid variable gets no entry, and when two
+          // variables canonicalize to the same name only the variable whose
+          // value/provenance currently owns that token may resolve to it.
+          defaultIdentityKeyByVariableId[v.id] = identityKey;
+          out.variableIdToName[v.id] = baseName;
+        }
+      }
     }
   }
 }
@@ -119,6 +155,45 @@ function renderColorValue(raw: VariableValue): string {
 /** Sanitize a Figma mode name into a token-name-safe slug (same rules as canonicalName). */
 function modeSlug(modeName: string): string {
   return modeName.toLowerCase().replace(/\s+/g, "").replace(/[^a-z0-9._-]/g, "");
+}
+
+function buildModeSuffixes(
+  modes: ReadonlyArray<{ modeId: string; name: string }>,
+  defaultModeId: string,
+): Record<string, string> {
+  const baseById: Record<string, string> = {};
+  const counts: Record<string, number> = {};
+  for (const mode of modes) {
+    if (mode.modeId === defaultModeId) continue;
+    const base = modeSlug(mode.name);
+    baseById[mode.modeId] = base;
+    counts[base] = (counts[base] ?? 0) + 1;
+  }
+
+  const suffixes: Record<string, string> = {};
+  const used = new Set<string>();
+  for (const mode of modes) {
+    if (mode.modeId === defaultModeId) continue;
+    const base = baseById[mode.modeId];
+    let suffix = base && counts[base] === 1
+      ? base
+      : `${base || "mode"}-${stableModeId(mode.modeId)}`;
+    let collision = 2;
+    while (used.has(suffix)) suffix = `${base || "mode"}-${stableModeId(mode.modeId)}-${collision++}`;
+    used.add(suffix);
+    suffixes[mode.modeId] = suffix;
+  }
+  return suffixes;
+}
+
+function stableModeId(modeId: string): string {
+  // FNV-1a gives arbitrary Plugin API ids a compact token-safe suffix.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < modeId.length; ++i) {
+    hash ^= modeId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 /**
@@ -152,21 +227,34 @@ async function assignToken(
   raw: VariableValue,
   resolvedType: Variable["resolvedType"],
   modeId: string,
-): Promise<void> {
+): Promise<string | undefined> {
   const value = await resolveValue(raw, modeId);
   switch (resolvedType) {
     case "COLOR":
-      if (typeof value === "object" && value && "r" in value) out.colors[name] = renderColorValue(value);
+      if (typeof value === "object" && value && "r" in value) {
+        out.colors[name] = renderColorValue(value);
+        return `colors.${name}`;
+      }
       break;
     case "FLOAT":
-      if (typeof value === "number") out.dimensions[name] = value;
+      if (typeof value === "number") {
+        out.dimensions[name] = value;
+        return `dimensions.${name}`;
+      }
       break;
     case "STRING":
-      if (typeof value === "string") out.strings[name] = value;
+      if (typeof value === "string") {
+        out.strings[name] = value;
+        return `strings.${name}`;
+      }
       break;
     case "BOOLEAN":
       // Booleans don't fit IRTokens cleanly; encode as "true" / "false" strings.
-      if (typeof value === "boolean") out.strings[name] = value ? "true" : "false";
+      if (typeof value === "boolean") {
+        out.strings[name] = value ? "true" : "false";
+        return `strings.${name}`;
+      }
       break;
   }
+  return undefined;
 }
