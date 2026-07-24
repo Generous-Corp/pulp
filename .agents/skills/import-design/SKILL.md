@@ -2070,15 +2070,6 @@ Two halves, both preserved end to end (audit item 5):
   (`colors.<canonical-name>`, etc.). Keep the node binding's value as the bare
   canonical name: category is known from the token map, while source identity
   is independently queryable and survives W3C token export.
-  Paint-array bindings remain under `figmaBoundVariable.<property>`. When the
-  plugin can prove that exactly one opaque solid paint maps losslessly to a
-  normalized IR color slot, it additionally emits
-  `figmaBoundVariable.slot.background_color`, `.color`, or `.border_color`.
-  Consumers may mutate the resolved literal only through that slot correlation;
-  indexed paints, text ranges, composites, and translucent paints fail closed.
-  Binding names are resolved through each node's inherited
-  `resolvedVariableModes`, so a dark-mode node points at the suffixed dark token
-  and identity rather than incorrectly mutating the collection default.
   Canonical names are `"collection/variable"` lowercased, whitespace stripped,
   `/` → `.`; a multi-mode collection emits the default mode under the bare
   name and every other mode suffixed `.<mode-slug>` (e.g. `theme.bg` +
