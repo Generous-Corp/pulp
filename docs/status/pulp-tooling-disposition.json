@@ -2792,6 +2792,27 @@
         "subcommands": []
       },
       {
+        "name": "render",
+        "disposition": "excluded",
+        "arguments": [
+          {
+            "name": "project",
+            "kind": "positional",
+            "required": true
+          },
+          {
+            "name": "--out",
+            "kind": "option",
+            "required": true
+          },
+          {
+            "name": "--sample-rate",
+            "kind": "option"
+          }
+        ],
+        "subcommands": []
+      },
+      {
         "name": "run",
         "disposition": "candidate-shared-later",
         "arguments": [
@@ -2951,6 +2972,64 @@
           }
         ],
         "subcommands": []
+      },
+      {
+        "name": "seq",
+        "disposition": "excluded",
+        "arguments": [],
+        "subcommands": [
+          {
+            "name": "schema",
+            "arguments": [],
+            "subcommands": []
+          },
+          {
+            "name": "validate",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "explain",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--sample-rate",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          },
+          {
+            "name": "apply",
+            "arguments": [
+              {
+                "name": "project",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "commands",
+                "kind": "positional",
+                "required": true
+              },
+              {
+                "name": "--out",
+                "kind": "option"
+              }
+            ],
+            "subcommands": []
+          }
+        ]
       },
       {
         "name": "ship",
