@@ -63,8 +63,7 @@ FileJournalOpenResult open_journal(const std::filesystem::path& path, const Proj
 }
 
 Project take_project(bool record_armed, std::int64_t placement_start) {
-    auto recorded =
-        Take::create({7}, MediaRef{{6}, {0}, 100}, {placement_start}, {48'000, 1});
+    auto recorded = Take::create({7}, MediaRef{{6}, {0}, 100}, {placement_start}, {48'000, 1});
     REQUIRE(recorded);
     auto lane = TakeLane::create({5}, "takes", {std::move(recorded).value()});
     REQUIRE(lane);
@@ -76,16 +75,10 @@ Project take_project(bool record_armed, std::int64_t placement_start) {
     auto sequence =
         Sequence::create({2}, "sequence", TickDuration{100}, {std::move(track).value()});
     REQUIRE(sequence);
-    MediaAsset asset{{6},
-                     "audio.wav",
-                     1'000,
-                     {48'000, 1},
-                     content_hash(),
-                     AssetStoragePolicy::External,
-                     {},
-                     {}};
-    auto project = Project::create(
-        {{1}, "recording", 8, {2}, {asset}, {std::move(sequence).value()}});
+    MediaAsset asset{
+        {6}, "audio.wav", 1'000, {48'000, 1}, content_hash(), AssetStoragePolicy::External, {}, {}};
+    auto project =
+        Project::create({{1}, "recording", 8, {2}, {asset}, {std::move(sequence).value()}});
     REQUIRE(project);
     return std::move(project).value();
 }
@@ -93,14 +86,12 @@ Project take_project(bool record_armed, std::int64_t placement_start) {
 Project playback_project(float gain_linear) {
     ClipPlaybackProperties playback;
     playback.gain_linear = gain_linear;
-    auto track =
-        Track::create({4}, "track", {make_note_clip({5}, {6}, 0, 1000, playback)});
+    auto track = Track::create({4}, "track", {make_note_clip({5}, {6}, 0, 1000, playback)});
     REQUIRE(track);
     auto sequence = Sequence::create({3}, "sequence", TickDuration{8 * kTicksPerQuarter},
                                      {std::move(track).value()});
     REQUIRE(sequence);
-    auto project =
-        Project::create({{1}, "project", 7, {3}, {}, {std::move(sequence).value()}});
+    auto project = Project::create({{1}, "project", 7, {3}, {}, {std::move(sequence).value()}});
     REQUIRE(project);
     return std::move(project).value();
 }
@@ -192,18 +183,16 @@ TEST_CASE("Timeline file journal validates restored state without mutating it") 
     auto recovered = open_journal(temporary.path, fallback);
     const auto durable_size = std::filesystem::file_size(temporary.path);
 
-    auto stale =
-        DocumentSession::restore(fallback, {}, {}, recovered.sink);
+    auto stale = DocumentSession::restore(fallback, {}, {}, recovered.sink);
     REQUIRE_FALSE(stale);
     REQUIRE(stale.error().code == ConflictCode::JournalDurability);
 
-    auto mismatched =
-        DocumentSession::restore(fallback, recovered.revision, {}, recovered.sink);
+    auto mismatched = DocumentSession::restore(fallback, recovered.revision, {}, recovered.sink);
     REQUIRE_FALSE(mismatched);
     REQUIRE(mismatched.error().code == ConflictCode::JournalDurability);
 
-    auto restored = DocumentSession::restore(recovered.checkpoint, recovered.revision, {},
-                                             recovered.sink);
+    auto restored =
+        DocumentSession::restore(recovered.checkpoint, recovered.revision, {}, recovered.sink);
     REQUIRE(restored);
     REQUIRE(std::filesystem::file_size(temporary.path) == durable_size);
 }
@@ -213,13 +202,11 @@ TEST_CASE("Timeline file journal restore validation includes recording state") {
     const auto durable = take_project(true, 0);
     auto opened = open_journal(temporary.path, durable);
 
-    auto arm_mismatch =
-        DocumentSession::restore(take_project(false, 0), {}, {}, opened.sink);
+    auto arm_mismatch = DocumentSession::restore(take_project(false, 0), {}, {}, opened.sink);
     REQUIRE_FALSE(arm_mismatch);
     REQUIRE(arm_mismatch.error().code == ConflictCode::JournalDurability);
 
-    auto take_mismatch =
-        DocumentSession::restore(take_project(true, 1), {}, {}, opened.sink);
+    auto take_mismatch = DocumentSession::restore(take_project(true, 1), {}, {}, opened.sink);
     REQUIRE_FALSE(take_mismatch);
     REQUIRE(take_mismatch.error().code == ConflictCode::JournalDurability);
 
@@ -231,8 +218,7 @@ TEST_CASE("Timeline file journal restore validation compares canonical float bit
     const auto durable = playback_project(-0.0f);
     auto opened = open_journal(temporary.path, durable);
 
-    auto mismatch =
-        DocumentSession::restore(playback_project(0.0f), {}, {}, opened.sink);
+    auto mismatch = DocumentSession::restore(playback_project(0.0f), {}, {}, opened.sink);
 
     REQUIRE_FALSE(mismatch);
     REQUIRE(mismatch.error().code == ConflictCode::JournalDurability);
@@ -326,6 +312,80 @@ TEST_CASE("Timeline file journal fails closed on complete final-frame corruption
     auto rejected = FileJournal::open(temporary.path, fallback, builtins());
     REQUIRE_FALSE(rejected);
     REQUIRE(rejected.error().code == FileJournalErrorCode::CorruptRecord);
+}
+
+TEST_CASE("Timeline file journal rejects committed final-frame payload corruption") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    {
+        auto opened = open_journal(temporary.path, fallback);
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto edit =
+            session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+        REQUIRE(session->submit(writer, std::move(edit)));
+    }
+    const auto committed_size = std::filesystem::file_size(temporary.path);
+    constexpr std::streamoff commit_trailer_bytes = 24;
+    {
+        std::fstream file(temporary.path, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(file);
+        file.seekg(-commit_trailer_bytes - 1, std::ios::end);
+        char byte = 0;
+        file.read(&byte, 1);
+        REQUIRE(file);
+        byte ^= 0x01;
+        file.seekp(-commit_trailer_bytes - 1, std::ios::end);
+        file.write(&byte, 1);
+        REQUIRE(file);
+    }
+
+    auto rejected = FileJournal::open(temporary.path, fallback, builtins());
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == FileJournalErrorCode::CorruptRecord);
+    REQUIRE(std::filesystem::file_size(temporary.path) == committed_size);
+}
+
+TEST_CASE("Timeline file journal discards a checksum-invalid final frame without a commit marker") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    std::uintmax_t revision_one_size = 0;
+    {
+        auto opened = open_journal(temporary.path, fallback);
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        auto first =
+            session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+        REQUIRE(session->submit(writer, std::move(first)));
+        revision_one_size = std::filesystem::file_size(temporary.path);
+        auto second =
+            session_transaction(writer, {1}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 2000, 3000}});
+        REQUIRE(session->submit(writer, std::move(second)));
+    }
+
+    constexpr std::streamoff commit_trailer_bytes = 24;
+    {
+        std::fstream file(temporary.path, std::ios::binary | std::ios::in | std::ios::out);
+        REQUIRE(file);
+        file.seekg(-commit_trailer_bytes - 1, std::ios::end);
+        char byte = 0;
+        file.read(&byte, 1);
+        REQUIRE(file);
+        byte ^= 0x01;
+        file.seekp(-commit_trailer_bytes - 1, std::ios::end);
+        file.write(&byte, 1);
+        REQUIRE(file);
+    }
+    const auto uncommitted_size = std::filesystem::file_size(temporary.path) - commit_trailer_bytes;
+    std::filesystem::resize_file(temporary.path, uncommitted_size);
+
+    const auto recovered = open_journal(temporary.path, fallback);
+    REQUIRE(recovered.repaired_torn_tail);
+    REQUIRE(recovered.revision == DocumentRevision{1});
+    REQUIRE(velocity(recovered.checkpoint) == 2000);
+    REQUIRE(std::filesystem::file_size(temporary.path) == revision_one_size);
 }
 
 TEST_CASE("Timeline file journal does not misclassify middle-header corruption as a torn tail") {

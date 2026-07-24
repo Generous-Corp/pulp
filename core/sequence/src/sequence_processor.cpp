@@ -117,6 +117,7 @@ void SequenceProcessor::prepare(const format::PrepareContext& context) {
     }
     maximum_block_size_ = static_cast<std::uint32_t>(context.max_buffer_size);
     prepared_tempo_map_ = &program->tempo_map();
+    prepared_ = true;
     status_ = SequenceProcessorStatus::Ready;
 }
 
@@ -125,6 +126,7 @@ void SequenceProcessor::release() {
     active_transport_ = nullptr;
     last_observation_ = {};
     maximum_block_size_ = 0;
+    prepared_ = false;
     midi_output_node_index_ = 0;
     prepared_tempo_map_ = nullptr;
     tracks_.clear();
@@ -270,8 +272,15 @@ void SequenceProcessor::process(audio::BufferView<float>& audio_output,
                                 midi::MidiBuffer& midi_out, const format::ProcessContext& context) {
     const auto frames = audio_output.num_samples();
     midi::clear_midi_block(midi_out);
-    if (status_ != SequenceProcessorStatus::Ready || frames == 0 || frames > maximum_block_size_ ||
-        frames != static_cast<std::size_t>(context.num_samples)) {
+    if (!prepared_) {
+        audio_output.clear();
+        return;
+    }
+    if (frames == 0 && context.num_samples == 0) {
+        audio_output.clear();
+        return;
+    }
+    if (frames > maximum_block_size_ || frames != static_cast<std::size_t>(context.num_samples)) {
         audio_output.clear();
         status_ = SequenceProcessorStatus::ExecutorFailed;
         return;

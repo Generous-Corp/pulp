@@ -9,6 +9,8 @@
 #include <pulp/view/midi_binding.hpp>
 #include <pulp/view/widgets.hpp>
 
+#include <limits>
+
 using namespace pulp;
 using Catch::Matchers::WithinAbs;
 
@@ -43,8 +45,8 @@ TEST_CASE("bind_midi_cc makes a knob emit Control Change", "[midi][bind]") {
     midi::MidiControlBus bus;
     view::Knob knob;
     view::bind_midi_cc(knob, bus, 0, 74);
-    knob.on_change(1.0f);   // user moves the knob to the top
-    knob.on_change(0.0f);   // and to the bottom
+    knob.on_change(1.0f); // user moves the knob to the top
+    knob.on_change(0.0f); // and to the bottom
 
     midi::MidiBuffer out;
     bus.drain_into(out);
@@ -68,8 +70,7 @@ TEST_CASE("bind_midi_note plays a note while a toggle is on", "[midi][bind]") {
     REQUIRE(out[1].is_note_off());
 }
 
-TEST_CASE("bind_midi_cc covers fader, range slider, and discrete controls",
-          "[midi][bind]") {
+TEST_CASE("bind_midi_cc covers fader, range slider, and discrete controls", "[midi][bind]") {
     midi::MidiControlBus bus;
     midi::MidiBuffer out;
 
@@ -154,8 +155,28 @@ TEST_CASE("MidiParameterMap learn binds the next CC", "[state][midi-map]") {
     REQUIRE_THAT(store.get_normalized(2), WithinAbs(0.0f, 1e-3f));
 }
 
-TEST_CASE("MidiParameterMap maps any parameter with zero driver code",
-          "[state][midi-map]") {
+TEST_CASE("MidiParameterMap sanitizes non-finite scale endpoints", "[state][midi-map]") {
+    state::StateStore store;
+    populate(store);
+    state::MidiParameterMap map;
+
+    map.set_mapping(0, 10, 1, {std::numeric_limits<float>::quiet_NaN(), 0.75f});
+    map.pump();
+
+    map.handle_cc(store, 0, 10, 0);
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.0f, 1e-6f));
+    map.handle_cc(store, 0, 10, 127);
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.75f, 1e-6f));
+
+    map.arm_learn(2, {0.25f, std::numeric_limits<float>::infinity()});
+    map.pump();
+    map.handle_cc(store, 1, 11, 0);
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(0.25f, 1e-6f));
+    map.handle_cc(store, 1, 11, 127);
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("MidiParameterMap maps any parameter with zero driver code", "[state][midi-map]") {
     // The map is parameter-agnostic: it drives whatever StateStore + ParamID it
     // is handed, so a hardware controller reaches any registered parameter
     // without a line of per-controller or per-parameter code — only runtime
@@ -199,8 +220,7 @@ TEST_CASE("MidiParameterMap maps any parameter with zero driver code",
     REQUIRE_THAT(store.get_normalized(targets[3].id), WithinAbs(0.0f, 1e-3f));
 }
 
-TEST_CASE("MidiParameterMap re-learn replaces an existing mapping",
-          "[state][midi-map]") {
+TEST_CASE("MidiParameterMap re-learn replaces an existing mapping", "[state][midi-map]") {
     // Re-learning the same controller must retarget it, not stack a second
     // binding: the old parameter goes quiet and the new one takes over.
     state::StateStore store;

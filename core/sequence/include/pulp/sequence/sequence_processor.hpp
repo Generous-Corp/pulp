@@ -68,7 +68,7 @@ class SequenceProcessor final : public format::Processor {
         return status_;
     }
     bool ready() const noexcept {
-        return status_ == SequenceProcessorStatus::Ready;
+        return prepared_;
     }
     SequenceProcessObservation last_observation() const noexcept {
         return last_observation_;
@@ -98,6 +98,7 @@ class SequenceProcessor final : public format::Processor {
     const playback::TransportSnapshot* active_transport_ = nullptr;
     std::uint32_t midi_output_node_index_ = 0;
     std::uint32_t maximum_block_size_ = 0;
+    bool prepared_ = false;
     SequenceProcessObservation last_observation_;
     SequenceProcessorStatus status_ = SequenceProcessorStatus::Unprepared;
 };

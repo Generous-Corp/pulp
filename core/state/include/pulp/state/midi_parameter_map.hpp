@@ -33,12 +33,13 @@
 ///   midi_map_.set_mapping(0, 1, kMix, {0.25f, 0.75f}); // sweep only the middle
 ///   midi_map_.set_mapping(0, 7, kGain, {1.0f, 0.0f});  // inverted
 
-#include <pulp/state/store.hpp>
-#include <pulp/runtime/spsc_queue.hpp>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <pulp/runtime/spsc_queue.hpp>
+#include <pulp/state/store.hpp>
 
 namespace pulp::state {
 
@@ -56,7 +57,7 @@ struct MidiMapScale {
 };
 
 class MidiParameterMap {
-public:
+  public:
     /// Match any MIDI channel.
     static constexpr uint8_t kOmni = 0xFF;
 
@@ -93,17 +94,17 @@ public:
     void pump() {
         while (auto cmd = commands_.try_pop()) {
             switch (cmd->type) {
-                case Command::Set:
-                    insert(cmd->channel, cmd->cc, cmd->id, cmd->scale);
-                    break;
-                case Command::Arm:
-                    learn_armed_ = true;
-                    learn_target_ = cmd->id;
-                    learn_scale_ = cmd->scale;
-                    break;
-                case Command::Clear:
-                    remove_target(cmd->id);
-                    break;
+            case Command::Set:
+                insert(cmd->channel, cmd->cc, cmd->id, cmd->scale);
+                break;
+            case Command::Arm:
+                learn_armed_ = true;
+                learn_target_ = cmd->id;
+                learn_scale_ = cmd->scale;
+                break;
+            case Command::Clear:
+                remove_target(cmd->id);
+                break;
             }
         }
     }
@@ -122,9 +123,11 @@ public:
         }
     }
 
-    bool learn_armed() const { return learn_armed_; }
+    bool learn_armed() const {
+        return learn_armed_;
+    }
 
-private:
+  private:
     struct Command {
         enum Type { Set, Arm, Clear } type;
         uint8_t channel;
@@ -140,8 +143,8 @@ private:
     };
 
     static MidiMapScale clamp_scale(MidiMapScale scale) {
-        scale.min = std::clamp(scale.min, 0.0f, 1.0f);
-        scale.max = std::clamp(scale.max, 0.0f, 1.0f);
+        scale.min = std::isfinite(scale.min) ? std::clamp(scale.min, 0.0f, 1.0f) : 0.0f;
+        scale.max = std::isfinite(scale.max) ? std::clamp(scale.max, 0.0f, 1.0f) : 1.0f;
         return scale;
     }
 
@@ -153,13 +156,15 @@ private:
                 return;
             }
         }
-        if (count_ < kMaxMappings) map_[count_++] = {channel, cc, id, scale};
+        if (count_ < kMaxMappings)
+            map_[count_++] = {channel, cc, id, scale};
     }
 
     void remove_target(ParamID id) {
         std::size_t w = 0;
         for (std::size_t i = 0; i < count_; ++i)
-            if (map_[i].id != id) map_[w++] = map_[i];
+            if (map_[i].id != id)
+                map_[w++] = map_[i];
         count_ = w;
     }
 

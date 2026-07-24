@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -29,7 +30,11 @@
 #else
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/acl.h>
+#endif
 #endif
 
 namespace {
@@ -140,10 +145,33 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
     static std::atomic<std::uint64_t> next_serial{1};
     fs::path temporary;
 #ifdef _WIN32
+    constexpr SECURITY_INFORMATION kSecurityInformation =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    std::vector<std::uint8_t> security_descriptor;
+    SECURITY_ATTRIBUTES security_attributes{};
+    SECURITY_ATTRIBUTES* security = nullptr;
+    const auto destination_attributes = ::GetFileAttributesW(destination.c_str());
+    if (destination_attributes != INVALID_FILE_ATTRIBUTES) {
+        DWORD required = 0;
+        ::GetFileSecurityW(destination.c_str(), kSecurityInformation, nullptr, 0, &required);
+        if (required == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            return false;
+        security_descriptor.resize(required);
+        if (!::GetFileSecurityW(destination.c_str(), kSecurityInformation,
+                                security_descriptor.data(), required, &required))
+            return false;
+        security_attributes.nLength = sizeof(security_attributes);
+        security_attributes.lpSecurityDescriptor = security_descriptor.data();
+        security = &security_attributes;
+    } else if (::GetLastError() != ERROR_FILE_NOT_FOUND &&
+               ::GetLastError() != ERROR_PATH_NOT_FOUND) {
+        return false;
+    }
+
     HANDLE handle = INVALID_HANDLE_VALUE;
     for (int attempt = 0; attempt != 128; ++attempt) {
         temporary = temporary_path(destination, next_serial.fetch_add(1));
-        handle = ::CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        handle = ::CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, security, CREATE_NEW,
                                FILE_ATTRIBUTE_NORMAL, nullptr);
         if (handle != INVALID_HANDLE_VALUE)
             break;
@@ -175,17 +203,57 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         return true;
 #else
+    bool destination_exists = false;
+    struct stat destination_status{};
+    if (::lstat(destination.c_str(), &destination_status) == 0) {
+        if (!S_ISREG(destination_status.st_mode))
+            return false;
+        destination_exists = true;
+    } else if (errno != ENOENT) {
+        return false;
+    }
+#if defined(__APPLE__)
+    acl_t destination_acl = nullptr;
+    if (destination_exists) {
+        destination_acl = ::acl_get_file(destination.c_str(), ACL_TYPE_EXTENDED);
+        if (destination_acl == nullptr && errno != ENOENT && errno != ENOATTR)
+            return false;
+        if (destination_acl != nullptr) {
+            acl_entry_t entry = nullptr;
+            const auto entry_result = ::acl_get_entry(destination_acl, ACL_FIRST_ENTRY, &entry);
+            if (entry_result < 0) {
+                ::acl_free(destination_acl);
+                return false;
+            }
+            if (entry_result == 0) {
+                ::acl_free(destination_acl);
+                destination_acl = nullptr;
+            }
+        }
+    }
+#endif
+
     int descriptor = -1;
     for (int attempt = 0; attempt != 128; ++attempt) {
         temporary = temporary_path(destination, next_serial.fetch_add(1));
         descriptor = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
         if (descriptor >= 0)
             break;
-        if (errno != EEXIST)
+        if (errno != EEXIST) {
+#if defined(__APPLE__)
+            if (destination_acl != nullptr)
+                ::acl_free(destination_acl);
+#endif
             return false;
+        }
     }
-    if (descriptor < 0)
+    if (descriptor < 0) {
+#if defined(__APPLE__)
+        if (destination_acl != nullptr)
+            ::acl_free(destination_acl);
+#endif
         return false;
+    }
 
     bool complete = true;
     std::size_t offset = 0;
@@ -201,6 +269,24 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
         }
         offset += static_cast<std::size_t>(written);
     }
+    if (complete && destination_exists) {
+        struct stat temporary_status{};
+        complete = ::fstat(descriptor, &temporary_status) == 0;
+        if (complete && (temporary_status.st_uid != destination_status.st_uid ||
+                         temporary_status.st_gid != destination_status.st_gid))
+            complete =
+                ::fchown(descriptor, destination_status.st_uid, destination_status.st_gid) == 0;
+        complete = complete && ::fchmod(descriptor, destination_status.st_mode &
+                                                        static_cast<mode_t>(07777)) == 0;
+#if defined(__APPLE__)
+        if (complete && destination_acl != nullptr)
+            complete = ::acl_set_fd_np(descriptor, destination_acl, ACL_TYPE_EXTENDED) == 0;
+#endif
+    }
+#if defined(__APPLE__)
+    if (destination_acl != nullptr)
+        ::acl_free(destination_acl);
+#endif
     complete = complete && sync_file(descriptor);
     complete = ::close(descriptor) == 0 && complete;
     if (!complete) {

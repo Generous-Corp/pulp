@@ -16,6 +16,7 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <sys/wait.h>
 #endif
 
@@ -157,6 +158,13 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
     const auto changed_wav = temp.path() / "changed.wav";
     write_text(project_path, project_json(source_path));
     write_text(changed_path, "sentinel");
+#ifndef _WIN32
+    constexpr auto changed_permissions = std::filesystem::perms::set_uid |
+                                         std::filesystem::perms::owner_all |
+                                         std::filesystem::perms::group_read;
+    std::filesystem::permissions(changed_path, changed_permissions,
+                                 std::filesystem::perm_options::replace);
+#endif
     write_text(
         command_path,
         R"([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])");
@@ -171,6 +179,29 @@ TEST_CASE("timeline CLI validates edits and renders through the installed comman
                     " --out " + quote(changed_path) + " > " + quote(command_result_path)) == 0);
     REQUIRE(std::filesystem::is_regular_file(changed_path));
     REQUIRE(read_text(changed_path) != "sentinel");
+#ifndef _WIN32
+    REQUIRE(std::filesystem::status(changed_path).permissions() == changed_permissions);
+
+    const auto new_path = temp.path() / "new.json";
+    const auto previous_mask = ::umask(0027);
+    const auto new_result =
+        run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) + " --out " +
+                quote(new_path) + " > /dev/null");
+    ::umask(previous_mask);
+    REQUIRE(new_result == 0);
+    REQUIRE(std::filesystem::status(new_path).permissions() ==
+            (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write |
+             std::filesystem::perms::group_read));
+
+    const auto write_only_path = temp.path() / "write-only.json";
+    write_text(write_only_path, "sentinel");
+    std::filesystem::permissions(write_only_path, std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace);
+    REQUIRE(run_cli(cli + " seq apply " + quote(project_path) + " " + quote(command_path) +
+                    " --out " + quote(write_only_path) + " > /dev/null") == 0);
+    REQUIRE(std::filesystem::status(write_only_path).permissions() ==
+            std::filesystem::perms::owner_write);
+#endif
     const auto changed_project = read_text(changed_path);
     for (const auto& entry : std::filesystem::directory_iterator(temp.path()))
         REQUIRE_FALSE(entry.path().filename().string().starts_with("changed.json.tmp."));

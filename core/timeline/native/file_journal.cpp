@@ -39,11 +39,13 @@
 namespace pulp::timeline {
 namespace {
 
-constexpr std::array<std::uint8_t, 8> kFileMagic{'P', 'T', 'L', 'J', 'N', 'L', '1', '\0'};
+constexpr std::array<std::uint8_t, 8> kFileMagic{'P', 'T', 'L', 'J', 'N', 'L', '2', '\0'};
 constexpr std::array<std::uint8_t, 4> kFrameMagic{'P', 'T', 'L', 'F'};
-constexpr std::uint32_t kFileVersion = 1;
+constexpr std::array<std::uint8_t, 4> kCommitMagic{'P', 'T', 'L', 'C'};
+constexpr std::uint32_t kFileVersion = 2;
 constexpr std::size_t kFileHeaderBytes = 16;
 constexpr std::size_t kFrameHeaderBytes = 32;
+constexpr std::size_t kCommitTrailerBytes = 24;
 constexpr std::uint8_t kCheckpointFrame = 1;
 constexpr std::uint8_t kCommitFrame = 2;
 
@@ -133,9 +135,9 @@ class NativeFile {
 
     static NativeFile create_exclusive(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
-        return NativeFile(
-            _wopen(path.c_str(), _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_NOINHERIT,
-                   _S_IREAD | _S_IWRITE));
+        return NativeFile(_wopen(path.c_str(),
+                                 _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_NOINHERIT,
+                                 _S_IREAD | _S_IWRITE));
 #else
         return NativeFile(::open(path.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600));
 #endif
@@ -143,9 +145,8 @@ class NativeFile {
 
     static NativeFile open_or_create(const std::filesystem::path& path) noexcept {
 #if defined(_WIN32)
-        return NativeFile(
-            _wopen(path.c_str(), _O_CREAT | _O_RDWR | _O_BINARY | _O_NOINHERIT,
-                   _S_IREAD | _S_IWRITE));
+        return NativeFile(_wopen(path.c_str(), _O_CREAT | _O_RDWR | _O_BINARY | _O_NOINHERIT,
+                                 _S_IREAD | _S_IWRITE));
 #else
         return NativeFile(::open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600));
 #endif
@@ -396,6 +397,26 @@ frame_header(std::uint8_t kind, DocumentRevision revision,
     return header;
 }
 
+std::array<std::uint8_t, kCommitTrailerBytes> commit_trailer(DocumentRevision revision,
+                                                             std::uint64_t frame_offset) noexcept {
+    std::array<std::uint8_t, kCommitTrailerBytes> trailer{};
+    std::copy(kCommitMagic.begin(), kCommitMagic.end(), trailer.begin());
+    write_u64(trailer.data() + 4, revision.value);
+    write_u64(trailer.data() + 12, frame_offset);
+    write_u32(trailer.data() + 20,
+              crc32(std::span<const std::uint8_t>(trailer.data(), trailer.size() - 4)));
+    return trailer;
+}
+
+bool valid_commit_trailer(std::span<const std::uint8_t, kCommitTrailerBytes> trailer,
+                          DocumentRevision revision, std::uint64_t frame_offset) noexcept {
+    return std::equal(kCommitMagic.begin(), kCommitMagic.end(), trailer.begin()) &&
+           read_u64(trailer.data() + 4) == revision.value &&
+           read_u64(trailer.data() + 12) == frame_offset &&
+           read_u32(trailer.data() + 20) ==
+               crc32(std::span<const std::uint8_t>(trailer.data(), trailer.size() - 4));
+}
+
 bool replace_file(const std::filesystem::path& temporary,
                   const std::filesystem::path& destination) noexcept {
 #if defined(_WIN32)
@@ -540,8 +561,7 @@ scan_file(NativeFile& file, const SchemaRegistry& registry, const FileJournalLim
             return file_failure<ScannedFile>(FileJournalErrorCode::InvalidFormat, offset);
         if ((!latest && kind != kCheckpointFrame) ||
             (latest &&
-             (kind != kCommitFrame ||
-              revision.value == std::numeric_limits<std::uint64_t>::max() ||
+             (kind != kCommitFrame || revision.value == std::numeric_limits<std::uint64_t>::max() ||
               frame_revision.value != revision.value + 1)))
             return file_failure<ScannedFile>(FileJournalErrorCode::RevisionMismatch, offset);
         if (payload_size > std::numeric_limits<std::uint64_t>::max() - kFrameHeaderBytes - offset)
@@ -554,6 +574,22 @@ scan_file(NativeFile& file, const SchemaRegistry& registry, const FileJournalLim
         std::vector<std::uint8_t> payload(static_cast<std::size_t>(payload_size));
         if (!file.read_all(payload))
             return file_failure<ScannedFile>(FileJournalErrorCode::IoError, offset);
+        auto committed_end = frame_end;
+        if (kind == kCommitFrame) {
+            if (frame_end > std::numeric_limits<std::uint64_t>::max() - kCommitTrailerBytes)
+                return file_failure<ScannedFile>(FileJournalErrorCode::LimitExceeded, offset);
+            const auto trailer_end = frame_end + kCommitTrailerBytes;
+            if (trailer_end > *size) {
+                torn_tail = true;
+                break;
+            }
+            std::array<std::uint8_t, kCommitTrailerBytes> trailer{};
+            if (!file.read_all(trailer))
+                return file_failure<ScannedFile>(FileJournalErrorCode::IoError, offset);
+            if (!valid_commit_trailer(trailer, frame_revision, offset))
+                return file_failure<ScannedFile>(FileJournalErrorCode::CorruptRecord, offset);
+            committed_end = trailer_end;
+        }
         if (crc32(payload) != read_u32(frame.data() + 24))
             return file_failure<ScannedFile>(FileJournalErrorCode::CorruptRecord, offset);
         const auto json =
@@ -563,7 +599,7 @@ scan_file(NativeFile& file, const SchemaRegistry& registry, const FileJournalLim
             return persistence_failure<ScannedFile>(decoded.error(), offset);
         latest = std::move(decoded).value();
         revision = frame_revision;
-        offset = frame_end;
+        offset = committed_end;
     }
     if (!latest)
         return file_failure<ScannedFile>(FileJournalErrorCode::InvalidFormat, offset);
@@ -658,9 +694,9 @@ FileJournal::open(const std::filesystem::path& path, Project fallback, SchemaReg
         file = std::move(initialized).value();
     }
 
-    auto impl = std::make_unique<Impl>(
-        Impl{canonical_path, std::move(registry), limits, std::move(lifetime_lock),
-             std::move(file), checkpoint, revision, false});
+    auto impl = std::make_unique<Impl>(Impl{canonical_path, std::move(registry), limits,
+                                            std::move(lifetime_lock), std::move(file), checkpoint,
+                                            revision, false});
     auto sink = std::shared_ptr<FileJournal>(new FileJournal(std::move(impl)));
     return runtime::Result<FileJournalOpenResult, FileJournalError>(runtime::Ok(
         FileJournalOpenResult{sink, std::move(checkpoint), revision, exists, repaired}));
@@ -697,13 +733,19 @@ FileJournal::append_batch(const JournalEntry& entry) noexcept {
     const auto payload_size = encoded.value().json.size();
     if (!file_size || payload_size > impl_->limits.max_file_bytes ||
         *file_size > impl_->limits.max_file_bytes - payload_size ||
-        kFrameHeaderBytes > impl_->limits.max_file_bytes - *file_size - payload_size) {
+        kFrameHeaderBytes + kCommitTrailerBytes >
+            impl_->limits.max_file_bytes - *file_size - payload_size) {
         impl_->failed = true;
         return sink_failure(JournalSinkError::IoError);
     }
     if (!impl_->file.seek(*file_size) ||
         !write_frame(impl_->file, kCommitFrame, entry.after, encoded.value().json) ||
         !impl_->file.sync()) {
+        impl_->failed = true;
+        return sink_failure(JournalSinkError::IoError);
+    }
+    const auto trailer = commit_trailer(entry.after, *file_size);
+    if (!impl_->file.write_all(trailer) || !impl_->file.sync()) {
         impl_->failed = true;
         return sink_failure(JournalSinkError::IoError);
     }
@@ -749,8 +791,7 @@ FileJournal::checkpoint(const Project& snapshot, DocumentRevision durable_revisi
 }
 
 runtime::Result<bool, JournalSinkError>
-FileJournal::validate_restore(const Project& snapshot,
-                              DocumentRevision durable_revision) noexcept {
+FileJournal::validate_restore(const Project& snapshot, DocumentRevision durable_revision) noexcept {
     if (impl_->failed)
         return sink_failure(JournalSinkError::Closed);
     const auto links = impl_->file.link_count();

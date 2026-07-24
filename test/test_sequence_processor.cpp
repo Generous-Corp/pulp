@@ -252,3 +252,58 @@ TEST_CASE("embedded sequence processor never publishes a partial MIDI block") {
     REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::RenderFailed);
     REQUIRE(midi_out.empty());
 }
+
+TEST_CASE("embedded sequence processor treats zero-frame callbacks as recoverable no-ops") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map), map, take(DecodedAudioAssetPool::create({})), 1);
+    auto program = programs.store.read();
+    REQUIRE(program);
+
+    sequence::SequenceProcessorConfig processor_config;
+    processor_config.output_channels = 1;
+    sequence::SequenceProcessor embedded(programs.store, processor_config);
+    state::StateStore state;
+    embedded.define_parameters(state);
+    embedded.prepare({
+        .sample_rate = 48'000.0,
+        .max_buffer_size = 32,
+        .input_channels = 0,
+        .output_channels = 1,
+    });
+    REQUIRE(embedded.ready());
+
+    Buffer zero_output(1, 0);
+    Buffer zero_input(1, 0);
+    auto zero_output_view = zero_output.view();
+    midi::MidiBuffer midi_in;
+    midi::MidiBuffer midi_out;
+    midi_out.reserve(256);
+    REQUIRE(midi_out.add(midi::MidiEvent::note_on(0, 60, 100)));
+    auto zero_context = host_context(snapshot(*program, 32, 0));
+    zero_context.num_samples = 0;
+    const auto observation = embedded.last_observation();
+    embedded.process(zero_output_view, zero_input.const_view(), midi_in, midi_out, zero_context);
+    REQUIRE(embedded.ready());
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+    REQUIRE(embedded.last_observation().valid == observation.valid);
+    REQUIRE(midi_out.empty());
+
+    Buffer output(1, 32);
+    Buffer input(1, 32);
+    auto output_view = output.view();
+    auto context = host_context(snapshot(*program, 32, 0));
+    context.num_samples = 31;
+    embedded.process(output_view, input.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.ready());
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::ExecutorFailed);
+
+    embedded.process(zero_output_view, zero_input.const_view(), midi_in, midi_out, zero_context);
+    REQUIRE(embedded.ready());
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::ExecutorFailed);
+
+    context.num_samples = 32;
+    embedded.process(output_view, input.const_view(), midi_in, midi_out, context);
+    REQUIRE(embedded.ready());
+    REQUIRE(embedded.status() == sequence::SequenceProcessorStatus::Ready);
+}
