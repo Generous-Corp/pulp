@@ -551,8 +551,20 @@ scan_file(NativeFile& file, const SchemaRegistry& registry, const FileJournalLim
         const auto header_crc =
             crc32(std::span<const std::uint8_t>(frame.data(), frame.size() - 4));
         if (!std::equal(kFrameMagic.begin(), kFrameMagic.end(), frame.begin()) ||
-            read_u32(frame.data() + 28) != header_crc)
+            read_u32(frame.data() + 28) != header_crc) {
+            // Appends publish durability with a commit trailer written only
+            // after the complete frame has been synced. A crash can therefore
+            // leave a full 32-byte header-shaped tail whose contents or CRC are
+            // torn, but no committed frame can end at the header boundary.
+            // Preserve fail-closed behavior when any bytes follow: those may
+            // include a commit trailer proving this is committed corruption or
+            // a later record proving the damage is not confined to the tail.
+            if (*size - offset == kFrameHeaderBytes) {
+                torn_tail = true;
+                break;
+            }
             return file_failure<ScannedFile>(FileJournalErrorCode::CorruptRecord, offset);
+        }
         const auto kind = frame[4];
         const auto frame_revision = DocumentRevision{read_u64(frame.data() + 8)};
         const auto payload_size = read_u64(frame.data() + 16);

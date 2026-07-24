@@ -266,6 +266,49 @@ TEST_CASE("external sync uses precise host bounds for MIDI clock",
     }
 }
 
+TEST_CASE("external sync uses precise host ticks for song position",
+          "[playback][external-sync]") {
+    constexpr auto sixteenth_ticks = kTicksPerQuarter / 4;
+    const auto map = constant_map();
+    auto render_position = [&](bool transport_started,
+                               bool discontinuity) -> std::uint16_t {
+        TransportSnapshot transport;
+        transport.tempo_map = &map;
+        transport.sample_rate = map.sample_rate();
+        transport.frame_count = 64;
+        transport.range_count = 1;
+        transport.is_playing = true;
+        transport.transport_started = transport_started;
+        auto& range = transport.ranges[0];
+        range.frame_count = 64;
+        range.timeline_tick_start = {sixteenth_ticks};
+        range.timeline_tick_end = {sixteenth_ticks + 1};
+        range.discontinuity = discontinuity;
+        range.host_beat_mapping = true;
+        range.host_tick_start = static_cast<double>(sixteenth_ticks) - 0.25;
+        range.host_tick_end = static_cast<double>(sixteenth_ticks) + 0.75;
+        range.has_precise_host_ticks = true;
+
+        midi::MidiBuffer output;
+        output.reserve(8);
+        output.set_realtime_capacity_limit();
+        ExternalSyncOutputConfig config;
+        config.emit_mtc = false;
+        REQUIRE(ExternalSyncOutput(config).process(transport, output).code ==
+                ExternalSyncOutputCode::Complete);
+        for (const auto& event : output) {
+            if (event.data()[0] == 0xf2)
+                return static_cast<std::uint16_t>(event.data()[1]) |
+                       (static_cast<std::uint16_t>(event.data()[2]) << 7);
+        }
+        FAIL("expected Song Position Pointer");
+        return std::uint16_t{0};
+    };
+
+    REQUIRE(render_position(true, false) == 0);
+    REQUIRE(render_position(false, true) == 0);
+}
+
 TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
           "[playback][external-sync]") {
     const auto map = constant_map();

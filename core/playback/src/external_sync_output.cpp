@@ -57,15 +57,6 @@ bool checked_multiply(std::int64_t value, std::int64_t multiplier, std::int64_t&
     return true;
 }
 
-std::int64_t floor_multiple_index(std::int64_t value, std::int64_t interval) noexcept {
-    if (interval <= 0)
-        return 0;
-    auto quotient = value / interval;
-    if (value < 0 && value % interval != 0)
-        --quotient;
-    return quotient;
-}
-
 timebase::SamplePosition quarter_frame_sample(std::int64_t quarter,
                                               timebase::RationalRate sample_rate,
                                               MtcFrameRate frame_rate) noexcept {
@@ -195,12 +186,16 @@ std::int32_t bounded_offset(std::int64_t value) noexcept {
         std::clamp<std::int64_t>(value, 0, std::numeric_limits<std::int32_t>::max()));
 }
 
-bool append_song_position(midi::MidiBuffer& output, timebase::TickPosition tick,
+bool append_song_position(midi::MidiBuffer& output, long double tick,
                           std::int32_t offset, std::uint32_t maximum,
                           ExternalSyncOutputResult& result) noexcept {
     const auto sixteenth = timebase::kTicksPerQuarter / 4;
-    const auto position =
-        std::clamp<std::int64_t>(floor_multiple_index(tick.value, sixteenth), 0, 0x3fff);
+    const auto raw_position = std::floor(tick / static_cast<long double>(sixteenth));
+    const auto position = raw_position <= 0.0L
+        ? std::int64_t{0}
+        : raw_position >= 0x3fff
+            ? std::int64_t{0x3fff}
+            : static_cast<std::int64_t>(raw_position);
     return append_short(output, 0xf2, static_cast<std::uint8_t>(position & 0x7f),
                         static_cast<std::uint8_t>((position >> 7) & 0x7f), offset, maximum, result);
 }
@@ -229,11 +224,16 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
         return result;
     }
 
-    const auto first_tick = transport.ranges[0].timeline_tick_start;
+    const auto& first_range = transport.ranges[0];
+    const auto first_tick = first_range.timeline_tick_start;
+    const auto first_position_tick =
+        first_range.has_precise_host_ticks
+            ? static_cast<long double>(first_range.host_tick_start)
+            : static_cast<long double>(first_tick.value);
     if (config_.emit_midi_clock && transport.transport_started) {
         if (first_tick.value != 0) {
-            if (!append_song_position(output, first_tick, 0, config_.max_messages_per_block,
-                                      result) ||
+            if (!append_song_position(output, first_position_tick, 0,
+                                      config_.max_messages_per_block, result) ||
                 !append_short(output, 0xfb, 0, 0, config_.max_messages_per_block, result))
                 return result;
         } else {
@@ -251,7 +251,11 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
             saturating_add(range.timeline_sample_start.value, range.frame_count)};
         if (config_.emit_midi_clock && range.discontinuity) {
             const auto offset = bounded_offset(range.sample_offset);
-            if (!append_song_position(output, range.timeline_tick_start, offset,
+            const auto position_tick =
+                range.has_precise_host_ticks
+                    ? static_cast<long double>(range.host_tick_start)
+                    : static_cast<long double>(range.timeline_tick_start.value);
+            if (!append_song_position(output, position_tick, offset,
                                       config_.max_messages_per_block, result) ||
                 (transport.is_playing &&
                  !append_short(output, 0xfb, 0, offset, config_.max_messages_per_block, result)))
