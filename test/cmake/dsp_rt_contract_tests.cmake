@@ -84,3 +84,27 @@ pulp_add_test_suite(pulp-test-square-osc-bank
     SOURCES test_square_osc_bank.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+# Percussion-synthesis shared layer. Each suite measures the property its
+# component is named for -- spectral slope, decay timing, hold interval,
+# vactrol asymmetry -- rather than asserting a coefficient against itself, so
+# the naive transforms they use are the slow part and the timeouts are wide.
+pulp_add_test_suite(pulp-test-noise-source
+    SOURCES test_noise_source.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
+
+pulp_add_test_suite(pulp-test-decay-envelope
+    SOURCES test_decay_envelope.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-lofi-chain
+    SOURCES test_lofi_chain.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-lowpass-gate
+    SOURCES test_lowpass_gate.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
