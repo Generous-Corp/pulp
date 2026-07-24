@@ -120,7 +120,9 @@ def vellum_trust_responses(
     ]
     return {
         "https://api.github.com/app": {"id": app_id},
-        "https://api.github.com/installation": {"app_id": app_id},
+        "https://api.github.com/repos/Generous-Corp/vellum/installation": {
+            "app_id": app_id,
+        },
         "https://api.github.com/repos/Generous-Corp/vellum": {
             "id": freeze.EXPECTED_FRAMEWORK_REPOSITORY_ID,
             "full_name": "Generous-Corp/vellum",
@@ -520,6 +522,27 @@ class FreezeUnitTests(unittest.TestCase):
                 app_jwt="redacted-app-jwt",
             )
 
+    def test_vellum_trust_uses_app_jwt_for_installation_identity(self):
+        responses = vellum_trust_responses()
+
+        def github(url: str, credential: str):
+            if url in {
+                "https://api.github.com/app",
+                "https://api.github.com/repos/Generous-Corp/vellum/installation",
+            }:
+                self.assertEqual(credential, "redacted-app-jwt")
+            else:
+                self.assertEqual(credential, "redacted-test-token")
+            return responses[url]
+
+        with mock.patch.object(freeze, "_github_json", side_effect=github):
+            freeze._verify_vellum_trust(
+                commit="b" * 40,
+                authority_ref="refs/tags/authority/native-design-kernel-v1",
+                token="redacted-test-token",
+                app_jwt="redacted-app-jwt",
+            )
+
     def test_schema_v2_record_binds_prepared_candidate_and_active_projection(self):
         with tempfile.TemporaryDirectory() as temporary:
             repo = pathlib.Path(temporary)
@@ -631,7 +654,9 @@ class FreezeUnitTests(unittest.TestCase):
             def github(url: str, _token: str):
                 if url == "https://api.github.com/app":
                     return {"id": 9001}
-                if url == "https://api.github.com/installation":
+                if url == (
+                    "https://api.github.com/repos/Generous-Corp/vellum/installation"
+                ):
                     return {"app_id": 9001}
                 if url.endswith("/repos/Generous-Corp/vellum"):
                     return {
