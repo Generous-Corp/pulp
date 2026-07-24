@@ -55,9 +55,11 @@ TEST_CASE("make_quirks_for Logic caps channel probe at 8",
     auto q = make_quirks_for(HostType::LogicPro, HostVersion{11, 0});
     REQUIRE(q.logic_au_channel_probe_cap == 8);
     REQUIRE(q.logic_au_tail_time_conversion == true);
+    REQUIRE(q.logic_au_v2_container_resize == true);
     // GarageBand shares the same Logic quirks.
     auto gb = make_quirks_for(HostType::GarageBand, HostVersion{});
     REQUIRE(gb.logic_au_channel_probe_cap == 8);
+    REQUIRE(gb.logic_au_v2_container_resize == false);
 }
 
 TEST_CASE("make_quirks_for Reaper flips all 6 Reaper flags",
@@ -926,6 +928,7 @@ TEST_CASE("apply_filter validated-only resets logic_au_channel_probe_cap",
     apply_filter(q, kQuirkFilterValidatedOnly);
     REQUIRE(q.logic_au_channel_probe_cap == 64);
     REQUIRE(q.logic_au_tail_time_conversion == false);
+    REQUIRE(q.logic_au_v2_container_resize == true);
 }
 
 TEST_CASE("apply_filter kQuirkFilterOff zeros every field including cheap defenses",
@@ -1365,7 +1368,7 @@ TEST_CASE("enumerate_quirk_fields covers every field with tier + enforced",
     auto fields = pulp::format::enumerate_quirk_fields(q);
     // One row per HostQuirks field (kept in lock-step with the X-macro
     // count static_assert in host_quirks.cpp).
-    REQUIRE(fields.size() == 37);
+    REQUIRE(fields.size() == 38);
 
     const auto* bypass = find_field(fields, "synthesize_bypass_parameter");
     REQUIRE(bypass != nullptr);

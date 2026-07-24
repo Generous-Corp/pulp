@@ -201,10 +201,10 @@ TEST_CASE("PluginViewHost (mac CPU) — the editor takes the keyboard only while
 
             root.release_input_focus();
             [pulp_view syncKeyFocus];
-            // Contract: with no field focused the editor RESIGNS — a plugin must not
-            // hold the DAW keyboard, or transport keys (Space/R) + the host's
-            // Musical Typing die while the editor is open.
-            REQUIRE(window.firstResponder != pulp_view);
+            // Contract: with no field focused the editor restores the responder
+            // that routed the DAW keyboard before the type-in. `nil` is not enough:
+            // Logic's Musical Typing remains silent until its responder is restored.
+            REQUIRE(window.firstResponder == host_field);
             REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
         }
 
@@ -332,7 +332,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a programmatic focus clear (no event) "
             [window close];
             return;
         }
-        REQUIRE(window.firstResponder != pulp_view);
+        REQUIRE(window.firstResponder == host_field);
         REQUIRE_FALSE([pulp_view acceptsFirstResponder]);
 
         host->detach();
@@ -398,6 +398,7 @@ TEST_CASE("PluginViewHost (mac CPU) — a focused non-text widget does NOT steal
 
         root.release_input_focus();
         [pulp_view syncKeyFocus];
+        REQUIRE(window.firstResponder == host_field);
         host->detach();
         host.reset();
         [window close];

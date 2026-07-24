@@ -14,6 +14,9 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <functional>
+#include <mutex>
+#include <unordered_map>
 #include <memory>
 #include <span>
 #include <string>
@@ -25,6 +28,37 @@ class View;
 }
 
 namespace pulp::format {
+
+namespace detail {
+
+/// Backing store for the editor→host resize handler (see
+/// `Processor::request_editor_resize`). Kept in a side table keyed first by
+/// the processor and then by each editor's opaque owner pointer rather than as a
+/// `Processor` DATA MEMBER on purpose: `Processor` is a widely-inherited public
+/// base, and growing `sizeof(Processor)` breaks every prebuilt library that
+/// already constructs a subclass (it crashed `~Processor()` on a mixed
+/// old-lib/new-header SDK). A side table keeps the class layout — and therefore
+/// the ABI — frozen while still adding the capability. The key is `const void*`
+/// (not `const Processor*`) so this block needs no forward declaration of
+/// `Processor`, which would otherwise confuse the node-ABI gate's class parser.
+/// Access is main-thread in practice; the mutex only guards a stray off-thread
+/// teardown. One instance across TUs (inline-function local statics are merged).
+inline std::mutex& editor_resize_mutex() {
+    static std::mutex m;
+    return m;
+}
+using EditorResizeHandler =
+    std::function<bool(uint32_t, uint32_t)>;
+using EditorResizeHandlerSet =
+    std::unordered_map<const void*, EditorResizeHandler>;
+
+inline std::unordered_map<const void*, EditorResizeHandlerSet>&
+editor_resize_handlers() {
+    static std::unordered_map<const void*, EditorResizeHandlerSet> table;
+    return table;
+}
+
+}  // namespace detail
 
 /// The plugin processor interface.
 ///
@@ -60,6 +94,15 @@ namespace pulp::format {
 /// - define_parameters() is called once during construction on the host thread.
 class Processor {
 public:
+    Processor() {
+        // Adapters clear the handler on editor close. If abnormal teardown
+        // skips that close, make address reuse safe before this new instance
+        // can observe a stale handler left under the same `this` key. Keep the
+        // virtual destructor exactly defaulted: its spelling/order is part of
+        // the frozen Processor node ABI.
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        detail::editor_resize_handlers().erase(this);
+    }
     virtual ~Processor() = default;
 
     /// Return the plugin's metadata. Called once during initialization.
@@ -406,6 +449,44 @@ public:
     /// logical pixels. Runs on the UI thread.
     virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
 
+    /// Editor-INITIATED host-window resize (the plugin↔host direction that
+    /// `on_view_resized` does not cover). The editor calls this to ask the
+    /// DAW/standalone host to resize the plugin window to (w × h) LOGICAL
+    /// pixels AND to re-pin the design viewport + aspect ratio to the same
+    /// size, so the content fills the new window with no letterbox / dark
+    /// fill and no squish. Use it when the editor's own natural size changes
+    /// at runtime — e.g. a chrome-hiding "player" mode that wants a smaller,
+    /// differently-shaped window than its full authoring layout.
+    ///
+    /// The format adapter installs the actual host call (CLAP
+    /// `clap_host_gui->request_resize`, VST3 `IPlugFrame::resizeView`, AU
+    /// `preferredContentSize`, standalone `WindowHost::request_content_size`)
+    /// via set_editor_resize_handler() when the editor opens, and clears it on
+    /// close. Returns true when a handler is installed AND the host accepted
+    /// the request; false when no editor is open, multiple editor windows make
+    /// the target ambiguous, the host exposes no resize path, or the host
+    /// refused (the editor should keep its current size).
+    /// Main-thread / UI-thread only.
+    ///
+    /// The handlers live in a side table (detail::editor_resize_handlers),
+    /// NOT a data member, so this capability adds nothing to `sizeof(Processor)`
+    /// and stays ABI-compatible with prebuilt libraries.
+    bool request_editor_resize(uint32_t width, uint32_t height) {
+        std::function<bool(uint32_t, uint32_t)> handler;
+        {
+            std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+            auto& table = detail::editor_resize_handlers();
+            auto it = table.find(this);
+            // A Processor can have multiple simultaneous editor views. With
+            // no view identity in this processor-level API, selecting one
+            // would resize the wrong window. Refuse while ambiguous; once all
+            // but one view close, that remaining handler becomes active.
+            if (it == table.end() || it->second.size() != 1) return false;
+            handler = it->second.begin()->second;
+        }
+        return handler(width, height);
+    }
+
     /// Called when the host's transport state transitions between
     /// playing and stopped, or jumps to a new position. Default no-op.
     virtual void on_host_transport_changed(bool /*is_playing*/,
@@ -683,6 +764,36 @@ public:
     /// push_output_param_event(). The adapter owns the queue, clears it before
     /// each block, and drains it after process().
     void set_output_param_events(state::ParameterEventQueue* events) { output_param_events_ = events; }
+
+    /// @internal Installed by the format adapter when the editor opens (and
+    /// cleared with a null handler on close — MUST be cleared before the
+    /// captured editor host / bridge is destroyed). The handler performs the
+    /// host-specific window resize AND re-pins the design viewport / aspect to
+    /// the requested (w, h). Stored in a side table keyed by `this` (see
+    /// detail::editor_resize_handlers) so `Processor`'s layout is unchanged.
+    void set_editor_resize_handler(
+        std::function<bool(uint32_t, uint32_t)> handler) {
+        set_editor_resize_handler(this, std::move(handler));
+    }
+
+    /// @internal Register a resize handler owned by one editor instance.
+    /// Passing a null handler removes only that owner's entry, so closing one
+    /// of several simultaneous views cannot disable another live view.
+    void set_editor_resize_handler(
+        const void* editor_owner,
+        std::function<bool(uint32_t, uint32_t)> handler) {
+        if (!editor_owner) return;
+        std::lock_guard<std::mutex> lock(detail::editor_resize_mutex());
+        auto& table = detail::editor_resize_handlers();
+        if (handler) {
+            table[this][editor_owner] = std::move(handler);
+        } else {
+            auto it = table.find(this);
+            if (it == table.end()) return;
+            it->second.erase(editor_owner);
+            if (it->second.empty()) table.erase(it);
+        }
+    }
 
 private:
     std::shared_ptr<const std::vector<uint8_t>> published_plugin_state_;

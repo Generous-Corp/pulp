@@ -1194,3 +1194,119 @@ TEST_CASE("CLAP gui_adjust_size aspect-locked behavior is unchanged (regression 
     REQUIRE(w == 400);
     REQUIRE(h == 300);
 }
+
+namespace {
+
+struct FakeClapGuiHost {
+    clap_host_t host{};
+    clap_host_gui_t gui{};
+    bool accept = true;
+    uint32_t requested_width = 0;
+    uint32_t requested_height = 0;
+    int requests = 0;
+
+    FakeClapGuiHost() {
+        host.clap_version = CLAP_VERSION;
+        host.host_data = this;
+        host.name = "Pulp resize test host";
+        host.vendor = "Pulp";
+        host.url = "https://pulp.audio";
+        host.version = "1";
+        host.get_extension = [](const clap_host_t* h, const char* id)
+            -> const void* {
+            auto* self = static_cast<FakeClapGuiHost*>(h->host_data);
+            return std::strcmp(id, CLAP_EXT_GUI) == 0 ? &self->gui : nullptr;
+        };
+        gui.request_resize = [](const clap_host_t* h, uint32_t width,
+                                uint32_t height) -> bool {
+            auto* self = static_cast<FakeClapGuiHost*>(h->host_data);
+            ++self->requests;
+            self->requested_width = width;
+            self->requested_height = height;
+            return self->accept;
+        };
+    }
+};
+
+class FakePluginViewHost final : public pulp::view::PluginViewHost {
+public:
+    pulp::view::NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(pulp::view::NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override {
+        size_ = {width, height};
+    }
+    Size get_size() const override { return size_; }
+    void set_design_viewport(float width, float height) override {
+        design_width = width;
+        design_height = height;
+    }
+    void set_fixed_aspect_ratio(float ratio) override {
+        aspect_ratio = ratio;
+    }
+
+    Size size_{};
+    float design_width = 0.0f;
+    float design_height = 0.0f;
+    float aspect_ratio = 0.0f;
+};
+
+}  // namespace
+
+TEST_CASE("CLAP editor resize negotiates through the host and rolls back refusal",
+          "[clap][entry][gui][resize][editor-request]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    make_clap_plugin_with_size(
+        data, ViewSize{400, 300, 200, 150, 800, 600, 4.0 / 3.0});
+    FakeClapGuiHost host;
+    data.host = &host.host;
+    auto editor_host = std::make_unique<FakePluginViewHost>();
+    auto* editor_host_ptr = editor_host.get();
+    data.editor_host = std::move(editor_host);
+    install_editor_resize_handler(data);
+
+    REQUIRE(data.processor->request_editor_resize(640, 480));
+    REQUIRE(host.requests == 1);
+    REQUIRE(host.requested_width == 640);
+    REQUIRE(host.requested_height == 480);
+    REQUIRE(data.bridge->size_hints().preferred_width == 640);
+    REQUIRE(data.bridge->size_hints().preferred_height == 480);
+    REQUIRE_THAT(editor_host_ptr->design_width, WithinAbs(640.0, 0.001));
+    REQUIRE_THAT(editor_host_ptr->design_height, WithinAbs(480.0, 0.001));
+    REQUIRE_THAT(editor_host_ptr->aspect_ratio, WithinAbs(4.0 / 3.0, 0.001));
+
+    host.accept = false;
+    REQUIRE_FALSE(data.processor->request_editor_resize(700, 500));
+    REQUIRE(host.requests == 2);
+    REQUIRE(data.bridge->size_hints().preferred_width == 640);
+    REQUIRE(data.bridge->size_hints().preferred_height == 480);
+
+    data.host = nullptr;
+    REQUIRE_FALSE(data.processor->request_editor_resize(720, 540));
+    REQUIRE(data.bridge->size_hints().preferred_width == 640);
+
+    gui_destroy(&data.plugin);
+    REQUIRE_FALSE(data.processor->request_editor_resize(720, 540));
+}
+
+TEST_CASE("CLAP editor resize handler fails closed after bridge teardown",
+          "[clap][entry][gui][resize][editor-request]") {
+    using namespace pulp::format::clap_generic;
+
+    pulp::format::clap_adapter::PulpClapPlugin data;
+    make_clap_plugin_with_size(
+        data, ViewSize{400, 300, 200, 150, 800, 600, 4.0 / 3.0});
+    FakeClapGuiHost host;
+    data.host = &host.host;
+    install_editor_resize_handler(data);
+    data.bridge.reset();
+
+    REQUIRE_FALSE(data.processor->request_editor_resize(640, 480));
+    REQUIRE(host.requests == 0);
+
+    pulp::format::clap_adapter::PulpClapPlugin empty;
+    install_editor_resize_handler(empty);
+}

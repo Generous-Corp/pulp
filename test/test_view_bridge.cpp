@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/format/gpu_host_select.hpp>
+#include <pulp/format/detail/au_v2_editor_resize.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/runtime/message_channel.hpp>
@@ -1344,4 +1345,272 @@ TEST_CASE("a discrete pull settles on the host's own value, across the range",
             CHECK(proc.last_frame->element_value(0) == Catch::Approx(elem_settled));  // settled
         }
     }
+}
+
+// ── Editor-initiated host resize (Processor::request_editor_resize) ──────────
+
+// Without a handler installed (no open editor / a host with no resize path),
+// request_editor_resize must be a safe no-op that reports refusal.
+TEST_CASE("Processor::request_editor_resize is false with no handler installed",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+    // The handler lives in a side table keyed by `this`; a prior test's
+    // Processor could have reused this stack address, so start from a clean slot.
+    p.set_editor_resize_handler(nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(640, 480));
+}
+
+// The adapter installs a handler; the plugin's editor calls
+// request_editor_resize and the request forwards (w, h) verbatim and returns
+// the host's accept/refuse result. Clearing the handler (editor close) restores
+// the no-op refusal.
+TEST_CASE("Processor::request_editor_resize forwards to the installed handler",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+
+    uint32_t seen_w = 0, seen_h = 0;
+    int calls = 0;
+    p.set_editor_resize_handler([&](uint32_t w, uint32_t h) {
+        ++calls;
+        seen_w = w;
+        seen_h = h;
+        return true;  // host accepts
+    });
+
+    REQUIRE(p.request_editor_resize(900, 800));
+    REQUIRE(calls == 1);
+    REQUIRE(seen_w == 900);
+    REQUIRE(seen_h == 800);
+
+    // A host that refuses is reported honestly (the editor keeps its size).
+    p.set_editor_resize_handler([](uint32_t, uint32_t) { return false; });
+    REQUIRE_FALSE(p.request_editor_resize(1280, 800));
+
+    // Cleared on editor close → back to a safe no-op refusal.
+    p.set_editor_resize_handler(nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(1280, 800));
+}
+
+// A processor-level request carries no editor identity. If two host windows
+// are open, refusing is safer than resizing the wrong one. Removing either
+// owner must leave the other live rather than erasing the shared processor
+// slot.
+TEST_CASE("Processor resize handlers are isolated per editor owner",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;
+    int first_owner = 0;
+    int second_owner = 0;
+    int first_calls = 0;
+    int second_calls = 0;
+
+    p.set_editor_resize_handler(&first_owner,
+                                [&](uint32_t, uint32_t) {
+                                    ++first_calls;
+                                    return true;
+                                });
+    REQUIRE(p.request_editor_resize(640, 480));
+    REQUIRE(first_calls == 1);
+
+    p.set_editor_resize_handler(&second_owner,
+                                [&](uint32_t, uint32_t) {
+                                    ++second_calls;
+                                    return true;
+                                });
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+    REQUIRE(first_calls == 1);
+    REQUIRE(second_calls == 0);
+
+    p.set_editor_resize_handler(&first_owner, nullptr);
+    REQUIRE(p.request_editor_resize(800, 600));
+    REQUIRE(second_calls == 1);
+
+    p.set_editor_resize_handler(&second_owner, nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+}
+
+// If abnormal teardown skips the adapter's normal handler clear, an allocator
+// may later place a new Processor at the same address. Construction must clear
+// that stale slot before the replacement can accidentally invoke the old host.
+TEST_CASE("Processor construction clears a stale editor-resize handler at a reused address",
+          "[view_bridge][editor-resize]") {
+    alignas(StubProcessor) std::byte storage[sizeof(StubProcessor)];
+    auto* first = new (storage) StubProcessor;
+    const void* key = first;
+    first->set_editor_resize_handler([](uint32_t, uint32_t) { return true; });
+    REQUIRE(pulp::format::detail::editor_resize_handlers().count(key) == 1);
+
+    // Simulate abnormal teardown: no set_editor_resize_handler(nullptr).
+    first->~StubProcessor();
+    REQUIRE(pulp::format::detail::editor_resize_handlers().count(key) == 1);
+
+    auto* replacement = new (storage) StubProcessor;
+    REQUIRE(replacement == key);
+    REQUIRE(pulp::format::detail::editor_resize_handlers().count(key) == 0);
+    REQUIRE_FALSE(replacement->request_editor_resize(640, 480));
+    replacement->~StubProcessor();
+}
+
+// A mode switch updates the reported preferred size + aspect while preserving
+// the processor's declared drag envelope.
+TEST_CASE("ViewBridge::set_preferred_size updates an in-bounds mode size",
+          "[view_bridge][editor-resize]") {
+    StubProcessor p;  // view_size() = {480,320, 320,240, 1024,768}
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    const auto& before = bridge.size_hints();
+    REQUIRE(before.preferred_width == 480);
+    REQUIRE(before.preferred_height == 320);
+
+    REQUIRE(bridge.set_preferred_size(900, 700));
+    const auto& after = bridge.size_hints();
+    REQUIRE(after.preferred_width == 900);
+    REQUIRE(after.preferred_height == 700);
+    // Aspect follows the new natural shape.
+    REQUIRE(after.aspect_ratio == Catch::Approx(900.0 / 700.0));
+    REQUIRE(after.min_width == before.min_width);
+    REQUIRE(after.min_height == before.min_height);
+    REQUIRE(after.max_width == before.max_width);
+    REQUIRE(after.max_height == before.max_height);
+    REQUIRE(after.preferred_width >= after.min_width);
+    REQUIRE(after.preferred_height >= after.min_height);
+    REQUIRE(after.preferred_width <= after.max_width);
+    REQUIRE(after.preferred_height <= after.max_height);
+
+    // Out-of-envelope modes are rejected without partial mutation.
+    REQUIRE_FALSE(bridge.set_preferred_size(900, 800));
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+    REQUIRE(bridge.size_hints().aspect_ratio ==
+            Catch::Approx(900.0 / 700.0));
+
+    // Zero dimensions are ignored (no accidental collapse).
+    REQUIRE_FALSE(bridge.set_preferred_size(0, 500));
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+}
+
+TEST_CASE("design-derived Forge bounds contain the 900x800 mode exactly",
+          "[view_bridge][editor-resize][forge]") {
+    const auto base = format::view_size_from_design(1280, 800, 640, 400);
+    REQUIRE(base.min_width == 640);
+    REQUIRE(base.min_height == 400);
+    REQUIRE(base.max_width == 2560);
+    REQUIRE(base.max_height == 1600);
+
+    class ForgeSizeProcessor final : public format::Processor {
+    public:
+        format::PluginDescriptor descriptor() const override {
+            return {"Forge", "Acme", "com.acme.forge", "1.0.0",
+                    format::PluginCategory::Effect};
+        }
+        void define_parameters(state::StateStore&) override {}
+        void prepare(const format::PrepareContext&) override {}
+        void process(audio::BufferView<float>&,
+                     const audio::BufferView<const float>&,
+                     midi::MidiBuffer&, midi::MidiBuffer&,
+                     const format::ProcessContext&) override {}
+        format::ViewSize view_size() const override {
+            return format::view_size_from_design(1280, 800, 640, 400);
+        }
+    } processor;
+    state::StateStore store;
+    format::ViewBridge bridge(processor, store);
+    REQUIRE(bridge.set_preferred_size(900, 800));
+    const auto& mode = bridge.size_hints();
+    REQUIRE(mode.preferred_width == 900);
+    REQUIRE(mode.preferred_height == 800);
+    REQUIRE(mode.min_width == base.min_width);
+    REQUIRE(mode.min_height == base.min_height);
+    REQUIRE(mode.max_width == base.max_width);
+    REQUIRE(mode.max_height == base.max_height);
+    REQUIRE(mode.aspect_ratio == Catch::Approx(900.0 / 800.0));
+}
+
+TEST_CASE("preferred-size host transaction publishes, accepts, and rolls back",
+          "[view_bridge][editor-resize][transaction]") {
+    StubProcessor p;
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+
+    bool callback_saw_proposed_hints = false;
+    REQUIRE(format::detail::negotiate_preferred_size(
+        bridge, 900, 700,
+        [&](uint32_t w, uint32_t h) {
+            callback_saw_proposed_hints =
+                w == 900 && h == 700 &&
+                bridge.size_hints().preferred_width == 900 &&
+                bridge.size_hints().preferred_height == 700 &&
+                bridge.size_hints().aspect_ratio ==
+                    Catch::Approx(900.0 / 700.0);
+            return true;
+        }));
+    REQUIRE(callback_saw_proposed_hints);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+
+    callback_saw_proposed_hints = false;
+    REQUIRE_FALSE(format::detail::negotiate_preferred_size(
+        bridge, 800, 600,
+        [&](uint32_t, uint32_t) {
+            callback_saw_proposed_hints =
+                bridge.size_hints().preferred_width == 800 &&
+                bridge.size_hints().preferred_height == 600;
+            return false;
+        }));
+    REQUIRE(callback_saw_proposed_hints);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+    REQUIRE(bridge.size_hints().aspect_ratio ==
+            Catch::Approx(900.0 / 700.0));
+
+    int invalid_request_calls = 0;
+    REQUIRE_FALSE(format::detail::negotiate_preferred_size(
+        bridge, 900, 800,
+        [&](uint32_t, uint32_t) {
+            ++invalid_request_calls;
+            return true;
+        }));
+    REQUIRE(invalid_request_calls == 0);
+    REQUIRE(bridge.size_hints().preferred_width == 900);
+    REQUIRE(bridge.size_hints().preferred_height == 700);
+}
+
+TEST_CASE("AU v2 editor resize commits only an exact native Cocoa size",
+          "[view_bridge][editor-resize][auv2]") {
+    StubProcessor p;
+    state::StateStore store;
+    format::ViewBridge bridge(p, store);
+
+    int native_calls = 0;
+    int viewport_commits = 0;
+    const void* owner = &native_calls;
+    format::au::editor_resize_detail::install_editor_resize_handler(
+        p, owner, bridge,
+        [&](uint32_t w, uint32_t h) {
+            ++native_calls;
+            return w == 900 && h == 700;
+        },
+        [&](uint32_t w, uint32_t h) {
+            ++viewport_commits;
+            CHECK(w == 900);
+            CHECK(h == 700);
+        });
+
+    REQUIRE(p.request_editor_resize(900, 700));
+    CHECK(native_calls == 1);
+    CHECK(viewport_commits == 1);
+    CHECK(bridge.size_hints().preferred_width == 900);
+    CHECK(bridge.size_hints().preferred_height == 700);
+
+    // Native refusal rolls the bridge back and never re-pins the viewport.
+    REQUIRE_FALSE(p.request_editor_resize(800, 600));
+    CHECK(native_calls == 2);
+    CHECK(viewport_commits == 1);
+    CHECK(bridge.size_hints().preferred_width == 900);
+    CHECK(bridge.size_hints().preferred_height == 700);
+
+    p.set_editor_resize_handler(owner, nullptr);
+    REQUIRE_FALSE(p.request_editor_resize(900, 700));
 }
