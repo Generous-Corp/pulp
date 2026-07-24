@@ -222,12 +222,12 @@ docs:
   - slug: example-timeline-phase1
     path: examples/timeline-phase1.md
     kind: guide
-    summary: Creative Timeline Engine Phase 1 audio-file and step-pattern worked examples
+    summary: Creative Timeline Engine audio-file, step-pattern, and multitrack graph/PDC worked examples
 
   - slug: timeline-sdk
     path: guides/timeline-sdk.md
     kind: guide
-    summary: Installed Creative Timeline Engine components, audited dependency closure, external consumer, and cheap project peek
+    summary: Creative Timeline Engine SDK, persistence, capture, playback, import, CLI, MCP, dependency closure, and project inspection
 
   - slug: example-pulp-gain
     path: examples/pulp-gain.md

@@ -21,11 +21,89 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
+
 namespace uc = pulp::cli::update_check;
 namespace mig = pulp::cli::migration;
+
+#ifdef _WIN32
+namespace {
+
+std::optional<std::wstring> read_windows_registry_string(
+    HKEY root, const wchar_t* subkey, const wchar_t* name) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subkey, 0, KEY_QUERY_VALUE, &key) !=
+        ERROR_SUCCESS) {
+        return std::nullopt;
+    }
+    DWORD type = 0;
+    DWORD byte_count = 0;
+    LONG result =
+        RegQueryValueExW(key, name, nullptr, &type, nullptr, &byte_count);
+    if (result != ERROR_SUCCESS ||
+        (type != REG_SZ && type != REG_EXPAND_SZ) ||
+        byte_count < sizeof(wchar_t)) {
+        RegCloseKey(key);
+        return std::nullopt;
+    }
+    std::wstring value(byte_count / sizeof(wchar_t), L'\0');
+    result = RegQueryValueExW(
+        key, name, nullptr, &type,
+        reinterpret_cast<BYTE*>(value.data()), &byte_count);
+    RegCloseKey(key);
+    if (result != ERROR_SUCCESS) return std::nullopt;
+    while (!value.empty() && value.back() == L'\0') value.pop_back();
+    return value;
+}
+
+bool write_windows_registry_string(HKEY root, const wchar_t* subkey,
+                                   const wchar_t* name,
+                                   const std::wstring& value) {
+    HKEY key = nullptr;
+    const LONG open_result = RegCreateKeyExW(
+        root, subkey, 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE,
+        nullptr, &key, nullptr);
+    if (open_result != ERROR_SUCCESS) return false;
+    const auto byte_count =
+        static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t));
+    const LONG write_result = RegSetValueExW(
+        key, name, 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(value.c_str()), byte_count);
+    RegCloseKey(key);
+    return write_result == ERROR_SUCCESS;
+}
+
+bool persist_windows_user_environment(const wchar_t* name,
+                                      const std::wstring& value) {
+    // REG_SZ is intentional: paths containing percent-delimited text must
+    // remain literal rather than being expanded as environment references.
+    if (!write_windows_registry_string(
+            HKEY_CURRENT_USER, L"Environment", name, value)) {
+        return false;
+    }
+
+    DWORD_PTR ignored = 0;
+    SendMessageTimeoutW(
+        HWND_BROADCAST, WM_SETTINGCHANGE, 0,
+        reinterpret_cast<LPARAM>(L"Environment"),
+        SMTO_ABORTIFHUNG, 5000, &ignored);
+    return true;
+}
+
+}  // namespace
+#endif
 
 // ── Cache location helpers (shared with pulp_cli.cpp dispatch path) ─────────
 
@@ -329,6 +407,71 @@ int cmd_upgrade(const std::vector<std::string>& args) {
                    outcome.status == S::no_home) {
             std::cout << "    (note) add " << install_dir.string()
                       << " to your PATH to run `pulp` directly.\n";
+        }
+
+        const auto mcp_binary =
+            pulp::cli::upgrade_install::installed_mcp_server(installed_payloads);
+        if (!mcp_binary.empty()) {
+#ifdef _WIN32
+            if (!(opt && std::string(opt) == "1")) {
+                const auto& native_mcp_binary = mcp_binary.native();
+                const auto current_mcp = read_windows_registry_string(
+                    HKEY_CURRENT_USER, L"Environment", L"PULP_MCP_BINARY")
+                                             .value_or(L"");
+                const auto managed_mcp = read_windows_registry_string(
+                    HKEY_CURRENT_USER, L"Software\\Pulp",
+                    L"ManagedPulpMcpBinary")
+                                             .value_or(L"");
+                const auto action =
+                    pulp::cli::upgrade_install::decide_windows_mcp_env_action(
+                        current_mcp, managed_mcp);
+                using A =
+                    pulp::cli::upgrade_install::WindowsMcpEnvAction;
+                if (action == A::preserve_user_override) {
+                    std::cout
+                        << "    Preserved user-managed PULP_MCP_BINARY.\n";
+                } else if (
+                    persist_windows_user_environment(
+                        L"PULP_MCP_BINARY", native_mcp_binary) &&
+                    write_windows_registry_string(
+                        HKEY_CURRENT_USER, L"Software\\Pulp",
+                        L"ManagedPulpMcpBinary", native_mcp_binary)) {
+                    _wputenv_s(
+                        L"PULP_MCP_BINARY", native_mcp_binary.c_str());
+                    std::cout << "    Configured PULP_MCP_BINARY for Claude Code.\n";
+                } else {
+                    std::cout << "    (note) set PULP_MCP_BINARY="
+                              << mcp_binary.string()
+                              << " before starting Claude Code.\n";
+                }
+            }
+#else
+            auto mcp_outcome = pulp::cli::upgrade_install::ensure_mcp_binary_env(
+                mcp_binary, shell_name,
+                home_env ? fs::path(home_env) : fs::path{},
+                opt && std::string(opt) == "1");
+            if (mcp_outcome.status == S::added) {
+                std::cout << "    Added PULP_MCP_BINARY to "
+                          << mcp_outcome.profile.string() << "\n"
+                          << "    Restart your shell or run: source "
+                          << mcp_outcome.profile.string() << "\n";
+            } else if (mcp_outcome.status == S::profile_unwritable ||
+                       mcp_outcome.status == S::no_home) {
+                std::cout << "    (note) set PULP_MCP_BINARY="
+                          << mcp_binary.string()
+                          << " before starting Claude Code.\n";
+            } else if (mcp_outcome.status == S::malformed_profile) {
+                std::cout
+                    << "    (note) preserved malformed Pulp MCP markers in "
+                    << mcp_outcome.profile.string() << ".\n"
+                    << "    Repair the block so it has exactly one managed "
+                       "start marker followed by one end marker,\n"
+                    << "    then rerun `pulp upgrade`; or set "
+                       "PULP_MCP_BINARY="
+                    << mcp_binary.string()
+                    << " before starting Claude Code.\n";
+            }
+#endif
         }
     }
 

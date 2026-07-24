@@ -1422,6 +1422,21 @@ TEST_CASE("resolve_standalone_sdk handles custom sdk_path and checkout local cac
     REQUIRE(installed_checkout->detail.find("(local cache)") != std::string::npos);
 }
 
+TEST_CASE("doctor reports a missing configured MCP path without claiming it was found",
+          "[project-command][doctor][mcp]") {
+    TempDir tmp;
+    const auto missing = tmp.path / "missing" / "pulp-mcp";
+    ScopedEnv configured("PULP_MCP_BINARY", missing.string());
+
+    const auto checks = run_doctor_checks({}, true, "pulp-mcp");
+    const auto& mcp = require_doctor_check(checks, "pulp-mcp");
+
+    REQUIRE_FALSE(mcp.passed);
+    REQUIRE(mcp.detail.find(missing.string() + " does not exist") !=
+            std::string::npos);
+    REQUIRE(mcp.detail.find("found but") == std::string::npos);
+}
+
 TEST_CASE("doctor WidgetBridge generated API passes for the checked-in generated files",
           "[project-command][doctor][widget-bridge]") {
     auto checks = run_doctor_checks(fs::path(PULP_SOURCE_DIR), false, "WidgetBridge");

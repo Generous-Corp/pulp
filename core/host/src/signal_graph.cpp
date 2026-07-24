@@ -2193,6 +2193,11 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
     return prepare_impl_(sample_rate, max_block_size, nullptr);
 }
 
+NodeId SignalGraph::last_prepare_custom_failure_node() const {
+    GraphMutationLock mutation_lock(*this);
+    return last_prepare_custom_failure_node_;
+}
+
 bool SignalGraph::prepare_impl_(
     double sample_rate, int max_block_size,
     const PrepareLifecycleObserver* lifecycle_observer) {
@@ -2214,6 +2219,7 @@ bool SignalGraph::prepare_impl_(
     // never invert order with the reader-drain handshake.
     GraphMutationLock mutation_lock(*this);
     ++authoring_generation_;
+    last_prepare_custom_failure_node_ = 0;
 
     cancel_swap_edit_locked_();
 
@@ -2265,10 +2271,24 @@ bool SignalGraph::prepare_impl_(
         }
         if (!n.custom_instance) {
             n.custom_instance = make_custom_instance(*type);
+            if (!n.custom_instance) {
+                last_prepare_custom_failure_node_ = n.id;
+                runtime::log_error(
+                    "SignalGraph: failed to create instance for custom node '{}'",
+                    n.name);
+                return false;
+            }
         }
         if (n.custom_instance) {
             if (n.custom_state_pending && type->load_state) {
-                type->load_state(n.custom_instance.get(), n.custom_state_blob);
+                if (!type->load_state(n.custom_instance.get(),
+                                      n.custom_state_blob)) {
+                    last_prepare_custom_failure_node_ = n.id;
+                    runtime::log_error(
+                        "SignalGraph: failed to restore state for custom node '{}'",
+                        n.name);
+                    return false;
+                }
                 n.custom_state_pending = false;
             }
             if (type->prepare) {

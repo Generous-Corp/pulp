@@ -473,6 +473,13 @@ device implementations, routing, audio, format adapters, or UI. Add those in
 their owning modules instead of widening the command and persistence core
 opportunistically.
 
+`core/timeline/PulpTimelineSources.cmake` is the canonical production source
+inventory. Desktop targets consume its portable and native lists; WAM and
+WebCLAP consume only the portable list. Add a new translation unit to that
+manifest instead of duplicating source lists in platform CMake, and keep
+`web_timeline_source_closure_check.py` green so an unclassified file cannot
+silently disappear from a runtime.
+
 ## Validation
 
 Build and run `pulp-test-timeline-model`, the automation curve and lane suites,

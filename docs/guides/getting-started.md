@@ -64,8 +64,9 @@ If you plan to use the Pulp [Claude Code plugin](claude-code-plugin.md), install
 the CLI **before** `claude plugin install pulp`. The plugin's MCP server is
 `pulp-mcp`, which ships in the CLI tarball into `~/.pulp/bin/` on macOS/Linux
 or `%USERPROFILE%\.pulp\bin\` on Windows. The plugin itself ships no binaries
-and locates `pulp-mcp` on `PATH`. Reversing the order leaves the plugin's
-`/mcp` panel reporting `pulp-mcp: cannot locate binary` on first connect.
+and the installer sets `PULP_MCP_BINARY` to the full server path without
+depending on Claude Code's inherited `PATH`. Reversing the order leaves the
+plugin's `/mcp` panel reporting a missing variable on first connect.
 
 The example below uses the macOS/Linux installer. On Windows, use the PowerShell
 installer from [Quick Install](#quick-install) for step 1.
@@ -74,7 +75,7 @@ installer from [Quick Install](#quick-install) for step 1.
 # 1. CLI first (drops pulp-mcp into ~/.pulp/bin/ and onto PATH).
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 
-# 2. Plugin second (its MCP launcher resolves pulp-mcp from PATH).
+# 2. Start a fresh shell, then install the plugin (it uses PULP_MCP_BINARY).
 claude plugin marketplace add Generous-Corp/pulp && claude plugin install pulp
 
 # 3. Verify the wiring.
@@ -92,6 +93,24 @@ Then create your first plugin:
 pulp create my-plugin           # scaffolds, builds the default native outputs, and tests
 pulp run                     # launch the standalone host
 ```
+
+## Start with the Creative Timeline Engine
+
+The same installation includes the headless Timeline CLI. Use `pulp seq` to
+validate, inspect, and transactionally edit canonical project JSON, and use
+`pulp render` for deterministic device-free arrangement renders:
+
+```bash
+pulp seq validate song.pulpseq.json
+pulp seq explain song.pulpseq.json
+pulp render song.pulpseq.json --out song.wav
+```
+
+For an embedded editor, recorder, or playback engine, start with the
+[Creative Timeline Engine SDK guide](timeline-sdk.md). For a source example,
+see the [multitrack arrangement](../examples/timeline-phase1.md). Claude Code
+users can ask the shipped Timeline skill to inspect or edit a project; it uses
+the same validation, command, explain, and render implementation through MCP.
 
 That's it — three commands from zero to a working plugin.
 

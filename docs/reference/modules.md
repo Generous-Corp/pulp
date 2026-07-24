@@ -859,6 +859,22 @@ platform metadata stay outside Timeline. Durable device definition and
 configuration needed for project save/load will be future document-owned state
 keyed by placement identity.
 
+`Take` and `TakeLane` keep recorded source identity and comp intent in the
+document. Takes reference sealed assets in absolute sample time; comp segments
+select normalized, non-overlapping ranges from those takes. Tracks retain all
+lanes but select at most one active lane for playback, with zero meaning the
+original arrangement. `InsertTakeLane`, `InsertTake`, `SetRecordArm`,
+`SetActiveTakeLane`, and `SetTakeComp` use the same transactional
+precondition/journal/undo machinery as clip and automation edits. Active lanes
+and selected takes cannot be removed until their references are cleared.
+
+`TrackFreeze` is an optional immutable selection of a sealed audio asset and
+the content hash of the render plan that produced it. It supersedes arrangement
+or comp playback without deleting authored clips, takes, automation, or device
+placements. Publish `CreateAsset` before `SetTrackFreeze` in one transaction;
+clear the freeze before removing the asset. A journal replay selects the sealed
+artifact and never performs a hidden render.
+
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. An audio asset may also carry typed
 `AudioLoopInfo`: musical length and meter, one-shot intent, MIDI root note,
@@ -1032,6 +1048,21 @@ program must name the same compiled tempo-map identity, and overlapping logical
 notes on one channel/pitch are reference-counted so the physical note-off waits
 for the last overlap. Timeline commands and persistence preserve the clip gain
 and fade properties consumed by the audio compiler.
+
+`capture_engine.hpp` is the bounded realtime recording boundary. `prepare()`
+allocates fixed take slots, audio storage, MIDI storage, and command/event
+queues from caller-supplied limits; `process()` only mutates those prepared
+buffers. Completed handles stay immutable until an explicit `ReleaseTake`.
+Control-side code drains events, copies captured data, and surfaces queue or
+capacity failures from `CaptureEngineStats`.
+
+`recording_commit.hpp` seals captured or retrospective audio into WAV bytes, a
+content-hashed `MediaAsset`, a `Take`, and ordered ordinary Timeline commands.
+`midi_capture_materializer.hpp` converts captured MIDI frames through the exact
+capture-rate `CompiledTempoMap` into note content while retaining MPE expression
+as a sidecar. Applications submit the resulting commands through
+`DocumentSession` and publish media bytes separately; the callback never edits
+the project or journal.
 
 ## sequence
 

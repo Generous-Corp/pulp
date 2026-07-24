@@ -26,6 +26,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -802,33 +803,241 @@ TEST_CASE("Baked processor prepare() re-inits stateful Custom instance state",
     }
 }
 
-TEST_CASE("load_baked refuses a signed plan whose Custom node carries state",
-          "[host][graph][bake][codec]") {
-    // The stateless-only v1 restriction: even a validly-signed plan with a small,
-    // in-cap custom_state must be refused at the LOAD path, never silently loaded.
-    pulp::host::BakedPlan plan;
-    plan.input_channels = 1;
-    plan.output_channels = 1;
-    pulp::host::BakedPlan::Node cn;
-    cn.id = 1;
-    cn.type = pulp::host::NodeType::Custom;
-    cn.num_input_ports = 1;
-    cn.num_output_ports = 1;
-    cn.custom_type_id = "x";
-    cn.custom_version = 1;
-    cn.custom_state = {0xDE, 0xAD, 0xBE, 0xEF};  // small, in-cap, non-empty
-    plan.nodes.push_back(std::move(cn));
+TEST_CASE("signed bake preserves stateful Custom nodes across disk and prepare",
+          "[host][graph][bake][codec][state]") {
+    struct GainState {
+        float gain = 0.0f;
+    };
+    CustomNodeType type;
+    type.type_id = "pulp.test.stateful-bake-gain";
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.lowerable = true;
+    type.create = []() -> void* { return new GainState(); };
+    type.destroy = [](void* state) { delete static_cast<GainState*>(state); };
+    type.reset = [](void* state) { static_cast<GainState*>(state)->gain = 0.0f; };
+    type.save_state = [](void* state) {
+        std::vector<std::uint8_t> bytes(sizeof(float));
+        const float gain = static_cast<GainState*>(state)->gain;
+        std::memcpy(bytes.data(), &gain, sizeof(gain));
+        return bytes;
+    };
+    type.load_state = [](void* state, std::span<const std::uint8_t> bytes) {
+        if (bytes.size() != sizeof(float)) return false;
+        float gain = 0.0f;
+        std::memcpy(&gain, bytes.data(), sizeof(gain));
+        if (!std::isfinite(gain) || gain < 0.0f || gain > 1.0f) return false;
+        static_cast<GainState*>(state)->gain = gain;
+        return true;
+    };
+    type.process_instance =
+        [](void* state, pulp::audio::BufferView<float>& output,
+           const pulp::audio::BufferView<const float>& input, int frames) {
+            auto* gain_state = static_cast<GainState*>(state);
+            for (int frame = 0; frame < frames; ++frame) {
+                output.channel_ptr(0)[frame] =
+                    input.channel_ptr(0)[frame] * gain_state->gain;
+            }
+            gain_state->gain = std::min(1.0f, gain_state->gain + 0.1f);
+        };
+
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(type));
+    const auto input = graph.add_input_node(1, "In");
+    const auto custom = graph.add_custom_node(type.type_id, type.version, "Stateful gain");
+    const auto output = graph.add_output_node(1, "Out");
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+
+    float initial_gain = 0.75f;
+    std::vector<std::uint8_t> initial_state(sizeof(initial_gain));
+    std::memcpy(initial_state.data(), &initial_gain, sizeof(initial_gain));
+    REQUIRE(graph.set_custom_node_state(custom, initial_state));
+    REQUIRE(graph.prepare(kSr, kFrames));
+
+    // Advance live instance state after the authored blob was staged. The bake
+    // writer must retain the authored state rather than race save_state() against
+    // a potentially-live audio callback.
+    const std::vector<std::vector<float>> ones{
+        std::vector<float>(static_cast<std::size_t>(kFrames), 1.0f)};
+    const auto live = run_graph(graph, kFrames, ones, 1);
+    CHECK(live[0][0] == 0.75f);
+
+    const auto plan_result = pulp::host::bake_to_plan(graph);
+    REQUIRE(plan_result.accepted);
+    REQUIRE(plan_result.plan);
+    const auto plan_node = std::find_if(
+        plan_result.plan->nodes.begin(), plan_result.plan->nodes.end(),
+        [custom](const pulp::host::BakedPlan::Node& node) {
+            return node.id == custom;
+        });
+    REQUIRE(plan_node != plan_result.plan->nodes.end());
+    REQUIRE(plan_node->custom_state.size() == sizeof(float));
+    float saved_gain = 0.0f;
+    std::memcpy(&saved_gain, plan_node->custom_state.data(), sizeof(saved_gain));
+    CHECK(saved_gain == 0.75f);
 
     std::array<std::uint8_t, 32> seed{};
     for (std::size_t i = 0; i < seed.size(); ++i) seed[i] = static_cast<std::uint8_t>(i + 11);
     const auto kp = pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
     REQUIRE(kp.has_value());
-    const auto bytes = pulp::host::write_baked_signed(plan, kp->private_key);
+    const auto bytes =
+        pulp::host::write_baked_signed(*plan_result.plan, kp->private_key);
     REQUIRE_FALSE(bytes.empty());
     pulp::host::BakedTrust trust;
     trust.trusted_public_keys.push_back(kp->public_key);
 
-    const auto r = pulp::host::load_baked(bytes, trust, {});
-    CHECK_FALSE(r.accepted);
-    CHECK(r.reason == LowerRejectReason::StatefulCustomNotYetLoadable);
+    auto loaded = pulp::host::load_baked(bytes, trust, {type});
+    REQUIRE(loaded.accepted);
+    REQUIRE(loaded.processor);
+    loaded.processor->prepare(make_prepare_ctx(1));
+    auto restored = run_baked(*loaded.processor, kFrames, ones, 1);
+    CHECK(restored[0][0] == 0.75f);
+
+    // Host re-prepare runs the type's reset hook, then reapplies authenticated
+    // initial state. If the ordering regresses, this block becomes silence.
+    loaded.processor->prepare(make_prepare_ctx(1));
+    restored = run_baked(*loaded.processor, kFrames, ones, 1);
+    CHECK(restored[0][0] == 0.75f);
+
+    const auto missing_type = pulp::host::load_baked(bytes, trust, {});
+    CHECK_FALSE(missing_type.accepted);
+    CHECK(missing_type.reason == LowerRejectReason::CustomNotYetLowerable);
+
+    auto null_factory_type = type;
+    null_factory_type.create = []() -> void* { return nullptr; };
+    const auto null_factory =
+        pulp::host::load_baked(bytes, trust, {null_factory_type});
+    CHECK_FALSE(null_factory.accepted);
+    CHECK(null_factory.reason ==
+          LowerRejectReason::StatefulCustomNotYetLoadable);
+    CHECK(null_factory.offending_node == custom);
+
+    const auto duplicate_registry =
+        pulp::host::load_baked(bytes, trust, {type, type});
+    CHECK_FALSE(duplicate_registry.accepted);
+    CHECK(duplicate_registry.reason == LowerRejectReason::CodecRejected);
+
+    auto malformed_plan = *plan_result.plan;
+    auto malformed_node = std::find_if(
+        malformed_plan.nodes.begin(), malformed_plan.nodes.end(),
+        [custom](const pulp::host::BakedPlan::Node& node) {
+            return node.id == custom;
+        });
+    REQUIRE(malformed_node != malformed_plan.nodes.end());
+    const float out_of_contract_gain = 2.0f;
+    malformed_node->custom_state.resize(sizeof(out_of_contract_gain));
+    std::memcpy(malformed_node->custom_state.data(), &out_of_contract_gain,
+                sizeof(out_of_contract_gain));
+    const auto malformed_bytes =
+        pulp::host::write_baked_signed(malformed_plan, kp->private_key);
+    REQUIRE_FALSE(malformed_bytes.empty());
+    const auto malformed =
+        pulp::host::load_baked(malformed_bytes, trust, {type});
+    CHECK_FALSE(malformed.accepted);
+    CHECK(malformed.reason ==
+          LowerRejectReason::StatefulCustomNotYetLoadable);
+    CHECK(malformed.offending_node == custom);
+
+    auto two_node_plan = *plan_result.plan;
+    const auto output_node = std::find_if(
+        two_node_plan.nodes.begin(), two_node_plan.nodes.end(),
+        [](const pulp::host::BakedPlan::Node& node) {
+            return node.type == pulp::host::NodeType::AudioOutput;
+        });
+    REQUIRE(output_node != two_node_plan.nodes.end());
+    const auto old_output_edge = std::find_if(
+        two_node_plan.connections.begin(), two_node_plan.connections.end(),
+        [custom, output_id = output_node->id](
+            const pulp::host::BakedPlan::Conn& connection) {
+            return connection.src_node == custom &&
+                   connection.dst_node == output_id;
+        });
+    REQUIRE(old_output_edge != two_node_plan.connections.end());
+    const auto output_id = output_node->id;
+    two_node_plan.connections.erase(old_output_edge);
+    const auto second_custom = output_id + 1;
+    pulp::host::BakedPlan::Node second = *plan_node;
+    second.id = second_custom;
+    second.custom_state.resize(sizeof(out_of_contract_gain));
+    std::memcpy(second.custom_state.data(), &out_of_contract_gain,
+                sizeof(out_of_contract_gain));
+    two_node_plan.nodes.push_back(std::move(second));
+    two_node_plan.connections.push_back(
+        {custom, 0, second_custom, 0, false});
+    two_node_plan.connections.push_back(
+        {second_custom, 0, output_id, 0, false});
+    const auto two_node_bytes =
+        pulp::host::write_baked_signed(two_node_plan, kp->private_key);
+    REQUIRE_FALSE(two_node_bytes.empty());
+    const auto later_malformed =
+        pulp::host::load_baked(two_node_bytes, trust, {type});
+    CHECK_FALSE(later_malformed.accepted);
+    CHECK(later_malformed.reason ==
+          LowerRejectReason::StatefulCustomNotYetLoadable);
+    CHECK(later_malformed.offending_node == second_custom);
+}
+
+TEST_CASE("signed bake restores meaningful zero-byte Custom state",
+          "[host][graph][bake][codec][state]") {
+    struct EmptyState {
+        float gain = 0.0f;
+    };
+    CustomNodeType type;
+    type.type_id = "pulp.test.empty-bake-state";
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.lowerable = true;
+    type.create = []() -> void* { return new EmptyState(); };
+    type.destroy = [](void* state) { delete static_cast<EmptyState*>(state); };
+    type.reset = [](void* state) { static_cast<EmptyState*>(state)->gain = 0.0f; };
+    type.load_state = [](void* state, std::span<const std::uint8_t> bytes) {
+        if (!bytes.empty()) return false;
+        static_cast<EmptyState*>(state)->gain = 0.4f;
+        return true;
+    };
+    type.process_instance =
+        [](void* state, pulp::audio::BufferView<float>& output,
+           const pulp::audio::BufferView<const float>& input, int frames) {
+            const float gain = static_cast<EmptyState*>(state)->gain;
+            for (int frame = 0; frame < frames; ++frame)
+                output.channel_ptr(0)[frame] =
+                    input.channel_ptr(0)[frame] * gain;
+        };
+
+    pulp::host::BakedPlan plan;
+    plan.input_channels = 1;
+    plan.output_channels = 1;
+    plan.nodes.push_back(
+        {1, pulp::host::NodeType::AudioInput, 0, 1, 1.0f, {}, 0, {}});
+    plan.nodes.push_back(
+        {2, pulp::host::NodeType::Custom, 1, 1, 1.0f,
+         type.type_id, type.version, {}});
+    plan.nodes.push_back(
+        {3, pulp::host::NodeType::AudioOutput, 1, 0, 1.0f, {}, 0, {}});
+    plan.connections.push_back({1, 0, 2, 0, false});
+    plan.connections.push_back({2, 0, 3, 0, false});
+
+    std::array<std::uint8_t, 32> seed{};
+    for (std::size_t i = 0; i < seed.size(); ++i)
+        seed[i] = static_cast<std::uint8_t>(i + 41);
+    const auto kp =
+        pulp::runtime::ed25519_keypair_from_seed(seed.data(), seed.size());
+    REQUIRE(kp);
+    const auto bytes =
+        pulp::host::write_baked_signed(plan, kp->private_key);
+    REQUIRE_FALSE(bytes.empty());
+    pulp::host::BakedTrust trust;
+    trust.trusted_public_keys.push_back(kp->public_key);
+
+    auto loaded = pulp::host::load_baked(bytes, trust, {type});
+    REQUIRE(loaded.accepted);
+    REQUIRE(loaded.processor);
+    loaded.processor->prepare(make_prepare_ctx(1));
+    const std::vector<std::vector<float>> ones{
+        std::vector<float>(static_cast<std::size_t>(kFrames), 1.0f)};
+    const auto restored = run_baked(*loaded.processor, kFrames, ones, 1);
+    CHECK(restored[0][0] == 0.4f);
 }

@@ -38,7 +38,8 @@ const char* lower_reason_str(pulp::host::LowerRejectReason r) {
         case R::CustomTransportNotLowerable: return "a transport-sensitive Custom node";
         case R::NonAudioLaneNotLowerable: return "a MIDI/automation/sidechain node or edge";
         case R::CodecRejected: return "codec/verify rejected";
-        case R::StatefulCustomNotYetLoadable: return "a stateful Custom node (unsupported on disk)";
+        case R::StatefulCustomNotYetLoadable:
+            return "a stateful Custom node could not be restored";
     }
     return "unknown";
 }
