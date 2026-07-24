@@ -309,6 +309,39 @@ TEST_CASE("external sync uses precise host ticks for song position",
     REQUIRE(render_position(false, true) == 0);
 }
 
+TEST_CASE("external sync continues from a fractional host position that rounds to zero",
+          "[playback][external-sync]") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.frame_count = 64;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    transport.transport_started = true;
+    auto& range = transport.ranges[0];
+    range.frame_count = 64;
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {1};
+    range.host_beat_mapping = true;
+    range.host_tick_start = 0.25;
+    range.host_tick_end = 1.25;
+    range.has_precise_host_ticks = true;
+
+    midi::MidiBuffer output;
+    output.reserve(8);
+    output.set_realtime_capacity_limit();
+    ExternalSyncOutputConfig config;
+    config.emit_mtc = false;
+    REQUIRE(ExternalSyncOutput(config).process(transport, output).code ==
+            ExternalSyncOutputCode::Complete);
+    REQUIRE(output.size() >= 2);
+    REQUIRE(output[0].data()[0] == 0xf2);
+    REQUIRE(output[0].data()[1] == 0);
+    REQUIRE(output[0].data()[2] == 0);
+    REQUIRE(output[1].data()[0] == 0xfb);
+}
+
 TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
           "[playback][external-sync]") {
     const auto map = constant_map();

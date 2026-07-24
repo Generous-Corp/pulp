@@ -231,7 +231,7 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
             ? static_cast<long double>(first_range.host_tick_start)
             : static_cast<long double>(first_tick.value);
     if (config_.emit_midi_clock && transport.transport_started) {
-        if (first_tick.value != 0) {
+        if (first_position_tick != 0.0L) {
             if (!append_song_position(output, first_position_tick, 0,
                                       config_.max_messages_per_block, result) ||
                 !append_short(output, 0xfb, 0, 0, config_.max_messages_per_block, result))
