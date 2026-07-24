@@ -11,6 +11,7 @@
 #include <bit>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 using namespace pulp;
 using namespace pulp::playback;
@@ -205,4 +206,35 @@ TEST_CASE("MIDI capture materialization requires the tempo-map sample rate") {
     auto invalid_rate = materialize_midi_capture(events, config);
     REQUIRE_FALSE(invalid_rate);
     REQUIRE(invalid_rate.error() == MidiCaptureMaterializationError::InvalidConfig);
+}
+
+TEST_CASE("MIDI capture pairs large overlapping note stacks in linear FIFO order") {
+    const auto map = midi_map();
+    constexpr std::size_t note_count = 4'096;
+    std::vector<CapturedMidiEvent> events;
+    events.reserve(note_count * 2);
+    for (std::size_t index = 0; index < note_count; ++index)
+        events.push_back(
+            at(midi::MidiEvent::note_on(0, 60, static_cast<std::uint8_t>(1 + index % 127)), index));
+    for (std::size_t index = 0; index < note_count; ++index)
+        events.push_back(at(midi::MidiEvent::note_off(0, 60), note_count + index));
+
+    MidiCaptureMaterializationConfig config;
+    config.tempo_map = &map;
+    config.capture_sample_rate = {100, 1};
+    config.frame_count = note_count * 2 + 1;
+    config.minimum_note_duration = {1};
+    config.next_item_id = 1;
+
+    auto materialized = materialize_midi_capture(events, config);
+
+    REQUIRE(materialized);
+    REQUIRE(materialized->notes.notes().size() == note_count);
+    const auto expected_velocity = [](std::uint8_t velocity) {
+        return static_cast<std::uint16_t>((static_cast<std::uint32_t>(velocity) * 65'535u + 63u) /
+                                          127u);
+    };
+    REQUIRE(materialized->notes.notes().front().velocity == expected_velocity(1));
+    REQUIRE(materialized->notes.notes().back().velocity ==
+            expected_velocity(static_cast<std::uint8_t>(1 + (note_count - 1) % 127)));
 }

@@ -49,6 +49,8 @@
 #include <unistd.h>
 #if defined(__APPLE__)
 #include <sys/acl.h>
+#elif defined(__linux__)
+#include <sys/xattr.h>
 #endif
 #endif
 
@@ -462,6 +464,23 @@ bool write_wav_atomic(const fs::path& destination,
             }
         }
     }
+#elif defined(__linux__)
+    std::optional<std::vector<std::uint8_t>> destination_acl;
+    if (destination_exists) {
+        constexpr auto acl_name = "system.posix_acl_access";
+        errno = 0;
+        const auto acl_size = ::getxattr(destination.c_str(), acl_name, nullptr, 0);
+        if (acl_size < 0) {
+            if (errno != ENODATA)
+                return false;
+        } else {
+            destination_acl.emplace(static_cast<std::size_t>(acl_size));
+            const auto copied = ::getxattr(destination.c_str(), acl_name, destination_acl->data(),
+                                           destination_acl->size());
+            if (copied != acl_size)
+                return false;
+        }
+    }
 #endif
 
     int reservation = -1;
@@ -503,6 +522,14 @@ bool write_wav_atomic(const fs::path& destination,
 #if defined(__APPLE__)
         if (complete && destination_acl != nullptr)
             complete = ::acl_set_fd_np(reservation, destination_acl, ACL_TYPE_EXTENDED) == 0;
+#elif defined(__linux__)
+        constexpr auto acl_name = "system.posix_acl_access";
+        if (complete && destination_acl) {
+            complete = ::fsetxattr(reservation, acl_name, destination_acl->data(),
+                                   destination_acl->size(), 0) == 0;
+        } else if (complete && ::fremovexattr(reservation, acl_name) != 0 && errno != ENODATA) {
+            complete = false;
+        }
 #endif
     }
 #if defined(__APPLE__)

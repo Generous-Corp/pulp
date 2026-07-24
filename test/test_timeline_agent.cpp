@@ -9,11 +9,18 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
+
+#if defined(__linux__)
+#include <cerrno>
+#include <sys/xattr.h>
+#include <unistd.h>
+#endif
 
 using Catch::Matchers::WithinAbs;
 using namespace pulp;
@@ -71,6 +78,42 @@ void require_no_render_temporaries(const std::filesystem::path& directory,
     for (const auto& entry : std::filesystem::directory_iterator(directory))
         REQUIRE_FALSE(entry.path().filename().string().starts_with(prefix));
 }
+
+#if defined(__linux__)
+std::vector<std::uint8_t> test_posix_acl() {
+    std::vector<std::uint8_t> bytes;
+    const auto append_u16 = [&bytes](std::uint16_t value) {
+        bytes.push_back(static_cast<std::uint8_t>(value));
+        bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+    };
+    const auto append_u32 = [&bytes](std::uint32_t value) {
+        for (int byte = 0; byte != 4; ++byte)
+            bytes.push_back(static_cast<std::uint8_t>(value >> (byte * 8)));
+    };
+    const auto append_entry = [&](std::uint16_t tag, std::uint16_t permissions, std::uint32_t id) {
+        append_u16(tag);
+        append_u16(permissions);
+        append_u32(id);
+    };
+    append_u32(0x0002); // Linux POSIX ACL xattr format version.
+    append_entry(0x0001, 0x0006, 0xffff'ffff); // owner: rw-
+    append_entry(0x0002, 0x0004,
+                 static_cast<std::uint32_t>(::getuid()) + 1); // named user: r--
+    append_entry(0x0004, 0x0000, 0xffff'ffff); // owning group: ---
+    append_entry(0x0010, 0x0004, 0xffff'ffff); // mask: r--
+    append_entry(0x0020, 0x0000, 0xffff'ffff); // other: ---
+    return bytes;
+}
+
+std::vector<std::uint8_t> read_posix_acl(const std::filesystem::path& path) {
+    constexpr auto name = "system.posix_acl_access";
+    const auto size = ::getxattr(path.c_str(), name, nullptr, 0);
+    REQUIRE(size >= 0);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    REQUIRE(::getxattr(path.c_str(), name, bytes.data(), bytes.size()) == size);
+    return bytes;
+}
+#endif
 
 std::string project_json(const std::filesystem::path& source, std::uint64_t frame_count = 32,
                          ContentHash content_hash = {}, bool include_duration = true,
@@ -237,6 +280,31 @@ TEST_CASE("timeline agent atomically publishes rendered WAV files") {
     REQUIRE(std::filesystem::is_regular_file(blocked_path / "sentinel"));
     require_no_render_temporaries(temp.path(), blocked_path);
 }
+
+#if defined(__linux__)
+TEST_CASE("timeline agent atomic render preserves a Linux POSIX ACL") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    const auto output_path = temp.path() / "output.wav";
+    write_text_file(output_path, "existing destination");
+    const auto acl = test_posix_acl();
+    constexpr auto acl_name = "system.posix_acl_access";
+    const auto acl_result = ::setxattr(output_path.c_str(), acl_name, acl.data(), acl.size(), 0);
+    if (acl_result != 0 && (errno == ENOTSUP || errno == EOPNOTSUPP))
+        SKIP("temporary filesystem does not support POSIX ACLs");
+    REQUIRE(acl_result == 0);
+    const auto expected_acl = read_posix_acl(output_path);
+
+    REQUIRE(tools::timeline::render(project_json(source_path), output_path.string()));
+    REQUIRE(read_posix_acl(output_path) == expected_acl);
+    require_no_render_temporaries(temp.path(), output_path);
+}
+#endif
 
 TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     const auto schema = tools::timeline::schema();

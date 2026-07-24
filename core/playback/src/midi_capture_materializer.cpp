@@ -13,6 +13,19 @@ struct ActiveNote {
     std::uint8_t velocity = 0;
 };
 
+struct ActiveNoteQueue {
+    std::vector<ActiveNote> notes;
+    std::size_t next = 0;
+
+    bool empty() const noexcept {
+        return next == notes.size();
+    }
+
+    ActiveNote pop_front() noexcept {
+        return notes[next++];
+    }
+};
+
 struct RawNote {
     std::uint64_t start = 0;
     std::uint64_t end = 0;
@@ -74,7 +87,7 @@ materialize_midi_capture(std::span<const CapturedMidiEvent> events,
                      [](const CapturedMidiEvent& lhs, const CapturedMidiEvent& rhs) {
                          return lhs.take_frame < rhs.take_frame;
                      });
-    std::array<std::vector<ActiveNote>, 16 * 128> active;
+    std::array<ActiveNoteQueue, 16 * 128> active;
     std::array<std::uint32_t, 16> active_on_channel{};
     std::vector<RawNote> raw_notes;
     std::vector<CapturedMidiEvent> expression;
@@ -84,14 +97,13 @@ materialize_midi_capture(std::span<const CapturedMidiEvent> events,
         const auto channel = captured.event.channel();
         if (captured.event.is_note_on() && captured.event.velocity() != 0) {
             const auto key = static_cast<std::size_t>(channel) * 128 + captured.event.note();
-            active[key].push_back({captured.take_frame, captured.event.velocity()});
+            active[key].notes.push_back({captured.take_frame, captured.event.velocity()});
             ++active_on_channel[channel];
         } else if (captured.event.is_note_off() ||
                    (captured.event.is_note_on() && captured.event.velocity() == 0)) {
             const auto key = static_cast<std::size_t>(channel) * 128 + captured.event.note();
             if (!active[key].empty()) {
-                const auto note = active[key].front();
-                active[key].erase(active[key].begin());
+                const auto note = active[key].pop_front();
                 --active_on_channel[channel];
                 raw_notes.push_back({note.frame, captured.take_frame, note.velocity,
                                      captured.event.note(), channel});
@@ -103,8 +115,10 @@ materialize_midi_capture(std::span<const CapturedMidiEvent> events,
     for (std::size_t key = 0; key < active.size(); ++key) {
         const auto channel = static_cast<std::uint8_t>(key / 128);
         const auto pitch = static_cast<std::uint8_t>(key % 128);
-        for (const auto& note : active[key])
-            raw_notes.push_back({note.frame, config.frame_count, note.velocity, pitch, channel});
+        const auto& queue = active[key];
+        for (auto index = queue.next; index < queue.notes.size(); ++index)
+            raw_notes.push_back({queue.notes[index].frame, config.frame_count,
+                                 queue.notes[index].velocity, pitch, channel});
     }
     std::sort(raw_notes.begin(), raw_notes.end(), [](const RawNote& lhs, const RawNote& rhs) {
         if (lhs.start != rhs.start)
