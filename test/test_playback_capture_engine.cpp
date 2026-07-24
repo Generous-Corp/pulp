@@ -239,6 +239,54 @@ TEST_CASE("capture engine accumulates one immutable take per loop pass") {
                         [](float sample) { return sample == 2.0f; }));
 }
 
+TEST_CASE("capture engine finalizes a fractional host-loop pass at its explicit wrap") {
+    const auto map = constant_map();
+    CaptureEngine engine;
+    auto config = capture_config(101, 2);
+    config.maximum_take_frames = 202;
+    REQUIRE(engine.prepare(std::move(config)));
+
+    CaptureCommand start;
+    start.type = CaptureCommandType::Start;
+    start.sequence = 9;
+    start.session.loop_enabled = true;
+    start.session.loop_start = {0};
+    start.session.loop_end = {100};
+    REQUIRE(engine.enqueue_command(start));
+
+    audio::Buffer<float> input(1, 101);
+    audio::Buffer<float> output(1, 101);
+    midi::MidiBuffer midi;
+    TransportSnapshot before_wrap;
+    before_wrap.tempo_map = &map;
+    before_wrap.sample_rate = map.sample_rate();
+    before_wrap.frame_count = 101;
+    before_wrap.is_playing = true;
+    before_wrap.range_count = 1;
+    before_wrap.ranges[0].frame_count = 101;
+    before_wrap.ranges[0].timeline_sample_start = {0};
+    before_wrap.ranges[0].timeline_tick_end = {1};
+    auto output_view = output.view();
+    REQUIRE(engine.process(read_view(input), output_view, midi, before_wrap) ==
+            CaptureProcessResult::Ok);
+
+    TransportSnapshot after_wrap = before_wrap;
+    after_wrap.ranges[0].frame_count = 1;
+    after_wrap.frame_count = 1;
+    after_wrap.ranges[0].timeline_sample_start = {0};
+    after_wrap.ranges[0].timeline_tick_end = {1};
+    after_wrap.ranges[0].discontinuity = true;
+    output_view = output.view();
+    REQUIRE(engine.process(read_view(input), output_view, midi, after_wrap) ==
+            CaptureProcessResult::Ok);
+
+    const auto events = drain(engine);
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].type == CaptureEventType::Started);
+    REQUIRE(events[1].type == CaptureEventType::TakeCompleted);
+    REQUIRE(events[1].frame_count == 101);
+}
+
 TEST_CASE("capture metronome renders during count-in before punch capture") {
     const auto map = constant_map();
     MasterTransport transport;

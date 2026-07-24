@@ -360,7 +360,13 @@ void CaptureEngine::handle_range_boundary(const TransportRange& range) noexcept 
         return;
     if (range.timeline_sample_start == expected_timeline_sample_)
         return;
-    if (session_.loop_enabled && expected_timeline_sample_ == session_.loop_end &&
+    const auto loop_end_plus_one =
+        session_.loop_end.value == std::numeric_limits<std::int64_t>::max()
+            ? session_.loop_end
+            : timebase::SamplePosition{session_.loop_end.value + 1};
+    if (session_.loop_enabled && range.discontinuity &&
+        expected_timeline_sample_ >= session_.loop_end &&
+        expected_timeline_sample_ <= loop_end_plus_one &&
         range.timeline_sample_start == session_.loop_start) {
         finalize_active_takes();
     } else {

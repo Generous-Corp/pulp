@@ -779,6 +779,14 @@ FileJournal::checkpoint(const Project& snapshot, DocumentRevision durable_revisi
     }
     if (durable_revision.value < impl_->revision.value)
         return runtime::Result<bool, JournalSinkError>(runtime::Ok(true));
+    auto checkpoint = serialize_project(snapshot, impl_->registry,
+                                        SerializeOptions{impl_->limits.max_record_bytes});
+    auto durable = serialize_project(impl_->current_snapshot, impl_->registry,
+                                     SerializeOptions{impl_->limits.max_record_bytes});
+    if (!checkpoint || !durable || checkpoint.value().json != durable.value().json) {
+        impl_->failed = true;
+        return sink_failure(JournalSinkError::InvalidState);
+    }
     impl_->file.close();
     auto replacement = write_checkpoint_file(impl_->path, snapshot, durable_revision,
                                              impl_->registry, impl_->limits);

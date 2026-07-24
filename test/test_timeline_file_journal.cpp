@@ -480,12 +480,33 @@ TEST_CASE("Timeline file journal checkpoint atomically compacts prior revisions"
     auto opened = open_journal(temporary.path, fallback);
     auto session = std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
     auto writer = std::move(session->register_writer()).value();
-    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    auto edit =
+        session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
     REQUIRE(session->submit(writer, std::move(edit)));
     const auto before = std::filesystem::file_size(temporary.path);
     REQUIRE(session->checkpoint({1}));
     const auto after = std::filesystem::file_size(temporary.path);
     REQUIRE(after < before);
+
+    session.reset();
+    opened.sink.reset();
+    const auto recovered = open_journal(temporary.path, fallback);
+    REQUIRE(recovered.revision == DocumentRevision{1});
+    REQUIRE(velocity(recovered.checkpoint) == 2000);
+}
+
+TEST_CASE("Timeline file journal rejects a checkpoint snapshot from another state") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    auto opened = open_journal(temporary.path, fallback);
+    auto session = std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+    auto writer = std::move(session->register_writer()).value();
+    auto edit = session_transaction(writer, {}, {SetNoteVelocity{{3}, {4}, {5}, {6}, 1000, 2000}});
+    REQUIRE(session->submit(writer, std::move(edit)));
+
+    auto rejected = opened.sink->checkpoint(fallback, {1});
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error() == JournalSinkError::InvalidState);
 
     session.reset();
     opened.sink.reset();
