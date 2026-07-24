@@ -162,6 +162,34 @@ def vellum_trust_responses(
 
 
 class FreezeUnitTests(unittest.TestCase):
+    def test_private_api_failure_names_endpoint_without_query_or_token(self):
+        error = freeze.urllib.error.HTTPError(
+            "https://api.github.com/repos/Generous-Corp/vellum/commits/deadbeef",
+            404,
+            "Not Found",
+            {},
+            None,
+        )
+        with mock.patch.object(
+            freeze.urllib.request, "urlopen", side_effect=error
+        ), self.assertRaisesRegex(
+            freeze.FreezeError,
+            (
+                r"at /repos/Generous-Corp/vellum/commits/deadbeef: "
+                r"HTTP Error 404"
+            ),
+        ) as raised:
+            freeze._github_json(
+                (
+                    "https://api.github.com/repos/Generous-Corp/vellum/"
+                    "commits/deadbeef?secret=do-not-log"
+                ),
+                "secret-token",
+            )
+        message = str(raised.exception)
+        self.assertNotIn("do-not-log", message)
+        self.assertNotIn("secret-token", message)
+
     def test_prepared_map_transfers_nothing(self):
         value = mapping("prepared", "pulp-authoritative-untransferred")
         freeze.validate_map(value)
