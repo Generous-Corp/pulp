@@ -17,11 +17,21 @@ const banner = `/* eslint-disable */
 // Regenerate via: npm run gen-types
 `;
 
-const ts = await compileFromFile(schemaPath, {
+let ts = await compileFromFile(schemaPath, {
   bannerComment: banner,
   style: { semi: true, singleQuote: false, printWidth: 100 },
   additionalProperties: false,
 });
+
+// json-schema-to-typescript emits an unsound index signature for an object
+// with optional named string properties plus string-valued additional
+// properties: the optional fields include `undefined`, but the generated
+// `[k: string]: string` rejects them. Preserve the schema semantics while
+// keeping the generated module type-checkable when imported by contract tests.
+ts = ts.replace(
+  /export interface Attributes \{([\s\S]*?)  \[k: string\]: string;\n\}/,
+  "export interface Attributes {$1  [k: string]: string | undefined;\n}",
+);
 
 await fs.writeFile(outPath, ts, "utf8");
 console.log("[pulp figma plugin] wrote", path.relative(process.cwd(), outPath));

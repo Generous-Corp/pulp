@@ -865,7 +865,8 @@ static void parse_ir_identity_fields(IRNode& node, const choc::value::ValueView&
     // under one of these field names; first non-empty wins. Sources without
     // native IDs (Stitch HTML, v0 TSX, Claude HTML) leave this empty and fall
     // through to the content-hash strategy.
-    for (const char* k : {"id", "nodeId", "node_id", "source_node_id", "sourceNodeId"}) {
+    for (const char* k : {"id", "nodeId", "node_id", "figma_node_id",
+                          "source_node_id", "sourceNodeId"}) {
         if (!obj.hasObjectMember(k)) continue;
         auto v = obj[k];
         if (!v.isString()) continue;
@@ -1515,8 +1516,14 @@ IRTokens parse_ir_tokens(const choc::value::ValueView& obj) {
             tokens.strings[std::string(m.name)] = std::string(m.value.toString());
         }
     }
-    if (obj.hasObjectMember("sourceIdentity") && obj["sourceIdentity"].isObject()) {
-        auto ids = obj["sourceIdentity"];
+    if (obj.hasObjectMember("sourceIdentity"))
+        parse_ir_token_source_identity(obj["sourceIdentity"], tokens);
+    return tokens;
+}
+
+void parse_ir_token_source_identity(const choc::value::ValueView& ids,
+                                    IRTokens& tokens) {
+    if (ids.isObject()) {
         for (uint32_t i = 0; i < ids.size(); ++i) {
             auto m = ids.getObjectMemberAt(i);
             if (!m.value.isObject()) continue;
@@ -1528,7 +1535,6 @@ IRTokens parse_ir_tokens(const choc::value::ValueView& obj) {
             tokens.source_identity[std::string(m.name)] = std::move(identity);
         }
     }
-    return tokens;
 }
 
 static const char* design_source_id(DesignSource source) {

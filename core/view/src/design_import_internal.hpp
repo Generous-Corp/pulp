@@ -161,6 +161,8 @@ const char* interactive_kind_id(InteractiveElementKind k);
 
 // Parse the DesignIR token table; defined in design_ir_json.cpp.
 IRTokens parse_ir_tokens(const choc::value::ValueView& obj);
+void parse_ir_token_source_identity(const choc::value::ValueView& obj,
+                                    IRTokens& tokens);
 
 // Parse a DesignIR asset manifest; defined in design_ir_json.cpp.
 IRAssetManifest parse_asset_manifest(const choc::value::ValueView& obj);

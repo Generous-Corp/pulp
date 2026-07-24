@@ -69,6 +69,48 @@ class RasterizeVectorFramesTest(unittest.TestCase):
         self.assertEqual([t["figma_node_id"] for t in targets], ["3:236"])
         self.assertEqual(targets[0]["name"], "Triangle")
 
+    def test_synthetic_multi_root_is_transparent_to_target_collection(self):
+        root = {
+            "type": "frame",
+            "name": "<multi-export>",
+            "synthetic": True,
+            "children": [
+                {
+                    "type": "frame",
+                    "name": "First illustration",
+                    "figma_node_id": "3:236",
+                    "children": [
+                        {
+                            "type": "vector",
+                            "name": "Triangle",
+                            "figma_node_id": "3:237",
+                            "figma": {"figma_type": "VECTOR"},
+                        }
+                    ],
+                },
+                {
+                    "type": "frame",
+                    "name": "Second illustration",
+                    "figma_node_id": "4:100",
+                    "children": [
+                        {
+                            "type": "vector",
+                            "name": "Circle",
+                            "figma_node_id": "4:101",
+                            "figma": {"figma_type": "ELLIPSE"},
+                        }
+                    ],
+                },
+            ],
+        }
+
+        targets = frvf.collect_targets(root)
+
+        self.assertEqual(
+            [target["figma_node_id"] for target in targets],
+            ["3:236", "4:100"],
+        )
+
     def test_apply_flattened_asset_updates_node_and_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = pathlib.Path(tmp)

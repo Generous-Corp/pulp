@@ -2061,7 +2061,15 @@ verbatim in `IRNode::attributes`). Tracked in `compat/imports.json`
 Two halves, both preserved end to end (audit item 5):
 
 - **Token definitions** — the envelope-level `tokens` block
-  (`{colors, dimensions, strings}`) → `parse_ir_tokens` → `IRTokens`.
+  (`{colors, dimensions, strings}`) → `parse_ir_tokens` → `IRTokens`. The
+  Figma-plugin v1 adapter additionally normalizes the forward-compatible
+  top-level `token_source_identity` extension into the same token table. The
+  plugin records each emitted token's original Figma variable id, collection,
+  mode, and `figma-plugin` adapter under the existing
+  category-qualified `IRTokens::source_identity` key
+  (`colors.<canonical-name>`, etc.). Keep the node binding's value as the bare
+  canonical name: category is known from the token map, while source identity
+  is independently queryable and survives W3C token export.
   Canonical names are `"collection/variable"` lowercased, whitespace stripped,
   `/` → `.`; a multi-mode collection emits the default mode under the bare
   name and every other mode suffixed `.<mode-slug>` (e.g. `theme.bg` +
