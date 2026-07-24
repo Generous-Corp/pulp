@@ -1023,7 +1023,6 @@ jobs:
             exclude="${exclude}|text_align center and right reflect cluster-aware width"
             exclude="${exclude}|mac harness scroll event carries non-zero deltas through PulpView"
             exclude="${exclude}|mac harness right-click reaches PulpView::rightMouseDown"
-            exclude="${exclude}|pulp-mcp-launcher"
             # CoreAudio/StandaloneApp device-opening suites rely on the
             # PROCESSORS reservation in test/CMakeLists.txt to avoid
             # RT-thread starvation under -j8; keep that reservation if

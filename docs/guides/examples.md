@@ -7,6 +7,21 @@ README or subsystem guide for those specialized workflows.
 
 All examples live under `examples/`.
 
+## Creative Timeline Engine
+
+**Path**: `examples/timeline-phase1/`
+
+**Type**: Headless / Standalone validation
+
+**Purpose**: Three worked arrangements covering decoded audio playback, an
+editable step pattern, and multitrack graph routing with automation, tempo/meter
+changes, and plugin-delay compensation.
+
+See the [Timeline examples guide](../examples/timeline-phase1.md) for build,
+headless-run, and validation commands. External SDK consumers should pair it
+with the [Timeline SDK guide](timeline-sdk.md) and the standalone
+`examples/timeline-sdk-consumer/` project.
+
 ## PulpGain
 
 **Path**: `examples/pulp-gain/`

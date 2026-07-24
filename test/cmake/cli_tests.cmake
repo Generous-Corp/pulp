@@ -359,6 +359,8 @@ catch_discover_tests(pulp-test-cli-upgrade-url)
 # pulp-cpp before replacing the user-facing pulp binary.
 add_executable(pulp-test-cli-upgrade-install test_cli_upgrade_install.cpp)
 target_include_directories(pulp-test-cli-upgrade-install PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(pulp-test-cli-upgrade-install PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 target_link_libraries(pulp-test-cli-upgrade-install PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-upgrade-install)
 

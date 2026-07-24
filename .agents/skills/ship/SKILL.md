@@ -793,11 +793,10 @@ directly. This preserves rollback/debug workflows such as
 The release tarball is **three** binaries — `pulp`,
 `pulp-cpp`, and `pulp-mcp`. `pulp-mcp` is the Claude Code plugin's MCP
 server. The plugin ships no binaries; its `.mcp.json` invokes
-`tools/mcp/pulp-mcp-launcher`, which `exec`s `pulp-mcp` from `$PATH`. If
-the CLI tarball is missing `pulp-mcp`, every fresh
-`claude plugin install pulp` produces a `/mcp` panel reporting `cannot
-locate pulp-mcp binary` — even though the plugin itself installed
-cleanly.
+the full path in `PULP_MCP_BINARY`, which the CLI installers persist without
+depending on Claude Code's inherited `$PATH`. If the CLI tarball is missing
+`pulp-mcp`, every fresh `claude plugin install pulp` produces a `/mcp` panel
+reporting a missing server even though the plugin itself installed cleanly.
 
 Contract that must hold across release lanes:
 
@@ -808,7 +807,7 @@ Contract that must hold across release lanes:
   the smoke matrix as `pulp-mcp --version` (its JSON-RPC stdin loop is
   not meaningfully testable from CI; the flag short-circuits before
   reading stdin).
-- `tools/scripts/install.sh` / `install.ps1` log `pulp-mcp` landing in
+- `tools/install/install.sh` / `install.ps1` configure `PULP_MCP_BINARY` for
   `~/.pulp/bin/` so users see the binary that the plugin will use.
 - `pulp upgrade --install` extracts the whole tarball, so refreshing
   the CLI also refreshes `pulp-mcp`.

@@ -234,13 +234,9 @@ if(UNIX)
     add_test(NAME ensure-signing-ready
         COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/test_ensure_signing_ready.sh)
     set_tests_properties(ensure-signing-ready PROPERTIES TIMEOUT 60)
-endif()
-# Launcher unit test: tools/mcp/pulp-mcp-launcher resolves the
-# source build / $PATH fallback / diagnostic. Hermetic (tempdir), no real binary.
-if(UNIX)
-    add_test(NAME pulp-mcp-launcher
-        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_mcp_launcher.sh)
-    set_tests_properties(pulp-mcp-launcher PROPERTIES TIMEOUT 45)
+    add_test(NAME pulp-installer-mcp-contract
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
+    set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 45)
 endif()
 if(Python3_Interpreter_FOUND)
     add_test(NAME pulp-mcp-binary-smoke

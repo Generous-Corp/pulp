@@ -38,7 +38,9 @@ endif()
 # Repo root = two levels up from tools/cmake/.
 get_filename_component(_PULP_WCLAP_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 include(${CMAKE_CURRENT_LIST_DIR}/PulpPortableWav.cmake)
+include(${_PULP_WCLAP_ROOT}/core/timeline/PulpTimelineSources.cmake)
 include(${_PULP_WCLAP_ROOT}/core/playback/PulpPlaybackSources.cmake)
+pulp_resolve_timeline_sources("${_PULP_WCLAP_ROOT}" _PULP_WCLAP_TIMELINE_SOURCES)
 pulp_resolve_playback_sources("${_PULP_WCLAP_ROOT}" _PULP_WCLAP_PLAYBACK_SOURCES)
 pulp_resolve_portable_wav(
     "${_PULP_WCLAP_ROOT}"
@@ -110,46 +112,7 @@ set(_PULP_WCLAP_INCLUDES
 set(_PULP_WCLAP_CORE_SOURCES
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_meter_map.cpp
     ${_PULP_WCLAP_ROOT}/core/timebase/src/compiled_tempo_map.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/asset_schema_migrations.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/assets.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_curve.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_document_internal.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/automation_lane.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/command.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/document_session.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/identity_directory.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/id_remap.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/journal.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/json_span_reader.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/model.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_codegen.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_canonical.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_parser.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_preflight.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_release.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_json_validation.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/schema_registry.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_asset_loop_decode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_automation_decode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode_support.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_decode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_project_decode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_command_decode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_encode.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/serialize_release.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/snapshot_equivalence.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/structural_registry_validation.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/track.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/track_schema_migrations.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/take_lane_schema_migrations.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/take_lane.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_automation_internal.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_take_internal.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_track_state_internal.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/transaction_reduction_support.cpp
-    ${_PULP_WCLAP_ROOT}/core/timeline/src/undo.cpp
+    ${_PULP_WCLAP_TIMELINE_SOURCES}
     ${_PULP_WCLAP_PLAYBACK_SOURCES}
     ${_PULP_WCLAP_WAV_SOURCES}
     ${_PULP_WCLAP_ROOT}/core/format/src/clap_adapter.cpp

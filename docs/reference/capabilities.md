@@ -13,10 +13,13 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (20 items across 13 capabilities)
+### Known limitations (23 items across 16 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
+| `timeline_engine.cli_mcp` | The headless render path emits arrangement audio only; it does not instantiate hosted devices or MIDI instruments, and unknown plugin-delay compensation remains null rather than being invented. | [link](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp) |
+| `timeline_engine.dawproject_import` | DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped. | [link](../guides/timeline-sdk.md#optional-dawproject-importer) |
+| `timeline_engine.capture` | Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities. | [link](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) |
 | `formats.clap` | Bus 0 routes to Processor::process(), bus 1 routes to Processor::set_sidechain(), and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, while additional input buses beyond the sidechain are not exposed. | `planning/production-readiness/01-format-adapters.md#1.1` |
 | `formats.clap` | CLAP PARAM_MOD note_id/port/channel/key fields are accepted as parameter modulation but are not routed with per-note modulation scope. | `planning/production-readiness/01-format-adapters.md#1.1` |
 | `formats.vst3` | Bus 0, one sidechain input, and descriptor-declared secondary output buses are routed through ProcessBuffers; a multi-out processor that overrides process(ProcessBuffers&) writes each aux output bus, and single-output processors leave aux buses silent. | `planning/production-readiness/01-format-adapters.md#1.2` |
@@ -453,6 +456,34 @@ Key header: `pulp/osc/osc.hpp`
 
 ---
 
+## Creative Timeline Engine
+
+The Timeline stack is an experimental, installed SDK surface. Its model,
+playback, and tooling layers are independently usable; the application retains
+device I/O, media publication, plugin instantiation, and UI ownership.
+
+| Capability | Status | Module | Docs | Examples |
+|---|---|---|---|---|
+| Immutable project model, typed transactions, undo/redo | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md) | [Timeline Phase 1](../examples/timeline-phase1.md) |
+| Canonical snapshots, release downgrade, bounded project peek | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#peek-before-loading) | |
+| Crash-consistent native `FileJournal` | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#durable-journals) | |
+| Tempo/meter transport and immutable playback programs | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md) | [Timeline Phase 1](../examples/timeline-phase1.md) |
+| Arrangement audio, note, and automation rendering | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md) | [multitrack arrangement](../examples/timeline-phase1.md#multitrack-arrangement) |
+| Takes, comp selection, and sealed track freeze | experimental | [timeline](modules.md#timeline) / [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
+| Bounded audio/MIDI capture and recording commit | experimental | [playback](modules.md#playback) | [Timeline SDK](../guides/timeline-sdk.md#takes-comps-freeze-and-capture) | |
+| DAWproject linear-subset import | experimental | [timeline](modules.md#timeline) | [Timeline SDK](../guides/timeline-sdk.md#optional-dawproject-importer) | [SDK consumer source](https://github.com/Generous-Corp/pulp/tree/main/examples/timeline-sdk-consumer) |
+| `pulp seq` validate/explain/apply and `pulp render` | experimental | Tooling | [CLI](cli.md#seq) | |
+| Five Timeline MCP operations + Claude Timeline skill | experimental | Agent tooling | [Claude plugin](../guides/claude-code-plugin.md) | |
+| `SequenceProcessor` plugin-format adapter | experimental | [sequence](modules.md#sequence) | [Timeline SDK](../guides/timeline-sdk.md#optional-plugin-format-adapter) | |
+
+The headless CLI/MCP renderer resolves sealed local assets and renders
+arrangement audio to Float32 WAV. It does not instantiate hosted devices or
+MIDI instruments and does not invent plugin-delay compensation. The
+DAWproject importer accepts a fail-closed linear subset rather than silently
+downgrading arbitrary sessions.
+
+---
+
 ## Agent / Automation
 
 | Capability | Status | Docs | Notes |
@@ -491,6 +522,8 @@ The `pulp` CLI wraps common development workflows.
 | `pulp import-design` (import from external design tools) | experimental | [cli](cli.md) |
 | `pulp import-design --from designmd` (Google DESIGN.md import, Apache-2.0; tokens-only in Phase 1) | partial | [imports/designmd](imports/designmd.md) |
 | `pulp export-tokens` (export design tokens) | experimental | [cli](cli.md) |
+| `pulp seq` (validate, explain, and transactionally edit Timeline projects) | experimental | [cli](cli.md#seq) |
+| `pulp render` (device-free Timeline arrangement render) | experimental | [cli](cli.md#render) |
 | `pulp ci-local` (local CI runner — Mac + VM validation) | experimental | [local-ci](../guides/local-ci.md) |
 
 ---

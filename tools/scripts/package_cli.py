@@ -21,12 +21,10 @@ single-binary contract, so pre-swap release lanes stay byte-identical.
 
 MCP binary support (#2067): when `--mcp-binary` is passed, the tarball
 also ships `pulp-mcp[.exe]` next to `pulp`. The Claude Code plugin's
-`.mcp.json` invokes `tools/mcp/pulp-mcp-launcher`, which falls back to
-`pulp-mcp` on `$PATH` — so once `~/.pulp/bin/` is on PATH (the existing
-install.sh / install.ps1 behavior) the plugin's MCP server "just
-works" without the plugin shipping the binary itself. Without
-`--mcp-binary` the script omits it, keeping older release lanes
-byte-identical.
+`.mcp.json` resolves `PULP_MCP_BINARY`, which the installers persist as the
+full executable path without depending on Claude Code's inherited `PATH`, so
+the plugin need not ship the binary itself. Without `--mcp-binary` the script
+omits it, keeping older release lanes byte-identical.
 
 Usage (called from .github/workflows/release-cli.yml):
     python3 tools/scripts/package_cli.py \\
