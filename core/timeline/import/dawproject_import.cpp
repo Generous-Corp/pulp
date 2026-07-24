@@ -252,7 +252,33 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
     if (!transport)
         return std::nullopt; // Defaults (120 bpm, 4/4) stand.
 
-    if (auto tempo = transport.child("Tempo")) {
+    pugi::xml_node tempo;
+    pugi::xml_node sig;
+    for (auto child : transport.children()) {
+        if (child.type() != pugi::node_element)
+            continue;
+        const std::string_view name = child.name();
+        pugi::xml_node* selected = nullptr;
+        if (name == "Tempo")
+            selected = &tempo;
+        else if (name == "TimeSignature")
+            selected = &sig;
+        else
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Transport> contains unsupported <") + std::string(name) + ">");
+        if (*selected)
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Transport> contains multiple <") + std::string(name) + ">");
+        *selected = child;
+        for (auto parameter_child : child.children()) {
+            if (parameter_child.type() == pugi::node_element)
+                return err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<") + std::string(name) + "> contains unsupported <" +
+                               parameter_child.name() + ">");
+        }
+    }
+
+    if (tempo) {
         auto unit = tempo.attribute("unit");
         if (!unit.empty() && std::string_view(unit.as_string()) != "bpm")
             return err(DawProjectImportErrorCode::UnsupportedFeature,
@@ -266,7 +292,7 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
         tempo_bpm_ = bpm;
     }
 
-    if (auto sig = transport.child("TimeSignature")) {
+    if (sig) {
         long long num = 0, den = 0;
         if (auto e = require_int(sig, "numerator", "<TimeSignature>", num))
             return e;
@@ -289,12 +315,17 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
     if (!structure)
         return std::nullopt;
 
-    for (auto track : structure.children("Track")) {
-        // Nested group tracks are outside the linear subset — refuse rather than
-        // flatten and silently lose the grouping.
-        if (track.child("Track"))
+    for (auto track : structure.children()) {
+        if (track.type() != pugi::node_element)
+            continue;
+        if (std::string_view(track.name()) != "Track")
             return err(DawProjectImportErrorCode::UnsupportedFeature,
-                       "nested group <Track> elements are not supported");
+                       std::string("<Structure> contains unsupported <") + track.name() + ">");
+        for (auto track_child : track.children()) {
+            if (track_child.type() == pugi::node_element)
+                return err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<Track> contains unsupported <") + track_child.name() + ">");
+        }
 
         auto id_attr = track.attribute("id");
         if (id_attr.empty())
@@ -324,7 +355,20 @@ std::optional<DawProjectImportError> Importer::read_arrangement(const pugi::xml_
     if (!arrangement)
         return std::nullopt;
 
-    auto root_lanes = arrangement.child("Lanes");
+    pugi::xml_node root_lanes;
+    for (auto child : arrangement.children()) {
+        if (child.type() != pugi::node_element)
+            continue;
+        const std::string_view name = child.name();
+        if (name != "Lanes")
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       std::string("<Arrangement> contains unsupported <") + std::string(name) +
+                           ">");
+        if (root_lanes)
+            return err(DawProjectImportErrorCode::UnsupportedFeature,
+                       "<Arrangement> contains multiple <Lanes>");
+        root_lanes = child;
+    }
     if (!root_lanes)
         return std::nullopt;
 
@@ -646,6 +690,49 @@ std::optional<DawProjectImportError> Importer::read_audio(const pugi::xml_node& 
 }
 
 ImportResult Importer::run(const pugi::xml_node& project) {
+    bool saw_application = false;
+    bool saw_transport = false;
+    bool saw_structure = false;
+    bool saw_arrangement = false;
+    bool saw_scenes = false;
+    for (auto child : project.children()) {
+        if (child.type() != pugi::node_element)
+            continue;
+        const std::string_view name = child.name();
+        bool* seen = nullptr;
+        if (name == "Application") {
+            seen = &saw_application;
+            for (auto metadata_child : child.children()) {
+                if (metadata_child.type() == pugi::node_element)
+                    return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
+                                   std::string("<Application> contains unsupported <") +
+                                       metadata_child.name() + ">"));
+            }
+        } else if (name == "Transport") {
+            seen = &saw_transport;
+        } else if (name == "Structure") {
+            seen = &saw_structure;
+        } else if (name == "Arrangement") {
+            seen = &saw_arrangement;
+        } else if (name == "Scenes") {
+            seen = &saw_scenes;
+            for (auto scene : child.children()) {
+                if (scene.type() == pugi::node_element)
+                    return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
+                                   std::string("<Scenes> contains unsupported <") + scene.name() +
+                                       ">"));
+            }
+        } else {
+            return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<Project> contains unsupported <") + std::string(name) +
+                               ">"));
+        }
+        if (*seen)
+            return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
+                           std::string("<Project> contains multiple <") + std::string(name) + ">"));
+        *seen = true;
+    }
+
     if (auto e = read_transport(project))
         return Err(std::move(*e));
     if (auto e = read_structure(project))

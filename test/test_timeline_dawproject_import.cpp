@@ -514,6 +514,93 @@ TEST_CASE("DAWproject import accepts explicit zero playStart as whole-content pl
     REQUIRE(result->sequences()[0].tracks()[0].clips().size() == 1);
 }
 
+TEST_CASE("DAWproject import validates Project-level semantic containers") {
+    SECTION("populated Scenes are not silently dropped") {
+        auto result = import_dawproject_xml(
+            R"(<Project version="1.0"><Application name="Test" version="1"/>)"
+            R"(<Scenes><Scene id="scene-1"/></Scenes></Project>)");
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+        REQUIRE(result.error().message.find("Scene") != std::string::npos);
+    }
+
+    SECTION("unknown root semantic child is not silently dropped") {
+        auto result = import_dawproject_xml(
+            R"(<Project version="1.0"><Application name="Test" version="1"/>)"
+            R"(<SessionData><Clip id="hidden"/></SessionData></Project>)");
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+        REQUIRE(result.error().message.find("SessionData") != std::string::npos);
+    }
+
+    SECTION("allowlisted application metadata and empty Scenes are harmless") {
+        auto result = import_dawproject_xml(
+            R"(<Project version="1.0"><Application name="Test DAW" version="9.2"/>)"
+            R"(<Scenes/></Project>)");
+        REQUIRE(result);
+        REQUIRE(result->sequences().size() == 1);
+    }
+
+    SECTION("nested application content is not treated as metadata") {
+        auto result = import_dawproject_xml(
+            R"(<Project version="1.0"><Application name="Test" version="1">)"
+            R"(<SessionData/></Application></Project>)");
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+        REQUIRE(result.error().message.find("SessionData") != std::string::npos);
+    }
+}
+
+TEST_CASE("DAWproject import exhaustively validates imported semantic containers") {
+    auto expect_unsupported = [](std::string_view xml, std::string_view detail) {
+        auto result = import_dawproject_xml(xml);
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
+        REQUIRE(result.error().message.find(detail) != std::string::npos);
+    };
+
+    SECTION("unknown Transport child") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Transport><Loop start="0" end="4"/></Transport></Project>)",
+            "Loop");
+    }
+    SECTION("duplicate Tempo") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120"/>)"
+            R"(<Tempo unit="bpm" value="130"/></Transport></Project>)",
+            "multiple");
+    }
+    SECTION("nested Tempo automation") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120">)"
+            R"(<Points/></Tempo></Transport></Project>)",
+            "Points");
+    }
+    SECTION("unknown Structure child") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Structure><Channel id="master"/></Structure></Project>)",
+            "Channel");
+    }
+    SECTION("schema-valid Channel nested under imported Track") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Structure><Track id="t1" name="A">)"
+            R"(<Channel role="regular" audioChannels="2"><Devices/></Channel>)"
+            R"(</Track></Structure></Project>)",
+            "Channel");
+    }
+    SECTION("direct Arrangement automation") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Arrangement><Points/></Arrangement></Project>)",
+            "Points");
+    }
+    SECTION("duplicate Arrangement Lanes") {
+        expect_unsupported(
+            R"(<Project version="1.0"><Arrangement><Lanes timeUnit="beats"/>)"
+            R"(<Lanes timeUnit="beats"/></Arrangement></Project>)",
+            "multiple");
+    }
+}
+
 TEST_CASE("DAWproject import rejects malformed and out-of-subset input") {
     auto expect = [](std::string_view xml, DawProjectImportErrorCode code) {
         auto result = import_dawproject_xml(xml);

@@ -11,10 +11,8 @@
   </Transport>
   <Structure>
     <Track contentType="audio" loaded="true" id="track-bass" name="Bass" color="#4aa3df">
-      <Channel role="regular" audioChannels="2"/>
     </Track>
     <Track contentType="notes" loaded="true" id="track-lead" name="Lead" color="#e67e22">
-      <Channel role="regular" audioChannels="2"/>
     </Track>
   </Structure>
   <Arrangement id="arrangement">
