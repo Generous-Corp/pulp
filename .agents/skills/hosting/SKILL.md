@@ -979,6 +979,36 @@ RT-safely, without re-baking — via the bake-layer injection primitive:
 `test/test_baked_graph_param_injection.cpp` is the executable spec (claims, ramps,
 sample accuracy, RT-allocation-free drain, the accumulate regression).
 
+### Catalog nodes with an internal control cadence read params per CHUNK
+
+`pulp/host/forge_fdn_reverb_catalog.hpp` (the multirate FDN reverb) is the
+pattern to copy for any wrapped engine that runs its own control rate. Its
+`process_instance_baked_param` walks the block in 32-sample chunks and re-reads
+the `BakedParamView` at each one, rather than sampling once per block.
+
+Two things follow from that, and both bite if you copy only half of it:
+
+- **Read at the engine's cadence, not the block's.** Reading once per block
+  makes a knob sweep step audibly at large buffer sizes; reading per sample
+  would be discarded by an engine that re-derives on a 32-sample tick anyway.
+  Match the engine.
+- **A param that reconfigures the engine must land on a CHUNK BOUNDARY.** The
+  reverb's `tank_rate` re-derives every delay length, filter coefficient and
+  resampler ratio. Applying that between the two halves of a resampler — after
+  the input leg produced its samples, before the output leg consumed them —
+  desynchronizes them permanently: a switch UP in rate silenced the wet output
+  for good, and it never recovered, because the deficit was re-created every
+  block. The engine now applies a pending rate change before either leg runs.
+  If you wrap something with a similar "reconfigure everything" param, apply it
+  at a boundary and add a test that switches in BOTH directions and compares
+  against a cold render — a one-directional test passes over this bug.
+
+Node shape matters to the host too: this node is **true stereo** (2 in / 2 out
+as one logical wire, not two mono halves) and **wet only**, so a graph that
+wants dry needs a `make_drywet_node` after it. `test/test_fdn_reverb_catalog.cpp`
+covers the injection path, the true-stereo claim and the RT probe across a live
+rate change.
+
 ## Common tripwires
 
 - **Instruments have no input bus — never address input element 0 blind.**
