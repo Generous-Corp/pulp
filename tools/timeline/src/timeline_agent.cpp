@@ -20,6 +20,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -111,11 +112,14 @@ std::string persistence_message(const pulp::timeline::PersistenceError& error) {
 }
 
 runtime::Result<std::shared_ptr<const DecodedAudioAssetPool>, AudioRendererError>
-load_assets(const LoadedProject& project) {
+load_assets(const LoadedProject& project,
+            const std::unordered_set<std::uint64_t>& reachable_asset_ids) {
     std::vector<DecodedAudioAsset> decoded;
-    decoded.reserve(project.value.assets().size());
+    decoded.reserve(reachable_asset_ids.size());
     std::uint64_t decoded_pcm_bytes = 0;
     for (const auto& asset : project.value.assets()) {
+        if (!reachable_asset_ids.contains(asset.id.value))
+            continue;
         std::optional<std::string> bytes;
         bool found_regular = false;
         bool found_unreadable = false;
@@ -166,6 +170,31 @@ load_assets(const LoadedProject& project) {
     return DecodedAudioAssetPool::create(std::move(decoded));
 }
 
+std::unordered_set<std::uint64_t> reachable_assets(const pulp::timeline::Sequence& sequence) {
+    std::unordered_set<std::uint64_t> result;
+    for (const auto& track : sequence.tracks()) {
+        if (const auto& freeze = track.freeze()) {
+            result.insert(freeze->media.asset_id.value);
+            continue;
+        }
+        if (track.active_take_lane_id().valid()) {
+            const auto* lane = track.find_take_lane(track.active_take_lane_id());
+            if (!lane)
+                continue;
+            for (const auto& segment : lane->comp_segments()) {
+                const auto* take = lane->find_take(segment.take_id);
+                if (take)
+                    result.insert(take->media().asset_id.value);
+            }
+            continue;
+        }
+        for (const auto& clip : track.clips())
+            if (const auto* media = std::get_if<pulp::timeline::MediaRef>(&clip.content()))
+                result.insert(media->asset_id.value);
+    }
+    return result;
+}
+
 struct CompiledProject {
     std::shared_ptr<const CompiledTempoMap> tempo_map;
     PlaybackProgramStore store;
@@ -179,8 +208,15 @@ compile_project(const LoadedProject& loaded, std::uint32_t sample_rate) {
         error.code = CompileErrorCode::InvalidRequest;
         return runtime::Err(error);
     }
-    auto assets = load_assets(loaded);
-    if (!assets && !loaded.value.assets().empty()) {
+    const auto* sequence = loaded.value.find_sequence(loaded.value.root_sequence_id());
+    if (!sequence) {
+        CompileError error;
+        error.code = CompileErrorCode::InvalidRequest;
+        error.item = loaded.value.root_sequence_id();
+        return runtime::Err(error);
+    }
+    auto assets = load_assets(loaded, reachable_assets(*sequence));
+    if (!assets) {
         CompileError error;
         error.code = CompileErrorCode::AudioProgramInvalid;
         error.item = assets.error().item;

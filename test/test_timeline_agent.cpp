@@ -208,6 +208,56 @@ TEST_CASE("timeline agent refuses media whose bytes do not match its durable ide
     REQUIRE(result.json.find(R"("stage":"render")") != std::string::npos);
 }
 
+TEST_CASE("timeline agent does not load offline media from non-root sequences") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+
+    auto clip = take(Clip::create_absolute({4}, {0}, 32, {48'000, 1}, MediaRef{{5}, {0}, 32},
+                                           {.gain_linear = 1.0f}));
+    auto track = take(Track::create({3}, "audio", {std::move(clip)}));
+    auto sequence = take(Sequence::create(
+        {2}, "root", std::nullopt, AbsoluteTimelineDuration{32, {48'000, 1}}, {std::move(track)}));
+    MediaAsset reachable{{5},
+                         "source.wav",
+                         32,
+                         {48'000, 1},
+                         file_hash(source_path),
+                         AssetStoragePolicy::External,
+                         {{AssetLocatorKind::ExternalUri, source_path.string()}},
+                         {},
+                         {}};
+    auto offline_hash = ContentHash::from_hex(runtime::sha256_hex("unreachable-offline-media"));
+    REQUIRE(offline_hash);
+    MediaAsset unreachable{
+        {6}, "offline.wav", 64, {48'000, 1}, *offline_hash, AssetStoragePolicy::External, {}, {},
+        {}};
+    auto offline_clip = take(Clip::create_absolute({9}, {0}, 64, {48'000, 1},
+                                                   MediaRef{{6}, {0}, 64}, {.gain_linear = 1.0f}));
+    auto offline_track = take(Track::create({10}, "offline", {std::move(offline_clip)}));
+    auto offline_sequence = take(Sequence::create({8}, "not selected", std::nullopt,
+                                                  AbsoluteTimelineDuration{64, {48'000, 1}},
+                                                  {std::move(offline_track)}));
+    auto project =
+        take(Project::create(ProjectInput{{1},
+                                          "offline",
+                                          11,
+                                          {2},
+                                          {std::move(reachable), std::move(unreachable)},
+                                          {std::move(sequence), std::move(offline_sequence)}}));
+
+    const auto json = project_to_json(project);
+    REQUIRE(tools::timeline::explain(json));
+    const auto output_path = temp.path() / "output.wav";
+    REQUIRE(tools::timeline::render(json, output_path.string()));
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+}
+
 TEST_CASE("timeline agent rejects path-derived hashes as media identity") {
     TempDirectory temp;
     audio::AudioFileData source;

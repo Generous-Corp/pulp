@@ -305,3 +305,29 @@ TEST_CASE("capture engine rejects overflowing channel ranges before indexing") {
                 CaptureProcessResult::InvalidBuffers);
     }
 }
+
+TEST_CASE("capture engine accepts equivalent rational sample rates") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    prepare_transport(transport, map, 1);
+    auto config = capture_config(1);
+    config.sample_rate = {96'000, 2};
+    CaptureEngine engine;
+    REQUIRE(engine.prepare(config));
+
+    audio::Buffer<float> input(1, 1);
+    audio::Buffer<float> output(1, 1);
+    auto output_view = output.view();
+    midi::MidiBuffer midi;
+    auto snapshot = next_block(transport, 1);
+    REQUIRE(engine.process(read_view(input), output_view, midi, snapshot) ==
+            CaptureProcessResult::Ok);
+
+    snapshot.sample_rate = {96'000, 2};
+    REQUIRE(engine.process(read_view(input), output_view, midi, snapshot) ==
+            CaptureProcessResult::Ok);
+
+    snapshot.sample_rate = {44'100, 1};
+    REQUIRE(engine.process(read_view(input), output_view, midi, snapshot) ==
+            CaptureProcessResult::InvalidTransport);
+}

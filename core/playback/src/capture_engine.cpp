@@ -113,6 +113,7 @@ bool CaptureEngine::prepare(const CaptureEngineConfig& config) {
         config.tracks.size() * static_cast<std::size_t>(config.take_slots_per_track);
     PULP_TRY {
         prepared_config = config;
+        prepared_config.sample_rate = config.sample_rate.normalized();
         track_runtime.resize(config.tracks.size());
         slots.resize(slot_count);
         for (std::size_t track_index = 0; track_index < config.tracks.size(); ++track_index) {
@@ -532,7 +533,8 @@ CaptureProcessResult CaptureEngine::process(const audio::BufferView<const float>
             track.channel_count > monitor_output.num_channels() - output_channel)
             return CaptureProcessResult::InvalidBuffers;
     }
-    if (!valid_transport_ranges(transport) || transport.sample_rate != config_.sample_rate)
+    if (!valid_transport_ranges(transport) ||
+        transport.sample_rate.normalized() != config_.sample_rate)
         return CaptureProcessResult::InvalidTransport;
 
     apply_commands();
