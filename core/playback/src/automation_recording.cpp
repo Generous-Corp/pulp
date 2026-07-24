@@ -1,5 +1,6 @@
 #include <pulp/playback/automation_recording.hpp>
 
+#include <pulp/runtime/exceptions.hpp>
 #include <pulp/timeline/model.hpp>
 
 #include <cmath>
@@ -9,9 +10,14 @@ namespace pulp::playback {
 
 bool AutomationRecorder::prepare(std::size_t maximum_points) {
     release();
-    if (maximum_points == 0)
+    if (maximum_points == 0 || maximum_points > points_.max_size())
         return false;
-    points_.reserve(maximum_points);
+    PULP_TRY {
+        points_.reserve(maximum_points);
+    }
+    PULP_CATCH_ALL {
+        return false;
+    }
     maximum_points_ = maximum_points;
     prepared_ = true;
     return true;

@@ -58,6 +58,20 @@ ContentHash file_hash(const std::filesystem::path& path) {
     return *hash;
 }
 
+void write_text_file(const std::filesystem::path& path, std::string_view text) {
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    REQUIRE(stream);
+    stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+    REQUIRE(stream.good());
+}
+
+void require_no_render_temporaries(const std::filesystem::path& directory,
+                                   const std::filesystem::path& destination) {
+    const auto prefix = destination.filename().string() + ".tmp.";
+    for (const auto& entry : std::filesystem::directory_iterator(directory))
+        REQUIRE_FALSE(entry.path().filename().string().starts_with(prefix));
+}
+
 std::string project_json(const std::filesystem::path& source, std::uint64_t frame_count = 32,
                          ContentHash content_hash = {}, bool include_duration = true,
                          std::vector<AssetLocator> locators = {}) {
@@ -161,6 +175,49 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE(changed_audio->num_frames() == 32);
     REQUIRE_THAT(original_audio->channels[0][0], WithinAbs(0.75f, 1e-7f));
     REQUIRE_THAT(changed_audio->channels[0][0], WithinAbs(0.375f, 1e-7f));
+}
+
+TEST_CASE("timeline agent atomically publishes rendered WAV files") {
+    TempDirectory temp;
+    audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.75f)};
+    const auto source_path = temp.path() / "source.wav";
+    REQUIRE(audio::write_wav_file(source_path.string(), source, audio::WavBitDepth::Float32));
+    const auto project = project_json(source_path);
+
+    const auto output_path = temp.path() / "output.wav";
+    write_text_file(output_path, "existing destination");
+#ifndef _WIN32
+    const auto preserved_permissions = std::filesystem::perms::none;
+    std::error_code permission_error;
+    std::filesystem::permissions(output_path, preserved_permissions,
+                                 std::filesystem::perm_options::replace, permission_error);
+    REQUIRE_FALSE(permission_error);
+#endif
+
+    REQUIRE(tools::timeline::render(project, output_path.string()));
+#ifndef _WIN32
+    REQUIRE((std::filesystem::status(output_path).permissions() & std::filesystem::perms::all) ==
+            preserved_permissions);
+    std::filesystem::permissions(
+        output_path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace, permission_error);
+    REQUIRE_FALSE(permission_error);
+#endif
+    const auto rendered = audio::read_audio_file(output_path.string());
+    REQUIRE(rendered);
+    REQUIRE_THAT(rendered->channels[0][0], WithinAbs(0.75f, 1e-7f));
+    require_no_render_temporaries(temp.path(), output_path);
+
+    const auto blocked_path = temp.path() / "blocked.wav";
+    REQUIRE(std::filesystem::create_directory(blocked_path));
+    write_text_file(blocked_path / "sentinel", "preserve me");
+    const auto failed = tools::timeline::render(project, blocked_path.string());
+    REQUIRE_FALSE(failed);
+    REQUIRE(std::filesystem::is_directory(blocked_path));
+    REQUIRE(std::filesystem::is_regular_file(blocked_path / "sentinel"));
+    require_no_render_temporaries(temp.path(), blocked_path);
 }
 
 TEST_CASE("timeline agent schema and errors are typed and fail closed") {

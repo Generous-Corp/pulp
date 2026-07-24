@@ -11,6 +11,8 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -18,11 +20,31 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <sstream>
+#include <streambuf>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <io.h>
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <sys/acl.h>
+#endif
+#endif
 
 namespace pulp::tools::timeline {
 namespace {
@@ -77,6 +99,312 @@ std::optional<std::string> read_file(const fs::path& path,
     } catch (...) {
         return std::nullopt;
     }
+}
+
+fs::path render_temporary_path(const fs::path& destination, std::uint64_t serial) {
+    auto temporary = destination;
+#ifdef _WIN32
+    const auto process = static_cast<std::uint64_t>(::GetCurrentProcessId());
+#else
+    const auto process = static_cast<std::uint64_t>(::getpid());
+#endif
+    temporary += ".tmp." + std::to_string(process) + "." + std::to_string(serial);
+    return temporary;
+}
+
+void remove_render_temporary(const fs::path& path) {
+    std::error_code ignored;
+    fs::remove(path, ignored);
+}
+
+class NativeRenderStreamBuffer final : public std::streambuf {
+  public:
+#ifdef _WIN32
+    explicit NativeRenderStreamBuffer(HANDLE handle) : handle_(handle) {}
+#else
+    explicit NativeRenderStreamBuffer(int descriptor) : descriptor_(descriptor) {}
+#endif
+
+  protected:
+    std::streamsize xsputn(const char* data, std::streamsize count) override {
+        if (count <= 0)
+            return 0;
+        std::streamsize offset = 0;
+        while (offset < count) {
+#ifdef _WIN32
+            const auto remaining = static_cast<std::uint64_t>(count - offset);
+            const auto chunk = static_cast<DWORD>(
+                std::min<std::uint64_t>(remaining, std::numeric_limits<DWORD>::max()));
+            DWORD written = 0;
+            if (!::WriteFile(handle_, data + offset, chunk, &written, nullptr) || written == 0)
+                break;
+            offset += static_cast<std::streamsize>(written);
+#else
+            const auto remaining = static_cast<std::uint64_t>(count - offset);
+            const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(
+                remaining, static_cast<std::uint64_t>(std::numeric_limits<ssize_t>::max())));
+            const auto written = ::write(descriptor_, data + offset, chunk);
+            if (written < 0 && errno == EINTR)
+                continue;
+            if (written <= 0)
+                break;
+            offset += static_cast<std::streamsize>(written);
+#endif
+        }
+        return offset;
+    }
+
+    int_type overflow(int_type value) override {
+        if (traits_type::eq_int_type(value, traits_type::eof()))
+            return traits_type::not_eof(value);
+        const char byte = traits_type::to_char_type(value);
+        return xsputn(&byte, 1) == 1 ? value : traits_type::eof();
+    }
+
+    pos_type seekoff(off_type offset, std::ios_base::seekdir direction,
+                     std::ios_base::openmode mode) override {
+        if ((mode & std::ios_base::out) == 0)
+            return pos_type(off_type(-1));
+#ifdef _WIN32
+        DWORD method = FILE_BEGIN;
+        if (direction == std::ios_base::cur)
+            method = FILE_CURRENT;
+        else if (direction == std::ios_base::end)
+            method = FILE_END;
+        LARGE_INTEGER distance{};
+        distance.QuadPart = static_cast<LONGLONG>(offset);
+        LARGE_INTEGER position{};
+        if (!::SetFilePointerEx(handle_, distance, &position, method))
+            return pos_type(off_type(-1));
+        return pos_type(static_cast<off_type>(position.QuadPart));
+#else
+        int whence = SEEK_SET;
+        if (direction == std::ios_base::cur)
+            whence = SEEK_CUR;
+        else if (direction == std::ios_base::end)
+            whence = SEEK_END;
+        const auto native_offset = static_cast<off_t>(offset);
+        if (static_cast<off_type>(native_offset) != offset)
+            return pos_type(off_type(-1));
+        const auto position = ::lseek(descriptor_, native_offset, whence);
+        return position < 0 ? pos_type(off_type(-1)) : pos_type(static_cast<off_type>(position));
+#endif
+    }
+
+    pos_type seekpos(pos_type position, std::ios_base::openmode mode) override {
+        return seekoff(static_cast<off_type>(position), std::ios_base::beg, mode);
+    }
+
+#ifdef _WIN32
+    HANDLE handle_;
+#else
+    int descriptor_;
+#endif
+};
+
+#ifndef _WIN32
+bool sync_render_file(int descriptor) noexcept {
+#if defined(__APPLE__) && defined(F_FULLFSYNC)
+    if (::fcntl(descriptor, F_FULLFSYNC) == 0)
+        return true;
+    if (errno != ENOTSUP)
+        return false;
+#endif
+    return ::fsync(descriptor) == 0;
+}
+
+bool sync_render_parent_directory(const fs::path& destination) noexcept {
+    auto parent = destination.parent_path();
+    if (parent.empty())
+        parent = ".";
+    const int descriptor = ::open(parent.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+    if (descriptor < 0)
+        return false;
+    const bool synced = ::fsync(descriptor) == 0;
+    const bool closed = ::close(descriptor) == 0;
+    return synced && closed;
+}
+#endif
+
+bool render_temporary_matches(
+#ifdef _WIN32
+    HANDLE handle,
+#else
+    int descriptor,
+#endif
+    const fs::path& path) noexcept {
+#ifdef _WIN32
+    BY_HANDLE_FILE_INFORMATION held{};
+    if (::GetFileInformationByHandle(handle, &held) == 0)
+        return false;
+    const auto named = ::CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES,
+                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (named == INVALID_HANDLE_VALUE)
+        return false;
+    BY_HANDLE_FILE_INFORMATION current{};
+    const bool queried = ::GetFileInformationByHandle(named, &current) != 0;
+    ::CloseHandle(named);
+    return queried && held.dwVolumeSerialNumber == current.dwVolumeSerialNumber &&
+           held.nFileIndexHigh == current.nFileIndexHigh &&
+           held.nFileIndexLow == current.nFileIndexLow;
+#else
+    struct stat held{};
+    struct stat current{};
+    return ::fstat(descriptor, &held) == 0 && S_ISREG(held.st_mode) && held.st_nlink == 1 &&
+           ::lstat(path.c_str(), &current) == 0 && S_ISREG(current.st_mode) &&
+           held.st_dev == current.st_dev && held.st_ino == current.st_ino;
+#endif
+}
+
+bool write_wav_atomic(const fs::path& destination,
+                      const pulp::audio::AudioFileData& audio) noexcept {
+    static std::atomic<std::uint64_t> next_serial{1};
+    fs::path temporary;
+#ifdef _WIN32
+    constexpr SECURITY_INFORMATION kSecurityInformation =
+        OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+    std::vector<std::uint8_t> security_descriptor;
+    SECURITY_ATTRIBUTES security_attributes{};
+    SECURITY_ATTRIBUTES* security = nullptr;
+    const auto destination_attributes = ::GetFileAttributesW(destination.c_str());
+    if (destination_attributes != INVALID_FILE_ATTRIBUTES) {
+        if ((destination_attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+            0)
+            return false;
+        DWORD required = 0;
+        ::GetFileSecurityW(destination.c_str(), kSecurityInformation, nullptr, 0, &required);
+        if (required == 0 || ::GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+            return false;
+        security_descriptor.resize(required);
+        if (!::GetFileSecurityW(destination.c_str(), kSecurityInformation,
+                                security_descriptor.data(), required, &required))
+            return false;
+        security_attributes.nLength = sizeof(security_attributes);
+        security_attributes.lpSecurityDescriptor = security_descriptor.data();
+        security = &security_attributes;
+    } else if (::GetLastError() != ERROR_FILE_NOT_FOUND &&
+               ::GetLastError() != ERROR_PATH_NOT_FOUND) {
+        return false;
+    }
+
+    HANDLE reservation = INVALID_HANDLE_VALUE;
+    for (int attempt = 0; attempt != 128; ++attempt) {
+        temporary = render_temporary_path(destination, next_serial.fetch_add(1));
+        reservation = ::CreateFileW(temporary.c_str(), GENERIC_WRITE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    security, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (reservation != INVALID_HANDLE_VALUE)
+            break;
+        if (::GetLastError() != ERROR_FILE_EXISTS && ::GetLastError() != ERROR_ALREADY_EXISTS)
+            return false;
+    }
+    if (reservation == INVALID_HANDLE_VALUE)
+        return false;
+
+    NativeRenderStreamBuffer buffer(reservation);
+    std::ostream output(&buffer);
+    const bool written =
+        pulp::audio::write_wav_stream(output, audio, pulp::audio::WavBitDepth::Float32);
+    const bool matches = render_temporary_matches(reservation, temporary);
+    const bool synced = written && matches && ::FlushFileBuffers(reservation) != 0;
+    const bool closed = ::CloseHandle(reservation) != 0;
+    if (!written || !matches || !synced || !closed) {
+        if (matches)
+            remove_render_temporary(temporary);
+        return false;
+    }
+    if (::MoveFileExW(temporary.c_str(), destination.c_str(),
+                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return true;
+#else
+    bool destination_exists = false;
+    struct stat destination_status{};
+    if (::lstat(destination.c_str(), &destination_status) == 0) {
+        if (!S_ISREG(destination_status.st_mode))
+            return false;
+        destination_exists = true;
+    } else if (errno != ENOENT) {
+        return false;
+    }
+#if defined(__APPLE__)
+    acl_t destination_acl = nullptr;
+    if (destination_exists) {
+        destination_acl = ::acl_get_file(destination.c_str(), ACL_TYPE_EXTENDED);
+        if (destination_acl == nullptr && errno != ENOENT && errno != ENOATTR)
+            return false;
+        if (destination_acl != nullptr) {
+            acl_entry_t entry = nullptr;
+            const auto entry_result = ::acl_get_entry(destination_acl, ACL_FIRST_ENTRY, &entry);
+            if (entry_result < 0) {
+                ::acl_free(destination_acl);
+                return false;
+            }
+            if (entry_result == 0) {
+                ::acl_free(destination_acl);
+                destination_acl = nullptr;
+            }
+        }
+    }
+#endif
+
+    int reservation = -1;
+    for (int attempt = 0; attempt != 128; ++attempt) {
+        temporary = render_temporary_path(destination, next_serial.fetch_add(1));
+        reservation = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (reservation >= 0)
+            break;
+        if (errno != EEXIST) {
+#if defined(__APPLE__)
+            if (destination_acl != nullptr)
+                ::acl_free(destination_acl);
+#endif
+            return false;
+        }
+    }
+    if (reservation < 0) {
+#if defined(__APPLE__)
+        if (destination_acl != nullptr)
+            ::acl_free(destination_acl);
+#endif
+        return false;
+    }
+
+    NativeRenderStreamBuffer buffer(reservation);
+    std::ostream output(&buffer);
+    bool complete = pulp::audio::write_wav_stream(output, audio, pulp::audio::WavBitDepth::Float32);
+    const bool matches = render_temporary_matches(reservation, temporary);
+    complete = complete && matches;
+    if (destination_exists) {
+        struct stat temporary_status{};
+        complete = complete && ::fstat(reservation, &temporary_status) == 0;
+        if (complete && (temporary_status.st_uid != destination_status.st_uid ||
+                         temporary_status.st_gid != destination_status.st_gid))
+            complete =
+                ::fchown(reservation, destination_status.st_uid, destination_status.st_gid) == 0;
+        complete = complete && ::fchmod(reservation, destination_status.st_mode &
+                                                         static_cast<mode_t>(07777)) == 0;
+#if defined(__APPLE__)
+        if (complete && destination_acl != nullptr)
+            complete = ::acl_set_fd_np(reservation, destination_acl, ACL_TYPE_EXTENDED) == 0;
+#endif
+    }
+#if defined(__APPLE__)
+    if (destination_acl != nullptr)
+        ::acl_free(destination_acl);
+#endif
+    complete = complete && sync_render_file(reservation);
+    complete = ::close(reservation) == 0 && complete;
+    if (!complete) {
+        if (matches)
+            remove_render_temporary(temporary);
+        return false;
+    }
+    if (::rename(temporary.c_str(), destination.c_str()) == 0)
+        return sync_render_parent_directory(destination);
+#endif
+    remove_render_temporary(temporary);
+    return false;
 }
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
@@ -480,8 +808,7 @@ OperationResult render(std::string_view project, std::string_view output,
                            "audio renderer error " + std::to_string(static_cast<unsigned>(status)));
         offset += count;
     }
-    if (!pulp::audio::write_wav_file(std::string(output), rendered,
-                                     pulp::audio::WavBitDepth::Float32))
+    if (!write_wav_atomic(fs::path(output), rendered))
         return failure("render", "could not write output WAV", output);
     return {0, "{\"channels\":" + std::to_string(channels) + ",\"frames\":\"" +
                    std::to_string(frames) +

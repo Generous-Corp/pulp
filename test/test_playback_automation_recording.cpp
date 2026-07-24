@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 using namespace pulp;
 using namespace pulp::playback;
 using namespace pulp::timebase;
@@ -67,4 +69,23 @@ TEST_CASE("write automation captures continuously and fails closed at capacity")
     REQUIRE(recorder.points().size() == 2);
     REQUIRE(recorder.points()[0].value == 0.2f);
     REQUIRE(recorder.record({0}, 0.5f, false) == AutomationRecordError::NonMonotonicPosition);
+}
+
+TEST_CASE("automation recorder rejects oversized capacity and remains reusable") {
+    AutomationRecorder recorder;
+    REQUIRE(recorder.prepare(2));
+    REQUIRE(recorder.begin(AutomationRecordMode::Write));
+    REQUIRE(recorder.record({0}, 0.25f, false) == AutomationRecordError::None);
+
+    REQUIRE_FALSE(recorder.prepare(std::numeric_limits<std::size_t>::max()));
+    REQUIRE_FALSE(recorder.begin(AutomationRecordMode::Write));
+    REQUIRE(recorder.record({1}, 0.5f, false) == AutomationRecordError::NotPrepared);
+    REQUIRE(recorder.points().empty());
+
+    REQUIRE(recorder.prepare(1));
+    REQUIRE(recorder.begin(AutomationRecordMode::Write));
+    REQUIRE(recorder.record({2}, 0.75f, false) == AutomationRecordError::None);
+    REQUIRE(recorder.end());
+    REQUIRE(recorder.points().size() == 1);
+    REQUIRE(recorder.points()[0] == RecordedAutomationPoint{{2}, 0.75f});
 }
