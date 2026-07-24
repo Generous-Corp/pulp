@@ -15,8 +15,7 @@ bool equal_note(const NoteEvent& lhs, const NoteEvent& rhs) noexcept {
 
 bool equal_automation_point(const AutomationPoint& lhs, const AutomationPoint& rhs) noexcept {
     return lhs.id == rhs.id && lhs.position == rhs.position &&
-           std::bit_cast<std::uint32_t>(lhs.value) ==
-               std::bit_cast<std::uint32_t>(rhs.value) &&
+           std::bit_cast<std::uint32_t>(lhs.value) == std::bit_cast<std::uint32_t>(rhs.value) &&
            lhs.interpolation == rhs.interpolation &&
            std::bit_cast<std::uint32_t>(lhs.curvature) ==
                std::bit_cast<std::uint32_t>(rhs.curvature);
@@ -71,13 +70,25 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
-    return saturated_add(
-        sizeof(AutomationLane),
+    return saturated_add(sizeof(AutomationLane),
         saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
 }
 
-bool equal_locators(std::span<const AssetLocator> lhs,
-                    std::span<const AssetLocator> rhs) noexcept {
+bool equal_take(const Take& lhs, const Take& rhs) noexcept {
+    return lhs.id() == rhs.id() && lhs.media().asset_id == rhs.media().asset_id &&
+           lhs.media().source_start == rhs.media().source_start &&
+           lhs.media().frame_count == rhs.media().frame_count &&
+           lhs.placement_start() == rhs.placement_start() && lhs.sample_rate() == rhs.sample_rate();
+}
+
+std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
+    auto size = saturated_add(saturated_add(sizeof(TakeLane), lane.name().size()),
+                              saturated_multiply(lane.takes().size(), sizeof(Take)));
+    return saturated_add(
+        size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
+}
+
+bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {
     return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
@@ -86,7 +97,8 @@ bool equal_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
         lhs.sample_rate != rhs.sample_rate || lhs.content_hash != rhs.content_hash ||
         lhs.storage_policy != rhs.storage_policy ||
         !equal_locators(lhs.locators, rhs.locators) ||
-        lhs.representations.size() != rhs.representations.size())
+        lhs.representations.size() != rhs.representations.size() ||
+        lhs.loop_info != rhs.loop_info)
         return false;
     for (std::size_t i = 0; i < lhs.representations.size(); ++i) {
         const auto& left = lhs.representations[i];
@@ -107,6 +119,14 @@ std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
         size = saturated_add(size, representation.role.size());
         for (const auto& locator : representation.locators)
             size = saturated_add(size, locator.hint.size());
+    }
+    if (asset.loop_info) {
+        size = saturated_add(
+            size, saturated_multiply(asset.loop_info->points.size(), sizeof(AudioLoopPoint)));
+        size = saturated_add(
+            size, saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
+        for (const auto& tag : asset.loop_info->tags)
+            size = saturated_add(size, tag.size());
     }
     return size;
 }
@@ -137,6 +157,14 @@ bool equivalent(const AutomationLane& lhs, const AutomationLane& rhs) noexcept {
     const auto right = rhs.curve().points();
     return lhs.id() == rhs.id() && lhs.target() == rhs.target() && left.size() == right.size() &&
            std::equal(left.begin(), left.end(), right.begin(), equal_automation_point);
+}
+
+bool equivalent(const TakeLane& lhs, const TakeLane& rhs) noexcept {
+    const auto left = lhs.takes();
+    const auto right = rhs.takes();
+    return lhs.id() == rhs.id() && lhs.name() == rhs.name() && left.size() == right.size() &&
+           std::equal(left.begin(), left.end(), right.begin(), equal_take) &&
+           std::ranges::equal(lhs.comp_segments(), rhs.comp_segments());
 }
 
 bool equivalent(const Command& lhs, const Command& rhs) noexcept {
@@ -172,13 +200,38 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
-            } else if constexpr (std::is_same_v<T, SetTempoMap> ||
-                                 std::is_same_v<T, SetMeterMap>) {
+            } else if constexpr (std::is_same_v<T, SetTempoMap> || std::is_same_v<T, SetMeterMap>) {
                 return left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, CreateAsset>) {
                 return equal_asset(left.asset, right.asset);
             } else if constexpr (std::is_same_v<T, RemoveAsset>) {
                 return left.asset_id == right.asset_id;
+            } else if constexpr (std::is_same_v<T, InsertTakeLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       equivalent(left.lane, right.lane);
+            } else if constexpr (std::is_same_v<T, RemoveTakeLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id;
+            } else if constexpr (std::is_same_v<T, SetRecordArm>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertTake>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id && equal_take(left.take, right.take);
+            } else if constexpr (std::is_same_v<T, RemoveTake>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id && left.take_id == right.take_id;
+            } else if constexpr (std::is_same_v<T, SetActiveTakeLane>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected_lane_id == right.expected_lane_id &&
+                       left.replacement_lane_id == right.replacement_lane_id;
+            } else if constexpr (std::is_same_v<T, SetTakeComp>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.lane_id == right.lane_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.expected == right.expected && left.replacement == right.replacement;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -211,16 +264,24 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), asset_retained_size(value.asset));
             if constexpr (std::is_same_v<T, InsertAutomationLane>)
                 return saturated_add(sizeof(T), automation_lane_retained_size(value.lane));
+            if constexpr (std::is_same_v<T, InsertTakeLane>)
+                return saturated_add(sizeof(T), take_lane_retained_size(value.lane));
+            if constexpr (std::is_same_v<T, InsertTake>)
+                return sizeof(T);
+            if constexpr (std::is_same_v<T, SetTakeComp>) {
+                const auto segment_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                return saturated_add(
+                    sizeof(T), saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+            }
             if constexpr (std::is_same_v<T, SetTempoMap>)
-                return saturated_add(sizeof(T),
-                                     saturated_multiply(
-                                         saturated_add(value.expected.points().size(),
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
                                                        value.replacement.points().size()),
                                          sizeof(timebase::TempoPoint)));
             if constexpr (std::is_same_v<T, SetMeterMap>)
-                return saturated_add(sizeof(T),
-                                     saturated_multiply(
-                                         saturated_add(value.expected.points().size(),
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
                                                        value.replacement.points().size()),
                                          sizeof(timebase::MeterPoint)));
             return sizeof(T);

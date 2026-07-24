@@ -20,6 +20,7 @@ hierarchy is the sanctioned path; do not add new `Socket::send` /
 | Talk to another process via pipe | `PipeStream` around `NamedPipe` |
 | Open a TCP connection | `TcpStream`, wrapped in `AsyncStream` so `connect()` doesn't block the caller |
 | Fetch an HTTP/S body | `HttpStream::get(url)` / `post(url, body)` |
+| Fetch with custom headers or consume an incremental HTTP/S response | `http_request(HttpRequest{...})` |
 | Send structured WebSocket frames | `WebSocketChannel::connect()` / `::accept()` over a `TcpStream` |
 | Send/receive OSC messages | `OscChannel::open(host, remote_port, local_port)` |
 | RPC-style request/response over any transport | `JsonRpcPeer` wrapping any `MessageChannel` |
@@ -104,6 +105,17 @@ When callbacks capture mutexes, condition variables, or other local state,
 declare that state before the `AsyncStream` and before any executor loop
 that may run queued callbacks. `stop()` / destruction can dispatch `on_close`;
 do not let callback captures die before the stream and loop have drained.
+
+### 8. Incremental HTTP callbacks run inline
+
+`HttpRequest::on_chunk` runs synchronously on the thread calling
+`http_request()`. Return `false` to abort the transfer. A request with a chunk
+callback leaves `HttpResponse::body` empty, so either consume bytes in the
+callback or omit the callback for buffered behavior. Chunk boundaries are
+transport boundaries, not message or SSE-event boundaries; retain incomplete
+protocol input between callbacks. Keep credentials in `HttpRequest::headers`;
+the runtime reports generic transport and callback errors without reflecting
+request header values.
 
 ## Extending with a new transport
 

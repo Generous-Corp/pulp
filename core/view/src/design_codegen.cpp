@@ -1394,6 +1394,12 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
     if (auto f = node.attributes.find("svg_fill"); f != node.attributes.end())
         ss << ind << "setSvgFill('" << id << "', '"
            << js_single_quote_escape(f->second) << "');\n";
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes — a subtracted icon baked as same-direction contours fills SOLID
+    // without it. Emitted only for evenodd; nonzero is the widget default.
+    if (auto fr = node.attributes.find("svg_fill_rule");
+        fr != node.attributes.end() && fr->second == "evenodd")
+        ss << ind << "setSvgFillRule('" << id << "', 'evenodd');\n";
     // Emission order is irrelevant — SvgPathWidget resolves the two at
     // paint time, preferring the gradient and using the solid only as
     // the parse-failure fallback — but the solid is emitted first so
@@ -1413,6 +1419,14 @@ static bool emit_js_svg_path_node(const NativeEmit& e) {
         // rim in a real design lowered to no stroke at all.
         ss << ind << "setSvgStroke('" << id << "', '"
            << js_single_quote_escape(*node.style.border_color) << "');\n";
+    // Gradient stroke rides beside the solid, same contract as the fill
+    // pair above: the widget prefers the gradient and keeps the solid as
+    // its parse-failure fallback, and the solid is emitted first so the
+    // generated JS reads the way it resolves.
+    if (auto sg = node.attributes.find("svg_stroke_gradient");
+        sg != node.attributes.end() && !sg->second.empty())
+        ss << ind << "setSvgStrokeGradient('" << id << "', '"
+           << js_single_quote_escape(sg->second) << "');\n";
     if (auto sw = node.attributes.find("svg_stroke_width");
         sw != node.attributes.end())
         ss << ind << "setSvgStrokeWidth('" << id << "', " << sw->second << ");\n";
@@ -2285,6 +2299,15 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
 
     ss << "setTheme('dark');\n\n";
 
+    // Imported designs replay geometry the design tool already solved at
+    // fractional coordinates. Yoga's default whole-pixel grid rounding moves
+    // siblings relative to each other by up to ~0.7px per axis, visibly
+    // de-centering concentric shapes (knob value-ring vs body). Opt the
+    // host's layout pass out; typeof-guarded so the bundle still loads on
+    // runtimes that predate the function and on web-compat DOM hosts
+    // (browsers lay out subpixel already).
+    ss << "if (typeof setSubpixelLayout === 'function') setSubpixelLayout('', true);\n\n";
+
     // Register bundled (non-system) fonts BEFORE any setFontFamily, so a
     // family like "Clash Grotesk" / "Inter" resolves to the shipped face
     // instead of silently falling back to a same-named system font (or a
@@ -2430,18 +2453,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // instead of dropping it to an empty frame. The copy keeps the caller's
         // IR untouched; the web-compat arm (which does not own the dropped-shape
         // fall-through) is intentionally not affected.
-        IRNode native_root = ir.root;
-        // Before synthesis: synthesize_node moves border_color onto the path it
-        // builds, and it only ever sees the discrete field — so the shorthand
-        // has to be split first or a stroked primitive synthesizes a path with
-        // no stroke on it.
-        normalize_border_shorthand(native_root);
-        // Reconnect a slider's detached progress fill to its thumb before path
-        // synthesis bakes the fill rect's width into path_data — a fill that
-        // floats away from the thumb in the stored geometry would otherwise
-        // render as a broken detached bar.
-        reconnect_slider_fill(native_root);
-        synthesize_primitive_paths(native_root);
+        DesignIR native_ir = prepare_native_design_ir(ir);
 
         // Resolve widget kinds through the SHARED recognition resolver — the
         // same pass the cpp and Swift emitters run — so this default JS lane
@@ -2449,14 +2461,13 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // Resolved AFTER the tree mutations above so the resolved tree mirrors
         // exactly what the emit walk sees; the walks share order, so a node and
         // its ResolvedNativeNode travel together through the recursion.
-        DesignIR native_ir = ir;
-        native_ir.root = native_root;
         const ResolvedNativeNode resolved_root =
             resolve_design_ir_native(native_ir, native_ir.asset_manifest);
 
         int var_counter = 0;
         std::unordered_map<const IRNode*, std::string> id_map;
-        generate_native_node(ss, native_root, resolved_root, opts, 0, var_counter, "", &id_map);
+        generate_native_node(
+            ss, native_ir.root, resolved_root, opts, 0, var_counter, "", &id_map);
         ss << "void 0;\n";
 
         // Tree-level fidelity pass: catch vector/path nodes codegen dropped to
@@ -2466,7 +2477,7 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         // lowering does not own the dropped-shape fall-through.
         if (opts.fidelity_report) {
             check_vector_renderability(
-                native_root, ir.diagnostics,
+                native_ir.root, ir.diagnostics,
                 [&id_map](const IRNode& n) -> std::string {
                     auto it = id_map.find(&n);
                     if (it != id_map.end()) return it->second;

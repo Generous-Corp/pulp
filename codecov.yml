@@ -201,6 +201,10 @@ flags:
     paths:
       - core/canvas/
     carryforward: true
+  dawproject:
+    paths:
+      - core/dawproject/
+    carryforward: true
   dsl:
     paths:
       - core/dsl/
@@ -240,6 +244,10 @@ flags:
   playback:
     paths:
       - core/playback/
+    carryforward: true
+  sequence:
+    paths:
+      - core/sequence/
     carryforward: true
   platform:
     paths:
@@ -399,6 +407,9 @@ component_management:
       paths:
         - "core/canvas/**"
         - "!core/canvas/platform/**"
+    - component_id: dawproject
+      name: dawproject
+      paths: ["core/dawproject/**"]
     - component_id: dsl
       name: dsl
       paths: ["core/dsl/**"]
@@ -433,6 +444,9 @@ component_management:
     - component_id: playback
       name: playback
       paths: ["core/playback/**"]
+    - component_id: sequence
+      name: sequence
+      paths: ["core/sequence/**"]
     - component_id: platform
       name: platform
       paths:

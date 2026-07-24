@@ -58,6 +58,8 @@ struct DecodeLimits {
     std::size_t max_opaque_bytes = 64ull * 1024ull * 1024ull;
     std::size_t max_migration_steps = 64;
     std::size_t max_assets = 100'000;
+    std::size_t max_audio_loop_points = 1'000'000;
+    std::size_t max_audio_loop_tags = 100'000;
     std::size_t max_sequences = 100'000;
     std::size_t max_tracks = 10'000;
     std::size_t max_clips = 100'000;
@@ -69,6 +71,7 @@ struct DecodeLimits {
     std::size_t max_automation_points = 5'000'000;
     std::size_t max_take_lanes = 100'000;
     std::size_t max_takes = 5'000'000;
+    std::size_t max_take_comp_segments = 5'000'000;
 
     static DecodeLimits web_defaults() noexcept;
 };

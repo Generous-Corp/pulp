@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 
 // CHOC audio file support
@@ -76,6 +77,12 @@ static bool has_consistent_channel_lengths(const AudioFileData& data) {
                        });
 }
 
+static bool can_write_wav(const AudioFileData& data) {
+    return data.sample_rate != 0 && has_consistent_channel_lengths(data) &&
+           data.num_channels() <= std::numeric_limits<uint16_t>::max() &&
+           data.num_frames() <= std::numeric_limits<uint32_t>::max();
+}
+
 std::optional<AudioFileInfo> read_audio_file_info(const std::string& path) {
     try {
         auto formats = make_format_list();
@@ -134,12 +141,9 @@ std::optional<AudioFileData> read_audio_file(const std::string& path) {
     }
 }
 
-bool write_wav_file(const std::string& path, const AudioFileData& data,
-                    WavBitDepth bit_depth) {
-    if (data.sample_rate == 0) return false;
-    if (!has_consistent_channel_lengths(data)) return false;
-    if (data.num_channels() > std::numeric_limits<uint16_t>::max()) return false;
-    if (data.num_frames() > std::numeric_limits<uint32_t>::max()) return false;
+bool write_wav_stream(std::ostream& output, const AudioFileData& data, WavBitDepth bit_depth) {
+    if (!can_write_wav(data))
+        return false;
 
     try {
         choc::audio::WAVAudioFileFormat<true> wav;
@@ -150,8 +154,10 @@ bool write_wav_file(const std::string& path, const AudioFileData& data,
                        : bit_depth == WavBitDepth::Int24   ? choc::audio::BitDepth::int24
                                                            : choc::audio::BitDepth::int16;
 
-        auto writer = wav.createWriter(std::filesystem::path(path), props);
-        if (!writer) return false;
+        auto stream = std::shared_ptr<std::ostream>(&output, [](std::ostream*) {});
+        auto writer = wav.createWriter(std::move(stream), props);
+        if (!writer)
+            return false;
 
         uint32_t frame_count = static_cast<uint32_t>(data.num_frames());
         choc::buffer::ChannelArrayBuffer<float> buffer(data.num_channels(), frame_count);
@@ -162,10 +168,26 @@ bool write_wav_file(const std::string& path, const AudioFileData& data,
                 channel_view.data.data[i] = data.channels[ch][i];
         }
 
-        return writer->appendFrames(buffer.getView());
+        const bool appended = writer->appendFrames(buffer.getView());
+        const bool flushed = appended && writer->flush();
+        writer.reset();
+        output.flush();
+        return flushed && output.good();
     } catch (...) {
         return false;
     }
+}
+
+bool write_wav_file(const std::string& path, const AudioFileData& data, WavBitDepth bit_depth) {
+    if (!can_write_wav(data))
+        return false;
+    std::ofstream output(std::filesystem::path(path),
+                         std::ios::binary | std::ios::out | std::ios::trunc);
+    if (!output)
+        return false;
+    const bool written = write_wav_stream(output, data, bit_depth);
+    output.close();
+    return written && !output.fail();
 }
 
 bool write_wav_file(const std::string& path, const AudioFileData& data) {

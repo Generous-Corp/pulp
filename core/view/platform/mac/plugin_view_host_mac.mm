@@ -95,6 +95,11 @@ extern "C" void pulp_mac_plugin_text_input_client_category_anchor();
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
 @property (nonatomic, assign) BOOL designTopAlign;
+// Reconcile first-responder with the pulp text-input focus slot. Declared here
+// so the host's frame-tick block (below the @implementation) can call it every
+// vsync — the event-independent cadence that hands the DAW keyboard back the
+// instant focus clears without a following key/mouse event.
+- (void)syncKeyFocus;
 @end
 
 // ── Accessibility element wrapping a Pulp View ──────────────────────────────
@@ -574,7 +579,7 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
 // restore matters: handing focus to nil instead of back to the host's own
 // view leaves hosts like Logic with dead keyboard routing (Musical Typing
 // stays silent after a type-in commit until the user resets the track).
-[[maybe_unused]] static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
+static NSResponder* pulp_plugin_live_prior_responder(NSResponder* saved, NSWindow* win) {
     if (saved == nil || saved == (NSResponder*)win || win.contentView == nil) return nil;
     NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:win.contentView];
     while (stack.count > 0) {
@@ -584,6 +589,27 @@ bool pulp_plugin_key_down(NSView* host, pulp::view::View* root, NSEvent* event) 
         [stack addObjectsFromArray:v.subviews];
     }
     return nil;
+}
+
+// Keep CPU and GPU embedded views on one responder-transfer contract. A text
+// field temporarily borrows first responder from the host; when it releases,
+// restore the same still-live host view instead of dropping the window to nil.
+// An explicit host grab still wins through -resignFirstResponder, which clears
+// `prior` before ending the widget's text input.
+static void pulp_plugin_sync_key_focus(NSView* host,
+                                       pulp::view::View* root,
+                                       NSResponder*& prior) {
+    NSWindow* win = host.window;
+    if (!win) return;
+    const bool wants = pulp_text_input_focused_under_root(root);
+    if (wants && win.firstResponder != host) {
+        prior = win.firstResponder;
+        [win makeFirstResponder:host];
+    } else if (!wants && win.firstResponder == host) {
+        NSResponder* restore = pulp_plugin_live_prior_responder(prior, win);
+        prior = nil;
+        [win makeFirstResponder:restore];
+    }
 }
 
 // End the focused widget's text input because the HOST moved the keyboard
@@ -749,18 +775,7 @@ static bool pulp_plugin_forward_key_to_host(NSView* self, NSEvent* event) {
     return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
-    NSWindow* win = self.window;
-    if (!win) return;
-    const bool wants = pulp_text_input_focused_under_root(self.rootView);
-    if (wants && win.firstResponder != self) {
-        [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        // No field focused — hand the keyboard back to the DAW so transport keys
-        // and the host's Musical Typing resume immediately (e.g. after a type-in
-        // commits). Without this the editor would keep first responder and swallow
-        // DAW shortcuts until the user clicked a host control.
-        [win makeFirstResponder:nil];
-    }
+    pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
 }
 // The host moved the keyboard elsewhere (click on a host control, window
 // switching) while a widget still held text-input focus: close that text
@@ -1246,6 +1261,19 @@ public:
                 // shared state, so leaving it set after teardown is harmless
                 // (the link is already stopped, no further callbacks fire).
                 if (!state->alive.load(std::memory_order_acquire)) return;
+                // Frame-tick focus reconciliation — the event-independent cadence.
+                // syncKeyFocus is only called on discrete key/mouse events, so a
+                // focus slot that clears WITHOUT a following event (a failed/rejected
+                // generation, a programmatic blur) would leave the editor NSView
+                // first responder, swallowing the DAW's Musical Typing letter keys
+                // until close/reopen. Running it every tick hands the keyboard back
+                // on the next vsync. Cheap + idempotent: syncKeyFocus only touches
+                // first responder on a transition (makeFirstResponder:nil when no
+                // pulp text field is focused and we still hold it; makeFirstResponder:
+                // self when one is focused and we don't), guarded so a steady state
+                // is a no-op. Runs after idle() so a focus change the JS pump made
+                // this frame is reflected immediately.
+                if (self->view_) [self->view_ syncKeyFocus];
                 // Consume the dirty flag AFTER the idle callback, so a repaint it
                 // requested lands in THIS frame; anything that dirties the view
                 // later (during the advance below) re-arms it for the next one.
@@ -1476,6 +1504,9 @@ private:
 @property (nonatomic, assign) float designW;
 @property (nonatomic, assign) float designH;
 @property (nonatomic, assign) BOOL designTopAlign;
+// See PulpPluginView::syncKeyFocus — declared so the GPU host's display-link
+// frame-tick block can reconcile first-responder every vsync.
+- (void)syncKeyFocus;
 @end
 
 @implementation PulpGpuPluginView {
@@ -1495,14 +1526,7 @@ private:
     return pulp_text_input_focused_under_root(self.rootView);
 }
 - (void)syncKeyFocus {
-    NSWindow* win = self.window;
-    if (!win) return;
-    const bool wants = pulp_text_input_focused_under_root(self.rootView);
-    if (wants && win.firstResponder != self) {
-        [win makeFirstResponder:self];
-    } else if (!wants && win.firstResponder == self) {
-        [win makeFirstResponder:nil];  // hand the keyboard back to the DAW
-    }
+    pulp_plugin_sync_key_focus(self, self.rootView, _priorResponder);
 }
 // Host took the keyboard while a type-in was open: close it, don't re-claim.
 // See PulpPluginView::resignFirstResponder.
@@ -2252,6 +2276,14 @@ private:
                     // alive=false and frees `self`. Re-check before touching ANY
                     // self member (parity with the CPU host's render_link_callback).
                     if (!alive->load(std::memory_order_acquire)) return;
+
+                    // Frame-tick focus reconciliation — the event-independent cadence
+                    // (see the identical note in MacPluginViewHost::render_link_callback).
+                    // Hands the DAW keyboard back the instant the pulp text-input slot
+                    // clears without a following key/mouse event (a failed/rejected
+                    // generation, a programmatic blur). Cheap + idempotent: syncKeyFocus
+                    // only touches first responder on a transition.
+                    if (self->metal_view_) [self->metal_view_ syncKeyFocus];
 
                     const auto tick = pulp::view::begin_host_frame(
                         &self->root_, self->frame_clock_, self->frame_pump_, frame_time,

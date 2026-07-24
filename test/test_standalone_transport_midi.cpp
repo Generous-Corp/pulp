@@ -84,6 +84,7 @@ ProcessContext make_block_context(const StandaloneConfig& cfg,
     proc_ctx.num_samples = cfg.buffer_size;
     proc_ctx.position_samples = block_start_samples;
     proc_ctx.is_playing = cfg.transport_playing;
+    proc_ctx.is_recording = cfg.transport_recording;
     proc_ctx.tempo_bpm = cfg.tempo_bpm;
     proc_ctx.time_sig_numerator = cfg.time_sig_numerator;
     proc_ctx.time_sig_denominator = cfg.time_sig_denominator;
@@ -255,6 +256,7 @@ TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationP
     original.time_sig_numerator = 7;
     original.time_sig_denominator = 8;
     original.transport_playing = false;
+    original.transport_recording = true;
 
     REQUIRE(StandaloneApp::save_persisted_config(app_name, original));
 
@@ -269,6 +271,7 @@ TEST_CASE("StandaloneApp::save_persisted_config round-trips through ApplicationP
     REQUIRE(loaded.time_sig_numerator == original.time_sig_numerator);
     REQUIRE(loaded.time_sig_denominator == original.time_sig_denominator);
     REQUIRE(loaded.transport_playing == original.transport_playing);
+    REQUIRE(loaded.transport_recording == original.transport_recording);
 
     // Empty app_name is the "persistence disabled" sentinel — the helpers
     // must return false / defaults so callers can opt out cleanly.

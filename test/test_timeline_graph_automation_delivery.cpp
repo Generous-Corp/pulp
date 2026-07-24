@@ -210,6 +210,79 @@ TEST_CASE("timeline graph binding automates the hosted PulpGain CLAP") {
                      - std::pow(10.0f, 0.75f / 20.0f)) < 1.0e-4f);
     REQUIRE(std::abs(gain->get_parameter(2) - 0.75f) < 1.0e-4f);
 }
+
+TEST_CASE("hosted CLAP receives graph modulation and mailbox parameter events") {
+    namespace fs = std::filesystem;
+    const fs::path path = PULP_TEST_CLAP_PATH;
+    if (!fs::exists(path)) {
+        WARN("CLAP test plugin not built at " << path << " - skipping");
+        return;
+    }
+
+    PluginInfo info;
+    info.name = "PulpGain";
+    info.path = path.string();
+    info.format = PluginFormat::CLAP;
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot);
+    REQUIRE(slot->is_loaded());
+    auto* gain = slot.get();
+
+    SignalGraph graph;
+    const auto input = graph.add_input_node(2, "audio and modulation source");
+    const auto plugin =
+        graph.add_plugin_node(std::move(slot), 2, 2, "hosted PulpGain");
+    const auto output = graph.add_output_node(2, "output");
+    REQUIRE(graph.connect(input, 0, plugin, 0));
+    REQUIRE(graph.connect(input, 1, plugin, 1));
+    REQUIRE(graph.connect(plugin, 0, output, 0));
+    REQUIRE(graph.connect(plugin, 1, output, 1));
+    REQUIRE(graph.connect_automation(input, 0, plugin, 2, -6.0f, 6.0f));
+    REQUIRE(graph.prepare(48'000.0, 8));
+
+    std::array<float, 8> modulation{};
+    modulation.back() = 1.0f;
+    std::array<float, 8> unity_audio{};
+    unity_audio.fill(1.0f);
+    const std::array<const float*, 2> input_channels{
+        modulation.data(), unity_audio.data()};
+    std::array<float, 8> left_output{};
+    std::array<float, 8> right_output{};
+    const std::array<float*, 2> output_channels{
+        left_output.data(), right_output.data()};
+    audio::BufferView<const float> input_view(
+        input_channels.data(), input_channels.size(), modulation.size());
+    audio::BufferView<float> output_view(
+        output_channels.data(), output_channels.size(), left_output.size());
+
+    graph.process(output_view, input_view, 8);
+    const float modulated_gain = std::pow(10.0f, 6.0f / 20.0f);
+    REQUIRE(std::abs(gain->get_parameter(2) - 6.0f) < 1.0e-4f);
+    REQUIRE(std::all_of(
+        right_output.begin(), right_output.end(), [&](float sample) {
+            return std::abs(sample - modulated_gain) < 1.0e-4f;
+        }));
+
+    ParameterEventQueue mailbox;
+    REQUIRE(mailbox.push({2, 7, -12.0f, 0}));
+    REQUIRE(graph.inject_parameter_events(plugin, mailbox));
+    graph.process(output_view, input_view, 8);
+    const float mailbox_gain = std::pow(10.0f, -12.0f / 20.0f);
+    REQUIRE(std::abs(gain->get_parameter(2) + 12.0f) < 1.0e-4f);
+    REQUIRE(std::all_of(
+        right_output.begin(), right_output.end(), [&](float sample) {
+            return std::abs(sample - mailbox_gain) < 1.0e-4f;
+        }));
+
+    // The mailbox publication is one-shot. The still-connected graph modulation
+    // owns the following block again, proving both sources reached the plugin.
+    graph.process(output_view, input_view, 8);
+    REQUIRE(std::abs(gain->get_parameter(2) - 6.0f) < 1.0e-4f);
+    REQUIRE(std::all_of(
+        right_output.begin(), right_output.end(), [&](float sample) {
+            return std::abs(sample - modulated_gain) < 1.0e-4f;
+        }));
+}
 #endif
 
 TEST_CASE("timeline graph binding rejects invalid automation routes and parameters") {

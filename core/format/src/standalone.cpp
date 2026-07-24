@@ -21,6 +21,10 @@
 #include <functional>
 #include <string_view>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 // The dev inspector (Cmd+I overlay) is gated behind the PULP_ENABLE_INSPECTOR
 // compile flag (root CMake option, default ON for dev/examples builds;
 // release/standalone-ship builds set it OFF) so a shipped standalone app does
@@ -353,16 +357,27 @@ void StandaloneApp::render_audio_block(
         proc_ctx.render_speed_hint = RenderSpeedHint::Realtime;
         proc_ctx.position_samples = block_start_samples;
         proc_ctx.is_playing = config_.transport_playing;
-        proc_ctx.is_recording = false;
+        proc_ctx.is_recording = config_.transport_recording;
         proc_ctx.tempo_bpm = config_.tempo_bpm;
         proc_ctx.time_sig_numerator = config_.time_sig_numerator;
         proc_ctx.time_sig_denominator = config_.time_sig_denominator;
+        proc_ctx.transport_validity.set(TransportField::SamplePosition);
+        proc_ctx.transport_validity.set(TransportField::Playing);
+        proc_ctx.transport_validity.set(TransportField::Recording);
+        proc_ctx.transport_validity.set(TransportField::Looping);
+        if (config_.tempo_bpm > 0.0) {
+            proc_ctx.transport_validity.set(TransportField::Tempo);
+        }
+        if (config_.time_sig_numerator > 0 && config_.time_sig_denominator > 0) {
+            proc_ctx.transport_validity.set(TransportField::TimeSignature);
+        }
         if (config_.tempo_bpm > 0.0 && ctx.sample_rate > 0.0) {
             const double seconds_per_beat = 60.0 / config_.tempo_bpm;
             const double samples_per_beat = seconds_per_beat * ctx.sample_rate;
             if (samples_per_beat > 0.0) {
                 proc_ctx.position_beats =
                     static_cast<double>(block_start_samples) / samples_per_beat;
+                proc_ctx.transport_validity.set(TransportField::BeatPosition);
             }
         }
         // Derive `bar`, then diff against the previous block for the transport
@@ -375,7 +390,12 @@ void StandaloneApp::render_audio_block(
         // AU / CLAP adapters so there is one definition of "the transport
         // started". Stateful; updates `playhead_prev_` in place.
         detail::derive_bar_from_beats(proc_ctx);
-        detail::compute_playhead_changes(proc_ctx, playhead_prev_);
+        if (proc_ctx.has_transport(TransportField::BeatPosition) &&
+            proc_ctx.has_transport(TransportField::TimeSignature)) {
+            proc_ctx.transport_validity.set(TransportField::Bar);
+        }
+        detail::compute_playhead_changes(
+            proc_ctx, playhead_prev_, detail::TransportDiffMode::FieldValidity);
 
         {
             // Flush denormals to zero for the DSP callback so quiet tails in
@@ -665,21 +685,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // so paint scale and the OS aspect lock track each tab. Editor stays pinned
     // at its declared size (no letterbox); Settings reflows to fill its taller
     // window. Framework-level so every standalone settings chrome benefits.
-    if (auto* tab_panel = chrome.tab_panel()) {
-        view::WindowHost* host = window.get();
-        const float editor_w = static_cast<float>(size_hints.preferred_width);
-        const float editor_h = static_cast<float>(size_hints.preferred_height);
-        const float settings_h =
-            std::max(editor_h, static_cast<float>(SettingsPanel::preferred_height()));
-        tab_panel->on_tab_change = [host, tab_panel, editor_w, editor_h, settings_h](int index) {
-            const bool settings = index == tab_panel->find_tab("Settings");
-            const float w = editor_w;
-            const float h = settings ? settings_h : editor_h;
-            host->set_fixed_aspect_ratio(w / h);
-            host->set_design_viewport(w, h);
-            host->request_content_size(w, h);
-        };
-    }
+    detail::configure_standalone_tab_resizing(*window, chrome, *bridge);
+
+    // Editor-INITIATED resize: let the editor ask the standalone window to
+    // resize itself (e.g. a chrome-hiding mode wanting a smaller shape). Drives
+    // the SAME design-viewport + content-size path the Settings tab uses above,
+    // and updates the bridge's reported hints so the new aspect sticks. Cleared
+    // in the close callback before the window / bridge it captures die.
+#if defined(__APPLE__) && TARGET_OS_OSX
+    detail::install_standalone_editor_resize_handler(
+        *processor_, this, *window, *bridge);
+#endif
 
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
@@ -695,6 +711,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
     window->set_close_callback([this, bridge_raw]() {
+        // Drop the editor→host resize handler before the window / bridge it
+        // captures are torn down by stop().
+        if (processor_) processor_->set_editor_resize_handler(this, nullptr);
         if (bridge_raw) bridge_raw->close();
         stop();
     });
@@ -1010,6 +1029,11 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // while the processor is still alive; the call is idempotent.
     window->run_event_loop();
 
+    // Application quit can leave the event loop without invoking the window's
+    // close callback. Remove this owner's entry before the bridge/window or
+    // processor is torn down; removal is harmless on platforms where no
+    // editor-initiated resize handler was installed.
+    if (processor_) processor_->set_editor_resize_handler(this, nullptr);
     bridge->close();
     stop();
     return true;
@@ -1066,6 +1090,7 @@ constexpr std::string_view kKeyTempo          = "standalone.tempo_bpm";
 constexpr std::string_view kKeyTimeSigNum     = "standalone.time_sig_num";
 constexpr std::string_view kKeyTimeSigDen     = "standalone.time_sig_den";
 constexpr std::string_view kKeyPlaying        = "standalone.transport_playing";
+constexpr std::string_view kKeyRecording      = "standalone.transport_recording";
 
 }  // namespace
 
@@ -1087,6 +1112,7 @@ StandaloneConfig StandaloneApp::load_persisted_config(std::string_view app_name,
     if (auto v = user.get_int(kKeyTimeSigNum))        cfg.time_sig_numerator   = static_cast<int>(*v);
     if (auto v = user.get_int(kKeyTimeSigDen))        cfg.time_sig_denominator = static_cast<int>(*v);
     if (auto v = user.get_bool(kKeyPlaying))          cfg.transport_playing    = *v;
+    if (auto v = user.get_bool(kKeyRecording))        cfg.transport_recording  = *v;
     return cfg;
 }
 
@@ -1108,6 +1134,7 @@ bool StandaloneApp::save_persisted_config(std::string_view app_name,
     user.set_int(kKeyTimeSigNum, config.time_sig_numerator);
     user.set_int(kKeyTimeSigDen, config.time_sig_denominator);
     user.set_bool(kKeyPlaying, config.transport_playing);
+    user.set_bool(kKeyRecording, config.transport_recording);
 
     // ApplicationProperties::save() walks both user + common files and
     // returns void; check the user file's persisted path is non-empty as

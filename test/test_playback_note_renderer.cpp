@@ -1,14 +1,14 @@
+#include <pulp/midi/block_ops.hpp>
 #include <pulp/playback/note_renderer.hpp>
 #include <pulp/playback/program_compiler.hpp>
-#include <pulp/midi/block_ops.hpp>
 
 #include "harness/scoped_rt_process_probe.hpp"
 #include "timebase_test_helpers.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <limits>
@@ -24,9 +24,9 @@ using namespace pulp::timeline;
 
 namespace {
 
-template <typename T, typename E>
-T take(runtime::Result<T, E> result) {
-    if (!result) std::abort();
+template <typename T, typename E> T take(runtime::Result<T, E> result) {
+    if (!result)
+        std::abort();
     return std::move(result).value();
 }
 
@@ -47,13 +47,12 @@ std::shared_ptr<const Project> note_project(const CompiledTempoMap& map,
     auto clip = take(Clip::create({20}, {0}, clip_duration, std::move(content)));
     auto track = take(Track::create({10}, "notes", {std::move(clip)}));
     auto sequence = take(Sequence::create({2}, "root", clip_duration, {std::move(track)}));
-    return std::make_shared<const Project>(take(Project::create(
-        ProjectInput{{1}, "project", 10'000, {2}, {}, {std::move(sequence)}})));
+    return std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "project", 10'000, {2}, {}, {std::move(sequence)}})));
 }
 
-NoteEvent note(const CompiledTempoMap& map, std::uint64_t id,
-               std::int64_t start_sample, std::int64_t end_sample,
-               std::uint8_t pitch, std::uint8_t channel = 0,
+NoteEvent note(const CompiledTempoMap& map, std::uint64_t id, std::int64_t start_sample,
+               std::int64_t end_sample, std::uint8_t pitch, std::uint8_t channel = 0,
                std::uint16_t velocity = 0xffff) {
     const auto origin = tick_at_sample(map, 0);
     const TickPosition start{(tick_at_sample(map, start_sample) - origin).value};
@@ -67,8 +66,8 @@ struct ProgramHarness {
     PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
 
     void publish(std::shared_ptr<const Project> project,
-                 std::shared_ptr<const CompiledTempoMap> map,
-                 std::uint64_t revision, DirtyTrackSet dirty = {.all = true}) {
+                 std::shared_ptr<const CompiledTempoMap> map, std::uint64_t revision,
+                 DirtyTrackSet dirty = {.all = true}) {
         ProgramCompileRequest request;
         request.project = std::move(project);
         request.sequence_id = {2};
@@ -79,7 +78,7 @@ struct ProgramHarness {
         while (compiler.status().busy)
             executor.run_for(std::chrono::seconds(1), 64);
         INFO("compile error code " << static_cast<int>(compiler.status().last_error.code)
-             << " item " << compiler.status().last_error.item.value);
+                                   << " item " << compiler.status().last_error.item.value);
         REQUIRE_FALSE(compiler.status().has_error);
     }
 };
@@ -88,13 +87,15 @@ class TinyBudgetExecutor final : public CompileExecutor {
   public:
     bool submit(std::unique_ptr<CompileTask> incoming,
                 std::chrono::steady_clock::time_point) override {
-        if (!incoming || task) return false;
+        if (!incoming || task)
+            return false;
         task = std::move(incoming);
         return true;
     }
 
     void run_one_work_unit() {
-        if (!task) return;
+        if (!task)
+            return;
         if (task->run_slice({std::chrono::steady_clock::now() + std::chrono::seconds(1), 1}) ==
             CompileTaskStatus::Complete)
             task.reset();
@@ -128,8 +129,7 @@ struct EventBytes {
     auto operator<=>(const EventBytes&) const = default;
 };
 
-std::vector<EventBytes> render_partition(ProgramHarness& programs,
-                                         const CompiledTempoMap& map,
+std::vector<EventBytes> render_partition(ProgramHarness& programs, const CompiledTempoMap& map,
                                          std::span<const std::uint32_t> blocks) {
     ArrangementNoteRenderer renderer({10});
     REQUIRE(renderer.prepare(64));
@@ -143,8 +143,8 @@ std::vector<EventBytes> render_partition(ProgramHarness& programs,
         auto program = latch.begin_block(programs.store);
         REQUIRE(renderer.process(program, snapshot).code == NoteRenderCode::Ok);
         for (const auto& event : renderer.events())
-            result.push_back({base + event.sample_offset,
-                              {event.data()[0], event.data()[1], event.data()[2]}});
+            result.push_back(
+                {base + event.sample_offset, {event.data()[0], event.data()[1], event.data()[2]}});
         base += frames;
     }
     return result;
@@ -152,13 +152,15 @@ std::vector<EventBytes> render_partition(ProgramHarness& programs,
 
 } // namespace
 
-TEST_CASE("note program compilation is deterministic and note offs win equal-sample ties") {
+TEST_CASE("note program compilation is deterministic and note offs win exact-tick ties") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 31, 30, 50, 62, 2, 0x8000),
-        note(*map, 30, 10, 30, 60, 1),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 31, 30, 50, 62, 2, 0x8000),
+                                      note(*map, 30, 10, 30, 60, 1),
+                                  }),
+                     map, 1);
 
     const auto program = programs.store.read();
     const auto events = program->find_track({10})->arrangement_note_events();
@@ -175,13 +177,61 @@ TEST_CASE("note program compilation is deterministic and note offs win equal-sam
     REQUIRE(events[2].note_id == ItemId{31});
 }
 
+TEST_CASE("host-mapped same-sample notes follow tick order before event kind") {
+    const auto map = tempo_map();
+    NoteEvent ending{{30}, {0}, {101}, 0xffff, 60, 0};
+    NoteEvent starting{{31}, {100}, {100}, 0xffff, 61, 0};
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {ending, starting}), map, 1);
+
+    PlaybackProgramBlockLatch latch;
+    auto program = latch.begin_block(programs.store);
+    const auto compiled = program.program()->find_track({10})->arrangement_note_events();
+    REQUIRE(compiled.size() == 4);
+    REQUIRE(compiled[1].sample == compiled[2].sample);
+    REQUIRE(compiled[1].tick == TickPosition{100});
+    REQUIRE(compiled[1].kind == NoteProgramEventKind::On);
+    REQUIRE(compiled[2].tick == TickPosition{101});
+    REQUIRE(compiled[2].kind == NoteProgramEventKind::Off);
+
+    TransportSnapshot transport;
+    transport.tempo_map = map.get();
+    transport.sample_rate = map->sample_rate();
+    transport.frame_count = 4;
+    transport.range_count = 1;
+    transport.is_playing = true;
+    transport.ranges[0].frame_count = 4;
+    transport.ranges[0].timeline_tick_start = {0};
+    transport.ranges[0].timeline_tick_end = {102};
+    transport.ranges[0].host_tick_start = 0.0;
+    transport.ranges[0].host_tick_end = 102.0;
+    transport.ranges[0].has_precise_host_ticks = true;
+    transport.ranges[0].host_beat_mapping = true;
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(8));
+    REQUIRE(renderer.process(program, transport).code == NoteRenderCode::Ok);
+    REQUIRE(renderer.events().size() == 3);
+    REQUIRE(renderer.events()[0].is_note_on());
+    REQUIRE(renderer.events()[0].data()[1] == 60);
+    REQUIRE(renderer.events()[0].sample_offset == 0);
+    REQUIRE(renderer.events()[1].is_note_on());
+    REQUIRE(renderer.events()[1].data()[1] == 61);
+    REQUIRE(renderer.events()[1].sample_offset == 3);
+    REQUIRE(renderer.events()[2].is_note_off());
+    REQUIRE(renderer.events()[2].data()[1] == 60);
+    REQUIRE(renderer.events()[2].sample_offset == 3);
+}
+
 TEST_CASE("note renderer preserves native MIDI2 velocity beyond the MIDI1 mirror") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 10, 20, 60, 0, 0x8000),
-        note(*map, 31, 30, 40, 62, 0, 0x8001),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 10, 20, 60, 0, 0x8000),
+                                      note(*map, 31, 30, 40, 62, 0, 0x8001),
+                                  }),
+                     map, 1);
     MasterTransport transport;
     prepare_playing_transport(transport, *map, 64);
     ArrangementNoteRenderer renderer({10});
@@ -219,6 +269,43 @@ TEST_CASE("note renderer preserves native MIDI2 velocity beyond the MIDI1 mirror
     REQUIRE(routed_ump[2].packet.velocity_16() == 0x8001);
 }
 
+TEST_CASE("precise host tick end retains an included rounded-boundary note") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {note(*map, 30, 500, 750, 60)}), map, 1);
+
+    PlaybackProgramBlockLatch latch;
+    auto program = latch.begin_block(programs.store);
+    const auto source_events = program.program()->find_track({10})->arrangement_note_events();
+    REQUIRE(source_events.size() == 2);
+    const auto event_tick = source_events[0].tick;
+
+    TransportSnapshot transport;
+    transport.tempo_map = map.get();
+    transport.sample_rate = map->sample_rate();
+    transport.frame_count = 1'024;
+    transport.is_playing = true;
+    transport.range_count = 1;
+    transport.ranges[0].frame_count = transport.frame_count;
+    transport.ranges[0].timeline_tick_start = {event_tick.value - 20};
+    transport.ranges[0].timeline_tick_end = event_tick;
+    transport.ranges[0].host_beat_mapping = true;
+    transport.ranges[0].host_tick_start = static_cast<double>(event_tick.value - 20);
+    transport.ranges[0].host_tick_end = static_cast<double>(event_tick.value) + 0.48;
+    transport.ranges[0].has_precise_host_ticks = true;
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(8));
+    std::uint32_t mapped_offset = 0;
+    REQUIRE(host_mapped_output_offset_for_tick(transport.ranges[0], source_events[0].tick,
+                                               mapped_offset));
+    REQUIRE(mapped_offset == 1'000);
+    REQUIRE(renderer.process(program, transport).code == NoteRenderCode::Ok);
+    REQUIRE(renderer.events().size() == 1);
+    REQUIRE(renderer.events()[0].is_note_on());
+    REQUIRE(renderer.events()[0].sample_offset == 1'000);
+}
+
 TEST_CASE("many note merge sort advances one charged work unit per slice") {
     const auto map = tempo_map();
     std::vector<NoteEvent> notes;
@@ -229,15 +316,15 @@ TEST_CASE("many note merge sort advances one charged work unit per slice") {
         // Descending durations make the compiler's generated off stream
         // maximally different from the NoteContent start ordering.
         const auto end = static_cast<std::int64_t>(2'000 - index);
-        notes.push_back(note(*map, 1'000 + index, start, end,
-                             static_cast<std::uint8_t>(index % 128)));
+        notes.push_back(
+            note(*map, 1'000 + index, start, end, static_cast<std::uint8_t>(index % 128)));
     }
 
     PlaybackProgramStore store;
     TinyBudgetExecutor executor;
     PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
-    ProgramCompileRequest request{note_project(*map, std::move(notes), 2'100),
-                                  {2}, map, 1, {.all = true}, {}};
+    ProgramCompileRequest request{
+        note_project(*map, std::move(notes), 2'100), {2}, map, 1, {.all = true}, {}};
     REQUIRE(compiler.submit(std::move(request)));
     while (compiler.status().busy && executor.slice_count < 100'000) {
         executor.run_one_work_unit();
@@ -259,20 +346,24 @@ TEST_CASE("many note merge sort advances one charged work unit per slice") {
 TEST_CASE("note renderer golden stream is invariant under variable block partitioning") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 10, 30, 60, 0),
-        note(*map, 31, 30, 50, 62, 1, 0x8000),
-        note(*map, 32, 80, 100, 64, 2, 1),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 10, 30, 60, 0),
+                                      note(*map, 31, 30, 50, 62, 1, 0x8000),
+                                      note(*map, 32, 80, 100, 64, 2, 1),
+                                  }),
+                     map, 1);
 
     constexpr std::array one{std::uint32_t{128}};
-    constexpr std::array varied{std::uint32_t{1}, std::uint32_t{64},
-                                std::uint32_t{17}, std::uint32_t{46}};
+    constexpr std::array varied{std::uint32_t{1}, std::uint32_t{64}, std::uint32_t{17},
+                                std::uint32_t{46}};
     const auto golden = render_partition(programs, *map, one);
     const auto partitioned = render_partition(programs, *map, varied);
     REQUIRE(partitioned == golden);
     REQUIRE(golden.size() == 6);
     REQUIRE(golden[0] == EventBytes{10, {0x90, 60, 127}});
+    // When an end and a start share one exact tick, the physical release still
+    // precedes the onset after tick-aware ordering is applied.
     REQUIRE(golden[1] == EventBytes{30, {0x80, 60, 0}});
     REQUIRE(golden[2] == EventBytes{30, {0x91, 62, 64}});
     REQUIRE(golden[5] == EventBytes{100, {0x82, 64, 0}});
@@ -281,10 +372,12 @@ TEST_CASE("note renderer golden stream is invariant under variable block partiti
 TEST_CASE("one loop wrap flushes old notes before emitting the second range") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 0, 5, 62),
-        note(*map, 31, 95, 115, 60),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 0, 5, 62),
+                                      note(*map, 31, 95, 115, 60),
+                                  }),
+                     map, 1);
 
     const LoopRegion loop{true, {0}, tick_at_sample(*map, 100)};
     MasterTransport transport;
@@ -357,8 +450,7 @@ TEST_CASE("seek stop and program adoption release notes without Phase 1 chase") 
     }
 
     REQUIRE(transport.seek({0}) == TransportError::None);
-    programs.publish(note_project(*map, {note(*map, 40, 10, 100, 60)}), map, 3,
-                     {false, {{10}}});
+    programs.publish(note_project(*map, {note(*map, 40, 10, 100, 60)}), map, 3, {false, {{10}}});
     {
         auto program = latch.begin_block(programs.store);
         (void)renderer.process(program, next_block(transport, 20));
@@ -377,10 +469,12 @@ TEST_CASE("seek stop and program adoption release notes without Phase 1 chase") 
 TEST_CASE("renderer overflow retains a deterministic prefix then flushes delivered state") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 10, 100, 60),
-        note(*map, 31, 10, 100, 61),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 10, 100, 60),
+                                      note(*map, 31, 10, 100, 61),
+                                  }),
+                     map, 1);
     MasterTransport transport;
     prepare_playing_transport(transport, *map, 128);
     ArrangementNoteRenderer renderer({10});
@@ -413,11 +507,13 @@ TEST_CASE("renderer overflow retains a deterministic prefix then flushes deliver
 TEST_CASE("overlapping MIDI keys release only at the final off and preserve retrigger ties") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 10, 50, 60),
-        note(*map, 31, 30, 70, 60),
-        note(*map, 32, 70, 90, 60),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 10, 50, 60),
+                                      note(*map, 31, 30, 70, 60),
+                                      note(*map, 32, 70, 90, 60),
+                                  }),
+                     map, 1);
     MasterTransport transport;
     prepare_playing_transport(transport, *map, 128);
     ArrangementNoteRenderer renderer({10});
@@ -460,10 +556,12 @@ TEST_CASE("overlapping MIDI keys release only at the final off and preserve retr
 TEST_CASE("overlap adoption emits one physical flush and clears every logical count") {
     const auto map = tempo_map();
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 10, 100, 60),
-        note(*map, 31, 20, 110, 60),
-    }), map, 1);
+    programs.publish(note_project(*map,
+                                  {
+                                      note(*map, 30, 10, 100, 60),
+                                      note(*map, 31, 20, 110, 60),
+                                  }),
+                     map, 1);
     MasterTransport transport;
     prepare_playing_transport(transport, *map, 128);
     ArrangementNoteRenderer renderer({10});
@@ -489,8 +587,8 @@ TEST_CASE("logical overlap saturation fails closed in the same block") {
     const auto map = tempo_map();
     std::vector<NoteEvent> notes;
     notes.reserve(ArrangementNoteRenderer::maximum_logical_overlap + 1u);
-    for (std::uint16_t index = 0;
-         index <= ArrangementNoteRenderer::maximum_logical_overlap; ++index) {
+    for (std::uint16_t index = 0; index <= ArrangementNoteRenderer::maximum_logical_overlap;
+         ++index) {
         notes.push_back(note(*map, 1000u + index, 10, 100, 60));
     }
     ProgramHarness programs;
@@ -568,18 +666,18 @@ TEST_CASE("note range offsets are exact at signed sample-position extremes") {
     constexpr auto low = std::numeric_limits<std::int64_t>::min();
     constexpr auto high = std::numeric_limits<std::int64_t>::max();
 
-    REQUIRE(playback::detail::note_event_offset_in_range(
-        SamplePosition{low + 63}, SamplePosition{low}, 64, offset));
+    REQUIRE(playback::detail::note_event_offset_in_range(SamplePosition{low + 63},
+                                                         SamplePosition{low}, 64, offset));
     REQUIRE(offset == 63);
-    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(
-        SamplePosition{low + 64}, SamplePosition{low}, 64, offset));
-    REQUIRE(playback::detail::note_event_offset_in_range(
-        SamplePosition{high}, SamplePosition{high - 63}, 64, offset));
+    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(SamplePosition{low + 64},
+                                                               SamplePosition{low}, 64, offset));
+    REQUIRE(playback::detail::note_event_offset_in_range(SamplePosition{high},
+                                                         SamplePosition{high - 63}, 64, offset));
     REQUIRE(offset == 63);
-    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(
-        SamplePosition{low}, SamplePosition{high}, 64, offset));
-    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(
-        SamplePosition{high}, SamplePosition{low}, 64, offset));
+    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(SamplePosition{low},
+                                                               SamplePosition{high}, 64, offset));
+    REQUIRE_FALSE(playback::detail::note_event_offset_in_range(SamplePosition{high},
+                                                               SamplePosition{low}, 64, offset));
 }
 
 TEST_CASE("renderer process is allocation and lock free after prepare") {
@@ -603,8 +701,7 @@ TEST_CASE("renderer process is allocation and lock free after prepare") {
     REQUIRE(allocations == 0);
 }
 
-TEST_CASE("no stuck notes under randomized seek and loop stress",
-          "[playback][rt-safety][stress]") {
+TEST_CASE("no stuck notes under randomized seek and loop stress", "[playback][rt-safety][stress]") {
     const auto map = tempo_map();
 
     // A document of overlapping sustained notes plus short and retriggering
@@ -613,16 +710,20 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
     // out-of-clip ranges) and maps to distinct start/end ticks.
     constexpr std::int64_t clip_end = 4'000;
     ProgramHarness programs;
-    programs.publish(note_project(*map, {
-        note(*map, 30, 0, 3'800, 60, 0),      // long, spans nearly the whole doc
-        note(*map, 31, 100, 3'700, 62, 0),    // long, offset onset
-        note(*map, 32, 200, 3'900, 64, 1),    // long, other channel
-        note(*map, 33, 50, 2'000, 60, 2),     // same pitch, different channel key
-        note(*map, 34, 400, 900, 67, 0),      // short
-        note(*map, 35, 1'000, 1'200, 69, 0),  // short
-        note(*map, 36, 500, 1'500, 72, 0),    // retrigger pair on one key: overlap
-        note(*map, 37, 1'400, 2'500, 72, 0),  // folds onto pitch 72 while active
-    }, clip_end), map, 1);
+    programs.publish(
+        note_project(*map,
+                     {
+                         note(*map, 30, 0, 3'800, 60, 0),     // long, spans nearly the whole doc
+                         note(*map, 31, 100, 3'700, 62, 0),   // long, offset onset
+                         note(*map, 32, 200, 3'900, 64, 1),   // long, other channel
+                         note(*map, 33, 50, 2'000, 60, 2),    // same pitch, different channel key
+                         note(*map, 34, 400, 900, 67, 0),     // short
+                         note(*map, 35, 1'000, 1'200, 69, 0), // short
+                         note(*map, 36, 500, 1'500, 72, 0),   // retrigger pair on one key: overlap
+                         note(*map, 37, 1'400, 2'500, 72, 0), // folds onto pitch 72 while active
+                     },
+                     clip_end),
+        map, 1);
 
     constexpr std::uint32_t max_block = 256;
     constexpr int ops_per_seed = 600;
@@ -651,10 +752,10 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
         std::array<int, 16 * 128> depth{};
         std::array<std::int64_t, 16 * 128> open{};
         for (const auto& ev : events) {
-            const std::size_t key =
-                static_cast<std::size_t>(ev.channel) * 128u + ev.pitch;
+            const std::size_t key = static_cast<std::size_t>(ev.channel) * 128u + ev.pitch;
             if (ev.kind == NoteProgramEventKind::On) {
-                if (depth[key]++ == 0) open[key] = ev.sample.value;
+                if (depth[key]++ == 0)
+                    open[key] = ev.sample.value;
             } else if (depth[key] > 0 && --depth[key] == 0) {
                 coverage[key].push_back({open[key], ev.sample.value});
             }
@@ -662,7 +763,8 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
     }
     const auto covered = [&](std::size_t key, std::int64_t sample) {
         for (const auto& extent : coverage[key])
-            if (sample >= extent.first && sample < extent.second) return true;
+            if (sample >= extent.first && sample < extent.second)
+                return true;
         return false;
     };
 
@@ -678,8 +780,8 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
 
     // Fixed seeds only — CI must be bit-for-bit reproducible. A red here on any
     // seed is a real stuck-note defect, not a flake.
-    constexpr std::array<std::uint32_t, 8> seeds{
-        1u, 42u, 1337u, 2024u, 0xC0FFEEu, 0xBADF00Du, 7u, 99991u};
+    constexpr std::array<std::uint32_t, 8> seeds{1u,        42u,        1337u, 2024u,
+                                                 0xC0FFEEu, 0xBADF00Du, 7u,    99991u};
 
     ArrangementNoteRenderer renderer({10});
     REQUIRE(renderer.prepare(4'096)); // ample: this document never overflows a block
@@ -701,7 +803,8 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
             const auto snapshot = next_block(transport, frames);
             if (snapshot.range_count == 2) {
                 ++loop_wrap_blocks;
-                if (renderer.has_active_notes()) ++loop_wrap_over_active;
+                if (renderer.has_active_notes())
+                    ++loop_wrap_over_active;
             }
             auto program = latch.begin_block(programs.store);
             const auto result = renderer.process(program, snapshot);
@@ -719,7 +822,8 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
                     ++seed_off;
                 }
             }
-            if (renderer.has_active_notes()) ++saw_active_blocks;
+            if (renderer.has_active_notes())
+                ++saw_active_blocks;
 
             // Coverage oracle: every key still sounding at the end of a playing
             // block must have a note covering the playhead's last played sample.
@@ -729,21 +833,21 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
             // range is deliberately not chased, so covered-but-silent is legal.
             if (snapshot.is_playing) {
                 const auto& last = snapshot.ranges[snapshot.range_count - 1];
-                const std::int64_t playhead_last =
-                    last.timeline_sample_start.value +
-                    static_cast<std::int64_t>(last.frame_count) - 1;
+                const std::int64_t playhead_last = last.timeline_sample_start.value +
+                                                   static_cast<std::int64_t>(last.frame_count) - 1;
                 for (std::size_t key = 0; key < net.size(); ++key)
-                    if (net[key] == 1) REQUIRE(covered(key, playhead_last));
+                    if (net[key] == 1)
+                        REQUIRE(covered(key, playhead_last));
             }
         };
 
         for (int op = 0; op < ops_per_seed; ++op) {
             switch (rng() % 4u) {
             case 0: { // seek to a random position across (and past) the document
-                if (renderer.has_active_notes()) ++seeks_over_active_notes;
+                if (renderer.has_active_notes())
+                    ++seeks_over_active_notes;
                 const std::int64_t target = static_cast<std::int64_t>(rng() % 4'400u);
-                REQUIRE(transport.seek(tick_at_sample(*map, target)) ==
-                        TransportError::None);
+                REQUIRE(transport.seek(tick_at_sample(*map, target)) == TransportError::None);
                 break;
             }
             case 1: { // randomly (un)set a loop region; skip regions the
@@ -751,8 +855,7 @@ TEST_CASE("no stuck notes under randomized seek and loop stress",
                 LoopRegion loop;
                 loop.enabled = (rng() % 2u) == 0u;
                 if (loop.enabled) {
-                    const std::int64_t start =
-                        static_cast<std::int64_t>(rng() % 2'500u);
+                    const std::int64_t start = static_cast<std::int64_t>(rng() % 2'500u);
                     const std::int64_t length =
                         static_cast<std::int64_t>(max_block + rng() % (max_block * 4u));
                     loop.start = tick_at_sample(*map, start);

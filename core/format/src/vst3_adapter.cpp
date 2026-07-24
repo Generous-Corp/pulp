@@ -111,15 +111,24 @@ pulp::format::ProcessContext build_process_context(
         ctx.is_playing = (state & Steinberg::Vst::ProcessContext::kPlaying) != 0;
         ctx.is_recording = (state & Steinberg::Vst::ProcessContext::kRecording) != 0;
         ctx.position_samples = pc->projectTimeSamples;
+        ctx.transport_validity.set(pulp::format::TransportField::Playing);
+        ctx.transport_validity.set(pulp::format::TransportField::Recording);
+        ctx.transport_validity.set(pulp::format::TransportField::Looping);
+        // Unlike the optional musical fields below, projectTimeSamples is a
+        // required ProcessContext member whenever the host supplies a context.
+        ctx.transport_validity.set(pulp::format::TransportField::SamplePosition);
         if (state & Steinberg::Vst::ProcessContext::kTempoValid) {
             ctx.tempo_bpm = pc->tempo;
+            ctx.transport_validity.set(pulp::format::TransportField::Tempo);
         }
         if (state & Steinberg::Vst::ProcessContext::kProjectTimeMusicValid) {
             ctx.position_beats = pc->projectTimeMusic;
+            ctx.transport_validity.set(pulp::format::TransportField::BeatPosition);
         }
         if (state & Steinberg::Vst::ProcessContext::kTimeSigValid) {
             ctx.time_sig_numerator = pc->timeSigNumerator;
             ctx.time_sig_denominator = pc->timeSigDenominator;
+            ctx.transport_validity.set(pulp::format::TransportField::TimeSignature);
         }
 
         // kCycleValid covers cycleStartMusic + cycleEndMusic; kCycleActive
@@ -129,11 +138,13 @@ pulp::format::ProcessContext build_process_context(
         if (state & Steinberg::Vst::ProcessContext::kCycleValid) {
             ctx.loop_start_beats = pc->cycleStartMusic;
             ctx.loop_end_beats = pc->cycleEndMusic;
+            ctx.transport_validity.set(pulp::format::TransportField::LoopRange);
         }
 
         // Host clock for video sync.
         if (state & Steinberg::Vst::ProcessContext::kSystemTimeValid) {
             ctx.host_time_ns = pc->systemTime;
+            ctx.transport_validity.set(pulp::format::TransportField::HostTime);
         }
 
         // SMPTE frame rate enum. VST3 reports it as an integer
@@ -153,6 +164,7 @@ pulp::format::ProcessContext build_process_context(
             // that trust ctx.frame_rate.
             ctx.frame_rate = pulp::format::detail::vst3_frame_rate(
                 static_cast<int>(fps), pulldown, drop);
+            ctx.transport_validity.set(pulp::format::TransportField::FrameRate);
         }
 
         // Derive bar index from position_beats + time-sig. VST3 also
@@ -161,10 +173,15 @@ pulp::format::ProcessContext build_process_context(
         // start, not a bar index. Deriving matches `ProcessContext::bar`
         // and stays consistent with the AU/CLAP paths.
         pulp::format::detail::derive_bar_from_beats(ctx);
+        if (ctx.has_transport(pulp::format::TransportField::BeatPosition) &&
+            ctx.has_transport(pulp::format::TransportField::TimeSignature)) {
+            ctx.transport_validity.set(pulp::format::TransportField::Bar);
+        }
     }
 
     // Diff against the previous block to populate the transport change flags.
-    pulp::format::detail::compute_playhead_changes(ctx, playhead_prev);
+    pulp::format::detail::compute_playhead_changes(
+        ctx, playhead_prev, pulp::format::detail::TransportDiffMode::FieldValidity);
     return ctx;
 }
 

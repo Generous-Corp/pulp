@@ -152,6 +152,9 @@ struct HostQuirks {
     // Logic Pro AU
     int logic_au_channel_probe_cap = 64;               ///< row 19 (Logic = 8)
     bool logic_au_tail_time_conversion = false;        ///< row 20
+    /// Logic AU v2 has no formal plugin-to-host resize callback, but its Cocoa
+    /// host accepts an exact resize of the returned view's immediate container.
+    bool logic_au_v2_container_resize = false;
     // NOTE (no runtime flag — handled in the AU v3 adapter, recorded here so the
     // DAW-quirks ledger captures it): Logic Pro AU v3 editor SIZING has two
     // confirmed behaviors a fixed-design GPU editor must accommodate:
@@ -298,6 +301,7 @@ struct HostQuirksMeta {
 
     QuirkStatus logic_au_channel_probe_cap = QuirkStatus::Speculative;
     QuirkStatus logic_au_tail_time_conversion = QuirkStatus::Speculative;
+    QuirkStatus logic_au_v2_container_resize = QuirkStatus::Validated;
 
     QuirkStatus au_v3_bypass_dual_tracking = QuirkStatus::Speculative;
     QuirkStatus au_v3_host_id_from_wrapper = QuirkStatus::Speculative;

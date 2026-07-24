@@ -1531,6 +1531,49 @@ pulp export-tokens --file theme.json --tokens tokens.json
 pulp export-tokens --dry-run
 ```
 
+### seq
+
+**Status**: experimental
+
+Inspect and edit canonical timeline project JSON through the same registry,
+decoder, immutable model, and `DocumentSession` transaction path used by the
+engine.
+
+```bash
+pulp seq schema
+pulp seq validate song.pulpseq.json
+pulp seq explain song.pulpseq.json [--sample-rate 48000]
+pulp seq apply song.pulpseq.json commands.json [--out changed.pulpseq.json]
+```
+
+`apply` accepts an array of typed command envelopes. It prints the committed
+project and revision as JSON; `--out` also writes the canonical project member
+through a sibling temporary file. Invalid projects, unknown command types,
+precondition conflicts, and empty command batches fail without publishing a
+partial edit.
+
+`explain` reports the compiled track plan, including clip IDs, note-event and
+audio-region counts, and automation presence. Plugin latency is a host-binding
+property, so the headless report returns `pdc_offset_samples: null` rather than
+claiming a value it cannot measure.
+
+### render
+
+**Status**: experimental
+
+Render the root arrangement of a canonical timeline project to a Float32 WAV
+without opening an audio device.
+
+```bash
+pulp render song.pulpseq.json --out song.wav [--sample-rate 48000]
+```
+
+The renderer resolves local asset locators, compiles the immutable playback
+program, and processes it in bounded blocks. It currently renders arrangement
+audio only; MIDI instruments, hosted device chains, and their latency
+compensation require a host binding and are not silently simulated. Use
+`pulp audio compare` afterward for advisory before/after quality analysis.
+
 ### audio
 
 **Status**: experimental

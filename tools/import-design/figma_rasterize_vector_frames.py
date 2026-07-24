@@ -142,6 +142,13 @@ def collect_targets(root: dict) -> list[dict]:
     targets: list[dict] = []
 
     def walk(n: dict):
+        # Exporter-created multi-selection wrappers have no native Figma node
+        # to export. Treat them as transparent even when their combined
+        # children look like one vector illustration.
+        if n.get("synthetic") is True:
+            for c in (n.get("children") or []):
+                walk(c)
+            return
         if is_vector_illustration(n):
             if n.get("figma_node_id"):
                 targets.append(n)

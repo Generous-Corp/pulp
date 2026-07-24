@@ -1,4 +1,5 @@
 #include "serialize_automation_decode.hpp"
+#include "bounded_increment.hpp"
 
 #include <bit>
 #include <limits>
@@ -17,9 +18,10 @@ const JsonValue* member(const JsonValue& value, std::string_view name) noexcept 
     return value.kind == JsonValue::Kind::Object ? value.find(name) : nullptr;
 }
 
-runtime::Result<const JsonValue*, PersistenceError>
-require_member(const JsonValue& value, std::string_view name, JsonValue::Kind kind,
-               const std::string& path) {
+runtime::Result<const JsonValue*, PersistenceError> require_member(const JsonValue& value,
+                                                                   std::string_view name,
+                                                                   JsonValue::Kind kind,
+                                                                   const std::string& path) {
     const auto* found = member(value, name);
     if (!found)
         return fail<const JsonValue*>(PersistenceErrorCode::MissingField,
@@ -48,8 +50,8 @@ ModelError model_error(AutomationLaneError error) noexcept {
 
 template <typename T>
 runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string path) {
-    return runtime::Err(PersistenceError{PersistenceErrorCode::ModelRejected, 0, 0, 0,
-                                         std::move(path), error});
+    return runtime::Err(
+        PersistenceError{PersistenceErrorCode::ModelRejected, 0, 0, 0, std::move(path), error});
 }
 
 } // namespace
@@ -65,16 +67,17 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
     for (std::size_t lane_index = 0; lane_index < value.array.size(); ++lane_index) {
         const auto lane_path = path + "/" + std::to_string(lane_index);
         const auto& lane_value = value.array[lane_index];
-        if (++lane_count > limits.max_automation_lanes)
+        const auto lane_increment = bounded_increment(lane_count, limits.max_automation_lanes);
+        if (!lane_increment)
             return fail<std::vector<AutomationLane>>(PersistenceErrorCode::LimitExceeded, lane_path,
-                                                     lane_value.begin, lane_count,
+                                                     lane_value.begin, lane_increment.actual,
                                                      limits.max_automation_lanes);
         auto lane_data =
             validate_exact_envelope(lane_value, "pulp.timeline.automation_lane", 1, lane_path);
         if (!lane_data)
             return runtime::Err(lane_data.error());
-        auto id = require_member(*lane_data.value(), "id", JsonValue::Kind::String,
-                                 lane_path + "/data");
+        auto id =
+            require_member(*lane_data.value(), "id", JsonValue::Kind::String, lane_path + "/data");
         auto points = require_member(*lane_data.value(), "points", JsonValue::Kind::Array,
                                      lane_path + "/data");
         auto target = require_member(*lane_data.value(), "target", JsonValue::Kind::Object,
@@ -86,10 +89,9 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
         if (!target)
             return runtime::Err(target.error());
         auto decoded_id = parse_canonical_u64_string(*id.value(), lane_path + "/data/id");
-        auto target_data =
-            validate_exact_envelope(*target.value(),
-                                    "pulp.timeline.automation_target.device_parameter", 1,
-                                    lane_path + "/data/target");
+        auto target_data = validate_exact_envelope(
+            *target.value(), "pulp.timeline.automation_target.device_parameter", 1,
+            lane_path + "/data/target");
         if (!decoded_id)
             return runtime::Err(decoded_id.error());
         if (!target_data)
@@ -114,10 +116,12 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
              ++point_index) {
             const auto point_path = lane_path + "/data/points/" + std::to_string(point_index);
             const auto& point = points.value()->array[point_index];
-            if (++point_count > limits.max_automation_points)
-                return fail<std::vector<AutomationLane>>(PersistenceErrorCode::LimitExceeded,
-                                                         point_path, point.begin, point_count,
-                                                         limits.max_automation_points);
+            const auto point_increment =
+                bounded_increment(point_count, limits.max_automation_points);
+            if (!point_increment)
+                return fail<std::vector<AutomationLane>>(
+                    PersistenceErrorCode::LimitExceeded, point_path, point.begin,
+                    point_increment.actual, limits.max_automation_points);
             const auto* point_id = member(point, "id");
             const auto* position = member(point, "position_ticks");
             const auto* value_bits = member(point, "value_bits");

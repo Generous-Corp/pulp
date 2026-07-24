@@ -292,8 +292,10 @@ wrong for a cross/Intel build on Apple Silicon).
   `tools/scripts/check_bundle_architectures.py <bundle> --archs arm64,x86_64 --strict`.
 - **Min-OS floor is the MAX across requested arches** (`PulpMinOs.cmake`, no
   longer hardcoded to `macos-arm64`). Both arm64 and x86_64 slices stamp
-  Skia/Dawn minos 13.0; the real floor is libc++ 13.3 (`std::to_chars(float)`),
-  arch-independent — so arm64, x86_64, and universal all pin **13.3**
+  Skia/Dawn minos 13.0; the real cross-SDK floor is libc++ 13.4 (the macOS 15.4
+  SDK gates the floating-point `std::to_chars` overloads reached by
+  `std::format`), arch-independent — so arm64, x86_64, and universal all pin
+  **13.4**
   (`tools/deps/min_os.json` `macos-arm64` + `macos-x64`, MEASURED with
   `measure_min_os.py --measure`, never hardcoded).
 - **Ships `experimental`.** GitHub VMs have no representative Intel GPU and

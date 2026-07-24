@@ -1036,14 +1036,22 @@ function firstImageFill(node) {
 }
 
 function cornerRadius(node) {
-  if (typeof node.cornerRadius === 'number') return Math.round(node.cornerRadius);
-  const corners = [
+  if (typeof node.cornerRadius === 'number') return round2(node.cornerRadius);
+  const raw = [
     node.rectangleTopLeftCornerRadius,
     node.rectangleTopRightCornerRadius,
     node.rectangleBottomRightCornerRadius,
     node.rectangleBottomLeftCornerRadius,
-  ].filter((v) => typeof v === 'number');
-  if (corners.length && corners.every((v) => v === corners[0])) return Math.round(corners[0]);
+  ];
+  if (!raw.some((v) => typeof v === 'number')) return null;
+  // A corner Figma omits is SQUARE (0), not "inherit the others": kiwi
+  // drops zero fields, so a panel rounded only at the bottom arrives as
+  // {br: 2, bl: 2} — filtering the absent corners out made those two look
+  // uniform and rounded ALL FOUR corners, silently. Normalize first, then
+  // collapse only when all four truly agree; perCornerRadii carries the
+  // asymmetric case.
+  const corners = raw.map((v) => (typeof v === 'number' ? v : 0));
+  if (corners.every((v) => v === corners[0])) return round2(corners[0]);
   return null;
 }
 
@@ -1072,7 +1080,7 @@ function perCornerRadii(node) {
   if (!all.some((v) => typeof v === 'number')) return null;
   if (all.every((v) => typeof v === 'number') && all.every((v) => v === all[0])) return null;
   // A corner Figma omits is square, not inherited.
-  const n = (v) => Math.round(typeof v === 'number' ? v : 0);
+  const n = (v) => round2(typeof v === 'number' ? v : 0);
   return { tl: n(tl), tr: n(tr), br: n(br), bl: n(bl) };
 }
 
@@ -1232,11 +1240,24 @@ export function materializeFrame(scene, frame, ctx) {
   // Every font family the frame references. Reported at the end so a
   // missing font is a stated result, not a mystery in the pixels.
   const fontsSeen = new Set();
+  // Glyph-outline outcomes per fontsSeen key, recorded where the lowering
+  // actually happens. The frame-level icon-font warning used to claim icons
+  // "will read as words" unconditionally — false whenever every glyph was
+  // baked from derivedTextData and renders correctly with no font at all.
+  // The warning copy has to follow what actually happened, so track it.
+  const glyphOutlineBaked = new Set();
+  const glyphOutlineMissing = new Set();
 
   function pushDiag(code, node, detail) {
     diagnostics.push({
       code,
-      node_id: guidKey(node.guid),
+      // The instance-path key when the node is a symbol-expansion clone, the
+      // plain guid otherwise. The guid alone attached every expanded knob's
+      // diagnostic to the MASTER ("1:57"), while the envelope and materials
+      // sidecar name the clone ("1:278/1:57") — so the material audit's
+      // per-node join never saw the diagnostic and scored an honest,
+      // out-loud degradation as a SILENT drop.
+      node_id: node.__key || guidKey(node.guid),
       node_name: node.name || null,
       detail: detail || null,
       severity: DIAGNOSTIC_SEVERITY[code] || 'info',
@@ -1271,9 +1292,17 @@ export function materializeFrame(scene, frame, ctx) {
   // design into the parent's content origin.
   function styleFor(node, parent, parentAbs = IDENTITY) {
     const style = {};
+    // Geometry keeps 2-decimal sub-pixel precision, matching the VECTOR_LIKE
+    // lane (round2 of the baked path bounds). Rounding box-model nodes to
+    // whole pixels while their sibling vectors keep fractions moves the two
+    // RELATIVE to each other by up to ~0.7px per axis — a knob's ELLIPSE body
+    // (7.51, 7.51, 22.53²) landed at (8, 8, 23²), shifting its center +0.72px
+    // down-right of the value-ring arc whose path center stayed fractional.
+    // On concentric geometry with a ~3.6px groove that misregistration is
+    // plainly visible; every ring in "A Channel FX" read as off-center.
     if (node.size) {
-      style.width = Math.round(node.size.x);
-      style.height = Math.round(node.size.y);
+      style.width = round2(node.size.x);
+      style.height = round2(node.size.y);
     }
 
     // Absolute placement from the node's affine transform. m02/m12 are the
@@ -1325,8 +1354,8 @@ export function materializeFrame(scene, frame, ctx) {
           const c = Math.cos(angle), s = Math.sin(angle);
           const cx = c * (w / 2) - s * (h / 2);   // R(theta)*(w/2,h/2)
           const cy = s * (w / 2) + c * (h / 2);
-          style.left = Math.round(x + cx - w / 2);
-          style.top = Math.round(y + cy - h / 2);
+          style.left = round2(x + cx - w / 2);
+          style.top = round2(y + cy - h / 2);
           // CSS-compatible rotate() the native codegen lowers to setRotation();
           // the renderer's default center transform-origin matches the
           // compensation above.
@@ -1358,8 +1387,8 @@ export function materializeFrame(scene, frame, ctx) {
             if (parentAbs.m11 < 0)
               origin = { ...origin, y: parent.size.y - (origin.y + visualHeight) };
           }
-          style.left = Math.round(origin.x);
-          style.top = Math.round(origin.y);
+          style.left = round2(origin.x);
+          style.top = round2(origin.y);
         }
       }
     }
@@ -1983,6 +2012,63 @@ export function materializeFrame(scene, frame, ctx) {
     return merged;
   }
 
+  // Lower a node's stroke paints onto its emitted path as REAL stroke
+  // channels (`stroke` / `strokeGradient` / `strokeWidth`), for paths that
+  // carry the shape's BOUNDARY rather than a pre-expanded band: the baked
+  // fill outline, a vector-network centerline, or a primitive whose path is
+  // synthesized downstream. Mirrors the fill contract — gradient preferred,
+  // the solid composite kept beside it as the parse-failure fallback, and
+  // every flatten stated. Returns true when a stroke was emitted.
+  function lowerStrokeChannels(out, node, w, h) {
+    const visible = (node.strokePaints || []).filter((p) => p.visible !== false);
+    if (!visible.length) return false;
+    const weight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
+    if (!(weight > 0)) return false;
+    if (visible.length > 1) {
+      pushDiag('multi-paint-stroke', node,
+        `${visible.length} visible stroke paints; a stroked path carries one — flattened to their composite`);
+    }
+    if (node.dynamicStrokeSettings || node.scatterStrokeSettings || node.stretchStrokeSettings) {
+      pushDiag('complex-stroke-flattened', node,
+        'variable-width (brush) stroke flattened to a uniform-weight stroke');
+    }
+    const dashes = Array.isArray(node.dashPattern)
+      ? node.dashPattern.filter((v) => typeof v === 'number' && v > 0) : [];
+    const geometryLosses = [];
+    if (dashes.length) geometryLosses.push(`dash pattern [${dashes.map(round2).join(', ')}]`);
+    if (typeof node.strokeCap === 'string' && node.strokeCap !== 'NONE')
+      geometryLosses.push(`${node.strokeCap} caps`);
+    if (typeof node.strokeJoin === 'string' && node.strokeJoin !== 'MITER')
+      geometryLosses.push(`${node.strokeJoin} joins`);
+    if (typeof node.miterLimit === 'number' && Math.abs(node.miterLimit - 4) > 1e-6)
+      geometryLosses.push(`miter limit ${round2(node.miterLimit)}`);
+    if (geometryLosses.length) {
+      pushDiag('complex-stroke-flattened', node,
+        `${geometryLosses.join(', ')} preserved as figma:* provenance but rendered with the path widget's continuous default stroke geometry`);
+    }
+    const grad = firstGradient(visible);
+    const css = gradientPaintToCss(grad, w, h);
+    const hex = approximatePaintColor(visible);
+    if (css) {
+      out.strokeGradient = css;
+      if (hex) out.stroke = hex;  // the widget's parse-failure fallback
+    } else if (hex) {
+      out.stroke = hex;
+      if (grad) {
+        pushDiag('gradient-approximated', node,
+          `${grad.type} stroke flattened to its mean stop color`);
+      }
+    } else {
+      return false;
+    }
+    out.strokeWidth = round2(weight);
+    if (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE') {
+      pushDiag('stroke-align-approximated', node,
+        `${node.strokeAlign} stroke painted centered on the outline; the band sits half the stroke weight off the aligned position`);
+    }
+    return true;
+  }
+
   const walked = new Set();
   function walk(node, parent, parentAbs, parentId) {
     // Hidden layers do not render in Figma; emitting them would paint hidden
@@ -2028,6 +2114,29 @@ export function materializeFrame(scene, frame, ctx) {
     if (walked.has(key)) return null;
     walked.add(key);
     const type = node.type;
+    // A BOOLEAN_OPERATION's paint IS its combined geometry. One with a null
+    // geometry blob (0 bytes), no size, and nothing else to offer paints
+    // NOTHING in Figma — but the box fallback below emitted it as a 0-sized
+    // frame that still carried its fill as a stray background slab, which
+    // layout parity then rightly flagged as an EXTRA node. Skipping IS the
+    // correct rendering, exactly like SLICE; only suppress when BOTH the
+    // geometry and the box are absent, so a boolean op whose geometry
+    // resolves (or that at least has real extent) keeps its current paths.
+    if (type === 'BOOLEAN_OPERATION') {
+      const bw = node.size && node.size.x;
+      const bh = node.size && node.size.y;
+      if (!(bw > 0) || !(bh > 0)) {
+        let boolGeometry = null;
+        try {
+          boolGeometry = geometryToPath(node, scene.blobs || []);
+        } catch { /* unreadable counts as none; the node has no box either way */ }
+        if (!boolGeometry) {
+          pushDiag('boolean-empty-skipped', node,
+            'BOOLEAN_OPERATION with null geometry and no size paints nothing and emits no node');
+          return null;
+        }
+      }
+    }
     const { style, assetRef, layout } = styleFor(node, parent, parentAbs);
     const out = { type: envelopeType(type), name: node.name || '', style };
     if (layout) out.layout = layout;
@@ -2141,12 +2250,14 @@ export function materializeFrame(scene, frame, ctx) {
     // carrying path-data to a native SvgPathWidget), so resolving the shape here
     // is the whole fix — nothing downstream needs to change.
     let vectorResolved = false;
-    // A vector whose geometry came from `strokeGeometry` IS the stroke, already
-    // expanded into a filled band and painted as a fill below. Emitting the
-    // node's stroke a second time as a CSS border strokes that band's outline —
-    // two parallel lines where the design has one, the "doubled / too thick"
-    // outline seen on a triad-pad triangle and every stroked ring.
-    let vectorStrokeBand = false;
+    // Whether this node's stroke is already expressed by the emitted path —
+    // as a baked band painted below (the stroke IS the geometry), or as real
+    // stroke channels lowered onto the path. Either way the box-border branch
+    // further down must not paint it a second time: a border on top of a band
+    // strokes the band's outline — two parallel lines where the design has
+    // one, the "doubled / too thick" outline once seen on a triad-pad
+    // triangle — and a border on top of a stroke channel doubles the edge.
+    let vectorStrokeExpressed = false;
     if (VECTOR_LIKE.has(type)) {
       let resolved = null;
       let failure = null;
@@ -2161,7 +2272,7 @@ export function materializeFrame(scene, frame, ctx) {
         ? { x: pAbs.m00 < 0, y: pAbs.m11 < 0 }
         : null;
       try {
-        resolved = geometryToPath(node, scene.blobs || [], ancestorMirror);
+        resolved = geometryToPath(node, scene.blobs || [], /* forceFill */ false, ancestorMirror);
         if (!resolved) failure = 'no resolvable geometry';
       } catch (err) {
         // A blob we cannot parse is worth surfacing loudly: it means this file
@@ -2169,13 +2280,51 @@ export function materializeFrame(scene, frame, ctx) {
         // sharing that blob will be missing rather than merely approximated.
         failure = `geometry unreadable: ${err.message}`;
       }
+      // Figma bakes the band of an INSIDE/OUTSIDE-aligned stroke UNCLIPPED —
+      // the boundary outlined at ±weight, DOUBLE the declared width, with the
+      // trim to the aligned side applied only at render time (verified on a
+      // real file: `Polygon 5`, weight 2 INSIDE, 4px band; see paths.mjs).
+      // Painting that band verbatim reads fat and bright. Prefer the shape's
+      // own outline with the stroke lowered as a centered stroke channel:
+      // correct width and color, off by half the weight in position — and
+      // said out loud (lowerStrokeChannels raises stroke-align-approximated).
+      if (resolved && resolved.paint === 'stroke' && !resolved.centerline
+          && (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE')) {
+        let outline = null;
+        try {
+          outline = geometryToPath(
+            node, scene.blobs || [], /* forceFill */ true, ancestorMirror);
+        } catch { /* keep the band */ }
+        // paint === 'fill' proves a distinct fill outline was actually picked;
+        // a node with no fillGeometry hands back the same band (paint
+        // 'stroke'), which must keep its band semantics, not be re-stroked.
+        if (outline && outline.paint === 'fill' && outline.centerline) resolved = outline;
+      }
       if (failure) pushDiag('vector-simplified', node, `${type} ${failure}; emitted as a plain box`);
       if (resolved) {
         vectorResolved = true;
-        vectorStrokeBand = resolved.paint === 'stroke';
         out.type = 'vector';
         out.path_data = resolved.d;
         out.viewBox = `0 0 ${round2(resolved.box.width)} ${round2(resolved.box.height)}`;
+        // The declared winding rule decides which regions of a multi-subpath
+        // path are HOLES, and Figma's baked geometry does not promise
+        // direction-corrected contours: a subtracted icon can arrive as five
+        // same-direction subpaths under `windingRule: 'ODD'` (the "Sub"
+        // speaker cabinet's hollow woofer). Dropping the rule fills those
+        // solid — silently, because a solid slab raises no parse error.
+        // Emitted only for evenodd: nonzero is SvgPathWidget's default, and
+        // design_ir_json reads this exact `fillRule` key into svg_fill_rule.
+        if (resolved.fillRule === 'evenodd') out.fillRule = 'evenodd';
+        if (resolved.mixedWinding) {
+          pushDiag('vector-fill-rule-approximated', node,
+            `${type} geometry regions declare different winding rules; one path carries one rule, using '${resolved.fillRule}' for all subpaths (exact unless regions overlap)`);
+        } else if (!resolved.fillRule && resolved.subpathCount > 1) {
+          // On a single contour the two rules fill identically; on a
+          // multi-subpath shape a missing rule means any hole the designer
+          // drew may render solid under the nonzero default.
+          pushDiag('vector-fill-rule-approximated', node,
+            `multi-subpath ${type} declares no winding rule; filled with the nonzero default, which can render its holes solid`);
+        }
         // A vector's INK is where its baked path is, not where its node box is,
         // so the sidecar's rect has to move with it. Figma's translation column
         // can sit far from the geometry it names — one `Bg PAnel` reports
@@ -2208,8 +2357,21 @@ export function materializeFrame(scene, frame, ctx) {
         // auto-layout parent must keep flowing — pinning it here would yank it
         // out of the flex pass that is supposed to place it.
         if (style.position === 'absolute') {
-          style.left = round2(resolved.box.minX);
-          style.top = round2(resolved.box.minY);
+          // geometryToPath mirrors the normalized ink when an ancestor's
+          // transform is dropped, but intentionally leaves its parent-space
+          // box untouched. Mirror that box inside the emitted parent as well:
+          // a [0,4] child of a 20px flipped frame belongs at [16,20], not
+          // [0,4]. This also works through a net-mirrored ancestor chain,
+          // because every emitted container keeps its visual width while the
+          // transform itself is omitted.
+          const parentWidth = parent?.size?.x;
+          const parentHeight = parent?.size?.y;
+          const placedMinX = ancestorMirror?.x && typeof parentWidth === 'number'
+            ? parentWidth - resolved.box.maxX : resolved.box.minX;
+          const placedMinY = ancestorMirror?.y && typeof parentHeight === 'number'
+            ? parentHeight - resolved.box.maxY : resolved.box.minY;
+          style.left = round2(placedMinX);
+          style.top = round2(placedMinY);
         } else if (node.size && (parent?.stackMode === 'HORIZONTAL'
                                  || parent?.stackMode === 'VERTICAL')) {
           // A FLOWING vector's flex slot must be its NODE box: Figma's
@@ -2232,10 +2394,15 @@ export function materializeFrame(scene, frame, ctx) {
             const nw = Math.abs(t.m00) * node.size.x;
             const nh = Math.abs(t.m11) * node.size.y;
             const nodeOrigin = mirrorAwareOrigin(t, node.size.x, node.size.y);
-            const overL = nodeOrigin.x - resolved.box.minX;
-            const overR = resolved.box.maxX - (nodeOrigin.x + nw);
-            const overT = nodeOrigin.y - resolved.box.minY;
-            const overB = resolved.box.maxY - (nodeOrigin.y + nh);
+            let overL = nodeOrigin.x - resolved.box.minX;
+            let overR = resolved.box.maxX - (nodeOrigin.x + nw);
+            let overT = nodeOrigin.y - resolved.box.minY;
+            let overB = resolved.box.maxY - (nodeOrigin.y + nh);
+            // A flowing item's flex slot stays in flow, but the ancestor
+            // mirror swaps which side of that slot each ink overhang occupies.
+            // Swap the reconciliation margins to match the mirrored path.
+            if (ancestorMirror?.x) [overL, overR] = [overR, overL];
+            if (ancestorMirror?.y) [overT, overB] = [overB, overT];
             const cap = (typeof node.strokeWeight === 'number' ? node.strokeWeight : 0) + 1;
             const overhangs = [overL, overR, overT, overB];
             if (overhangs.every((v) => Math.abs(v) <= cap)
@@ -2250,49 +2417,61 @@ export function materializeFrame(scene, frame, ctx) {
         }
         style.width = round2(resolved.box.width);
         style.height = round2(resolved.box.height);
-        // A stroke outline is a fillable region, so it is painted as a fill in
-        // the stroke's color. Re-stroking it would outline the outline.
-        const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
-        const hex = approximatePaintColor(paints);
-        // Always emit a fill, including the explicit 'none'. SvgPathWidget
-        // defaults to opaque black, so staying silent about an unknown paint
-        // renders a black silhouette — strictly worse than the plain box this
-        // lane used to emit, and the one way this change could regress a file.
-        out.fill = hex || 'none';
-        const grad = firstGradient(paints);
-        // The gradient rides the path alongside the flattened fill rather than
-        // replacing it: SvgPathWidget prefers the gradient and only falls back
-        // to fill_color_ when the string fails to parse, so the mean stays as
-        // the safety net and neither ordering nor a stale solid can bite.
-        //
-        // The box here is the geometry's, which a stroke outline overhangs by
-        // half the stroke weight, so the axis is off by that much against
-        // Figma's node box. That is sub-pixel on these rims and far smaller
-        // than the error it replaces.
-        const css = gradientPaintToCss(grad, style.width, style.height);
-        if (css) {
-          out.fillGradient = css;
-        } else if (!hex && grad) {
-          pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
-        } else if (hex && grad) {
-          pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop color`);
+        if (resolved.centerline && resolved.paint === 'stroke') {
+          // The path is the shape's BOUNDARY (vector-network fallback on a
+          // stroke-only node), not a band: nothing fills, and the stroke
+          // paints as a real stroke channel at its declared weight.
+          out.fill = 'none';
+          vectorStrokeExpressed =
+            lowerStrokeChannels(out, node, style.width, style.height);
+        } else {
+          // A baked stroke outline is a fillable region, so it is painted as
+          // a fill in the stroke's color. Re-stroking it would outline the
+          // outline.
+          const paints = resolved.paint === 'fill' ? node.fillPaints : node.strokePaints;
+          const centerlineNoFill = resolved.centerline && resolved.paint === 'fill'
+            && !(node.fillPaints || []).some((p) => p.visible !== false);
+          const hex = centerlineNoFill ? null : approximatePaintColor(paints);
+          // Always emit a fill, including the explicit 'none'. SvgPathWidget
+          // defaults to opaque black, so staying silent about an unknown paint
+          // renders a black silhouette — strictly worse than the plain box this
+          // lane used to emit, and the one way this change could regress a file.
+          out.fill = hex || 'none';
+          const grad = centerlineNoFill ? null : firstGradient(paints);
+          // The gradient rides the path alongside the flattened fill rather than
+          // replacing it: SvgPathWidget prefers the gradient and only falls back
+          // to fill_color_ when the string fails to parse, so the mean stays as
+          // the safety net and neither ordering nor a stale solid can bite.
+          //
+          // The box here is the geometry's, which a stroke outline overhangs by
+          // half the stroke weight, so the axis is off by that much against
+          // Figma's node box. That is sub-pixel on these rims and far smaller
+          // than the error it replaces.
+          const css = gradientPaintToCss(grad, style.width, style.height);
+          if (css) {
+            out.fillGradient = css;
+          } else if (!hex && grad) {
+            pushDiag('gradient-approximated', node, `${type} ${grad.type} has no stops; fill cleared`);
+          } else if (hex && grad) {
+            pushDiag('gradient-approximated', node, `${type} ${grad.type} flattened to its mean stop color`);
+          }
+          if (resolved.paint === 'stroke') {
+            // The band IS the stroke — already expressed by the fill above.
+            vectorStrokeExpressed = true;
+          } else if ((node.strokePaints || []).some((p) => p.visible !== false)) {
+            // The path is the fill outline, which for Figma is also the
+            // stroke's centerline — SvgPathWidget fills and then strokes the
+            // SAME path, so the stroke lowers as a real channel here instead
+            // of being dropped (exact for CENTER align; INSIDE/OUTSIDE says
+            // stroke-align-approximated). This used to drop with "the stroke
+            // outline would need a sibling vector", which overstated the
+            // constraint: the sibling is only needed for geometry the
+            // boundary cannot express, and no observed node has that.
+            vectorStrokeExpressed =
+              lowerStrokeChannels(out, node, style.width, style.height);
+          }
         }
         delete style.background_color;
-        if (resolved.droppedStroke) {
-          // The reason is DECODER-side, not widget-side. SvgPathWidget fills and
-          // then strokes the same path (svg_path_widget.cpp:728 / :762), so
-          // "fill and stroke cannot both render on one path" — what this said
-          // until now — is false, and it sent a reader looking for a widget
-          // limit that does not exist. The real constraint: Figma's fill and
-          // stroke are two DIFFERENT outlines (strokeGeometry is the stroke
-          // already expanded into a fillable region, not the fill's path), and
-          // one emitted node carries one `path_data`. Expressing both means
-          // emitting the stroke outline as a SIBLING vector — which is exactly
-          // what a stroke-only node already does — not setting a stroke on this
-          // one. Fires for a single node in the reference design.
-          pushDiag('vector-simplified', node,
-            `${type} stroke dropped: fill and stroke are separate outlines and one node carries one path; the stroke outline would need a sibling vector`);
-        }
       }
     }
 
@@ -2384,6 +2563,13 @@ export function materializeFrame(scene, frame, ctx) {
         } catch (err) {
           pushDiag('vector-simplified', node, `glyph outline unreadable: ${err.message}`);
         }
+        // The same key fontToken adds to fontsSeen, so the frame-level
+        // font report can tell a fully-outlined icon font from one whose
+        // glyphs are missing and will really render as words.
+        const fontStyle = node.fontName.style;
+        const fontKey = fontStyle && fontStyle !== 'Regular'
+          ? `${node.fontName.family} ${fontStyle}` : node.fontName.family;
+        (glyphs ? glyphOutlineBaked : glyphOutlineMissing).add(fontKey);
         if (glyphs) {
           // Same contract the VECTOR branch emits below — path_data + viewBox +
           // fill is what design_ir_json already lowers to an SvgPathWidget.
@@ -2400,6 +2586,19 @@ export function materializeFrame(scene, frame, ctx) {
           // The glyph paints in the text's own color.
           out.fill = out.style.color || 'none';
           delete out.style.color;
+          // A gradient-filled label keeps its gradient. TEXT never takes the
+          // box branch above (a text fill is the glyph color, not a
+          // background), so without this the outline flattened to
+          // firstSolidFill — the sequencer's rainbow "GENERATE PATTERN"
+          // imported flat gray. Same channel contract as the VECTOR branch:
+          // `fillGradient` rides beside `fill` (design_ir_json lowers it to
+          // svg_fill_gradient → setSvgFillGradient), the solid stays as the
+          // widget's parse-failure fallback, and a non-linear gradient
+          // returns null here so the generic gradient-approximated
+          // diagnostic below still states that loss.
+          const glyphGrad = firstGradient(node.fillPaints);
+          const glyphGradCss = gradientPaintToCss(glyphGrad, style.width, style.height);
+          if (glyphGradCss) out.fillGradient = glyphGradCss;
           // Keep the box and position styleFor already derived from the node's
           // size and transform: the glyph is drawn inside the designer's text
           // box, and re-placing the node on the glyph's ink would strip the
@@ -2425,7 +2624,7 @@ export function materializeFrame(scene, frame, ctx) {
       pushDiag('gradient-approximated', node, gradient.type);
     }
 
-    if (!vectorStrokeBand && (node.strokePaints || []).length) {
+    if (!vectorStrokeExpressed && (node.strokePaints || []).length) {
       const visibleStrokes = (node.strokePaints || []).filter((p) => p.visible !== false);
       // Per-side box strokes: kiwi stores individualStrokeWeights as
       // `borderStrokeWeightsIndependent` + border{Top,Right,Bottom,Left}Weight
@@ -2442,13 +2641,40 @@ export function materializeFrame(scene, frame, ctx) {
       const hasWeight = indep
         ? Object.values(sideWeights).some((w) => w > 0)
         : uniformWeight > 0;
-      if (visibleStrokes.length && hasWeight) {
+      // A GRADIENT stroke cannot ride a box border — but an ELLIPSE lowers to
+      // a synthesized SvgPath downstream (synthesize_primitive_paths), whose
+      // stroke-gradient channel paints it for real. Route it there instead of
+      // flattening: this is the knob-base rim in the FX designs. Scoped to
+      // the uniform-weight case (per-side weights are a box-model concept)
+      // and to LINEAR gradients (the only kind the widget's stroke parser
+      // takes — gradientPaintToCss returns null otherwise and the flatten
+      // chain below still states the loss).
+      const gradTop = firstGradient(visibleStrokes);
+      const gradCss = gradTop && out.type === 'ellipse' && !sideWeights && hasWeight
+        ? gradientPaintToCss(gradTop, style.width, style.height) : null;
+      if (gradCss) {
+        if (visibleStrokes.length > 1) {
+          pushDiag('multi-paint-stroke', node,
+            `${visibleStrokes.length} visible stroke paints; a stroked path carries one — flattened to their composite`);
+        }
+        out.strokeGradient = gradCss;
+        const s0 = firstSolidStroke(node);
+        if (s0) {
+          // The widget's parse-failure fallback, mirroring the fill contract.
+          out.stroke = colorToHex({ ...s0.color, a: (s0.color?.a ?? 1) * (s0.opacity ?? 1) });
+        }
+        out.strokeWidth = round2(uniformWeight);
+        if (node.strokeAlign === 'INSIDE' || node.strokeAlign === 'OUTSIDE') {
+          pushDiag('stroke-align-approximated', node,
+            `${node.strokeAlign} stroke painted centered on the outline; the band sits half the stroke weight off the aligned position`);
+        }
+      } else if (visibleStrokes.length && hasWeight) {
         const s = firstSolidStroke(node);
         // A box border carries exactly one paint. More than one visible stroke
         // paint, a non-solid paint on top, or a brush (variable-width) stroke
         // cannot ride it — flatten to the first solid and SAY SO. (A vector's
-        // baked strokeGeometry band — vectorStrokeBand above — is the faithful
-        // path and never reaches this branch.)
+        // baked strokeGeometry band — vectorStrokeExpressed above — is the
+        // faithful path and never reaches this branch.)
         if (visibleStrokes.length > 1) {
           pushDiag('multi-paint-stroke', node,
             `${visibleStrokes.length} visible stroke paints; a box border carries one — flattened to the first solid`);
@@ -2670,8 +2896,18 @@ export function materializeFrame(scene, frame, ctx) {
     pushDiag('fonts-required', { name: '<frame>' },
              `text uses ${fonts.length} font(s): ${fonts.join(', ')} — each must be installed where this UI renders, or text falls back`);
     for (const f of iconish) {
-      pushDiag('icon-font-required', { name: '<frame>' },
-               `"${f}" is an ICON font: glyphs come from LIGATURES, so without it every icon renders as its literal name (e.g. "lock" instead of a padlock). Install it, or the icons will read as words.`);
+      // Two truths, and the copy must match the one that happened: when every
+      // glyph was lowered to the file's baked outline, the icons render
+      // correctly WITHOUT the font, and warning that they "will read as
+      // words" is false. Only a font with missing/unreadable outlines (or
+      // textAsOutlines 'never') really degrades to literal ligature names.
+      if (glyphOutlineBaked.has(f) && !glyphOutlineMissing.has(f)) {
+        pushDiag('icon-font-required', { name: '<frame>' },
+                 `"${f}" is an ICON font (glyphs come from LIGATURES). Its icons were imported as the file's baked glyph outlines and render correctly without the font; installing it matters only if you re-author these icons as live, editable text.`);
+      } else {
+        pushDiag('icon-font-required', { name: '<frame>' },
+                 `"${f}" is an ICON font: glyphs come from LIGATURES, so without it every icon renders as its literal name (e.g. "lock" instead of a padlock). Install it, or the icons will read as words.`);
+      }
     }
   }
 
@@ -3144,6 +3380,10 @@ function collectVariableTokens(scene, seen, pushDiag) {
 // that lives only in a comment is how this got to four.
 export const DIAGNOSTIC_SEVERITY = {
   'vector-simplified': 'warning',
+  // A multi-subpath vector whose winding rule is missing or mixed: the rule
+  // decides which regions are holes, so the nonzero fallback can fill a
+  // designed hole solid — a loss that raises no error anywhere downstream.
+  'vector-fill-rule-approximated': 'warning',
   'gradient-approximated': 'warning',
   'blend-unsupported': 'warning',
   // An isolate group (explicit NORMAL on a container whose subtree blends)
@@ -3162,11 +3402,20 @@ export const DIAGNOSTIC_SEVERITY = {
   // rendered edge is deliberately NOT what the design declares.
   'multi-paint-stroke': 'warning',
   'complex-stroke-flattened': 'warning',
+  // An INSIDE/OUTSIDE-aligned stroke painted centered on the shape outline:
+  // the band sits half a stroke-weight off the aligned position. Warning
+  // because the rendered edge deliberately differs from the declaration —
+  // and because the alternative (Figma's baked band) is UNCLIPPED at double
+  // the declared width, which is strictly worse (see paths.mjs).
+  'stroke-align-approximated': 'warning',
   // Node-dispatch codes. All 'warning' deliberately — including slice-skipped,
   // whose skip is CORRECT rendering — because both consumers drop 'info'
   // (see the registry contract above), and a dispatch decision written
   // precisely to end silent node drops must never itself be invisible.
   'slice-skipped': 'warning',
+  // A null-geometry, zero-size BOOLEAN_OPERATION paints nothing in Figma;
+  // the skip is correct rendering, stated for the same reason as slice-skipped.
+  'boolean-empty-skipped': 'warning',
   // Paint-stack codes (audit item 7). All 'warning' for the same reason as
   // the dispatch codes: a diagnostic written precisely to end a silent paint
   // drop must never itself be invisible.

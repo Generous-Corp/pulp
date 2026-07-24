@@ -22,16 +22,16 @@ struct PlaybackContextProjectionOptions {
 
 /// Lossy, one-way adapter from the integer-authoritative playback snapshot to
 /// the public format ABI. Engine code never includes a format header.
-inline ProcessContext project_process_context(
-    const playback::TransportSnapshot& snapshot,
-    const playback::TransportRange& range,
-    const PlaybackContextProjectionOptions& options = {}) noexcept {
+inline ProcessContext
+project_process_context(const playback::TransportSnapshot& snapshot,
+                        const playback::TransportRange& range,
+                        const PlaybackContextProjectionOptions& options = {}) noexcept {
     ProcessContext context;
     context.sample_rate = static_cast<double>(snapshot.sample_rate.as_long_double());
-    context.num_samples = range.frame_count >
-                                  static_cast<std::uint32_t>(std::numeric_limits<int>::max())
-                              ? std::numeric_limits<int>::max()
-                              : static_cast<int>(range.frame_count);
+    context.num_samples =
+        range.frame_count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+            ? std::numeric_limits<int>::max()
+            : static_cast<int>(range.frame_count);
     context.process_mode = options.process_mode;
     context.is_bypassed = options.is_bypassed;
     context.is_tail_drain = options.is_tail_drain;
@@ -39,18 +39,25 @@ inline ProcessContext project_process_context(
     context.is_playing = snapshot.is_playing;
     context.is_recording = false;
     context.tempo_bpm = range.tempo_bpm;
-    context.position_beats = static_cast<double>(range.timeline_tick_start.value) /
-                             static_cast<double>(timebase::kTicksPerQuarter);
+    context.position_beats =
+        range.has_precise_host_ticks
+            ? range.host_tick_start / static_cast<double>(timebase::kTicksPerQuarter)
+            : static_cast<double>(range.timeline_tick_start.value) /
+                  static_cast<double>(timebase::kTicksPerQuarter);
     context.position_samples = range.timeline_sample_start.value;
     context.time_sig_numerator = snapshot.meter.numerator;
     context.time_sig_denominator = snapshot.meter.denominator;
     context.bar = range.bar_start.value;
     context.is_looping = snapshot.loop.enabled;
     if (snapshot.loop.enabled) {
-        context.loop_start_beats = static_cast<double>(snapshot.loop.start.value) /
-                                   static_cast<double>(timebase::kTicksPerQuarter);
-        context.loop_end_beats = static_cast<double>(snapshot.loop.end.value) /
-                                 static_cast<double>(timebase::kTicksPerQuarter);
+        context.loop_start_beats = snapshot.has_precise_host_loop
+                                       ? snapshot.host_loop_start_beats
+                                       : static_cast<double>(snapshot.loop.start.value) /
+                                             static_cast<double>(timebase::kTicksPerQuarter);
+        context.loop_end_beats = snapshot.has_precise_host_loop
+                                     ? snapshot.host_loop_end_beats
+                                     : static_cast<double>(snapshot.loop.end.value) /
+                                           static_cast<double>(timebase::kTicksPerQuarter);
     }
     context.host_time_ns = options.host_time_ns;
     context.frame_rate = options.frame_rate;
@@ -62,6 +69,19 @@ inline ProcessContext project_process_context(
     context.transport_started = first_range && snapshot.transport_started;
     context.reset_requested = first_range && snapshot.reset_requested;
     context.transport_jump = range.discontinuity;
+    context.transport_validity.set(TransportField::Playing);
+    context.transport_validity.set(TransportField::Looping);
+    context.transport_validity.set(TransportField::Tempo);
+    context.transport_validity.set(TransportField::BeatPosition);
+    context.transport_validity.set(TransportField::SamplePosition);
+    context.transport_validity.set(TransportField::TimeSignature);
+    context.transport_validity.set(TransportField::Bar);
+    if (snapshot.loop.enabled)
+        context.transport_validity.set(TransportField::LoopRange);
+    if (options.host_time_ns != 0)
+        context.transport_validity.set(TransportField::HostTime);
+    if (options.frame_rate != FrameRate::unknown)
+        context.transport_validity.set(TransportField::FrameRate);
     return context;
 }
 

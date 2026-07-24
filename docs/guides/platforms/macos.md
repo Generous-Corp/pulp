@@ -4,7 +4,7 @@ macOS is Pulp's primary development platform. This guide covers signing, notariz
 
 ## Requirements
 
-- macOS 13.3+ on Apple Silicon (ARM64) or Intel (x86_64). Apple Silicon is the primary development platform; Intel is supported for the CLI and SDK via native `darwin-x64` release builds (see [Architectures](#architectures)). The floor is 13.3 (not 13.0) because Apple's libc++ gates `std::to_chars(float)` — reached via `std::format` in Pulp's logging — at 13.3; it is arch-independent and pinned by `tools/cmake/PulpMinOs.cmake`.
+- macOS 13.4+ on Apple Silicon (ARM64) or Intel (x86_64). Apple Silicon is the primary development platform; Intel is supported for the CLI and SDK via native `darwin-x64` release builds (see [Architectures](#architectures)). The floor is 13.4 (not 13.0) because the macOS 15.4 SDK's libc++ gates the floating-point `std::to_chars` overloads reached via `std::format` in Pulp's logging at 13.4; it is arch-independent and pinned by `tools/cmake/PulpMinOs.cmake`.
 - Xcode 15+ command-line tools
 - CMake 3.24+
 - C++20 compiler (Apple Clang 15+)
@@ -137,7 +137,7 @@ The release pipeline publishes per-architecture binaries for the CLI and SDK:
 installs the matching artifact automatically. The Intel builds are compiled
 **natively** on a GitHub-hosted `macos-15-intel` runner (not cross-compiled),
 so wgpu-native and the GPU render path use genuine x86_64 binaries, and the
-release smoke lane runs each artifact natively. Both target macOS 13.3+
+release smoke lane runs each artifact natively. Both target macOS 13.4+
 (the arch-independent floor pinned by `tools/cmake/PulpMinOs.cmake`).
 
 Plugins you build with Pulp can target Intel or a universal binary from source

@@ -92,12 +92,12 @@ For each project it clones the repo, builds it against your installed SDK,
 measures every artifact it produced, and prints a table:
 
 ```
-SDK floor (this host): 13.3
+SDK floor (this host): 13.4
 
 repo                             build  floor    vs SDK   notes
 ---------------------------------------------------------------
-pulp-example-plugins             ok     13.3     match
-pulp-gpu-nam                     ok     13.3     match
+pulp-example-plugins             ok     13.4     match
+pulp-gpu-nam                     ok     13.4     match
 ```
 
 - **build** — did it compile against the new SDK?

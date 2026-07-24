@@ -498,11 +498,20 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
         "dimensions": {"theme.radius.md": 8},
         "strings": {"theme.label.gain": "Gain"}
       },
+      "token_source_identity": {
+        "colors.theme.brand.primary": {
+          "sourceId": "VariableID:1:1",
+          "sourceCollection": "Theme",
+          "sourceMode": "Light",
+          "sourceAdapter": "figma-plugin"
+        }
+      },
       "root": {
-        "type": "frame", "name": "Root",
+        "type": "frame", "name": "Root", "figma_node_id": "1:1",
         "children": [
           {
-            "type": "frame", "name": "Bound",
+            "type": "frame", "name": "Bound", "figma_node_id": "1:2",
+            "style": {"backgroundColor": "#ff0000"},
             "figma": {
               "parent_id": "1:1", "z_order": 0,
               "absolute_transform": [[1,0,0],[0,1,0]],
@@ -510,13 +519,15 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
               "bound_variables": {
                 "fills": "theme.brand.primary",
                 "fills.1": "theme/secondary with spaces",
+                "slot.background_color": "theme.brand.primary",
                 "cornerRadius": "theme.radius.md",
                 "componentProperties.label#9:0": "theme.label.gain"
               }
             }
           },
           {
-            "type": "frame", "name": "Plain",
+            "type": "frame", "name": "Plain", "figma_node_id": "1:3",
+            "style": {"backgroundColor": "#ff0000"},
             "figma": {
               "parent_id": "1:1", "z_order": 1,
               "absolute_transform": [[1,0,0],[0,1,0]],
@@ -533,6 +544,8 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
     // Token names are opaque passthrough — slashes/spaces are the producer's
     // business, this reader must not normalize them.
     CHECK(a.at("figmaBoundVariable.fills.1") == "theme/secondary with spaces");
+    CHECK(a.at("figmaBoundVariable.slot.background_color") ==
+          "theme.brand.primary");
     CHECK(a.at("figmaBoundVariable.cornerRadius") == "theme.radius.md");
     CHECK(a.at("figmaBoundVariable.componentProperties.label#9:0") ==
           "theme.label.gain");
@@ -540,11 +553,58 @@ TEST_CASE("figma block variable bindings land in namespaced attributes",
     CHECK(ir.tokens.colors.at("theme.brand.primary") == "#ff0000");
     CHECK(ir.tokens.dimensions.at("theme.radius.md") == 8.0f);
     CHECK(ir.tokens.strings.at("theme.label.gain") == "Gain");
+    const auto& identity =
+        ir.tokens.source_identity.at("colors.theme.brand.primary");
+    CHECK(identity.source_id == "VariableID:1:1");
+    CHECK(identity.source_collection == "Theme");
+    CHECK(identity.source_mode == "Light");
+    CHECK(identity.source_adapter == "figma-plugin");
+    // The resolved literal remains directly renderable while its binding and
+    // stable source-node identity stay queryable as separate provenance.
+    CHECK(ir.root.children[0].style.background_color == "#ff0000");
+    CHECK(ir.root.children[0].source_node_id == "1:2");
+    CHECK(ir.root.children[1].style.background_color == "#ff0000");
     // Negative: a node without bound_variables gains no binding attribute.
     for (const auto& [key, value] : ir.root.children[1].attributes) {
         (void)value;
         CHECK(key.rfind("figmaBoundVariable.", 0) != 0);
     }
+    // Canonical serialization sorts the unordered attribute/token maps. A
+    // frozen DesignIR can be parsed again without losing either the resolved
+    // paint or the token identity, independent of producer object-key order.
+    const auto canonical = serialize_design_ir(ir);
+    const auto reparsed = parse_design_ir_json(canonical);
+    CHECK(serialize_design_ir(reparsed) == canonical);
+    CHECK(reparsed.root.children[0].attributes.at("figmaBoundVariable.fills") ==
+          "theme.brand.primary");
+    CHECK(reparsed.root.children[0].style.background_color == "#ff0000");
+    CHECK(reparsed.tokens.source_identity.at("colors.theme.brand.primary").source_id ==
+          "VariableID:1:1");
+}
+
+TEST_CASE("figma-plugin synthetic multi-root keeps child anchors unique",
+          "[view][import][variables][anchors]") {
+    const auto ir = parse_figma_plugin_json(R"json({
+      "format_version": "2026.05-figma-plugin-v1",
+      "provenance": {"adapter": "figma-plugin", "version": "test"},
+      "tokens": {"colors": {}, "dimensions": {}, "strings": {}},
+      "root": {
+        "type": "frame", "name": "<multi-export>",
+        "children": [
+          {"type": "frame", "name": "First", "figma_node_id": "1:2"},
+          {"type": "frame", "name": "Second", "figma_node_id": "1:3"}
+        ]
+      }
+    })json");
+    REQUIRE(ir.root.children.size() == 2);
+    CHECK_FALSE(ir.root.source_node_id.has_value());
+    REQUIRE(ir.root.stable_anchor_id.has_value());
+    CHECK(ir.root.children[0].source_node_id == "1:2");
+    CHECK(ir.root.children[1].source_node_id == "1:3");
+    CHECK(ir.root.children[0].stable_anchor_id == "figma-plugin:1:2");
+    CHECK(ir.root.children[1].stable_anchor_id == "figma-plugin:1:3");
+    CHECK(ir.root.stable_anchor_id != ir.root.children[0].stable_anchor_id);
+    CHECK(ir.root.stable_anchor_id != ir.root.children[1].stable_anchor_id);
 }
 
 TEST_CASE("figma block without component metadata preserves nothing extra",
@@ -1465,6 +1525,62 @@ TEST_CASE("parse_param_binding_manifest_json reads a node-id → key object",
     REQUIRE_FALSE(arr.has_value());
 }
 
+TEST_CASE("a path's fill rule survives the IR JSON round-trip",
+          "[view][import][svg][fill-rule]") {
+    using namespace pulp::view;
+
+    // The winding rule decides which regions of a multi-subpath path are
+    // holes. Figma bakes subtracted icons as SAME-direction contours under an
+    // evenodd declaration (the reference "Sub" speaker cabinet is five such
+    // subpaths), so a dropped rule fills the icon solid — silently, since a
+    // solid slab raises no error. The fig decoder writes `fillRule` and the
+    // bridge has setSvgFillRule; this asserts the middle links.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Donut",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z M5 5 L15 5 L15 15 L5 15 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#ff0000",
+          "fillRule": "evenodd"
+        }, {
+          "type": "path", "name": "Slab",
+          "pathData": "M0 0 L20 0 L20 20 L0 20 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#00ff00",
+          "fillRule": "nonzero"
+        }, {
+          "type": "path", "name": "Junk",
+          "pathData": "M0 0 L20 0 Z",
+          "viewBox": "0 0 20 20",
+          "fill": "#0000ff",
+          "fillRule": "bogus"
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 3);
+    REQUIRE(ir.root.children[0].attributes.at("svg_fill_rule") == "evenodd");
+    REQUIRE(ir.root.children[1].attributes.at("svg_fill_rule") == "nonzero");
+    // An unrecognized value stays unset — the widget default (nonzero) is
+    // better than propagating a token no consumer understands.
+    REQUIRE(ir.root.children[2].attributes.count("svg_fill_rule") == 0);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    // evenodd reaches the generated JS; nonzero is the widget default and is
+    // deliberately NOT emitted — one setSvgFillRule, for the donut only.
+    size_t calls = 0;
+    for (auto pos = js.find("setSvgFillRule("); pos != std::string::npos;
+         pos = js.find("setSvgFillRule(", pos + 1))
+        ++calls;
+    REQUIRE(calls == 1);
+    REQUIRE(js.find("'evenodd'") != std::string::npos);
+}
+
 TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
           "[view][import][svg]") {
     using namespace pulp::view;
@@ -1508,6 +1624,67 @@ TEST_CASE("a path's gradient paint survives the IR JSON round-trip",
     REQUIRE(js.find("setSvgFillGradient(") != std::string::npos);
     REQUIRE(js.find("linear-gradient(180deg, #ffffff 0%, #000000 100%)") !=
             std::string::npos);
+}
+
+TEST_CASE("a stroke's gradient paint survives the IR JSON round-trip",
+          "[view][import][svg][stroke-gradient]") {
+    using namespace pulp::view;
+
+    // The stroke mirror of the fill-gradient round-trip above — this is how a
+    // Figma knob rim's GRADIENT_LINEAR stroke reaches setSvgStrokeGradient.
+    // The second node is the OTHER decoder shape: an ellipse primitive with NO
+    // authored path (its path is synthesized later by synthesize_primitive_
+    // paths), whose stroke channels must be captured anyway — gating the
+    // capture on path_data dropped the knob-base rim before synthesis ran.
+    const auto ir = parse_design_ir_json(R"JSON({
+      "version": 1, "source": "figma",
+      "root": {
+        "type": "frame", "name": "Panel",
+        "children": [{
+          "type": "path", "name": "Rim",
+          "pathData": "M0 0 L10 0 L10 10 Z",
+          "viewBox": "0 0 10 10",
+          "fill": "none",
+          "stroke": "#50505000",
+          "strokeGradient": "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)",
+          "strokeWidth": 1.88
+        }, {
+          "type": "ellipse", "name": "Base",
+          "strokeGradient": "linear-gradient(0deg, #ffffff40, #00000000)",
+          "strokeWidth": 0.94
+        }]
+      }
+    })JSON");
+
+    REQUIRE(ir.root.children.size() == 2);
+    const auto& rim = ir.root.children[0].attributes;
+    // Carried BESIDE the solid fallback, not instead of it — the widget falls
+    // back to the solid when the gradient string won't parse.
+    REQUIRE(rim.at("svg_stroke_gradient") ==
+            "linear-gradient(180deg, #ffffff40 0%, #00000000 100%)");
+    REQUIRE(rim.at("svg_stroke") == "#50505000");
+    REQUIRE(rim.at("svg_stroke_width").substr(0, 4) == "1.88");
+
+    const auto& base = ir.root.children[1].attributes;
+    REQUIRE(base.count("path_data") == 0);   // synthesized later, not authored
+    REQUIRE(base.at("svg_stroke_gradient") ==
+            "linear-gradient(0deg, #ffffff40, #00000000)");
+    REQUIRE(base.at("svg_stroke_width").substr(0, 4) == "0.94");
+
+    // And it reaches the generated JS — a parsed attribute nothing emits is
+    // the same silent drop as never parsing it.
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::bridge_native_js;
+    const auto js = generate_pulp_js(ir, opts);
+    REQUIRE(js.find("setSvgStrokeGradient(") != std::string::npos);
+    REQUIRE(js.find("linear-gradient(180deg, #ffffff40 0%, #00000000 100%)") !=
+            std::string::npos);
+    // Emission order pins the resolve order: the solid fallback first, the
+    // gradient after it (setSvgStroke clears a stale gradient slot).
+    const auto solid_pos = js.find("setSvgStroke('");
+    const auto grad_pos = js.find("setSvgStrokeGradient('");
+    REQUIRE(solid_pos != std::string::npos);
+    REQUIRE(solid_pos < grad_pos);
 }
 
 TEST_CASE("a control's art layers stay art, and are not each promoted to a control",

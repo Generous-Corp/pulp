@@ -791,6 +791,13 @@ TEST_CASE("AU v2 host callbacks mark transport jumps for processor reset",
     REQUIRE_FALSE(first.should_reset_dsp_state());
     REQUIRE(first.position_samples == 0);
     REQUIRE(first.is_playing);
+    REQUIRE(first.has_transport(pulp::format::TransportField::Playing));
+    REQUIRE(first.has_transport(pulp::format::TransportField::Looping));
+    REQUIRE(first.has_transport(pulp::format::TransportField::Tempo));
+    REQUIRE(first.has_transport(pulp::format::TransportField::BeatPosition));
+    REQUIRE(first.has_transport(pulp::format::TransportField::SamplePosition));
+    REQUIRE(first.has_transport(pulp::format::TransportField::TimeSignature));
+    REQUIRE(first.has_transport(pulp::format::TransportField::Bar));
     REQUIRE(first.process_mode == pulp::format::ProcessMode::Realtime);
     REQUIRE(first.render_speed_hint == pulp::format::RenderSpeedHint::Realtime);
 
@@ -1444,6 +1451,11 @@ TEST_CASE("AU v3 transport jumps request processor reset through ProcessContext"
         const auto first = processor->last_context;
         REQUIRE_FALSE(first.transport_jump);
         REQUIRE_FALSE(first.should_reset_dsp_state());
+        REQUIRE(first.has_transport(pulp::format::TransportField::Playing));
+        REQUIRE(first.has_transport(pulp::format::TransportField::Recording));
+        REQUIRE(first.has_transport(pulp::format::TransportField::Looping));
+        REQUIRE(first.has_transport(pulp::format::TransportField::SamplePosition));
+        REQUIRE_FALSE(first.has_transport(pulp::format::TransportField::Tempo));
 
         current_sample_position = 1008.0;
         status = block(&flags,

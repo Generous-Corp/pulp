@@ -1725,6 +1725,20 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
     REQUIRE(test_processor->last_context.position_samples == 12345);
     REQUIRE(test_processor->last_context.time_sig_numerator == 7);
     REQUIRE(test_processor->last_context.time_sig_denominator == 8);
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::Playing));
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::Recording));
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::Looping));
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::Tempo));
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::SamplePosition));
+    REQUIRE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::TimeSignature));
+    REQUIRE_FALSE(test_processor->last_context.has_transport(
+        pulp::format::TransportField::BeatPosition));
     REQUIRE(test_processor->had_param_events);
     REQUIRE(test_processor->last_param_events.size() == 3);
     REQUIRE(test_processor->last_param_events[0].param_id == kGainParamId);

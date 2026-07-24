@@ -9,8 +9,8 @@ name: Sanitizer Tests
 #   2. repository variable override (e.g. PULP_SANITIZER_TSAN_RUNS_ON_JSON)
 #   3. hard-coded default (e.g. "macos-14" / "ubuntu-24.04")
 #
-# When all the new repo variables are unset, this workflow resolves to
-# today's hard-coded defaults — no behavior change. Opt-in via
+# When a repo variable is unset, this workflow resolves to its reviewed
+# hard-coded default. Opt in via
 # `gh variable set PULP_SANITIZER_<TARGET>_RUNS_ON_JSON ...` to move a
 # single sanitizer (e.g. TSan) to a self-hosted Mac without editing code.
 # See docs/guides/local-ci.md § "Switching a job's runner without a code
@@ -145,7 +145,7 @@ jobs:
             "UndefinedBehaviorSanitizer (macOS ARM64)" \
             EXPLICIT_UBSAN_RUNNER_SELECTOR_JSON \
             UBSAN_RUNS_ON_JSON \
-            macos-14 \
+            macos-26 \
             pulp-build,pulp-build-vm)
           # RTSan only runs on workflow_dispatch (see rtsan job's
           # if:), so skip its selector resolution on pull_request/push

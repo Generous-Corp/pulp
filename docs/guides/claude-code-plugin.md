@@ -107,6 +107,7 @@ clients) can drive them in one turn instead of multiple shell calls.
 | Motion tracing + fixture replay | `pulp_motion_start_trace`, `pulp_motion_stop_trace`, `pulp_motion_snapshot`, `pulp_motion_list_traces`, `pulp_motion_load_fixture`, `pulp_motion_scrub_to`, `pulp_motion_play`, `pulp_motion_pause`, `pulp_motion_enable_cost`, `pulp_motion_disable_cost` |
 | Perfetto tracing (live-session inspector RPCs) | `pulp_trace_start`, `pulp_trace_stop`, `pulp_trace_snapshot`, `pulp_trace_query`, `pulp_trace_explain` (client-side `pulp trace doctor` / `open` / `fetch` and offline `query --trace` have no inspector RPC, so no MCP tool) |
 | Audio model / WAV-first excerpt-find / live probe/scope JSON / third-party plugin inspection + offline render / advisory before-after compare | `pulp_audio_model_list`, `pulp_audio_model_status`, `pulp_audio_model_activate`, `pulp_audio_excerpt_find`, `pulp_audio_read_bundle`, `pulp_audio_probe_json`, `pulp_audio_scope`, `pulp_audio_plugin_inspect`, `pulp_audio_render`, `pulp_audio_compare` |
+| Timeline project editing + rendering | `pulp_timeline_project_open`, `pulp_timeline_command_apply`, `pulp_timeline_validate`, `pulp_timeline_explain`, `pulp_timeline_render` |
 | Kit manifests | `pulp_kit`, `pulp_kit_search`, `pulp_kit_validate`, `pulp_kit_inspect`, `pulp_kit_plan`, `pulp_kit_verify`, `pulp_kit_apply`, `pulp_kit_remove`, `pulp_kit_pack`, `pulp_kit_publish_check`, `pulp_kit_init` |
 | Content packs | `pulp_content`, `pulp_content_validate`, `pulp_content_preview`, `pulp_content_install`, `pulp_content_update`, `pulp_content_list`, `pulp_content_rescan`, `pulp_content_remove`, `pulp_content_reveal` |
 
@@ -145,6 +146,12 @@ the deterministic `pulp audio validate compare` surface instead.
 The inspection/render/validate workflow is built into Pulp. Audio Quality Lab is
 only the richer advisory comparison step; its absence never blocks inspection or
 rendering and the compare tool returns an explicit install command.
+
+The five timeline tools are generated from the committed timeline schema
+manifest. They accept a project path or inline canonical project JSON; command
+application accepts only the generated typed command envelopes. Use
+`pulp_timeline_render` for deterministic Float32 WAV output, then optionally pass
+before/after renders to `pulp_audio_compare` for an advisory judgment.
 
 The kit and content MCP tools mirror the CLI trust model. `pulp_kit_*` tools inspect, plan, verify, and apply local project-transforming artifacts only after review; `pulp_content_*` tools validate, preview, and install data-only packs for an explicit plugin. Curated dependency packages stay on `pulp add <name>`.
 

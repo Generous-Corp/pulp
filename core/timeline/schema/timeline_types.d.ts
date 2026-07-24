@@ -4,12 +4,13 @@
 // the manifest) instead of editing this file.
 // Manifest version: 1
 
-/** `pulp.timeline.asset` — domain Document, schema version 1. */
+/** `pulp.timeline.asset` — domain Document, schema version 2. */
 export interface PulpTimelineAsset {
   content_hash: string;
   frame_count: number | string;
   id: number | string;
   locators: readonly unknown[];
+  loop_info?: Record<string, unknown>;
   name: string;
   representations: readonly unknown[];
   sample_rate: Record<string, unknown>;
@@ -45,6 +46,147 @@ export interface PulpTimelineClip {
   gain_linear_bits?: number | string;
   id: number | string;
   time_range: Record<string, unknown>;
+}
+
+/** `pulp.timeline.command.create_asset` — domain Command, schema version 1. */
+export interface PulpTimelineCommandCreateAsset {
+  asset: PulpTimelineAsset;
+}
+
+/** `pulp.timeline.command.insert_automation_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertAutomationLane {
+  lane: PulpTimelineAutomationLane;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_clip` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertClip {
+  clip: PulpTimelineClip;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_take` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertTake {
+  lane_id: number | string;
+  sequence_id: number | string;
+  take: PulpTimelineTake;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_take_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertTakeLane {
+  lane: PulpTimelineTakeLane;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.move_clip` — domain Command, schema version 1. */
+export interface PulpTimelineCommandMoveClip {
+  clip_id: number | string;
+  expected_range: Record<string, unknown>;
+  replacement_range: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_asset` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveAsset {
+  asset_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_automation_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveAutomationLane {
+  lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_clip` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveClip {
+  clip_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_take` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveTake {
+  lane_id: number | string;
+  sequence_id: number | string;
+  take_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_take_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveTakeLane {
+  lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_active_take_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetActiveTakeLane {
+  expected_lane_id: number | string;
+  replacement_lane_id: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_clip_playback_properties` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetClipPlaybackProperties {
+  clip_id: number | string;
+  expected: Record<string, unknown>;
+  replacement: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_meter_map` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetMeterMap {
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+}
+
+/** `pulp.timeline.command.set_note_velocity` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetNoteVelocity {
+  clip_id: number | string;
+  expected_velocity: number | string;
+  note_id: number | string;
+  replacement_velocity: number | string;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_record_arm` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetRecordArm {
+  expected: boolean;
+  replacement: boolean;
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_take_comp` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTakeComp {
+  expected: readonly unknown[];
+  lane_id: number | string;
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
+/** `pulp.timeline.command.set_tempo_map` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTempoMap {
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+}
+
+/** `pulp.timeline.command.set_track_freeze` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetTrackFreeze {
+  expected?: Record<string, unknown>;
+  replacement?: Record<string, unknown>;
+  sequence_id: number | string;
+  track_id: number | string;
 }
 
 /** `pulp.timeline.content.empty` — domain Content, schema version 1. */
@@ -99,18 +241,21 @@ export interface PulpTimelineTake {
   source_start: number | string;
 }
 
-/** `pulp.timeline.take_lane` — domain Document, schema version 1. */
+/** `pulp.timeline.take_lane` — domain Document, schema version 2. */
 export interface PulpTimelineTakeLane {
+  comp_segments: readonly unknown[];
   id: number | string;
   name: string;
   takes: readonly unknown[];
 }
 
-/** `pulp.timeline.track` — domain Document, schema version 4. */
+/** `pulp.timeline.track` — domain Document, schema version 6. */
 export interface PulpTimelineTrack {
+  active_take_lane_id: number | string;
   automation_lanes: readonly unknown[];
   clips: readonly unknown[];
   device_chain: readonly unknown[];
+  freeze?: Record<string, unknown>;
   id: number | string;
   name: string;
   record_armed: boolean;
@@ -124,6 +269,25 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.automation_lane"
   | "pulp.timeline.automation_target.device_parameter"
   | "pulp.timeline.clip"
+  | "pulp.timeline.command.create_asset"
+  | "pulp.timeline.command.insert_automation_lane"
+  | "pulp.timeline.command.insert_clip"
+  | "pulp.timeline.command.insert_take"
+  | "pulp.timeline.command.insert_take_lane"
+  | "pulp.timeline.command.move_clip"
+  | "pulp.timeline.command.remove_asset"
+  | "pulp.timeline.command.remove_automation_lane"
+  | "pulp.timeline.command.remove_clip"
+  | "pulp.timeline.command.remove_take"
+  | "pulp.timeline.command.remove_take_lane"
+  | "pulp.timeline.command.set_active_take_lane"
+  | "pulp.timeline.command.set_clip_playback_properties"
+  | "pulp.timeline.command.set_meter_map"
+  | "pulp.timeline.command.set_note_velocity"
+  | "pulp.timeline.command.set_record_arm"
+  | "pulp.timeline.command.set_take_comp"
+  | "pulp.timeline.command.set_tempo_map"
+  | "pulp.timeline.command.set_track_freeze"
   | "pulp.timeline.content.empty"
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
@@ -141,6 +305,25 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.automation_lane": PulpTimelineAutomationLane;
   "pulp.timeline.automation_target.device_parameter": PulpTimelineAutomationTargetDeviceParameter;
   "pulp.timeline.clip": PulpTimelineClip;
+  "pulp.timeline.command.create_asset": PulpTimelineCommandCreateAsset;
+  "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
+  "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
+  "pulp.timeline.command.insert_take": PulpTimelineCommandInsertTake;
+  "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
+  "pulp.timeline.command.move_clip": PulpTimelineCommandMoveClip;
+  "pulp.timeline.command.remove_asset": PulpTimelineCommandRemoveAsset;
+  "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
+  "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
+  "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
+  "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
+  "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
+  "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;
+  "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
+  "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
+  "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
+  "pulp.timeline.command.set_take_comp": PulpTimelineCommandSetTakeComp;
+  "pulp.timeline.command.set_tempo_map": PulpTimelineCommandSetTempoMap;
+  "pulp.timeline.command.set_track_freeze": PulpTimelineCommandSetTrackFreeze;
   "pulp.timeline.content.empty": PulpTimelineContentEmpty;
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;

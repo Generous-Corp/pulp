@@ -1,0 +1,77 @@
+name: Timeline hardening
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'core/timebase/**'
+      - 'core/timeline/**'
+      - 'core/playback/**'
+      - 'test/test_timeline_scale.cpp'
+      - 'test/cmake/timeline_tests.cmake'
+      - '.github/workflows/timeline-hardening.yml'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+  push:
+    branches: [main]
+    paths:
+      - 'core/timebase/**'
+      - 'core/timeline/**'
+      - 'core/playback/**'
+      - 'test/test_timeline_scale.cpp'
+      - 'test/cmake/timeline_tests.cmake'
+      - '.github/workflows/timeline-hardening.yml'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timeline-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scale-and-compile-latency:
+    if: github.event_name != 'schedule' || github.repository == 'Generous-Corp/pulp'
+    name: Timeline scale and compile latency
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build \
+            libasound2-dev libdbus-1-dev libgl1-mesa-dev libx11-dev \
+            libxext-dev libxrandr-dev libxkbcommon-dev libfontconfig1-dev
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+
+      - name: Configure focused benchmark build
+        run: |
+          cmake -S . -B build-timeline-hardening -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BENCHMARK=ON
+
+      - name: Build timeline scale gate
+        run: |
+          cmake --build build-timeline-hardening \
+            --target pulp-test-timeline-scale
+
+      - name: Enforce scale and compile-latency budgets
+        env:
+          PULP_PERF_STRICT: '1'
+        run: |
+          build-timeline-hardening/test/pulp-test-timeline-scale \
+            --rng-seed 1

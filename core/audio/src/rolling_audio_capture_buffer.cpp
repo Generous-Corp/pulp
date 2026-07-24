@@ -1,4 +1,5 @@
 #include <pulp/audio/rolling_audio_capture_buffer.hpp>
+#include <pulp/runtime/exceptions.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -120,9 +121,9 @@ bool RollingAudioCaptureBuffer::prepare(const RollingAudioCaptureBufferConfig& c
         return false;
     }
 
-    try {
+    PULP_TRY {
         storage_.assign(static_cast<std::size_t>(sample_count), 0.0f);
-    } catch (...) {
+    } PULP_CATCH_ALL {
         clear_unprepared();
         return false;
     }

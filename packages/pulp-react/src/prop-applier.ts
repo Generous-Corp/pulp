@@ -83,6 +83,39 @@ function isVirtualListType(type: string): boolean {
     return type === 'VirtualList' || type === 'virtuallist' || type === 'virtual-list';
 }
 
+function isSvgPathType(type: string): boolean {
+    // host-config maps both the typed component and the supported lowercase
+    // SVG intrinsic to createSvgPath, so both share this compound paint state.
+    return type === 'SvgPath' || type === 'path';
+}
+
+function hasProp(props: Record<string, unknown>, key: string): boolean {
+    return Object.prototype.hasOwnProperty.call(props, key)
+        && props[key] !== undefined && props[key] !== null;
+}
+
+/// `setSvgStroke` deliberately clears an old gradient so a solid stroke wins.
+/// Treat the solid fallback and gradient override as one compound state:
+/// always apply the fallback first, then the gradient, independent of JSX key
+/// order. On updates this same ordering preserves an unchanged gradient when
+/// its fallback changes and restores the fallback when the gradient disappears.
+function applySvgPathStrokeState(id: string, props: Record<string, unknown>, clearing = false): void {
+    const hasStroke = hasProp(props, 'stroke');
+    const hasGradient = hasProp(props, 'strokeGradient')
+        && String(props.strokeGradient).length > 0;
+    if (hasStroke) {
+        call('setSvgStroke', id, String(props.stroke));
+    } else if (clearing) {
+        // Removing an authored fallback must not leave its old color behind:
+        // an invalid retained gradient falls back to the widget's SVG-default
+        // black, while removing the whole stroke disables stroking.
+        call('setSvgStroke', id, hasGradient ? '#000000' : 'none');
+    }
+    if (hasGradient) {
+        call('setSvgStrokeGradient', id, String(props.strokeGradient));
+    }
+}
+
 /// Map a React-style on* prop to the bridge event name. The bridge
 /// dispatches:
 ///   on_click → 'click'        (Button, Panel, etc.)
@@ -378,6 +411,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'fillRule':     return call('setSvgFillRule', id, value as string);
         case 'fillGradient': return call('setSvgFillGradient', id, value as string);
         case 'stroke':       return call('setSvgStroke', id, value as string);
+        case 'strokeGradient': return call('setSvgStrokeGradient', id, value as string);
         case 'strokeWidth':  return call('setSvgStrokeWidth', id, value as number);
 
         default:
@@ -491,6 +525,7 @@ export function applyAllProps(instance: PulpInstance): void {
     for (const key of orderedPropKeys(type, props)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;  // text children handled by caller
+        if (isSvgPathType(type) && (key === 'stroke' || key === 'strokeGradient')) continue;
         if (isEventHandler(key)) {
             applyEventHandler(id, key, props[key]);
             continue;
@@ -500,6 +535,10 @@ export function applyAllProps(instance: PulpInstance): void {
             if (type === 'SvgLine' && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
         }
         applyOne(id, type, key, props[key], props);
+    }
+    if (isSvgPathType(type)
+        && (hasProp(props, 'stroke') || hasProp(props, 'strokeGradient'))) {
+        applySvgPathStrokeState(id, props);
     }
 }
 
@@ -516,6 +555,10 @@ export function applyChangedProps(
         oldProps.selectionMode !== newProps.selectionMode;
     const rowCountChanged = isVirtualListType(type) &&
         oldProps.rowCount !== newProps.rowCount;
+    const svgPathStrokeChanged = isSvgPathType(type) && (
+        oldProps.stroke !== newProps.stroke
+        || oldProps.strokeGradient !== newProps.strokeGradient
+    );
 
     // Coalesce SvgRect / SvgLine geometry changes into a single
     // setSvgRect / setSvgLine call sourced from the post-update props
@@ -546,6 +589,7 @@ export function applyChangedProps(
     for (const key of orderedPropKeys(type, newProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
+        if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
         // SvgRect / SvgLine geometry already emitted above; skip the
         // per-prop dispatch so we don't double-fire bridge calls.
         if (svgRectGeoChanged && type === 'SvgRect' && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
@@ -559,12 +603,17 @@ export function applyChangedProps(
             mutated = true;
         }
     }
+    if (svgPathStrokeChanged) {
+        applySvgPathStrokeState(id, newProps, true);
+        mutated = true;
+    }
 
     // Walk old props — clear anything that disappeared (best-effort —
     // most setters have no inverse; visible/opacity are obvious cases)
     for (const key of Object.keys(oldProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
+        if (svgPathStrokeChanged && (key === 'stroke' || key === 'strokeGradient')) continue;
         if (!(key in newProps)) {
             // Specific resets we can do meaningfully
             if (key === 'visible')  { call('setVisible', id, true); mutated = true; }

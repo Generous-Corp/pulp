@@ -113,9 +113,17 @@ pass the transform-array shape.
 The `<SvgPath>` intrinsic surfaces a typed JSX face for
 `createSvgPath` + `setSvgPath` + `setSvgViewBox` + `setSvgFill` +
 `setSvgFillRule` + `setSvgFillGradient` + `setSvgStroke` +
-`setSvgStrokeWidth`. Lowercase `svg` is a container and lowercase
-`path` creates the same `SvgPathWidget`, so imported SVG snippets do not
-need to be rewritten to the PascalCase intrinsic before they can render.
+`setSvgStrokeGradient` + `setSvgStrokeWidth`. Lowercase `svg` is a
+container and lowercase `path` creates the same `SvgPathWidget`, so
+imported SVG snippets do not need to be rewritten to the PascalCase
+intrinsic before they can render.
+
+`setSvgStrokeGradient` is the stroke mirror of `setSvgFillGradient`: a
+CSS `linear-gradient(...)` string parsed at paint time, with the solid
+stroke kept beside it as the parse-failure fallback (a later solid
+`setSvgStroke` clears the gradient slot). This is how a Figma
+GRADIENT_LINEAR stroke — a knob rim's bevel — renders instead of being
+dropped.
 
 `viewBox` accepts `[width, height]`, `"width height"`, and
 `"min-x min-y width height"` forms. The bridge consumes width and height

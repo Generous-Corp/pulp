@@ -29,6 +29,54 @@ struct JournalEntry {
     JournalEntryKind kind = JournalEntryKind::Ordinary;
 };
 
+enum class JournalSinkError : std::uint8_t {
+    Closed,
+    IoError,
+    InvalidState,
+    DurabilityUncertain,
+};
+
+class JournalSink {
+  public:
+    virtual ~JournalSink() = default;
+
+    JournalSink(const JournalSink&) = delete;
+    JournalSink& operator=(const JournalSink&) = delete;
+
+    /// Returns Ok(true) only after the complete transaction batch is durable.
+    /// Ok(false) is a durability failure and permanently rejects later durable
+    /// writes from the attached session.
+    /// The session writer lock is held during this call, so implementations
+    /// must not invoke lock-taking APIs on the originating DocumentSession.
+    /// Any result other than Ok(true) permanently rejects later durable writes
+    /// from that session.
+    virtual runtime::Result<bool, JournalSinkError>
+    append_batch(const JournalEntry& entry) noexcept = 0;
+
+    /// Durably installs the snapshot before discarding journal entries through
+    /// durable_revision. Only Ok(true) acknowledges durability; the session
+    /// retains its prior checkpoint on any other result.
+    /// The session writer lock is held during this call, so implementations
+    /// must not invoke lock-taking APIs on the originating DocumentSession.
+    /// Any result other than Ok(true) permanently rejects later durable writes
+    /// from that session.
+    virtual runtime::Result<bool, JournalSinkError>
+    checkpoint(const Project& snapshot, DocumentRevision durable_revision) noexcept = 0;
+
+    /// Verifies that an already-durable sink exactly matches a recovered
+    /// snapshot and revision before a session attaches to it. Only Ok(true)
+    /// permits attachment. This operation must not mutate or truncate durable
+    /// state.
+    virtual runtime::Result<bool, JournalSinkError> validate_restore(const Project&,
+                                                                     DocumentRevision) noexcept {
+        return runtime::Result<bool, JournalSinkError>(
+            runtime::Err(JournalSinkError::InvalidState));
+    }
+
+  protected:
+    JournalSink() = default;
+};
+
 class CommandJournal {
   public:
     explicit CommandJournal(JournalLimits limits) : limits_(limits) {}
@@ -57,7 +105,8 @@ class CommandJournal {
     };
     friend class detail::JournalAccess;
     runtime::Result<bool, TransactionError> preflight(const JournalEntry& entry) const;
-    void append_preflighted(JournalEntry entry, const Project& before);
+    std::optional<Project> prepare_append(const Project& before);
+    void append_prepared(JournalEntry entry, std::optional<Project> initial_snapshot) noexcept;
     bool checkpoint(DocumentRevision durable_revision);
 
     JournalLimits limits_;

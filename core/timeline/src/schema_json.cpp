@@ -41,10 +41,13 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_array_elements = 2'000'000;
     limits.max_opaque_bytes = 16ull * 1024ull * 1024ull;
     limits.max_notes = 1'000'000;
+    limits.max_audio_loop_points = 250'000;
+    limits.max_audio_loop_tags = 25'000;
     limits.max_automation_lanes = 25'000;
     limits.max_automation_points = 1'000'000;
     limits.max_take_lanes = 25'000;
     limits.max_takes = 1'000'000;
+    limits.max_take_comp_segments = 1'000'000;
     return limits;
 }
 

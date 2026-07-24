@@ -99,6 +99,20 @@ ProcessContext make_context(const OfflineRenderConfig& config,
     context.loop_start_beats = options.loop_start_beats;
     context.loop_end_beats = options.loop_end_beats;
     context.host_time_ns = host_time_for_block(options.host_time_ns, block_start, config.sample_rate);
+    context.transport_validity.set(TransportField::Playing);
+    context.transport_validity.set(TransportField::Recording);
+    context.transport_validity.set(TransportField::Looping);
+    context.transport_validity.set(TransportField::Tempo);
+    context.transport_validity.set(TransportField::BeatPosition);
+    context.transport_validity.set(TransportField::SamplePosition);
+    context.transport_validity.set(TransportField::TimeSignature);
+    context.transport_validity.set(TransportField::Bar);
+    if (options.is_looping) {
+        context.transport_validity.set(TransportField::LoopRange);
+    }
+    if (options.host_time_ns != 0) {
+        context.transport_validity.set(TransportField::HostTime);
+    }
     return context;
 }
 

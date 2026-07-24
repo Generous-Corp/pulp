@@ -28,6 +28,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <numbers>
@@ -468,4 +469,80 @@ TEST_CASE("CSSStyleDeclaration forwards flex-direction reverse modes verbatim",
 
     REQUIRE(bridge.widget("a")->flex().direction == FlexDirection::row_reverse);
     REQUIRE(bridge.widget("b")->flex().direction == FlexDirection::column_reverse);
+}
+
+// ── fix/knob-ring-offcenter — sub-pixel layout opt-in ───────────────────────
+//
+// Yoga's default pointScaleFactor of 1.0 rounds every solved box to the
+// whole-pixel grid. A replayed Figma design arrives with SOLVED fractional
+// geometry, and per-node rounding moves siblings RELATIVE to each other:
+// the knob-body ELLIPSE at (7.51, 7.51, 22.53²) rounded to (8, 8, 23²)
+// while its value-ring arc's vector box kept 2-decimal placement — every
+// ring in "A Channel FX" rendered visibly off-center of its body.
+// setSubpixelLayout opts the whole pass out of the pixel grid so both
+// siblings keep the centers Figma solved.
+
+TEST_CASE("default layout keeps Yoga's whole-pixel grid rounding",
+          "[view][bridge][layout][subpixel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('body', '');
+        setPosition('body', 'absolute');
+        setLeft('body', 7.51); setTop('body', 7.51);
+        setFlex('body', 'width', 22.53); setFlex('body', 'height', 22.53);
+    )");
+    root.layout_children();
+
+    auto b = bridge.widget("body")->bounds();
+    // Stock behavior unchanged: edges land on the whole-pixel grid.
+    REQUIRE(b.x == std::round(b.x));
+    REQUIRE(b.y == std::round(b.y));
+    REQUIRE(b.width == std::round(b.width));
+    REQUIRE(b.height == std::round(b.height));
+}
+
+TEST_CASE("setSubpixelLayout preserves fractional solved geometry pass-wide",
+          "[view][bridge][layout][subpixel]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // The imported-design shape: the opt-in rides the design root ('' = the
+    // bridge's host root here), the body ellipse box and the ring's vector
+    // box are concentric only at sub-pixel precision (centers 18.775 vs
+    // 18.775 — but rounded boxes give 19.5 vs 18.775).
+    bridge.load_script(R"(
+        setSubpixelLayout('', true);
+        createPanel('body', '');
+        setPosition('body', 'absolute');
+        setLeft('body', 7.51); setTop('body', 7.51);
+        setFlex('body', 'width', 22.53); setFlex('body', 'height', 22.53);
+        createPanel('ring', '');
+        setPosition('ring', 'absolute');
+        setLeft('ring', 1.88); setTop('ring', 1.88);
+        setFlex('ring', 'width', 33.8); setFlex('ring', 'height', 33.8);
+    )");
+    root.layout_children();
+
+    auto body = bridge.widget("body")->bounds();
+    REQUIRE_THAT(body.x, WithinAbs(7.51f, 0.001f));
+    REQUIRE_THAT(body.y, WithinAbs(7.51f, 0.001f));
+    REQUIRE_THAT(body.width, WithinAbs(22.53f, 0.001f));
+    REQUIRE_THAT(body.height, WithinAbs(22.53f, 0.001f));
+
+    auto ring = bridge.widget("ring")->bounds();
+    REQUIRE_THAT(ring.x, WithinAbs(1.88f, 0.001f));
+    REQUIRE_THAT(ring.width, WithinAbs(33.8f, 0.001f));
+
+    // The regression's observable: both boxes share one center.
+    const float body_cx = body.x + body.width / 2;
+    const float ring_cx = ring.x + ring.width / 2;
+    REQUIRE_THAT(body_cx, WithinAbs(ring_cx, 0.005f));
 }

@@ -1,16 +1,25 @@
 {
   "activation": {
-    "accepted_at": null,
-    "accepted_by": null,
+    "accepted_at": "2026-07-24T12:03:00Z",
+    "accepted_by": "@danielraffel",
+    "authority_record_path": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+    "initial_transition_event": "20260724-authority-activation-attempt-2",
     "pulp_extraction_base": "2ccff748f0d59da34b01ce1fbceabcf19f452731",
-    "state": "prepared",
-    "vellum_authority_commit": null
+    "state": "active",
+    "vellum_authority_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
   },
   "framework_repository": "Generous-Corp/vellum",
   "freeze_owner": "@danielraffel",
-  "schema_version": 1,
+  "schema_version": 2,
   "slices": [
     {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "canvas-kernel",
       "paths": [
         "core/canvas/include/pulp/canvas/affine_transform.hpp",
@@ -91,9 +100,10 @@
         "core/canvas/src/text_run_planner.cpp",
         "core/canvas/src/text_shaper.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
+      "authority": null,
       "id": "canvas-kernel-deferred",
       "paths": [
         "core/canvas/CMakeLists.txt",
@@ -125,29 +135,61 @@
       "state": "excluded"
     },
     {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "capture-primitives",
       "paths": [
         "core/view/include/pulp/view/screenshot.hpp",
         "core/view/include/pulp/view/screenshot_compare.hpp",
         "core/view/platform/mac/screenshot_mac.mm",
-        "core/view/platform/mac/window_host_mac_capture.h",
-        "core/view/platform/mac/window_host_mac_capture.mm",
         "core/view/src/screenshot_compare.cpp",
         "core/view/src/screenshot_gpu.cpp",
         "core/view/src/screenshot_skia.cpp",
         "core/view/src/screenshot_stub.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
+      "authority": null,
+      "id": "capture-primitives-deferred",
+      "paths": [
+        "core/view/platform/mac/window_host_mac_capture.h",
+        "core/view/platform/mac/window_host_mac_capture.mm"
+      ],
+      "state": "excluded"
+    },
+    {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "design-schema-compiler",
       "paths": [
         "core/view/include/pulp/view/anchor_strategy.hpp",
+        "core/view/include/pulp/view/design_tokens.hpp",
+        "core/view/src/anchor_strategy.cpp",
+        "core/view/src/design_tokens.cpp",
+        "packages/pulp-import-ir/src/anchors.ts",
+        "packages/pulp-import-ir/src/diff.ts",
+        "packages/pulp-import-ir/src/tweaks.ts"
+      ],
+      "state": "framework-authoritative-transferred"
+    },
+    {
+      "authority": null,
+      "id": "design-schema-compiler-deferred",
+      "paths": [
         "core/view/include/pulp/view/design_import.hpp",
         "core/view/include/pulp/view/design_ir.hpp",
         "core/view/include/pulp/view/design_sources.hpp",
-        "core/view/include/pulp/view/design_tokens.hpp",
-        "core/view/src/anchor_strategy.cpp",
         "core/view/src/design_import.cpp",
         "core/view/src/design_import_internal.hpp",
         "core/view/src/design_import_native_common.cpp",
@@ -156,15 +198,12 @@
         "core/view/src/design_ir_helpers.hpp",
         "core/view/src/design_ir_json.cpp",
         "core/view/src/design_ir_normalize.cpp",
-        "core/view/src/design_tokens.cpp",
-        "packages/pulp-import-ir/src/anchors.ts",
-        "packages/pulp-import-ir/src/diff.ts",
-        "packages/pulp-import-ir/src/tweaks.ts",
         "packages/pulp-import-ir/src/types.ts"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "excluded"
     },
     {
+      "authority": null,
       "id": "legacy-figma-schema",
       "paths": [
         "tools/figma-plugin/schema/figma-plugin-export-v1.json"
@@ -172,6 +211,7 @@
       "state": "pulp-only"
     },
     {
+      "authority": null,
       "id": "legal-provenance",
       "paths": [
         "DEPENDENCIES.md",
@@ -181,17 +221,32 @@
       "state": "pulp-authoritative-untransferred"
     },
     {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "macos-shell",
       "paths": [
-        "core/view/platform/mac/accessibility_mac.mm",
+        "core/view/platform/mac/accessibility_mac.mm"
+      ],
+      "state": "framework-authoritative-transferred"
+    },
+    {
+      "authority": null,
+      "id": "macos-shell-deferred",
+      "paths": [
         "core/view/platform/mac/window_host_mac.mm",
         "core/view/platform/mac/window_host_mac_geometry.mm",
         "core/view/platform/mac/window_host_mac_internal.hpp",
         "core/view/platform/mac/window_host_mac_view.h"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "excluded"
     },
     {
+      "authority": null,
       "id": "pulp-audio-plugin-product",
       "paths": [
         "core/audio/",
@@ -206,6 +261,7 @@
       "state": "pulp-only"
     },
     {
+      "authority": null,
       "id": "pulp-tooling-surface",
       "paths": [
         ".agents/skills/",
@@ -218,6 +274,13 @@
       "state": "pulp-only"
     },
     {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "render-skia-dawn",
       "paths": [
         "core/render/include/pulp/render/dirty_tracker.hpp",
@@ -238,9 +301,10 @@
         "core/render/src/skia_surface.cpp",
         "core/render/src/skia_surface_ganesh.cpp"
       ],
-      "state": "pulp-authoritative-untransferred"
+      "state": "framework-authoritative-transferred"
     },
     {
+      "authority": null,
       "id": "render-skia-dawn-deferred",
       "paths": [
         "core/render/CMakeLists.txt",
@@ -276,6 +340,13 @@
       "state": "excluded"
     },
     {
+      "authority": {
+        "accepted_at": "2026-07-24T12:03:00Z",
+        "accepted_by": "@danielraffel",
+        "counterpart": "provenance/authority/records/native-design-kernel-v1-attempt-2.json",
+        "event_id": "20260724-authority-activation-attempt-2",
+        "vellum_commit": "a106a02816a0cde53daac83f36a6630d664f6637"
+      },
       "id": "retained-ui-kernel",
       "paths": [
         "core/view/include/pulp/view/accessibility.hpp",
@@ -296,12 +367,7 @@
         "core/view/include/pulp/view/svg_fragment.hpp",
         "core/view/include/pulp/view/svg_path_widget.hpp",
         "core/view/include/pulp/view/value_source.hpp",
-        "core/view/include/pulp/view/view.hpp",
-        "core/view/include/pulp/view/view_fwd.hpp",
         "core/view/include/pulp/view/widget_painter.hpp",
-        "core/view/include/pulp/view/widgets.hpp",
-        "core/view/include/pulp/view/widgets/svg_line.hpp",
-        "core/view/include/pulp/view/widgets/svg_rect.hpp",
         "core/view/include/pulp/view/window_host.hpp",
         "core/view/src/accessibility.cpp",
         "core/view/src/accessibility_tree.cpp",
@@ -315,25 +381,32 @@
         "core/view/src/pointer_dispatch.cpp",
         "core/view/src/repaint_damage.cpp",
         "core/view/src/svg_path_widget.cpp",
+        "core/view/src/yoga_layout.cpp"
+      ],
+      "state": "framework-authoritative-transferred"
+    },
+    {
+      "authority": null,
+      "id": "retained-ui-kernel-deferred",
+      "paths": [
+        "core/view/include/pulp/view/theme.hpp",
+        "core/view/include/pulp/view/view.hpp",
+        "core/view/include/pulp/view/view_fwd.hpp",
+        "core/view/include/pulp/view/widgets.hpp",
+        "core/view/include/pulp/view/widgets/svg_line.hpp",
+        "core/view/include/pulp/view/widgets/svg_rect.hpp",
+        "core/view/src/theme.cpp",
         "core/view/src/view.cpp",
         "core/view/src/widgets.cpp",
         "core/view/src/widgets/label.cpp",
         "core/view/src/widgets/svg_line.cpp",
         "core/view/src/widgets/svg_rect.cpp",
-        "core/view/src/widgets/visualizers.cpp",
-        "core/view/src/yoga_layout.cpp"
-      ],
-      "state": "pulp-authoritative-untransferred"
-    },
-    {
-      "id": "retained-ui-kernel-deferred",
-      "paths": [
-        "core/view/include/pulp/view/theme.hpp",
-        "core/view/src/theme.cpp"
+        "core/view/src/widgets/visualizers.cpp"
       ],
       "state": "excluded"
     },
     {
+      "authority": null,
       "id": "runtime-assets",
       "paths": [
         "external/fonts/Inter-Regular.ttf",

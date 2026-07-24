@@ -1,5 +1,6 @@
 #include <pulp/timeline/serialize.hpp>
 
+#include "asset_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
 #include "serialize_internal.hpp"
@@ -211,8 +212,65 @@ bool write_representation(EncodeContext& context, const AssetRepresentation& rep
     });
 }
 
+bool write_loop_info(EncodeContext& context, const AudioLoopInfo& loop) {
+    if (!context.writer.character('{'))
+        return false;
+    bool has_member = false;
+    const auto member = [&](std::string_view name) {
+        if (has_member && !context.writer.character(','))
+            return false;
+        has_member = true;
+        return context.writer.quoted(name) && context.writer.character(':');
+    };
+    if (loop.active_range &&
+        (!member("in_marker_frame") ||
+         !context.writer.u64(loop.active_range->start_frame, true)))
+        return false;
+    if (!member("meter_denominator") ||
+        !context.writer.u64(static_cast<std::uint32_t>(loop.meter.denominator)) ||
+        !member("meter_numerator") ||
+        !context.writer.u64(static_cast<std::uint32_t>(loop.meter.numerator)))
+        return false;
+    if (loop.musical_length &&
+        (!member("musical_length_ticks") ||
+         !context.writer.i64(loop.musical_length->value, true)))
+        return false;
+    if (!member("one_shot") || !context.writer.append(loop.one_shot ? "true" : "false"))
+        return false;
+    if (loop.active_range &&
+        (!member("out_marker_frame") ||
+         !context.writer.u64(loop.active_range->end_frame, true)))
+        return false;
+    if (!member("points") || !context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < loop.points.size(); ++index) {
+        const auto& point = loop.points[index];
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"frame\":") ||
+            !context.writer.u64(point.frame, true) ||
+            !context.writer.append(",\"kind\":") ||
+            !context.writer.quoted(point.kind == AudioLoopPointKind::Manual ? "manual"
+                                                                           : "automatic") ||
+            !context.writer.character('}'))
+            return false;
+    }
+    if (!context.writer.character(']'))
+        return false;
+    if (loop.root_note &&
+        (!member("root_note") || !context.writer.u64(*loop.root_note)))
+        return false;
+    if (!member("tags") || !context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < loop.tags.size(); ++index)
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.quoted(loop.tags[index]))
+            return false;
+    return context.writer.append("]}");
+}
+
 bool write_asset(EncodeContext& context, const MediaAsset& asset) {
-    return write_envelope(context, "pulp.timeline.asset", 1, [&] {
+    return write_envelope(context, "pulp.timeline.asset",
+                          detail::asset_schema_policy.current_version, [&] {
         if (!context.writer.append("{\"content_hash\":") ||
             !context.writer.quoted(asset.content_hash.to_hex()) ||
             !context.writer.append(",\"frame_count\":") ||
@@ -224,7 +282,13 @@ bool write_asset(EncodeContext& context, const MediaAsset& asset) {
                 !write_locator(context, asset.locators[index]))
                 return false;
         }
-        if (!context.writer.append("],\"name\":") || !context.writer.quoted(asset.name) ||
+        if (!context.writer.character(']'))
+            return false;
+        if (asset.loop_info &&
+            (!context.writer.append(",\"loop_info\":") ||
+             !write_loop_info(context, *asset.loop_info)))
+            return false;
+        if (!context.writer.append(",\"name\":") || !context.writer.quoted(asset.name) ||
             !context.writer.append(",\"representations\":["))
             return false;
         for (std::size_t index = 0; index < asset.representations.size(); ++index) {
@@ -374,8 +438,24 @@ bool write_take(EncodeContext& context, const Take& take) {
 }
 
 bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
-    return write_envelope(context, "pulp.timeline.take_lane", 1, [&] {
-        if (!context.writer.append("{\"id\":") || !context.writer.u64(lane.id().value, true) ||
+    return write_envelope(context, "pulp.timeline.take_lane", 2, [&] {
+        if (!context.writer.append("{\"comp_segments\":["))
+            return false;
+        for (std::size_t index = 0; index < lane.comp_segments().size(); ++index) {
+            const auto& segment = lane.comp_segments()[index];
+            if ((index != 0 && !context.writer.character(',')) ||
+                !context.writer.append("{\"sample_count\":") ||
+                !context.writer.u64(segment.range.sample_count, true) ||
+                !context.writer.append(",\"sample_rate\":") ||
+                !write_rate(context, segment.range.sample_rate) ||
+                !context.writer.append(",\"start\":") ||
+                !context.writer.i64(segment.range.start.value, true) ||
+                !context.writer.append(",\"take_id\":") ||
+                !context.writer.u64(segment.take_id.value, true) ||
+                !context.writer.character('}'))
+                return false;
+        }
+        if (!context.writer.append("],\"id\":") || !context.writer.u64(lane.id().value, true) ||
             !context.writer.append(",\"name\":") || !context.writer.quoted(lane.name()) ||
             !context.writer.append(",\"takes\":["))
             return false;
@@ -391,7 +471,9 @@ bool write_track(EncodeContext& context, const Track& track) {
     return write_envelope(
         context, detail::track_schema_policy.type_name, detail::track_schema_policy.current_version,
         [&] {
-            if (!context.writer.append("{\"automation_lanes\":["))
+            if (!context.writer.append("{\"active_take_lane_id\":") ||
+                !context.writer.u64(track.active_take_lane_id().value, true) ||
+                !context.writer.append(",\"automation_lanes\":["))
                 return false;
             for (std::size_t index = 0; index < track.automation_lanes().size(); ++index)
                 if ((index != 0 && !context.writer.character(',')) ||
@@ -409,8 +491,26 @@ bool write_track(EncodeContext& context, const Track& track) {
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_device_placement(context, track.device_chain()[index]))
                     return false;
-            if (!context.writer.append("],\"id\":") ||
-                !context.writer.u64(track.id().value, true) ||
+            if (!context.writer.character(']'))
+                return false;
+            if (track.freeze()) {
+                const auto& freeze = *track.freeze();
+                if (!context.writer.append(",\"freeze\":{\"asset_id\":") ||
+                    !context.writer.u64(freeze.media.asset_id.value, true) ||
+                    !context.writer.append(",\"frame_count\":") ||
+                    !context.writer.u64(freeze.media.frame_count, true) ||
+                    !context.writer.append(",\"placement_start\":") ||
+                    !context.writer.i64(freeze.placement_start.value, true) ||
+                    !context.writer.append(",\"render_plan_hash\":") ||
+                    !context.writer.quoted(freeze.render_plan_hash.to_hex()) ||
+                    !context.writer.append(",\"sample_rate\":") ||
+                    !write_rate(context, freeze.sample_rate) ||
+                    !context.writer.append(",\"source_start\":") ||
+                    !context.writer.i64(freeze.media.source_start.value, true) ||
+                    !context.writer.character('}'))
+                    return false;
+            }
+            if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true) ||
                 !context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
                 !context.writer.append(",\"record_armed\":") ||
                 !context.writer.append(track.record_armed() ? "true" : "false") ||

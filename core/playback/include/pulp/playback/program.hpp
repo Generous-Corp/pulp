@@ -58,7 +58,10 @@ enum class NoteProgramEventKind : std::uint8_t { Off, On };
 /// Immutable arrangement-note event lowered by the program compiler. Musical
 /// ticks remain available for diagnostics and state snapshots, while the
 /// sample position is authoritative for half-open block scheduling against the
-/// exact CompiledTempoMap used to build the owning PlaybackProgram.
+/// exact CompiledTempoMap used to build the owning PlaybackProgram. Distinct
+/// ticks can quantize to the same compiled sample, so tick order remains
+/// authoritative within one sample; note-offs precede note-ons only when both
+/// the sample and tick are equal.
 struct NoteProgramEvent {
     timebase::SamplePosition sample;
     timebase::TickPosition tick;
@@ -75,8 +78,10 @@ constexpr bool note_program_event_less(const NoteProgramEvent& lhs,
                                        const NoteProgramEvent& rhs) noexcept {
     if (lhs.sample != rhs.sample)
         return lhs.sample < rhs.sample;
+    if (lhs.tick != rhs.tick)
+        return lhs.tick < rhs.tick;
     if (lhs.kind != rhs.kind)
-        return lhs.kind < rhs.kind; // note-offs first
+        return lhs.kind < rhs.kind; // note-offs first at one exact tick
     if (lhs.clip_id != rhs.clip_id)
         return lhs.clip_id < rhs.clip_id;
     return lhs.note_id < rhs.note_id;

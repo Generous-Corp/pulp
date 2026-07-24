@@ -21,8 +21,10 @@
 #include "pulp_mcp_version.h"
 #include "mcp_json.hpp"
 #include "mcp_compat.hpp"
+#include "mcp_server.hpp"
 #include "mcp_shell.hpp"
 #include "mcp_tools.hpp"
+#include "timeline_mcp_tools.h"
 
 namespace fs = std::filesystem;
 
@@ -84,15 +86,21 @@ using pulp_mcp::handle_audio_scope;
 using pulp_mcp::handle_audio_plugin_inspect;
 using pulp_mcp::handle_audio_render;
 using pulp_mcp::handle_audio_compare;
+using pulp_mcp::handle_timeline_project_open;
+using pulp_mcp::handle_timeline_command_apply;
+using pulp_mcp::handle_timeline_validate;
+using pulp_mcp::handle_timeline_explain;
+using pulp_mcp::handle_timeline_render;
 using pulp_mcp::handle_inspect_pending_requests;
-
 
 // ── MCP Protocol Handler ─────────────────────────────────────────────────────
 
-static std::string tools_list_json() {
+std::string pulp_mcp::server::tools_list_json() {
     std::string out;
     out.reserve(32 * 1024);
     out += R"JSON({"tools":[)JSON";
+    out += pulp_mcp::kTimelineMcpToolsArray;
+    out += ",";
     out += R"JSON({"name":"pulp_build","description":"Build the Pulp project (configure + compile)","inputSchema":{"type":"object","properties":{}}},)JSON";
     out += R"JSON({"name":"pulp_test","description":"Run the Pulp test suite","inputSchema":{"type":"object","properties":{"filter":{"type":"string","description":"Test name filter (regex)"}}}},)JSON";
     out += R"JSON({"name":"pulp_status","description":"Show Pulp project status","inputSchema":{"type":"object","properties":{}}},)JSON";
@@ -181,7 +189,7 @@ static std::string compact_for_wire(std::string s) {
 
 static std::string handle_request_raw(const std::string& json);
 
-static std::string handle_request(const std::string& json) {
+std::string pulp_mcp::server::handle_request(const std::string& json) {
     return compact_for_wire(handle_request_raw(json));
 }
 
@@ -207,7 +215,7 @@ static std::string handle_request_raw(const std::string& json) {
     }
 
     if (method == "tools/list") {
-        return json_result(id, tools_list_json());
+        return json_result(id, pulp_mcp::server::tools_list_json());
     }
 
     if (method == "tools/call") {
@@ -219,10 +227,26 @@ static std::string handle_request_raw(const std::string& json) {
             auto brace = json.find('{', args_pos);
             if (brace != std::string::npos) {
                 int depth = 1;
+                bool in_string = false;
+                bool escaped = false;
                 auto end = brace + 1;
                 while (end < json.size() && depth > 0) {
-                    if (json[end] == '{') ++depth;
-                    if (json[end] == '}') --depth;
+                    const char current = json[end];
+                    if (in_string) {
+                        if (escaped) {
+                            escaped = false;
+                        } else if (current == '\\') {
+                            escaped = true;
+                        } else if (current == '"') {
+                            in_string = false;
+                        }
+                    } else if (current == '"') {
+                        in_string = true;
+                    } else if (current == '{') {
+                        ++depth;
+                    } else if (current == '}') {
+                        --depth;
+                    }
                     ++end;
                 }
                 args_json = json.substr(brace, end - brace);
@@ -289,6 +313,11 @@ static std::string handle_request_raw(const std::string& json) {
         else if (name == "pulp_audio_plugin_inspect") result = handle_audio_plugin_inspect(args_json);
         else if (name == "pulp_audio_render")         result = handle_audio_render(args_json);
         else if (name == "pulp_audio_compare")        result = handle_audio_compare(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[0]) result = handle_timeline_project_open(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[1]) result = handle_timeline_command_apply(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[2]) result = handle_timeline_validate(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[3]) result = handle_timeline_explain(args_json);
+        else if (name == pulp_mcp::kTimelineMcpToolNames[4]) result = handle_timeline_render(args_json);
         else if (name == "pulp_screenshot" || name == "pulp_simulate_click" || name == "pulp_get_view_tree") {
             // These tools delegate to pulp-screenshot binary
             auto root = find_project_root();
@@ -537,7 +566,7 @@ static std::string handle_request_raw(const std::string& json) {
 
 // ── Main: stdio JSON-RPC transport ───────────────────────────────────────────
 
-int main(int argc, char* argv[]) {
+int pulp_mcp::server::run(int argc, char* argv[]) {
     // Flag-only invocations short-circuit the JSON-RPC loop so the
     // release-CLI smoke gate and `pulp doctor` can probe the binary
     // without speaking MCP framing. Keep this list narrow — anything
