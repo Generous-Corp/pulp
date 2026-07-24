@@ -121,6 +121,21 @@ add_test(NAME cmake-pulp-minos-consumer-pin
 set_tests_properties(cmake-pulp-minos-consumer-pin PROPERTIES
     LABELS "cmake;min-os"
     TIMEOUT 60)
+if(APPLE)
+    # Compile the std::format call shape used by runtime/log.hpp at the declared
+    # floor against the active SDK. Apple has changed the floating-point
+    # std::to_chars availability annotation across SDK releases; this catches a
+    # stale floor before a normal translation unit fails deep in libc++.
+    add_test(NAME cmake-pulp-macos-libcxx-floor
+        COMMAND bash
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_macos_libcxx_floor.sh
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_OSX_SYSROOT})
+    set_tests_properties(cmake-pulp-macos-libcxx-floor PROPERTIES
+        SKIP_RETURN_CODE 77
+        LABELS "cmake;min-os;macos;compile"
+        TIMEOUT 60)
+endif()
 # Install-layout regression for format helper sources used by
 # PulpAuv3.cmake / PulpPluginFormats.cmake from _PULP_FORMAT_SOURCE_DIR.
 # Without au_view_controller_mac.mm in the installed SDK, downstream

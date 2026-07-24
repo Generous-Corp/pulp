@@ -16,9 +16,9 @@
   "platforms": {
     "macos-arm64": {
       "unit": "macos_version",
-      "floor": "13.3",
+      "floor": "13.4",
       "binding": "skia,dawn,libcxx",
-      "note": "Floor is set by Apple's libc++, not Skia/Dawn: std::format instantiates std::formatter<float> through its type-erased make_format_args visitor for EVERY format call (even string-only ones), and std::to_chars(float) is marked unavailable before macOS 13.3 in the Xcode SDK's libc++. Pulp's logging (core/runtime/log.hpp) uses std::format pervasively, so 13.3 is a hard toolchain floor above Google's 13.0 deps target. Verified by compiling at deployment target 13.0 (fails) vs 13.3 (builds).",
+      "note": "Floor is set by Apple's libc++, not Skia/Dawn: std::format instantiates floating-point formatters through its type-erased visitor for EVERY format call (even integer-only ones), and the macOS 15.4 SDK marks std::to_chars(float/double/long double) unavailable before macOS 13.4. Pulp's logging (core/runtime/log.hpp) uses std::format pervasively, so 13.4 is the cross-SDK toolchain floor above Google's 13.0 deps target. Verified against the macOS 15.4 SDK by compiling the same std::format probe at deployment target 13.3 (fails) vs 13.4 (builds).",
       "deps": {
         "skia": {
           "measured": "13.0",
@@ -33,11 +33,11 @@
           "source": "Chromium mac_deployment_target @ m151"
         },
         "libcxx": {
-          "measured": "13.3",
-          "expected": "13.3",
+          "measured": "13.4",
+          "expected": "13.4",
           "always_linked": true,
           "toolchain_declared": true,
-          "source": "Apple libc++ std::to_chars(float) availability (Xcode SDK usr/include/c++/v1/__charconv/to_chars_floating_point.h), reached via std::format in core/runtime/log.hpp"
+          "source": "Apple libc++ std::to_chars(float/double/long double) availability in the macOS 15.4 SDK (usr/include/c++/v1/__charconv/to_chars_floating_point.h), reached via std::format in core/runtime/log.hpp"
         },
         "v8": {
           "measured": "11.0",
@@ -49,9 +49,9 @@
     },
     "macos-x64": {
       "unit": "macos_version",
-      "floor": "13.3",
+      "floor": "13.4",
       "binding": "skia,dawn,libcxx",
-      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.3 in the Xcode SDK's libc++, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m151-minos13, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0 (measured via measure_min_os.py --measure over the unpacked libskia.a / libdawn_combined.a on 2026-07-10), below the 13.3 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.3.",
+      "note": "Intel (x86_64) macOS target. Floor is arch-independent and set by Apple's libc++, not Skia/Dawn: std::to_chars(float/double/long double) — reached via std::format in core/runtime/log.hpp — is marked unavailable before macOS 13.4 in the macOS 15.4 SDK, exactly as on macos-arm64. The x86_64 Skia + Dawn prebuilt slices (danielraffel/skia-builder chrome/m151-minos13, skia-build-mac-x86_64-gpu-release.zip) both stamp minos 13.0 (measured via measure_min_os.py --measure over the unpacked libskia.a / libdawn_combined.a on 2026-07-10), below the 13.4 toolchain floor. A universal (arm64;x86_64) build's floor is max(macos-arm64, macos-x64) = 13.4.",
       "deps": {
         "skia": {
           "measured": "13.0",
@@ -66,11 +66,11 @@
           "source": "skia-builder chrome/m151-minos13 mac-x86_64 slice; measure_min_os.py --measure over build/mac-gpu/lib/Release/x86_64/libdawn_combined.a (bundled in the Skia toolchain)"
         },
         "libcxx": {
-          "measured": "13.3",
-          "expected": "13.3",
+          "measured": "13.4",
+          "expected": "13.4",
           "always_linked": true,
           "toolchain_declared": true,
-          "source": "Apple libc++ std::to_chars(float) availability (arch-independent), reached via std::format in core/runtime/log.hpp"
+          "source": "Apple libc++ std::to_chars(float/double/long double) availability in the macOS 15.4 SDK (arch-independent), reached via std::format in core/runtime/log.hpp"
         },
         "v8": {
           "measured": "11.0",
