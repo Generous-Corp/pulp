@@ -43,3 +43,16 @@ Activation is a two-phase handshake: Vellum first publishes the immutable
 pending record; Pulp then merges one authority-transition outbox event and the
 matching active projection; Vellum finally records the landed Pulp SHA and
 advances its cursor. A failed or missing check leaves the projection prepared.
+
+The trusted merge-group workflow has a one-time bootstrap constraint: GitHub
+loads a `merge_group` workflow from the current base branch, not from the
+synthetic merge result. The first commit that introduces
+`tools/scripts/github_app_jwt.py` therefore cannot repair the already-loaded
+base workflow from inside that workflow. For that bootstrap only, the
+non-required `Vellum trusted gate` workflow is disabled while the exact
+reviewed head passes the repository's normal required PR and merge-queue
+checks, then re-enabled immediately after landing. No authority transfer is
+allowed in that bootstrap commit. The next prepared-ownership merge group must
+run the re-enabled workflow from the new base and pass `Vellum trusted freeze`;
+that successful strict merge-group run is the retained proof that activation
+work may continue.

@@ -10,6 +10,7 @@ never optional, excluded, or Pulp-specific rows.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -21,8 +22,14 @@ from typing import Iterable
 
 DEFAULT_MANIFEST = Path("docs/contracts/vellum-initial-cut-manifest.json")
 DEFAULT_OUTPUT = Path(".github/vellum-ownership.json")
+EVENT_DIRECTORY = Path(".github/vellum-change-events")
 FRAMEWORK_REPOSITORY = "Generous-Corp/vellum"
 FREEZE_OWNER = "@danielraffel"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+EVENT_ID_RE = re.compile(r"^[0-9]{8}-[a-z0-9][a-z0-9-]{2,79}$")
+RECORD_PATH_RE = re.compile(
+    r"^provenance/authority/records/[a-z0-9][a-z0-9._-]{2,120}\.json$"
+)
 
 TRANSFERABLE = frozenset(
     {"framework-core", "authoring-only", "platform-adapter", "test-only"}
@@ -144,7 +151,14 @@ def build_projection(manifest: dict[str, object]) -> dict[str, object]:
             state = "pulp-authoritative-untransferred"
         else:
             state = "excluded"
-        slices.append({"id": slice_id, "state": state, "paths": sorted(grouped[slice_id])})
+        slices.append(
+            {
+                "id": slice_id,
+                "state": state,
+                "paths": sorted(grouped[slice_id]),
+                "authority": None,
+            }
+        )
 
     # These are intentionally broad Pulp-owned product/tool surfaces outside
     # the selected cut. They document the non-transfer boundary and therefore
@@ -164,6 +178,7 @@ def build_projection(manifest: dict[str, object]) -> dict[str, object]:
                     "core/playback/",
                     "core/signal/",
                 ],
+                "authority": None,
             },
             {
                 "id": "pulp-tooling-surface",
@@ -176,23 +191,189 @@ def build_projection(manifest: dict[str, object]) -> dict[str, object]:
                     "tools/cli/",
                     "tools/mcp/",
                 ],
+                "authority": None,
             },
         ]
     )
     slices.sort(key=lambda item: str(item["id"]))
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "framework_repository": FRAMEWORK_REPOSITORY,
         "freeze_owner": FREEZE_OWNER,
         "activation": {
             "state": "prepared",
             "pulp_extraction_base": manifest["source_commit"],
             "vellum_authority_commit": None,
+            "authority_record_path": None,
+            "initial_transition_event": None,
             "accepted_by": None,
             "accepted_at": None,
         },
         "slices": slices,
     }
+
+
+def normalize_prepared_v1(projection: dict[str, object]) -> dict[str, object]:
+    """Normalize only the pre-authority v1 projection for bootstrap verification."""
+
+    if projection.get("schema_version") != 1:
+        return projection
+    activation = projection.get("activation")
+    slices = projection.get("slices")
+    if (
+        not isinstance(activation, dict)
+        or activation.get("state") != "prepared"
+        or set(activation)
+        != {
+            "state",
+            "pulp_extraction_base",
+            "vellum_authority_commit",
+            "accepted_by",
+            "accepted_at",
+        }
+        or any(
+            activation.get(field) is not None
+            for field in ("vellum_authority_commit", "accepted_by", "accepted_at")
+        )
+        or not isinstance(slices, list)
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"id", "state", "paths"}
+            or item.get("state") == "framework-authoritative-transferred"
+            for item in slices
+        )
+    ):
+        raise ProjectionError(
+            "only the prepared, untransferred schema-v1 projection may normalize"
+        )
+    normalized = json.loads(json.dumps(projection))
+    normalized["schema_version"] = 2
+    normalized["activation"]["authority_record_path"] = None
+    normalized["activation"]["initial_transition_event"] = None
+    for item in normalized["slices"]:
+        item["authority"] = None
+    return normalized
+
+
+def load_activation_event(path: Path) -> dict[str, object]:
+    try:
+        event = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ProjectionError(f"cannot read activation event {path}: {error}") from error
+    if not isinstance(event, dict):
+        raise ProjectionError("activation event must be an object")
+    required = {
+        "schema_version",
+        "event_id",
+        "kind",
+        "created_at",
+        "slices",
+        "rationale",
+        "tests",
+        "transition",
+        "vellum_authority_commit",
+        "approved_by",
+        "counterpart",
+    }
+    if set(event) != required:
+        raise ProjectionError("activation event has missing or unknown fields")
+    event_id = event.get("event_id")
+    if (
+        event.get("schema_version") != 1
+        or event.get("kind") != "authority-transition"
+        or event.get("transition") != "activate"
+        or not isinstance(event_id, str)
+        or not EVENT_ID_RE.fullmatch(event_id)
+        or path.name != f"{event_id}.json"
+    ):
+        raise ProjectionError("activation event identity or transition is invalid")
+    commit = event.get("vellum_authority_commit")
+    counterpart = event.get("counterpart")
+    if not isinstance(commit, str) or not SHA_RE.fullmatch(commit):
+        raise ProjectionError("activation event needs an exact Vellum record commit")
+    if not isinstance(counterpart, str) or not RECORD_PATH_RE.fullmatch(counterpart):
+        raise ProjectionError("activation event needs a direct Vellum authority record path")
+    if event.get("approved_by") != FREEZE_OWNER:
+        raise ProjectionError("activation event requires the approved freeze owner")
+    created_at = event.get("created_at")
+    if not isinstance(created_at, str) or not created_at.endswith("Z"):
+        raise ProjectionError("activation event created_at must be UTC")
+    try:
+        parsed = dt.datetime.fromisoformat(created_at[:-1] + "+00:00")
+    except ValueError as error:
+        raise ProjectionError("activation event created_at is not a valid timestamp") from error
+    if parsed.utcoffset() != dt.timedelta(0):
+        raise ProjectionError("activation event created_at must be UTC")
+    slices = event.get("slices")
+    if (
+        not isinstance(slices, list)
+        or not slices
+        or slices != sorted(set(slices))
+        or not all(isinstance(item, str) for item in slices)
+    ):
+        raise ProjectionError("activation event slices must be sorted, unique, and non-empty")
+    rationale = event.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ProjectionError("activation event requires a rationale")
+    tests = event.get("tests")
+    if (
+        not isinstance(tests, list)
+        or not tests
+        or tests != sorted(set(tests))
+        or not all(isinstance(item, str) and item.strip() for item in tests)
+    ):
+        raise ProjectionError("activation event tests must be sorted, unique, and non-empty")
+    return event
+
+
+def activate_projection(
+    prepared: dict[str, object], event: dict[str, object]
+) -> dict[str, object]:
+    """Derive the active projection exclusively from one reviewed transition event."""
+
+    if prepared.get("schema_version") != 2:
+        raise ProjectionError("only a prepared schema-v2 projection can be activated")
+    activation = prepared.get("activation")
+    slices = prepared.get("slices")
+    if (
+        not isinstance(activation, dict)
+        or activation.get("state") != "prepared"
+        or not isinstance(slices, list)
+    ):
+        raise ProjectionError("activation input is not prepared")
+    selected = event["slices"]
+    assert isinstance(selected, list)
+    by_id = {
+        item.get("id"): item
+        for item in slices
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    if set(selected) - set(by_id):
+        raise ProjectionError("activation event names an unknown ownership slice")
+    authority = {
+        "event_id": event["event_id"],
+        "vellum_commit": event["vellum_authority_commit"],
+        "counterpart": event["counterpart"],
+        "accepted_by": event["approved_by"],
+        "accepted_at": event["created_at"],
+    }
+    for slice_id in selected:
+        item = by_id[slice_id]
+        if item.get("state") != "pulp-authoritative-untransferred":
+            raise ProjectionError(f"activation slice is not a prepared candidate: {slice_id}")
+        item["state"] = "framework-authoritative-transferred"
+        item["authority"] = dict(authority)
+    activation.update(
+        {
+            "state": "active",
+            "vellum_authority_commit": event["vellum_authority_commit"],
+            "authority_record_path": event["counterpart"],
+            "initial_transition_event": event["event_id"],
+            "accepted_by": event["approved_by"],
+            "accepted_at": event["created_at"],
+        }
+    )
+    return prepared
 
 
 def _source_without_comments_and_strings(source: str) -> str:
@@ -241,9 +422,23 @@ def neutrality_findings(repo: Path, manifest: dict[str, object]) -> list[tuple[s
 
 
 def verify_projection(
-    *, repo: Path, manifest: dict[str, object], projection: dict[str, object]
+    *,
+    repo: Path,
+    manifest: dict[str, object],
+    projection: dict[str, object],
+    expected_projection: dict[str, object] | None = None,
 ) -> None:
-    expected = build_projection(manifest)
+    projection = normalize_prepared_v1(projection)
+    expected = expected_projection
+    if expected is None:
+        expected = build_projection(manifest)
+        activation = projection.get("activation")
+        if isinstance(activation, dict) and activation.get("state") == "active":
+            event_id = activation.get("initial_transition_event")
+            if not isinstance(event_id, str) or not EVENT_ID_RE.fullmatch(event_id):
+                raise ProjectionError("active projection lacks a valid initial transition event")
+            event_path = repo / EVENT_DIRECTORY / f"{event_id}.json"
+            expected = activate_projection(expected, load_activation_event(event_path))
     if projection != expected:
         raise ProjectionError("ownership projection is stale; regenerate it from the cut manifest")
 
@@ -302,6 +497,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", type=Path, default=Path.cwd())
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--activation-event",
+        type=Path,
+        help="derive an active projection from one reviewed authority-transition event",
+    )
     parser.add_argument("--verify", action="store_true")
     return parser
 
@@ -314,6 +514,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         output_path = args.output if args.output.is_absolute() else repo / args.output
         manifest = load_manifest(manifest_path)
         expected = build_projection(manifest)
+        if args.activation_event is not None:
+            event_path = (
+                args.activation_event
+                if args.activation_event.is_absolute()
+                else repo / args.activation_event
+            )
+            expected = activate_projection(expected, load_activation_event(event_path))
         if args.verify:
             if not output_path.is_file():
                 raise ProjectionError(f"ownership projection does not exist: {output_path}")
@@ -321,7 +528,12 @@ def main(argv: Iterable[str] | None = None) -> int:
                 actual = json.loads(output_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as error:
                 raise ProjectionError(f"cannot read ownership projection: {error}") from error
-            verify_projection(repo=repo, manifest=manifest, projection=actual)
+            verify_projection(
+                repo=repo,
+                manifest=manifest,
+                projection=actual,
+                expected_projection=expected if args.activation_event is not None else None,
+            )
             print(f"verified {manifest['entry_count']} exact manifest rows in {output_path}")
             return 0
         findings = neutrality_findings(repo, manifest)

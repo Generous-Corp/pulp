@@ -54,7 +54,10 @@ jobs:
         run: python3 -m pip install --quiet 'pyyaml==6.0.2'
 
       - name: Run freeze-check negative controls
-        run: python3 tools/scripts/test_vellum_freeze_check.py
+        run: |
+          python3 tools/scripts/test_vellum_freeze_check.py
+          python3 tools/scripts/test_github_app_jwt.py
+          python3 tools/scripts/test_vellum_authority_workflows.py
 
       - name: Verify extraction and tooling inventories
         run: |

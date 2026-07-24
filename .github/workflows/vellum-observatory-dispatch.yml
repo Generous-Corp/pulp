@@ -41,16 +41,26 @@ jobs:
     if: needs.validate-outbox.outputs.dispatch_required == 'true'
     runs-on: ubuntu-latest
     steps:
-      # This job intentionally has one step. It neither checks out nor executes
-      # repository code before the narrowly scoped cross-repository credential
-      # is exposed.
+      # This job never checks out or executes repository code. Only the pinned
+      # GitHub-owned action sees the App private key, and its installation token
+      # is scoped to the one private Vellum repository.
+      - name: Mint one-repository Vellum dispatcher token
+        id: vellum-dispatcher-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ vars.VELLUM_DISPATCHER_APP_ID }}
+          private-key: ${{ secrets.VELLUM_DISPATCHER_APP_PRIVATE_KEY }}
+          owner: Generous-Corp
+          repositories: vellum
+          permission-contents: write
+
       - name: Send compact verified outbox record
         env:
-          GH_TOKEN: ${{ secrets.VELLUM_OBSERVATORY_TOKEN }}
+          GH_TOKEN: ${{ steps.vellum-dispatcher-token.outputs.token }}
           OUTBOX_B64: ${{ needs.validate-outbox.outputs.outbox_b64 }}
         run: |
           test -n "$GH_TOKEN" || {
-            echo 'VELLUM_OBSERVATORY_TOKEN is required after authority activates' >&2
+            echo 'Vellum dispatcher installation token was not minted' >&2
             exit 1
           }
           python3 - <<'PY'
