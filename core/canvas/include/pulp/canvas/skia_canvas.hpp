@@ -22,6 +22,7 @@ class SkPathBuilder;
 // declaration breaks compilation on consumers that include this
 // header without separately bringing in SkSamplingOptions.h.
 #include "include/core/SkSamplingOptions.h"
+#include <memory>
 #include <vector>
 class SkShader;
 class SkPathEffect;
@@ -55,8 +56,19 @@ namespace pulp::canvas {
 // Uses Skia Graphite when available, falls back to Ganesh or CPU
 class SkiaCanvas : public Canvas {
 public:
+    /// Renderer-owned backing store for cacheable layer textures.
+    ///
+    /// A live renderer creates one store and passes it to each per-frame
+    /// SkiaCanvas so LayerHandle values remain valid across canvas instances.
+    /// Standalone canvases may omit it and receive a private store.
+    class RetainedLayerStore;
+    static std::shared_ptr<RetainedLayerStore> create_retained_layer_store();
+
     // Create wrapping an existing SkCanvas (e.g., from a surface)
     explicit SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder = nullptr);
+    SkiaCanvas(SkCanvas* canvas,
+               skgpu::graphite::Recorder* recorder,
+               std::shared_ptr<RetainedLayerStore> retained_layers);
     ~SkiaCanvas() override;
 
     // Attach the Ganesh direct context that owns the surface this canvas draws
@@ -214,6 +226,8 @@ public:
             case CanvasCapability::box_shadow_gaussian:
             case CanvasCapability::scene_cache:  // record_scene/draw_scene (FU-3)
                 return true;
+            case CanvasCapability::retained_layer_cache:
+                return retained_layer_cache_supported_;
             case CanvasCapability::count:  // sentinel; never a real query
                 return false;
         }
@@ -617,9 +631,10 @@ private:
 
     // ── Retained layer state (skia_canvas_path.cpp) ──────────────────────
     // A sealed layer is an SkImage that survives past end_layer(). Cacheable
-    // layers stay in `layers_` until explicitly invalidated — across frames,
-    // across paints, until the owner says otherwise. Non-cacheable ones are
-    // dropped the first time they are drawn.
+    // layers stay in the renderer-owned store across ordinary frames and
+    // per-frame canvases. Explicit invalidation, a backing-scale change, or a
+    // GPU context change drops them; callers recheck layer_valid() each frame.
+    // Non-cacheable ones are dropped the first time they are drawn.
     struct SkiaLayer {
         sk_sp<SkImage> image;      ///< null until end_layer() seals it
         sk_sp<SkSurface> surface;  ///< live only while recording
@@ -628,19 +643,22 @@ private:
         float scale_y = 1.0f;
         bool cacheable = false;
     };
-    std::vector<std::pair<uint64_t, SkiaLayer>> layers_;
+    std::shared_ptr<RetainedLayerStore> retained_layers_;
+    bool retained_layer_cache_supported_ = false;
 
     /// Canvases we redirected away from, innermost last. `canvas_` points at
     /// the layer surface while recording; these are what we put back.
     struct OpenLayer {
         uint64_t id = 0;
         SkCanvas* previous_canvas = nullptr;
+        SkiaLayer layer;
+        bool cancelled = false;
     };
     std::vector<OpenLayer> open_layers_;
-    uint64_t next_layer_id_ = 1;
 
     SkiaLayer* find_layer(uint64_t id);
     const SkiaLayer* find_layer(uint64_t id) const;
+    void bind_retained_layer_store(const void* owner, uint8_t backend_kind);
     /// Shared by draw_layer / draw_layer_fitted / draw_layer_rotated.
     void draw_layer_common(LayerHandle layer, const SkMatrix& placement,
                            float alpha, BlendMode mode);

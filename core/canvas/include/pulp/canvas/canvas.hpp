@@ -784,7 +784,6 @@ public:
     ///     canvas.draw_layer(cached_, alpha);           // cheap, every frame
     ///     ...
     ///     canvas.invalidate_layer(cached_);            // when contents change
-    ///
     /// `id == 0` is the null handle, which every operation ignores.
     struct LayerHandle {
         uint64_t id = 0;
@@ -836,15 +835,16 @@ public:
     }
 
     /// Is `layer` still backed by a live texture that can be drawn WITHOUT
-    /// re-recording it? This is the question that has to survive across
-    /// frames, and the reason the layer API is a handle at all.
+    /// re-recording it? Check every frame: explicit invalidation and backend
+    /// context/backing-scale lifecycle changes may retire a handle.
     virtual bool layer_valid(LayerHandle layer) const {
         (void)layer;
         return false;
     }
 
     /// Drop `layer`'s texture. The next `layer_valid()` returns false, so the
-    /// caller re-records it. Call this when the layer's contents change.
+    /// caller re-records it. Call this when the layer's contents change;
+    /// backends may also perform the same retirement for context/scale changes.
     virtual void invalidate_layer(LayerHandle layer) { (void)layer; }
 
     // ── Scene recording (subtree cache, FU-3) ─────────────────────────────
