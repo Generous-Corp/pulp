@@ -94,6 +94,8 @@ struct AudioClipRendererProgram {
     std::uint32_t source_ordinal = 0;
     TimeDomain time_domain = TimeDomain::Absolute;
     std::shared_ptr<const audio::PreparedVariableRateConversion> host_rate_converter;
+    timebase::TickPosition musical_tick_start{};
+    timebase::TickPosition musical_tick_end{};
 
     std::int64_t timeline_end() const noexcept;
 };

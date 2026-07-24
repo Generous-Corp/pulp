@@ -281,11 +281,42 @@ TEST_CASE("DAWproject audio import requires media bytes to seal durable identity
     REQUIRE(result.error().message.find("audio/bass.wav") != std::string::npos);
 }
 
+TEST_CASE("DAWproject audio import reuses content identity across package locators") {
+    auto xml = read_fixture("linear_subset.dawproject.xml");
+    const auto first_path = xml.find("audio/bass.wav");
+    REQUIRE(first_path != std::string::npos);
+    const auto second_path = xml.find("audio/bass.wav", first_path + 1);
+    REQUIRE(second_path != std::string::npos);
+    xml.replace(second_path, std::string_view("audio/bass.wav").size(), "audio/bass-copy.wav");
+
+    std::vector<std::string> resolved_paths;
+    auto result = import_dawproject_xml(
+        xml, [&](std::string_view path) -> std::optional<std::vector<std::uint8_t>> {
+            resolved_paths.emplace_back(path);
+            if (path != "audio/bass.wav" && path != "audio/bass-copy.wav")
+                return std::nullopt;
+            return fixture_media_bytes();
+        });
+
+    REQUIRE(result.has_value());
+    const auto& project = result.value();
+    REQUIRE(resolved_paths == std::vector<std::string>{"audio/bass.wav", "audio/bass-copy.wav"});
+    REQUIRE(project.assets().size() == 1);
+    const auto& asset = project.assets()[0];
+    REQUIRE(asset.locators ==
+            std::vector<AssetLocator>{{AssetLocatorKind::PackageRelative, "audio/bass.wav"},
+                                      {AssetLocatorKind::PackageRelative, "audio/bass-copy.wav"}});
+
+    const auto& clips = project.sequences()[0].tracks()[0].clips();
+    REQUIRE(clips.size() == 2);
+    REQUIRE(std::get<MediaRef>(clips[0].content()).asset_id == asset.id);
+    REQUIRE(std::get<MediaRef>(clips[1].content()).asset_id == asset.id);
+}
+
 TEST_CASE("DAWproject rejects unsafe package paths before resolving media") {
     for (const auto unsafe :
-         std::array<std::string_view, 5>{"/tmp/outside.wav", R"(C:\outside.wav)",
-                                         "C:outside.wav", "../outside.wav",
-                                         R"(audio\..\outside.wav)"}) {
+         std::array<std::string_view, 5>{"/tmp/outside.wav", R"(C:\outside.wav)", "C:outside.wav",
+                                         "../outside.wav", R"(audio\..\outside.wav)"}) {
         auto xml = read_fixture("linear_subset.dawproject.xml");
         const auto path = xml.find("audio/bass.wav");
         REQUIRE(path != std::string::npos);
@@ -355,7 +386,31 @@ TEST_CASE("DAWproject audio import validates metadata against resolved WAV bytes
         auto result = import_dawproject_xml(xml, fixture_media_resolver());
         REQUIRE_FALSE(result);
         REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
-        REQUIRE(result.error().message.find("earlier reference") != std::string::npos);
+        REQUIRE(result.error().message.find("resolved media") != std::string::npos);
+    }
+
+    SECTION("content-identical locator with conflicting declared metadata") {
+        const auto first_audio = xml.find("<Audio");
+        REQUIRE(first_audio != std::string::npos);
+        const auto second_audio = xml.find("<Audio", first_audio + 1);
+        REQUIRE(second_audio != std::string::npos);
+        const auto path = xml.find("audio/bass.wav", second_audio);
+        REQUIRE(path != std::string::npos);
+        xml.replace(path, std::string_view("audio/bass.wav").size(), "audio/bass-copy.wav");
+        const auto sample_rate = xml.find(R"(sampleRate="44100")", second_audio);
+        REQUIRE(sample_rate != std::string::npos);
+        xml.replace(sample_rate, std::string_view(R"(sampleRate="44100")").size(),
+                    R"(sampleRate="48000")");
+
+        auto result = import_dawproject_xml(
+            xml, [](std::string_view path) -> std::optional<std::vector<std::uint8_t>> {
+                if (path != "audio/bass.wav" && path != "audio/bass-copy.wav")
+                    return std::nullopt;
+                return fixture_media_bytes();
+            });
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error().code == DawProjectImportErrorCode::InvalidValue);
+        REQUIRE(result.error().message.find("audio/bass-copy.wav") != std::string::npos);
     }
 
     SECTION("invalid media") {
@@ -382,12 +437,11 @@ TEST_CASE("DAWproject import fails closed on an out-of-subset clip (no silent dr
 TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and warp metadata") {
     auto expect_error = [](std::string_view clip_xml, DawProjectImportErrorCode code,
                            std::string_view detail) {
-        const auto xml =
-            std::string(R"(<Project version="1.0"><Structure>)") +
-            R"(<Track id="t1" name="A"/></Structure>)" +
-            R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)" +
-            std::string(clip_xml) +
-            R"(</Clips></Lanes></Lanes></Arrangement></Project>)";
+        const auto xml = std::string(R"(<Project version="1.0"><Structure>)") +
+                         R"(<Track id="t1" name="A"/></Structure>)" +
+                         R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t1"><Clips>)" +
+                         std::string(clip_xml) +
+                         R"(</Clips></Lanes></Lanes></Arrangement></Project>)";
         auto result = import_dawproject_xml(xml);
         REQUIRE(result.is_err());
         REQUIRE(result.error().code == code);
@@ -398,14 +452,12 @@ TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and war
     };
 
     SECTION("standard Clip playStart sub-range") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1" playStart="0.25"><Notes/></Clip>)",
-            "playStart");
+        expect_unsupported(R"(<Clip time="0" duration="1" playStart="0.25"><Notes/></Clip>)",
+                           "playStart");
     }
     SECTION("referenced Clip content") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1" reference="source-clip"><Notes/></Clip>)",
-            "referenced-content");
+        expect_unsupported(R"(<Clip time="0" duration="1" reference="source-clip"><Notes/></Clip>)",
+                           "referenced-content");
     }
     SECTION("Clip playStart is not numeric") {
         expect_error(R"(<Clip time="0" duration="1" playStart="junk"><Notes/></Clip>)",
@@ -416,19 +468,15 @@ TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and war
                      DawProjectImportErrorCode::InvalidValue, "playStart");
     }
     SECTION("Clip playStop") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1" playStop="1"><Notes/></Clip>)",
-            "playStop");
+        expect_unsupported(R"(<Clip time="0" duration="1" playStop="1"><Notes/></Clip>)",
+                           "playStop");
     }
     SECTION("Clip loopStart") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1" loopStart="0"><Notes/></Clip>)",
-            "loopStart");
+        expect_unsupported(R"(<Clip time="0" duration="1" loopStart="0"><Notes/></Clip>)",
+                           "loopStart");
     }
     SECTION("Clip loopEnd") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1" loopEnd="1"><Notes/></Clip>)",
-            "loopEnd");
+        expect_unsupported(R"(<Clip time="0" duration="1" loopEnd="1"><Notes/></Clip>)", "loopEnd");
     }
     SECTION("absolute Clip content time") {
         expect_unsupported(
@@ -436,49 +484,42 @@ TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and war
             "contentTimeUnit");
     }
     SECTION("Audio playStart variant") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio playStart="0.25" duration="1")"
-            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
-            "playStart");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio playStart="0.25" duration="1")"
+                           R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+                           "playStart");
     }
     SECTION("Audio playStop variant") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio playStop="1" duration="1")"
-            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
-            "playStop");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio playStop="1" duration="1")"
+                           R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+                           "playStop");
     }
     SECTION("Audio loopStart variant") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio loopStart="0" duration="1")"
-            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
-            "loopStart");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio loopStart="0" duration="1")"
+                           R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+                           "loopStart");
     }
     SECTION("Audio loopEnd variant") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio loopEnd="1" duration="1")"
-            R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
-            "loopEnd");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio loopEnd="1" duration="1")"
+                           R"( sampleRate="44100"><File path="audio/bass.wav"/></Audio></Clip>)",
+                           "loopEnd");
     }
     SECTION("Warp nested directly under Audio") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
-            R"(<File path="audio/bass.wav"/><Warp time="0" contentTime="0"/>)"
-            R"(</Audio></Clip>)",
-            "Warp");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+                           R"(<File path="audio/bass.wav"/><Warp time="0" contentTime="0"/>)"
+                           R"(</Audio></Clip>)",
+                           "Warp");
     }
     SECTION("Warps nested under Audio") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
-            R"(<File path="audio/bass.wav"/><Warps contentTimeUnit="seconds"/>)"
-            R"(</Audio></Clip>)",
-            "Warps");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+                           R"(<File path="audio/bass.wav"/><Warps contentTimeUnit="seconds"/>)"
+                           R"(</Audio></Clip>)",
+                           "Warps");
     }
     SECTION("Warp nested under File") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
-            R"(<File path="audio/bass.wav"><Warp time="0" contentTime="0"/></File>)"
-            R"(</Audio></Clip>)",
-            "Warp");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Audio duration="1" sampleRate="44100">)"
+                           R"(<File path="audio/bass.wav"><Warp time="0" contentTime="0"/></File>)"
+                           R"(</Audio></Clip>)",
+                           "Warp");
     }
     SECTION("Warps nested under Note") {
         expect_unsupported(
@@ -490,18 +531,16 @@ TEST_CASE("DAWproject import fails closed on unsupported audio sub-range and war
             "Warps");
     }
     SECTION("non-Note timeline nested under Notes") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Notes>)"
-            R"(<Warps contentTimeUnit="seconds" timeUnit="beats"/>)"
-            R"(</Notes></Clip>)",
-            "Warps");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Notes>)"
+                           R"(<Warps contentTimeUnit="seconds" timeUnit="beats"/>)"
+                           R"(</Notes></Clip>)",
+                           "Warps");
     }
     SECTION("Notes in absolute time") {
-        expect_unsupported(
-            R"(<Clip time="0" duration="1"><Notes timeUnit="seconds">)"
-            R"(<Note time="0" duration="1" channel="0" key="60"/>)"
-            R"(</Notes></Clip>)",
-            "timeUnit");
+        expect_unsupported(R"(<Clip time="0" duration="1"><Notes timeUnit="seconds">)"
+                           R"(<Note time="0" duration="1" channel="0" key="60"/>)"
+                           R"(</Notes></Clip>)",
+                           "timeUnit");
     }
 }
 
@@ -539,18 +578,18 @@ TEST_CASE("DAWproject import accepts explicit zero playStart as whole-content pl
 
 TEST_CASE("DAWproject import validates Project-level semantic containers") {
     SECTION("populated Scenes are not silently dropped") {
-        auto result = import_dawproject_xml(
-            R"(<Project version="1.0"><Application name="Test" version="1"/>)"
-            R"(<Scenes><Scene id="scene-1"/></Scenes></Project>)");
+        auto result =
+            import_dawproject_xml(R"(<Project version="1.0"><Application name="Test" version="1"/>)"
+                                  R"(<Scenes><Scene id="scene-1"/></Scenes></Project>)");
         REQUIRE(result.is_err());
         REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
         REQUIRE(result.error().message.find("Scene") != std::string::npos);
     }
 
     SECTION("unknown root semantic child is not silently dropped") {
-        auto result = import_dawproject_xml(
-            R"(<Project version="1.0"><Application name="Test" version="1"/>)"
-            R"(<SessionData><Clip id="hidden"/></SessionData></Project>)");
+        auto result =
+            import_dawproject_xml(R"(<Project version="1.0"><Application name="Test" version="1"/>)"
+                                  R"(<SessionData><Clip id="hidden"/></SessionData></Project>)");
         REQUIRE(result.is_err());
         REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
         REQUIRE(result.error().message.find("SessionData") != std::string::npos);
@@ -565,9 +604,9 @@ TEST_CASE("DAWproject import validates Project-level semantic containers") {
     }
 
     SECTION("nested application content is not treated as metadata") {
-        auto result = import_dawproject_xml(
-            R"(<Project version="1.0"><Application name="Test" version="1">)"
-            R"(<SessionData/></Application></Project>)");
+        auto result =
+            import_dawproject_xml(R"(<Project version="1.0"><Application name="Test" version="1">)"
+                                  R"(<SessionData/></Application></Project>)");
         REQUIRE(result.is_err());
         REQUIRE(result.error().code == DawProjectImportErrorCode::UnsupportedFeature);
         REQUIRE(result.error().message.find("SessionData") != std::string::npos);
@@ -588,16 +627,14 @@ TEST_CASE("DAWproject import exhaustively validates imported semantic containers
             "Loop");
     }
     SECTION("duplicate Tempo") {
-        expect_unsupported(
-            R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120"/>)"
-            R"(<Tempo unit="bpm" value="130"/></Transport></Project>)",
-            "multiple");
+        expect_unsupported(R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120"/>)"
+                           R"(<Tempo unit="bpm" value="130"/></Transport></Project>)",
+                           "multiple");
     }
     SECTION("nested Tempo automation") {
-        expect_unsupported(
-            R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120">)"
-            R"(<Points/></Tempo></Transport></Project>)",
-            "Points");
+        expect_unsupported(R"(<Project version="1.0"><Transport><Tempo unit="bpm" value="120">)"
+                           R"(<Points/></Tempo></Transport></Project>)",
+                           "Points");
     }
     SECTION("unknown Structure child") {
         expect_unsupported(
@@ -605,22 +642,19 @@ TEST_CASE("DAWproject import exhaustively validates imported semantic containers
             "Channel");
     }
     SECTION("schema-valid Channel nested under imported Track") {
-        expect_unsupported(
-            R"(<Project version="1.0"><Structure><Track id="t1" name="A">)"
-            R"(<Channel role="regular" audioChannels="2"><Devices/></Channel>)"
-            R"(</Track></Structure></Project>)",
-            "Channel");
+        expect_unsupported(R"(<Project version="1.0"><Structure><Track id="t1" name="A">)"
+                           R"(<Channel role="regular" audioChannels="2"><Devices/></Channel>)"
+                           R"(</Track></Structure></Project>)",
+                           "Channel");
     }
     SECTION("direct Arrangement automation") {
         expect_unsupported(
-            R"(<Project version="1.0"><Arrangement><Points/></Arrangement></Project>)",
-            "Points");
+            R"(<Project version="1.0"><Arrangement><Points/></Arrangement></Project>)", "Points");
     }
     SECTION("duplicate Arrangement Lanes") {
-        expect_unsupported(
-            R"(<Project version="1.0"><Arrangement><Lanes timeUnit="beats"/>)"
-            R"(<Lanes timeUnit="beats"/></Arrangement></Project>)",
-            "multiple");
+        expect_unsupported(R"(<Project version="1.0"><Arrangement><Lanes timeUnit="beats"/>)"
+                           R"(<Lanes timeUnit="beats"/></Arrangement></Project>)",
+                           "multiple");
     }
 }
 
@@ -784,6 +818,129 @@ TEST_CASE("DAWproject import rejects malformed and out-of-subset input") {
         expect(R"(<Project version="1.0"><Arrangement><Lanes timeUnit="beats">)"
                R"(<Markers/></Lanes></Arrangement></Project>)",
                DawProjectImportErrorCode::UnsupportedFeature);
+    }
+}
+
+TEST_CASE("DAWproject import enforces caller-configurable resource limits") {
+    const auto expect_limit = [](std::string_view xml, DawProjectMediaResolver resolver,
+                                 const DawProjectImportLimits& limits,
+                                 std::string_view limit_name) {
+        auto result = import_dawproject_xml(xml, std::move(resolver), limits);
+        REQUIRE(result.is_err());
+        REQUIRE(result.error().code == DawProjectImportErrorCode::LimitExceeded);
+        REQUIRE(result.error().message.find(limit_name) != std::string::npos);
+    };
+
+    SECTION("XML bytes are rejected before parsing") {
+        const std::string xml = R"(<Project version="1.0"/>)";
+        DawProjectImportLimits limits;
+        limits.max_xml_bytes = xml.size() - 1;
+        expect_limit(xml, {}, limits, "max_xml_bytes");
+    }
+
+    SECTION("track growth") {
+        DawProjectImportLimits limits;
+        limits.max_tracks = 1;
+        expect_limit(R"(<Project version="1.0"><Structure>)"
+                     R"(<Track id="a"/><Track id="b"/>)"
+                     R"(</Structure></Project>)",
+                     {}, limits, "max_tracks");
+    }
+
+    SECTION("clip growth across containers") {
+        DawProjectImportLimits limits;
+        limits.max_clips = 1;
+        expect_limit(R"(<Project version="1.0"><Structure><Track id="t"/></Structure>)"
+                     R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t">)"
+                     R"(<Clips><Clip time="0" duration="1"/></Clips>)"
+                     R"(<Clips><Clip time="1" duration="1"/></Clips>)"
+                     R"(</Lanes></Lanes></Arrangement></Project>)",
+                     {}, limits, "max_clips");
+    }
+
+    SECTION("note growth across clips") {
+        DawProjectImportLimits limits;
+        limits.max_notes = 1;
+        expect_limit(R"(<Project version="1.0"><Structure><Track id="t"/></Structure>)"
+                     R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t"><Clips>)"
+                     R"(<Clip time="0" duration="1"><Notes>)"
+                     R"(<Note time="0" duration="1" key="60"/>)"
+                     R"(<Note time="0" duration="1" key="61"/>)"
+                     R"(</Notes></Clip></Clips></Lanes></Lanes></Arrangement></Project>)",
+                     {}, limits, "max_notes");
+    }
+
+    const std::string two_audio_clips =
+        R"(<Project version="1.0"><Structure><Track id="t"/></Structure>)"
+        R"(<Arrangement><Lanes timeUnit="beats"><Lanes track="t"><Clips>)"
+        R"(<Clip time="0" duration="4"><Audio sampleRate="44100" duration="2">)"
+        R"(<File path="audio/a.wav"/></Audio></Clip>)"
+        R"(<Clip time="4" duration="4"><Audio sampleRate="44100" duration="2">)"
+        R"(<File path="audio/b.wav"/></Audio></Clip>)"
+        R"(</Clips></Lanes></Lanes></Arrangement></Project>)";
+
+    SECTION("package path bytes are rejected before resolver invocation") {
+        bool called = false;
+        DawProjectImportLimits limits;
+        limits.max_package_path_bytes = 4;
+        expect_limit(
+            two_audio_clips,
+            [&called](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+                called = true;
+                return fixture_media_bytes();
+            },
+            limits, "max_package_path_bytes");
+        REQUIRE_FALSE(called);
+    }
+
+    SECTION("resolver calls are bounded before invocation") {
+        std::size_t calls = 0;
+        DawProjectImportLimits limits;
+        limits.max_media_resolver_calls = 1;
+        expect_limit(
+            two_audio_clips,
+            [&calls](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+                ++calls;
+                return fixture_media_bytes();
+            },
+            limits, "max_media_resolver_calls");
+        REQUIRE(calls == 1);
+    }
+
+    SECTION("resolved bytes per call are rejected before media inspection") {
+        DawProjectImportLimits limits;
+        limits.max_media_bytes_per_resolver_call = fixture_media_bytes().size() - 1;
+        expect_limit(
+            two_audio_clips,
+            [](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+                return fixture_media_bytes();
+            },
+            limits, "max_media_bytes_per_resolver_call");
+    }
+
+    SECTION("cumulative resolved bytes include repeated resolver results") {
+        DawProjectImportLimits limits;
+        limits.max_total_media_bytes = fixture_media_bytes().size();
+        expect_limit(
+            two_audio_clips,
+            [](std::string_view) -> std::optional<std::vector<std::uint8_t>> {
+                return fixture_media_bytes();
+            },
+            limits, "max_total_media_bytes");
+    }
+
+    SECTION("unique media asset growth") {
+        DawProjectImportLimits limits;
+        limits.max_media_assets = 1;
+        expect_limit(
+            two_audio_clips,
+            [](std::string_view path) -> std::optional<std::vector<std::uint8_t>> {
+                auto bytes = fixture_media_bytes();
+                if (path == "audio/b.wav")
+                    bytes.back() = 1;
+                return bytes;
+            },
+            limits, "max_media_assets");
     }
 }
 

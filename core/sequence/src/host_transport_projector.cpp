@@ -155,11 +155,10 @@ HostTransportProjector::project(const format::ProcessContext& context,
 
     const auto frames = static_cast<std::uint32_t>(context.num_samples);
     const timebase::SamplePosition host_start{context.position_samples};
-    bool use_host_beat_clock = valid_host_beat_clock(context);
+    const bool use_host_beat_clock = valid_host_beat_clock(context);
     timebase::TickPosition host_tick_start;
     if (use_host_beat_clock && !beats_to_ticks(context.position_beats, host_tick_start)) {
-        use_host_beat_clock = false;
-        host_tick_start = tempo_map_->samples_to_ticks(host_start);
+        return HostTransportProjectionError::BeatPositionOutOfRange;
     }
     const bool mapping_transition =
         !first_block_ && use_host_beat_clock != previous_host_beat_mapping_;
@@ -176,6 +175,11 @@ HostTransportProjector::project(const format::ProcessContext& context,
     snapshot.frame_count = frames;
     snapshot.meter = meter;
     snapshot.loop = loop;
+    if (loop.enabled && use_host_beat_clock) {
+        snapshot.host_loop_start_beats = context.loop_start_beats;
+        snapshot.host_loop_end_beats = context.loop_end_beats;
+        snapshot.has_precise_host_loop = true;
+    }
     snapshot.is_playing = context.is_playing;
     snapshot.transport_changed = context.transport_changed;
     snapshot.transport_started =
@@ -188,7 +192,8 @@ HostTransportProjector::project(const format::ProcessContext& context,
                           timebase::SamplePosition timeline_start, bool range_discontinuity,
                           const timebase::TickPosition* forced_start = nullptr,
                           const timebase::TickPosition* forced_end = nullptr,
-                          double host_beat_start = std::numeric_limits<double>::quiet_NaN()) {
+                          double host_beat_start = std::numeric_limits<double>::quiet_NaN(),
+                          double forced_end_beat = std::numeric_limits<double>::quiet_NaN()) {
         auto& range = snapshot.ranges[index];
         range.sample_offset = offset;
         range.frame_count = count;
@@ -203,6 +208,19 @@ HostTransportProjector::project(const format::ProcessContext& context,
                                             context.tempo_bpm)
                        : tempo_map_->samples_to_ticks(add_frames(timeline_start, count)))
                 : range.timeline_tick_start;
+        if (use_host_beat_clock) {
+            range.has_precise_host_ticks = true;
+            range.host_tick_start =
+                host_beat_start * static_cast<double>(timebase::kTicksPerQuarter);
+            const auto end_beat = std::isfinite(forced_end_beat)
+                                      ? forced_end_beat
+                                      : host_beat_start + static_cast<double>(count) *
+                                                              context.tempo_bpm /
+                                                              (60.0 * context.sample_rate);
+            range.host_tick_end = context.is_playing
+                                      ? end_beat * static_cast<double>(timebase::kTicksPerQuarter)
+                                      : range.host_tick_start;
+        }
         if (range.timeline_tick_end < range.timeline_tick_start)
             range.timeline_tick_end = range.timeline_tick_start;
         range.monotonic_start = monotonic_;
@@ -242,7 +260,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
         }
         if (loop_length == 0)
             return HostTransportProjectionError::InvalidLoop;
-        if ((use_host_beat_clock && !(host_tick_start < loop.end)) ||
+        if ((use_host_beat_clock && !(context.position_beats < context.loop_end_beats)) ||
             (!use_host_beat_clock && host_start.value >= loop_end.value)) {
             make_range(0, 0, frames, host_start, discontinuity,
                        use_host_beat_clock ? &host_tick_start : nullptr, nullptr,
@@ -265,7 +283,9 @@ HostTransportProjector::project(const format::ProcessContext& context,
                     static_cast<std::uint64_t>(first_count) == until_wrap ? &loop.end : nullptr;
                 make_range(0, 0, first_count, host_start, discontinuity,
                            use_host_beat_clock ? &host_tick_start : nullptr, forced_end,
-                           context.position_beats);
+                           context.position_beats,
+                           forced_end != nullptr ? context.loop_end_beats
+                                                 : std::numeric_limits<double>::quiet_NaN());
                 snapshot.range_count = 1;
             }
             if (remaining > 0) {
@@ -275,7 +295,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
                 expected_next_sample_ =
                     remaining == loop_length ? loop_start : add_frames(loop_start, remaining);
                 next_pending_discontinuity = remaining == loop_length;
-            } else if (first_count > 0 && add_frames(host_start, first_count) == loop_end) {
+            } else if (first_count > 0 && static_cast<std::uint64_t>(first_count) == until_wrap) {
                 expected_next_sample_ = loop_start;
                 next_pending_discontinuity = true;
             } else {

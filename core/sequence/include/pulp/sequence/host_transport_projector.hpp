@@ -15,6 +15,7 @@ enum class HostTransportProjectionError : std::uint8_t {
     InvalidMeter,
     InvalidLoop,
     LoopTooShortForBlock,
+    BeatPositionOutOfRange,
 };
 
 /// Re-anchors the engine transport to the host's integer sample position on

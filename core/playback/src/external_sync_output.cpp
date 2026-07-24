@@ -26,6 +26,21 @@ std::int64_t ceil_div(std::int64_t value, std::int64_t divisor) noexcept {
     return quotient;
 }
 
+bool first_multiple_index_at_or_after(long double value, std::int64_t interval,
+                                      std::int64_t& result) noexcept {
+    if (interval <= 0 || !std::isfinite(value))
+        return false;
+    const auto minimum = ceil_div(std::numeric_limits<std::int64_t>::min(), interval);
+    const auto maximum = std::numeric_limits<std::int64_t>::max() / interval;
+    const auto candidate = std::ceil(value / static_cast<long double>(interval));
+    if (candidate > static_cast<long double>(maximum))
+        return false;
+    result = candidate < static_cast<long double>(minimum)
+                 ? minimum
+                 : static_cast<std::int64_t>(candidate);
+    return true;
+}
+
 std::int64_t saturating_add(std::int64_t value, std::uint32_t increment) noexcept {
     const auto maximum = std::numeric_limits<std::int64_t>::max();
     if (value > maximum - static_cast<std::int64_t>(increment))
@@ -257,12 +272,20 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
         if (config_.emit_midi_clock) {
             constexpr auto pulse_ticks = timebase::kTicksPerQuarter / 24;
             auto pulse = ceil_div(range.timeline_tick_start.value, pulse_ticks);
-            while (true) {
+            const auto has_first_pulse =
+                !range.has_precise_host_ticks ||
+                first_multiple_index_at_or_after(
+                    static_cast<long double>(range.host_tick_start), pulse_ticks, pulse);
+            const auto tick_end =
+                range.has_precise_host_ticks
+                    ? static_cast<long double>(range.host_tick_end)
+                    : static_cast<long double>(range.timeline_tick_end.value);
+            while (has_first_pulse) {
                 std::int64_t tick_value = 0;
                 if (!checked_multiply(pulse, pulse_ticks, tick_value))
                     break;
                 const timebase::TickPosition tick{tick_value};
-                if (!(tick < range.timeline_tick_end))
+                if (!(static_cast<long double>(tick.value) < tick_end))
                     break;
                 std::uint32_t mapped_offset = 0;
                 if (range.host_beat_mapping &&
@@ -271,6 +294,12 @@ ExternalSyncOutputResult ExternalSyncOutput::process(const TransportSnapshot& tr
                                       bounded_offset(range.sample_offset + mapped_offset),
                                       config_.max_messages_per_block, result))
                         return result;
+                    if (pulse == std::numeric_limits<std::int64_t>::max())
+                        break;
+                    ++pulse;
+                    continue;
+                }
+                if (range.has_precise_host_ticks) {
                     if (pulse == std::numeric_limits<std::int64_t>::max())
                         break;
                     ++pulse;

@@ -13,6 +13,9 @@ namespace pulp::playback {
 
 struct MidiCaptureMaterializationConfig {
     const timebase::CompiledTempoMap* tempo_map = nullptr;
+    // The frame domain of CapturedMidiEvent::take_frame. Materialization
+    // rejects a rate that differs from the sample-rate-specific tempo map.
+    timebase::RationalRate capture_sample_rate{0, 1};
     timebase::SamplePosition placement_start;
     std::uint64_t frame_count = 0;
     timebase::TickDuration quantize_grid;
@@ -31,6 +34,7 @@ enum class MidiCaptureMaterializationError : std::uint8_t {
     InvalidConfig,
     IdentityExhausted,
     InvalidNotes,
+    SampleRateMismatch,
 };
 
 runtime::Result<MaterializedMidiCapture, MidiCaptureMaterializationError>

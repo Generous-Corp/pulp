@@ -14,6 +14,9 @@ struct AudioRendererLimits {
     std::uint64_t max_tracks = 4'096u;
     std::uint64_t max_clips = 1'000'000u;
     std::uint32_t max_sample_rate_converters = 64u;
+    // Conservative retained-allocation charge, including container capacity,
+    // shared ownership, and per-allocation bookkeeping.
+    std::uint64_t max_sample_rate_converter_bytes = 256u * 1024u * 1024u;
     constexpr auto operator<=>(const AudioRendererLimits&) const = default;
 };
 

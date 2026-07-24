@@ -344,6 +344,73 @@ TEST_CASE("host-beat-mapped automation evaluates fractional ticks without sample
     REQUIRE(events[1] == AutomationBlockEvent{1, 0.5f, AutomationTransition::LinearRamp});
 }
 
+TEST_CASE("precise host ticks refine automation when rounded tick span is zero") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {0}, 0.0f}, AutomationPoint{{11}, {3}, 1.0f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 4;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {0};
+    snapshot.ranges[0].timeline_tick_end = {0};
+    snapshot.ranges[0].host_beat_mapping = true;
+    snapshot.ranges[0].host_tick_start = 0.0;
+    snapshot.ranges[0].host_tick_end = 0.4;
+    snapshot.ranges[0].has_precise_host_ticks = true;
+
+    std::array<AutomationBlockEvent, 4> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Ok);
+    REQUIRE(result.candidate_points == 4);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[3].sample_offset == 3);
+    REQUIRE(events[3].value > 0.0f);
+}
+
+TEST_CASE("precise fractional host starts evaluate mandatory Hold knots in document ticks") {
+    const auto map = constant_map(120.0);
+    auto curve = take(AutomationCurve::create(
+        {AutomationPoint{{10}, {100}, 0.0f, AutomationInterpolation::Hold},
+         AutomationPoint{{11}, {101}, 1.0f}, AutomationPoint{{12}, {103}, 0.5f}}));
+    auto source = take(AutomationLane::create({1}, DeviceParameterTarget{{99}, 7}, curve));
+    const auto compiled = program(source, map);
+
+    TransportSnapshot snapshot;
+    snapshot.tempo_map = map.get();
+    snapshot.sample_rate = map->sample_rate();
+    snapshot.frame_count = 4;
+    snapshot.is_playing = true;
+    snapshot.range_count = 1;
+    snapshot.ranges[0].frame_count = snapshot.frame_count;
+    snapshot.ranges[0].timeline_tick_start = {100};
+    snapshot.ranges[0].timeline_tick_end = {102};
+    snapshot.ranges[0].host_beat_mapping = true;
+    snapshot.ranges[0].host_tick_start = 100.4;
+    snapshot.ranges[0].host_tick_end = 102.4;
+    snapshot.ranges[0].has_precise_host_ticks = true;
+
+    std::array<AutomationBlockEvent, 2> events{};
+    AutomationCursor cursor;
+    const auto result = cursor.process(*compiled, snapshot, events);
+
+    REQUIRE(result.code == AutomationCursorCode::Coalesced);
+    REQUIRE(result.emitted_events == events.size());
+    REQUIRE(events[0] == AutomationBlockEvent{0, 0.0f, AutomationTransition::Seed});
+    REQUIRE(events[1].sample_offset == 1);
+    REQUIRE(events[1].value == 1.0f);
+    REQUIRE(events[1].transition == AutomationTransition::Immediate);
+}
+
 TEST_CASE("host-beat-mapped automation remains safe at the positive tick edge") {
     const auto maximum = std::numeric_limits<std::int64_t>::max();
     const auto map = constant_map(120.0);
@@ -656,15 +723,26 @@ TEST_CASE("automation cursor seeds both half-open ranges at a loop wrap") {
     prepare_transport(clock, *map, 4, true, map->samples_to_ticks({6}), loop);
     const auto snapshot = block(clock, 4);
     REQUIRE(snapshot.range_count == 2);
-    std::array<AutomationBlockEvent, 2> events{};
+    std::array<AutomationBlockEvent, 4> events{};
+    events[2].sample_offset = 0xfeedu;
+    events[3].sample_offset = 0xbeefu;
     AutomationCursor cursor;
 
-    const auto result = cursor.process(*compiled, snapshot, events);
+    const auto insufficient = cursor.process(*compiled, snapshot, std::span(events).first(1));
+    REQUIRE(insufficient.code == AutomationCursorCode::InsufficientCapacity);
+    REQUIRE(insufficient.candidate_points >= snapshot.range_count);
+    REQUIRE(insufficient.emitted_events == 0);
+    REQUIRE(events[2].sample_offset == 0xfeedu);
+    REQUIRE(events[3].sample_offset == 0xbeefu);
+
+    const auto result = cursor.process(*compiled, snapshot, std::span(events).first(2));
     REQUIRE(result.code == AutomationCursorCode::Coalesced);
     REQUIRE(result.emitted_events == 2);
     REQUIRE(events[0].sample_offset == 0);
     REQUIRE(events[1].sample_offset == 2);
     REQUIRE(events[1].value == 0.0f);
+    REQUIRE(events[2].sample_offset == 0xfeedu);
+    REQUIRE(events[3].sample_offset == 0xbeefu);
 }
 
 TEST_CASE("automation cursor rejects stale identities and reseeds newer generations") {

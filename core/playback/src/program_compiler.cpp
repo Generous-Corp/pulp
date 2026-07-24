@@ -249,6 +249,14 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
                                      request_->document_revision, seeded.error().code});
                 }
+                if (clip.host_rate_converter) {
+                    auto seeded = sample_rate_converters_.seed_host(
+                        clip.audio, clip.source_start, clip.source_frame_count,
+                        clip.host_rate_converter, clip.id, clip.asset_id, request_->audio_limits);
+                    if (!seeded)
+                        return fail({CompileErrorCode::AudioProgramInvalid, seeded.error().item,
+                                     request_->document_revision, seeded.error().code});
+                }
                 ++work;
                 continue;
             }
@@ -322,6 +330,16 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
+                    auto prepared = detail::prepare_track_freeze_sample_rate_converter(
+                        track, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!prepared)
+                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                                     request_->document_revision, prepared.error().code});
+                    if (!*prepared) {
+                        ++work;
+                        continue;
+                    }
                     auto compiled = detail::compile_track_freeze_program_cached(
                         track, *request_->project, *request_->tempo_map, *request_->audio_assets,
                         request_->audio_limits, sample_rate_converters_);
@@ -348,7 +366,6 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
 
             const auto& clip = track.clips()[clip_index_];
             if (!clip_started_) {
-                current_clip_ids_.push_back(clip.id());
                 if (std::holds_alternative<timeline::MediaRef>(clip.content())) {
                     if (!request_->audio_assets)
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
@@ -358,6 +375,16 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
+                    auto prepared = detail::prepare_audio_clip_sample_rate_converters(
+                        clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
+                        request_->audio_limits, sample_rate_converters_);
+                    if (!prepared)
+                        return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                                     request_->document_revision, prepared.error().code});
+                    if (!*prepared) {
+                        ++work;
+                        continue;
+                    }
                     auto compiled = detail::compile_audio_clip_program_cached(
                         clip, *request_->project, *request_->tempo_map, *request_->audio_assets,
                         request_->audio_limits, sample_rate_converters_);
@@ -368,6 +395,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                     current_audio_clips_.push_back(std::move(compiled).value());
                     current_audio_ids_.push_back(clip.id());
                 }
+                current_clip_ids_.push_back(clip.id());
                 clip_started_ = true;
             }
             const auto* notes = std::get_if<timeline::NoteContent>(&clip.content());
@@ -421,6 +449,16 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 return fail({CompileErrorCode::AudioProgramInvalid, current_take_lane_->id(),
                              request_->document_revision,
                              AudioRendererErrorCode::CapacityExceeded});
+            auto prepared = detail::prepare_take_comp_segment_sample_rate_converter(
+                *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
+                *request_->audio_assets, request_->audio_limits, sample_rate_converters_);
+            if (!prepared)
+                return fail({CompileErrorCode::AudioProgramInvalid, prepared.error().item,
+                             request_->document_revision, prepared.error().code});
+            if (!*prepared) {
+                ++work;
+                continue;
+            }
             auto compiled = detail::compile_take_comp_segment_program_cached(
                 *current_take_lane_, take_comp_index_, *request_->project, *request_->tempo_map,
                 *request_->audio_assets, request_->audio_limits, sample_rate_converters_);

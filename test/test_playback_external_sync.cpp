@@ -212,6 +212,60 @@ TEST_CASE("external sync projects MIDI clock through host beat mapping",
     REQUIRE(offsets == std::vector<std::int32_t>{0, 2'000, 4'000});
 }
 
+TEST_CASE("external sync uses precise host bounds for MIDI clock",
+          "[playback][external-sync]") {
+    constexpr auto pulse_ticks = kTicksPerQuarter / 24;
+    const auto map = constant_map();
+    auto render_clock_offsets = [&](TransportRange range) {
+        TransportSnapshot transport;
+        transport.tempo_map = &map;
+        transport.sample_rate = map.sample_rate();
+        transport.frame_count = range.frame_count;
+        transport.range_count = 1;
+        transport.is_playing = true;
+        transport.ranges[0] = range;
+
+        midi::MidiBuffer output;
+        output.reserve(8);
+        output.set_realtime_capacity_limit();
+        ExternalSyncOutputConfig config;
+        config.emit_mtc = false;
+        REQUIRE(ExternalSyncOutput(config).process(transport, output).code ==
+                ExternalSyncOutputCode::Complete);
+        std::vector<std::int32_t> offsets;
+        for (const auto& event : output)
+            if (event.data()[0] == 0xf8)
+                offsets.push_back(event.sample_offset);
+        return offsets;
+    };
+
+    SECTION("precise range includes pulse omitted by rounded end") {
+        TransportRange range;
+        range.frame_count = 100;
+        range.timeline_sample_start = {0};
+        range.timeline_tick_start = {pulse_ticks - 1};
+        range.timeline_tick_end = {pulse_ticks};
+        range.host_beat_mapping = true;
+        range.host_tick_start = static_cast<double>(pulse_ticks) - 0.25;
+        range.host_tick_end = static_cast<double>(pulse_ticks) + 0.25;
+        range.has_precise_host_ticks = true;
+        REQUIRE(render_clock_offsets(range) == std::vector<std::int32_t>{50});
+    }
+
+    SECTION("precise range excludes pulse admitted by rounded start") {
+        TransportRange range;
+        range.frame_count = 1'000;
+        range.timeline_sample_start = map.ticks_to_samples({pulse_ticks});
+        range.timeline_tick_start = {pulse_ticks};
+        range.timeline_tick_end = {2 * pulse_ticks};
+        range.host_beat_mapping = true;
+        range.host_tick_start = static_cast<double>(pulse_ticks) + 0.25;
+        range.host_tick_end = static_cast<double>(2 * pulse_ticks) - 0.25;
+        range.has_precise_host_ticks = true;
+        REQUIRE(render_clock_offsets(range).empty());
+    }
+}
+
 TEST_CASE("external sync rejects a sample rate inconsistent with its tempo map",
           "[playback][external-sync]") {
     const auto map = constant_map();

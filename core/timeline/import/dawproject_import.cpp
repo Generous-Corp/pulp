@@ -7,8 +7,8 @@
 
 #include <pugixml.hpp>
 
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -110,8 +110,8 @@ struct IdSource {
 // import (fail closed); std::nullopt means success.
 class Importer {
   public:
-    explicit Importer(DawProjectMediaResolver media_resolver)
-        : media_resolver_(std::move(media_resolver)) {}
+    Importer(DawProjectMediaResolver media_resolver, const DawProjectImportLimits& limits)
+        : media_resolver_(std::move(media_resolver)), limits_(limits) {}
     ImportResult run(const pugi::xml_node& project);
 
   private:
@@ -124,8 +124,8 @@ class Importer {
     std::optional<DawProjectImportError> read_notes(const pugi::xml_node& notes, ClipContent& out);
     std::optional<DawProjectImportError> read_audio(const pugi::xml_node& audio, ClipContent& out);
 
-    // Resolve (deduplicating by package path) a MediaAsset for an <Audio>,
-    // returning its id and frame count.
+    // Resolve a MediaAsset for an <Audio>, deduplicating by sealed content
+    // identity while retaining every package path as a resolution hint.
     std::optional<DawProjectImportError> resolve_asset(const pugi::xml_node& audio,
                                                        ItemId& asset_id_out,
                                                        std::uint64_t& frame_count_out);
@@ -146,10 +146,16 @@ class Importer {
     std::unordered_map<std::string, ItemId> track_by_daw_id_;
     std::unordered_map<std::uint64_t, std::vector<Clip>> clips_by_track_;
 
-    std::unordered_map<std::string, ItemId> asset_by_path_;
+    std::unordered_map<std::string, std::string> hash_by_path_;
+    std::unordered_map<std::string, ItemId> asset_by_hash_;
     std::vector<MediaAsset> assets_;
+    std::size_t clip_count_ = 0;
+    std::size_t note_count_ = 0;
+    std::size_t media_resolver_calls_ = 0;
+    std::uint64_t resolved_media_bytes_ = 0;
     std::int64_t max_end_tick_ = 0;
     DawProjectMediaResolver media_resolver_;
+    DawProjectImportLimits limits_;
 };
 
 // --- attribute helpers ------------------------------------------------------
@@ -212,8 +218,8 @@ std::optional<DawProjectImportError> require_int(const pugi::xml_node& node, con
     return std::nullopt;
 }
 
-std::optional<DawProjectImportError>
-reject_unsupported_play_start(const pugi::xml_node& node, const char* context) {
+std::optional<DawProjectImportError> reject_unsupported_play_start(const pugi::xml_node& node,
+                                                                   const char* context) {
     const auto attribute = node.attribute("playStart");
     if (attribute.empty())
         return std::nullopt;
@@ -223,13 +229,11 @@ reject_unsupported_play_start(const pugi::xml_node& node, const char* context) {
                    std::string(context) + " has invalid numeric attribute 'playStart'");
     if (play_start != 0.0)
         return err(DawProjectImportErrorCode::UnsupportedFeature,
-                   std::string(context) +
-                       " uses unsupported playStart sub-range playback");
+                   std::string(context) + " uses unsupported playStart sub-range playback");
     return std::nullopt;
 }
 
-std::optional<DawProjectImportError>
-reject_unsupported_clip_playback(const pugi::xml_node& clip) {
+std::optional<DawProjectImportError> reject_unsupported_clip_playback(const pugi::xml_node& clip) {
     if (!clip.attribute("reference").empty())
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    "<Clip> uses unsupported referenced-content semantics");
@@ -242,8 +246,7 @@ reject_unsupported_clip_playback(const pugi::xml_node& clip) {
                            " playback semantics");
     }
     const auto content_time_unit = clip.attribute("contentTimeUnit");
-    if (!content_time_unit.empty() &&
-        std::string_view(content_time_unit.as_string()) != "beats")
+    if (!content_time_unit.empty() && std::string_view(content_time_unit.as_string()) != "beats")
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    std::string("<Clip contentTimeUnit='") + content_time_unit.as_string() +
                        "'> is unsupported; only beat-relative content is imported");
@@ -339,10 +342,14 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
         if (std::string_view(track.name()) != "Track")
             return err(DawProjectImportErrorCode::UnsupportedFeature,
                        std::string("<Structure> contains unsupported <") + track.name() + ">");
+        if (track_order_.size() >= limits_.max_tracks)
+            return err(DawProjectImportErrorCode::LimitExceeded,
+                       "DAWproject track count exceeds max_tracks");
         for (auto track_child : track.children()) {
             if (track_child.type() == pugi::node_element)
                 return err(DawProjectImportErrorCode::UnsupportedFeature,
-                           std::string("<Track> contains unsupported <") + track_child.name() + ">");
+                           std::string("<Track> contains unsupported <") + track_child.name() +
+                               ">");
         }
 
         auto id_attr = track.attribute("id");
@@ -450,6 +457,10 @@ std::optional<DawProjectImportError> Importer::read_track_lanes(const pugi::xml_
                 if (std::string_view(clip.name()) != "Clip")
                     return err(DawProjectImportErrorCode::UnsupportedFeature,
                                std::string("<Clips> contains unsupported <") + clip.name() + ">");
+                if (clip_count_ >= limits_.max_clips)
+                    return err(DawProjectImportErrorCode::LimitExceeded,
+                               "DAWproject clip count exceeds max_clips");
+                ++clip_count_;
                 if (auto e = read_clip(clip, clips))
                     return e;
             }
@@ -531,6 +542,10 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
         if (std::string_view(note.name()) != "Note")
             return err(DawProjectImportErrorCode::UnsupportedFeature,
                        std::string("<Notes> contains unsupported <") + note.name() + ">");
+        if (note_count_ >= limits_.max_notes)
+            return err(DawProjectImportErrorCode::LimitExceeded,
+                       "DAWproject note count exceeds max_notes");
+        ++note_count_;
         for (auto child : note.children()) {
             if (child.type() == pugi::node_element)
                 return err(DawProjectImportErrorCode::UnsupportedFeature,
@@ -601,12 +616,16 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     if (path_attr.empty())
         return err(DawProjectImportErrorCode::MissingAttribute,
                    "<File> is missing required attribute 'path'");
-    std::string path = path_attr.as_string();
-    if (path.empty())
+    const std::string_view path_view = path_attr.as_string();
+    if (path_view.empty())
         return err(DawProjectImportErrorCode::InvalidValue, "<File path> must not be empty");
-    if (!package_path_is_lexically_safe(path))
+    if (path_view.size() > limits_.max_package_path_bytes)
+        return err(DawProjectImportErrorCode::LimitExceeded,
+                   "<File path> exceeds max_package_path_bytes");
+    if (!package_path_is_lexically_safe(path_view))
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<File path> must be a safe package-relative path");
+    std::string path(path_view);
 
     double duration_sec = 0.0, sample_rate = 0.0;
     if (auto e = require_double(audio, "duration", "<Audio>", duration_sec))
@@ -623,30 +642,26 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
         return err(DawProjectImportErrorCode::InvalidValue,
                    "<Audio> duration exceeds the supported frame domain");
 
-    if (auto it = asset_by_path_.find(path); it != asset_by_path_.end()) {
-        for (const auto& asset : assets_) {
-            if (asset.id != it->second)
-                continue;
-            if (sample_rate != asset.sample_rate.as_long_double() ||
-                !declared_duration_matches_frames(declared_frames, asset.frame_count))
-                return err(DawProjectImportErrorCode::InvalidValue,
-                           "<Audio> metadata disagrees with an earlier reference to '" + path +
-                               "'");
-            asset_id_out = asset.id;
-            frame_count_out = asset.frame_count;
-            return std::nullopt;
-        }
-        return err(DawProjectImportErrorCode::ModelRejected,
-                   "internal asset index lost resolved media '" + path + "'");
-    }
-
     if (!media_resolver_)
         return err(DawProjectImportErrorCode::MissingMediaBytes,
                    "media bytes are required to seal '" + path + "'");
+    if (media_resolver_calls_ >= limits_.max_media_resolver_calls)
+        return err(DawProjectImportErrorCode::LimitExceeded,
+                   "media resolver call count exceeds max_media_resolver_calls");
+    ++media_resolver_calls_;
     const auto bytes = media_resolver_(path);
     if (!bytes)
         return err(DawProjectImportErrorCode::MissingMediaBytes,
                    "media resolver did not provide '" + path + "'");
+    const auto byte_count = static_cast<std::uint64_t>(bytes->size());
+    if (byte_count > limits_.max_media_bytes_per_resolver_call)
+        return err(DawProjectImportErrorCode::LimitExceeded,
+                   "resolved media '" + path + "' exceeds max_media_bytes_per_resolver_call");
+    if (resolved_media_bytes_ > limits_.max_total_media_bytes ||
+        byte_count > limits_.max_total_media_bytes - resolved_media_bytes_)
+        return err(DawProjectImportErrorCode::LimitExceeded,
+                   "resolved media exceeds max_total_media_bytes");
+    resolved_media_bytes_ += byte_count;
     const auto info = audio::inspect_wav(*bytes);
     if (!info)
         return err(DawProjectImportErrorCode::InvalidValue,
@@ -662,6 +677,35 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     if (!hash)
         return err(DawProjectImportErrorCode::InvalidValue,
                    "failed to derive a content hash for '" + path + "'");
+    const auto hash_hex = hash->to_hex();
+    if (auto it = hash_by_path_.find(path); it != hash_by_path_.end() && it->second != hash_hex)
+        return err(DawProjectImportErrorCode::InvalidValue,
+                   "package path resolved to different content for '" + path + "'");
+
+    if (auto it = asset_by_hash_.find(hash_hex); it != asset_by_hash_.end()) {
+        for (auto& asset : assets_) {
+            if (asset.id != it->second)
+                continue;
+            if (asset.frame_count != info->num_frames ||
+                asset.sample_rate != timebase::RationalRate{info->sample_rate, 1})
+                return err(DawProjectImportErrorCode::InvalidValue,
+                           "content-identical media has inconsistent audio metadata for '" + path +
+                               "'");
+            const AssetLocator locator{AssetLocatorKind::PackageRelative, path};
+            if (std::find(asset.locators.begin(), asset.locators.end(), locator) ==
+                asset.locators.end())
+                asset.locators.push_back(locator);
+            hash_by_path_.emplace(path, hash_hex);
+            asset_id_out = asset.id;
+            frame_count_out = asset.frame_count;
+            return std::nullopt;
+        }
+        return err(DawProjectImportErrorCode::ModelRejected,
+                   "internal content-hash index lost resolved media '" + path + "'");
+    }
+    if (assets_.size() >= limits_.max_media_assets)
+        return err(DawProjectImportErrorCode::LimitExceeded,
+                   "DAWproject media asset count exceeds max_media_assets");
 
     ItemId asset_id = ids_.take();
     MediaAsset asset;
@@ -674,7 +718,8 @@ std::optional<DawProjectImportError> Importer::resolve_asset(const pugi::xml_nod
     asset.locators.push_back(AssetLocator{AssetLocatorKind::PackageRelative, path});
     frame_count_out = info->num_frames;
     assets_.push_back(std::move(asset));
-    asset_by_path_.emplace(path, asset_id);
+    hash_by_path_.emplace(path, hash_hex);
+    asset_by_hash_.emplace(hash_hex, asset_id);
     asset_id_out = asset_id;
     return std::nullopt;
 }
@@ -739,14 +784,14 @@ ImportResult Importer::run(const pugi::xml_node& project) {
             seen = &saw_scenes;
             for (auto scene : child.children()) {
                 if (scene.type() == pugi::node_element)
-                    return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
-                                   std::string("<Scenes> contains unsupported <") + scene.name() +
-                                       ">"));
+                    return Err(
+                        err(DawProjectImportErrorCode::UnsupportedFeature,
+                            std::string("<Scenes> contains unsupported <") + scene.name() + ">"));
             }
         } else {
-            return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
-                           std::string("<Project> contains unsupported <") + std::string(name) +
-                               ">"));
+            return Err(
+                err(DawProjectImportErrorCode::UnsupportedFeature,
+                    std::string("<Project> contains unsupported <") + std::string(name) + ">"));
         }
         if (*seen)
             return Err(err(DawProjectImportErrorCode::UnsupportedFeature,
@@ -814,11 +859,21 @@ ImportResult Importer::run(const pugi::xml_node& project) {
 
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml) {
-    return import_dawproject_xml(project_xml, {});
+    return import_dawproject_xml(project_xml, {}, DawProjectImportLimits{});
 }
 
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver) {
+    return import_dawproject_xml(project_xml, std::move(media_resolver), DawProjectImportLimits{});
+}
+
+runtime::Result<Project, DawProjectImportError>
+import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver,
+                      const DawProjectImportLimits& limits) {
+    if (project_xml.size() > limits.max_xml_bytes)
+        return Err(
+            err(DawProjectImportErrorCode::LimitExceeded, "DAWproject XML exceeds max_xml_bytes"));
+
     pugi::xml_document doc;
     auto parsed = doc.load_buffer(project_xml.data(), project_xml.size());
     if (!parsed)
@@ -839,7 +894,7 @@ import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver medi
                     std::string("unsupported DAWproject version '") + std::string(version) + "'"));
     }
 
-    Importer importer{std::move(media_resolver)};
+    Importer importer{std::move(media_resolver), limits};
     return importer.run(root);
 }
 

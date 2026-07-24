@@ -62,8 +62,12 @@ materialize_midi_capture(std::span<const CapturedMidiEvent> events,
     using Result = runtime::Result<MaterializedMidiCapture, MidiCaptureMaterializationError>;
     if (config.tempo_map == nullptr || config.frame_count == 0 ||
         config.frame_count > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-        config.minimum_note_duration.value <= 0 || config.next_item_id == 0)
+        !config.capture_sample_rate.valid() || config.minimum_note_duration.value <= 0 ||
+        config.next_item_id == 0)
         return Result(runtime::Err(MidiCaptureMaterializationError::InvalidConfig));
+    if (config.capture_sample_rate.normalized() !=
+        config.tempo_map->sample_rate().normalized())
+        return Result(runtime::Err(MidiCaptureMaterializationError::SampleRateMismatch));
 
     std::vector<CapturedMidiEvent> ordered(events.begin(), events.end());
     std::stable_sort(ordered.begin(), ordered.end(),

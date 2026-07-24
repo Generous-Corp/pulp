@@ -412,6 +412,15 @@ through `DocumentSession`, compiles the root sequence through
 `PlaybackProgramCompiler`, and renders arrangement audio through
 `ArrangementAudioRenderer`.
 
+External asset locators are URI hints, not filesystem paths by definition.
+The headless render lane accepts bare local paths and canonical `file://` URIs,
+percent-decodes local file URIs (including `file://localhost/...`), and skips
+unsupported or non-local schemes before constructing a filesystem path. It
+still verifies the resolved bytes against the asset's `ContentHash`.
+`PackageRelative` locators remain a separate contained-path contract beneath
+the canonical project directory; do not route them through the external-URI
+resolver.
+
 The installed CLI keeps this operational layer thin:
 
 ```
@@ -494,4 +503,11 @@ changes the model layout. Gotchas for extending it or adding another importer:
   before invoking `DawProjectMediaResolver`; a resolver is an untrusted-I/O
   boundary, not the place to repair an unsafe locator. Hash the returned media
   bytes, inspect their WAV metadata, and require that metadata to match the XML
-  before preserving the path as a `PackageRelative` locator hint.
+  before preserving the path as a `PackageRelative` locator hint. Deduplicate
+  assets by that sealed content hash, retaining each distinct safe locator and
+  rejecting path instability or conflicting metadata.
+- **Bound the import before growth.** Apply `DawProjectImportLimits` before
+  constructing the XML DOM and before growing structural, locator, asset, or
+  media-processing state. Legacy resolver callbacks own their returned-vector
+  allocation, so untrusted package readers must enforce the same per-call byte
+  ceiling while reading the package entry.

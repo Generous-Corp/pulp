@@ -3,6 +3,7 @@
 #include <pulp/runtime/result.hpp>
 #include <pulp/timeline/model.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -43,6 +44,7 @@ enum class DawProjectImportErrorCode : std::uint8_t {
     DuplicateTrackId,       // Two <Track> elements share an id.
     DanglingTrackReference, // A <Lanes track="..."> references an unknown track id.
     ModelRejected,          // The timeline model rejected the assembled project.
+    LimitExceeded,          // A caller-configurable import resource limit was exceeded.
 };
 
 struct DawProjectImportError {
@@ -56,12 +58,42 @@ struct DawProjectImportError {
 using DawProjectMediaResolver =
     std::function<std::optional<std::vector<std::uint8_t>>(std::string_view package_path)>;
 
+// Hard resource ceilings for one import. Limits are checked before XML parsing
+// and before growing importer-owned structural collections. Media byte limits
+// are checked immediately after a resolver returns, before inspection, hashing,
+// or retention. A zero limit rejects any corresponding non-empty resource.
+//
+// Resolvers still own the allocation used to produce their returned vector;
+// callers handling untrusted packages should apply the same per-call byte
+// ceiling while reading package entries.
+struct DawProjectImportLimits {
+    // Raw project.xml bytes, checked before constructing the XML DOM.
+    std::size_t max_xml_bytes = 64u * 1024u * 1024u;
+    // Totals across the whole document, not per parent/container.
+    std::size_t max_tracks = 16'384;
+    std::size_t max_clips = 1'000'000;
+    std::size_t max_notes = 5'000'000;
+    // Unique retained assets after content-hash deduplication.
+    std::size_t max_media_assets = 16'384;
+    // All callback invocations, including repeated paths or content.
+    std::size_t max_media_resolver_calls = 1'000'000;
+    std::size_t max_package_path_bytes = 4'096;
+    // Bytes returned by one successful callback.
+    std::uint64_t max_media_bytes_per_resolver_call = 2ull * 1024ull * 1024ull * 1024ull;
+    // Sum of every successful callback result, including duplicate media.
+    std::uint64_t max_total_media_bytes = 16ull * 1024ull * 1024ull * 1024ull;
+};
+
 // Parse a DAWproject `project.xml` document and assemble a timeline Project for
 // the documented linear subset. Out-of-subset constructs and malformed input are
 // rejected with a descriptive error rather than partially imported. Audio
-// projects require a resolver so their durable identities can be sealed.
+// projects require a resolver so their durable identities can be sealed. The
+// two compatibility overloads use DawProjectImportLimits defaults.
 runtime::Result<Project, DawProjectImportError> import_dawproject_xml(std::string_view project_xml);
 runtime::Result<Project, DawProjectImportError>
 import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver);
+runtime::Result<Project, DawProjectImportError>
+import_dawproject_xml(std::string_view project_xml, DawProjectMediaResolver media_resolver,
+                      const DawProjectImportLimits& limits);
 
 } // namespace pulp::timeline

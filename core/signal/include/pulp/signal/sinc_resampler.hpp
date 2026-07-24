@@ -41,36 +41,50 @@ template <typename SampleType = float> class SincResamplerT {
     /// and `cutoff` the normalized source-Nyquist cutoff in `(0, 1]`. Values
     /// outside that interval are clamped.
     void build(int half_width = 16, int phases = 512, double beta = 9.0, double cutoff = 1.0) {
-        half_ = half_width;
-        phases_ = phases;
+        begin_build(half_width, phases, beta, cutoff);
+        while (!build_step()) {
+        }
+    }
+
+    /// Starts a resumable kernel-table build. Each build_step() computes one
+    /// phase row so control-thread callers can honor an external work budget.
+    void begin_build(int half_width = 16, int phases = 512, double beta = 9.0,
+                     double cutoff = 1.0) {
+        half_ = std::max(1, half_width);
+        phases_ = std::max(1, phases);
         cutoff_ = std::isfinite(cutoff) ? std::clamp(cutoff, 1.0e-6, 1.0) : 1.0;
         const int taps = 2 * half_;
         // table_[phase][tap]; phase in [0, phases_] inclusive (the extra row
         // lets read() linearly interpolate up to phase == phases_).
         table_.assign(static_cast<size_t>(phases_ + 1) * taps, SampleType{0.0f});
-        const double i0_beta = bessel_i0(beta);
-        for (int ph = 0; ph <= phases_; ++ph) {
-            const double frac = static_cast<double>(ph) / phases_;
-            double sum = 0.0;
-            for (int t = 0; t < taps; ++t) {
-                // Distance from the interpolation point to tap t. Taps span
-                // [-half+1 .. half], so the sample at index (i0 + t - half + 1)
-                // sits at offset (t - half + 1 - frac) from the read point.
-                const double x = static_cast<double>(t - half_ + 1) - frac;
-                const double s = cutoff_ * sinc(cutoff_ * x);
-                // Kaiser window over the kernel support [-half, half].
-                const double wn = x / half_;
-                const double w = (wn > -1.0 && wn < 1.0)
-                                     ? bessel_i0(beta * std::sqrt(1.0 - wn * wn)) / i0_beta
-                                     : 0.0;
-                table_[static_cast<size_t>(ph) * taps + t] = static_cast<SampleType>(s * w);
-                sum += s * w;
-            }
-            if (std::abs(sum) > 1.0e-12) {
-                for (int t = 0; t < taps; ++t)
-                    table_[static_cast<size_t>(ph) * taps + t] /= static_cast<SampleType>(sum);
-            }
+        build_beta_ = beta;
+        build_i0_beta_ = bessel_i0(beta);
+        next_build_phase_ = 0;
+    }
+
+    bool build_step() {
+        if (next_build_phase_ > phases_)
+            return true;
+        const int ph = next_build_phase_;
+        const int taps = 2 * half_;
+        const double frac = static_cast<double>(ph) / phases_;
+        double sum = 0.0;
+        for (int t = 0; t < taps; ++t) {
+            const double x = static_cast<double>(t - half_ + 1) - frac;
+            const double s = cutoff_ * sinc(cutoff_ * x);
+            const double wn = x / half_;
+            const double w =
+                (wn > -1.0 && wn < 1.0)
+                    ? bessel_i0(build_beta_ * std::sqrt(1.0 - wn * wn)) / build_i0_beta_
+                    : 0.0;
+            table_[static_cast<size_t>(ph) * taps + t] = static_cast<SampleType>(s * w);
+            sum += s * w;
         }
+        if (std::abs(sum) > 1.0e-12)
+            for (int t = 0; t < taps; ++t)
+                table_[static_cast<size_t>(ph) * taps + t] /= static_cast<SampleType>(sum);
+        ++next_build_phase_;
+        return next_build_phase_ > phases_;
     }
 
     int half_width() const {
@@ -80,10 +94,13 @@ template <typename SampleType = float> class SincResamplerT {
         return 2 * half_;
     }
     bool ready() const {
-        return !table_.empty();
+        return !table_.empty() && next_build_phase_ > phases_;
     }
     double cutoff() const {
         return cutoff_;
+    }
+    std::size_t prepared_bytes() const noexcept {
+        return table_.capacity() * sizeof(SampleType);
     }
 
     /// Apply the kernel at fractional phase `frac` (in [0,1)) to exactly
@@ -158,6 +175,9 @@ template <typename SampleType = float> class SincResamplerT {
     int phases_ = 0;
     double cutoff_ = 1.0;
     std::vector<SampleType> table_;
+    double build_beta_ = 9.0;
+    double build_i0_beta_ = 1.0;
+    int next_build_phase_ = 1;
 };
 
 using SincResampler = SincResamplerT<float>;

@@ -22,25 +22,21 @@ std::int64_t saturating_add(std::int64_t value, std::uint32_t increment) noexcep
     return value + static_cast<std::int64_t>(increment);
 }
 
-std::uint64_t distance(timebase::SamplePosition start,
-                       timebase::SamplePosition end) noexcept {
+std::uint64_t distance(timebase::SamplePosition start, timebase::SamplePosition end) noexcept {
     if (end.value <= start.value)
         return 0;
     return static_cast<std::uint64_t>(end.value) - static_cast<std::uint64_t>(start.value);
 }
 
-timebase::BarPosition bar_at_tick(timebase::TickPosition tick,
-                                  timebase::TickPosition anchor_tick,
-                                  timebase::BarPosition anchor_bar,
-                                  MeterSignature meter) noexcept {
-    const long double ticks_per_bar =
-        static_cast<long double>(timebase::kTicksPerQuarter) *
-        static_cast<long double>(meter.numerator) * 4.0L /
-        static_cast<long double>(meter.denominator);
-    const long double relative_tick = static_cast<long double>(tick.value) -
-                                      static_cast<long double>(anchor_tick.value);
-    const long double projected = static_cast<long double>(anchor_bar.value) +
-                                  std::floor(relative_tick / ticks_per_bar);
+timebase::BarPosition bar_at_tick(timebase::TickPosition tick, timebase::TickPosition anchor_tick,
+                                  timebase::BarPosition anchor_bar, MeterSignature meter) noexcept {
+    const long double ticks_per_bar = static_cast<long double>(timebase::kTicksPerQuarter) *
+                                      static_cast<long double>(meter.numerator) * 4.0L /
+                                      static_cast<long double>(meter.denominator);
+    const long double relative_tick =
+        static_cast<long double>(tick.value) - static_cast<long double>(anchor_tick.value);
+    const long double projected =
+        static_cast<long double>(anchor_bar.value) + std::floor(relative_tick / ticks_per_bar);
     if (projected >= static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
         return {std::numeric_limits<std::int64_t>::max()};
     if (projected <= static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
@@ -54,12 +50,22 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
     if (transport.tempo_map == nullptr || transport.frame_count == 0 ||
         transport.frame_count >
             static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max()) ||
-        transport.range_count == 0 || transport.range_count > transport.ranges.size())
+        transport.range_count == 0 || transport.range_count > transport.ranges.size() ||
+        (transport.has_precise_host_loop &&
+         (!std::isfinite(transport.host_loop_start_beats) ||
+          !std::isfinite(transport.host_loop_end_beats) ||
+          !(transport.host_loop_start_beats < transport.host_loop_end_beats))))
         return false;
     std::uint64_t expected_offset = 0;
     for (std::uint8_t index = 0; index < transport.range_count; ++index) {
         const auto& range = transport.ranges[index];
         if (range.frame_count == 0 || range.sample_offset != expected_offset)
+            return false;
+        if (range.has_precise_host_ticks &&
+            (!range.host_beat_mapping || !std::isfinite(range.host_tick_start) ||
+             !std::isfinite(range.host_tick_end) ||
+             (transport.is_playing ? range.host_tick_end < range.host_tick_start
+                                   : range.host_tick_end != range.host_tick_start)))
             return false;
         expected_offset += range.frame_count;
         if (expected_offset > transport.frame_count || (index != 0 && !range.discontinuity))
@@ -68,53 +74,53 @@ bool valid_transport_ranges(const TransportSnapshot& transport) noexcept {
     return expected_offset == transport.frame_count;
 }
 
-long double host_mapped_document_sample_at_output_offset(
-    const TransportRange& range, const timebase::CompiledTempoMap& tempo_map,
-    std::uint32_t output_offset) noexcept {
+long double
+host_mapped_document_sample_at_output_offset(const TransportRange& range,
+                                             const timebase::CompiledTempoMap& tempo_map,
+                                             std::uint32_t output_offset) noexcept {
     if (range.frame_count == 0)
         return static_cast<long double>(
             tempo_map.ticks_to_samples(range.timeline_tick_start).value);
     const auto clamped = std::min(output_offset, range.frame_count);
-    const auto fraction = static_cast<long double>(clamped) /
-                          static_cast<long double>(range.frame_count);
-    const auto tick_span = static_cast<long double>(range.timeline_tick_end.value) -
-                           static_cast<long double>(range.timeline_tick_start.value);
-    const auto fractional_tick =
-        static_cast<long double>(range.timeline_tick_start.value) + tick_span * fraction;
-    if (fractional_tick <=
-        static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
+    const auto fraction =
+        static_cast<long double>(clamped) / static_cast<long double>(range.frame_count);
+    const auto tick_start = range.has_precise_host_ticks
+                                ? static_cast<long double>(range.host_tick_start)
+                                : static_cast<long double>(range.timeline_tick_start.value);
+    const auto tick_end = range.has_precise_host_ticks
+                              ? static_cast<long double>(range.host_tick_end)
+                              : static_cast<long double>(range.timeline_tick_end.value);
+    const auto fractional_tick = tick_start + (tick_end - tick_start) * fraction;
+    if (fractional_tick <= static_cast<long double>(std::numeric_limits<std::int64_t>::min()))
         return static_cast<long double>(
-            tempo_map.ticks_to_samples(
-                {std::numeric_limits<std::int64_t>::min()}).value);
-    if (fractional_tick >=
-        static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
+            tempo_map.ticks_to_samples({std::numeric_limits<std::int64_t>::min()}).value);
+    if (fractional_tick >= static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
         return static_cast<long double>(
-            tempo_map.ticks_to_samples(
-                {std::numeric_limits<std::int64_t>::max()}).value);
+            tempo_map.ticks_to_samples({std::numeric_limits<std::int64_t>::max()}).value);
     return tempo_map.fractional_ticks_to_samples(fractional_tick);
 }
 
 bool host_mapped_output_offset_for_tick(const TransportRange& range,
                                         timebase::TickPosition document_tick,
                                         std::uint32_t& output_offset) noexcept {
-    if (!range.host_beat_mapping || range.frame_count == 0 ||
-        !(range.timeline_tick_start < range.timeline_tick_end))
+    const auto tick_start = range.has_precise_host_ticks
+                                ? static_cast<long double>(range.host_tick_start)
+                                : static_cast<long double>(range.timeline_tick_start.value);
+    const auto tick_end = range.has_precise_host_ticks
+                              ? static_cast<long double>(range.host_tick_end)
+                              : static_cast<long double>(range.timeline_tick_end.value);
+    if (!range.host_beat_mapping || range.frame_count == 0 || !(tick_start < tick_end))
         return false;
-    if (document_tick < range.timeline_tick_start ||
-        !(document_tick < range.timeline_tick_end))
+    const auto document = static_cast<long double>(document_tick.value);
+    if (document < tick_start || !(document < tick_end))
         return false;
-    const auto tick_offset = static_cast<long double>(document_tick.value) -
-                             static_cast<long double>(range.timeline_tick_start.value);
-    const auto tick_span = static_cast<long double>(range.timeline_tick_end.value) -
-                           static_cast<long double>(range.timeline_tick_start.value);
-    const auto projected =
-        tick_offset * static_cast<long double>(range.frame_count) / tick_span;
+    const auto projected = (document - tick_start) * static_cast<long double>(range.frame_count) /
+                           (tick_end - tick_start);
     const auto floored = std::floor(projected);
-    output_offset =
-        floored <= 0.0L
-            ? 0u
-            : static_cast<std::uint32_t>(std::min<long double>(
-                  floored, static_cast<long double>(range.frame_count - 1)));
+    output_offset = floored <= 0.0L
+                        ? 0u
+                        : static_cast<std::uint32_t>(std::min<long double>(
+                              floored, static_cast<long double>(range.frame_count - 1)));
     return true;
 }
 
@@ -240,8 +246,8 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
             meter_anchor_tick_ = {};
             meter_anchor_bar_ = {};
         } else {
-            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_,
-                                            meter_anchor_bar_, meter_anchor_signature_);
+            meter_anchor_bar_ = bar_at_tick(timeline_tick_, meter_anchor_tick_, meter_anchor_bar_,
+                                            meter_anchor_signature_);
             meter_anchor_tick_ = timeline_tick_;
         }
         meter_anchor_signature_ = desired.meter;
@@ -255,16 +261,14 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     snapshot.meter = desired.meter;
     snapshot.loop = desired.loop;
     snapshot.is_playing = desired.playing;
-    snapshot.transport_changed = !first_block_ &&
-                                 (desired.playing != previous_playing_ ||
-                                  desired.loop.enabled != previous_loop_.enabled);
-    snapshot.transport_started = desired.playing &&
-                                 (first_block_ || !previous_playing_);
+    snapshot.transport_changed = !first_block_ && (desired.playing != previous_playing_ ||
+                                                   desired.loop.enabled != previous_loop_.enabled);
+    snapshot.transport_started = desired.playing && (first_block_ || !previous_playing_);
     snapshot.reset_requested = seeked;
     snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
 
-    auto make_range = [&](std::uint8_t index, std::uint32_t offset,
-                          std::uint32_t count, bool discontinuity,
+    auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
+                          bool discontinuity,
                           const timebase::TickPosition* forced_end_tick = nullptr) {
         auto& range = snapshot.ranges[index];
         range.sample_offset = offset;
@@ -275,10 +279,8 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.bar_start = bar_at_tick(range.timeline_tick_start, meter_anchor_tick_,
                                       meter_anchor_bar_, meter_anchor_signature_);
         range.tempo_bpm = tempo_cursor_.tempo_at_tick(range.timeline_tick_start);
-        range.tempo_changed = index == 0
-                                  ? !first_block_ &&
-                                        range.tempo_bpm != previous_tempo_bpm_
-                                  : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
+        range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
+                                         : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
         if (desired.playing) {
             const timebase::SamplePosition end_sample{
@@ -318,12 +320,11 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         }
 
         const auto until_wrap = distance(timeline_sample_, loop_end);
-        const auto first_count = static_cast<std::uint32_t>(
-            std::min<std::uint64_t>(frame_count, until_wrap));
+        const auto first_count =
+            static_cast<std::uint32_t>(std::min<std::uint64_t>(frame_count, until_wrap));
         if (first_count > 0) {
-            const auto* forced_end = static_cast<std::uint64_t>(first_count) == until_wrap
-                                         ? &desired.loop.end
-                                         : nullptr;
+            const auto* forced_end =
+                static_cast<std::uint64_t>(first_count) == until_wrap ? &desired.loop.end : nullptr;
             make_range(0, 0, first_count, pending_discontinuity_, forced_end);
             snapshot.range_count = 1;
             pending_discontinuity_ = false;

@@ -36,11 +36,35 @@ silent placeholder.
 When host beat mapping intentionally makes musical material follow the host
 tempo, keep absolute clips, take-comp segments, and frozen artifacts on
 `TransportRange::timeline_sample_start`; those sources are sample-domain
-content and must not inherit the beat projection. For musical audio, derive the
+content and must not inherit the beat projection. Carry precise fractional host
+tick endpoints through every callback and nested `ProcessContext` projection;
+integer `timeline_tick_*` fields remain compatibility metadata and must not
+drive host-mapped interpolation, loop admission, note scheduling, automation
+refinement, MIDI clock, or metronome enumeration. A precise host-mapping
+rejection must not fall back to document-tempo placement. For musical audio,
+derive the
 effective source-position step per output frame. A converter prepared only for
 the asset-rate/timeline-rate ratio cannot anti-alias faster host playback, so
-select a bounded prebuilt reconstruction kernel without allocating on the
-audio thread.
+prepare and share a per-MediaRef-range multiresolution audio pyramid off the
+audio thread. Build it incrementally inside the compiler work budget, count it
+against both converter-count and aggregate prepared-byte limits, including
+persistent sinc tables and container storage, and seed unchanged programs back
+into the cache. Clamp every pyramid level to the exact
+referenced source range so neighboring asset frames cannot bleed into a clip.
+Fixed-rate and variable-rate kernel construction are part of that same
+incremental budget: initializing a converter must not synchronously populate
+every sinc phase before yielding.
+Use fixed-size, incrementally allocated prepared chunks whose persistent
+footprint is computable; implementation-defined container bookkeeping cannot
+sit outside the byte cap.
+Each 2:1 stage must low-pass before decimation; select the coarsest level that
+leaves a bounded residual step, then use its prebuilt reconstruction kernel. Do
+not approximate extreme ratios by clamping a tiny cutoff onto a
+fixed-width source-rate kernel: once the sinc support contains too few zero
+crossings, normalization turns it into a short moving average and aliases
+despite the nominal cutoff. The fixed asset-rate/timeline-rate path therefore
+fails compilation beyond its honest kernel range, while host-tempo playback
+uses the prepared pyramid to retain its wider bounded contract.
 
 An active take lane replaces the track's arrangement source; zero
 `active_take_lane_id` selects arrangement clips. The compiler lowers each

@@ -3,6 +3,7 @@
 #include <pulp/format/playback_context_projection.hpp>
 #include <pulp/sequence/sequence_processor.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -223,7 +224,7 @@ TEST_CASE("host beat projection preserves fractional tick phase across small blo
     context.transport_validity.set(format::TransportField::Tempo);
     context.transport_validity.set(format::TransportField::SamplePosition);
 
-    TickPosition previous_end;
+    long double previous_end_sample = 0.0L;
     for (std::int64_t frame = 0; frame < 64; ++frame) {
         context.position_samples = frame;
         context.position_beats =
@@ -231,11 +232,27 @@ TEST_CASE("host beat projection preserves fractional tick phase across small blo
         TransportSnapshot projected;
         REQUIRE(projector.project(context, projected) ==
                 sequence::HostTransportProjectionError::None);
+        const auto& range = projected.ranges[0];
+        REQUIRE(range.has_precise_host_ticks);
+        const auto expected_start_tick =
+            (start_beat + static_cast<double>(frame) * tempo_bpm / (60.0 * sample_rate)) *
+            kTicksPerQuarter;
+        const auto expected_end_tick =
+            (start_beat + static_cast<double>(frame + 1) * tempo_bpm / (60.0 * sample_rate)) *
+            kTicksPerQuarter;
+        REQUIRE(range.host_tick_start == Catch::Approx(expected_start_tick));
+        REQUIRE(range.host_tick_end == Catch::Approx(expected_end_tick));
+        const auto nested = format::project_process_context(projected, range);
+        REQUIRE(nested.has_transport(format::TransportField::BeatPosition));
+        REQUIRE(nested.position_beats == Catch::Approx(context.position_beats));
+        const auto start_sample = host_mapped_document_sample_at_output_offset(range, *map, 0);
+        const auto end_sample = host_mapped_document_sample_at_output_offset(range, *map, 1);
         if (frame != 0)
-            REQUIRE(projected.ranges[0].timeline_tick_start == previous_end);
-        previous_end = projected.ranges[0].timeline_tick_end;
+            REQUIRE(start_sample == Catch::Approx(static_cast<double>(previous_end_sample)));
+        REQUIRE(end_sample > start_sample);
+        previous_end_sample = end_sample;
     }
-    REQUIRE(previous_end.value > static_cast<std::int64_t>(start_beat * kTicksPerQuarter));
+    REQUIRE(previous_end_sample > map->fractional_ticks_to_samples(start_beat * kTicksPerQuarter));
 }
 
 TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
@@ -329,6 +346,82 @@ TEST_CASE("host beat-domain loop projection keeps the final fractional frame cel
                 std::llround(context.position_beats * static_cast<double>(kTicksPerQuarter)))});
 }
 
+TEST_CASE("host beat-domain loop admission keeps a sub-tick final cell") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 2) == sequence::HostTransportProjectionError::None);
+
+    const auto tick_scale = static_cast<double>(kTicksPerQuarter);
+    const auto loop_end_beats = 100.4 / tick_scale;
+    const auto position_beats = 100.1 / tick_scale;
+    REQUIRE(std::llround(position_beats * tick_scale) ==
+            std::llround(loop_end_beats * tick_scale));
+    REQUIRE(position_beats < loop_end_beats);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 2;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = position_beats;
+    context.position_samples = 100'000;
+    context.loop_start_beats = 0.0;
+    context.loop_end_beats = loop_end_beats;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+    context.transport_validity.set(format::TransportField::LoopRange);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 2);
+    REQUIRE(projected.ranges[0].frame_count == 1);
+    REQUIRE(projected.ranges[0].timeline_tick_start == projected.loop.end);
+    REQUIRE(projected.ranges[0].timeline_tick_end == projected.loop.end);
+    REQUIRE(projected.ranges[1].sample_offset == 1);
+    REQUIRE(projected.ranges[1].frame_count == 1);
+    REQUIRE(projected.ranges[1].timeline_tick_start == projected.loop.start);
+    REQUIRE(projected.ranges[1].discontinuity);
+}
+
+TEST_CASE("host beat-domain loop projection carries a block-edge wrap into the next block") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 11) == sequence::HostTransportProjectionError::None);
+
+    constexpr double sample_rate = 48'000.0;
+    constexpr double loop_start_beats = 1.0;
+    const double loop_end_beats = loop_start_beats + 100.4 / sample_rate;
+    format::ProcessContext context;
+    context.sample_rate = sample_rate;
+    context.num_samples = 11;
+    context.is_playing = true;
+    context.is_looping = true;
+    context.tempo_bpm = 60.0;
+    context.position_beats = loop_end_beats - 10.4 / sample_rate;
+    context.position_samples = 100'000;
+    context.loop_start_beats = loop_start_beats;
+    context.loop_end_beats = loop_end_beats;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+    context.transport_validity.set(format::TransportField::LoopRange);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE(projected.range_count == 1);
+    REQUIRE(projected.ranges[0].frame_count == 11);
+    REQUIRE(projected.ranges[0].timeline_tick_end == projected.loop.end);
+
+    context.num_samples = 8;
+    context.position_beats = loop_start_beats;
+    context.position_samples = 99'910;
+    REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
+    REQUIRE_FALSE(projected.reset_requested);
+    REQUIRE(projected.ranges[0].timeline_sample_start.value == 99'910);
+}
+
 TEST_CASE("host beat-domain projection falls back when beat clock validity is absent or invalid") {
     const auto map = tempo_map();
     sequence::HostTransportProjector projector;
@@ -380,6 +473,27 @@ TEST_CASE("host beat-domain projection falls back when beat clock validity is ab
     REQUIRE(projected.reset_requested);
     REQUIRE(projected.ranges[0].discontinuity);
     REQUIRE(projected.ranges[0].timeline_tick_start.value == kTicksPerQuarter);
+}
+
+TEST_CASE("host beat-domain projection rejects an authoritative beat outside the tick domain") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 24'000;
+    context.position_beats = std::numeric_limits<double>::max();
+    context.tempo_bpm = 60.0;
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::BeatPositionOutOfRange);
 }
 
 TEST_CASE("embedded sequence processor schedules program-beat notes on the host beat clock") {
@@ -513,7 +627,7 @@ TEST_CASE("embedded sequence processor schedules program-beat notes on the host 
     }
 }
 
-TEST_CASE("host-mapped note scheduling scans same-sample events through the exact tick end") {
+TEST_CASE("host-mapped note scheduling preserves tick order within one compiled sample") {
     const auto map = tempo_map();
     ProgramHarness programs;
     programs.publish(host_tempo_same_sample_boundary_project(), map,
@@ -525,8 +639,10 @@ TEST_CASE("host-mapped note scheduling scans same-sample events through the exac
     REQUIRE(compiled_track->arrangement_note_events().size() == 4);
     const auto events = compiled_track->arrangement_note_events();
     REQUIRE(events[1].sample == events[2].sample);
-    REQUIRE(events[1].tick == TickPosition{2 * kTicksPerQuarter});
-    REQUIRE(events[2].tick == TickPosition{2 * kTicksPerQuarter - 1});
+    REQUIRE(events[1].tick == TickPosition{2 * kTicksPerQuarter - 1});
+    REQUIRE(events[1].kind == NoteProgramEventKind::On);
+    REQUIRE(events[2].tick == TickPosition{2 * kTicksPerQuarter});
+    REQUIRE(events[2].kind == NoteProgramEventKind::Off);
 
     sequence::SequenceProcessorConfig processor_config;
     processor_config.output_channels = 1;

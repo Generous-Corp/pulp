@@ -158,6 +158,7 @@ TEST_CASE("MIDI capture quantizes notes and trims expression outside active note
     };
     MidiCaptureMaterializationConfig config;
     config.tempo_map = &map;
+    config.capture_sample_rate = {100, 1};
     config.frame_count = 50;
     config.quantize_grid = {kTicksPerQuarter / 2};
     config.minimum_note_duration = {kTicksPerQuarter / 8};
@@ -178,4 +179,30 @@ TEST_CASE("MIDI capture quantizes notes and trims expression outside active note
     REQUIRE(materialized->mpe_expression[0].event.is_pitch_bend());
     REQUIRE(materialized->mpe_expression[1].event.is_cc());
     REQUIRE(materialized->next_item_id == 501);
+}
+
+TEST_CASE("MIDI capture materialization requires the tempo-map sample rate") {
+    const auto map = midi_map();
+    const std::array events{
+        at(midi::MidiEvent::note_on(0, 60, 100), 0),
+        at(midi::MidiEvent::note_off(0, 60), 10),
+    };
+    MidiCaptureMaterializationConfig config;
+    config.tempo_map = &map;
+    config.capture_sample_rate = {200, 2};
+    config.frame_count = 10;
+
+    auto equivalent_rate = materialize_midi_capture(events, config);
+    REQUIRE(equivalent_rate);
+
+    config.capture_sample_rate = {48'000, 1};
+    auto mismatched_rate = materialize_midi_capture(events, config);
+    REQUIRE_FALSE(mismatched_rate);
+    REQUIRE(mismatched_rate.error() ==
+            MidiCaptureMaterializationError::SampleRateMismatch);
+
+    config.capture_sample_rate = {0, 1};
+    auto invalid_rate = materialize_midi_capture(events, config);
+    REQUIRE_FALSE(invalid_rate);
+    REQUIRE(invalid_rate.error() == MidiCaptureMaterializationError::InvalidConfig);
 }

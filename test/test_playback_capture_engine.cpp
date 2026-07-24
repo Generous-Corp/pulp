@@ -74,6 +74,35 @@ std::vector<CaptureEvent> drain(CaptureEngine& engine) {
     return result;
 }
 
+std::vector<float> render_metronome_snapshot(const CompiledTempoMap& map,
+                                             TransportSnapshot transport, CaptureSession session) {
+    auto config = capture_config(transport.frame_count);
+    config.maximum_take_frames = transport.frame_count;
+    config.tracks[0].monitor = false;
+    CaptureEngine engine;
+    REQUIRE(engine.prepare(std::move(config)));
+
+    session.metronome_enabled = true;
+    session.metronome_level = 0.5f;
+    CaptureCommand start;
+    start.type = CaptureCommandType::Start;
+    start.sequence = 10;
+    start.session = session;
+    REQUIRE(engine.enqueue_command(start));
+
+    transport.tempo_map = &map;
+    transport.sample_rate = map.sample_rate();
+    transport.is_playing = true;
+    audio::Buffer<float> input(1, transport.frame_count);
+    audio::Buffer<float> output(1, transport.frame_count);
+    midi::MidiBuffer midi;
+    auto output_view = output.view();
+    REQUIRE(engine.process(read_view(input), output_view, midi, transport) ==
+            CaptureProcessResult::Ok);
+    const auto channel = output.channel(0);
+    return {channel.begin(), channel.end()};
+}
+
 } // namespace
 
 TEST_CASE("capture engine applies punch boundaries sample-exactly without RT allocation") {
@@ -266,6 +295,9 @@ TEST_CASE("capture metronome projects ticks through host beat mapping") {
     transport.ranges[0].timeline_tick_start = {0};
     transport.ranges[0].timeline_tick_end = {kTicksPerQuarter / 10};
     transport.ranges[0].host_beat_mapping = true;
+    transport.ranges[0].host_tick_start = 0.0;
+    transport.ranges[0].host_tick_end = static_cast<double>(kTicksPerQuarter) / 10.0;
+    transport.ranges[0].has_precise_host_ticks = true;
 
     audio::Buffer<float> input(1, 4'800);
     audio::Buffer<float> output(1, 4'800);
@@ -278,6 +310,83 @@ TEST_CASE("capture metronome projects ticks through host beat mapping") {
     REQUIRE(output.channel(0)[4'000] == 0.5f);
     REQUIRE(output.channel(0)[1'000] == 0.0f);
     REQUIRE(output.channel(0)[3'000] == 0.0f);
+}
+
+TEST_CASE("capture metronome excludes a rounded click before the precise host start") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.frame_count = 100;
+    transport.range_count = 1;
+    auto& range = transport.ranges[0];
+    range.frame_count = 100;
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {10};
+    range.host_beat_mapping = true;
+    range.host_tick_start = 0.25;
+    range.host_tick_end = 9.75;
+    range.has_precise_host_ticks = true;
+
+    CaptureSession session;
+    session.metronome_interval = {10};
+    const auto output = render_metronome_snapshot(map, transport, session);
+    REQUIRE(std::all_of(output.begin(), output.end(), [](float sample) { return sample == 0.0f; }));
+}
+
+TEST_CASE("capture metronome includes a click before the precise host end") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.frame_count = 100;
+    transport.range_count = 1;
+    auto& range = transport.ranges[0];
+    range.frame_count = 100;
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {10};
+    range.host_beat_mapping = true;
+    range.host_tick_start = 0.25;
+    range.host_tick_end = 10.25;
+    range.has_precise_host_ticks = true;
+
+    CaptureSession session;
+    session.metronome_interval = {10};
+    const auto output = render_metronome_snapshot(map, transport, session);
+    REQUIRE(std::count(output.begin(), output.end(), 0.5f) == 1);
+    REQUIRE(output[97] == 0.5f);
+}
+
+TEST_CASE("capture metronome uses precise host endpoints across a loop boundary") {
+    const auto map = constant_map();
+    TransportSnapshot transport;
+    transport.frame_count = 200;
+    transport.range_count = 2;
+    auto& before_wrap = transport.ranges[0];
+    before_wrap.frame_count = 100;
+    before_wrap.timeline_tick_start = {10};
+    before_wrap.timeline_tick_end = {20};
+    before_wrap.host_beat_mapping = true;
+    before_wrap.host_tick_start = 10.25;
+    before_wrap.host_tick_end = 19.75;
+    before_wrap.has_precise_host_ticks = true;
+    auto& after_wrap = transport.ranges[1];
+    after_wrap.sample_offset = 100;
+    after_wrap.frame_count = 100;
+    after_wrap.timeline_sample_start = {0};
+    after_wrap.timeline_tick_start = {0};
+    after_wrap.timeline_tick_end = {10};
+    after_wrap.discontinuity = true;
+    after_wrap.host_beat_mapping = true;
+    after_wrap.host_tick_start = 0.25;
+    after_wrap.host_tick_end = 10.25;
+    after_wrap.has_precise_host_ticks = true;
+
+    CaptureSession session;
+    session.loop_enabled = true;
+    session.loop_start = {0};
+    session.loop_end = {100};
+    session.metronome_interval = {10};
+    const auto output = render_metronome_snapshot(map, transport, session);
+    REQUIRE(std::count(output.begin(), output.end(), 0.5f) == 1);
+    REQUIRE(output[100] == 0.0f);
+    REQUIRE(output[197] == 0.5f);
 }
 
 TEST_CASE("capture engine rejects aggregate preallocation beyond its explicit budget") {

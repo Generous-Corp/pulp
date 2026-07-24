@@ -9,16 +9,32 @@
 namespace pulp::playback {
 namespace {
 
-std::int64_t ceil_multiple(std::int64_t value, std::int64_t interval) noexcept {
+bool ceil_multiple(std::int64_t value, std::int64_t interval, std::int64_t& result) noexcept {
     const auto remainder = value % interval;
-    if (remainder == 0)
-        return value;
+    if (remainder == 0) {
+        result = value;
+        return true;
+    }
     if (value >= 0) {
         if (value > std::numeric_limits<std::int64_t>::max() - (interval - remainder))
-            return std::numeric_limits<std::int64_t>::max();
-        return value + interval - remainder;
+            return false;
+        result = value + interval - remainder;
+        return true;
     }
-    return value - remainder;
+    result = value - remainder;
+    return true;
+}
+
+bool first_metronome_tick(long double precise_start, std::int64_t interval,
+                          std::int64_t& result) noexcept {
+    const auto exclusive_upper = std::ldexp(1.0L, 63);
+    const auto inclusive_lower = -exclusive_upper;
+    if (!std::isfinite(precise_start) || precise_start >= exclusive_upper)
+        return false;
+    const auto ceiled = std::ceil(precise_start);
+    const auto lower_bound = ceiled <= inclusive_lower ? std::numeric_limits<std::int64_t>::min()
+                                                       : static_cast<std::int64_t>(ceiled);
+    return ceil_multiple(lower_bound, interval, result);
 }
 
 bool add_storage_bytes(std::uint64_t count, std::uint64_t element_size, std::uint64_t maximum,
@@ -294,31 +310,42 @@ void CaptureEngine::render_metronome(audio::BufferView<float>& output,
     const auto interval = session_.metronome_interval.value;
     for (std::uint8_t range_index = 0; range_index < transport.range_count; ++range_index) {
         const auto& range = transport.ranges[range_index];
-        auto tick = ceil_multiple(range.timeline_tick_start.value, interval);
-        while (tick < range.timeline_tick_end.value) {
+        if (range.host_beat_mapping && !range.has_precise_host_ticks)
+            continue;
+        const auto precise_tick_start = static_cast<long double>(range.host_tick_start);
+        const auto precise_tick_end = static_cast<long double>(range.host_tick_end);
+        std::int64_t tick = 0;
+        const auto has_first_tick =
+            range.host_beat_mapping
+                ? first_metronome_tick(precise_tick_start, interval, tick)
+                : ceil_multiple(range.timeline_tick_start.value, interval, tick);
+        if (!has_first_tick)
+            continue;
+        while (range.host_beat_mapping ? static_cast<long double>(tick) < precise_tick_end
+                                       : tick < range.timeline_tick_end.value) {
             std::uint32_t mapped_offset = 0;
-            const auto mapped =
-                range.host_beat_mapping &&
-                host_mapped_output_offset_for_tick(range, {tick}, mapped_offset);
-            const auto sample =
-                mapped
-                    ? timebase::SamplePosition{
-                          range.timeline_sample_start.value +
-                          static_cast<std::int64_t>(mapped_offset)}
-                    : transport.tempo_map->ticks_to_samples({tick});
-            if (sample >= session_.count_in_start &&
-                (!session_.has_punch_out || sample < session_.punch_out) &&
-                sample >= range.timeline_sample_start) {
-                const auto delta =
-                    mapped ? static_cast<std::uint64_t>(mapped_offset)
-                           : static_cast<std::uint64_t>(sample.value) -
-                                 static_cast<std::uint64_t>(
-                                     range.timeline_sample_start.value);
-                if (delta < range.frame_count) {
-                    output.channel(
-                        session_.metronome_output_channel)[range.sample_offset +
-                                                           static_cast<std::uint32_t>(delta)] +=
-                        session_.metronome_level;
+            const auto mapped = !range.host_beat_mapping ||
+                                host_mapped_output_offset_for_tick(range, {tick}, mapped_offset);
+            if (mapped) {
+                const auto sample =
+                    range.host_beat_mapping
+                        ? timebase::SamplePosition{range.timeline_sample_start.value +
+                                                   static_cast<std::int64_t>(mapped_offset)}
+                        : transport.tempo_map->ticks_to_samples({tick});
+                if (sample >= session_.count_in_start &&
+                    (!session_.has_punch_out || sample < session_.punch_out) &&
+                    sample >= range.timeline_sample_start) {
+                    const auto delta =
+                        range.host_beat_mapping
+                            ? static_cast<std::uint64_t>(mapped_offset)
+                            : static_cast<std::uint64_t>(sample.value) -
+                                  static_cast<std::uint64_t>(range.timeline_sample_start.value);
+                    if (delta < range.frame_count) {
+                        output.channel(
+                            session_.metronome_output_channel)[range.sample_offset +
+                                                               static_cast<std::uint32_t>(delta)] +=
+                            session_.metronome_level;
+                    }
                 }
             }
             if (tick > std::numeric_limits<std::int64_t>::max() - interval)

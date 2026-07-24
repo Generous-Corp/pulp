@@ -6,6 +6,7 @@
 #include <pulp/playback/program_compiler.hpp>
 #include <pulp/playback/transport.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/runtime/url.hpp>
 #include <pulp/timeline/document_session.hpp>
 #include <pulp/timeline/schema_codegen.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -20,10 +21,12 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <new>
 #include <optional>
 #include <ostream>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <streambuf>
 #include <unordered_set>
 #include <utility>
@@ -105,8 +108,7 @@ std::optional<std::string> read_file(const fs::path& path,
 bool package_relative_hint_is_lexically_safe(std::string_view hint) {
     if (hint.empty() || hint.front() == '/' || hint.front() == '\\')
         return false;
-    if (hint.size() >= 2 && std::isalpha(static_cast<unsigned char>(hint[0])) &&
-        hint[1] == ':')
+    if (hint.size() >= 2 && std::isalpha(static_cast<unsigned char>(hint[0])) && hint[1] == ':')
         return false;
 
     std::size_t component_begin = 0;
@@ -129,6 +131,57 @@ bool path_is_beneath(const fs::path& base, const fs::path& candidate) {
             return false;
     }
     return base_component == base.end() && candidate_component != candidate.end();
+}
+
+bool has_uri_scheme(std::string_view hint) {
+    const auto colon = hint.find(':');
+    if (colon == std::string_view::npos || colon == 0)
+        return false;
+    if (colon == 1 && std::isalpha(static_cast<unsigned char>(hint.front())))
+        return false;
+    if (!std::isalpha(static_cast<unsigned char>(hint.front())))
+        return false;
+    return std::all_of(
+        hint.begin() + 1, hint.begin() + static_cast<std::ptrdiff_t>(colon), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '-' || c == '.';
+        });
+}
+
+std::optional<fs::path> resolve_external_asset(const fs::path& base, std::string_view hint) {
+    std::string decoded;
+    constexpr std::string_view file_scheme = "file://";
+    if (hint.starts_with(file_scheme)) {
+        auto rest = hint.substr(file_scheme.size());
+        if (rest.starts_with('/')) {
+            decoded = pulp::runtime::percent_decode(rest);
+        } else {
+            constexpr std::string_view localhost = "localhost";
+            if (!rest.starts_with(localhost) ||
+                (rest.size() > localhost.size() && rest[localhost.size()] != '/'))
+                return std::nullopt;
+            decoded = pulp::runtime::percent_decode(rest.substr(localhost.size()));
+        }
+#ifdef _WIN32
+        if (decoded.size() >= 3 && decoded.front() == '/' &&
+            std::isalpha(static_cast<unsigned char>(decoded[1])) && decoded[2] == ':')
+            decoded.erase(decoded.begin());
+#endif
+    } else {
+        if (has_uri_scheme(hint))
+            return std::nullopt;
+        decoded.assign(hint);
+    }
+    if (decoded.empty() || decoded.find('\0') != std::string::npos)
+        return std::nullopt;
+
+    try {
+        fs::path candidate(decoded);
+        if (candidate.is_relative())
+            candidate = base / candidate;
+        return candidate;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::optional<fs::path> resolve_package_relative_asset(const fs::path& canonical_base,
@@ -514,13 +567,10 @@ load_assets(const LoadedProject& project,
                     continue;
                 candidate = std::move(*resolved);
             } else {
-                try {
-                    candidate = fs::path(locator.hint);
-                } catch (...) {
+                auto resolved = resolve_external_asset(project.base_directory, locator.hint);
+                if (!resolved)
                     continue;
-                }
-                if (candidate.is_relative())
-                    candidate = project.base_directory / candidate;
+                candidate = std::move(*resolved);
             }
             std::error_code error;
             if (!fs::is_regular_file(candidate, error))
@@ -843,7 +893,15 @@ OperationResult render(std::string_view project, std::string_view output,
 
     pulp::audio::AudioFileData rendered;
     rendered.sample_rate = sample_rate;
-    rendered.channels.assign(channels, std::vector<float>(static_cast<std::size_t>(frames)));
+    try {
+        rendered.channels.reserve(channels);
+        for (std::uint32_t channel = 0; channel < channels; ++channel)
+            rendered.channels.emplace_back(static_cast<std::size_t>(frames));
+    } catch (const std::bad_alloc&) {
+        return failure("render", "could not allocate the in-memory render buffer");
+    } catch (const std::length_error&) {
+        return failure("render", "could not allocate the in-memory render buffer");
+    }
 
     MasterTransport transport;
     constexpr std::uint32_t block_size = 512;

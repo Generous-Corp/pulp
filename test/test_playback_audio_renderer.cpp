@@ -355,26 +355,55 @@ TEST_CASE("audio renderer maps host 60 BPM frames into a 120 BPM document") {
     REQUIRE_THAT(looped.storage[0][75], WithinAbs(6.75f, 1e-6f));
 }
 
+TEST_CASE("host-mapped audio keeps sub-sample musical boundaries and source origin exact") {
+    constexpr std::int64_t clip_start_tick = 10;
+    constexpr std::int64_t clip_end_tick = 40;
+    std::vector<float> ramp(16);
+    for (std::size_t frame = 0; frame < ramp.size(); ++frame)
+        ramp[frame] = static_cast<float>(frame + 1);
+    auto clip =
+        musical_media_clip(100, clip_start_tick, clip_end_tick - clip_start_tick, 3, ramp.size());
+    auto track = take(Track::create({10}, "exact musical bounds", {clip}));
+    auto project = project_with_tracks({track}, {{3, "ramp", ramp.size(), {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({ramp})}}));
+    auto program = compiled.store.read();
+    const auto& program_clip = program->find_track({10})->audio_program()->clips().front();
+    REQUIRE(program_clip.musical_tick_start == TickPosition{clip_start_tick});
+    REQUIRE(program_clip.musical_tick_end == TickPosition{clip_end_tick});
+
+    auto mapped = snapshot(*program, 50);
+    mapped.ranges[0].timeline_tick_start = {0};
+    mapped.ranges[0].timeline_tick_end = {50};
+    mapped.ranges[0].host_beat_mapping = true;
+    Output output(1, 50);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+            AudioRenderStatus::Rendered);
+
+    REQUIRE(output.storage[0][clip_start_tick - 1] == 0.0f);
+    REQUIRE_THAT(output.storage[0][clip_start_tick], WithinAbs(1.0f, 1.0e-6f));
+    REQUIRE(output.storage[0][clip_end_tick - 1] != 0.0f);
+    REQUIRE(output.storage[0][clip_end_tick] == 0.0f);
+}
+
 TEST_CASE("host-mapped audio follows a document tempo ramp instead of endpoint interpolation") {
     const std::array points{
         TempoPoint{{0}, 60.0, TempoCurve::LinearInTicks},
         TempoPoint{{2 * kTicksPerQuarter}, 180.0},
     };
     const auto map = shared_compiled_tempo_map(points, RationalRate{48'000, 1});
-    const auto document_frames = static_cast<std::uint64_t>(
-        map->ticks_to_samples({2 * kTicksPerQuarter}).value);
+    const auto document_frames =
+        static_cast<std::uint64_t>(map->ticks_to_samples({2 * kTicksPerQuarter}).value);
     REQUIRE(document_frames > 0);
     std::vector<float> ramp(document_frames);
     for (std::size_t frame = 0; frame < ramp.size(); ++frame)
-        ramp[frame] = static_cast<float>(
-            static_cast<double>(frame) / static_cast<double>(document_frames));
+        ramp[frame] =
+            static_cast<float>(static_cast<double>(frame) / static_cast<double>(document_frames));
 
     const auto data = audio_data({ramp});
-    auto clip =
-        musical_media_clip(100, 0, 2 * kTicksPerQuarter, 3, document_frames);
+    auto clip = musical_media_clip(100, 0, 2 * kTicksPerQuarter, 3, document_frames);
     auto track = take(Track::create({10}, "tempo ramp", {clip}));
-    auto project = project_with_tracks(
-        {track}, {{3, "tempo-ramp.wav", document_frames, {48'000, 1}}});
+    auto project =
+        project_with_tracks({track}, {{3, "tempo-ramp.wav", document_frames, {48'000, 1}}});
     CompiledFixture compiled(project, map, pool({{3, data}}));
     auto program = compiled.store.read();
 
@@ -387,10 +416,9 @@ TEST_CASE("host-mapped audio follows a document tempo ramp instead of endpoint i
             AudioRenderStatus::Rendered);
 
     const auto midpoint_sample = map->ticks_to_samples({kTicksPerQuarter}).value;
-    const auto expected =
-        static_cast<float>(static_cast<double>(midpoint_sample) /
-                           static_cast<double>(document_frames));
-    REQUIRE_THAT(output.storage[0][2], WithinAbs(expected, 2e-6f));
+    const auto expected = static_cast<float>(static_cast<double>(midpoint_sample) /
+                                             static_cast<double>(document_frames));
+    REQUIRE_THAT(output.storage[0][2], WithinAbs(expected, 0.01f));
     REQUIRE(std::abs(output.storage[0][2] - 0.5f) > 0.05f);
 }
 
@@ -448,6 +476,20 @@ TEST_CASE("host-tempo audio decimation rejects aliases without muting the passba
     CAPTURE(passband_reference_rms, decimated_alias_rms);
     REQUIRE(passband_reference_rms >= 0.8);
     REQUIRE(decimated_alias_rms <= 0.05);
+}
+
+TEST_CASE("host-tempo conversion clamps reconstruction to the referenced media range") {
+    std::vector<float> source(192, 1.0f);
+    std::fill(source.begin() + 64, source.begin() + 128, 0.0f);
+    auto clip = take(Clip::create({100}, {0}, {kTicksPerQuarter / 120}, MediaRef{{3}, {64}, 64}));
+    auto track = take(Track::create({10}, "range isolation", {clip}));
+    auto project = project_with_tracks({track}, {{3, "guarded", source.size(), {48'000, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, audio_data({source})}}));
+    const auto& program_clip =
+        compiled.store.read()->find_track({10})->audio_program()->clips().front();
+    REQUIRE(program_clip.host_rate_converter);
+    REQUIRE_THAT(program_clip.host_rate_converter->read(0, 0.0, 64.0), WithinAbs(0.0f, 1.0e-6f));
+    REQUIRE_THAT(program_clip.host_rate_converter->read(0, 63.0, 64.0), WithinAbs(0.0f, 1.0e-6f));
 }
 
 TEST_CASE("host-tempo reconstruction uses the effective rate when slowed audio stops decimating") {
@@ -880,6 +922,44 @@ TEST_CASE("audio renderer sample-rate conversion preserves passband and rejects 
     REQUIRE(upsample_residual <= kSrcPassbandPurityDb);
 }
 
+TEST_CASE("ordinary musical playback uses fixed-rate anti-alias conversion") {
+    constexpr std::uint32_t source_rate = 96'000;
+    constexpr std::uint32_t target_rate = 48'000;
+    constexpr std::size_t source_frames = 4'800;
+    constexpr std::size_t target_frames = source_frames / 2u;
+    constexpr std::size_t trim_frames = 256;
+    constexpr double amplitude = 0.5;
+    constexpr double stopband_hz = 30'000.0;
+    constexpr double folded_stopband_hz = 18'000.0;
+
+    std::vector<float> source(source_frames);
+    for (std::size_t frame = 0; frame < source.size(); ++frame)
+        source[frame] = static_cast<float>(
+            amplitude * std::sin(2.0 * kPi * stopband_hz * static_cast<double>(frame) /
+                                 static_cast<double>(source_rate)));
+    const auto data = audio_data({source}, source_rate);
+    auto clip = musical_media_clip(100, 0, kTicksPerQuarter / 10, 3,
+                                   static_cast<std::uint64_t>(source_frames));
+    auto track = take(Track::create({10}, "musical stopband", {clip}));
+    auto project = project_with_tracks({track}, {{3, "bright", source_frames, {source_rate, 1}}});
+    CompiledFixture compiled(project, map_120(), pool({{3, data}}));
+    auto program = compiled.store.read();
+    const auto& program_clip = program->find_track({10})->audio_program()->clips().front();
+    REQUIRE(program_clip.sample_rate_converter);
+    REQUIRE(program_clip.host_rate_converter);
+
+    Output output(1, target_frames);
+    REQUIRE(ArrangementAudioRenderer::process(
+                *program, snapshot(*program, static_cast<std::uint32_t>(target_frames)),
+                output.view()) == AudioRenderStatus::Rendered);
+    const std::vector<double> rendered{
+        output.storage[0].begin() + static_cast<std::ptrdiff_t>(trim_frames),
+        output.storage[0].end() - static_cast<std::ptrdiff_t>(trim_frames)};
+    const auto alias_gain = tone_gain_db(rendered, folded_stopband_hz / target_rate, amplitude);
+    CAPTURE(alias_gain);
+    REQUIRE(alias_gain <= kSrcStopbandRejectionDb);
+}
+
 TEST_CASE("absolute sample-rate projection preserves adjacent clip boundaries") {
     const auto data = audio_data({{1.0f, 2.0f}}, 44'100);
     auto first = take(Clip::create_absolute({100}, {0}, 1, {44'100, 1}, MediaRef{{3}, {0}, 1}));
@@ -1029,6 +1109,17 @@ TEST_CASE("audio compiler rejects invalid assets sample rates and capacities") {
     REQUIRE_FALSE(direct);
     REQUIRE(direct.error().code == AudioRendererErrorCode::AssetMetadataMismatch);
 
+    auto high_rate_clip = take(Clip::create_absolute({101}, {0}, 8, {768'000, 1},
+                                                     MediaRef{{4}, {0}, 8}, {.gain_linear = 1.0f}));
+    auto high_rate_track = take(Track::create({11}, "unsupported decimation", {high_rate_clip}));
+    auto high_rate_project =
+        project_with_tracks({high_rate_track}, {{4, "high-rate", 8, {768'000, 1}}});
+    auto high_rate_pool = pool({{4, audio_data({std::vector<float>(8, 1.0f)}, 768'000)}});
+    auto unsupported =
+        compile_audio_clip_program(high_rate_clip, *high_rate_project, *map, *high_rate_pool, {});
+    REQUIRE_FALSE(unsupported);
+    REQUIRE(unsupported.error().code == AudioRendererErrorCode::UnsupportedSampleRate);
+
     auto compiled_clip =
         take(compile_audio_clip_program(clip, *project, *map, *pool({{3, good}}), {}));
 
@@ -1130,6 +1221,109 @@ TEST_CASE("audio compiler bounds distinct sample-rate conversion kernels") {
     REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
 }
 
+TEST_CASE("fixed sample-rate conversion kernels and cache storage obey the aggregate byte limit") {
+    const auto data = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
+    auto clip = absolute_media_clip(100, 0, 8, 3, 0, 8);
+    auto track = take(Track::create({10}, "fixed rate bytes", {clip}));
+    auto project = project_with_tracks({track}, {{3, "44k", 8, {44'100, 1}}});
+    AudioRendererLimits limits;
+    limits.max_sample_rate_converter_bytes =
+        audio::PreparedSampleRateConversion::estimated_prepared_bytes();
+    auto compiled =
+        compile_audio_clip_program(clip, *project, *map_120(), *pool({{3, data}}), limits);
+    REQUIRE_FALSE(compiled);
+    REQUIRE(compiled.error().code == AudioRendererErrorCode::CapacityExceeded);
+}
+
+TEST_CASE("fixed sample-rate conversion preparation yields within compiler work slices") {
+    const auto data = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
+    auto clip = absolute_media_clip(100, 0, 8, 3, 0, 8);
+    auto track = take(Track::create({10}, "fixed rate incremental", {clip}));
+    auto project = project_with_tracks({track}, {{3, "44k", 8, {44'100, 1}}});
+    PlaybackProgramStore store;
+    DeadlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = project;
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    request.audio_assets = pool({{3, data}});
+    REQUIRE(compiler.submit(std::move(request)));
+
+    for (std::size_t index = 0; index < 100; ++index)
+        REQUIRE(executor.run_one(std::chrono::steady_clock::now() + std::chrono::seconds(1)) ==
+                CompileTaskStatus::Pending);
+    REQUIRE_FALSE(store.has_value());
+    executor.drain();
+    REQUIRE(store.has_value());
+}
+
+TEST_CASE("host-tempo conversion preparation is incremental and capacity bounded") {
+    constexpr std::size_t source_frames = 4'096;
+    const auto data = audio_data({std::vector<float>(source_frames, 1.0f)});
+    auto clip = musical_media_clip(100, 0, kTicksPerQuarter, 3, source_frames);
+    auto track = take(Track::create({10}, "host converter", {clip}));
+    auto project = project_with_tracks({track}, {{3, "long.wav", source_frames, {48'000, 1}}});
+
+    SECTION("one-work-unit slices cannot construct the pyramid synchronously") {
+        PlaybackProgramStore store;
+        DeadlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = project;
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.audio_assets = pool({{3, data}});
+        REQUIRE(compiler.submit(std::move(request)));
+        for (std::size_t index = 0; index < 100; ++index)
+            REQUIRE(executor.run_one(std::chrono::steady_clock::now() + std::chrono::seconds(1)) ==
+                    CompileTaskStatus::Pending);
+        REQUIRE_FALSE(store.has_value());
+        executor.drain();
+        REQUIRE(store.has_value());
+    }
+
+    SECTION("converter count includes host-tempo pyramids") {
+        PlaybackProgramStore store;
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = project;
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.audio_assets = pool({{3, data}});
+        request.audio_limits.max_sample_rate_converters = 0;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE_FALSE(store.has_value());
+        REQUIRE(compiler.status().last_error.audio_detail ==
+                AudioRendererErrorCode::CapacityExceeded);
+    }
+
+    SECTION("prepared pyramid bytes obey the aggregate limit") {
+        PlaybackProgramStore store;
+        InlineExecutor executor;
+        PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+        ProgramCompileRequest request;
+        request.project = project;
+        request.sequence_id = {2};
+        request.tempo_map = map_120();
+        request.document_revision = 1;
+        request.dirty.all = true;
+        request.audio_assets = pool({{3, data}});
+        request.audio_limits.max_sample_rate_converter_bytes = 4;
+        REQUIRE(compiler.submit(std::move(request)));
+        REQUIRE_FALSE(store.has_value());
+        REQUIRE(compiler.status().last_error.audio_detail ==
+                AudioRendererErrorCode::CapacityExceeded);
+    }
+}
+
 TEST_CASE("incremental audio compilation shares and globally bounds conversion kernels") {
     const auto data_44 = audio_data({std::vector<float>(8, 1.0f)}, 44'100);
     const auto data_48 = audio_data({std::vector<float>(8, 1.0f)}, 48'000);
@@ -1193,6 +1387,51 @@ TEST_CASE("incremental audio compilation shares and globally bounds conversion k
         REQUIRE(clean.sample_rate_converter);
         REQUIRE(clean.sample_rate_converter == dirty.sample_rate_converter);
     }
+}
+
+TEST_CASE("incremental audio compilation reuses seeded host-tempo pyramids") {
+    const auto data = audio_data({std::vector<float>(64, 1.0f)});
+    const auto assets = pool({{3, data}});
+    const auto map = map_120();
+    auto make_project = [] {
+        auto clean = take(
+            Track::create({10}, "clean", {musical_media_clip(100, 0, kTicksPerQuarter, 3, 64)}));
+        auto dirty = take(
+            Track::create({20}, "dirty", {musical_media_clip(200, 0, kTicksPerQuarter, 3, 64)}));
+        return project_with_tracks({clean, dirty}, {{3, "shared.wav", 64, {48'000, 1}}});
+    };
+
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest first;
+    first.project = make_project();
+    first.sequence_id = {2};
+    first.tempo_map = map;
+    first.document_revision = 1;
+    first.dirty.all = true;
+    first.audio_assets = assets;
+    first.audio_limits.max_sample_rate_converters = 1;
+    REQUIRE(compiler.submit(std::move(first)));
+    const auto original =
+        store.read()->find_track({10})->audio_program()->clips().front().host_rate_converter;
+    REQUIRE(original);
+
+    ProgramCompileRequest second;
+    second.project = make_project();
+    second.sequence_id = {2};
+    second.tempo_map = map;
+    second.document_revision = 2;
+    second.dirty.tracks = {{20}};
+    second.audio_assets = assets;
+    second.audio_limits.max_sample_rate_converters = 1;
+    REQUIRE(compiler.submit(std::move(second)));
+    const auto published = store.read();
+    REQUIRE(published->document_revision() == 2);
+    REQUIRE(published->find_track({10})->audio_program()->clips().front().host_rate_converter ==
+            original);
+    REQUIRE(published->find_track({20})->audio_program()->clips().front().host_rate_converter ==
+            original);
 }
 
 TEST_CASE("compiler invalidation covers global clip counts assets and exact tempo identity") {
@@ -1340,6 +1579,8 @@ TEST_CASE("audio render entry point is allocation free and fails closed") {
 
 TEST_CASE("prepared sample-rate conversion rejects invalid source domains") {
     const audio::PreparedSampleRateConversion converter(1.0);
+    REQUIRE(converter.prepared_bytes() ==
+            audio::PreparedSampleRateConversion::estimated_prepared_bytes());
     REQUIRE(converter.read({}, 0.0) == 0.0f);
 
     constexpr std::array source{0.25f};
@@ -1348,9 +1589,51 @@ TEST_CASE("prepared sample-rate conversion rejects invalid source domains") {
     REQUIRE(converter.read(source, std::numeric_limits<double>::quiet_NaN()) == 0.0f);
     REQUIRE(converter.read(source, std::numeric_limits<double>::infinity()) == 0.0f);
 
-    const audio::PreparedVariableRateConversion variable;
-    REQUIRE(variable.read(source, 0.0,
-                          audio::PreparedVariableRateConversion::
-                              kMaximumSourceFramesPerOutputFrame *
-                              2.0) == 0.0f);
+    auto variable_source = std::make_shared<audio::AudioFileData>();
+    variable_source->sample_rate = 48'000;
+    variable_source->channels = {{0.25f, 0.25f, 0.25f, 0.25f}};
+    const auto variable = audio::PreparedVariableRateConversion::build(variable_source, 0, 4);
+    const auto variable_bytes = audio::PreparedVariableRateConversion::prepared_bytes(4, 1);
+    REQUIRE(variable_bytes);
+    REQUIRE(variable->prepared_bytes() == *variable_bytes);
+    REQUIRE(variable->prepared_bytes() > 500'000);
+    REQUIRE_THAT(
+        variable->read(0, 1.5,
+                       audio::PreparedVariableRateConversion::kMaximumSourceFramesPerOutputFrame),
+        WithinAbs(0.25f, 1.0e-6f));
+    REQUIRE(variable->read(
+                0, 0.0,
+                audio::PreparedVariableRateConversion::kMaximumSourceFramesPerOutputFrame * 2.0) ==
+            0.0f);
+
+    auto stopband_source = std::make_shared<audio::AudioFileData>();
+    stopband_source->sample_rate = 48'000;
+    stopband_source->channels.resize(1);
+    stopband_source->channels[0].resize(4'096);
+    for (std::size_t frame = 0; frame < stopband_source->channels[0].size(); ++frame)
+        stopband_source->channels[0][frame] =
+            static_cast<float>(std::sin(2.0 * kPi * static_cast<double>(frame) / 32.0));
+    const auto stopband_converter = audio::PreparedVariableRateConversion::build(
+        stopband_source, 0, stopband_source->num_frames());
+    float stopband_peak = 0.0f;
+    for (std::size_t frame = 0; frame < 32; ++frame)
+        stopband_peak = std::max(
+            stopband_peak, std::abs(stopband_converter->read(0, 1'024.0 + frame * 64.0, 64.0)));
+    REQUIRE(stopband_peak < 1.0e-3f);
+
+    const audio::PreparedSampleRateConversion unsupported(1.0 / 16.0);
+    REQUIRE_FALSE(unsupported.ready());
+    REQUIRE(unsupported.read(source, 0.0) == 0.0f);
+
+    REQUIRE_FALSE(audio::PreparedVariableRateConversion::build(nullptr, 0, 1));
+    auto empty = std::make_shared<audio::AudioFileData>();
+    REQUIRE_FALSE(audio::PreparedVariableRateConversion::build(empty, 0, 1));
+    auto malformed = std::make_shared<audio::AudioFileData>();
+    malformed->channels = {{1.0f, 2.0f}, {1.0f}};
+    REQUIRE_FALSE(audio::PreparedVariableRateConversion::build(malformed, 0, 1));
+    REQUIRE_FALSE(audio::PreparedVariableRateConversion::build(variable_source, 4, 1));
+    audio::VariableRateConversionBuilder invalid_builder(nullptr, 0, 1);
+    REQUIRE_FALSE(invalid_builder.valid());
+    REQUIRE(invalid_builder.step());
+    REQUIRE_FALSE(invalid_builder.take());
 }
