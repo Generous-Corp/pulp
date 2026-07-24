@@ -64,10 +64,13 @@ void square_task(void* ctx, std::uint32_t i) noexcept {
 }
 
 bool wait_for_progress(const std::atomic<std::uint64_t>& counter) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    // A busy yield loop can repeatedly win the scheduler on low-core hosted
+    // macOS runners and starve the driver thread this probe is waiting for.
+    // Poll with a short sleep and keep the deadline diagnostic-only.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (counter.load(std::memory_order_relaxed) == 0 &&
            std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     return counter.load(std::memory_order_relaxed) > 0;
 }
