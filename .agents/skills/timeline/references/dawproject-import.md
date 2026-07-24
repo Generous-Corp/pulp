@@ -1,16 +1,16 @@
 # DAWproject import
 
-`import_dawproject_xml` (`core/timeline/import/dawproject_import.cpp`) builds a
+`import_dawproject_xml` (`core/dawproject/src/dawproject_import.cpp`) builds a
 `Project` from a DAWproject `project.xml` for the documented linear subset:
 single tempo/meter, flat tracks, and beats-timed `<Notes>`/`<Audio>` clips. It
 consumes only the model's public construction API and never changes the model
 layout.
 
-- Keep foreign-format and heavy-dependency interop in `import/`, not `src/`.
-  The web timeline-source-closure gate sweeps every `core/timeline/src/*.cpp`
-  into WAM/WebCLAP, which do not link `pulp-runtime`; the importer needs
-  pugixml.
-- Compile under the timeline library's `-fno-exceptions -fno-rtti` contract.
+- Keep foreign-format and heavy-dependency interop in the dedicated
+  `pulp::dawproject-import` target, not the dependency-minimal
+  `pulp::timeline` target. The importer may depend on `pulp::audio` for media
+  inspection; Timeline itself must remain below Audio.
+- Compile under the importer's `-fno-exceptions -fno-rtti` contract.
   Use pugixml DOM traversal, never its throwing XPath API. The runtime XML
   wrapper is too weak to correlate clips with parent lanes, so include pugixml
   privately and reuse the object code already in `pulp::runtime`.

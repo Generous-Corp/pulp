@@ -8,6 +8,7 @@
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 
 namespace pulp::timeline {
@@ -125,6 +126,10 @@ class StructuralScanner {
     bool member(Span object, std::string_view wanted, Span& result, bool& found) {
         return reader_.member(object, wanted, result, found) || adopt_reader_error();
     }
+    bool members(Span object, std::span<detail::JsonSpanMember> wanted,
+                 std::size_t* member_count = nullptr) {
+        return reader_.members(object, wanted, member_count) || adopt_reader_error();
+    }
     bool string_value(Span span, std::string& value) {
         return reader_.string_value(span, value) || adopt_reader_error();
     }
@@ -132,72 +137,26 @@ class StructuralScanner {
         return reader_.u32_value(span, value);
     }
 
-    bool exact_envelope_keys(Span object, bool& exact) {
-        exact = false;
-        std::size_t position = object.begin;
-        skip_space(position);
-        if (position >= object.end || source_[position++] != '{')
-            return true;
-        std::size_t members = 0;
-        bool data = false;
-        bool type = false;
-        bool version = false;
-        skip_space(position);
-        if (position < object.end && source_[position] == '}')
-            return true;
-        for (;;) {
-            skip_space(position);
-            std::string key;
-            if (!scan_string(position, &key))
-                return false;
-            skip_space(position);
-            if (position >= object.end || source_[position++] != ':') {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-            Span value;
-            if (!skip_value(position, 1, value))
-                return false;
-            ++members;
-            if (key == "data")
-                data = true;
-            else if (key == "type_name")
-                type = true;
-            else if (key == "version")
-                version = true;
-            skip_space(position);
-            if (position < object.end && source_[position] == '}')
-                break;
-            if (position >= object.end || source_[position++] != ',') {
-                set_error(PersistenceErrorCode::InvalidJson, position);
-                return false;
-            }
-        }
-        exact = members == 3 && data && type && version;
-        return true;
-    }
-
     bool envelope(Span value, std::string& type, std::uint32_t& version, Span& data,
                   bool& valid_shape) {
-        Span type_span;
-        Span version_span;
-        bool has_type = false;
-        bool has_version = false;
-        bool has_data = false;
-        bool exact_keys = false;
-        if (!exact_envelope_keys(value, exact_keys) ||
-            !member(value, "type_name", type_span, has_type) ||
-            !member(value, "version", version_span, has_version) ||
-            !member(value, "data", data, has_data))
+        std::array requested{
+            detail::JsonSpanMember{"data"},
+            detail::JsonSpanMember{"type_name"},
+            detail::JsonSpanMember{"version"},
+        };
+        std::size_t member_count = 0;
+        if (!members(value, requested, &member_count))
             return false;
         valid_shape = false;
-        if (!has_type)
+        if (!requested[1].found)
             return true;
-        if (!string_value(type_span, type))
+        if (!string_value(requested[1].span, type))
             return false;
-        if (!has_version || !has_data)
+        if (!requested[2].found || !requested[0].found)
             return true;
-        valid_shape = exact_keys && u32_value(version_span, version) && data.begin < data.end &&
+        data = requested[0].span;
+        valid_shape = member_count == requested.size() &&
+                      u32_value(requested[2].span, version) && data.begin < data.end &&
                       source_[data.begin] == '{';
         return true;
     }
@@ -253,6 +212,17 @@ class StructuralScanner {
         return false;
     }
 
+    bool require_shape(const detail::JsonSpanMember& member, std::uint8_t allowed,
+                       std::size_t object_offset, const std::string& path,
+                       PersistenceErrorCode missing_code = PersistenceErrorCode::InvalidSchema) {
+        if (member.found && has_shape(member.span, allowed))
+            return true;
+        set_error(member.found ? PersistenceErrorCode::InvalidSchema : missing_code,
+                  member.found ? member.span.begin : object_offset, 0, 0,
+                  path + "/" + std::string(member.name));
+        return false;
+    }
+
     template <typename ElementFn>
     bool governed_array(Span array, std::size_t& count, std::size_t maximum,
                         const std::string& path, ElementFn&& visit) {
@@ -301,31 +271,34 @@ class StructuralScanner {
         }
         if (!require_structural_shape(valid_shape, version, "", value.begin))
             return false;
-        Span id;
-        Span name;
-        Span next;
-        Span root;
-        bool has_id = false;
-        bool has_name = false;
-        bool has_next = false;
-        bool has_root = false;
-        if (!member(data, "id", id, has_id) || !member(data, "name", name, has_name) ||
-            !member(data, "next_item_id", next, has_next) ||
-            !member(data, "root_sequence_id", root, has_root))
+        std::array requested{
+            detail::JsonSpanMember{"assets"},
+            detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"name"},
+            detail::JsonSpanMember{"next_item_id"},
+            detail::JsonSpanMember{"root_sequence_id"},
+            detail::JsonSpanMember{"sequences"},
+        };
+        if (!members(data, requested))
             return false;
+        const auto assets = requested[0].span;
+        const auto id = requested[1].span;
+        const auto name = requested[2].span;
+        const auto next = requested[3].span;
+        const auto root = requested[4].span;
+        const auto sequences = requested[5].span;
+        const auto has_assets = requested[0].found;
+        const auto has_id = requested[1].found;
+        const auto has_name = requested[2].found;
+        const auto has_next = requested[3].found;
+        const auto has_root = requested[4].found;
+        const auto has_sequences = requested[5].found;
         if (!has_id || !has_name || !has_next || !has_root || !has_shape(id, StringShape) ||
             !has_shape(name, StringShape) || !has_shape(next, StringShape) ||
             !has_shape(root, StringShape)) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, "/data");
             return false;
         }
-        Span assets;
-        Span sequences;
-        bool has_assets = false;
-        bool has_sequences = false;
-        if (!member(data, "assets", assets, has_assets) ||
-            !member(data, "sequences", sequences, has_sequences))
-            return false;
         if (!has_assets || !has_sequences) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, "/data");
             return false;
@@ -490,19 +463,25 @@ class StructuralScanner {
         if (!require_structural_shape(valid_shape, version, path, value.begin))
             return false;
         const auto data_path = path + "/data";
-        if (!require_member(data, "absolute_duration", ObjectShape | NullShape, data_path) ||
-            !require_member(data, "id", StringShape, data_path) ||
-            !require_member(data, "musical_duration", StringShape | NullShape, data_path) ||
-            !require_member(data, "name", StringShape, data_path))
+        std::array requested{
+            detail::JsonSpanMember{"absolute_duration"},
+            detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"musical_duration"},
+            detail::JsonSpanMember{"name"},
+            detail::JsonSpanMember{"tracks"},
+        };
+        if (!members(data, requested))
             return false;
-        Span tracks;
-        bool found = false;
-        if (!member(data, "tracks", tracks, found))
+        if (!require_shape(requested[0], ObjectShape | NullShape, data.begin, data_path) ||
+            !require_shape(requested[1], StringShape, data.begin, data_path) ||
+            !require_shape(requested[2], StringShape | NullShape, data.begin, data_path) ||
+            !require_shape(requested[3], StringShape, data.begin, data_path))
             return false;
-        if (!found) {
+        if (!requested[4].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
+        const auto tracks = requested[4].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
@@ -526,27 +505,32 @@ class StructuralScanner {
                                       detail::track_schema_policy.current_version))
             return false;
         const auto data_path = path + "/data";
-        if (!require_member(data, "id", StringShape, data_path) ||
-            !require_member(data, "name", StringShape, data_path))
+        std::array requested{
+            detail::JsonSpanMember{"automation_lanes"},
+            detail::JsonSpanMember{"clips"},
+            detail::JsonSpanMember{"device_chain"},
+            detail::JsonSpanMember{"freeze"},
+            detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"name"},
+            detail::JsonSpanMember{"record_armed"},
+            detail::JsonSpanMember{"take_lanes"},
+        };
+        if (!members(data, requested))
             return false;
-        Span clips;
-        Span devices;
-        Span automation;
-        Span take_lanes;
-        Span freeze;
-        Span record_armed;
-        bool has_clips = false;
-        bool has_devices = false;
-        bool has_automation = false;
-        bool has_take_lanes = false;
-        bool has_freeze = false;
-        bool has_record_armed = false;
-        if (!member(data, "clips", clips, has_clips) ||
-            !member(data, "device_chain", devices, has_devices) ||
-            !member(data, "automation_lanes", automation, has_automation) ||
-            !member(data, "take_lanes", take_lanes, has_take_lanes) ||
-            !member(data, "freeze", freeze, has_freeze) ||
-            !member(data, "record_armed", record_armed, has_record_armed))
+        const auto automation = requested[0].span;
+        const auto clips = requested[1].span;
+        const auto devices = requested[2].span;
+        const auto freeze = requested[3].span;
+        const auto record_armed = requested[6].span;
+        const auto take_lanes = requested[7].span;
+        const auto has_automation = requested[0].found;
+        const auto has_clips = requested[1].found;
+        const auto has_devices = requested[2].found;
+        const auto has_freeze = requested[3].found;
+        const auto has_record_armed = requested[6].found;
+        const auto has_take_lanes = requested[7].found;
+        if (!require_shape(requested[4], StringShape, data.begin, data_path) ||
+            !require_shape(requested[5], StringShape, data.begin, data_path))
             return false;
         const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
         const auto requires_automation = detail::track_schema_policy.requires_automation(version);
@@ -771,18 +755,21 @@ class StructuralScanner {
         if (!require_structural_shape(valid_shape, version, path, value.begin))
             return false;
         const auto data_path = path + "/data";
-        if (!require_member(data, "id", StringShape, data_path) ||
-            !require_member(data, "time_range", ObjectShape, data_path))
+        std::array requested{
+            detail::JsonSpanMember{"content"},
+            detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"time_range"},
+        };
+        if (!members(data, requested) ||
+            !require_shape(requested[1], StringShape, data.begin, data_path) ||
+            !require_shape(requested[2], ObjectShape, data.begin, data_path))
             return false;
-        Span content;
-        bool found = false;
-        if (!member(data, "content", content, found))
-            return false;
-        if (!found) {
+        if (!requested[0].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       path + "/data/content");
             return false;
         }
+        const auto content = requested[0].span;
         std::string content_type;
         Span content_data;
         if (!envelope(content, content_type, version, content_data, valid_shape))

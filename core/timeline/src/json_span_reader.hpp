@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -12,6 +13,15 @@ namespace pulp::timeline::detail {
 struct JsonSpan {
     std::size_t begin = 0;
     std::size_t end = 0;
+};
+
+struct JsonSpanMember {
+    explicit constexpr JsonSpanMember(std::string_view member_name) noexcept
+        : name(member_name) {}
+
+    std::string_view name;
+    JsonSpan span;
+    bool found = false;
 };
 
 class JsonSpanReader {
@@ -23,6 +33,8 @@ class JsonSpanReader {
                      std::size_t capture_limit = 128);
     bool skip_value(std::size_t& position, std::size_t depth, JsonSpan& span);
     bool member(JsonSpan object, std::string_view wanted, JsonSpan& result, bool& found);
+    bool members(JsonSpan object, std::span<JsonSpanMember> wanted,
+                 std::size_t* member_count = nullptr);
     bool string_value(JsonSpan span, std::string& value);
     bool decoded_string(JsonSpan span, std::string& value, std::string path);
     bool canonical_u64(JsonSpan span, std::uint64_t& value, std::string path);

@@ -1,6 +1,7 @@
 #include "json_span_reader.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <limits>
 
@@ -237,7 +238,22 @@ bool JsonSpanReader::skip_value(std::size_t& position, std::size_t depth, JsonSp
 
 bool JsonSpanReader::member(JsonSpan object, std::string_view wanted, JsonSpan& result,
                             bool& found) {
-    found = false;
+    std::array requested{JsonSpanMember{wanted}};
+    if (!members(object, requested))
+        return false;
+    result = requested.front().span;
+    found = requested.front().found;
+    return true;
+}
+
+bool JsonSpanReader::members(JsonSpan object, std::span<JsonSpanMember> wanted,
+                             std::size_t* member_count) {
+    for (auto& request : wanted) {
+        request.span = {};
+        request.found = false;
+    }
+    if (member_count)
+        *member_count = 0;
     std::size_t position = object.begin;
     skip_space(position);
     if (position >= object.end || source_[position++] != '{')
@@ -258,13 +274,17 @@ bool JsonSpanReader::member(JsonSpan object, std::string_view wanted, JsonSpan& 
         JsonSpan value;
         if (!skip_value(position, 1, value))
             return false;
-        if (key == wanted) {
-            if (found) {
-                set_error(PersistenceErrorCode::DuplicateKey, object.begin);
-                return false;
+        if (member_count)
+            ++*member_count;
+        for (auto& request : wanted) {
+            if (key == request.name) {
+                if (request.found) {
+                    set_error(PersistenceErrorCode::DuplicateKey, object.begin);
+                    return false;
+                }
+                request.found = true;
+                request.span = value;
             }
-            found = true;
-            result = value;
         }
         skip_space(position);
         if (position < object.end && source_[position] == '}')

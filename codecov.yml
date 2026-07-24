@@ -201,6 +201,10 @@ flags:
     paths:
       - core/canvas/
     carryforward: true
+  dawproject:
+    paths:
+      - core/dawproject/
+    carryforward: true
   dsl:
     paths:
       - core/dsl/
@@ -403,6 +407,9 @@ component_management:
       paths:
         - "core/canvas/**"
         - "!core/canvas/platform/**"
+    - component_id: dawproject
+      name: dawproject
+      paths: ["core/dawproject/**"]
     - component_id: dsl
       name: dsl
       paths: ["core/dsl/**"]

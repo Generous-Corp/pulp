@@ -337,6 +337,15 @@ inline uint32_t params_count(const clap_plugin_t* plugin) {
     return static_cast<uint32_t>(self->store.param_count());
 }
 
+inline uint32_t params_flags(const state::ParamInfo& parameter) {
+    uint32_t flags = CLAP_PARAM_IS_AUTOMATABLE;
+    const bool is_bypass = state::is_bypass_param(parameter);
+    if (state::is_discrete_param(parameter) || is_bypass)
+        flags |= CLAP_PARAM_IS_STEPPED;
+    if (is_bypass) flags |= CLAP_PARAM_IS_BYPASS;
+    return flags;
+}
+
 inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_param_info_t* info) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     auto params = self->store.all_params();
@@ -348,10 +357,7 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     info->min_value = p.range.min;
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;
-    info->flags = CLAP_PARAM_IS_AUTOMATABLE;
-    if (state::is_discrete_param(p))
-        info->flags |= CLAP_PARAM_IS_STEPPED;
-    if (state::is_bypass_param(p)) info->flags |= CLAP_PARAM_IS_BYPASS;
+    info->flags = params_flags(p);
     return true;
 }
 

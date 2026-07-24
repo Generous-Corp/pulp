@@ -108,10 +108,10 @@ set_tests_properties(cmake-pulp-install-layout PROPERTIES
     LABELS "cmake;binary-data;issue-905;slow"
     TIMEOUT 120)
 
-# Installed Creative Timeline Engine consumer. The fixture requests only the
-# three public engine components, builds and runs outside the source tree, and
-# audits the resulting ten first-party libraries plus six support archives for
-# forbidden UI/GPU/host baggage.
+# Installed Creative Timeline Engine consumer. The fixture requests the three
+# public engine components plus the optional DAWproject importer, builds and
+# runs outside the source tree, and audits both target closures for forbidden
+# UI/GPU/host baggage.
 add_test(NAME cmake-timeline-sdk-consumer
     COMMAND ${CMAKE_COMMAND}
         -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}

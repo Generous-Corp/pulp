@@ -56,6 +56,22 @@ host targets enter the closure.
 Plugin hosting is deliberately outside the engine. A desktop integration
 adapts its own instrument/effect ports; the caller owns audio-device I/O.
 
+## Optional DAWproject importer
+
+Foreign-format import stays outside the dependency-minimal Timeline model.
+Applications that ingest DAWproject `project.xml` files request and link the
+dedicated importer:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS dawproject-import)
+target_link_libraries(my_timeline_app PRIVATE Pulp::dawproject-import)
+```
+
+`Pulp::dawproject-import` adds the importer implementation and its audio/WAV
+dependency to the closure, and exposes
+`pulp::timeline::import_dawproject_xml`. Applications that only create or
+deserialize native Pulp projects do not link that importer implementation.
+
 ## Optional plugin-format adapter
 
 `Pulp::sequence` is an exported integration layer for applications that need to

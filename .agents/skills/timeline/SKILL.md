@@ -19,6 +19,8 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   playback derivation in `PlaybackProgramCompiler`, realtime rendering behind
   immutable programs and transport snapshots, and capture publication as
   ordinary timeline commands.
+- Link the optional `Pulp::dawproject-import` SDK target only when ingesting
+  DAWproject XML; keep the dependency-minimal model on `Pulp::timeline`.
 - Use the generated schema surfaces to discover command/document shapes; do
   not hand-copy schema vocabularies into a client.
 

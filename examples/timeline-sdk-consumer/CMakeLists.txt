@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
 project(PulpTimelineSdkConsumer VERSION 0.1.0 LANGUAGES CXX)
 
-find_package(Pulp REQUIRED COMPONENTS timebase timeline playback)
+find_package(Pulp REQUIRED COMPONENTS timebase timeline playback dawproject-import)
 
-foreach(_component timebase timeline playback)
+foreach(_component timebase timeline playback dawproject-import)
     if(NOT Pulp_${_component}_FOUND)
         message(FATAL_ERROR "Pulp did not report required component ${_component}")
     endif()
@@ -14,6 +14,11 @@ target_link_libraries(pulp-timeline-sdk-consumer PRIVATE
     Pulp::timebase
     Pulp::timeline
     Pulp::playback
+)
+
+add_executable(pulp-dawproject-import-sdk-consumer dawproject_import.cpp)
+target_link_libraries(pulp-dawproject-import-sdk-consumer PRIVATE
+    Pulp::dawproject-import
 )
 
 # Audit the installed target graph, not a hand-maintained dependency list.
@@ -84,5 +89,47 @@ foreach(_forbidden
     if(_forbidden IN_LIST _actual_closure)
         message(FATAL_ERROR
             "Timeline SDK unexpectedly pulled ${_forbidden} into its link closure")
+    endif()
+endforeach()
+
+set_property(GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE "")
+_pulp_collect_dependencies(Pulp::dawproject-import)
+get_property(_actual_importer_closure GLOBAL PROPERTY PULP_TIMELINE_SDK_CLOSURE)
+list(REMOVE_DUPLICATES _actual_importer_closure)
+list(SORT _actual_importer_closure)
+
+set(_expected_importer_closure
+    Pulp::audio
+    Pulp::dawproject-import
+    Pulp::events
+    Pulp::everest
+    Pulp::hwy
+    Pulp::mbedcrypto
+    Pulp::mbedtls
+    Pulp::mbedx509
+    Pulp::midi
+    Pulp::p256m
+    Pulp::platform
+    Pulp::runtime
+    Pulp::signal
+    Pulp::state
+    Pulp::timebase
+    Pulp::timeline
+)
+list(SORT _expected_importer_closure)
+if(NOT _actual_importer_closure STREQUAL _expected_importer_closure)
+    message(FATAL_ERROR
+        "DAWproject importer SDK closure drifted.\n"
+        "Expected: ${_expected_importer_closure}\n"
+        "Actual:   ${_actual_importer_closure}")
+endif()
+
+foreach(_forbidden
+        Pulp::canvas Pulp::format Pulp::gpu-audio Pulp::graph Pulp::host
+        Pulp::playback Pulp::render Pulp::sequence Pulp::standalone
+        Pulp::view Pulp::view-core)
+    if(_forbidden IN_LIST _actual_importer_closure)
+        message(FATAL_ERROR
+            "DAWproject importer unexpectedly pulled ${_forbidden} into its link closure")
     endif()
 endforeach()

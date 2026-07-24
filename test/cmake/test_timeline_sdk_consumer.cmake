@@ -58,6 +58,17 @@ if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
 endif()
 
+set(_importer_executable "${_consumer_build}/pulp-dawproject-import-sdk-consumer")
+if(WIN32)
+    set(_importer_executable
+        "${_consumer_build}/Release/pulp-dawproject-import-sdk-consumer.exe")
+endif()
+execute_process(COMMAND "${_importer_executable}" RESULT_VARIABLE _importer_run_result)
+if(NOT _importer_run_result EQUAL 0)
+    message(FATAL_ERROR
+        "Installed DAWproject importer consumer exited ${_importer_run_result}")
+endif()
+
 set(_missing_source "${_fixture_root}/missing-component")
 set(_missing_build "${_fixture_root}/missing-component-build")
 file(MAKE_DIRECTORY "${_missing_source}")

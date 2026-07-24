@@ -696,7 +696,8 @@ NOT linking `pulp-runtime` (it drags in mbedTLS + http, too heavy for wasm). The
 `core/{timebase,timeline,playback}/src/*.cpp` appear in those lists — so adding a
 new production TU under `core/timeline/src/` forces it into the wasm plugin. Keep
 native-only or heavy-dependency code (e.g. the DAWproject importer, which needs
-pugixml from `pulp-runtime`) OUT of `core/timeline/src/` — put it in a sibling
-dir like `core/timeline/import/` so the closure does not sweep it into the wasm
-DSP binary. If a timeline source genuinely belongs in the web plugin, add it to
-BOTH lane lists (and provide any dependency the lanes don't already compile).
+pugixml and audio/WAV inspection) OUT of `core/timeline/src/` — put it in a
+sibling module such as `core/dawproject/` with its own target so the closure
+does not sweep it into the wasm DSP binary. If a timeline source genuinely
+belongs in the web plugin, add it to BOTH lane lists (and provide any dependency
+the lanes don't already compile).
