@@ -332,4 +332,40 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
     return all;
 }
 
+bool plugin_info_from_au_identity(std::string_view identity, PluginInfo& info) {
+    // "TYPE:SUBT:MANU" — three four-byte OSTypes, two separators.
+    if (identity.size() != 14 || identity[4] != ':' || identity[9] != ':')
+        return false;
+
+    const auto type = identity.substr(0, 4);
+    const bool is_instrument = type == "aumu";
+    const bool is_generator = type == "augn";
+    const bool is_effect = type == "aufx" || type == "aumf";
+    if (!is_instrument && !is_generator && !is_effect)
+        return false;
+
+    // OSType bytes are otherwise unconstrained, but a separator inside a field
+    // means the caller mis-assembled the identity rather than chose an odd code.
+    if (identity.find(':', 10) != std::string_view::npos ||
+        identity.substr(5, 4).find(':') != std::string_view::npos)
+        return false;
+
+    // Build into a fresh descriptor rather than overlaying the caller's. An AU
+    // identity is a *complete* descriptor, and callers branch on path.empty()
+    // to tell "load by identity" from "load by bundle" — overlaying would let a
+    // reused PluginInfo keep a stale path and send them down the wrong branch.
+    PluginInfo built;
+    built.name = std::string(identity);
+    built.unique_id = std::string(identity);
+    built.format = PluginFormat::AudioUnit;
+    built.is_instrument = is_instrument;
+    built.is_effect = is_effect;
+    // Instruments and generators are sources: they take no audio input.
+    built.num_inputs = (is_instrument || is_generator) ? 0 : 2;
+    built.num_outputs = 2;
+    built.supports_midi_in = is_instrument;
+    info = std::move(built);
+    return true;
+}
+
 } // namespace pulp::host

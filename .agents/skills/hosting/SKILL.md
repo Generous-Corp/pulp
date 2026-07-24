@@ -1490,6 +1490,35 @@ contract is:
 - **AU**: scanned by `AudioComponent` API, not file-system walk. The
   AU component's type/subtype/manu four-char codes serve as identity.
 
+### An AU identity needs no scan at all
+
+AU is the one format whose identity is also its complete loader
+descriptor — there is no filesystem path to resolve. So when you already
+know which component you want, **do not scan for it**:
+
+```cpp
+PluginInfo info;
+if (pulp::host::plugin_info_from_au_identity("aumu:Vas7:RoCl", info))
+    auto slot = PluginSlot::load(info);   // straight to AudioComponentFindNext
+```
+
+Scanning to reach a known AU walks every installed plugin — slow, and it
+drags the caller through unrelated third-party bundles that may
+instantiate badly. `plugin_info_from_au_identity()` (in `scanner.hpp`) is
+pure string logic with no platform dependency, so it is testable and
+tested everywhere, not just where AUs exist.
+
+It accepts only the four component types Pulp can host, and the type
+code decides the bus shape: `aumu` is a MIDI instrument (0 in, MIDI in),
+`augn` is a no-input generator (0 in, **no** MIDI), and `aufx`/`aumf`
+are effects (stereo in). Getting `augn` wrong is the easy mistake — it
+is a source like an instrument but is not MIDI-driven.
+
+It returns false rather than throwing so callers can fall through to a
+scan for other formats. That fallback is why rejection is strict: a
+parser loose enough to accept a CLAP-style id would silently skip
+discovery and then report "no suitable plugin found".
+
 Bundles that don't expose their identity through the safe path (e.g.
 VST3 without moduleinfo.json) fall back to the directory stem. The
 graph_serializer rehydration handles stem IDs the same way it always
