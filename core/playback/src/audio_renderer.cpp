@@ -97,10 +97,6 @@ struct detail::AudioSampleRateConverterCache::Impl {
         return saturating_add(saturating_add(converter_bytes, storage), additional);
     }
 
-    std::uint64_t required_bytes(std::uint64_t additional = 0) const noexcept {
-        return required_bytes_with_counts(additional, entry_count, host_rate_entry_count);
-    }
-
     void add_entry(Entry value) {
         auto node = std::make_unique<EntryNode>();
         node->value = std::move(value);
@@ -193,7 +189,8 @@ struct detail::AudioSampleRateConverterCache::Impl {
             return runtime::Err(AudioRendererError{AudioRendererErrorCode::UnsupportedSampleRate,
                                                    item, related_item});
         const auto actual_bytes = converter->prepared_bytes();
-        const auto required = required_bytes(actual_bytes);
+        const auto required = required_bytes_with_counts(
+            actual_bytes, entry_count + 1u, host_rate_entry_count);
         if (required > limits.max_sample_rate_converter_bytes)
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
@@ -309,7 +306,8 @@ struct detail::AudioSampleRateConverterCache::Impl {
             return runtime::Err(
                 AudioRendererError{AudioRendererErrorCode::InvalidAsset, item, related_item});
         const auto actual_bytes = converter->prepared_bytes();
-        const auto required = required_bytes(actual_bytes);
+        const auto required = required_bytes_with_counts(
+            actual_bytes, entry_count, host_rate_entry_count + 1u);
         if (required > limits.max_sample_rate_converter_bytes)
             return runtime::Err(AudioRendererError{
                 AudioRendererErrorCode::CapacityExceeded,
