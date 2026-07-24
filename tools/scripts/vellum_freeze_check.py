@@ -727,7 +727,10 @@ def _github_json(url: str, token: str) -> dict[str, Any]:
         with urllib.request.urlopen(request, timeout=30) as response:
             value = json.load(response)
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise FreezeError(f"cannot verify private Vellum authority: {exc}") from exc
+        endpoint = urllib.parse.urlsplit(url).path
+        raise FreezeError(
+            f"cannot verify private Vellum authority at {endpoint}: {exc}"
+        ) from exc
     if not isinstance(value, dict):
         raise FreezeError("private Vellum verification returned a non-object")
     return value
