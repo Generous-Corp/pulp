@@ -15,6 +15,7 @@ enum class HostTransportProjectionError : std::uint8_t {
     InvalidMeter,
     InvalidLoop,
     LoopTooShortForBlock,
+    InvalidHostBeatClock,
     BeatPositionOutOfRange,
 };
 

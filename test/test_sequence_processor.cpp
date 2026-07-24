@@ -484,7 +484,7 @@ TEST_CASE("host beat-domain loop projection carries a block-edge wrap into the n
     REQUIRE(projected.ranges[0].timeline_sample_start.value == 99'910);
 }
 
-TEST_CASE("host beat-domain projection falls back when beat clock validity is absent or invalid") {
+TEST_CASE("host beat-domain projection falls back when beat clock validity is incomplete") {
     const auto map = tempo_map();
     sequence::HostTransportProjector projector;
     REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
@@ -535,6 +535,37 @@ TEST_CASE("host beat-domain projection falls back when beat clock validity is ab
     REQUIRE(projected.reset_requested);
     REQUIRE(projected.ranges[0].discontinuity);
     REQUIRE(projected.ranges[0].timeline_tick_start.value == kTicksPerQuarter);
+}
+
+TEST_CASE("host beat-domain projection rejects invalid authoritative beat fields") {
+    const auto map = tempo_map();
+    sequence::HostTransportProjector projector;
+    REQUIRE(projector.prepare(*map, 32) == sequence::HostTransportProjectionError::None);
+
+    format::ProcessContext context;
+    context.sample_rate = 48'000.0;
+    context.num_samples = 32;
+    context.is_playing = true;
+    context.position_samples = 24'000;
+    context.position_beats = 1.0;
+    context.tempo_bpm = std::numeric_limits<double>::quiet_NaN();
+    context.transport_validity.set(format::TransportField::BeatPosition);
+    context.transport_validity.set(format::TransportField::Tempo);
+    context.transport_validity.set(format::TransportField::SamplePosition);
+
+    TransportSnapshot projected;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::InvalidHostBeatClock);
+
+    context.tempo_bpm = 60.0;
+    context.position_beats = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::InvalidHostBeatClock);
+
+    context.position_beats = 1.0;
+    context.tempo_bpm = 0.0;
+    REQUIRE(projector.project(context, projected) ==
+            sequence::HostTransportProjectionError::InvalidHostBeatClock);
 }
 
 TEST_CASE("host beat-domain projection rejects an authoritative beat outside the tick domain") {

@@ -229,10 +229,16 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
     }
 #if defined(__APPLE__)
     acl_t destination_acl = nullptr;
+    bool destination_acl_supported = true;
     if (destination_exists) {
         destination_acl = ::acl_get_file(destination.c_str(), ACL_TYPE_EXTENDED);
-        if (destination_acl == nullptr && errno != ENOENT && errno != ENOATTR)
-            return false;
+        if (destination_acl == nullptr) {
+            if (errno == ENOTSUP || errno == EOPNOTSUPP) {
+                destination_acl_supported = false;
+            } else if (errno != ENOENT && errno != ENOATTR) {
+                return false;
+            }
+        }
         if (destination_acl != nullptr) {
             acl_entry_t entry = nullptr;
             const auto entry_result = ::acl_get_entry(destination_acl, ACL_FIRST_ENTRY, &entry);
@@ -248,12 +254,15 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
     }
 #elif defined(__linux__)
     std::optional<std::vector<std::uint8_t>> destination_acl;
+    bool destination_acl_supported = true;
     if (destination_exists) {
         constexpr auto acl_name = "system.posix_acl_access";
         errno = 0;
         const auto acl_size = ::getxattr(destination.c_str(), acl_name, nullptr, 0);
         if (acl_size < 0) {
-            if (errno != ENODATA)
+            if (errno == ENOTSUP || errno == EOPNOTSUPP)
+                destination_acl_supported = false;
+            else if (errno != ENODATA)
                 return false;
         } else {
             destination_acl.emplace(static_cast<std::size_t>(acl_size));
@@ -312,18 +321,23 @@ bool write_text_atomic(const fs::path& destination, std::string_view text) noexc
         complete = complete && ::fchmod(descriptor, destination_status.st_mode &
                                                         static_cast<mode_t>(07777)) == 0;
 #if defined(__APPLE__)
-        if (complete && destination_acl != nullptr) {
-            complete = ::acl_set_fd_np(descriptor, destination_acl, ACL_TYPE_EXTENDED) == 0;
-        } else if (complete)
-            complete = clear_extended_acl(descriptor);
+        if (complete && destination_acl_supported) {
+            complete = destination_acl != nullptr
+                           ? ::acl_set_fd_np(descriptor, destination_acl,
+                                             ACL_TYPE_EXTENDED) == 0
+                           : clear_extended_acl(descriptor);
+        }
 #elif defined(__linux__)
         constexpr auto acl_name = "system.posix_acl_access";
-        if (complete && destination_acl) {
-            complete = ::fsetxattr(descriptor, acl_name, destination_acl->data(),
-                                   destination_acl->size(), 0) == 0;
-        } else if (complete && ::fremovexattr(descriptor, acl_name) != 0 &&
-                   errno != ENODATA) {
-            complete = false;
+        if (complete && destination_acl_supported) {
+            if (destination_acl) {
+                complete = ::fsetxattr(descriptor, acl_name, destination_acl->data(),
+                                       destination_acl->size(), 0) == 0;
+            } else if (::fremovexattr(descriptor, acl_name) != 0 &&
+                       errno != ENODATA && errno != ENOTSUP &&
+                       errno != EOPNOTSUPP) {
+                complete = false;
+            }
         }
 #endif
     }

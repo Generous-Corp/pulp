@@ -34,12 +34,10 @@ bool beats_to_ticks(double beats, timebase::TickPosition& result) noexcept {
     return true;
 }
 
-bool valid_host_beat_clock(const format::ProcessContext& context) noexcept {
+bool has_host_beat_clock(const format::ProcessContext& context) noexcept {
     return context.has_transport(format::TransportField::BeatPosition) &&
            context.has_transport(format::TransportField::Tempo) &&
-           context.has_transport(format::TransportField::SamplePosition) &&
-           std::isfinite(context.position_beats) && std::isfinite(context.tempo_bpm) &&
-           context.tempo_bpm > 0.0;
+           context.has_transport(format::TransportField::SamplePosition);
 }
 
 timebase::TickPosition tick_at_host_frame(double start_beat, std::uint32_t frames,
@@ -155,8 +153,13 @@ HostTransportProjector::project(const format::ProcessContext& context,
 
     const auto frames = static_cast<std::uint32_t>(context.num_samples);
     const timebase::SamplePosition host_start{context.position_samples};
-    const bool use_host_beat_clock = valid_host_beat_clock(context);
+    const bool use_host_beat_clock = has_host_beat_clock(context);
     timebase::TickPosition host_tick_start;
+    if (use_host_beat_clock &&
+        (!std::isfinite(context.position_beats) ||
+         !std::isfinite(context.tempo_bpm) || context.tempo_bpm <= 0.0)) {
+        return HostTransportProjectionError::InvalidHostBeatClock;
+    }
     if (use_host_beat_clock && !beats_to_ticks(context.position_beats, host_tick_start)) {
         return HostTransportProjectionError::BeatPositionOutOfRange;
     }

@@ -120,6 +120,7 @@ struct ReplacementMetadata {
     std::vector<std::uint8_t> security_descriptor;
 #else
     struct stat status{};
+    bool acl_supported = true;
 #if defined(__APPLE__)
     acl_t acl = nullptr;
 
@@ -166,8 +167,13 @@ bool capture_replacement_metadata(const std::filesystem::path& path,
     metadata.exists = true;
 #if defined(__APPLE__)
     metadata.acl = ::acl_get_file(path.c_str(), ACL_TYPE_EXTENDED);
-    if (metadata.acl == nullptr && errno != ENOENT && errno != ENOATTR)
-        return false;
+    if (metadata.acl == nullptr) {
+        if (errno == ENOTSUP || errno == EOPNOTSUPP) {
+            metadata.acl_supported = false;
+        } else if (errno != ENOENT && errno != ENOATTR) {
+            return false;
+        }
+    }
     if (metadata.acl != nullptr) {
         acl_entry_t entry = nullptr;
         const auto entry_result = ::acl_get_entry(metadata.acl, ACL_FIRST_ENTRY, &entry);
@@ -183,7 +189,9 @@ bool capture_replacement_metadata(const std::filesystem::path& path,
     errno = 0;
     const auto acl_size = ::getxattr(path.c_str(), acl_name, nullptr, 0);
     if (acl_size < 0) {
-        if (errno != ENODATA)
+        if (errno == ENOTSUP || errno == EOPNOTSUPP)
+            metadata.acl_supported = false;
+        else if (errno != ENODATA)
             return false;
     } else {
         metadata.acl.emplace(static_cast<std::size_t>(acl_size));
@@ -468,15 +476,20 @@ bool apply_replacement_metadata(NativeFile& file,
     if (::fchmod(descriptor, metadata.status.st_mode & static_cast<mode_t>(07777)) != 0)
         return false;
 #if defined(__APPLE__)
+    if (!metadata.acl_supported)
+        return true;
     if (metadata.acl != nullptr)
         return ::acl_set_fd_np(descriptor, metadata.acl, ACL_TYPE_EXTENDED) == 0;
     return clear_extended_acl(descriptor);
 #elif defined(__linux__)
+    if (!metadata.acl_supported)
+        return true;
     constexpr auto acl_name = "system.posix_acl_access";
     if (metadata.acl)
         return ::fsetxattr(descriptor, acl_name, metadata.acl->data(),
                           metadata.acl->size(), 0) == 0;
-    return ::fremovexattr(descriptor, acl_name) == 0 || errno == ENODATA;
+    return ::fremovexattr(descriptor, acl_name) == 0 || errno == ENODATA ||
+           errno == ENOTSUP || errno == EOPNOTSUPP;
 #else
     return true;
 #endif
