@@ -780,3 +780,15 @@ target_sources(pulp-test-forge-dynamics-catalog PRIVATE
 target_link_libraries(pulp-test-forge-dynamics-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-dynamics-catalog)
+
+# Distortion catalog node. Adds the oversampling-tier latency assertions to the
+# usual bake-and-inject shape: the tier is a registration-time realization
+# precisely because it determines latency, so each tier's reported figure is
+# checked against its measured impulse position rather than trusted.
+add_executable(pulp-test-forge-distortion-catalog test_forge_distortion_catalog.cpp)
+target_sources(pulp-test-forge-distortion-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-forge-distortion-catalog
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-distortion-catalog)
