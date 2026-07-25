@@ -123,6 +123,62 @@ TransportSnapshot next_block(MasterTransport& transport, std::uint32_t frames) {
     return snapshot;
 }
 
+/// A document of overlapping sustained notes plus short and retriggering notes,
+/// so a randomly placed playhead almost always sits inside at least one active
+/// note. Every note stays inside its clip (the compiler rejects out-of-clip
+/// ranges) and maps to distinct start/end ticks.
+constexpr std::int64_t kStressClipEnd = 4'000;
+
+std::shared_ptr<const Project> stress_note_project(const CompiledTempoMap& map) {
+    return note_project(map,
+                        {
+                            note(map, 30, 0, 3'800, 60, 0),     // spans nearly the whole doc
+                            note(map, 31, 100, 3'700, 62, 0),   // long, offset onset
+                            note(map, 32, 200, 3'900, 64, 1),   // long, other channel
+                            note(map, 33, 50, 2'000, 60, 2),    // same pitch, other channel key
+                            note(map, 34, 400, 900, 67, 0),     // short
+                            note(map, 35, 1'000, 1'200, 69, 0), // short
+                            note(map, 36, 500, 1'500, 72, 0),   // retrigger pair on one key
+                            note(map, 37, 1'400, 2'500, 72, 0), // folds onto 72 while active
+                        },
+                        kStressClipEnd);
+}
+
+/// Folded per-key sounding extents, built from the exact compiled schedule the
+/// renderer plays while sharing none of its flush code. A key may sound only
+/// while the playhead sits inside one of its extents, which makes this an
+/// independent stuck-note oracle: a discontinuity that fails to release a note
+/// strands the playhead outside every extent for a still-sounding key.
+struct NoteCoverage {
+    std::array<std::vector<std::pair<std::int64_t, std::int64_t>>, 16 * 128> extents;
+
+    bool covers(std::size_t key, std::int64_t sample) const {
+        for (const auto& extent : extents[key])
+            if (sample >= extent.first && sample < extent.second)
+                return true;
+        return false;
+    }
+};
+
+NoteCoverage note_coverage(const PlaybackProgramStore& store, ItemId track_id) {
+    NoteCoverage coverage;
+    const auto program = store.read();
+    REQUIRE(program);
+    const auto events = program->find_track(track_id)->arrangement_note_events();
+    std::array<int, 16 * 128> depth{};
+    std::array<std::int64_t, 16 * 128> open{};
+    for (const auto& event : events) {
+        const std::size_t key = static_cast<std::size_t>(event.channel) * 128u + event.pitch;
+        if (event.kind == NoteProgramEventKind::On) {
+            if (depth[key]++ == 0)
+                open[key] = event.sample.value;
+        } else if (depth[key] > 0 && --depth[key] == 0) {
+            coverage.extents[key].push_back({open[key], event.sample.value});
+        }
+    }
+    return coverage;
+}
+
 struct EventBytes {
     std::int64_t sample = 0;
     std::array<std::uint8_t, 3> bytes{};
@@ -704,26 +760,8 @@ TEST_CASE("renderer process is allocation and lock free after prepare") {
 TEST_CASE("no stuck notes under randomized seek and loop stress", "[playback][rt-safety][stress]") {
     const auto map = tempo_map();
 
-    // A document of overlapping sustained notes plus short and retriggering
-    // notes, so a randomly placed playhead almost always sits inside at least
-    // one active note. Every note stays inside its clip (compiler rejects
-    // out-of-clip ranges) and maps to distinct start/end ticks.
-    constexpr std::int64_t clip_end = 4'000;
     ProgramHarness programs;
-    programs.publish(
-        note_project(*map,
-                     {
-                         note(*map, 30, 0, 3'800, 60, 0),     // long, spans nearly the whole doc
-                         note(*map, 31, 100, 3'700, 62, 0),   // long, offset onset
-                         note(*map, 32, 200, 3'900, 64, 1),   // long, other channel
-                         note(*map, 33, 50, 2'000, 60, 2),    // same pitch, different channel key
-                         note(*map, 34, 400, 900, 67, 0),     // short
-                         note(*map, 35, 1'000, 1'200, 69, 0), // short
-                         note(*map, 36, 500, 1'500, 72, 0),   // retrigger pair on one key: overlap
-                         note(*map, 37, 1'400, 2'500, 72, 0), // folds onto pitch 72 while active
-                     },
-                     clip_end),
-        map, 1);
+    programs.publish(stress_note_project(*map), map, 1);
 
     constexpr std::uint32_t max_block = 256;
     constexpr int ops_per_seed = 600;
@@ -739,33 +777,10 @@ TEST_CASE("no stuck notes under randomized seek and loop stress", "[playback][rt
     // the seek/loop-flush contract: the renderer folds logical overlaps, so its
     // physical stream stays a clean per-key toggle whether or not a
     // discontinuity releases stranded notes — and a terminal stop-flush always
-    // rebalances the counts. Coverage is the missing dimension. A key may sound
-    // only while the playhead sits inside the union of that key's note extents;
-    // a discontinuity that leaves a note ON strands the playhead outside every
-    // extent for a still-sounding key. Build the folded extents from the exact
-    // compiled schedule the renderer plays, sharing none of its flush code.
-    std::array<std::vector<std::pair<std::int64_t, std::int64_t>>, 16 * 128> coverage;
-    {
-        const auto program = programs.store.read();
-        REQUIRE(program);
-        const auto events = program->find_track({10})->arrangement_note_events();
-        std::array<int, 16 * 128> depth{};
-        std::array<std::int64_t, 16 * 128> open{};
-        for (const auto& ev : events) {
-            const std::size_t key = static_cast<std::size_t>(ev.channel) * 128u + ev.pitch;
-            if (ev.kind == NoteProgramEventKind::On) {
-                if (depth[key]++ == 0)
-                    open[key] = ev.sample.value;
-            } else if (depth[key] > 0 && --depth[key] == 0) {
-                coverage[key].push_back({open[key], ev.sample.value});
-            }
-        }
-    }
+    // rebalances the counts. Coverage is the missing dimension.
+    const auto coverage = note_coverage(programs.store, {10});
     const auto covered = [&](std::size_t key, std::int64_t sample) {
-        for (const auto& extent : coverage[key])
-            if (sample >= extent.first && sample < extent.second)
-                return true;
-        return false;
+        return coverage.covers(key, sample);
     };
 
     // Aggregate non-vacuity witnesses across every seed. They prove the fuzz
@@ -924,4 +939,283 @@ TEST_CASE("compiler rejects note ranges outside their clip and sub-sample notes"
         sub_sample_programs.executor.run_for(std::chrono::seconds(1), 64);
     REQUIRE(sub_sample_programs.compiler.status().has_error);
     REQUIRE(sub_sample_programs.compiler.status().last_error.item == ItemId{31});
+}
+
+namespace {
+
+struct PhysicalNote {
+    std::int32_t sample_offset = 0;
+    bool note_on = false;
+};
+
+void prepare_scrub_transport(MasterTransport& transport, const CompiledTempoMap& map,
+                             std::uint32_t maximum) {
+    MasterTransportConfig config;
+    config.max_buffer_size = maximum;
+    config.initially_playing = false;
+    REQUIRE(transport.prepare(map, config) == TransportError::None);
+}
+
+} // namespace
+
+TEST_CASE("a scrub window restart releases the notes it strands") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {note(*map, 40, 1'100, 3'800, 62, 0)}, 4'000), map, 1);
+
+    constexpr std::uint32_t max_block = 256;
+    constexpr std::uint32_t window = 512;
+    MasterTransport transport;
+    prepare_scrub_transport(transport, *map, max_block);
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    REQUIRE(transport.begin_scrub(window, tick_at_sample(*map, 1'000)) == TransportError::None);
+
+    const auto consume = [&](std::uint32_t frames) {
+        const auto snapshot = next_block(transport, frames);
+        auto program = latch.begin_block(programs.store);
+        REQUIRE(renderer.process(program, snapshot).code == NoteRenderCode::Ok);
+        std::vector<PhysicalNote> events;
+        for (const auto& event : renderer.events())
+            events.push_back({event.sample_offset, event.is_note_on()});
+        return events;
+    };
+
+    // The first window sounds the note: its onset falls inside the window.
+    const auto opening = consume(max_block);
+    REQUIRE(opening.size() == 1);
+    REQUIRE(opening[0].sample_offset == 100);
+    REQUIRE(opening[0].note_on);
+    REQUIRE(renderer.has_active_notes());
+
+    REQUIRE(consume(max_block).empty()); // rest of the window: nothing new
+    REQUIRE(renderer.has_active_notes());
+
+    // Restarting the window rewinds the playhead behind the sounding note. The
+    // restart must release it at the window boundary before re-attacking it.
+    const auto restarted = consume(max_block);
+    REQUIRE(restarted.size() == 2);
+    REQUIRE(restarted[0].sample_offset == 0);
+    REQUIRE_FALSE(restarted[0].note_on);
+    REQUIRE(restarted[1].sample_offset == 100);
+    REQUIRE(restarted[1].note_on);
+
+    // Releasing the drag stops the playhead and leaves nothing sounding.
+    REQUIRE(transport.end_scrub() == TransportError::None);
+    const auto released = consume(max_block);
+    REQUIRE(released.size() == 1);
+    REQUIRE_FALSE(released[0].note_on);
+    REQUIRE_FALSE(renderer.has_active_notes());
+}
+
+TEST_CASE("a scrub window does not chase a note that started before it") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {note(*map, 40, 0, 3'800, 62, 0)}, 4'000), map, 1);
+
+    MasterTransport transport;
+    prepare_scrub_transport(transport, *map, 256);
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    REQUIRE(transport.begin_scrub(512, tick_at_sample(*map, 1'000)) == TransportError::None);
+
+    // Scrub inherits the transport's seek semantics rather than inventing a
+    // chase: a window that opens mid-note is silent for that note.
+    for (int step = 0; step < 6; ++step) {
+        const auto snapshot = next_block(transport, 256);
+        auto program = latch.begin_block(programs.store);
+        REQUIRE(renderer.process(program, snapshot).code == NoteRenderCode::Ok);
+        REQUIRE(renderer.events().empty());
+        REQUIRE_FALSE(renderer.has_active_notes());
+    }
+}
+
+TEST_CASE("no stuck notes under randomized scrub stress", "[playback][rt-safety][stress]") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(stress_note_project(*map), map, 1);
+
+    constexpr std::uint32_t max_block = 256;
+    constexpr int ops_per_seed = 600;
+
+    std::array<int, 16 * 128> net{};
+    const auto coverage = note_coverage(programs.store, {10});
+
+    // Non-vacuity witnesses aggregated across seeds: they prove the fuzz drove
+    // the scrub-specific risky paths (windows restarting under sounding notes,
+    // and restarts that split a block) rather than an idle or silent stream.
+    std::uint64_t total_on_all = 0;
+    std::uint64_t total_off_all = 0;
+    std::uint64_t scrub_blocks = 0;
+    std::uint64_t scrub_restarts = 0;
+    std::uint64_t restarts_over_active_notes = 0;
+    std::uint64_t split_scrub_blocks = 0;
+
+    // Fixed seeds only — CI must be bit-for-bit reproducible. A red here on any
+    // seed is a real stuck-note defect, not a flake.
+    constexpr std::array<std::uint32_t, 8> seeds{3u,     11u,      1'234u,   2'718u,
+                                                 0xFEEDu, 0xD1CEDu, 314'159u, 65'537u};
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(4'096));
+
+    for (const auto seed : seeds) {
+        renderer.reset();
+        net.fill(0);
+        MasterTransport transport;
+        prepare_scrub_transport(transport, *map, max_block);
+        PlaybackProgramBlockLatch latch;
+
+        std::uint64_t seed_on = 0;
+        std::uint64_t seed_off = 0;
+        std::mt19937 rng{seed};
+
+        const auto consume_block = [&](std::uint32_t frames) {
+            const auto snapshot = next_block(transport, frames);
+            const bool had_active = renderer.has_active_notes();
+            if (snapshot.scrubbing) {
+                ++scrub_blocks;
+                if (snapshot.range_count == 2)
+                    ++split_scrub_blocks;
+                for (std::uint8_t index = 0; index < snapshot.range_count; ++index) {
+                    if (!snapshot.ranges[index].discontinuity)
+                        continue;
+                    ++scrub_restarts;
+                    if (had_active)
+                        ++restarts_over_active_notes;
+                }
+            }
+            auto program = latch.begin_block(programs.store);
+            const auto result = renderer.process(program, snapshot);
+            REQUIRE(result.code == NoteRenderCode::Ok);
+            for (const auto& event : renderer.events()) {
+                const std::size_t key =
+                    static_cast<std::size_t>(event.channel()) * 128u + event.note();
+                if (event.is_note_on()) {
+                    REQUIRE(net[key] == 0); // never two ons without an off between
+                    net[key] = 1;
+                    ++seed_on;
+                } else if (event.is_note_off()) {
+                    REQUIRE(net[key] == 1); // never an off without a live note
+                    net[key] = 0;
+                    ++seed_off;
+                }
+            }
+
+            // Coverage oracle: a key still sounding once the block ends must
+            // have a note covering the playhead's last played sample. A window
+            // restart that fails to release its stranded notes rewinds the
+            // playhead out from under a sounding key and trips this. Only the
+            // stuck direction is checked — a window that opens mid-note is
+            // deliberately silent, so covered-but-silent is legal.
+            if (snapshot.is_playing) {
+                const auto& last = snapshot.ranges[snapshot.range_count - 1];
+                const std::int64_t playhead_last = last.timeline_sample_start.value +
+                                                   static_cast<std::int64_t>(last.frame_count) - 1;
+                for (std::size_t key = 0; key < net.size(); ++key)
+                    if (net[key] == 1)
+                        REQUIRE(coverage.covers(key, playhead_last));
+            }
+        };
+
+        const auto random_tick = [&] {
+            return tick_at_sample(*map, static_cast<std::int64_t>(rng() % 4'400u));
+        };
+
+        for (int op = 0; op < ops_per_seed; ++op) {
+            switch (rng() % 6u) {
+            case 0: { // start (or restart) a drag with a fresh window length
+                const auto window = max_block + rng() % (max_block * 4u);
+                REQUIRE(transport.begin_scrub(window, random_tick()) == TransportError::None);
+                break;
+            }
+            case 1: // move the drag; a no-op when no drag is in progress
+                (void)transport.scrub_to(random_tick());
+                break;
+            case 2: // release the drag
+                REQUIRE(transport.end_scrub() == TransportError::None);
+                break;
+            case 3: // an explicit reposition that outranks the window in flight
+                REQUIRE(transport.seek(random_tick()) == TransportError::None);
+                break;
+            case 4: // scrubbing over a rolling transport and over a stopped one
+                (void)transport.set_playing((rng() % 2u) == 0u);
+                break;
+            default: { // loop wrapping is suspended during a drag, live after it
+                LoopRegion loop;
+                loop.enabled = (rng() % 2u) == 0u;
+                if (loop.enabled) {
+                    const std::int64_t start = static_cast<std::int64_t>(rng() % 2'500u);
+                    const std::int64_t length =
+                        static_cast<std::int64_t>(max_block + rng() % (max_block * 4u));
+                    loop.start = tick_at_sample(*map, start);
+                    loop.end = tick_at_sample(*map, start + length);
+                }
+                (void)transport.set_loop(loop); // rejected loops simply do not apply
+                break;
+            }
+            }
+
+            const int blocks = 1 + static_cast<int>(rng() % 3u);
+            for (int b = 0; b < blocks; ++b)
+                consume_block(1u + rng() % max_block);
+        }
+
+        // Terminal release: ending the drag and stopping releases every
+        // sounding note in one block.
+        REQUIRE(transport.end_scrub() == TransportError::None);
+        REQUIRE(transport.set_playing(false) == TransportError::None);
+        consume_block(max_block);
+
+        REQUIRE_FALSE(renderer.has_active_notes());
+        REQUIRE(std::all_of(net.begin(), net.end(), [](int v) { return v == 0; }));
+        REQUIRE(seed_on == seed_off);
+        REQUIRE(seed_on > 0);
+
+        total_on_all += seed_on;
+        total_off_all += seed_off;
+    }
+
+    REQUIRE(total_on_all == total_off_all);
+    REQUIRE(total_on_all > 0);
+    REQUIRE(scrub_blocks > 0);
+    REQUIRE(scrub_restarts > 0);
+    REQUIRE(restarts_over_active_notes > 0);
+    REQUIRE(split_scrub_blocks > 0);
+}
+
+TEST_CASE("scrub note rendering is allocation free after prepare") {
+    const auto map = tempo_map();
+    ProgramHarness programs;
+    programs.publish(note_project(*map, {note(*map, 40, 1'100, 3'800, 62, 0)}, 4'000), map, 1);
+
+    MasterTransport transport;
+    prepare_scrub_transport(transport, *map, 300);
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    REQUIRE(transport.begin_scrub(1'024, tick_at_sample(*map, 1'000)) == TransportError::None);
+    for (int step = 0; step < 3; ++step) {
+        const auto warm = next_block(transport, 300);
+        auto program = latch.begin_block(programs.store);
+        REQUIRE(renderer.process(program, warm).code == NoteRenderCode::Ok);
+    }
+    REQUIRE(renderer.has_active_notes());
+
+    // The probed block both restarts the window mid-block and flushes a
+    // sounding note, which is the allocation-prone combination.
+    const auto snapshot = next_block(transport, 300);
+    REQUIRE(snapshot.range_count == 2);
+    auto program = latch.begin_block(programs.store);
+    std::size_t allocations = 1;
+    NoteRenderCode code = NoteRenderCode::NotPrepared;
+    {
+        test::ScopedRtProcessProbe probe;
+        code = renderer.process(program, snapshot).code;
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(code == NoteRenderCode::Ok);
+    REQUIRE(allocations == 0);
 }

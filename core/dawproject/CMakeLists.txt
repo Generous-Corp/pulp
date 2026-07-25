@@ -12,6 +12,7 @@ target_link_libraries(pulp-dawproject-import
         pulp::timeline
     PRIVATE
         pulp::audio
+        pulp::interchange
         pulp::runtime
 )
 
