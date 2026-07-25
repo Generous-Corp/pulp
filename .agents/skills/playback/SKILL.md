@@ -212,6 +212,19 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   target plus target-defining commands, so a subsystem-local helper executable
   whose own name shares the module prefix (e.g. `pulp-timeline-schema-emit`) may
   link `pulp::timeline` without tripping the floor.
+- A follow action's period is anchored to `LaunchHandle::last_start()` — the
+  monotonic beat the launch RESOLVED to — never to the monotonic origin and
+  never to the block that carried the Start. `FollowActionTimer` builds a
+  `LaunchQuantize` whose phase is that beat and walks it with the same
+  `next_launch_boundary()` / `resolve_launch_sample()` pair a launch uses, so
+  the fire inherits the launch's sample accuracy across a loop wrap for free.
+  Recovering the launch beat from a Start event's sample offset instead would
+  round through the tempo map and lose that exactness.
+- A test whose launch lands on a multiple of the follow period CANNOT tell a
+  launch-anchored grid from an origin-anchored one — both produce the same
+  boundaries, so re-anchoring to phase 0 keeps such a test green. Prove the
+  anchoring with an OFF-grid launch (an immediate launch from a non-beat
+  `initial_position`); only then does the fire sample separate the two.
 - `ArrangementAudioRenderer::process()` clears output, validates the complete
   zero/one-wrap snapshot, and mixes arrangement-selected tracks in stable
   PlaybackProgram order. It is immutable-input RT safe, wraps `ScopedNoAlloc`,

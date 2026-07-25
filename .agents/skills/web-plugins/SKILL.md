@@ -701,3 +701,10 @@ sibling module such as `core/dawproject/` with its own target so the closure
 does not sweep it into the wasm DSP binary. If a timeline source genuinely
 belongs in the web plugin, add it to BOTH lane lists (and provide any dependency
 the lanes don't already compile).
+
+The closure globs `src/*.cpp` only, so a header-only engine addition — a new
+`core/timeline/include/**` type, or new inline logic on an existing one — needs
+no lane-list edit and cannot break the gate. Skill-sync still flags such a
+change here (it maps whole directories, not file kinds); confirm the diff adds
+no TU under `core/{timebase,timeline,playback}/src/` before treating the flag
+as a real source-closure obligation.
