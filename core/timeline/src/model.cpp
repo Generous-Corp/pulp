@@ -746,6 +746,12 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
             return ModelError{ModelErrorCode::InvalidMediaRange, owner, media.asset_id};
         return std::nullopt;
     };
+    static_assert(kClipContentAlternativeCount == 5,
+                  "ClipContent gained an alternative: this scan admits a project only when "
+                  "every asset a clip names exists and is in range, and it reaches assets "
+                  "through MediaRef alone. Content that names an asset any other way is "
+                  "admitted unchecked here. Decide how the new content reaches assets "
+                  "before widening the variant.");
     for (const auto& sequence : input.sequences) {
         for (const auto& track : sequence.tracks()) {
             for (const auto& clip : track.clips()) {
@@ -885,6 +891,11 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
         return fail<Project>(ModelErrorCode::MissingAsset, asset_id);
     // Referential integrity: an asset that any clip or take still plays cannot
     // be removed, or replay would resurrect a MediaRef pointing at a missing asset.
+    static_assert(kClipContentAlternativeCount == 5,
+                  "ClipContent gained an alternative: this scan decides an asset is unused "
+                  "by looking only at MediaRef. Content that references an asset any other "
+                  "way would let the asset be removed out from under it. Teach this scan "
+                  "how the new content reaches assets before widening the variant.");
     for (const auto& sequence : data_->sequences)
         for (const auto& track : sequence.tracks()) {
             for (const auto& clip : track.clips())

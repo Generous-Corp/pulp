@@ -222,6 +222,36 @@ artifact is needed. Never modify canonical project JSON text directly.
   remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
+### Widening `ClipContent` is guarded, and the two guards are not interchangeable
+
+`ClipContent` decides what a clip *is*, so nearly every consumer dispatches on
+it — and the default failure of a new alternative is silence, not an error. A
+consumer written as an `if`/`if constexpr` chain keeps compiling and treats the
+new kind as absent: a clip that renders nothing, an export manifest that reports
+no loss while dropping data, a remap that carries stale ItemIds into a copy. No
+test catches that, because nothing wrote a test for a kind that did not exist.
+
+So the variant carries two guards, and which one a site gets is a judgement, not
+a style preference:
+
+- **Visit through `ClipContentCases`** when the site is genuinely dispatching —
+  the encoder, content equality, the journal's retained-size accounting, the
+  interchange census, the id-remap walk, and the playback compiler's content
+  classifier. The overload set has no generic fallback, so widening the variant
+  fails overload resolution right there.
+- **`static_assert(kClipContentAlternativeCount == N)`** when the site *cannot*
+  be a visit but is only correct for today's alternatives — the decoder, which
+  dispatches on envelope type names rather than on the variant, and the two
+  asset referential-integrity scans, which reach assets through `MediaRef`
+  alone. Each message names the decision that site owes.
+
+A site that reads one alternative and is correct for every other one (a note
+lookup, a `MediaRef` range check at construction) needs neither; do not add
+noise there. And note that `-fno-exceptions` makes a bare `std::get` on a
+mismatched alternative call `std::terminate` rather than throw, so a fallthrough
+`std::get` is a process abort, not a caught error — that is why the encoder is a
+visit and not a chain ending in `std::get<OpaqueContent>`.
+
 ## Editing contracts
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
