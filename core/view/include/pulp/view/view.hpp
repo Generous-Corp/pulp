@@ -333,6 +333,13 @@ public:
     GestureRecognizer* gesture_recognizer_at(size_t index); const GestureRecognizer* gesture_recognizer_at(size_t index) const;
     bool dispatch_gesture_pointer_event(const MouseEvent& root_event, double timestamp_seconds = -1.0);
     void advance_gesture_recognizers(double timestamp_seconds = -1.0); bool has_time_driven_gestures() const;
+
+    /// True when a gesture recognizer ACTIVELY claimed the last pointer event.
+    /// Distinct from dispatch_gesture_pointer_event()'s return, which is true
+    /// merely because a recognizer is a CANDIDATE here. Gate host early-returns
+    /// on this: bailing on candidacy makes any control that registers a gesture
+    /// undraggable, because the normal deliver_mouse_* path never runs.
+    bool gesture_claimed_pointer() const;
     // ── Pointer capture (W3C setPointerCapture) ─────────────────────────
 
     /// Capture pointer events for this view — all events for pointer_id

@@ -327,6 +327,16 @@ std::int64_t AudioClipRendererProgram::timeline_end() const noexcept {
     return timeline_start + static_cast<std::int64_t>(timeline_frame_count);
 }
 
+// Both entry points below treat "not a MediaRef" as "not audio". That is the
+// only reading of a clip that has no samples of its own, and it is why the
+// program compiler classifies content before it gets here — but the assumption
+// lives in this file too, so it is asserted here.
+static_assert(timeline::kClipContentAlternativeCount == 5,
+              "ClipContent gained an alternative: this renderer resolves audio through "
+              "MediaRef alone and treats every other alternative as silent. If the new "
+              "content can produce audio, give it a resolve path here before widening the "
+              "variant; if it cannot, say so at the compiler's content classifier.");
+
 runtime::Result<AudioClipRendererProgram, AudioRendererError>
 detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
                                           const timeline::Project& project,

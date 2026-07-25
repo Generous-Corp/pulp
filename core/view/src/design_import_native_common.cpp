@@ -1774,8 +1774,18 @@ std::unique_ptr<View> materialize_node(const IRNode& node,
                     break;
                 case PromotedChildHitPolicy::pass_through_self:
                     child->set_pointer_events(View::PointerEvents::box_none);
+                    // A parent that never descends makes box_none meaningless:
+                    // hit_test() stops at the parent, so the interactive
+                    // descendant this policy exists to reach is unreachable.
+                    // TextButton defaults to box_only, so re-open it here —
+                    // the button asked for this child to be reachable.
+                    view->set_pointer_events(View::PointerEvents::auto_);
                     break;
                 case PromotedChildHitPolicy::unchanged:
+                    // Same reasoning: `unchanged` means "this child is itself
+                    // interactive, leave it alone", which only holds if the
+                    // parent lets hit_test() reach it.
+                    view->set_pointer_events(View::PointerEvents::auto_);
                     break;
             }
         }

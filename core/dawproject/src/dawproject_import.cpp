@@ -3,6 +3,8 @@
 #include "dawproject_import_support.hpp"
 #include "dawproject_media_sealer.hpp"
 
+#include <pulp/interchange/capability.hpp>
+#include <pulp/interchange/concept.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 
@@ -34,6 +36,54 @@ constexpr double kPpq = static_cast<double>(timebase::kTicksPerQuarter);
 
 DawProjectImportError err(DawProjectImportErrorCode code, std::string message) {
     return detail::import_error(code, std::move(message));
+}
+
+constexpr interchange::Format kFormat = interchange::Format::DawProject;
+
+// The concepts this reader has code for. The capability table decides policy;
+// this list is what the reader can actually do, and the static assertion below
+// requires the table to stay inside it. Turning a row on without writing its
+// reader is a compile error rather than a construct that is admitted and then
+// quietly dropped -- the failure mode a capability table most has to avoid.
+constexpr interchange::Concept kImplementedImports[] = {
+    interchange::Concept::TrackFlat,       interchange::Concept::ClipMusical,
+    interchange::Concept::ClipNote,        interchange::Concept::ClipMedia,
+    interchange::Concept::TempoSingle,     interchange::Concept::MeterSingle,
+    interchange::Concept::AssetSealedHash, interchange::Concept::AssetReferencedMedia,
+};
+
+constexpr bool reader_implements(interchange::Concept concept_value) noexcept {
+    for (interchange::Concept implemented : kImplementedImports) {
+        if (implemented == concept_value)
+            return true;
+    }
+    return false;
+}
+
+static_assert(
+    [] {
+        for (std::size_t index = 0; index < interchange::kConceptCount; ++index) {
+            const auto concept_value = static_cast<interchange::Concept>(index);
+            if (interchange::import_supports(kFormat, concept_value) &&
+                !reader_implements(concept_value))
+                return false;
+        }
+        return true;
+    }(),
+    "the DAWproject capability table admits a concept this reader has no code for");
+
+// Name the interchange concept a construct is, and let the capability table
+// decide whether this format may admit it. Concepts the table does not list read
+// as ImportLevel::None, so a construct the reader cannot classify --
+// Concept::Unknown -- refuses without anyone writing a rule for it.
+// The message is a view so admitting a construct costs only the table lookup:
+// the sites below run per clip and per note, and the overwhelmingly common
+// answer is "supported", where no message is ever needed.
+std::optional<DawProjectImportError> admit(interchange::Concept concept_value,
+                                           std::string_view refusal) {
+    if (interchange::import_supports(kFormat, concept_value))
+        return std::nullopt;
+    return err(DawProjectImportErrorCode::UnsupportedFeature, std::string(refusal));
 }
 
 std::optional<std::int64_t> beats_to_ticks(double beats) noexcept {
@@ -208,6 +258,8 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
             return e;
         if (!std::isfinite(bpm) || !(bpm > 0.0))
             return err(DawProjectImportErrorCode::InvalidValue, "<Tempo value> must be positive");
+        if (auto e = admit(interchange::Concept::TempoSingle, "<Tempo> is unsupported"))
+            return e;
         tempo_bpm_ = bpm;
     }
 
@@ -221,6 +273,9 @@ std::optional<DawProjectImportError> Importer::read_transport(const pugi::xml_no
             den > std::numeric_limits<std::int32_t>::max())
             return err(DawProjectImportErrorCode::InvalidValue,
                        "<TimeSignature> numerator and denominator must be positive 32-bit values");
+        if (auto e = admit(interchange::Concept::MeterSingle,
+                           "<TimeSignature> is unsupported"))
+            return e;
         meter_num_ = static_cast<std::int32_t>(num);
         meter_den_ = static_cast<std::int32_t>(den);
     }
@@ -244,11 +299,21 @@ std::optional<DawProjectImportError> Importer::read_structure(const pugi::xml_no
             return err(DawProjectImportErrorCode::LimitExceeded,
                        "DAWproject track count exceeds max_tracks");
         for (auto track_child : track.children()) {
-            if (track_child.type() == pugi::node_element)
-                return err(DawProjectImportErrorCode::UnsupportedFeature,
-                           std::string("<Track> contains unsupported <") + track_child.name() +
-                               ">");
+            if (track_child.type() != pugi::node_element)
+                continue;
+            // A track inside a track is grouping; anything else this reader has
+            // no name for. Neither is admissible, so the lookup is the refusal.
+            static_assert(!reader_implements(interchange::Concept::TrackGroup) &&
+                          !reader_implements(interchange::Concept::Unknown));
+            return *admit(std::string_view(track_child.name()) == "Track"
+                              ? interchange::Concept::TrackGroup
+                              : interchange::Concept::Unknown,
+                          std::string("<Track> contains unsupported <") + track_child.name() + ">");
         }
+
+        if (auto e = admit(interchange::Concept::TrackFlat,
+                           std::string("<Track> is unsupported for this format")))
+            return e;
 
         auto id_attr = track.attribute("id");
         if (id_attr.empty())
@@ -298,9 +363,10 @@ std::optional<DawProjectImportError> Importer::read_arrangement(const pugi::xml_
 
     auto time_unit = root_lanes.attribute("timeUnit");
     if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
-        return err(DawProjectImportErrorCode::UnsupportedFeature,
-                   std::string("<Arrangement> timeUnit='") + time_unit.as_string() +
-                       "' is unsupported; only musical 'beats' timing is imported");
+        // Seconds-timed lanes place their clips in absolute time.
+        return *admit(interchange::Concept::ClipAbsolute,
+                      std::string("<Arrangement> timeUnit='") + time_unit.as_string() +
+                          "' is unsupported; only musical 'beats' timing is imported");
 
     for (auto child : root_lanes.children()) {
         if (child.type() != pugi::node_element)
@@ -313,9 +379,14 @@ std::optional<DawProjectImportError> Importer::read_arrangement(const pugi::xml_
             // Markers, master automation, and similar arrangement-level timelines
             // are not yet imported; fail closed so their content is never silently
             // dropped.
-            return err(DawProjectImportErrorCode::UnsupportedFeature,
-                       std::string("<Arrangement> contains unsupported timeline <") +
-                           std::string(name) + ">");
+            // Markers are a named concept; other arrangement-level timelines
+            // this reader cannot classify. Neither is admissible.
+            static_assert(!reader_implements(interchange::Concept::Marker) &&
+                          !reader_implements(interchange::Concept::Unknown));
+            return *admit(name == "Markers" ? interchange::Concept::Marker
+                                            : interchange::Concept::Unknown,
+                          std::string("<Arrangement> contains unsupported timeline <") +
+                              std::string(name) + ">");
         }
     }
     return std::nullopt;
@@ -324,9 +395,9 @@ std::optional<DawProjectImportError> Importer::read_arrangement(const pugi::xml_
 std::optional<DawProjectImportError> Importer::read_track_lanes(const pugi::xml_node& lanes) {
     const auto time_unit = lanes.attribute("timeUnit");
     if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
-        return err(DawProjectImportErrorCode::UnsupportedFeature,
-                   std::string("<Lanes timeUnit='") + time_unit.as_string() +
-                       "'> is unsupported; only musical 'beats' timing is imported");
+        return *admit(interchange::Concept::ClipAbsolute,
+                      std::string("<Lanes timeUnit='") + time_unit.as_string() +
+                          "'> is unsupported; only musical 'beats' timing is imported");
 
     auto track_attr = lanes.attribute("track");
     if (track_attr.empty())
@@ -346,9 +417,9 @@ std::optional<DawProjectImportError> Importer::read_track_lanes(const pugi::xml_
         if (name == "Clips") {
             const auto time_unit = child.attribute("timeUnit");
             if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
-                return err(DawProjectImportErrorCode::UnsupportedFeature,
-                           std::string("<Clips timeUnit='") + time_unit.as_string() +
-                               "'> is unsupported; only musical 'beats' timing is imported");
+                return *admit(interchange::Concept::ClipAbsolute,
+                              std::string("<Clips timeUnit='") + time_unit.as_string() +
+                                  "'> is unsupported; only musical 'beats' timing is imported");
             auto& clips = clips_by_track_.at(track_id.value);
             for (auto clip : child.children()) {
                 if (clip.type() != pugi::node_element)
@@ -405,14 +476,23 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
             if (auto e = read_audio(child, content))
                 return e;
         } else {
-            return err(DawProjectImportErrorCode::UnsupportedFeature,
-                       std::string("<Clip> contains unsupported content <") + std::string(name) +
-                           ">");
+            // A warp map is a named concept; other content this reader cannot
+            // classify. Neither is admissible, so the lookup is the refusal.
+            static_assert(!reader_implements(interchange::Concept::ClipWarp) &&
+                          !reader_implements(interchange::Concept::Unknown));
+            return *admit(name == "Warps" ? interchange::Concept::ClipWarp
+                                          : interchange::Concept::Unknown,
+                          std::string("<Clip> contains unsupported content <") + std::string(name) +
+                              ">");
         }
     }
     if (content_children > 1)
         return err(DawProjectImportErrorCode::UnsupportedFeature,
                    "<Clip> with multiple content timelines is not supported");
+
+    if (auto e = admit(interchange::Concept::ClipMusical,
+                       "<Clip> beat-anchored placement is unsupported"))
+        return e;
 
     auto made = Clip::create(ids_.take(), timebase::TickPosition{range->start},
                              timebase::TickDuration{range->duration}, std::move(content));
@@ -428,11 +508,15 @@ std::optional<DawProjectImportError> Importer::read_clip(const pugi::xml_node& c
 
 std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& notes,
                                                           ClipContent& out) {
+    if (auto e = admit(interchange::Concept::ClipNote, "<Notes> content is unsupported"))
+        return e;
+
     const auto time_unit = notes.attribute("timeUnit");
     if (!time_unit.empty() && std::string_view(time_unit.as_string()) != "beats")
-        return err(DawProjectImportErrorCode::UnsupportedFeature,
-                   std::string("<Notes timeUnit='") + time_unit.as_string() +
-                       "'> is unsupported; only musical 'beats' timing is imported");
+        // Seconds-timed notes are absolute-anchored content.
+        return *admit(interchange::Concept::ClipAbsolute,
+                      std::string("<Notes timeUnit='") + time_unit.as_string() +
+                          "'> is unsupported; only musical 'beats' timing is imported");
 
     std::vector<NoteEvent> events;
     for (auto note : notes.children()) {
@@ -506,6 +590,18 @@ std::optional<DawProjectImportError> Importer::read_notes(const pugi::xml_node& 
 
 std::optional<DawProjectImportError> Importer::read_audio(const pugi::xml_node& audio,
                                                           ClipContent& out) {
+    // Media content, its sealed identity, and its by-locator storage are three
+    // separate declarations; an importer may carry the clip without carrying
+    // either of the others, so each is asked for on its own.
+    if (auto e = admit(interchange::Concept::ClipMedia, "<Audio> content is unsupported"))
+        return e;
+    if (auto e = admit(interchange::Concept::AssetSealedHash,
+                       "<Audio> media cannot be sealed to a content hash for this format"))
+        return e;
+    if (auto e = admit(interchange::Concept::AssetReferencedMedia,
+                       "<Audio> media referenced by package path is unsupported"))
+        return e;
+
     if (auto e = reject_unsupported_audio_playback(audio))
         return e;
     bool saw_file = false;
@@ -564,9 +660,11 @@ ImportResult Importer::run(const pugi::xml_node& project) {
             seen = &saw_scenes;
             for (auto scene : child.children()) {
                 if (scene.type() == pugi::node_element)
-                    return Err(
-                        err(DawProjectImportErrorCode::UnsupportedFeature,
-                            std::string("<Scenes> contains unsupported <") + scene.name() + ">"));
+                    // Scenes are the clip launcher, not the arrangement.
+                    static_assert(!reader_implements(interchange::Concept::ClipLaunch));
+                    return Err(*admit(
+                        interchange::Concept::ClipLaunch,
+                        std::string("<Scenes> contains unsupported <") + scene.name() + ">"));
             }
         } else {
             return Err(

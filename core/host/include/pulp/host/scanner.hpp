@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace pulp::host {
@@ -123,5 +124,20 @@ private:
 // return an absurd value that would make reserve()/iteration throw and abort
 // the whole scan. Exposed for testing.
 uint32_t cap_clap_plugin_count(uint32_t count) noexcept;
+
+// Build a loadable PluginInfo from an Audio Unit component identity of the
+// form TYPE:SUBT:MANU (three four-byte OSTypes, e.g. "aumu:Vas7:RoCl").
+//
+// An AU identity is already the complete loader descriptor — unlike VST3/CLAP
+// it carries no filesystem path to resolve — so a caller that knows which
+// component it wants does not need discovery at all. Scanning to reach a known
+// component means walking every installed plugin, which is slow and exposes
+// the caller to unrelated third-party bundles that instantiate badly.
+//
+// Returns false and leaves `info` untouched when the string is not a
+// well-formed identity, so callers can fall back to scanning for other formats.
+// Only the four component types Pulp can host are accepted: `aumu` (MIDI
+// instrument), `augn` (no-input generator), and `aufx`/`aumf` (effects).
+bool plugin_info_from_au_identity(std::string_view identity, PluginInfo& info);
 
 } // namespace pulp::host

@@ -310,10 +310,31 @@ per-ABI entry point for it.** Go through the plugin's own state:
   missing no-exceptions entry passes that check and surfaces instead as an
   undefined symbol when the no-exceptions target links.
 
+- The browser lanes inherit transport behavior for free, including behavior that
+  did not exist when the ABI lists were written. Playhead scrubbing is the worked
+  example: `MasterTransport::begin_scrub()` emits repeated windows whose restarts
+  are ordinary range discontinuities, so the WAM/WebCLAP builds got it purely
+  because `transport.cpp` was already in both lists — no source-list edit, no
+  worklet change, no JS surface. Prefer that shape when adding an engine feature
+  in the browser: express it as ranges the existing portable units already
+  publish. It also means a browser-visible behavior change can land with an
+  unchanged web source closure, so a green `web-timeline-source-closure` is not
+  evidence that the wasm lanes are unaffected — check what the transport now
+  publishes per block, not just which files moved.
+
 - Extraction produces a new translation unit and carries the same obligation.
   Moving a helper out of an already-listed engine `.cpp` into its own file reads
   as a pure refactor, because the origin unit stays listed everywhere — but the
   extracted file is new to every list its module maintains.
+
+- `core/timeline` and `core/playback` are in the wasm closure, so their
+  compile-time model guards fire in the browser lanes too. `ClipContent` carries
+  an overload set with no generic fallback plus `static_assert`s on its
+  alternative count, precisely so a new clip content kind cannot slip through as
+  silence. Widening it therefore reds the WAM and WebCLAP builds at the same
+  points as the native ones, which is the intent — but it also means the guards
+  must be satisfied *before* the widening lands, not in a follow-up, or every
+  lane goes red at once with no partial-progress path.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP

@@ -68,11 +68,45 @@ std::optional<ModelError> validate_owned_ids(std::vector<ItemId> ids) {
     return std::nullopt;
 }
 
+// Remapping a subtree is only sound when every ItemId the content owns is
+// collected here and rewritten in rebuild_clip. An alternative that owns ids but
+// has no branch would keep the originals and alias the source project, so the
+// walk is exhaustive and each alternative states whether it owns anything.
 void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
     ids.push_back(clip.id());
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
-        for (const auto& note : notes->notes())
-            ids.push_back(note.id);
+    std::visit(ClipContentCases{
+                   [](const EmptyContent&) {},
+                   // MediaRef::asset_id is an external reference, not owned.
+                   [](const MediaRef&) {},
+                   [&](const NoteContent& notes) {
+                       for (const auto& note : notes.notes())
+                           ids.push_back(note.id);
+                   },
+                   // Registered payloads must own no ItemIds; that is the
+                   // condition under which the registry admits them.
+                   [](const RegisteredContent&) {},
+                   // Opaque content may own ids in a shape we cannot read, which
+                   // is why remap_rejection refuses it outright.
+                   [](const OpaqueContent&) {},
+               },
+               clip.content());
+}
+
+// A clip can only be remapped when its content's identity/reference shape is
+// legible. Answering this per alternative in one place keeps the preflight
+// walks, which each scan a different level of the tree, from drifting apart.
+std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexcept {
+    return std::visit(
+        ClipContentCases{
+            [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
+            [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
+            [](const OpaqueContent&) {
+                return std::optional<ModelErrorCode>{ModelErrorCode::OpaqueContentCannotRemap};
+            },
+        },
+        content);
 }
 
 void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
@@ -84,8 +118,8 @@ void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
 }
 
 std::optional<ModelError> preflight(const Clip& clip) {
-    if (std::holds_alternative<OpaqueContent>(clip.content()))
-        return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
+    if (const auto rejected = remap_rejection(clip.content()))
+        return ModelError{*rejected, clip.id(), {}};
     std::vector<ItemId> ids;
     append_clip_ids(clip, ids);
     return validate_owned_ids(std::move(ids));
@@ -98,8 +132,8 @@ std::optional<ModelError> preflight(const Track& track) {
     detail::append_automation_owned_ids(track.automation_lanes(), ids);
     append_take_ids(track, ids);
     for (const auto& clip : track.clips()) {
-        if (std::holds_alternative<OpaqueContent>(clip.content()))
-            return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
+        if (const auto rejected = remap_rejection(clip.content()))
+            return ModelError{*rejected, clip.id(), {}};
         append_clip_ids(clip, ids);
     }
     return validate_owned_ids(std::move(ids));
@@ -114,8 +148,8 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
         detail::append_automation_owned_ids(track.automation_lanes(), ids);
         append_take_ids(track, ids);
         for (const auto& clip : track.clips()) {
-            if (std::holds_alternative<OpaqueContent>(clip.content()))
-                return ModelError{ModelErrorCode::OpaqueContentCannotRemap, clip.id(), {}};
+            if (const auto rejected = remap_rejection(clip.content()))
+                return ModelError{*rejected, clip.id(), {}};
             append_clip_ids(clip, ids);
         }
     }
@@ -124,23 +158,40 @@ std::optional<ModelError> preflight(const Sequence& sequence) {
 
 runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTable& table,
                                                ExternalIdFixup external) {
+    // The counterpart to append_clip_ids: every id collected there is rewritten
+    // here, and every external reference is fixed up. An alternative left out of
+    // this dispatch would be carried into the remapped project still pointing at
+    // the source's ids, so it is exhaustive rather than a chain of get_ifs.
     ClipContent content = clip.content();
-    if (auto* media = std::get_if<MediaRef>(&content)) {
-        auto fixed = external.apply(media->asset_id);
-        if (!fixed)
-            return fail<Clip>(fixed.error().code, fixed.error().item, fixed.error().related_item);
-        media->asset_id = fixed.value();
-    }
-    if (const auto* old_notes = std::get_if<NoteContent>(&clip.content())) {
-        std::vector<NoteEvent> notes(old_notes->notes().begin(), old_notes->notes().end());
-        for (auto& note : notes)
-            note.id = *table.find(note.id);
-        auto rebuilt = NoteContent::create(std::move(notes));
-        if (!rebuilt)
-            return fail<Clip>(rebuilt.error().code, rebuilt.error().item,
-                              rebuilt.error().related_item);
-        content = std::move(rebuilt).value();
-    }
+    std::optional<ModelError> content_error;
+    std::visit(ClipContentCases{
+                   [](const EmptyContent&) {},
+                   [&](MediaRef& media) {
+                       auto fixed = external.apply(media.asset_id);
+                       if (!fixed)
+                           content_error = fixed.error();
+                       else
+                           media.asset_id = fixed.value();
+                   },
+                   [&](NoteContent& old_notes) {
+                       std::vector<NoteEvent> notes(old_notes.notes().begin(),
+                                                    old_notes.notes().end());
+                       for (auto& note : notes)
+                           note.id = *table.find(note.id);
+                       auto rebuilt = NoteContent::create(std::move(notes));
+                       if (!rebuilt)
+                           content_error = rebuilt.error();
+                       else
+                           old_notes = std::move(rebuilt).value();
+                   },
+                   // Registered payloads own no ItemIds by construction, and
+                   // opaque content never reaches here — preflight refuses it.
+                   [](RegisteredContent&) {},
+                   [](OpaqueContent&) {},
+               },
+               content);
+    if (content_error)
+        return fail<Clip>(content_error->code, content_error->item, content_error->related_item);
     if (clip.time_anchor() == ClipTimeAnchor::Musical)
         return Clip::create(*table.find(clip.id()), clip.start(), clip.duration(),
                             std::move(content), clip.playback_properties());
@@ -376,9 +427,8 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
     for (const auto& sequence : project.sequences())
         for (const auto& track : sequence.tracks())
             for (const auto& clip : track.clips())
-                if (std::holds_alternative<OpaqueContent>(clip.content()))
-                    return fail<RemappedProject>(ModelErrorCode::OpaqueContentCannotRemap,
-                                                 clip.id());
+                if (const auto rejected = remap_rejection(clip.content()))
+                    return fail<RemappedProject>(*rejected, clip.id());
     ItemIdAllocator allocator(first_id);
     IdRemapTable table;
     const auto identities = detail::ProjectStateAccess::identity_entries(project);

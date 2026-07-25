@@ -223,7 +223,12 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::press;
     gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+    // Bail only when a recognizer actually CLAIMED the pointer. Bailing on the
+    // dispatch return meant "a recognizer exists on this chain", so a control
+    // that merely registered a gesture never received press, drag or release —
+    // permanently undraggable in the host while looking perfectly alive.
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer()) {
         *drag_target = nullptr;
         return;
     }
@@ -320,8 +325,18 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
     gesture_event.modifiers = mods;
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::drag;
-    if (root->dispatch_gesture_pointer_event(gesture_event))
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer()) {
+        // Claim landed mid-drag: hand the pointer to the gesture, but close the
+        // bracket the delivered press opened, and drop the target so the widget
+        // cannot silently resume dragging (with a position jump) if the gesture
+        // later goes terminal.
+        if (*drag_target && view_is_in_tree(*drag_target, root))
+            (*drag_target)->on_mouse_up(
+                pulp::view::mac_geometry::to_local(pt, *drag_target, root));
+        *drag_target = nullptr;
         return;
+    }
     if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
     pulp::view::deliver_mouse_drag(*root, *drag_target, pt, mods,
@@ -346,7 +361,22 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     gesture_event.is_down = false;
     gesture_event.phase = pulp::view::MousePhase::release;
     gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+    // Bail only when a recognizer actually CLAIMED the pointer. Bailing on the
+    // dispatch return meant "a recognizer exists on this chain", so a control
+    // that merely registered a gesture never received press, drag or release —
+    // permanently undraggable in the host while looking perfectly alive.
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer()) {
+        // A recognizer can only claim on this release (a double-tap reaches
+        // `ended` on the SECOND release), by which point the press was already
+        // delivered — the widget is mid-gesture. Dropping the up here leaves
+        // that bracket open: Knob::on_mouse_down fired on_gesture_begin and
+        // enabled relative-mouse mode, and only on_mouse_up clears them, so the
+        // host keeps beginEdit open with no endEdit and the DAW holds an
+        // automation touch. Close it before bailing.
+        if (*drag_target && view_is_in_tree(*drag_target, root))
+            (*drag_target)->on_mouse_up(
+                pulp::view::mac_geometry::to_local(pt, *drag_target, root));
         *drag_target = nullptr;
         return;
     }

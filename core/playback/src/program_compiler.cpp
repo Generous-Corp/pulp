@@ -5,11 +5,36 @@
 #include "track_automation_compiler.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 namespace pulp::playback {
+namespace {
+
+/// What a clip contributes to a compiled program. The compiler asks this once
+/// per clip instead of testing alternatives inline, so that adding a content
+/// kind cannot resolve to "neither audio nor notes" by default — a clip the
+/// compiler skips renders silence, with no error anywhere to explain it.
+enum class ClipContentRole : std::uint8_t { Silent, Audio, Notes };
+
+ClipContentRole clip_content_role(const timeline::Clip& clip) noexcept {
+    return std::visit(timeline::ClipContentCases{
+                          [](const timeline::EmptyContent&) { return ClipContentRole::Silent; },
+                          [](const timeline::MediaRef&) { return ClipContentRole::Audio; },
+                          [](const timeline::NoteContent&) { return ClipContentRole::Notes; },
+                          // Extension content carries no audio or notes the
+                          // compiler can read; a renderer for it would be a new
+                          // role, not a silent fallthrough.
+                          [](const timeline::RegisteredContent&) { return ClipContentRole::Silent; },
+                          [](const timeline::OpaqueContent&) { return ClipContentRole::Silent; },
+                      },
+                      clip.content());
+}
+
+} // namespace
 
 struct PlaybackProgramCompilerCore;
 
@@ -369,8 +394,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             }
 
             const auto& clip = track.clips()[clip_index_];
+            const ClipContentRole role = clip_content_role(clip);
             if (!clip_started_) {
-                if (std::holds_alternative<timeline::MediaRef>(clip.content())) {
+                if (role == ClipContentRole::Audio) {
                     if (!request_->audio_assets)
                         return fail({CompileErrorCode::AudioProgramInvalid, clip.id(),
                                      request_->document_revision,
@@ -402,7 +428,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 current_clip_ids_.push_back(clip.id());
                 clip_started_ = true;
             }
-            const auto* notes = std::get_if<timeline::NoteContent>(&clip.content());
+            const auto* notes = role == ClipContentRole::Notes
+                                    ? std::get_if<timeline::NoteContent>(&clip.content())
+                                    : nullptr;
             if (!notes || note_index_ == notes->notes().size()) {
                 note_index_ = 0;
                 clip_started_ = false;
