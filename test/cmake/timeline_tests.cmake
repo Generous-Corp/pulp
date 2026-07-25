@@ -13,6 +13,12 @@ pulp_add_test_suite(pulp-test-timeline-dawproject-import
     LIBRARIES pulp::playback pulp::dawproject-import)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+# pulp::midi supplies the shared MIDI 2.0 velocity scaling the SMF interop
+# module reimplements under its -fno-exceptions contract; linking it here keeps
+# the two provably in agreement.
+pulp_add_test_suite(pulp-test-timeline-smf
+    SOURCES test_timeline_smf.cpp
+    LIBRARIES pulp::smf-interop pulp::midi)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport

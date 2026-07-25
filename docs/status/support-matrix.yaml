@@ -1002,6 +1002,9 @@ timeline_engine:
   dawproject_import:
     status: experimental
     notes: Fail-closed DAWproject v1 linear subset with flat beats-timed note/audio tracks, sealed WAV identity, and explicit resource limits.
+  smf_interop:
+    status: experimental
+    notes: Fail-closed Standard MIDI File import/export against the tempo and meter maps, with exact canonical tick conversion on dividing grids and reported rounding otherwise.
   cli_mcp:
     status: experimental
     notes: pulp seq validate/explain/apply, pulp render, five generated MCP operations, and the Claude Timeline skill share one headless implementation.
@@ -1042,6 +1045,11 @@ limitations:
   timeline_engine.dawproject_import:
     - text: "DAWproject import is a bounded linear subset: nested groups, warps, seconds-timed lanes, and unsupported timeline constructs fail the import rather than being dropped."
       tracked_in: "../guides/timeline-sdk.md#optional-dawproject-importer"
+  timeline_engine.smf_interop:
+    - text: "Standard MIDI File import accepts format 0/1 with a metrical division, note on/off, and the tempo, time-signature, track-name, and end-of-track meta events; SMPTE divisions, format 2, and any other event fail the import unless the caller opts into ignoring non-note events."
+      tracked_in: "../guides/timeline-sdk.md#optional-standard-midi-file-interop"
+    - text: "SMF export covers note content plus the tempo and meter maps; device chains, automation, takes, freezes, and media assets have no SMF representation, and a tempo ramp or a tick the requested division cannot represent exactly is an error rather than an approximation."
+      tracked_in: "../guides/timeline-sdk.md#optional-standard-midi-file-interop"
   timeline_engine.capture:
     - text: "Capture owns fixed-capacity callback buffers only; device I/O, durable media publication, and submission of materialized Timeline commands remain application responsibilities."
       tracked_in: "../guides/timeline-sdk.md#takes-comps-freeze-and-capture"

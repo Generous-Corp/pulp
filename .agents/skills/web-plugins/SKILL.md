@@ -310,6 +310,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   missing no-exceptions entry passes that check and surfaces instead as an
   undefined symbol when the no-exceptions target links.
 
+- Only translation units under `core/timeline/src` join those lists. A public
+  header added under `core/timeline/include` for a foreign-format interop
+  target — `dawproject_import.hpp`, `smf.hpp` — stays out of every web source
+  list, because its implementation lives in its own target
+  (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
+  build. The closure checker scans sources, so adding such a header is
+  correct even though it touches `core/timeline`.
+
 - Extraction produces a new translation unit and carries the same obligation.
   Moving a helper out of an already-listed engine `.cpp` into its own file reads
   as a pure refactor, because the origin unit stays listed everywhere — but the

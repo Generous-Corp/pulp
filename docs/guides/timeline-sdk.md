@@ -94,6 +94,53 @@ responsibilities. See
 representative supported document; malformed or out-of-subset input returns a
 typed `DawProjectImportError` rather than a partial project.
 
+## Optional Standard MIDI File interop
+
+Standard MIDI File (SMF) import and export live in their own target for the same
+reason DAWproject import does — foreign-format I/O stays out of the
+dependency-minimal Timeline model:
+
+```cmake
+find_package(Pulp REQUIRED COMPONENTS smf-interop)
+target_link_libraries(my_timeline_app PRIVATE Pulp::smf-interop)
+```
+
+`Pulp::smf-interop` exposes `pulp::timeline::import_smf` and
+`pulp::timeline::export_smf` from `<pulp/timeline/smf.hpp>`.
+
+Conversion runs entirely in the musical domain. An SMF carries its own timebase
+— a header division in ticks per quarter note plus Set Tempo and Time Signature
+meta-events — so import scales those ticks onto the canonical
+`timebase::kTicksPerQuarter` grid and turns the meta-events into the project's
+`TempoMap` and `MeterMap`. Nothing is flattened to seconds in either direction,
+so a tempo change mid-file survives the round trip as a tempo point.
+
+- Tick scaling is exact for every position when the division divides
+  `kTicksPerQuarter` (96, 120, 192, 240, 480, 960, …; not 384 or 1920).
+  Otherwise import rounds to the nearest canonical tick and reports both
+  `exact_tick_conversion` and the error bound. Export is exact by default: a
+  canonical tick the requested division cannot represent is an error unless
+  `allow_lossy_tick_rounding` is set.
+- Import accepts format 0 and 1 with a metrical division, `MTrk` chunks only,
+  Note On/Note Off (including the zero-velocity Note On that means Note Off),
+  and the Set Tempo, Time Signature, Sequence/Track Name, and End of Track meta
+  events. SMPTE divisions, format 2, unknown chunks, malformed running status,
+  unbalanced notes, zero-length notes, and any other event fail the whole
+  import. `SmfUnsupportedEventPolicy::IgnoreNonNote` is the caller's explicit
+  opt-in to discard non-note channel messages, system-exclusive blocks, and
+  out-of-subset meta events.
+- `SmfImportLimits` bounds file bytes, tracks, events, notes, simultaneously
+  sounding notes, tempo and meter points, meta payload bytes, track-name bytes,
+  and the absolute tick ceiling before the corresponding state grows.
+- Export writes a format-1 file whose track 0 is a conductor track carrying the
+  tempo and meter maps. Note velocity is scaled to the 7-bit MIDI domain; a
+  velocity that would scale to zero is rejected rather than rewritten, because
+  a zero-velocity Note On reads as a Note Off. A tempo ramp, a sample-anchored
+  clip, and a clip holding non-note content are errors, not approximations.
+- Round trips through a dividing division preserve note start, duration, pitch,
+  channel, and 7-bit-representable velocity exactly. Tempo returns within the
+  Set Tempo event's whole-microsecond resolution.
+
 ## Optional plugin-format adapter
 
 `Pulp::sequence` is an exported integration layer for applications that need to

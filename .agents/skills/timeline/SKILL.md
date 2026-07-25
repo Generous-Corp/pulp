@@ -1,6 +1,6 @@
 ---
 name: timeline
-description: Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. Use for sequencers, arrangements, clips or notes, tempo and meter maps, automation, takes and comps, freeze, capture-to-timeline workflows, durable journals, project persistence, DAWproject import, and agent-driven timeline operations.
+description: Build, edit, validate, explain, render, import, or integrate Pulp timeline projects through the CLI, MCP tools, or C++ SDK. Use for sequencers, arrangements, clips or notes, tempo and meter maps, automation, takes and comps, freeze, capture-to-timeline workflows, durable journals, project persistence, DAWproject import, Standard MIDI File import and export, and agent-driven timeline operations.
 ---
 
 # Timeline document model
@@ -20,7 +20,8 @@ description: Build, edit, validate, explain, render, import, or integrate Pulp t
   immutable programs and transport snapshots, and capture publication as
   ordinary timeline commands.
 - Link the optional `Pulp::dawproject-import` SDK target only when ingesting
-  DAWproject XML; keep the dependency-minimal model on `Pulp::timeline`.
+  DAWproject XML, and `Pulp::smf-interop` only when reading or writing Standard
+  MIDI Files; keep the dependency-minimal model on `Pulp::timeline`.
 - Use the generated schema surfaces to discover command/document shapes; do
   not hand-copy schema vocabularies into a client.
 
@@ -536,3 +537,11 @@ Read [references/dawproject-import.md](references/dawproject-import.md) before
 changing the DAWproject importer or adding another foreign-format importer. It
 defines the native/web source boundary, parser constraints, fail-closed subset,
 sealed media identity, and pre-growth resource limits.
+
+Read [references/smf-interop.md](references/smf-interop.md) before changing
+Standard MIDI File import/export. It covers why the conversion stays in the
+musical domain rather than resolving to seconds, which header divisions convert
+exactly against `kTicksPerQuarter`, why the vendored `choc::midi::File` reader
+cannot back this path, and the byte-stream traps (running-status cancellation,
+system-exclusive framing, FIFO note matching) a hand-rolled decoder must get
+right.
