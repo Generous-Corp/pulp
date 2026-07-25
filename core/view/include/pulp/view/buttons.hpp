@@ -27,11 +27,24 @@ public:
     // (NSAccessibilityCheckBoxRole / AT-SPI TOGGLE_BUTTON) until the role
     // vocabulary grew a `button` literal, so every screen reader told the user
     // "checkbox" and offered a state it does not have.
-    TextButton() { set_access_role(AccessRole::button); set_focusable(true); }
+    // A button is one target, including whatever is drawn inside it. Children
+    // default to `auto_`, and hit_test() returns the topmost hit-testable view
+    // — so an icon or label centred in a button silently swallowed the click
+    // and on_click never fired. Clicking the button's few bare pixels worked,
+    // which made it look intermittent rather than broken. `box_only` is the
+    // React-Native-shaped way to say "me, never my children"; a button that
+    // genuinely needs an interactive child can opt back out with
+    // set_pointer_events(PointerEvents::auto_).
+    TextButton() {
+        set_access_role(AccessRole::button);
+        set_focusable(true);
+        set_pointer_events(PointerEvents::box_only);
+    }
     explicit TextButton(std::string label) : label_(std::move(label)) {
         set_access_role(AccessRole::button);
         set_derived_access_label(label_);
         set_focusable(true);
+        set_pointer_events(PointerEvents::box_only);
     }
 
     void set_label(std::string text) { label_ = std::move(text); set_derived_access_label(label_); }
