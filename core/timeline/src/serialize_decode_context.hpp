@@ -68,5 +68,9 @@ runtime::Result<Take, PersistenceError> decode_take(const JsonValue& value, Deco
                                                     std::string path);
 runtime::Result<TakeLane, PersistenceError>
 decode_take_lane(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<SequenceMarker, PersistenceError>
+decode_marker(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<SequenceRegion, PersistenceError>
+decode_region(const JsonValue& value, DecodeContext& context, std::string path);
 
 } // namespace pulp::timeline::detail

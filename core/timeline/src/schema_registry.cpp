@@ -2,6 +2,8 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "sequence_schema_migrations.hpp"
+#include "sequence_schema_policy.hpp"
 #include "take_lane_schema_migrations.hpp"
 #include "track_schema_migrations.hpp"
 #include "track_schema_policy.hpp"
@@ -288,12 +290,28 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"locators", SchemaValueKind::Array},
                                {"role", SchemaValueKind::String},
                                {"storage_policy", SchemaValueKind::String}}));
-    schemas.push_back(builtin("pulp.timeline.sequence", SchemaDomain::Document,
-                              {{"absolute_duration", SchemaValueKind::Object},
-                               {"id", SchemaValueKind::U64String},
-                               {"musical_duration", SchemaValueKind::I64String},
+    auto sequence =
+        builtin(std::string(detail::sequence_schema_policy.type_name), SchemaDomain::Document,
+                {{"absolute_duration", SchemaValueKind::Object},
+                 {"id", SchemaValueKind::U64String},
+                 {"markers", SchemaValueKind::Array},
+                 {"musical_duration", SchemaValueKind::I64String},
+                 {"name", SchemaValueKind::String},
+                 {"regions", SchemaValueKind::Array},
+                 {"tracks", SchemaValueKind::Array}},
+                detail::sequence_schema_policy.current_version);
+    sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
+    sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
+    schemas.push_back(std::move(sequence));
+    schemas.push_back(builtin("pulp.timeline.marker", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
-                               {"tracks", SchemaValueKind::Array}}));
+                               {"position", SchemaValueKind::I64String}}));
+    schemas.push_back(builtin("pulp.timeline.region", SchemaDomain::Document,
+                              {{"duration", SchemaValueKind::I64String},
+                               {"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"position", SchemaValueKind::I64String}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
                          {{"active_take_lane_id", SchemaValueKind::U64String},
                           {"automation_lanes", SchemaValueKind::Array},
@@ -437,6 +455,18 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_marker", SchemaDomain::Command,
+                              {{"marker", SchemaValueKind::Object, true, "pulp.timeline.marker"},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.remove_marker", SchemaDomain::Command,
+        {{"marker_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_region", SchemaDomain::Command,
+                              {{"region", SchemaValueKind::Object, true, "pulp.timeline.region"},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.remove_region", SchemaDomain::Command,
+        {{"region_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_freeze", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Object, false},
                                {"replacement", SchemaValueKind::Object, false},

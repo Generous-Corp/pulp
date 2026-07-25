@@ -2,6 +2,7 @@
 
 #include "asset_schema_policy.hpp"
 #include "project_state_access.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
@@ -606,6 +607,53 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+runtime::Result<SequenceMarker, PersistenceError>
+decode_marker(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment = bounded_increment(context.counts.markers, context.limits.max_markers);
+    if (!increment)
+        return fail<SequenceMarker>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                    increment.actual, context.limits.max_markers);
+    auto data = data_for(value, "pulp.timeline.marker", path);
+    if (!data)
+        return fail<SequenceMarker>(data.error().code, data.error().path, data.error().byte_offset);
+    auto id = required(*data.value(), "id", path + "/data");
+    auto name = string_field(*data.value(), "name", path + "/data");
+    auto position = required(*data.value(), "position", path + "/data");
+    if (!id || !name || !position)
+        return fail<SequenceMarker>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
+    if (!decoded_id || !decoded_position)
+        return fail<SequenceMarker>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    return runtime::Ok(SequenceMarker{ItemId{decoded_id.value()}, std::move(name).value(),
+                                      timebase::TickPosition{decoded_position.value()}});
+}
+
+runtime::Result<SequenceRegion, PersistenceError>
+decode_region(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment = bounded_increment(context.counts.regions, context.limits.max_regions);
+    if (!increment)
+        return fail<SequenceRegion>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                    increment.actual, context.limits.max_regions);
+    auto data = data_for(value, "pulp.timeline.region", path);
+    if (!data)
+        return fail<SequenceRegion>(data.error().code, data.error().path, data.error().byte_offset);
+    auto id = required(*data.value(), "id", path + "/data");
+    auto name = string_field(*data.value(), "name", path + "/data");
+    auto position = required(*data.value(), "position", path + "/data");
+    auto duration = required(*data.value(), "duration", path + "/data");
+    if (!id || !name || !position || !duration)
+        return fail<SequenceRegion>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
+    auto decoded_duration = parse_canonical_i64_string(*duration.value(), path + "/data/duration");
+    if (!decoded_id || !decoded_position || !decoded_duration)
+        return fail<SequenceRegion>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    return runtime::Ok(SequenceRegion{ItemId{decoded_id.value()}, std::move(name).value(),
+                                      timebase::TickPosition{decoded_position.value()},
+                                      timebase::TickDuration{decoded_duration.value()}});
+}
+
 runtime::Result<Sequence, PersistenceError>
 decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
                 const SchemaRegistry& registry, DecodeContext& context, std::string path) {
@@ -615,17 +663,47 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     if (!sequence_increment)
         return fail<Sequence>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                               sequence_increment.actual, limits.max_sequences);
-    auto data = data_for(value, "pulp.timeline.sequence", path);
-    if (!data)
-        return fail<Sequence>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto tracks = required(*data.value(), "tracks", path + "/data");
-    auto musical = required(*data.value(), "musical_duration", path + "/data");
-    auto absolute = required(*data.value(), "absolute_duration", path + "/data");
+    auto structural = data_for_versions(value, sequence_schema_policy.type_name,
+                                        sequence_schema_policy.oldest_readable_version,
+                                        sequence_schema_policy.current_version, path);
+    if (!structural)
+        return fail<Sequence>(structural.error().code, structural.error().path,
+                              structural.error().byte_offset);
+    const auto* data = structural.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto name = string_field(*data, "name", path + "/data");
+    auto tracks = required(*data, "tracks", path + "/data");
+    auto musical = required(*data, "musical_duration", path + "/data");
+    auto absolute = required(*data, "absolute_duration", path + "/data");
     if (!id || !name || !tracks || !musical || !absolute ||
         tracks.value()->kind != JsonValue::Kind::Array)
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
+    std::vector<SequenceMarker> decoded_markers;
+    std::vector<SequenceRegion> decoded_regions;
+    if (sequence_schema_policy.requires_annotations(structural.value().version)) {
+        auto markers = required(*data, "markers", path + "/data");
+        auto regions = required(*data, "regions", path + "/data");
+        if (!markers || markers.value()->kind != JsonValue::Kind::Array)
+            return fail<Sequence>(PersistenceErrorCode::MissingField, path + "/data/markers");
+        if (!regions || regions.value()->kind != JsonValue::Kind::Array)
+            return fail<Sequence>(PersistenceErrorCode::MissingField, path + "/data/regions");
+        decoded_markers.reserve(markers.value()->array.size());
+        for (std::size_t index = 0; index < markers.value()->array.size(); ++index) {
+            auto decoded = decode_marker(markers.value()->array[index], context,
+                                         path + "/data/markers/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_markers.push_back(std::move(decoded).value());
+        }
+        decoded_regions.reserve(regions.value()->array.size());
+        for (std::size_t index = 0; index < regions.value()->array.size(); ++index) {
+            auto decoded = decode_region(regions.value()->array[index], context,
+                                         path + "/data/regions/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_regions.push_back(std::move(decoded).value());
+        }
+    }
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
@@ -661,7 +739,8 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         decoded_tracks.push_back(std::move(decoded).value());
     }
     auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
-                                    decoded_absolute, std::move(decoded_tracks));
+                                    decoded_absolute, std::move(decoded_tracks),
+                                    std::move(decoded_markers), std::move(decoded_regions));
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));

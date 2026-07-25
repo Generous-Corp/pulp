@@ -3,6 +3,7 @@
 #include "asset_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -142,6 +143,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "take_lane";
     case ItemKind::Take:
         return "take";
+    case ItemKind::Marker:
+        return "marker";
+    case ItemKind::Region:
+        return "region";
     }
     return "project";
 }
@@ -524,36 +529,71 @@ bool write_track(EncodeContext& context, const Track& track) {
         });
 }
 
-bool write_sequence(EncodeContext& context, const Sequence& sequence) {
-    return write_envelope(context, "pulp.timeline.sequence", 1, [&] {
-        if (!context.writer.append("{\"absolute_duration\":"))
-            return false;
-        if (sequence.absolute_duration()) {
-            if (!context.writer.append("{\"sample_count\":") ||
-                !context.writer.u64(sequence.absolute_duration()->sample_count, true) ||
-                !context.writer.append(",\"sample_rate\":") ||
-                !write_rate(context, sequence.absolute_duration()->sample_rate) ||
-                !context.writer.character('}'))
-                return false;
-        } else if (!context.writer.append("null"))
-            return false;
-        if (!context.writer.append(",\"id\":") || !context.writer.u64(sequence.id().value, true) ||
-            !context.writer.append(",\"musical_duration\":"))
-            return false;
-        if (sequence.duration()) {
-            if (!context.writer.i64(sequence.duration()->value, true))
-                return false;
-        } else if (!context.writer.append("null"))
-            return false;
-        if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
-            !context.writer.append(",\"tracks\":["))
-            return false;
-        for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_track(context, sequence.tracks()[index]))
-                return false;
-        return context.writer.append("]}");
+bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
+    return write_envelope(context, "pulp.timeline.marker", 1, [&] {
+        return context.writer.append("{\"id\":") && context.writer.u64(marker.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(marker.name) &&
+               context.writer.append(",\"position\":") &&
+               context.writer.i64(marker.position.value, true) && context.writer.character('}');
     });
+}
+
+bool write_region(EncodeContext& context, const SequenceRegion& region) {
+    return write_envelope(context, "pulp.timeline.region", 1, [&] {
+        return context.writer.append("{\"duration\":") &&
+               context.writer.i64(region.duration.value, true) &&
+               context.writer.append(",\"id\":") && context.writer.u64(region.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(region.name) &&
+               context.writer.append(",\"position\":") &&
+               context.writer.i64(region.position.value, true) && context.writer.character('}');
+    });
+}
+
+bool write_sequence(EncodeContext& context, const Sequence& sequence) {
+    return write_envelope(
+        context, detail::sequence_schema_policy.type_name,
+        detail::sequence_schema_policy.current_version, [&] {
+            if (!context.writer.append("{\"absolute_duration\":"))
+                return false;
+            if (sequence.absolute_duration()) {
+                if (!context.writer.append("{\"sample_count\":") ||
+                    !context.writer.u64(sequence.absolute_duration()->sample_count, true) ||
+                    !context.writer.append(",\"sample_rate\":") ||
+                    !write_rate(context, sequence.absolute_duration()->sample_rate) ||
+                    !context.writer.character('}'))
+                    return false;
+            } else if (!context.writer.append("null"))
+                return false;
+            if (!context.writer.append(",\"id\":") ||
+                !context.writer.u64(sequence.id().value, true) ||
+                !context.writer.append(",\"markers\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.markers().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_marker(context, sequence.markers()[index]))
+                    return false;
+            if (!context.writer.append("],\"musical_duration\":"))
+                return false;
+            if (sequence.duration()) {
+                if (!context.writer.i64(sequence.duration()->value, true))
+                    return false;
+            } else if (!context.writer.append("null"))
+                return false;
+            if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
+                !context.writer.append(",\"regions\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.regions().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_region(context, sequence.regions()[index]))
+                    return false;
+            if (!context.writer.append("],\"tracks\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_track(context, sequence.tracks()[index]))
+                    return false;
+            return context.writer.append("]}");
+        });
 }
 
 } // namespace
@@ -598,6 +638,16 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
+        for (std::size_t index = 0; index < sequence.markers().size(); ++index)
+            if (!is_valid_utf8(sequence.markers()[index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/markers/" +
+                                                    std::to_string(index) + "/data/name");
+        for (std::size_t index = 0; index < sequence.regions().size(); ++index)
+            if (!is_valid_utf8(sequence.regions()[index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/regions/" +
+                                                    std::to_string(index) + "/data/name");
         for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index) {
             const auto& track = sequence.tracks()[track_index];
             const auto track_path =

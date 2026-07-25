@@ -80,6 +80,35 @@ artifact is needed. Never modify canonical project JSON text directly.
   exist in its device chain, and permits only one lane per placement/parameter
   pair. Lane and point IDs are Project identities owned by that Track; host
   delivery remains a separate contract.
+- A `Sequence` owns two annotation lists: `SequenceMarker` (a named point) and
+  `SequenceRegion` (a named span). Both are canonical-ticks values, share one
+  identity space (a marker may not reuse a region's `ItemId` in the same
+  sequence), and are stored sorted — markers by `(position, id)`, regions by
+  `(position, duration, id)`. **Regions may overlap and nest by design**: named
+  sections contain sub-sections, so disjointness is deliberately not an
+  invariant. What `Sequence::create` does enforce is a positive region length, a
+  non-negative position, and containment inside the sequence's musical duration
+  when it declares one — an absolute-only sequence bounds nothing above.
+- **`Sequence` is built through `create()` overloads, not aggregate init.**
+  Unlike `TrackInput`/`ProjectInput`, its `Data` is pimpl'd behind
+  `shared_ptr<const Data>`, so adding sequence-owned state means adding an
+  overload — existing call sites keep compiling and no positional brace-init
+  anywhere in the tree silently shifts a field. Preserve that: do not convert
+  `Sequence` into an input struct to add a field.
+- **The `pulp.timeline.sequence` schema is versioned; the encoder must not
+  hard-code its version.** `sequence_schema_policy` (`sequence_schema_policy.hpp`,
+  mirroring `track_schema_policy`) owns the type name, current version, oldest
+  readable version, and the `requires_annotations(version)` predicate that
+  decode and preflight both consult. A literal version in `write_sequence`,
+  `walk_sequence`, or `structural_registry_validation` is how these three drift
+  apart — route every one through the policy.
+- Markers and regions are command-addressable: `InsertMarker` / `RemoveMarker` /
+  `InsertRegion` / `RemoveRegion` reduce through
+  `transaction_marker_internal`, which plans an `ItemKind::Marker` or
+  `ItemKind::Region` identity parented by the **sequence** (not a track), so
+  `DirtyItem::owner_track` is legitimately zero for these commands. They emit
+  inverse commands, so undo, redo, and journal replay restore the annotation and
+  its tombstone ownership exactly.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -228,7 +257,8 @@ artifact is needed. Never modify canonical project JSON text directly.
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
   `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, `SetTakeComp`, and `SetTrackFreeze` are the bounded mutation
+  `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
+  `RemoveMarker`, `InsertRegion`, and `RemoveRegion` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.

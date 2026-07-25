@@ -33,7 +33,9 @@ Project command_payload_project() {
         .active_take_lane_id = {12},
         .freeze = freeze,
     }));
-    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, {track}));
+    auto sequence = take(Sequence::create({5}, "root", TickDuration{100}, std::nullopt, {track},
+                                          {SequenceMarker{{14}, "verse", {0}}},
+                                          {SequenceRegion{{15}, "chorus", {0}, {50}}}));
     MediaAsset asset{{20}, "take.wav", 1'000, {48'000, 1}, hash('d'), AssetStoragePolicy::External,
                      {},   {},         {}};
     return take(
@@ -67,6 +69,8 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& take_lane = member(track_data, "take_lanes").array[0];
     const auto& take_value = member(member(take_lane, "data"), "takes").array[0];
     const auto& freeze = member(track_data, "freeze");
+    const auto& marker = member(member(sequence, "data"), "markers").array[0];
+    const auto& region = member(member(sequence, "data"), "regions").array[0];
     const auto& tempo_map = member(project_data, "tempo_map");
     const auto& meter_map = member(project_data, "meter_map");
 
@@ -132,6 +136,14 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope("pulp.timeline.command.set_track_freeze",
                  "{\"expected\":" + std::string(parsed->raw(freeze)) +
                      R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope("pulp.timeline.command.insert_marker",
+                 "{\"marker\":" + std::string(parsed->raw(marker)) + R"(,"sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_marker",
+                 R"({"marker_id":"14","sequence_id":"5"})"),
+        envelope("pulp.timeline.command.insert_region",
+                 "{\"region\":" + std::string(parsed->raw(region)) + R"(,"sequence_id":"5"})"),
+        envelope("pulp.timeline.command.remove_region",
+                 R"({"region_id":"15","sequence_id":"5"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -162,6 +174,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<SetActiveTakeLane>(commands[16]));
     REQUIRE(std::holds_alternative<SetTakeComp>(commands[17]));
     REQUIRE(std::holds_alternative<SetTrackFreeze>(commands[18]));
+    REQUIRE(std::holds_alternative<InsertMarker>(commands[19]));
+    REQUIRE(std::holds_alternative<RemoveMarker>(commands[20]));
+    REQUIRE(std::holds_alternative<InsertRegion>(commands[21]));
+    REQUIRE(std::holds_alternative<RemoveRegion>(commands[22]));
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {

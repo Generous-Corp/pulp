@@ -105,8 +105,32 @@ std::optional<ModelError> preflight(const Track& track) {
     return validate_owned_ids(std::move(ids));
 }
 
+// Markers and regions are sequence-owned identities with no external references,
+// so the remap only has to allocate and rewrite their ItemIds.
+void append_annotation_ids(const Sequence& sequence, std::vector<ItemId>& ids) {
+    for (const auto& marker : sequence.markers())
+        ids.push_back(marker.id);
+    for (const auto& region : sequence.regions())
+        ids.push_back(region.id);
+}
+
+void allocate_annotation_owned(const Sequence& sequence, IdRemapTable& table,
+                               ItemIdAllocator& allocator, std::optional<ModelError>& error) {
+    for (const auto& marker : sequence.markers()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, marker.id);
+    }
+    for (const auto& region : sequence.regions()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, region.id);
+    }
+}
+
 std::optional<ModelError> preflight(const Sequence& sequence) {
     std::vector<ItemId> ids{sequence.id()};
+    append_annotation_ids(sequence, ids);
     for (const auto& track : sequence.tracks()) {
         ids.push_back(track.id());
         for (const auto& device : track.device_chain())
@@ -281,8 +305,15 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
                                   rebuilt.error().related_item);
         tracks.push_back(std::move(rebuilt).value());
     }
+    std::vector<SequenceMarker> markers(sequence.markers().begin(), sequence.markers().end());
+    for (auto& marker : markers)
+        marker.id = *table.find(marker.id);
+    std::vector<SequenceRegion> regions(sequence.regions().begin(), sequence.regions().end());
+    for (auto& region : regions)
+        region.id = *table.find(region.id);
     return Sequence::create(*table.find(sequence.id()), sequence.name(), sequence.duration(),
-                            sequence.absolute_duration(), std::move(tracks));
+                            sequence.absolute_duration(), std::move(tracks), std::move(markers),
+                            std::move(regions));
 }
 
 } // namespace
@@ -344,6 +375,7 @@ remap_ids(const Sequence& sequence, ItemIdAllocator& allocator, ExternalIdFixup 
     auto working = allocator;
     IdRemapTable table;
     std::optional<ModelError> error = allocate_owned(table, working, sequence.id());
+    allocate_annotation_owned(sequence, table, working, error);
     for (const auto& track : sequence.tracks()) {
         if (!error)
             error = allocate_owned(table, working, track.id());

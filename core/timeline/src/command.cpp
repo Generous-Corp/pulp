@@ -88,6 +88,15 @@ std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
         size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
 }
 
+bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position;
+}
+
+bool equal_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.duration == rhs.duration;
+}
+
 bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {
     return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
@@ -232,6 +241,16 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMarker>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_marker(left.marker, right.marker);
+            } else if constexpr (std::is_same_v<T, RemoveMarker>) {
+                return left.sequence_id == right.sequence_id && left.marker_id == right.marker_id;
+            } else if constexpr (std::is_same_v<T, InsertRegion>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_region(left.region, right.region);
+            } else if constexpr (std::is_same_v<T, RemoveRegion>) {
+                return left.sequence_id == right.sequence_id && left.region_id == right.region_id;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -268,6 +287,10 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), take_lane_retained_size(value.lane));
             if constexpr (std::is_same_v<T, InsertTake>)
                 return sizeof(T);
+            if constexpr (std::is_same_v<T, InsertMarker>)
+                return saturated_add(sizeof(T), value.marker.name.size());
+            if constexpr (std::is_same_v<T, InsertRegion>)
+                return saturated_add(sizeof(T), value.region.name.size());
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());

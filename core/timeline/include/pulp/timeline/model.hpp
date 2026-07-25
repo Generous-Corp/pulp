@@ -65,6 +65,8 @@ enum class ModelErrorCode : std::uint8_t {
     ActiveCompTakeRemoval,
     InvalidAudioLoopInfo,
     InvalidAssetStoragePolicy,
+    InvalidMarker,
+    InvalidRegion,
 };
 
 struct ModelError {
@@ -498,6 +500,30 @@ class Track {
     std::shared_ptr<const Data> data_;
 };
 
+// A marker is a named point on the sequence timeline; a region is a named span.
+// Both are anchored in canonical ticks — the same musical domain a musical clip
+// uses — and both carry a stable ItemId so a command can address one by identity.
+// A region is not a clip: it holds no content and never renders. When the
+// sequence declares a musical duration, a marker's position and a region's whole
+// span must lie inside it.
+struct SequenceMarker {
+    ItemId id;
+    std::string name;
+    timebase::TickPosition position;
+};
+
+// Regions MAY overlap, including full containment. Named sections nest by
+// nature ("chorus" inside "part B"), so disjointness is deliberately not an
+// invariant: Sequence::create accepts any set of in-bounds, positive-length,
+// uniquely identified regions. The only ordering guarantee is the canonical
+// sort below.
+struct SequenceRegion {
+    ItemId id;
+    std::string name;
+    timebase::TickPosition position;
+    timebase::TickDuration duration;
+};
+
 class Sequence {
   public:
     static runtime::Result<Sequence, ModelError>
@@ -506,6 +532,10 @@ class Sequence {
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks);
+    static runtime::Result<Sequence, ModelError>
+    create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
+           std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
+           std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions);
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -513,11 +543,27 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
+    // Ordered by (position, id). Markers and regions share one identity space:
+    // no marker may reuse a region's ItemId within the same sequence.
+    std::span<const SequenceMarker> markers() const noexcept;
+    // Ordered by (position, duration, id). Overlap is permitted.
+    std::span<const SequenceRegion> regions() const noexcept;
+    const SequenceMarker* find_marker(ItemId id) const noexcept;
+    const SequenceRegion* find_region(ItemId id) const noexcept;
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
+    runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
+    runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
+    runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
     bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:
     struct Data;
+    // Annotation edits validate only the annotation lists and share the existing
+    // track storage and identity index; they never re-walk the arrangement.
+    runtime::Result<Sequence, ModelError>
+    with_annotations(std::vector<SequenceMarker> markers,
+                     std::vector<SequenceRegion> regions) const;
     explicit Sequence(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };
@@ -545,6 +591,8 @@ enum class ItemKind : std::uint8_t {
     AutomationPoint,
     TakeLane,
     Take,
+    Marker,
+    Region,
 };
 
 // Canonical immediate parent for a kind. Every parent that an item's own
@@ -565,6 +613,8 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Sequence:
         return project_id;
     case ItemKind::Track:
+    case ItemKind::Marker:
+    case ItemKind::Region:
         return sequence_id;
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:

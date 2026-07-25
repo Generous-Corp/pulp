@@ -1,4 +1,5 @@
 #include "asset_schema_policy.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -72,9 +73,22 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField sequence_fields[] = {
         {"absolute_duration", SchemaValueKind::Object},
         {"id", SchemaValueKind::U64String},
+        {"markers", SchemaValueKind::Array},
         {"musical_duration", SchemaValueKind::I64String},
         {"name", SchemaValueKind::String},
+        {"regions", SchemaValueKind::Array},
         {"tracks", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField marker_fields[] = {
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"position", SchemaValueKind::I64String},
+    };
+    static constexpr ExpectedField region_fields[] = {
+        {"duration", SchemaValueKind::I64String},
+        {"id", SchemaValueKind::U64String},
+        {"name", SchemaValueKind::String},
+        {"position", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField track_fields[] = {
         {"active_take_lane_id", SchemaValueKind::U64String},
@@ -132,7 +146,10 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
          asset_schema_policy.current_version, asset_schema_policy.oldest_readable_version},
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
-        {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
+        {SchemaDomain::Document, sequence_schema_policy.type_name, sequence_fields,
+         sequence_schema_policy.current_version, sequence_schema_policy.oldest_readable_version},
+        {SchemaDomain::Document, "pulp.timeline.marker", marker_fields},
+        {SchemaDomain::Document, "pulp.timeline.region", region_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
          track_schema_policy.current_version, track_schema_policy.oldest_readable_version},
         {SchemaDomain::Document, "pulp.timeline.automation_lane", automation_lane_fields},
