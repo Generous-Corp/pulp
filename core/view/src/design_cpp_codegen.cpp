@@ -1459,7 +1459,13 @@ void emit_node(std::ostringstream& out,
     // make the box_none emitted below inert and silently drop the interactive
     // descendant. Emitted once here so it covers both the extracted-factory
     // path and the inline emit_node path.
-    if (parent_owns_imported_child_hits) {
+    //
+    // Skipped when this node is itself `pass_through_self`: its own box_none was
+    // emitted above, and re-opening here would clobber it — the parent's policy
+    // for this node outranks this node's policy for its children, which is the
+    // order the runtime materializer already uses.
+    if (parent_owns_imported_child_hits &&
+        self_hit_policy != PromotedChildHitPolicy::pass_through_self) {
         for (std::size_t i = 0; i < count; ++i) {
             if (promoted_widget_child_hit_policy(node.children[i], resolved.children[i]) ==
                 PromotedChildHitPolicy::disabled)

@@ -656,6 +656,13 @@ TEST_CASE("a mere candidate recognizer does not claim the pointer",
     CHECK(had_candidate);                          // a recognizer is present...
     CHECK_FALSE(root.gesture_claimed_pointer());   // ...but it has claimed nothing
 
+    // A wheel event must not leave a stale claim behind. handle_pointer_event
+    // returns early for wheels, so the clear has to precede that early-out.
+    auto wheel = pointer_event({30, 30}, MousePhase::hover, &t);
+    wheel.is_wheel = true;
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(wheel, t));
+    CHECK_FALSE(root.gesture_claimed_pointer());
+
     // A view with no recognizer at all claims nothing either.
     View bare;
     bare.set_bounds({0, 0, 200, 200});
@@ -664,4 +671,40 @@ TEST_CASE("a mere candidate recognizer does not claim the pointer",
     auto down2 = pointer_event({30, 30}, MousePhase::press, &t);
     CHECK_FALSE(bare.dispatch_gesture_pointer_event(down2, t));
     CHECK_FALSE(bare.gesture_claimed_pointer());
+}
+
+TEST_CASE("a widget carrying a recognizer still receives its own events",
+          "[view][gesture]") {
+    // The end-to-end shape of the host bug: a control that merely REGISTERS a
+    // recognizer must keep working normally until that recognizer actually
+    // claims. Previously the mere presence of one suppressed press/drag/release
+    // entirely, so a knob with a double-tap gesture was dead to the mouse while
+    // still painting and showing its value.
+    struct Probe final : View {
+        int downs = 0;
+        int ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<Probe>();
+    auto* probe = owned.get();
+    owned->set_bounds({20, 20, 100, 100});
+    root.add_child(std::move(owned));
+
+    // Control: no recognizer at all.
+    root.simulate_click({50, 50});
+    CHECK(probe->downs == 1);
+    CHECK(probe->ups == 1);
+
+    // Subject: identical, except the widget now carries a double-tap gesture.
+    // A single click leaves it a candidate, never a claim, so delivery must be
+    // unchanged — and the down/up bracket must stay balanced, or a real widget
+    // would hold begin_gesture open with no matching end.
+    probe->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+    root.simulate_click({50, 50});
+    CHECK(probe->downs == 2);
+    CHECK(probe->ups == 2);
 }

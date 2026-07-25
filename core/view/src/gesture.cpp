@@ -821,8 +821,13 @@ void GestureArbiter::finish_session_if_needed(PointerSession& session,
 
 bool GestureArbiter::handle_pointer_event(View& root, const MouseEvent& root_event,
                                           double timestamp_seconds) {
-    if (root_event.is_wheel) return false;
+    // Cleared before every early-out, including the wheel one: a stale claim
+    // from the previous pointer event would otherwise survive into the next
+    // query. The host happens to short-circuit on the dispatch return today,
+    // so it never reads it — which is exactly what would make this a quiet
+    // trap for the next caller.
     claimed_pointer_ = false;
+    if (root_event.is_wheel) return false;
     if (timestamp_seconds < 0.0)
         timestamp_seconds = default_timestamp_seconds();
 
