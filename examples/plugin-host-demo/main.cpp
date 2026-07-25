@@ -8,8 +8,8 @@
 //   pulp-plugin-host-demo                      # auto-pick first scanned CLAP
 //   pulp-plugin-host-demo --list               # list scanned plugins and exit
 //   pulp-plugin-host-demo --path <bundle>      # load a CLAP/VST3/LV2 bundle directly
-//   pulp-plugin-host-demo --id <plugin-id>     # select a scanned descriptor by id
-//                                              # (required for path-less AU components)
+//   pulp-plugin-host-demo --id <plugin-id>     # load an AU 4CC identity directly,
+//                                              # or select another scanned descriptor
 //   pulp-plugin-host-demo --warmup-ms 500       # service native host events
 //                                              # before inspecting/rendering
 //   pulp-plugin-host-demo --manage             # headless plugin-manager UX
@@ -497,6 +497,8 @@ int main(int argc, char** argv) {
             std::printf("Usage: %s [--list] [--manage] [--editor] "
                         "[--path <bundle>] [--id <plugin-id>] "
                         "[--warmup-ms <milliseconds>] [--editor-ms <milliseconds>]\n"
+                        "  --id            load an AU TYPE:SUBT:MANU identity directly; "
+                        "other formats resolve by scan\n"
                         "  --editor        open the loaded plugin's editor in a window "
                         "(auto-closes after --editor-ms, default 3000)\n", argv[0]);
             return 0;
@@ -531,6 +533,9 @@ int main(int argc, char** argv) {
                 filter_path.c_str());
             return 2;
         }
+    } else if (!filter_id.empty() && plugin_info_from_au_identity(filter_id, chosen)) {
+        // AU component triplets are complete identities. Load the exact
+        // caller-selected component without enumerating unrelated plugins.
     } else {
         PluginScanner scanner;
         ScanOptions opts;
@@ -538,8 +543,7 @@ int main(int argc, char** argv) {
         auto plugins = scanner.scan(opts);
 
         if (!filter_id.empty()) {
-            // A path-less --id (e.g. an AU OSType triplet) resolves against the
-            // scanned descriptors.
+            // Non-AU IDs still need discovery to resolve their bundle path.
             chosen = pick_plugin(plugins, {}, filter_id);
         } else {
             // Prefer CLAP for the no-argument demo because it is the most
