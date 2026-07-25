@@ -177,6 +177,47 @@ installed SDK. Installed embedders should deserialize through
 `pulp::timeline`, compile through `pulp::playback`, and render through the
 public playback program APIs described above.
 
+## Scrubbing the playhead
+
+Dragging the playhead is audible through `MasterTransport` itself, not through a
+renderer. Scrub mode makes the transport emit short repeated windows that start
+at the latest posted position:
+
+```cpp
+// Mouse down on the ruler: 2048 frames is roughly a 43 ms grain at 48 kHz.
+transport.begin_scrub(2048, position_ticks);
+
+// Every mouse move during the drag.
+transport.scrub_to(new_position_ticks);
+
+// Mouse up.
+transport.end_scrub();
+```
+
+The rules that matter when wiring a UI to it:
+
+- The window length must be at least the transport's `max_buffer_size`;
+  `begin_scrub()` returns `ScrubWindowTooShortForMaximumBlock` otherwise.
+- A position posted by `scrub_to()` is latched and takes effect at the next
+  window boundary, so the grain rate is the window length rather than the rate
+  your UI emits mouse moves at. Call it as often as you like.
+- `TransportSnapshot::is_playing` is true while scrubbing even when the musical
+  transport is stopped, and `TransportSnapshot::scrubbing` distinguishes the
+  mode. Each window restart arrives as a range discontinuity, which is the same
+  signal a loop wrap produces — renderers need no scrub-specific handling, and
+  notes left sounding by a restart are released at the boundary.
+- **Scrubbing suspends loop wrapping.** A drag is a direct statement of
+  position, so the transport will not pull the audible window back to the loop
+  start, and positions outside the loop stay reachable. The loop is still
+  reported in the snapshot so a UI keeps drawing it, and wrapping resumes on the
+  first block after `end_scrub()`, which parks the playhead on the position the
+  drag was released at.
+- A note whose onset precedes a window is not retriggered, matching the seek
+  behavior of `ArrangementNoteRenderer`.
+- Scrubbing reaches the same consumers a seek does: an in-progress capture take
+  is cancelled, and external MIDI sync emits a song-position update per window,
+  so slaved gear chases the drag.
+
 ## One typed edit through CLI and MCP
 
 Start by asking the installed CLI for the generated schema, then validate the

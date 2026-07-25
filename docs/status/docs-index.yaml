@@ -357,6 +357,11 @@ docs:
     kind: reference
     summary: Catalog of every developer-facing core/view UI primitive
 
+  - slug: interchange-matrix
+    path: reference/interchange-matrix.md
+    kind: reference
+    summary: Per-format interchange capability matrix — what each format carries per concept, what it refuses on import, and what it costs on export (generated from core/interchange/capabilities)
+
   - slug: sequencer-state-channel
     path: reference/sequencer-state-channel.md
     kind: reference
