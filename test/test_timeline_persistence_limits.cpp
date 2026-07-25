@@ -580,9 +580,12 @@ TEST_CASE("Timeline structural preflight rejects missing required fields before 
 }
 
 TEST_CASE("Timeline future built-in notes content remains opaque and quota-terminal") {
+    // One past the registered current version: a built-in type name the reader
+    // knows at a version it does not. Raise this whenever the notes content
+    // schema is bumped, or the case silently stops testing the opaque path.
     const std::string raw =
-        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":2})";
-    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 2}, raw));
+        R"({"data":{"notes":[{},{}]},"type_name":"pulp.timeline.content.notes","version":3})";
+    auto opaque = take(OpaqueContent::create({"pulp.timeline.content.notes", 3}, raw));
     const auto registry = builtins();
     auto snapshot = take(serialize_project(project_with(std::move(opaque)), registry));
     DecodeLimits limits;

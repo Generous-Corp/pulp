@@ -109,6 +109,29 @@ TEST_CASE("Note probability is exact at both endpoints", "[timeline][note-modifi
             REQUIRE(note_modifier_sounds(always, always_key, pass));
         }
     }
+
+    // A sweep alone is too weak here. The realistic way to lose an endpoint is
+    // to drop the early returns and compare against a power-of-two modulus,
+    // which leaks on exactly one residue in 65536 — a sweep would have to be
+    // enormous to stumble onto it. So aim at that residue directly: find the
+    // draws that would leak and assert the endpoints hold precisely there.
+    constexpr std::uint64_t power_of_two = note_probability_certain + 1u;
+    bool found_top = false;
+    bool found_bottom = false;
+    for (std::uint64_t pass = 0; pass < 1'000'000 && !(found_top && found_bottom); ++pass) {
+        const NoteModifierDraw draw{note_modifier_draw_key(0, {7}), pass};
+        const auto residue = draw.value() % power_of_two;
+        if (residue == note_probability_certain) {
+            found_top = true;
+            REQUIRE(note_probability_sounds(note_probability_certain, draw));
+        }
+        if (residue == 0) {
+            found_bottom = true;
+            REQUIRE_FALSE(note_probability_sounds(0, draw));
+        }
+    }
+    REQUIRE(found_top);
+    REQUIRE(found_bottom);
 }
 
 TEST_CASE("The same seed replays the same sounding decisions", "[timeline][note-modifier][determinism]") {

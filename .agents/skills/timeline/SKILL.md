@@ -574,6 +574,13 @@ document is preflighted *before* migration runs, so the older shape has to pass
 too. Field lists in the validator are ordered, and the registry lists fields
 alphabetically, so a new field goes in its sorted position, not at the end.
 
+A bump also invalidates any test that pins a **"future version" sentinel** —
+`test_timeline_persistence_limits.cpp` asserts that a known built-in type name at
+an unknown version stays opaque and quota-terminal, using a literal version one
+past the current one. When the schema catches up to that literal the case still
+passes trivially while no longer testing the opaque path at all, so raise the
+sentinel in the same change.
+
 
 The `SchemaRegistry` is the single generative source for the timeline's agent
 surfaces (JS facade, TypeScript definitions, MCP tool definitions, CLI verbs):
