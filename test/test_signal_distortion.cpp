@@ -138,7 +138,7 @@ TEST_CASE("3 turn-on voltage orders germanium < silicon < led",
     // asserts the shipped table produces the documented ordering rather than
     // asserting the voltages themselves.
     const auto turn_on_voltage = [](DiodeModel model) {
-        detail::DiodeNetwork network;
+        junction::JunctionPair network;
         detail::apply_diode_model(network, model);
         detail::apply_symmetry(network, 0.0);
         constexpr double kCurrentThreshold = 1e-6;  // amps
@@ -202,7 +202,7 @@ TEST_CASE("4 the in-loop knee tracks drive while the to-ground knee does not",
     // is therefore right at the edge of what a correct clipper produces, so what
     // is asserted here is the DERIVED prediction rather than the round number.
     // See adjudication A-12.
-    const double theta = 1.0 * detail::kThermalVoltage;  // silicon: n = 1
+    const double theta = 1.0 * junction::kThermalVoltage;  // silicon: n = 1
     const double clip_at_lo = units::db_to_linear(ground_lo);
     const double predicted_growth =
         units::linear_to_db((clip_at_lo + theta * std::log(4.0)) / clip_at_lo);
@@ -386,7 +386,7 @@ TEST_CASE("the antiderivative differentiates back to the current",
     // (b → 0), where the naive θ/b form divides by a vanishing number.
     for (auto model : {DiodeModel::silicon, DiodeModel::germanium, DiodeModel::led}) {
         for (double symmetry : {-1.0, -0.5, 0.0, 0.5, 1.0}) {
-            detail::DiodeNetwork network;
+            junction::JunctionPair network;
             detail::apply_diode_model(network, model);
             detail::apply_symmetry(network, symmetry);
 
@@ -404,7 +404,7 @@ TEST_CASE("the antiderivative differentiates back to the current",
 TEST_CASE("a removed leg is exactly a single diode", "[distortion][clipper]") {
     // symmetry = −1 must produce the one-sided Shockley law with no residual
     // conduction on the other half — the property that makes it half-wave.
-    detail::DiodeNetwork network;
+    junction::JunctionPair network;
     detail::apply_diode_model(network, DiodeModel::silicon);
     detail::apply_symmetry(network, -1.0);
     REQUIRE(network.leg_b == 0.0);

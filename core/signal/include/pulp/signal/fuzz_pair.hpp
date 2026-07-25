@@ -88,6 +88,7 @@
 /// is independently chosen and independently ranged.
 
 #include <pulp/signal/dc_blocker.hpp>
+#include <pulp/signal/junction.hpp>
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/oversampling.hpp>
 #include <pulp/signal/rng.hpp>
@@ -125,8 +126,10 @@ public:
     /// [design parameter] silicon Is 5e-12 calibration units (range 1e-13 .. 5e-11).
     static constexpr double kSiliconSaturation = 5e-12;
 
-    /// Thermal voltage at 300 K. A physical constant, `k·T/q`, not a fit.
-    static constexpr double kThermalVoltage = 0.02585;
+    /// The shared thermal voltage. Named here so this module's own formulas
+    /// read in its terms, but there is exactly one definition, in
+    /// `junction.hpp`.
+    static constexpr double kThermalVoltage = junction::kThermalVoltage;
 
     // ── Circuit constants ─────────────────────────────────────────────────
 
@@ -361,19 +364,14 @@ public:
 
 private:
     /// `i(v_be)` — the Ebers-Moll forward-active term, in calibration units.
-    double junction_current(double v_be) const {
-        // Clamped so a transient overshoot cannot produce inf. 80 is far past
-        // any current the collector load will admit and well short of `exp`'s
-        // overflow.
-        const double arg = std::clamp(v_be / (ideality_ * kThermalVoltage), -80.0, 80.0);
-        return saturation_ * std::expm1(arg);
-    }
+    ///
+    /// A transistor's base-emitter junction is a single forward junction, so
+    /// the shared network is configured with its reverse leg removed
+    /// (`leg_b = 0`) and this is exactly `Is·(exp(v/(n·V_T)) − 1)`.
+    double junction_current(double v_be) const { return network_.current(v_be); }
 
     /// `di/dv_be` — the transconductance the loop-gain formula needs.
-    double transconductance(double v_be) const {
-        const double arg = std::clamp(v_be / (ideality_ * kThermalVoltage), -80.0, 80.0);
-        return saturation_ / (ideality_ * kThermalVoltage) * std::exp(arg);
-    }
+    double transconductance(double v_be) const { return network_.conductance(v_be); }
 
     /// One stage's collector voltage on the normalised rail. This is what
     /// bounds the circuit: without it the junction current is unbounded and the
@@ -496,6 +494,11 @@ private:
             ideality_ = kSiliconIdeality;
             saturation_ = kSiliconSaturation;
         }
+        network_.ideality = ideality_;
+        network_.saturation_current = saturation_;
+        network_.leg_a = 1.0;
+        // A transistor's base-emitter junction conducts one way only.
+        network_.leg_b = 0.0;
 
         available_current_ =
             std::max(kNominalCollectorCurrent * std::pow(1.0 - starve_, kStarveExponent),
@@ -506,8 +509,11 @@ private:
         // 363 mV / 693 mV fall out of the shipped constants rather than being
         // restated. Starvation lowers it toward cutoff, which is the gating
         // mechanism.
-        bias_voltage_ =
-            ideality_ * kThermalVoltage * std::log(available_current_ / saturation_ + 1.0);
+        // The quiescent bias IS the conduction knee at the available current, and
+        // it is INVERTED FROM THE SAME LAW the forward path uses rather than
+        // written out again — so the documented 363 mV / 693 mV figures are
+        // consequences of the shipped (n, Is) rows and cannot drift from them.
+        bias_voltage_ = network_.knee_voltage(available_current_);
 
         // The collector load puts the quiescent collector mid-rail.
         collector_load_ = (1.0 - kQuiescentCollector) / kNominalCollectorCurrent;
@@ -548,6 +554,7 @@ private:
     bool oversample_ = true;
     bool drift_enabled_ = false;
 
+    junction::JunctionPair network_{};
     double ideality_ = kGermaniumIdeality;
     double saturation_ = kGermaniumSaturation;
     double available_current_ = kNominalCollectorCurrent;

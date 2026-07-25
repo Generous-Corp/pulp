@@ -95,6 +95,7 @@
 /// is independently chosen and independently ranged.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/junction.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/units.hpp>
 
@@ -120,98 +121,13 @@ enum class ClipperTopology : std::uint8_t {
 
 namespace detail {
 
-/// Thermal voltage `k·T/q` at 300 K, in volts. A physical constant, not a fit.
-inline constexpr double kThermalVoltage = 0.02585;
-
-/// `(exp(x) − 1) / x`, with the removable singularity at 0 handled.
-///
-/// This is what makes the antiderivative below stable as a leg's reciprocal
-/// count goes to zero (a leg being removed). Writing that term as
-/// `θ/b · (exp(−b·v/θ) − 1)` instead would divide by a vanishing `b` and
-/// produce a huge value that only cancels in a later subtraction — correct on
-/// paper and catastrophic in floating point.
-inline double exprel(double x) {
-    if (std::abs(x) < 1e-6) {
-        // Two Taylor terms are already below double precision at this cutoff.
-        return 1.0 + x * 0.5 + x * x * (1.0 / 6.0);
-    }
-    return std::expm1(x) / x;
-}
-
-/// One diode network: the Shockley law over two antiparallel legs.
-///
-/// `a` and `b` are the RECIPROCAL series-diode counts of the two legs; see the
-/// file doc block for why reciprocals.
-struct DiodeNetwork {
-    double saturation_current = 1e-14;  ///< `Is`, amps.
-    double ideality = 1.0;              ///< `n`, dimensionless.
-    double leg_a = 1.0;                 ///< Reciprocal series count, positive leg.
-    double leg_b = 1.0;                 ///< Reciprocal series count, negative leg.
-
-    /// `θ = n·Vt`, the exponential's scale in volts.
-    double theta() const { return ideality * kThermalVoltage; }
-
-    /// Clamps an exponent argument so a transient overshoot cannot produce inf.
-    /// 80 is ~5.5e34 — far past any current the solver will accept, and well
-    /// short of `exp`'s overflow at ~709.
-    static double clamp_exponent(double x) { return std::clamp(x, -80.0, 80.0); }
-
-    /// `i_D(v)` in amps. The `−1` terms of the two legs cancel exactly, which
-    /// is why this is a difference of exponentials rather than of `expm1`s.
-    double current(double v) const {
-        const double t = theta();
-        return saturation_current * (std::exp(clamp_exponent(leg_a * v / t)) -
-                                     std::exp(clamp_exponent(-leg_b * v / t)));
-    }
-
-    /// `i_D'(v)` in siemens — the incremental conductance Newton needs.
-    double conductance(double v) const {
-        const double t = theta();
-        return saturation_current / t *
-               (leg_a * std::exp(clamp_exponent(leg_a * v / t)) +
-                leg_b * std::exp(clamp_exponent(-leg_b * v / t)));
-    }
-
-    /// A closed-form estimate of where the clipped node voltage will land, used
-    /// as the solver's warm start.
-    ///
-    /// This matters more than it looks. Newton on an exponential advances by
-    /// roughly one thermal voltage per iteration when it starts deep in
-    /// conduction — 26 mV at a time — so a cold start two volts away needs
-    /// dozens of iterations, and the RT-safety cap is eight. The estimate comes
-    /// from solving the conducting branch directly: with `v ≪ v_drive`,
-    /// `(v_drive − v)/R = Is·exp(a·v/θ)` gives `v ≈ (θ/a)·ln(v_drive/(R·Is))`.
-    /// For silicon at 2 V through 10 kΩ that is 0.613 V — the knee, to three
-    /// figures. From there Newton converges in two or three steps.
-    ///
-    /// Below conduction, or with the relevant leg absent, the node simply
-    /// follows the drive, which is what the fallthrough returns.
-    double conduction_estimate(double v_drive, double resistance) const {
-        const double leg = v_drive >= 0.0 ? leg_a : leg_b;
-        if (!(leg > 0.0)) return v_drive;
-        const double ratio = std::abs(v_drive) / (resistance * saturation_current);
-        if (!(ratio > 1.0)) return v_drive;
-        const double magnitude = (theta() / leg) * std::log(ratio);
-        return std::copysign(std::min(magnitude, std::abs(v_drive)), v_drive);
-    }
-
-    /// `∫i_D(v)dv`, in closed form — no numerical quadrature. Used by the ADAA
-    /// path. Written through `exprel` so a removed leg (`b → 0`) is exact
-    /// rather than a cancelling pair of large numbers.
-    double antiderivative(double v) const {
-        const double t = theta();
-        return saturation_current * v *
-               (exprel(clamp_exponent(leg_a * v / t)) - exprel(clamp_exponent(-leg_b * v / t)));
-    }
-};
-
 /// The `(Is, n)` pair for a device family. Honest `[design parameter]` rows
 /// representing a class's published order of magnitude, never a measured part.
 ///
 /// [design parameter] silicon Is 1e-14 (range 1e-15 .. 1e-12), n 1.0 (1.0 .. 1.05)
 /// [design parameter] germanium Is 1e-6 (range 1e-7 .. 1e-5), n 1.1 (1.0 .. 1.3)
 /// [design parameter] led Is 1e-18 (range 1e-19 .. 1e-17), n 2.0 (1.5 .. 2.5)
-inline void apply_diode_model(DiodeNetwork& network, DiodeModel model) {
+inline void apply_diode_model(junction::JunctionPair& network, DiodeModel model) {
     switch (model) {
         case DiodeModel::germanium:
             network.saturation_current = 1e-6;
@@ -234,7 +150,7 @@ inline void apply_diode_model(DiodeNetwork& network, DiodeModel model) {
 /// Positive `symmetry` lengthens the positive leg (turns on later); negative
 /// `symmetry` fades the negative leg out entirely. Both are continuous and both
 /// reduce to the matched pair at 0.
-inline void apply_symmetry(DiodeNetwork& network, double symmetry) {
+inline void apply_symmetry(junction::JunctionPair& network, double symmetry) {
     const double s = std::clamp(symmetry, -1.0, 1.0);
     network.leg_a = 1.0 / (1.0 + std::max(0.0, s));
     network.leg_b = 1.0 + std::min(0.0, s);
@@ -430,12 +346,12 @@ public:
 
 private:
     /// The diode term as the solver sees it: the plain current, or its ADAA
-    /// difference quotient when that is well-conditioned.
+    /// difference quotient. The guard and the fallback live in `JunctionPair`,
+    /// so the two clipper classes cannot drift apart on either.
     double diode_term(double v) const {
-        if (!adaa_) return network_.current(v);
-        const double delta = v - previous_voltage_;
-        if (std::abs(delta) <= ClipperSolverConfig::kAdaaEpsilon) return network_.current(v);
-        return (network_.antiderivative(v) - network_.antiderivative(previous_voltage_)) / delta;
+        return adaa_ ? network_.adaa_current(v, previous_voltage_,
+                                             ClipperSolverConfig::kAdaaEpsilon)
+                     : network_.current(v);
     }
 
     double solve(double vin) {
@@ -477,7 +393,7 @@ private:
             ClipperSolverConfig::kMaxNewtonIterations, last_iterations_);
     }
 
-    detail::DiodeNetwork network_{};
+    junction::JunctionPair network_{};
     double sample_rate_ = 44100.0;
     double timestep_ = 1.0 / 44100.0;
     double resistance_ = kResistanceDefault;
@@ -624,11 +540,13 @@ private:
         capacitance_ = 1.0 / (two_pi * feedback_resistance_ * knee_corner_hz_);
     }
 
+    /// The diode term as the solver sees it: the plain current, or its ADAA
+    /// difference quotient. The guard and the fallback live in `JunctionPair`,
+    /// so the two clipper classes cannot drift apart on either.
     double diode_term(double v) const {
-        if (!adaa_) return network_.current(v);
-        const double delta = v - previous_voltage_;
-        if (std::abs(delta) <= ClipperSolverConfig::kAdaaEpsilon) return network_.current(v);
-        return (network_.antiderivative(v) - network_.antiderivative(previous_voltage_)) / delta;
+        return adaa_ ? network_.adaa_current(v, previous_voltage_,
+                                             ClipperSolverConfig::kAdaaEpsilon)
+                     : network_.current(v);
     }
 
     /// The shared trapezoidal + Newton solve. `forcing` is the extra current
@@ -660,7 +578,7 @@ private:
             ClipperSolverConfig::kMaxNewtonIterations, last_iterations_);
     }
 
-    detail::DiodeNetwork network_{};
+    junction::JunctionPair network_{};
     Topology topology_ = Topology::in_loop;
     double sample_rate_ = 44100.0;
     double timestep_ = 1.0 / 44100.0;

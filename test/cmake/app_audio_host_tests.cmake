@@ -792,3 +792,12 @@ target_sources(pulp-test-forge-distortion-catalog PRIVATE
 target_link_libraries(pulp-test-forge-distortion-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-distortion-catalog)
+
+# Smoke test for the shared bake-layer fixture. Small on purpose: its job is to
+# keep the fixture compiling against both a mono and a stereo catalog node, so a
+# change to either shape fails here rather than in whichever suite happens to be
+# rebuilt next.
+add_executable(pulp-test-baked-node-fixture test_baked_node_fixture_smoke.cpp)
+target_link_libraries(pulp-test-baked-node-fixture
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-baked-node-fixture)
