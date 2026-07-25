@@ -84,3 +84,61 @@ pulp_add_test_suite(pulp-test-square-osc-bank
     SOURCES test_square_osc_bank.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 300)
+
+# Percussion-synthesis shared layer. Each suite measures the property its
+# component is named for -- spectral slope, decay timing, hold interval,
+# vactrol asymmetry -- rather than asserting a coefficient against itself, so
+# the naive transforms they use are the slow part and the timeouts are wide.
+pulp_add_test_suite(pulp-test-noise-source
+    SOURCES test_noise_source.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
+
+pulp_add_test_suite(pulp-test-decay-envelope
+    SOURCES test_decay_envelope.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-lofi-chain
+    SOURCES test_lofi_chain.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-lowpass-gate
+    SOURCES test_lowpass_gate.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+pulp_add_test_suite(pulp-test-two-pole-resonator
+    SOURCES test_two_pole_resonator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 300)
+
+# Percussion voices. These cover the shared lifecycle (additive render, faded
+# choke, velocity reaching timbre) alongside the voice's own behaviour, since
+# a voice that broke a lifecycle rule would still sound plausible in isolation.
+pulp_add_test_suite(pulp-test-drum-kick
+    SOURCES test_drum_kick.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
+
+pulp_add_test_suite(pulp-test-drum-voices
+    SOURCES test_drum_voices.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 600)
+
+# The physically-modelled voices and their primitives. Each is measured against
+# the thing a simpler construction cannot do: the shifter against a pitch shift,
+# the string against a harmonic series it was never given, the membrane against
+# the inharmonic ratios that stop it having a pitch.
+pulp_add_test_suite(pulp-test-drum-physical
+    SOURCES test_drum_physical.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)
+
+# The FM voices. The eight-operator routing table is data, so its suite runs
+# every algorithm rather than a sample of them.
+pulp_add_test_suite(pulp-test-drum-fm
+    SOURCES test_drum_fm.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)
