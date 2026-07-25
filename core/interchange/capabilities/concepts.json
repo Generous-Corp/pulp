@@ -31,6 +31,7 @@
     { "id": "clip.media", "detect": "model", "summary": "Clip content that references a media asset." },
     { "id": "clip.gain", "detect": "model", "summary": "Per-clip gain applied to the clip's content." },
     { "id": "clip.fades", "detect": "model", "summary": "Per-clip fade in and fade out durations." },
+    { "id": "clip.note-modifier", "detect": "model", "summary": "Per-note playback modifiers: probability, pass condition, and ratchet." },
     { "id": "clip.crossfade", "detect": "format", "summary": "An overlap between two adjacent clips authored as one transition item." },
     { "id": "clip.warp", "detect": "format", "summary": "A time-warp map deforming clip content against timeline time." },
     { "id": "clip.launch", "detect": "model", "summary": "Non-arrangement clip playback (scenes, launcher grids)." },

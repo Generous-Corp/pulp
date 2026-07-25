@@ -552,6 +552,29 @@ alternative, in variant order).
 
 ## Schema codegen & drift gate
 
+### Bumping a schema version touches two hand-written validators the codegen never reaches
+
+The registry entry, the migration pair, and the encode/decode sites are the
+obvious edits. Two more are hand-maintained, are not generated, and produce no
+compile error when they go stale:
+
+- `core/timeline/src/structural_registry_validation.cpp` holds a literal
+  `ExpectedField[]` per structural type plus its `{current_version,
+  oldest_readable_version}` pair, and rejects a registry whose field list or
+  version does not match exactly. Miss it and `serialize_project` fails on a
+  document you just built in memory, with `InvalidSchema` /
+  `UnsupportedSchemaVersion` and no path — it reads like an encoder bug.
+- `core/timeline/src/schema_json_preflight.cpp` gates the structural scan on a
+  literal version (`content_type != "…" || version != 1`). A version bump that
+  leaves it pinned sends every new document down the opaque-passthrough branch
+  and skips its validation entirely — a silent weakening, not a failure.
+
+Both must accept the whole readable range, not just the newest version: a v1
+document is preflighted *before* migration runs, so the older shape has to pass
+too. Field lists in the validator are ordered, and the registry lists fields
+alphabetically, so a new field goes in its sorted position, not at the end.
+
+
 The `SchemaRegistry` is the single generative source for the timeline's agent
 surfaces (JS facade, TypeScript definitions, MCP tool definitions, CLI verbs):
 they are generated from it, never hand-maintained, so they cannot drift.

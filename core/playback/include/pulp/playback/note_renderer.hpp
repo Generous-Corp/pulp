@@ -29,6 +29,29 @@ constexpr bool note_event_offset_in_range(timebase::SamplePosition event,
     return true;
 }
 
+/// Which loop pass a transport range is playing, counted from the transport's
+/// monotonic origin. The monotonic beat advances without wrapping while the
+/// timeline tick returns to the loop start, so their difference grows by one
+/// loop length per wrap — that difference over the loop length IS the pass
+/// count, with no counter to drift or to reset at the wrong moment.
+///
+/// Without an enabled loop every position is played once, so the pass is zero:
+/// a linear playthrough is the first pass, not an undefined one.
+constexpr std::uint64_t note_modifier_pass_index(const TransportRange& range,
+                                                 const LoopRegion& loop) noexcept {
+    if (!loop.enabled)
+        return 0;
+    const auto length = loop.end.value - loop.start.value;
+    if (length <= 0)
+        return 0;
+    // A position before the loop, or a seek that rewound the monotonic clock
+    // past it, has not completed a pass.
+    if (range.monotonic_start.position.value <= loop.start.value)
+        return 0;
+    return static_cast<std::uint64_t>(range.monotonic_start.position.value - loop.start.value) /
+           static_cast<std::uint64_t>(length);
+}
+
 } // namespace detail
 
 enum class NoteRenderCode : std::uint8_t {

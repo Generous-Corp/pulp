@@ -32,6 +32,7 @@
     "clip.warp": { "level": "none", "refusal": "warped clip content" },
     "clip.launch": { "level": "none", "refusal": "scenes and clip-launcher content" },
     "clip.gain": { "level": "none", "refusal": "per-clip gain" },
+    "clip.note-modifier": { "level": "none", "refusal": "per-note probability, conditions, and ratchets" },
     "clip.fades": { "level": "none", "refusal": "per-clip fades" },
     "context.chord-scale": { "level": "none", "refusal": "chord and scale context lanes" },
     "context.groove": { "level": "none", "refusal": "groove templates and swing" },
@@ -80,6 +81,11 @@
     },
     "clip.gain": { "level": "full" },
     "clip.fades": { "level": "full" },
+    "clip.note-modifier": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once"
+    },
     "automation.device-param": {
       "level": "drop",
       "loss_class": "dropped",

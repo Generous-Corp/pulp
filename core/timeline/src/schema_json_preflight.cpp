@@ -976,7 +976,8 @@ class StructuralScanner {
             return require_member(content_data, "sequence_id", StringShape, content_path) &&
                    require_member(content_data, "source_start", StringShape, content_path);
         }
-        if (content_type != "pulp.timeline.content.notes" || version != 1) {
+        const bool is_notes = content_type == "pulp.timeline.content.notes";
+        if (!is_notes || version > 2 || version == 0) {
             const auto* schema =
                 registry_ ? registry_->find(SchemaDomain::Content, content_type) : nullptr;
             const auto raw_size = content.end - content.begin;
@@ -996,6 +997,41 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, content_data.begin, 0, 0,
                       path + "/data/content/data/notes");
             return false;
+        }
+        // The modifier companion array arrived with v2, so a v1 envelope must
+        // still preflight without it — the migration is what adds the members.
+        if (version == 2) {
+            const auto content_path = path + "/data/content/data";
+            if (!require_member(content_data, "modifier_seed", StringShape, content_path) ||
+                !require_member(content_data, "modifiers", ArrayShape, content_path))
+                return false;
+            Span modifiers;
+            bool has_modifiers = false;
+            if (!member(content_data, "modifiers", modifiers, has_modifiers))
+                return false;
+            std::size_t modifier_count = 0;
+            if (!governed_array(
+                    modifiers, modifier_count, limits_.max_notes, content_path + "/modifiers",
+                    [&](Span modifier, std::size_t index) {
+                        const auto modifier_path =
+                            content_path + "/modifiers/" + std::to_string(index);
+                        if (!has_shape(modifier, ObjectShape)) {
+                            set_error(PersistenceErrorCode::InvalidSchema, modifier.begin, 0, 0,
+                                      modifier_path);
+                            return false;
+                        }
+                        return require_member(modifier, "condition", StringShape, modifier_path) &&
+                               require_member(modifier, "condition_offset", NumberShape,
+                                              modifier_path) &&
+                               require_member(modifier, "condition_period", NumberShape,
+                                              modifier_path) &&
+                               require_member(modifier, "note_id", StringShape, modifier_path) &&
+                               require_member(modifier, "probability", NumberShape,
+                                              modifier_path) &&
+                               require_member(modifier, "ratchet_count", NumberShape,
+                                              modifier_path);
+                    }))
+                return false;
         }
         return governed_array(
             notes, counts_.notes, limits_.max_notes, path + "/data/content/data/notes",

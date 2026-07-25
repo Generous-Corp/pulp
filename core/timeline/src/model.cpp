@@ -214,6 +214,12 @@ runtime::Result<ItemId, ModelError> ItemIdAllocator::allocate() noexcept {
 }
 
 runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes) {
+    return create(std::move(notes), {}, 0);
+}
+
+runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEvent> notes,
+                                                             std::vector<NoteModifier> modifiers,
+                                                             std::uint64_t modifier_seed) {
     for (const auto& note : notes) {
         if (!note.id.valid())
             return fail<NoteContent>(ModelErrorCode::InvalidItemId, note.id);
@@ -227,21 +233,53 @@ runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEve
     std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
         return std::pair(lhs.start.value, lhs.id.value) < std::pair(rhs.start.value, rhs.id.value);
     });
-    return runtime::Result<NoteContent, ModelError>(
-        runtime::Ok(NoteContent(std::make_shared<const std::vector<NoteEvent>>(std::move(notes)))));
+    for (const auto& modifier : modifiers) {
+        if (!modifier.note_id.valid())
+            return fail<NoteContent>(ModelErrorCode::InvalidItemId, modifier.note_id);
+        // A neutral entry describes a note that already plays that way, so
+        // admitting it would give one document two byte encodings.
+        if (!note_modifier_well_formed(modifier) || note_modifier_is_neutral(modifier))
+            return fail<NoteContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
+        const auto owner = std::find_if(notes.begin(), notes.end(), [&](const NoteEvent& note) {
+            return note.id == modifier.note_id;
+        });
+        if (owner == notes.end())
+            return fail<NoteContent>(ModelErrorCode::MissingItem, modifier.note_id);
+    }
+    if (const auto duplicate =
+            first_duplicate(modifiers, [](const NoteModifier& entry) { return entry.note_id; }))
+        return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
+    std::sort(modifiers.begin(), modifiers.end(),
+              [](const NoteModifier& lhs, const NoteModifier& rhs) {
+                  return lhs.note_id.value < rhs.note_id.value;
+              });
+    auto data = std::make_shared<Data>();
+    data->notes = std::move(notes);
+    data->modifiers = std::move(modifiers);
+    data->modifier_seed = modifier_seed;
+    return runtime::Result<NoteContent, ModelError>(runtime::Ok(NoteContent(std::move(data))));
+}
+
+const NoteModifier* NoteContent::modifier_for(ItemId note_id) const noexcept {
+    const auto& modifiers = data_->modifiers;
+    const auto found = std::lower_bound(modifiers.begin(), modifiers.end(), note_id.value,
+                                        [](const NoteModifier& entry, std::uint64_t wanted) {
+                                            return entry.note_id.value < wanted;
+                                        });
+    return found != modifiers.end() && found->note_id == note_id ? &*found : nullptr;
 }
 
 runtime::Result<NoteContent, ModelError> NoteContent::replace_note(NoteEvent note) const {
     if (!note.id.valid() || note.duration.value <= 0 || note.pitch > 127 || note.channel > 15)
         return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
-    auto replacement = *notes_;
+    auto replacement = data_->notes;
     const auto found =
         std::find_if(replacement.begin(), replacement.end(),
                      [&](const NoteEvent& candidate) { return candidate.id == note.id; });
     if (found == replacement.end() || found->id != note.id)
         return fail<NoteContent>(ModelErrorCode::MissingItem, note.id);
     *found = note;
-    return create(std::move(replacement));
+    return create(std::move(replacement), data_->modifiers, data_->modifier_seed);
 }
 
 runtime::Result<OpaqueContent, ModelError>

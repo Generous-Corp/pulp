@@ -21,7 +21,15 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
             // EmptyContent is the absence of content, not a concept to carry.
             [&](const timeline::EmptyContent&) {},
             [&](const timeline::MediaRef&) { out.record(Concept::ClipMedia, id, limits); },
-            [&](const timeline::NoteContent&) { out.record(Concept::ClipNote, id, limits); },
+            [&](const timeline::NoteContent& notes) {
+                out.record(Concept::ClipNote, id, limits);
+                // Modifiers decide whether a note sounds at all, so a format
+                // that cannot carry them loses audible content. Recording them
+                // is what keeps an export's loss manifest from claiming nothing
+                // was lost.
+                if (!notes.modifiers().empty())
+                    out.record(Concept::ClipNoteModifier, id, limits);
+            },
             [&](const timeline::RegisteredContent&) {
                 out.record(Concept::ContentRegistered, id, limits);
             },

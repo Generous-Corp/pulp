@@ -82,6 +82,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::Full, "", ""}, // clip.media
         {ImportLevel::None, "", "per-clip gain"}, // clip.gain
         {ImportLevel::None, "", "per-clip fades"}, // clip.fades
+        {ImportLevel::None, "", "per-note probability, conditions, and ratchets"}, // clip.note-modifier
         {ImportLevel::None, "", ""}, // clip.crossfade
         {ImportLevel::None, "", "warped clip content"}, // clip.warp
         {ImportLevel::None, "", "scenes and clip-launcher content"}, // clip.launch
@@ -131,6 +132,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.media
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.gain
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // clip.fades
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once"}, // clip.note-modifier
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.crossfade"}, // clip.crossfade
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.warp"}, // clip.warp
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for clip.launch"}, // clip.launch

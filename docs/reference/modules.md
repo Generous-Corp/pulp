@@ -866,7 +866,13 @@ before rebuilding the immutable hierarchy. Clip, Track, and Sequence subtree
 overloads distinguish owned IDs from external media-asset references and accept
 an atomic `ExternalIdFixup`; closure-wide duplicate owned IDs are rejected
 before allocator state changes. `NoteContent` is a flat POD array sorted by
-`(start, ItemId)`. Fallible construction uses
+`(start, ItemId)`, alongside a sparse companion array of per-note playback
+modifiers sorted by note ID and an authored seed. A modifier carries a
+probability, a loop-pass condition, and a ratchet count; notes that play
+unconditionally and once carry no entry. Evaluation is a pure function of the
+seed, the note identity, and the loop-pass index, so an identical document and
+transport trace always reproduces the same sounding decisions.
+Fallible construction uses
 `pulp::runtime::Result` and reports `ModelError` without exceptions.
 
 `automation_curve.hpp` provides immutable, position-ordered automation points

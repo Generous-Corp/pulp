@@ -213,11 +213,17 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     }
 
     const auto events = view.program->arrangement_note_events();
+    const auto modifiers = view.program->note_modifiers();
     std::int64_t last_cursor = 0;
     for (std::uint8_t range_index = 0; range_index < transport.range_count; ++range_index) {
         const auto& range = transport.ranges[range_index];
         if (range.discontinuity && !flush(range.sample_offset))
             break;
+        // Constant for the whole range: the pass only changes at a wrap, and a
+        // wrap always starts a new range. A note's on and its off therefore
+        // resolve against the same pass, so the gate can never admit one
+        // without the other and leave a note hanging.
+        const auto pass_index = detail::note_modifier_pass_index(range, transport.loop);
 
         const auto search_sample =
             range.host_beat_mapping
@@ -244,6 +250,18 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
                                                         range.frame_count, local_offset)) {
                     if (cursor->sample >= range.timeline_sample_start)
                         break;
+                    continue;
+                }
+            }
+            // Pure arithmetic over the immutable program: no allocation, no
+            // stored draw state, and no dependence on how many events were
+            // considered before this one.
+            if (!modifiers.empty()) {
+                const auto* modifier = find_note_modifier(modifiers, cursor->note_id);
+                if (modifier != nullptr &&
+                    !timeline::note_modifier_sounds(modifier->modifier, modifier->draw_key,
+                                                    pass_index)) {
+                    last_cursor = static_cast<std::int64_t>((cursor - events.begin()) + 1);
                     continue;
                 }
             }

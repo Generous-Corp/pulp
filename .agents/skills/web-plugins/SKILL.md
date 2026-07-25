@@ -343,6 +343,20 @@ per-ABI entry point for it.** Go through the plugin's own state:
   (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
   build. The closure checker scans sources, so adding such a header is
   correct even though it touches `core/timeline`.
+- A new `core/timeline` translation unit belongs in **two** source lists:
+  `core/timeline/PulpTimelineSources.cmake` and the
+  `pulp-test-timeline-no-exceptions` OBJECT library in
+  `test/cmake/timeline_tests.cmake`. The native target
+  (`core/timeline/CMakeLists.txt`), `PulpWam.cmake`, and `PulpWclap.cmake` all
+  call `pulp_resolve_timeline_sources()`, so one edit to the resolver feeds all
+  three and hand-editing the web lists for a timeline unit is not just
+  unnecessary, it is wrong. Timeline is the exception here: engine units from
+  other modules are still hand-listed per lane, so check which shape the module
+  uses before assuming either one. `web-timeline-source-closure` compares only
+  the WAM and WebCLAP lanes — which the resolver satisfies automatically — so a
+  missing no-exceptions entry passes that check and surfaces instead as an
+  undefined symbol when the no-exceptions target links. That target is the only
+  list a timeline TU can actually be missed from.
 
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked

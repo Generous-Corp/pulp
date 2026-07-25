@@ -104,6 +104,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
     }
 
     SECTION("concepts the document does not use are absent") {
+        REQUIRE_FALSE(counted.contains(Concept::ClipNoteModifier));
         REQUIRE_FALSE(counted.contains(Concept::TakeLane));
         REQUIRE_FALSE(counted.contains(Concept::TrackFreeze));
         REQUIRE_FALSE(counted.contains(Concept::DevicePlacement));
@@ -199,4 +200,37 @@ TEST_CASE("a census records authored groove state even when it currently sounds 
     REQUIRE(recorded.contains(Concept::ContextGroove));
     REQUIRE(recorded.count(Concept::ContextGroove) == 1);
     REQUIRE(recorded.owners(Concept::ContextGroove)[0] == ItemId{2});
+}
+
+TEST_CASE("a census records per-note modifiers so an export cannot drop them silently",
+          "[interchange]") {
+    NoteModifier chance;
+    chance.note_id = {8};
+    chance.probability = 0x4000;
+    auto content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {chance}, 7));
+    auto clip = take_value(Clip::create({5}, {200}, {100}, std::move(content)));
+    auto track = take_value(Track::create({6}, "musical", {clip}));
+    auto sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000}, {track}));
+    const Project project = take_value(
+        Project::create(ProjectInput{{1}, "modified", 100, {2}, {}, {sequence}}));
+
+    const ConceptCensus counted = census(project);
+    REQUIRE(counted.count(Concept::ClipNote) == 1);
+    REQUIRE(counted.count(Concept::ClipNoteModifier) == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteModifier).size() == 1);
+    REQUIRE(counted.owners(Concept::ClipNoteModifier)[0] == ItemId{5});
+    REQUIRE(concept_detectable_in_model(Concept::ClipNoteModifier));
+
+    // The same notes without a modifier record only the note concept, so the
+    // new row cannot be a constant that fires on every note clip.
+    auto plain_content = take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}));
+    auto plain_clip = take_value(Clip::create({5}, {200}, {100}, std::move(plain_content)));
+    auto plain_track = take_value(Track::create({6}, "musical", {plain_clip}));
+    auto plain_sequence = take_value(Sequence::create({2}, "root", TickDuration{1'000},
+                                                      {plain_track}));
+    const Project plain = take_value(
+        Project::create(ProjectInput{{1}, "plain", 100, {2}, {}, {plain_sequence}}));
+    const ConceptCensus plain_census = census(plain);
+    REQUIRE(plain_census.count(Concept::ClipNote) == 1);
+    REQUIRE_FALSE(plain_census.contains(Concept::ClipNoteModifier));
 }

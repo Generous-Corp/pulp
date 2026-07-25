@@ -29,6 +29,7 @@ is not a reason to add a model feature.
 | `clip.media` | yes | Clip content that references a media asset. |
 | `clip.gain` | yes | Per-clip gain applied to the clip's content. |
 | `clip.fades` | yes | Per-clip fade in and fade out durations. |
+| `clip.note-modifier` | yes | Per-note playback modifiers: probability, pass condition, and ratchet. |
 | `clip.crossfade` | format-only | An overlap between two adjacent clips authored as one transition item. |
 | `clip.warp` | format-only | A time-warp map deforming clip content against timeline time. |
 | `clip.launch` | yes | Non-arrangement clip playback (scenes, launcher grids). |
@@ -81,6 +82,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `clip.media` | full |  |
 | `clip.gain` | none | per-clip gain |
 | `clip.fades` | none | per-clip fades |
+| `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
 | `clip.crossfade` | none | not declared |
 | `clip.warp` | none | warped clip content |
 | `clip.launch` | none | scenes and clip-launcher content |
@@ -129,6 +131,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `clip.media` | full |  |  |  |
 | `clip.gain` | full |  |  |  |
 | `clip.fades` | full |  |  |  |
+| `clip.note-modifier` | drop |  | dropped | DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once |
 | `clip.crossfade` | drop | | dropped | not declared |
 | `clip.warp` | drop | | dropped | not declared |
 | `clip.launch` | drop | | dropped | not declared |
