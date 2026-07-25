@@ -384,7 +384,11 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
     emit_px("borderRadius", s.border_radius);
     emit_str("border", s.border);
     if (!s.box_shadow.empty())
-        ss << ind << var << ".style.boxShadow = '" << box_shadow_to_css(s.box_shadow) << "';\n";
+        // Escaped like every other design-supplied string that lands in a JS
+        // literal: box_shadow_to_css passes the authored shadow text through, so
+        // a quote in it would close this literal and leave the rest executable.
+        ss << ind << var << ".style.boxShadow = '"
+           << js_single_quote_escape(box_shadow_to_css(s.box_shadow)) << "';\n";
     emit_str("filter", s.filter);
     // backdrop-filter rides the same web-compat style path as filter: the
     // style-decl bridge (web-compat-style-decl-paint.js) parses the blur(Npx)
