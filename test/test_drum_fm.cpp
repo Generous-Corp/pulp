@@ -13,15 +13,18 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/drum/fm.hpp>
+#include <pulp/signal/drum/fm6.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
 namespace {
 
+using pulp::signal::drum::Fm6DrumVoice;
 using pulp::signal::drum::Fm8DrumVoice;
 using pulp::signal::drum::FmDrumVoice;
 using pulp::signal::drum::VelocityResponse;
@@ -411,6 +414,191 @@ TEST_CASE("The FM voices allocate nothing on the audio thread",
                 voice->process(buffer.data(), static_cast<int>(buffer.size()));
                 voice->reset();
             }
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
+
+
+// -- Six operators, thirty-two algorithms ------------------------------------
+
+TEST_CASE("Every six-operator routing is structurally well formed",
+          "[signal][drum][fm6]") {
+    // The routing table is transcribed data, and the header is explicit that it
+    // has not been verified row by row against a service manual. These
+    // invariants are what stop a MALFORMED row shipping silently -- they cannot
+    // catch a row that is well formed and simply wrong, which is why the
+    // caveat stays in the header rather than being retired by this test.
+    for (int index = 0; index < Fm6DrumVoice::algorithm_count; ++index) {
+        const auto& alg = Fm6DrumVoice::algorithms[static_cast<std::size_t>(index)];
+        INFO("algorithm " << (index + 1));
+
+        // Something has to reach the output.
+        REQUIRE(alg.carriers != 0);
+        // Carriers and masks may only name real operators.
+        REQUIRE((alg.carriers & ~0x3Fu) == 0);
+        REQUIRE(alg.feedback_op < Fm6DrumVoice::operator_count);
+
+        std::uint8_t reachable = alg.carriers;
+        for (int pass = 0; pass < Fm6DrumVoice::operator_count; ++pass) {
+            for (int op = 0; op < Fm6DrumVoice::operator_count; ++op) {
+                if (reachable & (1u << op)) {
+                    reachable = static_cast<std::uint8_t>(
+                        reachable | alg.modulated_by[static_cast<std::size_t>(op)]);
+                }
+            }
+        }
+        for (int op = 0; op < Fm6DrumVoice::operator_count; ++op) {
+            const auto mask = alg.modulated_by[static_cast<std::size_t>(op)];
+            // A mask may only name real operators, and an operator must not
+            // modulate itself through the mask -- self-modulation is the
+            // feedback path, which is a separate, single, named operator.
+            REQUIRE((mask & ~0x3Fu) == 0);
+            REQUIRE((mask & (1u << op)) == 0);
+            // Every operator either sounds or feeds something that does. An
+            // unreachable operator is silent CPU and a certain sign the row is
+            // mistyped.
+            INFO("operator " << (op + 1) << " unreachable");
+            REQUIRE((reachable & (1u << op)) != 0);
+        }
+    }
+}
+
+TEST_CASE("Every six-operator routing renders audio and stays finite",
+          "[signal][drum][fm6]") {
+    for (int index = 0; index < Fm6DrumVoice::algorithm_count; ++index) {
+        Fm6DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(index);
+        voice.set_tune_hz(140.0);
+        voice.set_depth(4.0);
+        voice.set_formant_hz(14000.0);
+        voice.set_formant_q(0.6);
+
+        const auto y = hit(voice, 1.0f, 12000);
+        INFO("algorithm " << (index + 1));
+        REQUIRE(peak(y) > 1e-4);
+        for (float v : y) REQUIRE(std::isfinite(v));
+    }
+}
+
+TEST_CASE("The fully additive routing carries no modulation",
+          "[signal][drum][fm6]") {
+    // Algorithm 32 is six independent carriers, so modulation depth must do
+    // nothing at all to it -- the one row whose behaviour is unambiguous
+    // regardless of how the rest of the table is verified.
+    auto render_at = [](double depth) {
+        Fm6DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(31);
+        voice.set_tune_hz(140.0);
+        voice.set_depth(depth);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 12000);
+    };
+
+    REQUIRE(render_at(0.0) == render_at(9.0));
+}
+
+TEST_CASE("A stacked routing does respond to modulation depth",
+          "[signal][drum][fm6]") {
+    // The negative control for the additive test: depth must matter where
+    // there is routing for it to act on.
+    auto brightness = [](double depth) {
+        Fm6DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(0);
+        voice.set_tune_hz(140.0);
+        voice.set_depth(depth);
+        voice.set_formant_hz(14000.0);
+        voice.set_formant_q(0.6);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return high_fraction(hit(voice, 1.0f, 24000), 1500.0);
+    };
+
+    REQUIRE(brightness(8.0) > brightness(0.0) * 2.0);
+}
+
+TEST_CASE("Feedback acts only on the routing's designated operator",
+          "[signal][drum][fm6]") {
+    // Algorithm 32 is additive with its feedback operator among the carriers,
+    // so feedback is audible there; the depth control is not.
+    auto brightness = [](double feedback) {
+        Fm6DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(31);
+        voice.set_tune_hz(140.0);
+        voice.set_feedback(feedback);
+        voice.set_formant_hz(14000.0);
+        voice.set_formant_q(0.6);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return high_fraction(hit(voice, 1.0f, 24000), 2000.0);
+    };
+
+    REQUIRE(brightness(1.0) > brightness(0.0) * 1.5);
+}
+
+TEST_CASE("The pitch envelope moves every operator together",
+          "[signal][drum][fm6]") {
+    // A global sweep, so the spectrum keeps its shape while the whole voice
+    // moves -- unlike a per-operator ratio change, which reshapes it.
+    Fm6DrumVoice voice;
+    voice.prepare(kFs);
+    voice.set_algorithm(31);
+    voice.set_tune_hz(150.0);
+    voice.set_pitch_sweep_octaves(2.0);
+    voice.set_pitch_sweep_ms(60.0);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 48000);
+    const std::vector<float> early(y.begin(), y.begin() + 4800);
+    const std::vector<float> late(y.begin() + 24000, y.end());
+    REQUIRE(high_fraction(early, 1200.0) > high_fraction(late, 1200.0) * 1.5);
+}
+
+TEST_CASE("The six-operator voice is deterministic and bounds its indices",
+          "[signal][drum][fm6]") {
+    Fm6DrumVoice voice;
+    voice.prepare(kFs);
+    voice.set_algorithm(7);
+    const auto first = hit(voice, 0.8f, 12000);
+    voice.reset();
+    REQUIRE(hit(voice, 0.8f, 12000) == first);
+
+    voice.set_algorithm(999);
+    REQUIRE(voice.algorithm() == Fm6DrumVoice::algorithm_count - 1);
+    voice.set_algorithm(-3);
+    REQUIRE(voice.algorithm() == 0);
+    voice.set_operator_ratio(-1, 2.0);
+    voice.set_operator_level(Fm6DrumVoice::operator_count, 1.0);
+    voice.set_operator_decay_ms(42, 100.0);
+    const auto y = hit(voice, 1.0f, 4800);
+    for (float v : y) REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("The six-operator voice allocates nothing on the audio thread",
+          "[signal][drum][fm6][rt-safety]") {
+    Fm6DrumVoice voice;
+    voice.prepare(kFs);
+    voice.set_algorithm(4);
+    voice.set_feedback(0.5);
+    voice.output().set_drive(0.4);
+
+    std::vector<float> buffer(256, 0.0f);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int repeat = 0; repeat < 6; ++repeat) {
+            voice.set_algorithm(repeat * 5);
+            voice.note_on(0.5f + 0.05f * static_cast<float>(repeat));
+            for (int block = 0; block < 12; ++block) {
+                std::fill(buffer.begin(), buffer.end(), 0.0f);
+                voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            }
+            voice.choke(3.0f);
+            voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            voice.reset();
         }
         allocations = probe.allocation_count();
     }
