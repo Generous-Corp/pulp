@@ -41,6 +41,23 @@ Select a frame, then **Export to Pulp** to download the `*.pulp.json` (or
 `*.pulp.zip` when the design has assets). Feed either straight to the importer —
 `pulp import-design --from figma-plugin <file>` reads a `.pulp.zip` directly.
 
+### Forge clipboard round-trip
+
+The plugin also provides an explicit, offline clipboard bridge for Forge:
+
+- **Copy for Forge** exports the selected Figma frame through the same
+  `figma-plugin-export-v1` extractor, embeds its assets in a bounded
+  `pulp-figma-clipboard-v1` text envelope, and places that envelope on the
+  system clipboard.
+- **Import pasted Forge UI** accepts the reciprocal DesignIR envelope, rebuilds
+  its frame/text/shape hierarchy as editable Figma nodes, and preserves audio
+  widget kinds and parameter bindings as plugin-owned metadata. A later export
+  reads those fields before name/pixel heuristics, so knob/fader/meter bindings
+  survive the trip.
+
+This is deliberately plugin-mediated. It does not parse or claim compatibility
+with Figma's private native Cmd+C clipboard payload.
+
 **Rebuild, don't re-import.** After the first manifest import, code changes are
 picked up by **`npm run build` + re-running the plugin** — Figma re-reads
 `dist/` fresh on every run. You only **re-import the manifest** if

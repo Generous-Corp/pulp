@@ -51,6 +51,9 @@ export interface ExtractedFigmaNode {
   // colored span). Absent for homogeneous text — the flat dominant style in
   // `style` is the whole story then, and the consumer prefers the plain path.
   runs?: ExtractedTextRun[];
+  // Internal-only exact Figma face names used to build font_family_assets.
+  // serialize.ts does not emit this field on nodes.
+  font_faces?: Array<{ family: string; style: string; weight?: number }>;
   // Free-form string attributes serialized into IRNode.attributes. Used for
   // namespaced preserved-not-lowered text metadata (figma:text_auto_resize,
   // figma:text_truncation, figma:max_lines, figma:hyperlink).
@@ -67,6 +70,14 @@ export interface ExtractedFigmaNode {
   render_mode?: string;                        // "faithful_svg"
   svg_asset_id?: string;                       // → asset_manifest entry (image/svg+xml)
   interactive_elements?: InteractiveElement[];
+  // Forge copy-back stores a multi-state DesignIR node as one plugin-owned
+  // states container. extractScene unwraps it and reconstructs this sibling
+  // axis so a Figma -> Forge copy does not flatten the alternates into children.
+  alternate_frames?: ExtractedFigmaNode[];
+  // Canonical DesignIR children retained behind a faithful SVG. These are
+  // already envelope nodes, not ExtractedFigmaNode values, and must bypass
+  // toEnvelopeNode when the plugin exports the faithful visual back to Forge.
+  preserved_semantic_children?: unknown[];
 
   // Component / instance metadata — populated when walking INSTANCE nodes
   component_key?: string;
@@ -129,6 +140,7 @@ export interface ExtractedStyle {
   // CSS background-size keyword — Figma IMAGE-fill scale mode on frame-shaped
   // nodes (FILL → cover, FIT → contain, TILE → auto + background_repeat).
   background_size?: string;
+  background_repeat?: string;
   // CSS object-fit — Figma IMAGE-fill scale mode when the fill becomes a
   // dedicated image node; ImageView::paint honors it.
   object_fit?: string;
@@ -183,6 +195,7 @@ export interface ExtractedStyle {
   letter_spacing?: number;
   line_height?: number;
   text_transform?: string;
+  text_decoration?: string;
   overflow?: string;
   /// CSS transform, today always `rotate(<deg>deg)` — the spelling the shared
   /// codegen lowers to setRotation (center pivot). Emitted by the walk when a

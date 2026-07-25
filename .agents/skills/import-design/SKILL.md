@@ -138,6 +138,13 @@ cannot clear it**. So be maximally frugal. Order of preference, smartest first:
    node tree) directly from the open file — **no MCP tool call, no REST budget**.
    This is the truly-unlimited local path; once you hold the envelope, all
    importer/render work is offline forever. Prefer this to spend ZERO quota.
+   The plugin also exposes an explicit, offline Forge bridge:
+   **Copy for Forge** wraps that same scene plus content-addressed assets in the
+   versioned `pulp-figma-clipboard-v1` text envelope; **Import pasted Forge UI**
+   accepts the reciprocal canonical DesignIR envelope and rebuilds editable
+   hierarchy, layout, stable source identity, and audio-widget bindings. This is
+   intentionally a plugin-mediated copy/paste protocol, not a claim of native
+   Figma `Cmd+C` clipboard compatibility.
 2. **Inspect / verify a design** → the **Figma desktop MCP**, but BUDGET the
    6/month. When you must call, use ONE `get_design_context` (reference code +
    screenshot + metadata together) instead of separate `get_metadata` +

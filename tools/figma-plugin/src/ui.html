@@ -60,6 +60,18 @@
       button:hover {
         background: color-mix(in srgb, currentColor 8%, transparent);
       }
+      textarea {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 54px;
+        resize: vertical;
+        font: 10px ui-monospace, "SF Mono", Menlo, monospace;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 4px;
+        background: transparent;
+        color: inherit;
+        padding: 6px;
+      }
       .privacy {
         font-size: 10px;
         color: #888;
@@ -121,7 +133,20 @@
       <div class="row">
         <button id="btn-refresh">Refresh</button>
         <button id="btn-export"><strong>Export to Pulp</strong></button>
+        <button id="btn-copy-forge">Copy for Forge</button>
         <button id="btn-close">Close</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Forge round-trip</h2>
+      <p class="subtitle" style="margin: 0 0 8px;">
+        Forge and this plugin exchange a public Pulp DesignIR envelope. This
+        does not inspect Figma's private Cmd+C clipboard format.
+      </p>
+      <textarea id="forge-paste" placeholder="Paste a Forge DesignIR clipboard payload here"></textarea>
+      <div class="row">
+        <button id="btn-import-forge"><strong>Import pasted Forge UI</strong></button>
       </div>
     </div>
 

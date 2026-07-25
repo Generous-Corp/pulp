@@ -143,15 +143,53 @@ export async function extractScene(
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (ctx.truncated) break;
+    if ("getPluginData" in n &&
+        n.getPluginData("pulp.alternate_frames_container") === "1") {
+      if (!("children" in n)) {
+        throw new Error("Forge alternate-frame container has no children.");
+      }
+      const indexed = n.children.map((child) => ({
+        child,
+        index: Number(child.getPluginData("pulp.alternate_frame_index")),
+      }));
+      if (indexed.length < 2 ||
+          indexed.some((entry) => !Number.isInteger(entry.index) || entry.index < 0)) {
+        throw new Error(
+          "Forge alternate-frame container needs at least two states with integer pulp.alternate_frame_index metadata.",
+        );
+      }
+      indexed.sort((a, b) => a.index - b.index);
+      if (indexed.some((entry, index) => entry.index !== index)) {
+        throw new Error(
+          "Forge alternate-frame indices must be contiguous and start at zero.",
+        );
+      }
+      const frames: ExtractedFigmaNode[] = [];
+      for (const [stateIndex, entry] of indexed.entries()) {
+        ctx.pathStack.push(`/root[${i}]/alternate_frames[${stateIndex}]`);
+        const extracted = await walk(entry.child, null, stateIndex, ctx, null);
+        ctx.pathStack.pop();
+        if (!extracted) {
+          throw new Error(`Forge alternate frame ${stateIndex} could not be extracted.`);
+        }
+        if (cfg.faithfulVector && extracted.render_mode !== "faithful_svg") {
+          await applyFaithfulVector(extracted, entry.child, ctx);
+        }
+        frames.push(extracted);
+      }
+      frames[0].alternate_frames = frames.slice(1);
+      roots.push(frames[0]);
+      continue;
+    }
     ctx.pathStack.push(`/root[${i}]`);
     const extracted = await walk(n, null, i, ctx, null);
     ctx.pathStack.pop();
     if (extracted) {
-      if (cfg.faithfulVector) {
+      if (cfg.faithfulVector && extracted.render_mode !== "faithful_svg") {
         await applyFaithfulVector(extracted, n, ctx);
-        if (extracted.render_mode === "faithful_svg")
-          stripNormalizedColorBindings(extracted);
       }
+      if (cfg.faithfulVector && extracted.render_mode === "faithful_svg")
+        stripNormalizedColorBindings(extracted);
       roots.push(extracted);
     }
   }
@@ -161,15 +199,19 @@ export async function extractScene(
   // post-order pass over the finished tree states each one. Runs after the
   // walk because the condition reads the children's lowered blend modes.
   for (const root of roots) {
-    for (const d of collectGroupIsolationDiagnostics(root)) {
-      ctx.diagnostics.push(d);
+    for (const state of [root, ...(root.alternate_frames ?? [])]) {
+      for (const d of collectGroupIsolationDiagnostics(state)) {
+        ctx.diagnostics.push(d);
+      }
     }
   }
 
   // Collect the unique font-family/style/weight tuples used by text
   // nodes in the extracted tree. Runs after the walk because every text
   // node has already had its style normalized via extractTextStyle.
-  const fontFamilyAssets = collectFontFamilyAssets(roots);
+  const fontFamilyAssets = collectFontFamilyAssets(
+    roots.flatMap((root) => [root, ...(root.alternate_frames ?? [])]),
+  );
 
   return {
     roots,
@@ -213,6 +255,30 @@ function parentIsAutoLayout(parent: SceneNode | null): boolean {
   return parentLayoutMode(parent) !== null;
 }
 
+function gradientStackFingerprint(paints: readonly Paint[]): string {
+  return JSON.stringify(paints.map((paint) =>
+    paint.type === "GRADIENT_LINEAR" ? paint : { type: paint.type }));
+}
+
+function gradientIsAspectSensitive(css: string): boolean {
+  const head = /^linear-gradient\(\s*([^,]+),/i.exec(css)?.[1]?.trim().toLowerCase();
+  if (!head) return true;
+  const cardinal = ({
+    "to top": 0,
+    "to right": 90,
+    "to bottom": 180,
+    "to left": 270,
+  } as Record<string, number>)[head];
+  const degree = cardinal ?? (
+    /^[-+]?(?:\d+\.?\d*|\.\d+)deg$/.test(head)
+      ? Number(head.slice(0, -3))
+      : NaN
+  );
+  if (!Number.isFinite(degree)) return true;
+  const normalized = ((degree % 90) + 90) % 90;
+  return normalized > 1e-6 && Math.abs(normalized - 90) > 1e-6;
+}
+
 async function walk(
   node: SceneNode,
   parentId: string | null,
@@ -221,6 +287,13 @@ async function walk(
   parent: SceneNode | null = null,
 ): Promise<ExtractedFigmaNode | null> {
   if (ctx.truncated) return null;
+  if ("getPluginData" in node &&
+      node.getPluginData("pulp.alternate_frames_container") === "1") {
+    throw new Error(
+      `Forge alternate-frame container "${node.name}" is nested below the ` +
+      "selection root and cannot be flattened truthfully; export refused.",
+    );
+  }
   if (!ctx.cfg.includeHidden && "visible" in node && node.visible === false) {
     return null;
   }
@@ -265,6 +338,184 @@ async function walk(
     layout: extractLayout(node, parent),
     children: [],
   };
+  let roundtripBackgroundImage = false;
+  let roundtripNodeImage = false;
+  let roundtripSvgVisualMode: "faithful" | "inline" | "asset" | undefined;
+  let roundtripSemanticChildren: unknown[] | undefined;
+
+  // Forge copy-back creates ordinary Figma nodes and records the DesignIR
+  // semantics as plugin-owned metadata. Read that metadata before the normal
+  // component-key/name recognizers so the next export retains widget kind and
+  // parameter binding without guessing from pixels or layer names.
+  if ("getPluginData" in node) {
+    const roundtripType = node.getPluginData("pulp.design_ir_type");
+    if (roundtripType) {
+      const supportedRoundtripType =
+        roundtripType === "text" || roundtripType === "label" ||
+        roundtripType === "ellipse" || roundtripType === "circle" ||
+        roundtripType === "rectangle" || roundtripType === "rect" ||
+        roundtripType === "image" || roundtripType === "vector" ||
+        roundtripType === "path" || roundtripType === "svg_path" ||
+        roundtripType === "frame" || roundtripType === "group" ||
+        roundtripType === "container" || roundtripType === "panel" ||
+        roundtripType === "row" || roundtripType === "col" ||
+        roundtripType === "view" || roundtripType === "button" ||
+        roundtripType === "input" || roundtripType === "slider" ||
+        roundtripType === "knob" || roundtripType === "fader" ||
+        roundtripType === "meter" || roundtripType === "xy_pad" ||
+        roundtripType === "waveform" || roundtripType === "spectrum";
+      if (!supportedRoundtripType) {
+        throw new Error(
+          `Invalid pulp.design_ir_type metadata on "${node.name}": ${roundtripType}.`,
+        );
+      }
+      ex.type = roundtripType;
+    }
+    const semanticChildren = node.getPluginData(
+      "pulp.faithful_semantic_children",
+    );
+    if (semanticChildren) {
+      const parsed = JSON.parse(semanticChildren);
+      if (!Array.isArray(parsed)) {
+        throw new Error(
+          `Invalid pulp.faithful_semantic_children metadata on "${node.name}".`,
+        );
+      }
+      roundtripSemanticChildren = parsed;
+    }
+    const roundtripAttributes = node.getPluginData("pulp.design_ir_attributes");
+    if (roundtripAttributes) {
+      try {
+        const parsed = JSON.parse(roundtripAttributes) as unknown;
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) ||
+            Object.values(parsed as Record<string, unknown>).some(
+              (value) => typeof value !== "string",
+            )) {
+          throw new Error("expected an object of string values");
+        }
+        ex.attributes = Object.fromEntries(
+          Object.entries(parsed as Record<string, string>).filter(
+            ([key]) => ![
+              "figma:text_auto_resize",
+              "figma:text_truncation",
+              "figma:max_lines",
+              "figma:hyperlink",
+            ].includes(key),
+          ),
+        );
+      } catch (error) {
+        throw new Error(
+          `Invalid pulp.design_ir_attributes metadata on "${node.name}": ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+      }
+    }
+    roundtripBackgroundImage =
+      node.getPluginData("pulp.background_image_asset") === "1";
+    roundtripNodeImage = node.getPluginData("pulp.node_image_asset") === "1";
+    const svgVisualMode = node.getPluginData("pulp.svg_visual_mode");
+    if (svgVisualMode) {
+      if (svgVisualMode !== "faithful" && svgVisualMode !== "inline" &&
+          svgVisualMode !== "asset") {
+        throw new Error(
+          `Invalid pulp.svg_visual_mode metadata on "${node.name}": ${svgVisualMode}.`,
+        );
+      }
+      roundtripSvgVisualMode = svgVisualMode;
+    }
+    const roundtripKind = node.getPluginData("pulp.audio_widget");
+    if (roundtripKind === "none") {
+      ex.audio_widget = "none";
+    } else if (roundtripKind === "knob" || roundtripKind === "fader" ||
+        roundtripKind === "meter" || roundtripKind === "xy_pad" ||
+        roundtripKind === "waveform" || roundtripKind === "spectrum") {
+      ex.library_widget_kind = roundtripKind;
+      ex.audio_label = node.getPluginData("pulp.audio_label") || undefined;
+      const readRoundtripNumber = (key: string): number | undefined => {
+        const value = node.getPluginData(key);
+        if (!value) return undefined;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      };
+      ex.audio_min = readRoundtripNumber("pulp.audio_min");
+      ex.audio_max = readRoundtripNumber("pulp.audio_max");
+      ex.audio_default = readRoundtripNumber("pulp.audio_default");
+      ex.audio_units = node.getPluginData("pulp.audio_units") || undefined;
+      ex.audio_binding = node.getPluginData("pulp.binding") || undefined;
+      ex.audio_binding_y = node.getPluginData("pulp.binding_y") || undefined;
+      ex.library_version = "forge-roundtrip-v1";
+    }
+    const sourceNodeId = node.getPluginData("pulp.source_node_id");
+    const stableAnchorId = node.getPluginData("pulp.stable_anchor_id");
+    if (sourceNodeId) {
+      ex.attributes = {
+        ...(ex.attributes ?? {}),
+        "pulp:roundtrip_source_node_id": sourceNodeId,
+      };
+    }
+    if (stableAnchorId) {
+      ex.attributes = {
+        ...(ex.attributes ?? {}),
+        "pulp:roundtrip_stable_anchor_id": stableAnchorId,
+      };
+    }
+    const backgroundGradient = node.getPluginData("pulp.background_gradient");
+    if (backgroundGradient) {
+      if (!/^linear-gradient\(/i.test(backgroundGradient)) {
+        throw new Error(
+          `Invalid pulp.background_gradient metadata on "${node.name}".`,
+        );
+      }
+      const expectedFingerprint = node.getPluginData(
+        "pulp.background_gradient_fingerprint",
+      );
+      const currentPaint = "fills" in node && Array.isArray(node.fills)
+        ? node.fills.find((paint) => paint.type === "GRADIENT_LINEAR")
+        : undefined;
+      if (expectedFingerprint &&
+          currentPaint?.type === "GRADIENT_LINEAR" &&
+          "fills" in node && Array.isArray(node.fills) &&
+          gradientStackFingerprint(node.fills) ===
+            expectedFingerprint) {
+        const importedAspect = Number(
+          node.getPluginData("pulp.background_gradient_aspect_ratio"),
+        );
+        const currentAspect = node.width / Math.max(node.height, 1e-9);
+        if (gradientIsAspectSensitive(backgroundGradient) &&
+            (!Number.isFinite(importedAspect) ||
+             Math.abs(importedAspect - currentAspect) > 1e-6)) {
+          throw new Error(
+            `Aspect-changing resize of diagonal round-trip gradient on ` +
+            `"${node.name}" cannot be represented truthfully; export refused.`,
+          );
+        }
+        // extractStyle(node, ctx) completed synchronously when `ex` was
+        // created. Preserve exact canonical CSS only while the Figma paint
+        // still matches the imported paint; direct Figma edits win.
+        ex.style.background_gradient = backgroundGradient;
+      } else if (currentPaint?.type === "GRADIENT_LINEAR") {
+        throw new Error(
+          `Edited round-trip gradient on "${node.name}" cannot be represented ` +
+          "truthfully by the current Pulp gradient runtime; export refused.",
+        );
+      }
+    }
+    const interactiveElements = node.getPluginData("pulp.interactive_elements");
+    if (interactiveElements) {
+      try {
+        const parsed = JSON.parse(interactiveElements);
+        if (!Array.isArray(parsed)) throw new Error("expected an array");
+        ex.interactive_elements = parsed;
+      } catch (error) {
+        throw new Error(
+          `Invalid pulp.interactive_elements metadata on "${node.name}": ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
 
   // Strokes → box border (uniform or per-side), preserved figma:* stroke
   // provenance, and the multi-paint / complex-stroke diagnostics. Lives
@@ -452,11 +703,95 @@ async function walk(
     const assetId = await ctx.assets.captureImageFill(imgHash);
     delete ex.style.background_image;
     if (assetId) {
-      ex.asset_ref = assetId;
-      ex.type = "image";
+      if (roundtripBackgroundImage) {
+        ex.style.background_image = assetId;
+        if (ex.style.object_fit) {
+          ex.style.background_size = ex.style.object_fit;
+          delete ex.style.object_fit;
+        }
+        ex.attributes = {
+          ...(ex.attributes ?? {}),
+          backgroundImageAssetId: assetId,
+        };
+      } else if (roundtripNodeImage) {
+        ex.asset_ref = assetId;
+      } else {
+        ex.asset_ref = assetId;
+        ex.type = "image";
+      }
     } else {
       pushDiag(ctx, "warning", "image-fill-unresolved", "unresolved_asset",
         `Image fill with hash ${imgHash} could not be fetched.`);
+    }
+  }
+
+  // createNodeFromSvg() produces a FRAME containing vector children. Preserve
+  // the authoritative DesignIR SVG representation rather than letting the
+  // generic illustration heuristic below rasterize it to PNG on re-export.
+  // Capture the current Figma geometry so user edits still win.
+  if (roundtripSvgVisualMode) {
+    let exportNode = node;
+    let neutralClone: SceneNode | undefined;
+    if (roundtripSvgVisualMode !== "faithful") {
+      // The source asset must not absorb editable wrapper styling. Export a
+      // temporary neutral clone so opacity/effects/strokes/clipping remain on
+      // the DesignIR node and are not applied twice on its next round trip.
+      const sourceWidth = node.width;
+      const sourceHeight = node.height;
+      neutralClone = node.clone();
+      // clone() inserts beside the source. Detach it before auto layout can
+      // influence the export geometry, then restore the source dimensions.
+      figma.currentPage.appendChild(neutralClone);
+      if ("resize" in neutralClone) neutralClone.resize(sourceWidth, sourceHeight);
+      exportNode = neutralClone;
+      if ("opacity" in neutralClone) neutralClone.opacity = 1;
+      if ("effects" in neutralClone) neutralClone.effects = [];
+      if ("blendMode" in neutralClone) {
+        (neutralClone as SceneNode & { blendMode: BlendMode }).blendMode =
+          "PASS_THROUGH";
+      }
+      if ("strokes" in neutralClone) neutralClone.strokes = [];
+      if ("clipsContent" in neutralClone) neutralClone.clipsContent = false;
+      if ("cornerRadius" in neutralClone) {
+        (neutralClone as SceneNode & CornerMixin).cornerRadius = 0;
+      }
+    }
+    const res = await (async () => {
+      try {
+        return await ctx.assets.captureExportedNode(exportNode, "SVG");
+      } finally {
+        neutralClone?.remove();
+      }
+    })();
+    if ("error" in res) {
+      throw new Error(
+        `Round-trip SVG ${node.name} could not be exported truthfully: ${res.error}`,
+      );
+    }
+    if (roundtripSvgVisualMode === "faithful") {
+      const interactiveMetadata = node.getPluginData("pulp.interactive_elements");
+      if (interactiveMetadata && (ex.interactive_elements?.length ?? 0) > 0) {
+        const expected = node.getPluginData(
+          "pulp.interactive_elements_visual_fingerprint",
+        );
+        const entry = ctx.assets.entries().find(
+          (candidate) => candidate.asset_id === res.assetId,
+        );
+        if (!expected || !entry || entry.content_hash !== expected) {
+          throw new Error(
+            `Edited faithful-SVG artwork on "${node.name}" no longer matches ` +
+            "its authoritative interactive geometry; export refused.",
+          );
+        }
+      }
+      ex.render_mode = "faithful_svg";
+      ex.svg_asset_id = res.assetId;
+    } else {
+      ex.asset_ref = res.assetId;
+    }
+    ex.children = [];
+    if (roundtripSemanticChildren) {
+      ex.preserved_semantic_children = roundtripSemanticChildren;
     }
   }
 
@@ -491,6 +826,9 @@ async function walk(
   if (
     !isVectorLike &&
     !ex.asset_ref &&
+    !roundtripSvgVisualMode &&
+    (!("getPluginData" in node) ||
+     !node.getPluginData("pulp.design_ir_type")) &&
     (node.type === "FRAME" || node.type === "GROUP") &&
     "children" in node &&
     (node as ChildrenMixin).children.length > 0 &&
@@ -594,7 +932,7 @@ async function walk(
   // wrapper, unclipped — exactly Figma's scope — and a second mask opens a
   // second wrapper inside the first, so stacked masks intersect the way
   // nested clips do.
-  if ("children" in node) {
+  if ("children" in node && !roundtripSvgVisualMode) {
     const children = (node as ChildrenMixin).children;
     // Open mask scopes: synthetic wrappers, pruned when they end up empty.
     const scopes: Array<{ wrapper: ExtractedFigmaNode; holder: ExtractedFigmaNode[] }> = [];
@@ -841,11 +1179,20 @@ function extractStyle(n: SceneNode, ctx: WalkCtx): ExtractedStyle {
       // with cover (the imageTransform crop window has no CSS equivalent) and
       // TILE keeps the stretch default — both say so.
       const { fit, exact } = scaleModeToObjectFit(image.scaleMode);
-      if (fit) s.object_fit = fit;
+      if (image.scaleMode === "TILE") {
+        s.background_size = "auto";
+        s.background_repeat = "repeat";
+      } else if (fit) {
+        s.object_fit = fit;
+      }
       if (!exact) {
         pushDiag(ctx, "warning", "image-scale-approximated", "capture_partial",
           `${n.name}: image fill scale mode ${image.scaleMode} has no exact ` +
-          `equivalent; ${fit ? `approximated as object-fit: ${fit}` : "rendered stretched to the box"}.`);
+          `equivalent; ${image.scaleMode === "TILE"
+            ? "repeat intent preserved, but Figma tile scaling and Pulp rendering remain partial"
+            : fit
+              ? `approximated as object-fit: ${fit}`
+              : "rendered stretched to the box"}.`);
       }
       // Paint-level opacity — distinct from layer opacity. For a childless
       // node the fill IS the node's only content, so folding it into the
@@ -979,7 +1326,11 @@ function segmentColor(fills: readonly Paint[] | undefined): string | undefined {
 /// offsets (converted from the API's UTF-16 code-unit indices). A homogeneous
 /// node returns no runs — the flat dominant style stays the whole story, which
 /// is the path the consumer prefers for single-style text.
-function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
+function extractTextRuns(
+  t: TextNode,
+  s: ExtractedStyle,
+  fontFaces: Array<{ family: string; style: string; weight?: number }>,
+): ExtractedTextRun[] {
   const getSegments = (t as unknown as {
     getStyledTextSegments?: (fields: string[]) => StyledSegment[];
   }).getStyledTextSegments;
@@ -1009,7 +1360,7 @@ function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
   if (s.font_family === undefined && first.fontName &&
       typeof first.fontName.family === "string") {
     s.font_family = first.fontName.family;
-    s.font_style = /italic/i.test(first.fontName.style) ? "italic" : "normal";
+    s.font_style = /italic|oblique/i.test(first.fontName.style) ? "italic" : "normal";
   }
   if (s.color === undefined) {
     const c = segmentColor(first.fills);
@@ -1025,7 +1376,32 @@ function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
     u16 >= 0 && u16 < toByte.length ? toByte[u16] : toByte[toByte.length - 1];
 
   const runs: ExtractedTextRun[] = [];
+  const exactFaceByRepresentableTuple = new Map<string, string>();
   for (const seg of segments) {
+    if (seg.fontName && typeof seg.fontName.family === "string" &&
+        typeof seg.fontName.style === "string") {
+      if (s.font_family && seg.fontName.family !== s.font_family) {
+        throw new Error(
+          `Mixed font families on "${t.name}" cannot be represented by the ` +
+          "current DesignIR text-run model; export refused.",
+        );
+      }
+      const italic = /italic|oblique/i.test(seg.fontName.style) ? "italic" : "normal";
+      const tuple = `${seg.fontName.family}|${seg.fontWeight ?? ""}|${italic}`;
+      const existingFace = exactFaceByRepresentableTuple.get(tuple);
+      if (existingFace && existingFace !== seg.fontName.style) {
+        throw new Error(
+          `Distinct font faces "${existingFace}" and "${seg.fontName.style}" ` +
+          `on "${t.name}" collapse to the same DesignIR weight/style tuple; export refused.`,
+        );
+      }
+      exactFaceByRepresentableTuple.set(tuple, seg.fontName.style);
+      fontFaces.push({
+        family: seg.fontName.family,
+        style: seg.fontName.style,
+        weight: typeof seg.fontWeight === "number" ? seg.fontWeight : undefined,
+      });
+    }
     const run: ExtractedTextRun = {
       start: byteAt(seg.start),
       end: byteAt(seg.end),
@@ -1040,17 +1416,20 @@ function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
       run.fontWeight = seg.fontWeight;
     }
     if (seg.fontName && typeof seg.fontName.style === "string") {
-      const italic = /italic/i.test(seg.fontName.style) ? "italic" : "normal";
+      const italic = /italic|oblique/i.test(seg.fontName.style) ? "italic" : "normal";
       if (italic !== (s.font_style ?? "normal")) run.fontStyle = italic;
     }
     const color = segmentColor(seg.fills);
     if (color && color !== s.color) run.color = color;
     const ls = letterSpacingPx(seg.letterSpacing, seg.fontSize);
-    if (ls !== undefined && ls !== 0 && ls !== s.letter_spacing) {
+    if (ls !== undefined && ls !== (s.letter_spacing ?? 0)) {
       run.letterSpacing = ls;
     }
-    if (seg.textDecoration === "UNDERLINE") run.textDecoration = "underline";
-    else if (seg.textDecoration === "STRIKETHROUGH") run.textDecoration = "line-through";
+    const decoration = seg.textDecoration === "UNDERLINE" ? "underline"
+      : seg.textDecoration === "STRIKETHROUGH" ? "line-through" : "none";
+    if (decoration !== (s.text_decoration ?? "none")) {
+      run.textDecoration = decoration;
+    }
     if (Object.keys(run).length > 2) runs.push(run);
   }
   return runs;
@@ -1058,14 +1437,19 @@ function extractTextRuns(t: TextNode, s: ExtractedStyle): ExtractedTextRun[] {
 
 function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): void {
   const s = ex.style;
+  const fontFaces: Array<{ family: string; style: string; weight?: number }> = [];
   // Read the "first character" style as the dominant style; mixed-style
   // ranges are then captured as per-range deltas in `runs` below.
   const charLen = t.characters.length;
-  if (charLen === 0) return;
   if (typeof t.fontSize === "number") s.font_size = t.fontSize;
   if (typeof t.fontName === "object" && t.fontName) {
     s.font_family = t.fontName.family;
-    s.font_style = /italic/i.test(t.fontName.style) ? "italic" : "normal";
+    s.font_style = /italic|oblique/i.test(t.fontName.style) ? "italic" : "normal";
+    fontFaces.push({
+      family: t.fontName.family,
+      style: t.fontName.style,
+      weight: typeof t.fontWeight === "number" ? t.fontWeight : undefined,
+    });
   }
   if (typeof t.fontWeight === "number") s.font_weight = t.fontWeight;
   if (typeof t.letterSpacing === "object" && t.letterSpacing) {
@@ -1087,6 +1471,10 @@ function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): vo
   if (t.textCase === "UPPER") s.text_transform = "uppercase";
   else if (t.textCase === "LOWER") s.text_transform = "lowercase";
   else if (t.textCase === "TITLE") s.text_transform = "capitalize";
+  if (t.textDecoration === "UNDERLINE") s.text_decoration = "underline";
+  else if (t.textDecoration === "STRIKETHROUGH") {
+    s.text_decoration = "line-through";
+  }
   // text color = first solid fill
   if (Array.isArray(t.fills) && t.fills.length > 0) {
     const first = (t.fills as readonly Paint[]).find((p) => p.type === "SOLID" && p.visible !== false);
@@ -1105,10 +1493,20 @@ function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): vo
 
   // Mixed styled ranges → ordered per-range deltas with UTF-8 byte offsets.
   // A homogeneous node emits no runs and keeps the flat single-style path.
-  const runs = extractTextRuns(t, s);
+  const runs = charLen > 0 ? extractTextRuns(t, s, fontFaces) : [];
+  if (fontFaces.length > 0) {
+    const unique = new Map(
+      fontFaces.map((face) => [
+        `${face.family}|${face.style}|${face.weight ?? ""}`,
+        face,
+      ]),
+    );
+    ex.font_faces = Array.from(unique.values());
+  }
   if (runs.length > 0) {
     ex.runs = runs;
-  } else if (typeof (t as unknown as { getStyledTextSegments?: unknown })
+  } else if (charLen > 0 &&
+      typeof (t as unknown as { getStyledTextSegments?: unknown })
       .getStyledTextSegments !== "function") {
     // Only reachable on a host without the segmentation API — say so instead
     // of silently flattening (the pre-capture behavior).
@@ -1135,7 +1533,7 @@ function extractTextStyle(t: TextNode, ex: ExtractedFigmaNode, ctx: WalkCtx): vo
   const getHyperlink = (t as unknown as {
     getRangeHyperlink?: (start: number, end: number) => { type: string; value: string } | null | symbol;
   }).getRangeHyperlink;
-  if (typeof getHyperlink === "function") {
+  if (charLen > 0 && typeof getHyperlink === "function") {
     try {
       const link = getHyperlink.call(t, 0, charLen);
       // A symbol means figma.mixed (per-range links) — preserved only when the
@@ -1187,6 +1585,24 @@ async function applyFaithfulVector(
   const entry = ctx.assets.entries().find((e) => e.asset_id === res.assetId);
   if (entry) {
     const svg = decodeSvgBytes(entry.bytes);
+    // Forge copy-back stores the canonical overlay array as plugin data.
+    // Preserve that authority instead of replacing actions, swaps, custom
+    // factories, or exact hit geometry with heuristic SVG re-detection.
+    if ("getPluginData" in sceneNode &&
+        sceneNode.getPluginData("pulp.interactive_elements") !== "") {
+      const preserved = node.interactive_elements ?? [];
+      if (preserved.length === 0) return;
+      const expected = sceneNode.getPluginData(
+        "pulp.interactive_elements_visual_fingerprint",
+      );
+      if (!expected || entry.content_hash !== expected) {
+        throw new Error(
+          `Edited faithful-SVG artwork on "${sceneNode.name}" no longer matches ` +
+          "its authoritative interactive geometry; export refused.",
+        );
+      }
+      return;
+    }
     // Geometry knobs from the SVG + source-metadata overlays from the node tree
     // (search/dropdown/stepper/tabs), mapped into the SVG's panel space — kept in
     // lockstep with the REST lane (figma_rest_export.py).

@@ -117,6 +117,36 @@ test("mixed segments become ordered runs with UTF-8 byte offsets and dominant ba
     fontWeight: 400,
     textDecoration: "underline",
   });
+  assert.deepEqual(
+    res.font_family_assets.map((face) => ({
+      family: face.family,
+      style: face.style,
+      weight: face.weight,
+    })),
+    [
+      { family: "Inter", style: "Bold", weight: 700 },
+      { family: "Inter", style: "Regular", weight: 400 },
+    ],
+  );
+});
+
+test("distinct exact faces that collapse to one run tuple fail closed", async () => {
+  const colliding = mixedTextNode() as unknown as {
+    getStyledTextSegments: (fields: string[]) => Array<Record<string, unknown>>;
+  };
+  const originalSegments = colliding.getStyledTextSegments;
+  colliding.getStyledTextSegments = (fields) =>
+    originalSegments(fields).map((segment, index) => index === 1
+      ? {
+          ...segment,
+          fontName: { family: "Inter", style: "Condensed Bold" },
+          fontWeight: 700,
+        }
+      : segment);
+  await assert.rejects(
+    () => extractScene([frameWith(colliding)], { faithfulVector: false }),
+    /Distinct font faces "Bold" and "Condensed Bold".*export refused/,
+  );
 });
 
 test("textAlignVertical CENTER lands as style.vertical_align middle", async () => {
@@ -155,6 +185,60 @@ test("homogeneous text keeps the flat path: no runs array", async () => {
   const text = res.roots[0].children[0];
   assert.equal(text.runs, undefined);
   assert.equal(text.style.vertical_align, "top");
+});
+
+test("a run can explicitly reset inherited letter spacing to zero", async () => {
+  const spaced = mixedTextNode() as unknown as {
+    letterSpacing: { value: number; unit: "PIXELS" };
+    getStyledTextSegments: (fields: string[]) => Array<Record<string, unknown>>;
+  };
+  spaced.letterSpacing = { value: 4, unit: "PIXELS" };
+  const originalSegments = spaced.getStyledTextSegments;
+  spaced.getStyledTextSegments = (fields) =>
+    originalSegments(fields).map((segment, index) => ({
+      ...segment,
+      letterSpacing: { value: index === 0 ? 4 : 0, unit: "PIXELS" },
+    }));
+  const res = await extractScene([frameWith(spaced)], { faithfulVector: false });
+  assert.equal(res.roots[0].children[0].style.letter_spacing, 4);
+  assert.equal(res.roots[0].children[0].runs?.[0].letterSpacing, 0);
+});
+
+test("empty text retains node typography and text metadata", async () => {
+  const empty = {
+    type: "TEXT",
+    id: "1:5",
+    name: "Empty label",
+    visible: true,
+    absoluteBoundingBox: bounds(0, 0, 80, 16),
+    characters: "",
+    fontSize: 14,
+    fontName: { family: "Inter", style: "Bold" },
+    fontWeight: 700,
+    letterSpacing: { value: 2, unit: "PIXELS" },
+    lineHeight: { value: 18, unit: "PIXELS" },
+    textAlignHorizontal: "CENTER",
+    textAlignVertical: "BOTTOM",
+    textAutoResize: "HEIGHT",
+    textTruncation: "ENDING",
+    maxLines: 2,
+    fills: solidFill(1, 0, 0),
+  } as unknown as SceneNode;
+  const res = await extractScene([frameWith(empty)], { faithfulVector: false });
+  const text = res.roots[0].children[0];
+  assert.equal(text.content, "");
+  assert.equal(text.style.color, "#ff0000");
+  assert.equal(text.style.font_family, "Inter");
+  assert.equal(text.style.font_size, 14);
+  assert.equal(text.style.font_weight, 700);
+  assert.equal(text.style.font_style, "normal");
+  assert.equal(text.style.letter_spacing, 2);
+  assert.equal(text.style.line_height, 18);
+  assert.equal(text.style.text_align, "center");
+  assert.equal(text.style.vertical_align, "bottom");
+  assert.equal(text.attributes?.["figma:text_auto_resize"], "height");
+  assert.equal(text.attributes?.["figma:text_truncation"], "ending");
+  assert.equal(text.attributes?.["figma:max_lines"], "2");
 });
 
 test("truncation and max-lines are preserved as namespaced attributes", async () => {

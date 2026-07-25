@@ -5,6 +5,8 @@ export type PulpFigmaUIMessage =
   | { type: "report-file-key"; fileKey: string | null }
   | { type: "get-selection-summary" }
   | { type: "export" }
+  | { type: "copy-selection-for-forge" }
+  | { type: "import-forge-design"; clipboardText: string }
   /// User dragged a TTF/OTF onto the plugin UI to satisfy a non-system font.
   /// `bytes` is the raw font file as a number[] (postMessage-safe transit).
   | {
@@ -59,5 +61,11 @@ export type PulpSandboxMessage =
       suggestedName: string;
       json: string;
       assets: AssetBundle[];
+      delivery?: "download" | "clipboard";
+    }
+  | {
+      type: "forge-import-result";
+      nodeCount: number;
+      audioWidgetCount: number;
     }
   | { type: "error"; message: string };

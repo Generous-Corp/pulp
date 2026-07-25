@@ -42,6 +42,9 @@ export function serializeExport(
   diagnostics: ExtractedDiagnostic[],
   ctx: SerializeContext,
 ): unknown {
+  const uniqueUserFontAssets = Array.from(new Map(
+    (ctx.userFonts?.entries() ?? []).map((font) => [font.asset_id, font]),
+  ).values());
   // Orphan-font check: if the user dropped a TTF/OTF for
   // (family, style) tuples that don't appear in font_family_assets
   // (drop happened before scan, or selection changed before export),
@@ -126,7 +129,7 @@ export function serializeExport(
         // assets in the same manifest. The local_path always ends in
         // .ttf / .otf so the zip writer and downstream consumers can
         // pick them out by extension without re-sniffing the mime.
-        ...(ctx.userFonts?.entries() ?? []).map((f) => ({
+        ...uniqueUserFontAssets.map((f) => ({
           asset_id: f.asset_id,
           original_uri: `userfont://${encodeURIComponent(f.original_filename)}`,
           original_uri_aliases: [],
@@ -204,8 +207,11 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   // reads these keys). Only present on a faithful_svg node.
   if (n.render_mode) out.render_mode = n.render_mode;
   if (n.svg_asset_id) out.svg_asset_id = n.svg_asset_id;
-  if (n.interactive_elements && n.interactive_elements.length > 0) {
+  if (n.interactive_elements !== undefined) {
     out.interactive_elements = n.interactive_elements;
+  }
+  if (n.alternate_frames && n.alternate_frames.length > 0) {
+    out.alternate_frames = n.alternate_frames.map(toEnvelopeNode);
   }
 
   // Emit audio-widget metadata at the IR node root. The C++
@@ -276,8 +282,38 @@ function toEnvelopeNode(n: ExtractedFigmaNode): unknown {
   }
   out.figma = figma;
 
-  if (n.children.length > 0) {
+  if (n.preserved_semantic_children) {
+    out.children = n.preserved_semantic_children.map((child) =>
+      schemaCompatiblePreservedNode(child, n.figma_node_id)
+    );
+  } else if (n.children.length > 0) {
     out.children = n.children.map(toEnvelopeNode);
+  }
+  return out;
+}
+
+function schemaCompatiblePreservedNode(
+  value: unknown,
+  ownerFigmaNodeId: string,
+): unknown {
+  const source = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {
+    ...source,
+    name: typeof source.name === "string"
+      ? source.name
+      : typeof source.label === "string" ? source.label
+      : typeof source.type === "string" ? source.type : "Semantic node",
+    // The semantic subtree is represented by, and editable through, the
+    // owning faithful SVG node. Attribute it to that real Figma node rather
+    // than inventing a child SceneNode identity that does not exist.
+    figma_node_id: ownerFigmaNodeId,
+  };
+  for (const key of ["children", "alternate_frames"]) {
+    if (Array.isArray(source[key])) {
+      out[key] = (source[key] as unknown[]).map((child) =>
+        schemaCompatiblePreservedNode(child, ownerFigmaNodeId)
+      );
+    }
   }
   return out;
 }

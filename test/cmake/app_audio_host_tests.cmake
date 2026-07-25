@@ -559,6 +559,20 @@ target_link_libraries(pulp-test-forge-lofi-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-lofi-catalog)
 
+# Multi-character delay. Audio-domain acceptance suite for the signal block
+# (pulp/signal/character_delay.hpp) plus its catalog node: delay-time accuracy
+# per character, the self-oscillation contract, the BBD clock/bandwidth law,
+# tape wow and flutter, the physical tier's hysteresis and Wallace loss filter,
+# reverse / freeze / ducking, determinism, and the same RT-probe wiring the
+# other catalog tests use.
+add_executable(pulp-test-character-delay test_character_delay.cpp)
+target_sources(pulp-test-character-delay PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-character-delay
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-character-delay)
+
 # NativeHandleVisitor pure-header pattern test. No plugin loading
 # required; uses lightweight mock slots to exercise dispatch.
 add_executable(pulp-test-native-handle-visitor test_native_handle_visitor.cpp)
