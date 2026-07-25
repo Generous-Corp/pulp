@@ -63,10 +63,17 @@ TEST_CASE("live paint runs under the no-alloc contract",
     root.paint_all(canvas);
 
     REQUIRE(root.painted);
+#ifdef NDEBUG
+    // Release: ScopedNoAlloc's body is #ifndef NDEBUG (scoped_no_alloc.hpp keeps
+    // the SYMBOL so mixed-mode links stay ABI-stable, but the body is a no-op),
+    // so there is no contract state to observe and nothing to assert about it.
+    REQUIRE(root.guard_depth_during_paint == 0);
+#else
     REQUIRE(root.guard_depth_during_paint > 0);
     // Live paint keeps the contract armed, so a real per-frame allocation in
     // widget code is still caught by the RT interceptor.
     REQUIRE(root.in_no_alloc_scope_during_paint);
+#endif
 }
 
 TEST_CASE("offscreen capture suspends the no-alloc contract",
@@ -81,12 +88,17 @@ TEST_CASE("offscreen capture suspends the no-alloc contract",
     // would pass vacuously on a build where the backend silently no-ops.
     REQUIRE(root.painted);
 
-    // The ScopedNoAlloc guard is still ON THE STACK during the capture (paint_all
-    // opens it unconditionally) ...
-    REQUIRE(root.guard_depth_during_paint > 0);
-    // ... but the contract reports SUSPENDED, which is what stops the RT
-    // interceptor from aborting the capture.
+    // Holds in BOTH build types, and is the invariant that actually protects the
+    // suite: the capture completes instead of aborting on the trap.
     REQUIRE_FALSE(root.in_no_alloc_scope_during_paint);
-
     REQUIRE_FALSE(png.empty());
+
+#ifndef NDEBUG
+    // Debug only — the guard has a body here, so we can prove the interesting
+    // part: the ScopedNoAlloc is still ON THE STACK during the capture
+    // (paint_all opens it unconditionally) and the contract nonetheless reports
+    // SUSPENDED. Under NDEBUG the depth is always 0, so asserting it would be
+    // asserting the compiler flag, not the behaviour.
+    REQUIRE(root.guard_depth_during_paint > 0);
+#endif
 }
