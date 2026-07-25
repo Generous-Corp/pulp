@@ -171,9 +171,9 @@ modules:
     docs: reference/modules.md#dsl
 
   - name: osc
-    summary: Open Sound Control messaging
+    summary: Open Sound Control messaging, plus OscParameterMap — OSC address/pattern to parameter binding with learn
     status: experimental
-    dependencies: [runtime]
+    dependencies: [runtime, state]
     docs: reference/modules.md#osc
 
   - name: native-components

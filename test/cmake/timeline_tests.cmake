@@ -171,6 +171,15 @@ pulp_add_test_suite(pulp-test-midi-parameter-map-scaling
     SOURCES test_midi_parameter_map_scaling.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::timeline)
 
+# The OSC counterpart of the same surface: an OSC address (literal or OSC 1.0
+# wildcard pattern) binds to the same ParamID space, so a tablet control surface
+# reaches the engine's DeviceParameterTarget parameters with zero driver code.
+# The binding lives in core/osc (pulp::osc) because it needs the OSC address
+# matcher; pulp::timeline is linked to drive the engine's own parameter identity.
+pulp_add_test_suite(pulp-test-osc-parameter-map
+    SOURCES test_osc_parameter_map.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::osc pulp::state pulp::timeline)
+
 # The multitrack/PDC proof is also registered separately from the aggregate
 # example suite. That keeps the Phase-2 gate independent of standalone-editor
 # linkage and lets no-JS engine builds exercise the proof directly.
