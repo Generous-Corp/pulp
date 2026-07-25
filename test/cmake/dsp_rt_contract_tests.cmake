@@ -153,3 +153,11 @@ pulp_add_test_suite(pulp-test-mod-utilities
     SOURCES test_mod_utilities.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 600)
+
+# The saturation toolkit — the memoryless nonlinearity every drive/fuzz/tape/
+# tube stage composes. The suite is the spec's acceptance set A1-A12; harmonic
+# expectations are computed from the shipped closed forms, not restated.
+pulp_add_test_suite(pulp-test-signal-saturator
+    SOURCES test_signal_saturator.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)

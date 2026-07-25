@@ -757,3 +757,15 @@ pulp_add_test_suite(pulp-test-widget-gallery LIBRARIES pulp::view)
 # can compute its whole geometry with no canvas and no paint, and a label whose
 # inline editor is a real child view.
 pulp_add_test_suite(pulp-test-widget-metrics LIBRARIES pulp::view)
+
+# Saturation toolkit catalog node. Same bake-and-inject shape as the lo-fi
+# catalog suite: proves each baked param moves the baked node's audio over the
+# production injection path, and that the registry's worst-case-gain helper
+# agrees with the bound the DSP suite asserts.
+add_executable(pulp-test-forge-saturator-catalog test_forge_saturator_catalog.cpp)
+target_sources(pulp-test-forge-saturator-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-forge-saturator-catalog
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-saturator-catalog)
