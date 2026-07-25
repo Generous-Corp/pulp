@@ -33,6 +33,10 @@ pulp_add_test_suite(pulp-test-signal-rt-safety
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
 
+pulp_add_test_suite(pulp-test-signal-mod-rt-safety
+    SOURCES test_signal_mod_rt_safety.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 pulp_add_test_suite(pulp-test-multi-channel-meter
     SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
