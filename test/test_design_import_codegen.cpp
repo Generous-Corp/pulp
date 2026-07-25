@@ -3263,3 +3263,53 @@ TEST_CASE("generated JS opts its layout pass into sub-pixel geometry",
     REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
                     "setSubpixelLayout('', true);") != std::string::npos);
 }
+
+TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child stays reachable") {
+    // TextButton defaults to PointerEvents::box_only so a centred icon cannot
+    // swallow its own click — but hit_test() then never descends, which would
+    // make the box_none it emits for the child inert. The generated code must
+    // re-open the parent, exactly as the runtime materializer does, or baked
+    // output silently loses the interactive descendant the sibling Knob test
+    // above proves is preserved. Knob has no box_only default, which is why
+    // that test kept passing while the button path was broken.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode outer_button;
+    outer_button.type = "button";
+    outer_button.name = "Outer Button";
+    outer_button.text_content = "Outer";
+    outer_button.style.width = 80.0f;
+    outer_button.style.height = 80.0f;
+    outer_button.layout.direction = LayoutDirection::column;
+
+    IRNode container;
+    container.type = "frame";
+    container.name = "Interactive Container";
+    container.style.width = 80.0f;
+    container.style.height = 40.0f;
+    container.layout.direction = LayoutDirection::column;
+
+    IRNode nested_button;
+    nested_button.type = "button";
+    nested_button.name = "Nested Fine Button";
+    nested_button.text_content = "Fine";
+    nested_button.style.width = 60.0f;
+    nested_button.style.height = 20.0f;
+
+    container.children.push_back(std::move(nested_button));
+    outer_button.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(outer_button));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(count_occurrences(
+                result.source,
+                "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
+    // ...and the parent re-opened, or that box_none reaches nothing.
+    REQUIRE(count_occurrences(
+                result.source,
+                "->set_pointer_events(pulp::view::View::PointerEvents::auto_);") == 1);
+}

@@ -1150,6 +1150,10 @@ void View::advance_gesture_recognizers(double timestamp_seconds) {
         gesture_arbiter_->advance_time(*this, timestamp_seconds);
 }
 
+bool View::gesture_claimed_pointer() const {
+    return gesture_arbiter_ && gesture_arbiter_->claimed_pointer();
+}
+
 bool View::has_time_driven_gestures() const {
     return gesture_arbiter_ && gesture_arbiter_->wants_time_updates();
 }

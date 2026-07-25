@@ -1453,6 +1453,23 @@ void emit_node(std::ostringstream& out,
                                 : std::min(node.children.size(), resolved.children.size());
     const bool parent_owns_imported_child_hits =
         native_kind_owns_imported_child_hits(resolved.kind);
+    // A promoted widget that keeps a reachable child must be re-opened first.
+    // TextButton defaults to PointerEvents::box_only so a centred icon cannot
+    // swallow its own click, and hit_test() then never descends — which would
+    // make the box_none emitted below inert and silently drop the interactive
+    // descendant. Emitted once here so it covers both the extracted-factory
+    // path and the inline emit_node path.
+    if (parent_owns_imported_child_hits) {
+        for (std::size_t i = 0; i < count; ++i) {
+            if (promoted_widget_child_hit_policy(node.children[i], resolved.children[i]) ==
+                PromotedChildHitPolicy::disabled)
+                continue;
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      var + "->set_pointer_events(pulp::view::View::PointerEvents::auto_);");
+            break;
+        }
+    }
+
     for (std::size_t i = 0; i < count; ++i) {
         const auto& child = node.children[i];
         const auto child_hit_policy = parent_owns_imported_child_hits
@@ -1471,11 +1488,6 @@ void emit_node(std::ostringstream& out,
                 } else if (child_hit_policy == PromotedChildHitPolicy::pass_through_self) {
                     emit_line(out, depth + 1, ctx.opts.indent_spaces,
                               child_var + "->set_pointer_events(pulp::view::View::PointerEvents::box_none);");
-                    // A parent that never descends makes box_none meaningless.
-                    // TextButton defaults to box_only, so re-open it: the
-                    // button asked for this child to stay reachable.
-                    emit_line(out, depth + 1, ctx.opts.indent_spaces,
-                              var + "->set_pointer_events(pulp::view::View::PointerEvents::auto_);");
                 }
                 emit_line(out, depth + 1, ctx.opts.indent_spaces,
                           var + "->add_child(std::move(" + child_var + "));");

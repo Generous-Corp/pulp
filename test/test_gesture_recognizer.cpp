@@ -631,3 +631,37 @@ TEST_CASE("clearing child recognizers cancels root arbiter sessions",
     CHECK_FALSE(root.dispatch_gesture_pointer_event(
         pointer_event({40, 10}, MousePhase::release, &t), t));
 }
+
+TEST_CASE("a mere candidate recognizer does not claim the pointer",
+          "[view][gesture]") {
+    // dispatch_gesture_pointer_event() returns true whenever a recognizer is a
+    // CANDIDATE on the hit view's ancestor chain — candidates are never pruned
+    // within a session, a failing recognizer only changes state. A host that
+    // reads that return as "the gesture took this pointer" stops delivering
+    // press/drag/release to the widget, so ANY control that registers a
+    // recognizer becomes permanently undraggable while looking perfectly alive.
+    // gesture_claimed_pointer() is the honest signal, and must stay false until
+    // a recognizer actually activates.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    View& child = add_child(root, {20, 20, 100, 100});
+
+    // A double-tap recognizer: on a single press it is a candidate, not a claim.
+    child.add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    double t = 0.0;
+    auto down = pointer_event({30, 30}, MousePhase::press, &t);
+    const bool had_candidate = root.dispatch_gesture_pointer_event(down, t);
+
+    CHECK(had_candidate);                          // a recognizer is present...
+    CHECK_FALSE(root.gesture_claimed_pointer());   // ...but it has claimed nothing
+
+    // A view with no recognizer at all claims nothing either.
+    View bare;
+    bare.set_bounds({0, 0, 200, 200});
+    View& plain = add_child(bare, {20, 20, 100, 100});
+    (void)plain;
+    auto down2 = pointer_event({30, 30}, MousePhase::press, &t);
+    CHECK_FALSE(bare.dispatch_gesture_pointer_event(down2, t));
+    CHECK_FALSE(bare.gesture_claimed_pointer());
+}

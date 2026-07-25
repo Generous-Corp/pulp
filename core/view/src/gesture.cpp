@@ -822,6 +822,7 @@ void GestureArbiter::finish_session_if_needed(PointerSession& session,
 bool GestureArbiter::handle_pointer_event(View& root, const MouseEvent& root_event,
                                           double timestamp_seconds) {
     if (root_event.is_wheel) return false;
+    claimed_pointer_ = false;
     if (timestamp_seconds < 0.0)
         timestamp_seconds = default_timestamp_seconds();
 
@@ -846,7 +847,15 @@ bool GestureArbiter::handle_pointer_event(View& root, const MouseEvent& root_eve
     feed_session(root, session, root_event, context);
     resolve_session(session, root_event);
 
+    // `consumed` says only that a recognizer EXISTS on this view's ancestor
+    // chain — candidates are never pruned within a session, a failing
+    // recognizer merely changes state. `claimed` says one actually took the
+    // pointer. A host that bails on mere candidacy makes any control carrying
+    // a recognizer permanently undraggable, because normal delivery never runs.
     const bool consumed = !session.candidates.empty();
+    claimed_pointer_ = std::any_of(
+        session.candidates.begin(), session.candidates.end(),
+        [](const Candidate& candidate) { return candidate.active; });
     const int pointer_id = session.pointer_id;
     finish_session_if_needed(session, root_event);
     if (is_release_or_cancel(root_event))

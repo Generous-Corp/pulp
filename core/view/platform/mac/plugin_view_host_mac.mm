@@ -223,7 +223,12 @@ void pulp_plugin_mouse_down(NSView* host, pulp::view::View* root, NSEvent* event
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::press;
     gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+    // Bail only when a recognizer actually CLAIMED the pointer. Bailing on the
+    // dispatch return meant "a recognizer exists on this chain", so a control
+    // that merely registered a gesture never received press, drag or release —
+    // permanently undraggable in the host while looking perfectly alive.
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer()) {
         *drag_target = nullptr;
         return;
     }
@@ -320,7 +325,8 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
     gesture_event.modifiers = mods;
     gesture_event.is_down = true;
     gesture_event.phase = pulp::view::MousePhase::drag;
-    if (root->dispatch_gesture_pointer_event(gesture_event))
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer())
         return;
     if (!*drag_target) return;
     if (!view_is_in_tree(*drag_target, root)) { *drag_target = nullptr; return; }
@@ -346,7 +352,12 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
     gesture_event.is_down = false;
     gesture_event.phase = pulp::view::MousePhase::release;
     gesture_event.click_count = static_cast<int>(event.clickCount);
-    if (root->dispatch_gesture_pointer_event(gesture_event)) {
+    // Bail only when a recognizer actually CLAIMED the pointer. Bailing on the
+    // dispatch return meant "a recognizer exists on this chain", so a control
+    // that merely registered a gesture never received press, drag or release —
+    // permanently undraggable in the host while looking perfectly alive.
+    if (root->dispatch_gesture_pointer_event(gesture_event) &&
+        root->gesture_claimed_pointer()) {
         *drag_target = nullptr;
         return;
     }
