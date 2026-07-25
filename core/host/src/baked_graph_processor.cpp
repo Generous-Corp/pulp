@@ -231,7 +231,11 @@ LowerabilityProof lowerability_of(
     return proof;
 }
 
-LowerResult bake(const SignalGraph& graph) {
+using CustomStateRestoreMap =
+    std::unordered_map<NodeId, std::vector<std::uint8_t>>;
+
+static LowerResult bake_impl(const SignalGraph& graph,
+                             const CustomStateRestoreMap* restore_states) {
     LowerResult result;
 
     // Lowerability gate. Order matters: the Plugin/Custom node-kind refusals are
@@ -302,7 +306,14 @@ LowerResult bake(const SignalGraph& graph) {
             if (src.custom_instance) {
                 const CustomNodeType* type =
                     graph.custom_node_type(src.custom_type_id, src.custom_type_version);
-                if (type != nullptr && (type->prepare || type->reset)) {
+                const std::vector<std::uint8_t>* restore_state = nullptr;
+                if (restore_states) {
+                    const auto restore_it = restore_states->find(src.id);
+                    if (restore_it != restore_states->end())
+                        restore_state = &restore_it->second;
+                }
+                if (type != nullptr &&
+                    (type->prepare || type->reset || restore_state)) {
                     CustomNodeLifecycle lc;
                     auto inst = src.custom_instance;  // shared keepalive per closure
                     if (type->prepare) {
@@ -313,6 +324,14 @@ LowerResult bake(const SignalGraph& graph) {
                     }
                     if (type->reset) {
                         lc.reset = [inst, fn = type->reset]() { fn(inst.get()); };
+                    }
+                    if (restore_state && type->load_state) {
+                        auto state = *restore_state;
+                        lc.restore_state =
+                            [inst, fn = type->load_state,
+                             state = std::move(state)]() {
+                                return fn(inst.get(), state);
+                            };
                     }
                     custom_lifecycles[src.id] = std::move(lc);
                 }
@@ -339,6 +358,10 @@ LowerResult bake(const SignalGraph& graph) {
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
+}
+
+LowerResult bake(const SignalGraph& graph) {
+    return bake_impl(graph, nullptr);
 }
 
 BakePlanResult bake_to_plan(const SignalGraph& graph) {
@@ -375,7 +398,16 @@ BakePlanResult bake_to_plan(const SignalGraph& graph) {
         } else if (src.type == NodeType::Custom) {
             n.custom_type_id = src.custom_type_id;
             n.custom_version = src.custom_type_version;
+            // Persist the authored/staged blob, never the live instance's
+            // save_state(): a prepared graph may be processing concurrently and
+            // Custom save_state has no audio-thread concurrency contract.
             n.custom_state = src.custom_state_blob;
+            if (n.custom_state.size() > kBakedMaxCustomState) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = src.id;
+                result.message = "Custom node state exceeds the signed bake limit";
+                return result;
+            }
         }
         plan.nodes.push_back(std::move(n));
     }
@@ -410,11 +442,44 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
     // so bake()'s full lowerability re-proof + custom resolution run on the
     // reconstructed topology. The file's implicit claim is never trusted.
     SignalGraph graph;
-    for (const auto& type : custom_types) graph.register_custom_node_type(type);
+    for (std::size_t i = 0; i < custom_types.size(); ++i) {
+        for (std::size_t j = i + 1; j < custom_types.size(); ++j) {
+            if (custom_types[i].type_id == custom_types[j].type_id &&
+                custom_types[i].version == custom_types[j].version) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.message =
+                    "duplicate Custom type identity in load registry";
+                return result;
+            }
+        }
+        if (!graph.register_custom_node_type(custom_types[i])) {
+            result.reason = LowerRejectReason::CodecRejected;
+            result.message = "invalid Custom type in load registry";
+            return result;
+        }
+    }
 
     std::unordered_map<NodeId, NodeId> id_map;
+    CustomStateRestoreMap restore_states;
     for (const auto& n : plan->nodes) {
         NodeId gid = 0;
+        const CustomNodeType* resolved_type = nullptr;
+        bool has_state_lifecycle = false;
+        if (n.type == NodeType::Custom) {
+            resolved_type =
+                graph.custom_node_type(n.custom_type_id, n.custom_version);
+            has_state_lifecycle =
+                resolved_type && resolved_type->create &&
+                resolved_type->load_state;
+            if (!n.custom_state.empty() && !has_state_lifecycle) {
+                result.reason = LowerRejectReason::CustomNotYetLowerable;
+                result.offending_node = n.id;
+                result.message =
+                    "stateful Custom node requires a matching registered type "
+                    "with create + load_state";
+                return result;
+            }
+        }
         switch (n.type) {
             case NodeType::AudioInput:
                 gid = graph.add_input_node(n.num_output_ports, "in");
@@ -427,12 +492,6 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
                 if (gid != 0) graph.set_node_gain(gid, n.gain);
                 break;
             case NodeType::Custom:
-                if (!n.custom_state.empty()) {
-                    result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
-                    result.offending_node = n.id;
-                    result.message = "on-disk stateful custom node not supported in v1";
-                    return result;
-                }
                 gid = graph.add_custom_node(n.custom_type_id, n.custom_version, "custom");
                 break;
             default:  // Plugin / MIDI — never lowerable; refuse loudly.
@@ -447,6 +506,22 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
             return result;
         }
         id_map[n.id] = gid;
+        // A zero-byte blob can be meaningful opaque state. Presence is derived
+        // from the authoritative registered lifecycle, never from blob length.
+        if (n.type == NodeType::Custom && has_state_lifecycle) {
+            if (!graph.set_custom_node_state(gid, n.custom_state)) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = n.id;
+                result.message = "could not stage authenticated Custom node state";
+                return result;
+            }
+            if (!restore_states.emplace(gid, n.custom_state).second) {
+                result.reason = LowerRejectReason::CodecRejected;
+                result.offending_node = n.id;
+                result.message = "duplicate reconstructed Custom state identity";
+                return result;
+            }
+        }
     }
     for (const auto& c : plan->connections) {
         const auto s = id_map.find(c.src_node);
@@ -473,11 +548,27 @@ LowerResult load_baked(std::span<const std::uint8_t> bytes, const BakedTrust& tr
     constexpr double kNominalPrepareSampleRate = 48000.0;
     constexpr int kNominalPrepareBlock = 512;
     if (!graph.prepare(kNominalPrepareSampleRate, kNominalPrepareBlock)) {
-        result.reason = LowerRejectReason::NotPrepared;
-        result.message = "reconstructed graph failed to prepare";
+        const NodeId failed_graph_node =
+            graph.last_prepare_custom_failure_node();
+        if (failed_graph_node != 0) {
+            result.reason = LowerRejectReason::StatefulCustomNotYetLoadable;
+            const auto failed_plan_node = std::find_if(
+                id_map.begin(), id_map.end(),
+                [failed_graph_node](const auto& ids) {
+                    return ids.second == failed_graph_node;
+                });
+            if (failed_plan_node != id_map.end())
+                result.offending_node = failed_plan_node->first;
+            result.message =
+                "registered Custom type could not create an instance or "
+                "rejected authenticated state";
+        } else {
+            result.reason = LowerRejectReason::NotPrepared;
+            result.message = "reconstructed graph failed to prepare";
+        }
         return result;
     }
-    return bake(graph);
+    return bake_impl(graph, &restore_states);
 }
 
 BakedGraphProcessor::BakedGraphProcessor(
@@ -550,14 +641,17 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     // prepare at the host's REAL rate/block (bake / load_baked may have prepared
     // at a different or nominal rate), then reset so no stale DSP state — e.g. a
     // delay line still holding the source graph's audio — leaks into the baked
-    // stream. prepare() is a re-init boundary; the header documents that a baked
-    // Processor starts from zero. Control-thread only, never on the audio path.
+    // stream. A signed artifact may additionally carry authenticated initial
+    // state; restore it LAST so prepare/reset cannot erase it. In-memory bake
+    // has no restore hook and retains the fresh-stream contract. Control-thread
+    // only, never on the audio path.
     // Runs BEFORE prepare_param_injection() so the injection state's reset of
     // held params to declared defaults lands on a freshly re-inited instance —
     // one coherent re-init boundary for both DSP state and injected params.
     for (auto& [id, lc] : custom_lifecycles_) {
         if (lc.prepare) lc.prepare(context.sample_rate, max_block);
         if (lc.reset) lc.reset();
+        if (lc.restore_state && !lc.restore_state()) return;
     }
 
     // Build per-node injection state for every param-declaring custom node and
