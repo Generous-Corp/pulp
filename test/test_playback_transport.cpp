@@ -37,6 +37,15 @@ TransportSnapshot block(MasterTransport& transport, std::uint32_t frames) {
     return snapshot;
 }
 
+/// Tick anchor for a sample offset. Every scrub fixture places anchors on exact
+/// quarter-note boundaries so the tick round-trip is lossless and the expected
+/// sample positions stay exact integers.
+TickPosition tick_at(const CompiledTempoMap& map, std::int64_t sample) {
+    const auto tick = map.samples_to_ticks({sample});
+    REQUIRE(map.ticks_to_samples(tick) == SamplePosition{sample});
+    return tick;
+}
+
 } // namespace
 
 static_assert(std::is_trivially_copyable_v<TransportRange>);
@@ -633,4 +642,278 @@ TEST_CASE("projection clamps extreme bar indices before integer conversion") {
     const auto negative =
         format::project_process_context(snapshot, snapshot.ranges[0]);
     REQUIRE(negative.bar == std::numeric_limits<std::int64_t>::min());
+}
+
+TEST_CASE("scrub renders repeated windows that restart on the dragged anchor") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    const auto anchor = tick_at(map, 48'000);
+    const auto anchor_sample = map.ticks_to_samples(anchor);
+
+    REQUIRE(transport.begin_scrub(1'024, anchor) == TransportError::None);
+
+    // The window is four blocks long, so the first four blocks walk forward from
+    // the anchor and the fifth starts the next window back at the anchor.
+    for (int window = 0; window < 3; ++window) {
+        for (std::int64_t step = 0; step < 4; ++step) {
+            const auto snapshot = block(transport, 256);
+            REQUIRE(valid_transport_ranges(snapshot));
+            REQUIRE(snapshot.scrubbing);
+            REQUIRE(snapshot.is_playing); // audio advances even though play is off
+            REQUIRE(snapshot.range_count == 1);
+            REQUIRE(snapshot.ranges[0].timeline_sample_start ==
+                    SamplePosition{anchor_sample.value + step * 256});
+            REQUIRE(snapshot.ranges[0].discontinuity == (step == 0));
+            // Only entering scrub is a hard reposition; the window restarts in
+            // between must not ask consumers to reset state every grain.
+            REQUIRE(snapshot.reset_requested == (window == 0 && step == 0));
+        }
+    }
+}
+
+TEST_CASE("a scrub window restart splits a block exactly like a loop wrap") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(300)) == TransportError::None);
+    const auto anchor = tick_at(map, 24'000);
+    const auto anchor_sample = map.ticks_to_samples(anchor);
+    REQUIRE(transport.begin_scrub(1'024, anchor) == TransportError::None);
+
+    for (int step = 0; step < 3; ++step)
+        REQUIRE(block(transport, 300).range_count == 1);
+
+    const auto split = block(transport, 300);
+    REQUIRE(valid_transport_ranges(split));
+    REQUIRE(split.range_count == 2);
+    REQUIRE(split.ranges[0].frame_count == 124); // 1024 - 3 * 300
+    REQUIRE(split.ranges[0].timeline_sample_start ==
+            SamplePosition{anchor_sample.value + 900});
+    REQUIRE_FALSE(split.ranges[0].discontinuity);
+    REQUIRE(split.ranges[1].frame_count == 176);
+    REQUIRE(split.ranges[1].sample_offset == 124);
+    REQUIRE(split.ranges[1].discontinuity);
+    REQUIRE(split.ranges[1].timeline_sample_start == anchor_sample);
+}
+
+TEST_CASE("a scrub window shorter than a block still yields at most two ranges") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(512)) == TransportError::None);
+    // begin_scrub rejects a sub-block window, so the only way to reach the
+    // clamp is a maximum-length block against the smallest legal window.
+    REQUIRE(transport.begin_scrub(256, tick_at(map, 0)) ==
+            TransportError::ScrubWindowTooShortForMaximumBlock);
+    REQUIRE(transport.begin_scrub(512, tick_at(map, 24'000)) == TransportError::None);
+    for (int step = 0; step < 4; ++step) {
+        const auto snapshot = block(transport, 512);
+        REQUIRE(valid_transport_ranges(snapshot));
+        REQUIRE(snapshot.range_count == 1);
+    }
+}
+
+TEST_CASE("the scrub anchor is latched to window boundaries") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    const auto first = tick_at(map, 24'000);
+    const auto second = tick_at(map, 96'000);
+    const auto first_sample = map.ticks_to_samples(first);
+    const auto second_sample = map.ticks_to_samples(second);
+    REQUIRE(transport.begin_scrub(1'024, first) == TransportError::None);
+    REQUIRE(block(transport, 256).ranges[0].timeline_sample_start == first_sample);
+
+    // A drag posts positions far faster than a window elapses. The window in
+    // flight keeps playing so the grain rate stays the window length instead of
+    // the UI event rate; the new anchor only takes effect at the next boundary.
+    REQUIRE(transport.scrub_to(second) == TransportError::None);
+    for (std::int64_t step = 1; step < 4; ++step) {
+        const auto held = block(transport, 256);
+        REQUIRE(held.ranges[0].timeline_sample_start ==
+                SamplePosition{first_sample.value + step * 256});
+        REQUIRE_FALSE(held.ranges[0].discontinuity);
+    }
+
+    const auto restarted = block(transport, 256);
+    REQUIRE(restarted.ranges[0].discontinuity);
+    REQUIRE(restarted.ranges[0].timeline_sample_start == second_sample);
+}
+
+TEST_CASE("starting a fresh drag abandons the window in flight") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    const auto first = tick_at(map, 24'000);
+    const auto second = tick_at(map, 96'000);
+    REQUIRE(transport.begin_scrub(1'024, first) == TransportError::None);
+    REQUIRE(block(transport, 256).ranges[0].timeline_sample_start ==
+            map.ticks_to_samples(first));
+
+    // A new drag may carry a different window length, so honouring it only once
+    // the previous window drained would be surprising. Unlike scrub_to(), it
+    // takes effect on the next block.
+    REQUIRE(transport.begin_scrub(512, second) == TransportError::None);
+    const auto fresh = block(transport, 256);
+    REQUIRE(fresh.ranges[0].discontinuity);
+    REQUIRE(fresh.ranges[0].timeline_sample_start == map.ticks_to_samples(second));
+
+    // ...and the new window length is the one now in force.
+    REQUIRE_FALSE(block(transport, 256).ranges[0].discontinuity);
+    REQUIRE(block(transport, 256).ranges[0].discontinuity);
+}
+
+TEST_CASE("scrub keeps the monotonic beat moving forward across window restarts") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    REQUIRE(transport.begin_scrub(1'024, tick_at(map, 96'000)) == TransportError::None);
+
+    MonotonicBeat previous{};
+    bool have_previous = false;
+    std::uint32_t restarts = 0;
+    for (int step = 0; step < 40; ++step) {
+        // Drag backwards down the timeline: every restart rewinds the playhead,
+        // which is exactly the case where a naive implementation would let the
+        // monotonic clock rewind with it.
+        REQUIRE(transport.scrub_to(tick_at(map, 96'000 - step * 2'400)) ==
+                TransportError::None);
+        const auto snapshot = block(transport, 256);
+        for (std::uint8_t index = 0; index < snapshot.range_count; ++index) {
+            const auto& range = snapshot.ranges[index];
+            if (range.discontinuity)
+                ++restarts;
+            if (have_previous)
+                REQUIRE_FALSE(range.monotonic_start < previous);
+            REQUIRE_FALSE(range.monotonic_end < range.monotonic_start);
+            previous = range.monotonic_end;
+            have_previous = true;
+        }
+    }
+    REQUIRE(restarts > 1); // the run genuinely rewound the playhead repeatedly
+    REQUIRE(previous > MonotonicBeat{});
+}
+
+TEST_CASE("scrub suspends loop wrapping and release restores it") {
+    const auto map = constant_map();
+    auto setup = config(256);
+    setup.initially_playing = true;
+    setup.loop = {true, tick_at(map, 0), tick_at(map, 48'000)};
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+    REQUIRE(block(transport, 256).ranges[0].timeline_sample_start == SamplePosition{0});
+
+    // Dragging past the loop end must stay reachable: a drag is a direct
+    // statement of position, so the transport may not pull the window back.
+    const auto outside = tick_at(map, 96'000);
+    const auto outside_sample = map.ticks_to_samples(outside);
+    REQUIRE(transport.begin_scrub(1'024, outside) == TransportError::None);
+    for (std::int64_t step = 0; step < 8; ++step) {
+        const auto snapshot = block(transport, 256);
+        REQUIRE(valid_transport_ranges(snapshot));
+        REQUIRE(snapshot.loop.enabled); // still reported so a UI keeps drawing it
+        REQUIRE(snapshot.range_count == 1);
+        REQUIRE(snapshot.ranges[0].timeline_sample_start ==
+                SamplePosition{outside_sample.value + (step % 4) * 256});
+    }
+
+    // Releasing the drag parks on the anchor and hands the playhead back to the
+    // looping transport, which wraps it on the very next block.
+    REQUIRE(transport.end_scrub() == TransportError::None);
+    const auto released = block(transport, 256);
+    REQUIRE_FALSE(released.scrubbing);
+    REQUIRE(released.reset_requested);
+    REQUIRE(released.ranges[0].discontinuity);
+    REQUIRE(released.ranges[0].timeline_sample_start == SamplePosition{0});
+}
+
+TEST_CASE("leaving scrub parks the playhead on the released anchor") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    REQUIRE(transport.begin_scrub(1'024, tick_at(map, 24'000)) == TransportError::None);
+    (void)block(transport, 256);
+    (void)block(transport, 256);
+
+    const auto released_at = tick_at(map, 72'000);
+    REQUIRE(transport.scrub_to(released_at) == TransportError::None);
+    REQUIRE(transport.end_scrub() == TransportError::None);
+
+    const auto parked = block(transport, 256);
+    REQUIRE_FALSE(parked.scrubbing);
+    REQUIRE_FALSE(parked.is_playing); // the musical transport was never rolling
+    REQUIRE(parked.reset_requested);
+    REQUIRE(parked.ranges[0].discontinuity);
+    REQUIRE(parked.ranges[0].timeline_sample_start == map.ticks_to_samples(released_at));
+    // A stopped transport holds the parked position instead of drifting.
+    const auto held = block(transport, 256);
+    REQUIRE(held.ranges[0].timeline_sample_start == map.ticks_to_samples(released_at));
+    REQUIRE_FALSE(held.ranges[0].discontinuity);
+}
+
+TEST_CASE("a seek during scrub outranks the window in flight") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(256)) == TransportError::None);
+    REQUIRE(transport.begin_scrub(1'024, tick_at(map, 24'000)) == TransportError::None);
+    (void)block(transport, 256);
+
+    const auto target = tick_at(map, 120'000);
+    const auto target_sample = map.ticks_to_samples(target);
+    REQUIRE(transport.seek(target) == TransportError::None);
+    const auto seeked = block(transport, 256);
+    REQUIRE(seeked.reset_requested);
+    REQUIRE(seeked.ranges[0].discontinuity);
+    REQUIRE(seeked.ranges[0].timeline_sample_start == target_sample);
+
+    // The seek also re-anchored the drag, so the next window starts there too.
+    for (int step = 0; step < 3; ++step)
+        (void)block(transport, 256);
+    const auto restarted = block(transport, 256);
+    REQUIRE(restarted.ranges[0].discontinuity);
+    REQUIRE(restarted.ranges[0].timeline_sample_start == target_sample);
+}
+
+TEST_CASE("scrub control calls validate window and mode before publishing") {
+    MasterTransport unprepared;
+    REQUIRE(unprepared.begin_scrub(1'024, {}) == TransportError::NotPrepared);
+    REQUIRE(unprepared.scrub_to({}) == TransportError::NotPrepared);
+    REQUIRE(unprepared.end_scrub() == TransportError::NotPrepared);
+
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(1'024)) == TransportError::None);
+    REQUIRE(transport.scrub_to({}) == TransportError::NotScrubbing);
+    REQUIRE(transport.begin_scrub(0, {}) == TransportError::InvalidScrubWindow);
+    REQUIRE(transport.begin_scrub(1'023, {}) ==
+            TransportError::ScrubWindowTooShortForMaximumBlock);
+    // A rejected request must not have entered scrub mode.
+    REQUIRE(transport.scrub_to({}) == TransportError::NotScrubbing);
+    REQUIRE_FALSE(block(transport, 1'024).scrubbing);
+
+    REQUIRE(transport.begin_scrub(1'024, {}) == TransportError::None);
+    REQUIRE(transport.scrub_to({}) == TransportError::None);
+    REQUIRE(block(transport, 1'024).scrubbing);
+    REQUIRE(transport.end_scrub() == TransportError::None);
+    REQUIRE(transport.scrub_to({}) == TransportError::NotScrubbing);
+}
+
+TEST_CASE("scrub blocks stay allocation free including the restarting block") {
+    const auto map = constant_map();
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, config(300)) == TransportError::None);
+    REQUIRE(transport.begin_scrub(1'024, tick_at(map, 24'000)) == TransportError::None);
+    for (int step = 0; step < 3; ++step)
+        REQUIRE(block(transport, 300).range_count == 1);
+
+    TransportSnapshot snapshot;
+    auto error = TransportError::NotPrepared;
+    std::size_t allocation_count = 1;
+    {
+        test::ScopedRtProcessProbe probe;
+        error = transport.begin_block(300, snapshot);
+        allocation_count = probe.allocation_count();
+    }
+    REQUIRE(error == TransportError::None);
+    REQUIRE(snapshot.range_count == 2); // the probed block really did restart
+    REQUIRE(allocation_count == 0);
 }

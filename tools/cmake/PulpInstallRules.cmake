@@ -28,7 +28,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-timebase pulp-timeline pulp-playback pulp-events
     pulp-sample-bank-manifest pulp-state
-    pulp-dawproject-import
+    pulp-interchange pulp-dawproject-import
     pulp-audio pulp-midi pulp-signal pulp-graph pulp-format pulp-sequence
     pulp-osc pulp-canvas pulp-view-core pulp-view
     pulp-standalone pulp-dsl pulp-native-components

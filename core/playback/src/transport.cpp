@@ -177,7 +177,47 @@ TransportError MasterTransport::seek(timebase::TickPosition position) noexcept {
     if (tempo_map_ == nullptr)
         return TransportError::NotPrepared;
     control_state_.position = position;
+    // An explicit reposition during a drag is the same intent as moving the
+    // anchor, so the two positions never disagree.
+    if (control_state_.scrubbing)
+        control_state_.scrub_position = position;
     ++control_state_.seek_generation;
+    publish_desired();
+    return TransportError::None;
+}
+
+TransportError MasterTransport::begin_scrub(std::uint32_t window_frames,
+                                            timebase::TickPosition position) noexcept {
+    if (tempo_map_ == nullptr)
+        return TransportError::NotPrepared;
+    if (window_frames == 0)
+        return TransportError::InvalidScrubWindow;
+    if (window_frames < max_buffer_size_)
+        return TransportError::ScrubWindowTooShortForMaximumBlock;
+    control_state_.scrubbing = true;
+    control_state_.scrub_window_frames = window_frames;
+    control_state_.scrub_position = position;
+    ++control_state_.scrub_generation;
+    publish_desired();
+    return TransportError::None;
+}
+
+TransportError MasterTransport::scrub_to(timebase::TickPosition position) noexcept {
+    if (tempo_map_ == nullptr)
+        return TransportError::NotPrepared;
+    if (!control_state_.scrubbing)
+        return TransportError::NotScrubbing;
+    control_state_.scrub_position = position;
+    publish_desired();
+    return TransportError::None;
+}
+
+TransportError MasterTransport::end_scrub() noexcept {
+    if (tempo_map_ == nullptr)
+        return TransportError::NotPrepared;
+    // scrub_position is deliberately retained: begin_block parks the playhead
+    // on it as the drag releases.
+    control_state_.scrubbing = false;
     publish_desired();
     return TransportError::None;
 }
@@ -232,6 +272,27 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         return TransportError::InvalidFrameCount;
 
     const auto desired = desired_.read();
+
+    // Leaving scrub parks the playhead on the anchor the drag released on,
+    // never mid-window. A seek published in the same control window is the
+    // later, more explicit intent, so it is applied afterwards and wins.
+    const bool scrub_entered = desired.scrubbing && !previous_scrubbing_;
+    const bool scrub_exited = !desired.scrubbing && previous_scrubbing_;
+    if (scrub_exited) {
+        timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
+        tempo_cursor_.seek(timeline_sample_);
+        timeline_tick_ = desired.scrub_position;
+        pending_discontinuity_ = true;
+        scrub_window_remaining_ = 0;
+    }
+
+    // A fresh drag abandons the window in flight; moving an existing drag does
+    // not, which is what keeps the anchor latched to window boundaries.
+    if (desired.scrub_generation != applied_scrub_generation_) {
+        applied_scrub_generation_ = desired.scrub_generation;
+        scrub_window_remaining_ = 0;
+    }
+
     const bool seeked = desired.seek_generation != applied_seek_generation_;
     if (seeked) {
         timeline_sample_ = tempo_map_->ticks_to_samples(desired.position);
@@ -239,7 +300,13 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         timeline_tick_ = desired.position;
         applied_seek_generation_ = desired.seek_generation;
         pending_discontinuity_ = true;
+        // An explicit reposition outranks the window in flight: the next scrub
+        // window starts at the seek target instead of finishing the old one.
+        scrub_window_remaining_ = 0;
     }
+
+    // Scrubbing moves the playhead whether or not the musical transport rolls.
+    const bool advancing = desired.scrubbing || desired.playing;
 
     if (desired.meter != meter_anchor_signature_) {
         if (first_block_) {
@@ -260,11 +327,17 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     snapshot.frame_count = frame_count;
     snapshot.meter = desired.meter;
     snapshot.loop = desired.loop;
-    snapshot.is_playing = desired.playing;
-    snapshot.transport_changed = !first_block_ && (desired.playing != previous_playing_ ||
-                                                   desired.loop.enabled != previous_loop_.enabled);
-    snapshot.transport_started = desired.playing && (first_block_ || !previous_playing_);
-    snapshot.reset_requested = seeked;
+    snapshot.is_playing = advancing;
+    snapshot.scrubbing = desired.scrubbing;
+    snapshot.transport_changed =
+        !first_block_ &&
+        (advancing != previous_playing_ || desired.loop.enabled != previous_loop_.enabled);
+    snapshot.transport_started = advancing && (first_block_ || !previous_playing_);
+    // Entering and leaving scrub are hard repositions. The window restarts in
+    // between are not: they recur many times a second, and a per-grain state
+    // reset would wipe consumer state that the plain discontinuity already
+    // describes correctly.
+    snapshot.reset_requested = seeked || scrub_entered || scrub_exited;
     snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
 
     auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
@@ -282,7 +355,7 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
                                          : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
-        if (desired.playing) {
+        if (advancing) {
             const timebase::SamplePosition end_sample{
                 saturating_add(timeline_sample_.value, count)};
             range.timeline_tick_end = forced_end_tick != nullptr
@@ -301,7 +374,38 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         }
     };
 
-    if (!desired.playing) {
+    // Restarting the window is structurally a loop wrap: reposition, mark a
+    // discontinuity, and split the block. Consumers that already release notes
+    // and reset readers on a wrap therefore need no scrub-specific handling.
+    auto start_scrub_window = [&]() {
+        timeline_sample_ = tempo_map_->ticks_to_samples(desired.scrub_position);
+        tempo_cursor_.seek(timeline_sample_);
+        timeline_tick_ = desired.scrub_position;
+        // Clamping to a full maximum block keeps "a block spans at most two
+        // windows" a structural property of begin_block rather than something
+        // only begin_scrub's validation guarantees.
+        scrub_window_remaining_ = std::max(desired.scrub_window_frames, max_buffer_size_);
+        pending_discontinuity_ = true;
+    };
+
+    if (desired.scrubbing) {
+        if (scrub_window_remaining_ == 0)
+            start_scrub_window();
+        const auto first_count = std::min(frame_count, scrub_window_remaining_);
+        make_range(0, 0, first_count, pending_discontinuity_);
+        snapshot.range_count = 1;
+        pending_discontinuity_ = false;
+        scrub_window_remaining_ -= first_count;
+
+        const auto remaining = frame_count - first_count;
+        if (remaining > 0) {
+            start_scrub_window();
+            make_range(1, first_count, remaining, true);
+            snapshot.range_count = 2;
+            pending_discontinuity_ = false;
+            scrub_window_remaining_ -= remaining;
+        }
+    } else if (!desired.playing) {
         make_range(0, 0, frame_count, pending_discontinuity_);
         snapshot.range_count = 1;
         pending_discontinuity_ = false;
@@ -347,7 +451,8 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
 
     snapshot.tempo_bpm = snapshot.ranges[0].tempo_bpm;
     previous_tempo_bpm_ = snapshot.ranges[snapshot.range_count - 1].tempo_bpm;
-    previous_playing_ = desired.playing;
+    previous_playing_ = advancing;
+    previous_scrubbing_ = desired.scrubbing;
     previous_meter_ = desired.meter;
     previous_loop_ = desired.loop;
     first_block_ = false;
@@ -367,7 +472,10 @@ void MasterTransport::reset() noexcept {
     meter_anchor_bar_ = {};
     meter_anchor_signature_ = {};
     applied_seek_generation_ = 0;
+    applied_scrub_generation_ = 0;
     block_index_ = 0;
+    scrub_window_remaining_ = 0;
+    previous_scrubbing_ = false;
     previous_playing_ = false;
     previous_meter_ = {};
     previous_loop_ = {};
