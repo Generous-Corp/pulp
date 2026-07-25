@@ -21,15 +21,11 @@ namespace pulp::signal::drum {
 /// one with more headroom — it sounds like a different instrument. `Fm8DrumVoice`
 /// is the more capable engine; this is the more recognisable one.
 ///
-/// **Provenance and a caveat, both load-bearing.**
-///
-/// This is a clean-room implementation of a published architecture: six
-/// operators, thirty-two fixed routings, one feedback operator per routing, a
-/// global pitch envelope. No third-party synthesis source is vendored,
-/// transcribed, or consulted, and no constant here is fitted against any
-/// commercial emulation of the instrument. The envelope shaping is Pulp's own
-/// `DecayEnvelopeT` rather than a transcribed rate/level table — the tables are
-/// where transcription risk actually lives, and nothing here needs them.
+/// The architecture is six operators, thirty-two fixed routings, one feedback
+/// operator per routing, and a global pitch envelope. Envelope shaping is
+/// `DecayEnvelopeT`, so an operator's contour is described in the same
+/// milliseconds-and-T60 terms as every other voice here rather than in
+/// device-specific rate and level units.
 ///
 /// The routing table is transcribed from published descriptions of the
 /// instrument's architecture. Three rules the documentation states about the
