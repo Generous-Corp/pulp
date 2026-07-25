@@ -243,3 +243,97 @@ TEST_CASE("timeline graph binding publishes content generations atomically") {
     REQUIRE(output.storage[0][0] == 0.5f);
     binding.set_before_binding_publish_hook_for_test(nullptr);
 }
+
+// Render continuity across a structural edit. The transport runs unbroken while
+// a track is added to the sequence, so the edit changes the routed node set
+// underneath a stream that is already sounding. PDC is active: the anchor
+// reports two samples of latency, which delays the onset but must never punch a
+// hole into the middle of the stream. A gap here would be either a dropped
+// block (process returning false) or a silent sample once the compensation
+// delay has passed.
+TEST_CASE("timeline graph binding renders gap-free across a structural edit with PDC active",
+          "[timeline][pdc][render-continuity]") {
+    constexpr std::uint32_t kFrames = 4;
+    constexpr int kBlocks = 32;
+    constexpr int kEditBlock = 16;
+    constexpr std::uint64_t kClipFrames = 512;
+    // The PDC anchor's reported latency. The first samples of the stream are
+    // the compensation delay, not a dropout, so continuity is asserted after
+    // them.
+    constexpr std::size_t kLatencySamples = 2;
+
+    const auto map = tempo_map();
+    auto assets = asset_pool(std::vector<float>(kClipFrames, 1.0f));
+    ProgramHarness programs;
+    programs.publish(audio_project(1.0f, kClipFrames), map, assets, 1);
+
+    SignalGraph graph;
+    const auto input_node = graph.add_input_node(1);
+    const auto latency_node = graph.add_plugin_node(
+        std::make_unique<ReportedLatencySilence>(), 1, 1, "PDC anchor");
+    const auto output_node = graph.add_output_node(1);
+    REQUIRE(graph.connect(input_node, 0, latency_node, 0));
+    REQUIRE(graph.connect(latency_node, 0, output_node, 0));
+    REQUIRE(graph.prepare(48'000.0, kFrames));
+
+    TimelineGraphPlaybackBinding binding(graph, programs.store);
+    const std::array one_route{TimelineTrackGraphRoute{{10}, output_node, 0, 0}};
+    const std::array two_routes{TimelineTrackGraphRoute{{10}, output_node, 0, 0},
+                                TimelineTrackGraphRoute{{11}, output_node, 0, 0}};
+    auto one = programs.store.read();
+    REQUIRE(binding.prepare(*one, one_route, config(1), 48'000.0, kFrames));
+    const auto stable_audio = binding.audio_node_for({10});
+    const auto node_types_before = graph.custom_node_type_count();
+
+    Buffer input(1, kFrames);
+    Buffer output(1, kFrames);
+    auto output_view = output.view();
+
+    std::vector<float> stream;
+    stream.reserve(static_cast<std::size_t>(kBlocks) * kFrames);
+    std::int64_t position = 0;
+
+    // The transport never stops: both halves of the stream advance the same
+    // running sample position, so the edit lands inside continuous playback.
+    const auto render = [&](const PlaybackProgram& program, int blocks) {
+        for (int block = 0; block < blocks; ++block) {
+            INFO("sample position " << position);
+            REQUIRE(binding.process(output_view, input.const_view(),
+                                    snapshot(program, kFrames, position)));
+            const auto& channel = output.storage[0];
+            stream.insert(stream.end(), channel.begin(), channel.end());
+            position += kFrames;
+        }
+    };
+
+    render(*one, kEditBlock);
+
+    // The structural edit lands mid-stream: a second track joins the sequence,
+    // which grows the routed node set while audio is running.
+    programs.publish(parallel_audio_project(kClipFrames), map, assets, 2);
+    auto two = programs.store.read();
+    REQUIRE(binding.prepare(*two, two_routes, config(1), 48'000.0, kFrames));
+    REQUIRE(binding.audio_node_for({11}) != 0);
+    REQUIRE(graph.custom_node_type_count() > node_types_before);
+    // The pre-existing track keeps its node identity, so the edit is a
+    // transactional grow rather than a teardown and rebuild.
+    REQUIRE(binding.audio_node_for({10}) == stable_audio);
+
+    render(*two, kBlocks - kEditBlock);
+
+    REQUIRE(stream.size() == static_cast<std::size_t>(kBlocks) * kFrames);
+
+    // Continuity: past the compensation delay every sample is sounding. A
+    // dropped or zero-filled block during the edit shows up here as a zero.
+    for (std::size_t index = kLatencySamples; index < stream.size(); ++index) {
+        INFO("sample " << index);
+        REQUIRE(stream[index] > 0.0f);
+    }
+
+    // The edit must actually have taken effect, otherwise the continuity
+    // assertion above would pass vacuously against the pre-edit program. Track
+    // 10 alone renders 1.0; both tracks sum to 1.5.
+    const auto edit_sample = static_cast<std::size_t>(kEditBlock) * kFrames;
+    REQUIRE(stream[edit_sample - 1] == 1.0f);
+    REQUIRE(stream.back() == 1.5f);
+}

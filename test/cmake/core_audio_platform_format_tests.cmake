@@ -64,14 +64,20 @@ catch_discover_tests(pulp-test-mcp-server)
 
 # Timeline MCP operations have their own bounded suite so media/render fixtures
 # do not keep expanding the legacy protocol test translation unit.
+# Links pulp-mcp-core rather than compiling mcp_timeline_tools.cpp directly:
+# the agent loop hands its rendered variants to pulp_audio_compare, whose
+# handler lives in the same library, and compiling one of its translation units
+# a second time here would duplicate those symbols.
 add_executable(pulp-test-mcp-timeline-tools test_mcp_timeline_tools.cpp)
-target_sources(pulp-test-mcp-timeline-tools PRIVATE
-    "${CMAKE_SOURCE_DIR}/tools/mcp/mcp_timeline_tools.cpp")
 target_link_libraries(pulp-test-mcp-timeline-tools PRIVATE
+    pulp-mcp-core
     pulp::audio
     pulp::timeline
     pulp::tool-timeline
     Catch2::Catch2WithMain)
+# pulp_audio_compare resolves its delegated CLI from a project root.
+target_compile_definitions(pulp-test-mcp-timeline-tools PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 catch_discover_tests(pulp-test-mcp-timeline-tools)
 
 # MIDI tests

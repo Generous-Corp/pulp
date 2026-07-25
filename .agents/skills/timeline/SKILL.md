@@ -501,6 +501,35 @@ evidence, or sampler rendering part of the timeline document schema; keep those
 contracts in `pulp::audio` unless a future version explicitly adds a document
 reference type.
 
+### Writing a render-continuity assertion
+
+A "gap-free during playback" test must distinguish two things that both look
+like silence at the head of the stream:
+
+- **PDC compensation delay is not a dropout.** A latency-reporting node in the
+  graph legitimately zeroes the first `latency_samples()` samples. Start the
+  continuity scan *after* that window, and say so in the test, or the assertion
+  reports a gap on every healthy run.
+- **A continuity scan alone can pass vacuously.** If the edit under test never
+  actually took effect, an unbroken stream proves nothing. Assert the rendered
+  level changes across the edit as well, so the test fails both when the stream
+  gaps and when the edit was silently dropped.
+
+`PlaybackProgramStore::read()` returns a non-copyable, non-assignable
+`ReadGuard`. A render loop cannot reassign one guard as it swaps programs —
+hold a separate guard per program and drive the blocks through a helper, which
+also keeps the transport position continuous across the swap.
+
+### `pulp_audio_compare` is advisory and opt-in
+
+`handle_audio_compare` delegates to the Audio Quality Lab, a managed Python
+tool that is deliberately **not** installed by default and is resolved relative
+to a Pulp project root. A test must not assume a measured judgment comes back:
+when the lab is absent the handler still returns a well-formed typed envelope
+carrying its install hint. Assert the typed envelope and the absence of an
+argument refusal — that is what proves the loop reached the compare stage — and
+leave the measurement to the tool's own suite.
+
 ## Foreign-format import (interop)
 
 Read [references/dawproject-import.md](references/dawproject-import.md) before

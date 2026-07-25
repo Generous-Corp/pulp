@@ -196,4 +196,81 @@ TEST_CASE("timeline MCP confines package-relative media to the project base",
     require_contains(traversal_response, R"JSON("stage":"render")JSON");
 }
 
+// The agent loop end to end: apply a command to make a second journal variant,
+// render both variants headless, and hand the two renders to
+// pulp_audio_compare for an advisory verdict.
+//
+// The measurement itself belongs to the opt-in Audio Quality Lab, so what is
+// asserted here is that the loop CLOSES over the agent's own renders and comes
+// back typed — not that a particular judgment was returned. When the lab is not
+// installed the typed response carries its actionable install hint, which is
+// the documented opt-in path rather than a failure of the loop. The one thing
+// that would mean the loop did not close is an argument refusal, so that is
+// asserted against explicitly.
+TEST_CASE("timeline agent renders two journal variants and receives a typed compare verdict",
+          "[mcp][tools][timeline][audio]") {
+    TempDir temp;
+    pulp::audio::AudioFileData source;
+    source.sample_rate = 48'000;
+    source.channels = {std::vector<float>(32, 0.8f)};
+    const auto source_path = temp.path / "source.wav";
+    REQUIRE(pulp::audio::write_wav_file(source_path.string(), source,
+                                        pulp::audio::WavBitDepth::Float32));
+
+    const auto project = make_timeline_project_json(source_path);
+    const auto project_argument = pulp::timeline::quote_json_string(project);
+
+    // Variant B is a journal variant of A: the same document plus one typed
+    // command, which is what an agent exploring an edit actually produces.
+    const std::string command =
+        R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";
+    const auto applied = handle_timeline_command_apply("{\"commands\":" + command +
+                                                       ",\"project\":" + project_argument + "}");
+    require_contains(applied, R"JSON("revision":"1")JSON");
+    const auto variant_project = timeline_project_from_response(applied);
+
+    const auto reference_path = temp.path / "variant-a.wav";
+    const auto candidate_path = temp.path / "variant-b.wav";
+    const auto render_arguments = [](const std::string& project_json,
+                                     const std::filesystem::path& output) {
+        return "{\"output\":" +
+               pulp::timeline::quote_json_string(
+                   pulp::tools::timeline::filesystem_path_to_utf8(output)) +
+               ",\"project\":" + pulp::timeline::quote_json_string(project_json) +
+               ",\"sample_rate\":48000}";
+    };
+    require_contains(handle_timeline_render(render_arguments(project, reference_path)),
+                     R"JSON("frames":"32")JSON");
+    require_contains(handle_timeline_render(render_arguments(variant_project, candidate_path)),
+                     R"JSON("frames":"32")JSON");
+
+    // The two renders must actually differ, otherwise the comparison below
+    // would be asked to judge a document against itself.
+    const auto reference_audio = pulp::audio::read_audio_file(reference_path.string());
+    const auto candidate_audio = pulp::audio::read_audio_file(candidate_path.string());
+    REQUIRE(reference_audio);
+    REQUIRE(candidate_audio);
+    REQUIRE_THAT(reference_audio->channels[0][0], WithinAbs(0.8f, 1e-7f));
+    REQUIRE_THAT(candidate_audio->channels[0][0], WithinAbs(0.4f, 1e-7f));
+
+    // pulp_audio_compare resolves its delegated CLI relative to a project root.
+    ScopedCurrentPath cwd(std::filesystem::path(PULP_SOURCE_DIR));
+    const auto verdict = handle_audio_compare(
+        "{\"candidate\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(candidate_path)) +
+        ",\"reference\":" +
+        pulp::timeline::quote_json_string(
+            pulp::tools::timeline::filesystem_path_to_utf8(reference_path)) +
+        "}");
+
+    require_contains(verdict, R"JSON("content")JSON");
+    require_contains(verdict, R"JSON("type":"text")JSON");
+    // Reaching the compare stage is the loop closing. These refusals would mean
+    // it never got there with the agent's renders.
+    REQUIRE(verdict.find("reference and candidate are required") == std::string::npos);
+    REQUIRE(verdict.find("must be WAV paths, not options") == std::string::npos);
+    REQUIRE(verdict.find("not in a Pulp project") == std::string::npos);
+}
+
 } // namespace
