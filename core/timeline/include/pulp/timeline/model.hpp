@@ -249,6 +249,43 @@ class OpaqueContent {
 using ClipContent =
     std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent>;
 
+/// Overload set for visiting a ClipContent with **no generic fallback**.
+///
+/// What a clip *is* decides whether it renders audio, contributes notes, owns
+/// ItemIds that must be remapped, or survives a save. Every one of those
+/// decisions is a per-alternative dispatch, and none of them has a defensible
+/// default: a content kind nobody wrote a branch for is not "nothing", it is a
+/// clip whose data was dropped. Consumers that dispatch through a generic
+/// lambda (`[](const auto&)`, or an `if`/`if constexpr` chain that falls
+/// through) keep compiling when the variant grows and then quietly treat the
+/// new alternative as absent — a clip that renders silence, an export manifest
+/// that reports no loss while losing data, a remap that leaves stale ItemIds
+/// behind. Visiting through this type makes a new alternative a compile error
+/// at every call site until someone decides what it means.
+///
+///     std::visit(ClipContentCases{
+///                    [&](const EmptyContent&) { ... },
+///                    [&](const MediaRef& media) { ... },
+///                    [&](const NoteContent& notes) { ... },
+///                    [&](const RegisteredContent& registered) { ... },
+///                    [&](const OpaqueContent& opaque) { ... },
+///                },
+///                clip.content());
+template <class... Fs> struct ClipContentCases : Fs... {
+    using Fs::operator()...;
+};
+template <class... Fs> ClipContentCases(Fs...) -> ClipContentCases<Fs...>;
+
+/// Guard for code that can only be correct while ClipContent holds exactly the
+/// alternatives it does today — a decoder keyed on envelope type names, a
+/// referential-integrity scan that assumes MediaRef is the only alternative
+/// naming an asset, an audio path that assumes MediaRef is the only alternative
+/// carrying samples. Those sites cannot be expressed as a visit, so they assert
+/// on the alternative count instead: widening the variant stops the build with a
+/// message naming the decision that site owes, rather than shipping a document
+/// that silently loses the new content on load, save, or render.
+inline constexpr std::size_t kClipContentAlternativeCount = std::variant_size_v<ClipContent>;
+
 class Clip {
   public:
     static runtime::Result<Clip, ModelError> create(ItemId id, timebase::TickPosition start,

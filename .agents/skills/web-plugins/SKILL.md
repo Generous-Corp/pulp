@@ -327,6 +327,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   as a pure refactor, because the origin unit stays listed everywhere — but the
   extracted file is new to every list its module maintains.
 
+- `core/timeline` and `core/playback` are in the wasm closure, so their
+  compile-time model guards fire in the browser lanes too. `ClipContent` carries
+  an overload set with no generic fallback plus `static_assert`s on its
+  alternative count, precisely so a new clip content kind cannot slip through as
+  silence. Widening it therefore reds the WAM and WebCLAP builds at the same
+  points as the native ones, which is the intent — but it also means the guards
+  must be satisfied *before* the widening lands, not in a follow-up, or every
+  lane goes red at once with no partial-progress path.
+
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP
   through the `clap.state` extension — and both produce the *same* `PLST` blob the
