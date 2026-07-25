@@ -124,22 +124,26 @@ public:
         set_fall_ms(fall);
     }
 
-    void reset(SampleType value = SampleType{0}) { value_ = value; }
+    void reset(SampleType value = SampleType{0}) { value_ = static_cast<double>(value); }
 
     SampleType process(SampleType target) {
-        const SampleType delta = target - value_;
-        if (delta == SampleType{0}) return value_;
+        // The accumulator is double regardless of SampleType: a long linear
+        // ramp at a high sample rate steps by less than half an ulp of a
+        // float value near 1, and a float accumulator would absorb the step
+        // and stall short of the target forever.
+        const double delta = static_cast<double>(target) - value_;
+        if (delta == 0.0) return static_cast<SampleType>(value_);
         if (mode_ == Mode::linear) {
-            const SampleType step = delta > SampleType{0} ? rise_step_ : fall_step_;
+            const double step = static_cast<double>(delta > 0.0 ? rise_step_ : fall_step_);
             value_ += std::clamp(delta, -step, step);
         } else {
-            const SampleType coeff = delta > SampleType{0} ? rise_coeff_ : fall_coeff_;
+            const double coeff = static_cast<double>(delta > 0.0 ? rise_coeff_ : fall_coeff_);
             value_ += coeff * delta;
         }
-        return value_;
+        return static_cast<SampleType>(value_);
     }
 
-    SampleType current() const { return value_; }
+    SampleType current() const { return static_cast<SampleType>(value_); }
     Mode mode() const { return mode_; }
 
 private:
@@ -169,7 +173,7 @@ private:
     SampleType fall_step_ = SampleType{1} / SampleType{480};
     SampleType rise_coeff_ = SampleType{1};
     SampleType fall_coeff_ = SampleType{1};
-    SampleType value_ = SampleType{0};
+    double value_ = 0.0;
     Mode mode_ = Mode::linear;
 };
 

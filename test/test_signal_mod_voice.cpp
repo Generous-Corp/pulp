@@ -241,6 +241,32 @@ TEST_CASE("Lpg colour 1 is a pure filter at unity gain", "[signal][mod][lpg]") {
     REQUIRE_THAT(units::linear_to_db(rms(open) / rms(input)), WithinAbs(0.0f, 0.2f));
 }
 
+TEST_CASE("Lpg peak output never exceeds the input peak near Nyquist",
+          "[signal][mod][lpg]") {
+    // A trapezoidal one-pole commanded above sample_rate / 4 has a
+    // greater-than-one step response: full-scale near-Nyquist alternation
+    // pumps the integrator state past the input bound, and the next
+    // low-frequency sample reads that state straight out. The cell caps its
+    // commanded cutoff at sample_rate / 4 so the no-boost contract holds at
+    // every sample rate and brightness setting.
+    Lpg lpg;
+    lpg.prepare(44100.0f);
+    lpg.set_colour(1.0f); // unity gain stage: any boost is the filter's
+    lpg.set_range_hz(40.0f, 18000.0f);
+    lpg.set_gate(1.0f);
+    for (int i = 0; i < 48000; ++i) (void)lpg.process(0.0f); // cell fully open
+
+    float peak = 0.0f;
+    float x = 1.0f;
+    for (int i = 0; i < 512; ++i) { // full-scale alternation at Nyquist
+        peak = std::max(peak, std::abs(lpg.process(x)));
+        x = -x;
+    }
+    for (int i = 0; i < 64; ++i) // a step to DC exposes the pumped state
+        peak = std::max(peak, std::abs(lpg.process(1.0f)));
+    REQUIRE(peak <= 1.0f + 1.0e-4f);
+}
+
 TEST_CASE("Lpg couples loudness and brightness", "[signal][mod][lpg]") {
     // The defining property: a quieter moment is also a darker one. Compare the
     // high-frequency content of a loud strike against a soft one.

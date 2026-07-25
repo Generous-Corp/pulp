@@ -146,10 +146,13 @@ constexpr std::uint64_t rng_key(std::uint64_t purpose, std::uint64_t index) {
     return mix64(purpose * kGoldenGamma + index + kGoldenGamma);
 }
 
-/// Ornstein-Uhlenbeck walk (Uhlenbeck & Ornstein, Phys. Rev. 36, 1930),
-/// integrated Euler-Maruyama:
+/// Ornstein-Uhlenbeck walk (Uhlenbeck & Ornstein, Phys. Rev. 36, 1930):
 ///
-///     y += theta * (mu - y) * dt + sigma * sqrt(dt) * g
+///     y += (1 - e^(-theta * dt)) * (mu - y) + sigma * sqrt(dt) * g
+///
+/// The drift term uses the exact per-step decay factor rather than the naive
+/// Euler-Maruyama `theta * dt`, which matches it for small products but goes
+/// unstable once `theta * dt` exceeds 1 — see the note in `next()`.
 ///
 /// A random walk with a restoring force. Unlike filtered white noise it has a
 /// defined mean it returns to, and unlike an LFO it never repeats. The
@@ -179,9 +182,13 @@ public:
         rate_ = update_rate_hz > 0.0 ? update_rate_hz : 1.0;
         dt_ = 1.0 / rate_;
         sqrt_dt_ = std::sqrt(dt_);
+        update_drift_coeff_();
     }
 
-    void set_theta(double theta_per_second) { theta_ = std::max(0.0, theta_per_second); }
+    void set_theta(double theta_per_second) {
+        theta_ = std::max(0.0, theta_per_second);
+        update_drift_coeff_();
+    }
     void set_sigma(double sigma) { sigma_ = std::max(0.0, sigma); }
     void set_mu(double mu) { mu_ = mu; }
     void seed(std::uint32_t s) { rng_.seed(s); }
@@ -195,7 +202,14 @@ public:
     void reset_value() { value_ = mu_; }
 
     SampleType next() {
-        const double drift = theta_ * (mu_ - value_) * dt_;
+        // The drift uses the exact per-step decay factor `1 - e^(-theta*dt)`
+        // rather than the naive Euler `theta * dt`. The two agree when
+        // `theta * dt` is small, but Euler overshoots the mean once the
+        // product passes 1 and turns the walk into a clamp-to-clamp
+        // oscillator past 2 — reachable with a hard pull at a low update
+        // rate. The exact factor is a fraction in (0, 1] for every theta, so
+        // the pull is unconditionally stable.
+        const double drift = drift_coeff_ * (mu_ - value_);
         const double diffusion = sigma_ * sqrt_dt_ * static_cast<double>(rng_.gaussian());
         value_ = std::clamp(value_ + drift + diffusion,
                             -static_cast<double>(kClamp),
@@ -212,6 +226,8 @@ public:
     }
 
 private:
+    void update_drift_coeff_() { drift_coeff_ = -std::expm1(-theta_ * dt_); }
+
     Xorshift32 rng_{};
     double value_ = 0.0;
     double mu_ = 0.0;
@@ -220,6 +236,8 @@ private:
     double rate_ = 48000.0;
     double dt_ = 1.0 / 48000.0;
     double sqrt_dt_ = 1.0 / 219.089023002066;
+    // Matches the default theta and dt; `prepare()` recomputes it exactly.
+    double drift_coeff_ = 1.0 / 48000.0;
 };
 
 using OuWalk = OuWalkT<float>;

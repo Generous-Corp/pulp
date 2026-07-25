@@ -236,7 +236,7 @@ public:
 
     Stage stage() const { return stage_; }
     bool finished() const { return stage_ == Stage::done; }
-    int cycles_completed() const { return cycles_; }
+    long long cycles_completed() const { return cycles_; }
     double phase() const { return phase_; }
 
     // ── output ───────────────────────────────────────────────────────────────
@@ -420,7 +420,7 @@ private:
         if (phase_ >= 1.0) {
             const double whole = std::floor(phase_);
             phase_ -= whole;
-            cycles_ += static_cast<int>(whole);
+            cycles_ += static_cast<long long>(whole);
             on_cycles_completed_();
         }
     }
@@ -531,7 +531,9 @@ private:
     std::uint32_t seed_ = 0x12345678u;
     int segments_ = 1;
     int repeat_count_ = 0;
-    int cycles_ = 0;
+    // 64-bit: a free-running LFO at the rate ceiling wraps ~86400 cycles per
+    // second at 192 kHz, which overflows a 32-bit counter within hours.
+    long long cycles_ = 0;
 
     Wave wave_ = Wave::sine;
     Mode mode_ = Mode::free;

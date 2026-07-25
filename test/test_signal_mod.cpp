@@ -253,6 +253,24 @@ TEST_CASE("Drift fraction honours the unit contract at extreme sigma",
     REQUIRE(peak <= 1.0f);
 }
 
+TEST_CASE("OuWalk stays stable when theta exceeds the update rate",
+          "[signal][mod][rng]") {
+    // Naive Euler drift (theta * dt) overshoots the mean once theta * dt
+    // passes 1 and oscillates clamp-to-clamp past 2. The walk applies the
+    // exact per-step decay factor, so any theta is a hard pull toward the
+    // mean, never an oscillator — including at control rates as low as
+    // DriftT's at an 8 kHz session.
+    OuWalk walk;
+    walk.prepare(250.0);
+    walk.set_theta(600.0); // theta * dt = 2.4
+    walk.set_sigma(0.001);
+    walk.seed(1u);
+    walk.reset();
+    float peak = 0.0f;
+    for (int i = 0; i < 200; ++i) peak = std::max(peak, std::abs(walk.next()));
+    REQUIRE(peak < 0.05f);
+}
+
 // ── lfo: rate ────────────────────────────────────────────────────────────────
 
 TEST_CASE("Lfo frequency is accurate to 0.01 percent", "[signal][mod][lfo]") {
@@ -309,6 +327,15 @@ TEST_CASE("Lfo stays bounded and finite at audio rate", "[signal][mod][lfo]") {
         REQUIRE(std::isfinite(value));
         REQUIRE(std::abs(value) <= 1.0f);
     }
+}
+
+TEST_CASE("Lfo cycle counter is wide enough for a day-long free run",
+          "[signal][mod][lfo]") {
+    // At the 0.45 * sample_rate rate ceiling a free-running LFO completes
+    // ~86400 cycles per second at 192 kHz; a 32-bit counter overflows —
+    // undefined behavior — in under seven hours of playback.
+    Lfo lfo;
+    REQUIRE(sizeof(decltype(lfo.cycles_completed())) >= 8);
 }
 
 // ── lfo: shape ───────────────────────────────────────────────────────────────
@@ -697,6 +724,22 @@ TEST_CASE("SlewLimiter exponential mode reaches one time constant",
 
     for (int i = 0; i < 480; ++i) (void)slew.process(1.0f);
     REQUIRE_THAT(slew.current(), WithinAbs(0.632f, 0.005f));
+}
+
+TEST_CASE("SlewLimiter keeps moving when the step is below float precision",
+          "[signal][mod][tools]") {
+    // A two-minute linear slew at 384 kHz steps ~2.2e-8 per sample — less
+    // than half an ulp of 0.5f, which a float accumulator absorbs, stalling
+    // the value forever. The limiter accumulates in double, so the ramp
+    // keeps its documented travel time at any rate and length.
+    SlewLimiter slew;
+    slew.prepare(384000.0f);
+    slew.set_mode(SlewLimiter::Mode::linear);
+    slew.set_times_ms(120000.0f, 120000.0f);
+    slew.reset(0.5f);
+    for (int i = 0; i < 1000000; ++i) (void)slew.process(1.0f);
+    // One million samples of a 46.08-million-sample full-span ramp.
+    REQUIRE_THAT(slew.current(), WithinAbs(0.5f + 1.0e6f / 46.08e6f, 2.0e-4f));
 }
 
 TEST_CASE("SampleHold latches on the clock's rising edge", "[signal][mod][tools]") {

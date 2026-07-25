@@ -424,6 +424,30 @@ TEST_CASE("mod_lpg never boosts", "[forge][catalog][mod]") {
     }
 }
 
+TEST_CASE("mod_lpg never boosts at full brightness near Nyquist",
+          "[forge][catalog][mod]") {
+    // Adversarial version of the noise probe above: an open cell at the
+    // brightness ceiling, full-scale Nyquist-rate alternation to pump the
+    // filter's integrator state, then a DC step to read that state out. The
+    // cell caps its commanded cutoff at sample_rate / 4, which is what keeps
+    // the declared unity worst-case gain true.
+    BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
+    inject(fixture, mod_cat::kModLpgColour, 1.0f);
+    inject(fixture, mod_cat::kModLpgBrightnessHz, 18000.0f);
+
+    std::vector<float> alternating(static_cast<std::size_t>(kFrames));
+    for (int i = 0; i < kFrames; ++i)
+        alternating[static_cast<std::size_t>(i)] = (i % 2 == 0) ? 1.0f : -1.0f;
+
+    (void)render(*fixture.result.processor, {silence(), constant(1.0f)}, 40); // open the cell
+    const auto pumped =
+        render(*fixture.result.processor, {alternating, constant(1.0f)}, 8);
+    const auto exposed =
+        render(*fixture.result.processor, {constant(1.0f), constant(1.0f)}, 2);
+    REQUIRE(peak(pumped) <= 1.0f + 1e-4f);
+    REQUIRE(peak(exposed) <= 1.0f + 1e-4f);
+}
+
 // ── mod_slew ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("mod_slew linear rise takes exactly the injected time",

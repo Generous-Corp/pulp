@@ -135,6 +135,8 @@ public:
     /// stays at unity), between = both.
     void set_colour(float c) { colour_ = std::clamp(c, 0.0f, 1.0f); }
 
+    /// The effective ceiling is additionally capped at `sample_rate / 4` in
+    /// `process()` — see the note there.
     void set_range_hz(float min_hz, float max_hz) {
         fc_min_ = std::clamp(min_hz, 10.0f, 20000.0f);
         fc_max_ = std::clamp(max_hz, fc_min_ * 1.01f, 20000.0f);
@@ -172,7 +174,16 @@ public:
         const SampleType amplitude = control_ * std::sqrt(control_); // control^1.5
         const float filter_control =
             1.0f - colour_ * (1.0f - static_cast<float>(control_));
-        filter_.set_cutoff(static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control)));
+        // The commanded cutoff is capped at sample_rate / 4. Above that the
+        // trapezoidal one-pole's step response exceeds one: near-Nyquist
+        // content pumps the integrator state past the input bound, and the
+        // next low-frequency sample reads it back out as a peak above the
+        // input's — up to ~1.5x at 18 kHz / 44.1 kHz. At or below the cap
+        // every state update is a convex combination, so peak out <= peak in
+        // holds unconditionally, which is the no-boost contract the LPG's
+        // consumers (and its own "can only attenuate" gain law) rely on.
+        const auto cutoff = static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control));
+        filter_.set_cutoff(std::min(cutoff, SampleType{0.25} * sample_rate_));
 
         const SampleType filtered = filter_.process_lowpass(input);
         const SampleType gain =

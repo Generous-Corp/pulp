@@ -209,7 +209,11 @@ inline CustomNodeType make_mod_lfo_node() {
 // brightening.
 //
 // Worst-case gain is unity: the amplitude law is control^1.5 with control in
-// [0, 1] and the filter is a one-pole lowpass, so the node can only attenuate.
+// [0, 1], and the cell caps its commanded cutoff at sample_rate / 4, below
+// which the one-pole's peak output provably cannot exceed its peak input. (An
+// uncapped trapezoidal one-pole is NOT attenuate-only — commanded above
+// sample_rate / 4 its step response overshoots, so `brightness` settings past
+// the cap saturate there at low sample rates.)
 struct ModLpgInstance {
     signal::Lpg lpg;
     signal::TriggerDetect edge;
