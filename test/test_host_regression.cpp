@@ -422,29 +422,45 @@ TEST_CASE("PluginScanner VST3 bundle with malformed moduleinfo.json falls back t
           "[host][scanner][regression][issue-52]") {
     ScratchDir scratch("vst3-bad-moduleinfo");
 
-    // Invalid JSON — choc::json::parse throws, scanner must catch and
-    // fall back silently (no crash on a user's plugin folder).
-    auto bundle = make_vst3_bundle(scratch.path, "BadJson",
-                                   "{ this is not json");
+    // choc::json::parse throws on both shapes, and the scanner must contain
+    // the exception and fall back to the bundle stem rather than crash on a
+    // user's plugin folder. Free text is the obvious case; the trailing comma
+    // is the one actually seen in installed third-party bundles, where the
+    // manifest is well-formed right up to the point it throws.
+    struct MalformedCase {
+        const char* stem;
+        const char* moduleinfo;
+    };
+    const MalformedCase cases[]{
+        {"BadJson", "{ this is not json"},
+        {"TrailingComma",
+         R"({"Classes":[{"Category":"Audio Module Class","CID":"0123456789abcdef0123456789abcdef"},]})"},
+    };
 
     ScanOptions opts;
     opts.scan_clap = false;
     opts.scan_au = false;
     opts.scan_lv2 = false;
     opts.scan_vst3 = true;
+    opts.only_extra_paths = true;
     opts.extra_paths.push_back(scratch.path.string());
 
-    PluginScanner scanner;
-    auto plugins = scanner.scan(opts);
+    for (const auto& item : cases) {
+        INFO("moduleinfo case: " << item.stem);
+        auto bundle = make_vst3_bundle(scratch.path, item.stem, item.moduleinfo);
 
-    bool found = false;
-    for (const auto& p : plugins) {
-        if (p.path != bundle.string()) continue;
-        found = true;
-        REQUIRE(p.unique_id == p.name);
-        REQUIRE(p.name == "BadJson");
+        PluginScanner scanner;
+        auto plugins = scanner.scan(opts);
+
+        bool found = false;
+        for (const auto& p : plugins) {
+            if (p.path != bundle.string()) continue;
+            found = true;
+            REQUIRE(p.unique_id == p.name);
+            REQUIRE(p.name == item.stem);
+        }
+        REQUIRE(found);
     }
-    REQUIRE(found);
 }
 
 // ── Scanner regression: blacklist short-circuits re-scan ──────────────────

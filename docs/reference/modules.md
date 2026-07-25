@@ -569,6 +569,25 @@ a working convolution and would hide the bug. Assert
 | Bridged-T Resonator | `bridged_t_resonator.hpp` | Trapezoidally integrated two-state model of the published TR-808 bridged-T network, exposing physical component values and circuit nodes; it is a resonator primitive, not a complete drum voice |
 | Square Oscillator Bank | `square_osc_bank.hpp` | Allocation-free-after-prepare bank of independently tunable, weighted, band-limited square oscillators for inharmonic metallic excitation and other clustered sources |
 
+#### Modulation and utility toolkit
+
+The library layer complex DSP composes from instead of re-implementing inline —
+sources, wires, events, envelopes, and the routing between them. Full guide with
+worked patches: the [modulation toolkit](modulation-toolkit.md).
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Deterministic randomness | `rng.hpp` | Xorshift32 with a Box-Muller Gaussian, a stateless purpose-keyed hash, and the Ornstein-Uhlenbeck walk (`OuWalkT`, `DriftT`) behind every analog-drift effect |
+| LFO | `lfo.hpp` | Seven waveforms plus a continuous shape morph, pulse width, triangle bias, a random blend, stereo and quadrature output, and a delay/fade-in/repeat/fade-out lifecycle |
+| Control-signal tools | `mod_tools.hpp` | `SlewLimiterT`, `SampleHoldT`, `AttenuverterT`, `RectifierT`, `ComparatorT`, `QuantizerT`, `CurveT`, and the shared stage-curve law |
+| Trigger and gate kit | `trigger.hpp` | `TriggerDetectT`, `GateGenT`, `ClockDividerT`, `ClockMultT`, `BurstGenT`, `TrigDelayT` — the event domain the modular world calls triggers and gates |
+| Envelope family | `envelope.hpp` | `ArT`, `AdT`, `AhdT`, `DahdsrT`, `ModEnvT` with per-stage curves and looping, plus the level-independent `TransientDetectorT` |
+| VCA | `vca.hpp` | Control-driven gain with linear or ~40 dB exponential response and a built-in de-clicking control lag; exactly unity at full |
+| Low-pass gate | `lpg.hpp` | Vactrol-modelled Buchla gate — loudness and brightness move together, and a re-strike mid-decay accumulates the way a real roll does |
+| Mod matrix | `mod_matrix.hpp` | Fixed-capacity source-to-destination routing with depth and a `via` slot; trivially copyable, so it hot-swaps through a `TripleBuffer` |
+| Unit conversions | `units.hpp` | dB, MIDI pitch, cents, one-pole and T60 coefficients, tapers, and the one shared musical-division table (straight, dotted, triplet) |
+| Chaos | `chaos.hpp` | `LogisticMapT` — one control-rate source that runs from periodic to chaotic on a single knob |
+
 `ModalBank::prepare()` allocates its fixed-capacity storage and therefore runs
 off the audio thread. After preparation, `process_add()`, `reset()`, and pickup
 updates are allocation-free; `set_modes()` is allocation-free but evaluates
