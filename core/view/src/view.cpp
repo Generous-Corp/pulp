@@ -1320,6 +1320,23 @@ void View::request_repaint() {
     }
 }
 
+void View::request_repaint_self(float halo) {
+    // Bounded invalidation for a widget's own repaint. The rect-less
+    // request_repaint() marks the WHOLE surface dirty by design, which is right
+    // for a structural change and wrong for a value tick: a knob drag would
+    // re-composite a plug-in's entire static chrome on every mouse move, and a
+    // partial-repaint host could never engage because the damage is never
+    // bounded.
+    //
+    // The halo is a correctness requirement, not padding. A bounded repaint is
+    // only legal if it is pixel-identical to a full one, so the rect must cover
+    // every pixel the widget can touch — glow, focus ring, modulation arc.
+    // Mirrors the meter peak-overscan idiom in widgets/visualizers.cpp.
+    const auto b = local_bounds();
+    request_repaint(Rect{b.x - halo, b.y - halo,
+                         b.width + 2 * halo, b.height + 2 * halo});
+}
+
 void View::request_repaint(const Rect& local_dirty) {
     // Stale the subtree scene cache up the ancestor chain (see request_repaint()
     // above). Done here too because the bounded-success path below calls
