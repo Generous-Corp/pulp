@@ -76,11 +76,14 @@ static_assert(
 // decide whether this format may admit it. Concepts the table does not list read
 // as ImportLevel::None, so a construct the reader cannot classify --
 // Concept::Unknown -- refuses without anyone writing a rule for it.
+// The message is a view so admitting a construct costs only the table lookup:
+// the sites below run per clip and per note, and the overwhelmingly common
+// answer is "supported", where no message is ever needed.
 std::optional<DawProjectImportError> admit(interchange::Concept concept_value,
-                                           std::string refusal) {
+                                           std::string_view refusal) {
     if (interchange::import_supports(kFormat, concept_value))
         return std::nullopt;
-    return err(DawProjectImportErrorCode::UnsupportedFeature, std::move(refusal));
+    return err(DawProjectImportErrorCode::UnsupportedFeature, std::string(refusal));
 }
 
 std::optional<std::int64_t> beats_to_ticks(double beats) noexcept {
