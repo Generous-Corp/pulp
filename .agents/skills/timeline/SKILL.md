@@ -533,6 +533,28 @@ like silence at the head of the stream:
 hold a separate guard per program and drive the blocks through a helper, which
 also keeps the transport position continuous across the swap.
 
+### Widening `AutomationTarget` is guarded, and the guard is load-bearing
+
+`AutomationTarget` is a `std::variant`, and `core/timeline` compiles
+`-fno-exceptions`. That combination makes `std::get<Alternative>` on a
+mismatched target call `std::terminate` rather than throw — so a consumer that
+reads the target with `std::get` is a latent process abort the moment the
+variant grows. Three encoder/transaction/document sites do exactly that, and
+they carry a `static_assert` on `kAutomationTargetAlternativeCount` for it.
+
+The opposite mistake is quieter and worse. A consumer that visits with a generic
+lambda (`[](const auto&)`, or an `if constexpr` chain with no `else`) keeps
+compiling and silently ignores the new alternative. A target that exists in the
+document but is missing from a census or an export loss manifest reads as
+"nothing was there" — a manifest claiming no loss while dropping data is worse
+than a refusal.
+
+So visit through `AutomationTargetCases`, the overload set with no generic
+fallback. Adding an alternative then fails the build at every call site until
+someone decides what it means. When you do widen the variant, expect the
+`static_assert`s to fire: that is the design, and each message names the
+decision that site owes.
+
 ### `pulp_audio_compare` is advisory and opt-in
 
 `handle_audio_compare` delegates to the Audio Quality Lab, a managed Python

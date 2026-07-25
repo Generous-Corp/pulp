@@ -51,13 +51,12 @@ void record_track(ConceptCensus& out, const timeline::Track& track, const Census
         out.record(Concept::DevicePlacement, device.id, limits);
 
     for (const timeline::AutomationLane& lane : track.automation_lanes()) {
-        std::visit(
-            [&](const auto& target) {
-                using Target = std::decay_t<decltype(target)>;
-                if constexpr (std::is_same_v<Target, timeline::DeviceParameterTarget>)
-                    out.record(Concept::AutomationDeviceParam, lane.id(), limits);
-            },
-            lane.target());
+        std::visit(timeline::AutomationTargetCases{
+                       [&](const timeline::DeviceParameterTarget&) {
+                           out.record(Concept::AutomationDeviceParam, lane.id(), limits);
+                       },
+                   },
+                   lane.target());
     }
 
     for (const timeline::TakeLane& lane : track.take_lanes()) {

@@ -4,6 +4,7 @@
 #include <pulp/timeline/automation_curve.hpp>
 #include <pulp/timeline/item_id.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include <variant>
@@ -29,6 +30,34 @@ struct DeviceParameterTarget {
 /// Exhaustive authored-target set. Later target categories extend this variant
 /// without changing AutomationLane's factory signature or observer API.
 using AutomationTarget = std::variant<DeviceParameterTarget>;
+
+/// Overload set for visiting an AutomationTarget with **no generic fallback**.
+///
+/// Adding an alternative to AutomationTarget must not be a silent change.
+/// Consumers that dispatch through a generic lambda (`[](const auto&)`, or an
+/// `if constexpr` chain with no else) keep compiling and then quietly ignore the
+/// new alternative, which is the worse failure: a target that exists in the
+/// document but is absent from a census, an export manifest, or a delivery path
+/// reads as "nothing was there" rather than as an error. Visiting through this
+/// type instead makes a new alternative a compile error at every call site until
+/// someone decides what it means.
+///
+///     std::visit(AutomationTargetCases{
+///                    [&](const DeviceParameterTarget& t) { ... },
+///                },
+///                lane.target());
+template <class... Fs> struct AutomationTargetCases : Fs... {
+    using Fs::operator()...;
+};
+template <class... Fs> AutomationTargetCases(Fs...) -> AutomationTargetCases<Fs...>;
+
+/// Guard for code that can only be correct while the variant has exactly one
+/// alternative — chiefly `std::get<DeviceParameterTarget>` on a target, which
+/// under this module's `-fno-exceptions` build calls `std::terminate` rather
+/// than throwing when the alternative does not match. Widening the variant trips
+/// this at compile time instead of aborting the process at run time.
+inline constexpr std::size_t kAutomationTargetAlternativeCount =
+    std::variant_size_v<AutomationTarget>;
 
 enum class AutomationLaneErrorCode : std::uint8_t {
     InvalidLaneId,
