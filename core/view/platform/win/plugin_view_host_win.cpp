@@ -22,6 +22,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/platform/win_pointer_input.hpp>
+#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -521,6 +522,7 @@ public:
         // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface
         // takes LOGICAL dims + the scale factor and applies the logical→pixel
         // transform itself at paint (mirrors MacGpuWindowHost).
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
@@ -552,6 +554,7 @@ public:
 #ifdef PULP_HAS_SKIA
         // Mirror set_size()'s surface sizing (GPU at physical, Skia at logical +
         // scale) but WITHOUT the SetWindowPos.
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
 #endif
@@ -571,6 +574,7 @@ public:
 #ifdef PULP_HAS_SKIA
         // Re-size surfaces at the new pixel resolution. Logical size is
         // unchanged, so the view tree layout is untouched.
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
 #endif
@@ -663,6 +667,9 @@ private:
     // handle_wm_size() distinguish a host-driven resize from our own echo.
     bool in_set_size_ = false;
     View* drag_target_ = nullptr;
+    // FU-2: when true the host clips the repaint to the damaged rect and blits
+    // a retained persistent-scene target. Default OFF.
+    bool partial_repaint_enabled_ = false;
 
     // Window-space mapping lives in win_pointer_input.hpp so the signed-word
     // unpack and the physical→logical divide are unit-tested off Windows (the
@@ -799,15 +806,38 @@ private:
             gpu_surface_.reset();
             return;
         }
+        // FU-2 partial repaint (default OFF, PULP_PARTIAL_REPAINT=1). The Dawn
+        // swapchain does not preserve content between frames, so a clipped
+        // repaint is only correct against a retained scene target. If the
+        // backend cannot retain one, disable partial repaint outright — we must
+        // never clip a non-preserving surface.
+        if (const char* env = std::getenv("PULP_PARTIAL_REPAINT"))
+            partial_repaint_enabled_ = (env[0] == '1');
+        if (partial_repaint_enabled_ && skia_surface_ &&
+            !skia_surface_->set_persistent_scene(true)) {
+            partial_repaint_enabled_ = false;
+            runtime::log_warn("WinPluginViewHost: backend cannot retain a scene; "
+                              "partial repaint disabled");
+        }
+        // A newly created surface has no previous frame to preserve.
+        damage_.mark_full();
         runtime::log_info("WinPluginViewHost: GPU and Skia surfaces ready");
     }
 
     // Shared scene paint (matches the macOS plugin GPU host).
-    void paint_scene(canvas::Canvas& canvas) {
+    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
         // Background fill + layout + view-tree paint. The nested
         // layout/layout_children span from View::layout_children() lands inside
         // this one, which is what makes layout-vs-paint attribution possible.
         PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+        // FU-2: clip the ENTIRE body, background fill included. Everything
+        // outside the clip must remain the retained scene's previous pixels;
+        // filling the background unclipped would erase them.
+        const int clip_save = canvas.save_count();
+        if (clip) {
+            canvas.save();
+            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
+        }
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
@@ -835,6 +865,7 @@ private:
             root_.paint_all(canvas);
             View::paint_overlays(canvas, &root_);
         }
+        if (clip) canvas.restore_to_count(clip_save);
     }
 
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
@@ -861,7 +892,27 @@ private:
             gpu_surface_->end_frame();
             return false;
         }
-        paint_scene(*canvas);
+        // Decide whether this frame can be clipped losslessly. The hazard model
+        // (compute_effective_damage) escalates to a full repaint if anything
+        // that SAMPLES at a distance — backdrop-filter, blur, mask, sampling
+        // effect, render transform — reaches the damage, which is what makes a
+        // clipped repaint pixel-identical to a full one.
+        //
+        // Skipped entirely under a design viewport: paint applies a letterbox
+        // scale+translate there, so root-space damage does not map to the
+        // clip space without further work.
+        Rect clip_rect{};
+        const Rect* clip = nullptr;
+        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
+            has_pending_dirty_bounds() && design_viewport_w_ <= 0.0f) {
+            const auto b = pending_dirty_bounds();
+            const auto decision = compute_effective_damage(root_, b, scale_);
+            if (!decision.full) {
+                clip_rect = decision.bounds;
+                clip = &clip_rect;
+            }
+        }
+        paint_scene(*canvas, clip);
         bool readback_ok = true;
         if (cap) {
             // read_current_rgba finalizes + submits the open frame's recording
@@ -874,6 +925,7 @@ private:
         }
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
+        clear_pending_dirty();  // frame painted + submitted (mirrors DirtyTracker::clear)
         // A failed/empty readback must report false so capture_back_buffer_png()
         // falls back to the raster path instead of returning a blank frame.
         return cap ? readback_ok : true;

@@ -22,6 +22,7 @@
 // CopyFromParent so colormap/depth match the parent.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/drag_drop.hpp>
 
@@ -306,6 +307,8 @@ private:
     float fixed_aspect_ratio_ = 0.0f;
     bool design_top_align_ = false;
     float scale_ = 1.0f;  // HiDPI: logical→physical-pixel factor
+    // FU-2: clip the repaint to the damaged rect against a retained scene.
+    bool partial_repaint_enabled_ = false;
 
     // Physical pixel dimensions = logical × scale (min 1).
     uint32_t pixel_w() const {
@@ -815,13 +818,29 @@ private:
         scfg.height = static_cast<uint32_t>(height);  // LOGICAL
         scfg.scale_factor = scale_;
         skia_surface_ = render::SkiaSurface::create(*gpu_surface_, scfg);
+        if (const char* env = std::getenv("PULP_PARTIAL_REPAINT"))
+            partial_repaint_enabled_ = (env[0] == '1');
+        // The swapchain does not preserve content between frames, so a clipped
+        // repaint needs a retained scene target; without one, never clip.
+        if (partial_repaint_enabled_ && skia_surface_ &&
+            !skia_surface_->set_persistent_scene(true))
+            partial_repaint_enabled_ = false;
+        damage_.mark_full();  // a new surface has no previous frame to preserve
         if (!skia_surface_) {
             runtime::log_warn("X11PluginViewHost: skia surface create failed; cpu raster only");
             gpu_surface_.reset();
         }
     }
 
-    void paint_scene(canvas::Canvas& canvas) {
+    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
+        // FU-2: clip the ENTIRE body, background fill included — everything
+        // outside the clip must stay the retained scene's previous pixels, so
+        // an unclipped background fill would erase them.
+        const int clip_save = canvas.save_count();
+        if (clip) {
+            canvas.save();
+            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
+        }
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
@@ -849,6 +868,7 @@ private:
             root_.paint_all(canvas);
             View::paint_overlays(canvas, &root_);
         }
+        if (clip) canvas.restore_to_count(clip_save);
     }
 
     bool render_frame_gpu(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
@@ -860,7 +880,22 @@ private:
             gpu_surface_->end_frame();
             return false;
         }
-        paint_scene(*canvas);
+        // Same damage decision as the Windows host: only clip when partial
+        // repaint is enabled, the pending damage is bounded, and the hazard
+        // model says a clipped repaint is pixel-identical to a full one.
+        // Skipped under a design viewport (letterbox scale+translate).
+        Rect clip_rect{};
+        const Rect* clip = nullptr;
+        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
+            has_pending_dirty_bounds() && design_viewport_w_ <= 0.0f) {
+            const auto b = pending_dirty_bounds();
+            const auto decision = compute_effective_damage(root_, b, scale_);
+            if (!decision.full) {
+                clip_rect = decision.bounds;
+                clip = &clip_rect;
+            }
+        }
+        paint_scene(*canvas, clip);
         if (cap) {
             // read_current_rgba finalizes + submits the open frame's recording
             // before readback (see SkiaSurface contract), so no separate flush.
@@ -871,6 +906,7 @@ private:
         }
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
+        clear_pending_dirty();  // frame painted + submitted
         return true;
     }
 

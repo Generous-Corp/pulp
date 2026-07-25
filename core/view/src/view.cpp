@@ -1343,10 +1343,15 @@ void View::request_repaint(const Rect& local_dirty) {
     // mark_dirty() directly rather than request_repaint(), so it would not
     // otherwise reach the invalidation.
     invalidate_subtree_caches_up();
-    // Bounded invalidation is only wired for the window-host path; the
-    // plugin-view-host path (and no host) has no sub-region invalidator, so
-    // fall back to a full repaint there.
-    if (!window_host_) {
+    // Bounded invalidation needs a host that can accumulate a sub-region.
+    // Both hosts can now: WindowHost via mark_dirty(Rect), PluginViewHost via
+    // mark_dirty_region(Rect) (both back onto PendingDamage). With no host at
+    // all there is nowhere to put the rect, so fall back to a full repaint.
+    //
+    // The plug-in path used to fall through here unconditionally, which is why
+    // partial repaint was unreachable for every plug-in editor on every
+    // platform however the host was wired.
+    if (!window_host_ && !plugin_view_host_) {
         request_repaint();
         return;
     }
@@ -1375,8 +1380,13 @@ void View::request_repaint(const Rect& local_dirty) {
         off_x += v->bounds_.x;
         off_y += v->bounds_.y;
     }
-    window_host_->mark_dirty(Rect{off_x + local_dirty.x, off_y + local_dirty.y,
-                                  local_dirty.width, local_dirty.height});
+    const Rect root_rect{off_x + local_dirty.x, off_y + local_dirty.y,
+                         local_dirty.width, local_dirty.height};
+    if (window_host_) {
+        window_host_->mark_dirty(root_rect);
+    } else {
+        plugin_view_host_->mark_dirty_region(root_rect);
+    }
 }
 
 bool View::start_file_drag(const FileDragRequest& request) {
