@@ -120,20 +120,35 @@ TEST_CASE("an export cannot run without consent for each loss", "[interchange]")
         REQUIRE(result.error().concepts[0] == Concept::ClipAbsolute);
     }
 
-    SECTION("accepting every loss gets past consent") {
+    SECTION("accepting every loss lets the writer run") {
         ExportOptions options;
         options.accepted_losses = plan.required_consent();
         bool ran = false;
-        const ExportWriter writer = [&ran](const ExportPlan&) {
+        const ExportWriter writer = [&ran](const ExportPlan& planned) {
             ran = true;
-            return pulp::runtime::Ok(ExportArtifacts{});
+            // The writer sees the plan it is executing, not the document.
+            REQUIRE_FALSE(planned.is_lossless());
+            ExportArtifacts artifacts;
+            artifacts.artifacts.push_back(ExportArtifact{"project.xml", {1, 2, 3}});
+            return pulp::runtime::Ok(std::move(artifacts));
         };
-        // The format declares no writer, so this still refuses -- but for the
-        // writer's absence, not for consent.
+        auto result = run_export(plan, options, writer);
+        REQUIRE(ran);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value().artifacts.size() == 1);
+        REQUIRE(result.value().artifacts[0].name == "project.xml");
+    }
+
+    SECTION("a writer that fails on its own terms surfaces its error") {
+        ExportOptions options;
+        options.accepted_losses = plan.required_consent();
+        const ExportWriter writer = [](const ExportPlan&) {
+            return pulp::runtime::Err(
+                ExportError{ExportErrorCode::WriterFailed, "package entry rejected", {}});
+        };
         auto result = run_export(plan, options, writer);
         REQUIRE(result.is_err());
-        REQUIRE(result.error().code == ExportErrorCode::NoWriterRegistered);
-        REQUIRE_FALSE(ran);
+        REQUIRE(result.error().code == ExportErrorCode::WriterFailed);
     }
 }
 
@@ -141,11 +156,25 @@ TEST_CASE("a lossless plan still needs a writer to produce bytes", "[interchange
     const ExportPlan plan = plan_export(lossless_project(), Format::DawProject);
     REQUIRE(plan.is_lossless());
 
-    // Phase-0 state: the capability data declares no DAWproject writer, so every
-    // export refuses at the last step rather than silently emitting nothing.
+    // No writer means no artifact, rather than an empty one reported as success.
+    // The capability data says the same thing about DAWproject today.
     REQUIRE_FALSE(format_has_writer(Format::DawProject));
     auto result = run_export(plan, ExportOptions{}, ExportWriter{});
     REQUIRE(result.is_err());
     REQUIRE(result.error().code == ExportErrorCode::NoWriterRegistered);
     REQUIRE(result.error().message.find("DAWproject") != std::string::npos);
+}
+
+TEST_CASE("a loss manifest names its loss classes durably", "[interchange]") {
+    // These ids are written into exported artifacts, so they are a compatibility
+    // surface, not a debug string.
+    REQUIRE(loss_class_id(LossClass::Dropped) == "dropped");
+    REQUIRE(loss_class_id(LossClass::Degraded) == "degraded");
+    REQUIRE(loss_class_id(LossClass::Flattened) == "flattened");
+    REQUIRE(loss_class_id(LossClass::Approximated) == "approximated");
+
+    const ExportPlan plan = plan_export(lossy_project(), Format::DawProject);
+    const LossEntry* entry = plan.losses().find(Concept::ClipAbsolute);
+    REQUIRE(entry != nullptr);
+    REQUIRE(loss_class_id(entry->loss_class) == "approximated");
 }

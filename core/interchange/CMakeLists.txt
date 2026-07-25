@@ -1,6 +1,7 @@
 add_library(pulp-interchange
     src/census.cpp
     src/export_plan.cpp
+    src/loss.cpp
 )
 add_library(pulp::interchange ALIAS pulp-interchange)
 

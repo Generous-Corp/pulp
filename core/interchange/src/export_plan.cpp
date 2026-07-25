@@ -5,16 +5,6 @@
 
 namespace pulp::interchange {
 
-const LossEntry* LossManifest::find(Concept concept_value) const noexcept {
-    for (const LossEntry& entry : entries_) {
-        if (entry.concept_value == concept_value)
-            return &entry;
-    }
-    return nullptr;
-}
-
-void LossManifest::add(LossEntry entry) { entries_.push_back(std::move(entry)); }
-
 std::vector<Concept> ExportPlan::required_consent() const {
     std::vector<Concept> concepts;
     concepts.reserve(losses_.entries().size());
@@ -76,7 +66,7 @@ run_export(const ExportPlan& plan, const ExportOptions& options, const ExportWri
                                         std::move(unaccepted)});
     }
 
-    if (!format_has_writer(plan.format()) || !writer) {
+    if (!writer) {
         std::string message = "no writer is registered for ";
         message += format_display_name(plan.format());
         return runtime::Err(

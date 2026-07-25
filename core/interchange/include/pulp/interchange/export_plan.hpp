@@ -28,7 +28,7 @@ struct ExportArtifacts {
 enum class ExportErrorCode : std::uint8_t {
     /// The plan loses concepts the caller did not list in accepted_losses.
     UnacceptedLoss,
-    /// The format declares no writer, or none was supplied.
+    /// No writer was supplied for the format.
     NoWriterRegistered,
     /// The writer ran and failed on its own terms.
     WriterFailed,
@@ -90,7 +90,11 @@ ExportPlan plan_export(const timeline::Project& project, Format format,
                        const CensusLimits& limits = {});
 
 /// Turns a plan into bytes. Writers are supplied per call rather than through a
-/// registry, so a test can drive the consent path without global state.
+/// registry, so a caller cannot end up exporting through a writer it did not
+/// choose, and a test can drive the contract without global state.
+///
+/// Whether a writer exists at all for a format is separately declared by its
+/// capability data (format_has_writer); this seam is what a writer plugs into.
 using ExportWriter =
     std::function<runtime::Result<ExportArtifacts, ExportError>(const ExportPlan&)>;
 
