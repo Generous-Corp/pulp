@@ -417,6 +417,11 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
                 !context.writer.character('}'))
                 return false;
         }
+        static_assert(kAutomationTargetAlternativeCount == 1,
+                      "AutomationTarget gained an alternative: this encoder writes a "
+                      "device_parameter envelope unconditionally and std::get terminates "
+                      "under -fno-exceptions on a different kind. Give the new target its "
+                      "own envelope before widening the variant.");
         const auto& target = std::get<DeviceParameterTarget>(lane.target());
         return context.writer.append("],\"target\":") &&
                write_envelope(

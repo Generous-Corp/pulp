@@ -322,6 +322,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   evidence that the wasm lanes are unaffected — check what the transport now
   publishes per block, not just which files moved.
 
+- A compile-time guard in a portable timeline header fires in the browser lanes
+  too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
+  alternative count (and an overload set with no generic fallback) precisely so
+  that widening the variant cannot slip through silently. Because those sources
+  are in the WAM/WebCLAP closure, widening it breaks the wasm builds at the same
+  point as the native ones — which is what you want. It also means the guard
+  must be satisfied before the widening lands, not after, or both lanes go red
+  together.
+
 - Extraction produces a new translation unit and carries the same obligation.
   Moving a helper out of an already-listed engine `.cpp` into its own file reads
   as a pure refactor, because the origin unit stays listed everywhere — but the
