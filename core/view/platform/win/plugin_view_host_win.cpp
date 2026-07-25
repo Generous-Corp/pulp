@@ -52,6 +52,7 @@
 
 #include <pulp/view/drag_drop.hpp>
 
+#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <cwchar>
@@ -904,11 +905,40 @@ private:
         Rect clip_rect{};
         const Rect* clip = nullptr;
         if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
-            has_pending_dirty_bounds() && design_viewport_w_ <= 0.0f) {
+            has_pending_dirty_bounds()) {
             const auto b = pending_dirty_bounds();
+            // Hazard model runs in ROOT space (where the damage was produced).
             const auto decision = compute_effective_damage(root_, b, scale_);
             if (!decision.full) {
                 clip_rect = decision.bounds;
+                // Under a design viewport the paint body applies
+                // translate(tx,ty) + scale(sx,sy), but the clip below is
+                // installed in SURFACE space, before that transform. Map the
+                // root-space damage through the same letterbox transform so
+                // the two agree; without this the clip lands in the wrong
+                // place (which is why plug-in editors — which always set a
+                // design viewport — previously had to skip partial repaint
+                // entirely).
+                float sx, sy, tx, ty;
+                if (design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
+                    WindowHost::compute_design_viewport_transform(
+                        static_cast<float>(size_.width),
+                        static_cast<float>(size_.height),
+                        design_viewport_w_, design_viewport_h_,
+                        sx, sy, tx, ty, design_top_align_) &&
+                    sx > 0.0f && sy > 0.0f) {
+                    clip_rect = Rect{tx + clip_rect.x * sx,
+                                     ty + clip_rect.y * sy,
+                                     clip_rect.width * sx,
+                                     clip_rect.height * sy};
+                    // Re-snap OUT to whole surface pixels after scaling: a
+                    // fractional edge would clip a partially covered pixel.
+                    const float x0 = std::floor(clip_rect.x);
+                    const float y0 = std::floor(clip_rect.y);
+                    clip_rect = Rect{x0, y0,
+                                     std::ceil(clip_rect.x + clip_rect.width) - x0,
+                                     std::ceil(clip_rect.y + clip_rect.height) - y0};
+                }
                 clip = &clip_rect;
             }
         }

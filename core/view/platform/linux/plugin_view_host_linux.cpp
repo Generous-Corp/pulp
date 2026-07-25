@@ -49,6 +49,7 @@
 #include <X11/Xresource.h>  // Xrm* — Xft.dpi lookup for HiDPI scale (L9)
 
 #include <atomic>
+#include <cmath>
 #include <chrono>   // XDND source drag deadline
 #include <cstdint>
 #include <cstdlib>  // atof, malloc/free
@@ -887,11 +888,35 @@ private:
         Rect clip_rect{};
         const Rect* clip = nullptr;
         if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
-            has_pending_dirty_bounds() && design_viewport_w_ <= 0.0f) {
+            has_pending_dirty_bounds()) {
             const auto b = pending_dirty_bounds();
+            // Hazard model runs in ROOT space, where the damage was produced.
             const auto decision = compute_effective_damage(root_, b, scale_);
             if (!decision.full) {
                 clip_rect = decision.bounds;
+                // Map through the design-viewport letterbox transform: the clip
+                // is installed in SURFACE space, before paint applies
+                // translate(tx,ty)+scale(sx,sy). Plug-in editors always set a
+                // design viewport, so without this they could not use partial
+                // repaint at all.
+                float sx, sy, tx, ty;
+                if (design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
+                    WindowHost::compute_design_viewport_transform(
+                        static_cast<float>(size_.width),
+                        static_cast<float>(size_.height),
+                        design_viewport_w_, design_viewport_h_,
+                        sx, sy, tx, ty, design_top_align_) &&
+                    sx > 0.0f && sy > 0.0f) {
+                    clip_rect = Rect{tx + clip_rect.x * sx,
+                                     ty + clip_rect.y * sy,
+                                     clip_rect.width * sx,
+                                     clip_rect.height * sy};
+                    const float x0 = std::floor(clip_rect.x);
+                    const float y0 = std::floor(clip_rect.y);
+                    clip_rect = Rect{x0, y0,
+                                     std::ceil(clip_rect.x + clip_rect.width) - x0,
+                                     std::ceil(clip_rect.y + clip_rect.height) - y0};
+                }
                 clip = &clip_rect;
             }
         }
