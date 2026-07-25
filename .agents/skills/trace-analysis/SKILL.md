@@ -263,3 +263,58 @@ render (`examples/trace-demo`) so the answer reproduces exactly. See
 - `.agents/skills/trace-sql/SKILL.md` — the SQL substrate + trace-stdlib
 - `core/runtime/include/pulp/runtime/trace.hpp` — macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers (L0/L1/L2), worked use cases, gotchas
+
+## Tracing a plug-in on Windows
+
+Windows tracing was unusable until 2026-07-25 — four independent blockers, each
+fatal on its own. If a Windows capture comes back empty, check these first.
+
+1. **`PULP_TRACING=ON` did not compile under MSVC.** `trace.cpp`'s ship-guard
+   sentinel used `__attribute__((used, visibility("default")))`; MSVC errors
+   C4430/C2065/C3861 and `pulp-runtime` fails, taking 22 dependent targets with
+   it. Now `__declspec(dllexport)` on MSVC.
+2. **Perfetto was excluded from the installed SDK.** `pulp-runtime` linked
+   tracing through `$<BUILD_INTERFACE:pulp-tracing>`, correct when tracing is
+   OFF and wrong when ON — every library carries Perfetto symbols but the export
+   named none, so a plug-in linking a traced SDK failed with unresolved
+   `perfetto::` symbols. `pulp-perfetto`/`pulp-tracing`/`perfetto.h` now install
+   into `PulpTargets` when tracing is ON.
+3. **No code path ever started a session.** `Tracing::start()` had zero callers
+   and a plug-in has no `main()`. `Tracing::attach()` now autostarts from
+   `$PULP_TRACE_PATH`, and the VST3 adapter attaches/detaches over its lifetime.
+4. **The Windows plug-in host had no spans.** Only `window_host_mac.mm` had
+   `render/frame` + `canvas/paint`.
+
+### Capture recipe
+
+```bash
+cmake -S <pulp> -B <build> -DPULP_TRACING=ON       # then build + cmake --install
+# in the HOST process environment (not the build shell):
+PULP_TRACE_PATH=C:\path\out.pftrace
+PULP_TRACE_SECONDS=45      # timed flush; see below
+```
+
+`PULP_TRACE_SECONDS` matters. Perfetto's `duration_ms` only caps the buffer —
+the `.pftrace` is written by `stop()`, which otherwise means unloading the
+plug-in you are profiling. The timed flush makes a capture self-completing.
+
+### Always instrument the blocking call
+
+A frame span whose children sum to ~2 ms while the frame itself takes 45 ms
+means the cost is in an **uninstrumented** call inside it. On Windows that was
+the swapchain acquire (`gpu_acquire`, added 2026-07-25): with a Fifo present
+mode `GetCurrentTexture()` blocks until the next refresh. Before that span
+existed the time had nowhere to be attributed and the trace looked healthy.
+
+### Driving a Windows GUI capture with nobody watching
+
+Screenshot/input automation needs an **Active** session; a disconnected RDP
+session captures blank frames at the default 800x600. Move the session to the
+console so it stays renderable with no client attached:
+
+```powershell
+tscon <session-id> /dest:console     # session stays Active, RDP client detaches
+```
+
+Pair with auto-logon so a session exists after reboot, and run long builds under
+Task Scheduler (S4U) — an SSH drop otherwise kills `cmake`/MSBuild mid-build.
