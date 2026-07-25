@@ -1471,6 +1471,11 @@ void emit_node(std::ostringstream& out,
                 } else if (child_hit_policy == PromotedChildHitPolicy::pass_through_self) {
                     emit_line(out, depth + 1, ctx.opts.indent_spaces,
                               child_var + "->set_pointer_events(pulp::view::View::PointerEvents::box_none);");
+                    // A parent that never descends makes box_none meaningless.
+                    // TextButton defaults to box_only, so re-open it: the
+                    // button asked for this child to stay reachable.
+                    emit_line(out, depth + 1, ctx.opts.indent_spaces,
+                              var + "->set_pointer_events(pulp::view::View::PointerEvents::auto_);");
                 }
                 emit_line(out, depth + 1, ctx.opts.indent_spaces,
                           var + "->add_child(std::move(" + child_var + "));");

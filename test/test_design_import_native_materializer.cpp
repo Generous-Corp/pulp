@@ -2869,3 +2869,52 @@ TEST_CASE("baked native materializer makes a faithful_svg tab_group an interacti
     if (cmp.similarity >= 0.999f) SKIP("native raster unavailable in this build");
     CHECK(cmp.similarity < 0.999f);   // the live pill visibly moved between slots
 }
+
+TEST_CASE("a promoted TextButton still reaches an interactive descendant",
+          "[view][import][native-materializer][hit-test]") {
+    // TextButton defaults to PointerEvents::box_only so a centred icon cannot
+    // swallow its own click. That default would otherwise make the promoted-
+    // child hit policy dead for buttons: hit_test() stops at the button and
+    // never descends, so `pass_through_self` (box_none on the child) and
+    // `unchanged` (the child is itself interactive) become unreachable, and
+    // pulpHitTestable="true" silently stops meaning anything.
+    //
+    // The sibling case above pins the same contract with a Knob parent — Knob
+    // has no box_only default, which is exactly why that test kept passing
+    // while the button path broke.
+    DesignIR ir;
+    ir.root = frame("root", 120.0f, 120.0f, LayoutDirection::column);
+
+    auto button_node = frame("outer-button", 80.0f, 80.0f, LayoutDirection::column);
+    button_node.type = "button";
+    button_node.text_content = "Outer";
+
+    auto container = frame("interactive-container", 80.0f, 40.0f, LayoutDirection::column);
+    auto nested = frame("nested-fine-button", 60.0f, 20.0f, LayoutDirection::column);
+    nested.type = "button";
+    nested.text_content = "Fine";
+    container.children.push_back(std::move(nested));
+    button_node.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(button_node));
+
+    auto root = build_native_view_tree(ir, {}, {.preview_mode = true});
+    REQUIRE(root != nullptr);
+    root->set_bounds({0, 0, 120.0f, 120.0f});
+    root->layout_children();
+
+    auto* outer = dynamic_cast<TextButton*>(root->child_at(0));
+    REQUIRE(outer != nullptr);
+    // Re-opened for descent, because this button asked for a reachable child.
+    REQUIRE(outer->pointer_events() == View::PointerEvents::auto_);
+
+    auto* container_view = outer->child_at(0);
+    REQUIRE(container_view != nullptr);
+    REQUIRE(container_view->pointer_events() == View::PointerEvents::box_none);
+    auto* nested_view = dynamic_cast<TextButton*>(container_view->child_at(0));
+    REQUIRE(nested_view != nullptr);
+
+    // The nested button is reachable...
+    REQUIRE(root->hit_test({30.0f, 10.0f}) == nested_view);
+    // ...and the outer button still owns its own body.
+    REQUIRE(root->hit_test({70.0f, 60.0f}) == outer);
+}
