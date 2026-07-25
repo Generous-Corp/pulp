@@ -769,3 +769,14 @@ target_sources(pulp-test-forge-saturator-catalog PRIVATE
 target_link_libraries(pulp-test-forge-saturator-catalog
     PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-forge-saturator-catalog)
+
+# Dynamics catalog nodes. Same bake-and-inject shape as the lo-fi catalog suite;
+# the stereo-link case additionally asserts the node's TRUE-STEREO wiring, which
+# a dual-mono instancing mistake would otherwise pass every other test with.
+add_executable(pulp-test-forge-dynamics-catalog test_forge_dynamics_catalog.cpp)
+target_sources(pulp-test-forge-dynamics-catalog PRIVATE
+    $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
+    $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>)
+target_link_libraries(pulp-test-forge-dynamics-catalog
+    PRIVATE pulp::host pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-forge-dynamics-catalog)

@@ -161,3 +161,12 @@ pulp_add_test_suite(pulp-test-signal-saturator
     SOURCES test_signal_saturator.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 900)
+
+# Feedforward compressor — the transparent/modern reference design, and the
+# gain-computer core the VCA / FET / diode-bridge lineages compose. The suite is
+# the spec's acceptance set 1-11; expected values are computed from the shipped
+# constants and closed forms rather than restated.
+pulp_add_test_suite(pulp-test-signal-feedforward-compressor
+    SOURCES test_signal_feedforward_compressor.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)
