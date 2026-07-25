@@ -54,6 +54,49 @@ runtime::Result<T, PersistenceError> model_fail(ModelError error, std::string pa
         PersistenceError{PersistenceErrorCode::ModelRejected, 0, 0, 0, std::move(path), error});
 }
 
+// Each alternative owes its own envelope, dispatched on the declared type name.
+// An unrecognised name is refused rather than coerced to a device parameter,
+// because a target silently read as the wrong kind drives the wrong control.
+runtime::Result<AutomationTarget, PersistenceError>
+decode_automation_target(const JsonValue& value, const std::string& path) {
+    const auto* type_name = member(value, "type_name");
+    if (!type_name || type_name->kind != JsonValue::Kind::String)
+        return fail<AutomationTarget>(PersistenceErrorCode::MissingField, path + "/type_name",
+                                      value.begin);
+    if (type_name->scalar == "pulp.timeline.automation_target.track_mixer") {
+        auto data = validate_exact_envelope(
+            value, "pulp.timeline.automation_target.track_mixer", 1, path);
+        if (!data)
+            return runtime::Err(data.error());
+        auto parameter =
+            require_member(*data.value(), "parameter", JsonValue::Kind::String, path + "/data");
+        if (!parameter)
+            return runtime::Err(parameter.error());
+        const auto decoded = track_mixer_parameter_from_name(parameter.value()->scalar);
+        if (!decoded)
+            return fail<AutomationTarget>(PersistenceErrorCode::InvalidSchema,
+                                          path + "/data/parameter", parameter.value()->begin);
+        return runtime::Ok(AutomationTarget(TrackMixerTarget{*decoded}));
+    }
+    auto data = validate_exact_envelope(
+        value, "pulp.timeline.automation_target.device_parameter", 1, path);
+    if (!data)
+        return runtime::Err(data.error());
+    const auto* placement = member(*data.value(), "device_placement_id");
+    const auto* parameter = member(*data.value(), "parameter_id");
+    if (!placement || !parameter)
+        return fail<AutomationTarget>(PersistenceErrorCode::MissingField, path + "/data");
+    auto placement_id =
+        parse_canonical_u64_string(*placement, path + "/data/device_placement_id");
+    auto parameter_id = parse_u32_number(*parameter, path + "/data/parameter_id");
+    if (!placement_id)
+        return runtime::Err(placement_id.error());
+    if (!parameter_id)
+        return runtime::Err(parameter_id.error());
+    return runtime::Ok(
+        AutomationTarget(DeviceParameterTarget{{placement_id.value()}, parameter_id.value()}));
+}
+
 } // namespace
 
 runtime::Result<std::vector<AutomationLane>, PersistenceError>
@@ -89,26 +132,11 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
         if (!target)
             return runtime::Err(target.error());
         auto decoded_id = parse_canonical_u64_string(*id.value(), lane_path + "/data/id");
-        auto target_data = validate_exact_envelope(
-            *target.value(), "pulp.timeline.automation_target.device_parameter", 1,
-            lane_path + "/data/target");
         if (!decoded_id)
             return runtime::Err(decoded_id.error());
-        if (!target_data)
-            return runtime::Err(target_data.error());
-        const auto* placement = member(*target_data.value(), "device_placement_id");
-        const auto* parameter = member(*target_data.value(), "parameter_id");
-        if (!placement || !parameter)
-            return fail<std::vector<AutomationLane>>(PersistenceErrorCode::MissingField,
-                                                     lane_path + "/data/target/data");
-        auto placement_id = parse_canonical_u64_string(
-            *placement, lane_path + "/data/target/data/device_placement_id");
-        auto parameter_id =
-            parse_u32_number(*parameter, lane_path + "/data/target/data/parameter_id");
-        if (!placement_id)
-            return runtime::Err(placement_id.error());
-        if (!parameter_id)
-            return runtime::Err(parameter_id.error());
+        auto decoded_target = decode_automation_target(*target.value(), lane_path + "/data/target");
+        if (!decoded_target)
+            return runtime::Err(decoded_target.error());
 
         std::vector<AutomationPoint> decoded_points;
         decoded_points.reserve(points.value()->array.size());
@@ -170,10 +198,8 @@ decode_automation_lanes(const JsonValue& value, const DecodeLimits& limits, std:
         if (!curve)
             return model_fail<std::vector<AutomationLane>>(model_error(curve.error()),
                                                            lane_path + "/data/points");
-        auto lane = AutomationLane::create(
-            {decoded_id.value()},
-            DeviceParameterTarget{{placement_id.value()}, parameter_id.value()},
-            std::move(curve).value());
+        auto lane = AutomationLane::create({decoded_id.value()}, std::move(decoded_target).value(),
+                                          std::move(curve).value());
         if (!lane)
             return model_fail<std::vector<AutomationLane>>(model_error(lane.error()), lane_path);
         lanes.push_back(std::move(lane).value());

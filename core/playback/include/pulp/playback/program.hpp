@@ -3,6 +3,7 @@
 #include <pulp/playback/automation_limits.hpp>
 #include <pulp/playback/audio_renderer_limits.hpp>
 #include <pulp/playback/program_identity.hpp>
+#include <pulp/playback/track_mixer_program.hpp>
 #include <pulp/runtime/result.hpp>
 #include <pulp/runtime/slot.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
@@ -150,6 +151,13 @@ class TrackProgram {
         return generated_id_start_;
     }
 
+    /// The track's own level and stereo placement, with any lanes that automate
+    /// them already resolved. Borrows from automation_program_, which this
+    /// program holds alive.
+    const TrackMixerProgram& mixer() const noexcept {
+        return mixer_;
+    }
+
   private:
     friend class ProgramCompilerTask;
     TrackProgram(timeline::ItemId id, ProgramGeneration generation,
@@ -162,7 +170,8 @@ class TrackProgram {
                  std::uint64_t expanded_clip_count,
                  std::uint64_t expanded_note_event_count,
                  std::uint64_t generated_id_start,
-                 std::uint64_t generated_id_count) noexcept;
+                 std::uint64_t generated_id_count,
+                 TrackMixerProgram mixer) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
@@ -178,6 +187,7 @@ class TrackProgram {
     std::uint64_t expanded_note_event_count_ = 0;
     std::uint64_t generated_id_start_ = 0;
     std::uint64_t generated_id_count_ = 0;
+    TrackMixerProgram mixer_;
 };
 
 class PlaybackProgram {

@@ -31,7 +31,9 @@ struct TrackAutomationProgramError {
     timeline::ItemId track;
     timeline::ItemId lane;
     timeline::ItemId related_lane;
-    timeline::DeviceParameterTarget target;
+    // Reported verbatim so a rejected duplicate names the control it collided
+    // on, whichever kind of target that was.
+    timeline::AutomationTarget target;
 };
 
 /// Immutable compiler-supplied grouping of one track's compiled automation

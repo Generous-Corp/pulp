@@ -38,7 +38,7 @@ class AutomationProgramCompiler {
     ProgramGeneration generation_ = 0;
     Stage stage_ = Stage::Complete;
     std::size_t index_ = 0;
-    timeline::DeviceParameterTarget target_;
+    timeline::AutomationTarget target_;
     std::vector<CompiledKnot> knots_;
     std::vector<AutomationProgramSegment> segments_;
     std::shared_ptr<const AutomationProgram> result_;

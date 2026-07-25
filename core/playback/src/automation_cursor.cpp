@@ -30,17 +30,6 @@ timebase::SamplePosition add_saturating(timebase::SamplePosition start,
     return {start.value + static_cast<std::int64_t>(offset)};
 }
 
-std::size_t segment_for_sample(std::span<const AutomationProgramSegment> segments,
-                               timebase::SamplePosition sample) noexcept {
-    const auto found = std::upper_bound(
-        segments.begin(), segments.end(), sample,
-        [](timebase::SamplePosition value, const AutomationProgramSegment& segment) {
-            return value < segment.end_sample;
-        });
-    return found == segments.end() ? segments.size() - 1u
-                                   : static_cast<std::size_t>(found - segments.begin());
-}
-
 template <typename Visitor>
 void visit_unique_knots(std::span<const AutomationProgramSegment> segments,
                         Visitor&& visitor) noexcept {
@@ -457,32 +446,11 @@ bool host_mapped_mandatory_tick_at_frame(const AutomationProgram& program,
 EvaluatedPoint evaluate(const AutomationProgram& program, timebase::SamplePosition sample,
                         timebase::TempoCursor& tempo, bool cold,
                         std::size_t& segment_index) noexcept {
-    const auto segments = program.segments();
-    if (cold) {
-        segment_index = segment_for_sample(segments, sample);
-    } else {
-        while (segment_index + 1u < segments.size() &&
-               sample >= segments[segment_index].end_sample) {
-            ++segment_index;
-        }
-    }
-    if (sample < segments.front().start_sample)
+    segment_index = select_automation_segment(program, sample, cold, segment_index);
+    if (sample < program.segments().front().start_sample)
         return {program.leading_value(), segment_index};
-
     const auto tick = cold ? tempo.seek(sample).tick : tempo.advance(sample).tick;
-    const auto& segment = segments[segment_index];
-    if (segment.start_sample == segment.end_sample)
-        return {segment.end_value, segment_index};
-    if (segment.start_tick == segment.end_tick || tick <= segment.start_tick)
-        return {segment.start_value, segment_index};
-    if (tick >= segment.end_tick)
-        return {segment.end_value, segment_index};
-    if (segment.interpolation == timeline::AutomationInterpolation::Hold)
-        return {segment.start_value, segment_index};
-    return {timeline::evaluate_continuous_automation_segment(tick, segment.start_tick,
-                                                             segment.end_tick, segment.start_value,
-                                                             segment.end_value, segment.curvature),
-            segment_index};
+    return {evaluate_automation_segment(program, segment_index, sample, tick), segment_index};
 }
 
 EvaluatedPoint evaluate_host_mapped(const AutomationProgram& program,

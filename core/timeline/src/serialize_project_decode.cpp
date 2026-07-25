@@ -583,6 +583,7 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto clips = required(data, "clips", path + "/data");
     const auto* active_take_lane = data.find("active_take_lane_id");
     const auto* freeze = data.find("freeze");
+    const auto* mixer = data.find("mixer");
     const auto* devices = data.find("device_chain");
     const auto* automation = data.find("automation_lanes");
     const auto* take_lanes = data.find("take_lanes");
@@ -597,6 +598,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         detail::track_schema_policy.requires_active_take_lane(envelope.value().version);
     const auto supports_freeze =
         detail::track_schema_policy.supports_freeze(envelope.value().version);
+    const auto supports_mixer =
+        detail::track_schema_policy.supports_mixer(envelope.value().version);
     if (!id || !name || !clips || clips.value()->kind != JsonValue::Kind::Array ||
         (!requires_devices && devices) ||
         (requires_devices && (!devices || devices->kind != JsonValue::Kind::Array)) ||
@@ -608,7 +611,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
         (!requires_active_take_lane && active_take_lane) ||
         (requires_active_take_lane &&
          (!active_take_lane || active_take_lane->kind != JsonValue::Kind::String)) ||
-        (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object))
+        (!supports_freeze && freeze) || (freeze && freeze->kind != JsonValue::Kind::Object) ||
+        (!supports_mixer && mixer) || (mixer && mixer->kind != JsonValue::Kind::Object))
         return fail<Track>(PersistenceErrorCode::MissingField, std::move(path));
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
@@ -681,6 +685,9 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     auto decoded_freeze = detail::decode_track_freeze(freeze, path);
     if (!decoded_freeze)
         return runtime::Err(decoded_freeze.error());
+    auto decoded_mixer = detail::decode_track_mixer(mixer, path);
+    if (!decoded_mixer)
+        return runtime::Err(decoded_mixer.error());
     auto created = Track::create(TrackInput{.id = {decoded_id.value()},
                                             .name = std::move(name).value(),
                                             .clips = std::move(decoded_clips),
@@ -689,7 +696,8 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
                                             .take_lanes = std::move(decoded_take_lanes),
                                             .record_armed = decoded_record_armed,
                                             .active_take_lane_id = decoded_active_take_lane,
-                                            .freeze = std::move(decoded_freeze).value()});
+                                            .freeze = std::move(decoded_freeze).value(),
+                                            .mixer = decoded_mixer.value()});
     if (!created)
         return model_fail<Track>(created.error(), std::move(path));
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));

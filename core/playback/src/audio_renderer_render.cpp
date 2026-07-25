@@ -99,7 +99,35 @@ bool valid_transport(const TransportSnapshot& transport, std::size_t output_fram
     return prior_end == transport.frame_count;
 }
 
+// One track's mixer resolved for a render pass. Held by value on the stack so
+// the audio thread never touches shared cursor state, and skipped wholesale when
+// the track was never touched — that is what keeps an untouched track's output
+// bit-identical to what it was before mixer state existed.
+struct TrackMixerRun {
+    TrackMixerControlCursor gain;
+    TrackMixerControlCursor pan;
+    bool transparent = true;
+
+    void reset(const TrackMixerProgram& mixer) noexcept {
+        transparent = mixer.transparent();
+        gain.reset(mixer.gain_automation, mixer.gain_linear);
+        pan.reset(mixer.pan_automation, mixer.pan);
+    }
+
+    void restart(const timebase::CompiledTempoMap& map) noexcept {
+        gain.restart(map);
+        pan.restart(map);
+    }
+
+    float factor(timebase::SamplePosition sample, std::size_t channel,
+                 std::size_t channel_count) noexcept {
+        return gain.value_at(sample) *
+               track_mixer_channel_gain(pan.value_at(sample), channel, channel_count);
+    }
+};
+
 void render_track(const AudioTrackRendererProgram& track, const TransportRange& range,
+                  const timebase::CompiledTempoMap& tempo_map, TrackMixerRun& mixer,
                   audio::BufferView<float> output, bool absolute_only = false) noexcept {
     const auto range_start = range.timeline_sample_start.value;
     const auto range_end = range_start + static_cast<std::int64_t>(range.frame_count);
@@ -125,6 +153,10 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
         const auto count = static_cast<std::size_t>(overlap_end - overlap_start);
         for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
             auto destination = output.channel(channel);
+            // Each channel replays the same span, so the forward cursors start
+            // over rather than stepping backwards.
+            if (!mixer.transparent)
+                mixer.restart(tempo_map);
             for (std::size_t frame = 0; frame < count; ++frame) {
                 const auto relative = relative_start + frame;
                 const auto source_position =
@@ -141,10 +173,16 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
                         ? static_cast<float>(source_position -
                                              static_cast<long double>(source_offset))
                         : 0.0f;
+                const auto mixer_factor =
+                    mixer.transparent
+                        ? 1.0f
+                        : mixer.factor(timebase::SamplePosition{overlap_start +
+                                                               static_cast<std::int64_t>(frame)},
+                                       channel, output.num_channels());
                 destination[output_start + frame] +=
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
                                   fraction, static_cast<double>(source_position)) *
-                    envelope(*clip, relative);
+                    envelope(*clip, relative) * mixer_factor;
             }
         }
     }
@@ -153,8 +191,9 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
 void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                                    const TransportRange& range,
                                    const timebase::CompiledTempoMap& tempo_map,
+                                   TrackMixerRun& mixer,
                                    audio::BufferView<float> output) noexcept {
-    render_track(track, range, output, true);
+    render_track(track, range, tempo_map, mixer, output, true);
     const auto clips = track.clips();
     for (std::uint32_t output_frame = 0; output_frame < range.frame_count; ++output_frame) {
         const auto fraction =
@@ -214,11 +253,17 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
             const auto destination_frame =
                 static_cast<std::size_t>(range.sample_offset + output_frame);
             for (std::size_t channel = 0; channel < output.num_channels(); ++channel) {
+                const auto mixer_factor =
+                    mixer.transparent
+                        ? 1.0f
+                        : mixer.factor(timebase::SamplePosition{static_cast<std::int64_t>(
+                                           document_position)},
+                                       channel, output.num_channels());
                 output.channel(channel)[destination_frame] +=
                     source_sample(*clip, channel, output.num_channels(), source_frame, next_frame,
                                   fraction, static_cast<double>(source_position),
                                   source_frames_per_output_frame) *
-                    envelope(*clip, relative);
+                    envelope(*clip, relative) * mixer_factor;
             }
         }
     }
@@ -245,15 +290,20 @@ std::optional<AudioRenderStatus> invalid_audio_program(const AudioTrackRendererP
 }
 
 AudioRenderStatus render_audio_program(const AudioTrackRendererProgram& program,
+                                       const TrackMixerProgram& mixer,
                                        const TransportSnapshot& transport,
                                        const timebase::CompiledTempoMap& tempo_map,
                                        audio::BufferView<float> output) noexcept {
+    TrackMixerRun run;
+    run.reset(mixer);
     for (std::uint8_t index = 0; index < transport.range_count; ++index) {
         const auto& range = transport.ranges[index];
+        if (!run.transparent)
+            run.restart(tempo_map);
         if (range.host_beat_mapping)
-            render_host_beat_mapped_track(program, range, tempo_map, output);
+            render_host_beat_mapped_track(program, range, tempo_map, run, output);
         else
-            render_track(program, range, output);
+            render_track(program, range, tempo_map, run, output);
     }
     return program.clips().empty() ? AudioRenderStatus::Silent : AudioRenderStatus::Rendered;
 }
@@ -297,7 +347,8 @@ AudioRenderStatus ArrangementAudioRenderer::process(const PlaybackProgram& progr
         if (provider.selected != ProviderKind::Arrangement ||
             !provider.available(ProviderKind::Arrangement) || !track->audio_program())
             continue;
-        rendered = render_audio_program(*track->audio_program(), transport, program.tempo_map(),
+        rendered = render_audio_program(*track->audio_program(), track->mixer(), transport,
+                                        program.tempo_map(),
                                         output) == AudioRenderStatus::Rendered ||
                    rendered;
     }
@@ -348,7 +399,8 @@ AudioRenderStatus ArrangementAudioTrackRenderer::process(const PlaybackProgramBl
 
     AudioRenderStatus status = AudioRenderStatus::Silent;
     if (transport.is_playing && arrangement_selected && audio_program != nullptr)
-        status = render_audio_program(*audio_program, transport, program.tempo_map(), output);
+        status = render_audio_program(*audio_program, view.program->mixer(), transport,
+                                      program.tempo_map(), output);
 
     RendererCarryState carry = shell_.state_snapshot();
     carry.key = shell_.active_key();

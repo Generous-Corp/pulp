@@ -454,21 +454,36 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
                 !context.writer.character('}'))
                 return false;
         }
-        static_assert(kAutomationTargetAlternativeCount == 1,
-                      "AutomationTarget gained an alternative: this encoder writes a "
-                      "device_parameter envelope unconditionally and std::get terminates "
-                      "under -fno-exceptions on a different kind. Give the new target its "
-                      "own envelope before widening the variant.");
-        const auto& target = std::get<DeviceParameterTarget>(lane.target());
+        // Every alternative owes an envelope. A target kind that fell off the end
+        // of this dispatch would be a lane saved without what it drives, so the
+        // visit is exhaustive by construction rather than by a trailing else.
         return context.writer.append("],\"target\":") &&
-               write_envelope(
-                   context, "pulp.timeline.automation_target.device_parameter", 1,
-                   [&] {
-                       return context.writer.append("{\"device_placement_id\":") &&
-                              context.writer.u64(target.device_placement_id.value, true) &&
-                              context.writer.append(",\"parameter_id\":") &&
-                              context.writer.u64(target.param_id) && context.writer.character('}');
-                   }) &&
+               std::visit(AutomationTargetCases{
+                              [&](const DeviceParameterTarget& target) {
+                                  return write_envelope(
+                                      context,
+                                      "pulp.timeline.automation_target.device_parameter", 1, [&] {
+                                          return context.writer.append(
+                                                     "{\"device_placement_id\":") &&
+                                                 context.writer.u64(
+                                                     target.device_placement_id.value, true) &&
+                                                 context.writer.append(",\"parameter_id\":") &&
+                                                 context.writer.u64(target.param_id) &&
+                                                 context.writer.character('}');
+                                      });
+                              },
+                              [&](const TrackMixerTarget& target) {
+                                  return write_envelope(
+                                      context, "pulp.timeline.automation_target.track_mixer", 1,
+                                      [&] {
+                                          return context.writer.append("{\"parameter\":") &&
+                                                 context.writer.quoted(
+                                                     track_mixer_parameter_name(target.parameter)) &&
+                                                 context.writer.character('}');
+                                      });
+                              },
+                          },
+                          lane.target()) &&
                context.writer.character('}');
     });
 }
@@ -562,8 +577,20 @@ bool write_track(EncodeContext& context, const Track& track) {
                     !context.writer.character('}'))
                     return false;
             }
-            if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true) ||
-                !context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
+            if (!context.writer.append(",\"id\":") || !context.writer.u64(track.id().value, true))
+                return false;
+            // A default mixer is written as absence, so a document that never
+            // touched a fader stays byte-identical to its pre-mixer form.
+            if (track.mixer() != TrackMixer{}) {
+                if (!context.writer.append(",\"mixer\":{\"gain_linear_bits\":") ||
+                    !context.writer.u64(std::bit_cast<std::uint32_t>(track.mixer().gain_linear),
+                                        true) ||
+                    !context.writer.append(",\"pan_bits\":") ||
+                    !context.writer.u64(std::bit_cast<std::uint32_t>(track.mixer().pan), true) ||
+                    !context.writer.character('}'))
+                    return false;
+            }
+            if (!context.writer.append(",\"name\":") || !context.writer.quoted(track.name()) ||
                 !context.writer.append(",\"record_armed\":") ||
                 !context.writer.append(track.record_armed() ? "true" : "false") ||
                 !context.writer.append(",\"take_lanes\":["))

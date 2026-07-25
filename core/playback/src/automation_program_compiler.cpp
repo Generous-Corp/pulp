@@ -44,7 +44,7 @@ void AutomationProgramCompiler::reset(
     generation_ = generation;
     stage_ = Stage::Validate;
     index_ = 0;
-    target_ = {};
+    target_ = timeline::AutomationTarget{};
     knots_.clear();
     knots_.reserve(lane.curve().points().size());
     segments_.clear();
@@ -59,10 +59,9 @@ AutomationProgramCompiler::step() {
             return fail(AutomationProgramErrorCode::InvalidGeneration, lane_->id());
         if (!tempo_map_)
             return fail(AutomationProgramErrorCode::MissingTempoMap, lane_->id());
-        const auto* target = std::get_if<timeline::DeviceParameterTarget>(&lane_->target());
-        if (!target)
-            return fail(AutomationProgramErrorCode::UnsupportedTarget, lane_->id());
-        target_ = *target;
+        // Every authored target kind lowers to the same curve; what differs is
+        // who consumes it, which is decided by the target the program carries.
+        target_ = lane_->target();
         stage_ = Stage::Knots;
         return runtime::Ok(AutomationProgramCompileStatus::Pending);
     }

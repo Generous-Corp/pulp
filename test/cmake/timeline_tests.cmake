@@ -90,6 +90,7 @@ pulp_add_test_suite(pulp-test-playback-audio-renderer
     SOURCES test_playback_audio_renderer.cpp
         test_playback_audio_renderer_conversion.cpp
         test_playback_track_freeze.cpp
+        test_playback_track_mixer.cpp
         harness/rt_allocation_probe.cpp
     LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
         pulp::runtime)
@@ -163,7 +164,7 @@ endif()
 pulp_add_test_suite(pulp-test-timeline-commands
     SOURCES test_timeline_commands.cpp test_timeline_automation_commands.cpp
         test_timeline_take_commands.cpp test_timeline_track_freeze.cpp
-        test_timeline_marker_commands.cpp
+        test_timeline_marker_commands.cpp test_timeline_track_mixer.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)

@@ -33,7 +33,8 @@ TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                            std::uint64_t expanded_clip_count,
                            std::uint64_t expanded_note_event_count,
                            std::uint64_t generated_id_start,
-                           std::uint64_t generated_id_count) noexcept
+                           std::uint64_t generated_id_count,
+                           TrackMixerProgram mixer) noexcept
     : id_(id), generation_(generation), provider_(provider), state_policy_(state_policy),
       clip_ids_(std::move(clip_ids)), note_events_(std::move(note_events)),
       note_modifiers_(std::move(note_modifiers)), audio_program_(std::move(audio_program)),
@@ -42,7 +43,7 @@ TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
       expanded_clip_count_(expanded_clip_count),
       expanded_note_event_count_(expanded_note_event_count),
       generated_id_start_(generated_id_start),
-      generated_id_count_(generated_id_count) {}
+      generated_id_count_(generated_id_count), mixer_(mixer) {}
 
 PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                                  timeline::ItemId project_id, timeline::ItemId sequence_id,

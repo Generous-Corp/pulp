@@ -297,6 +297,13 @@ struct SetClipSequenceRef {
     ItemId clip_id;
     SequenceRef expected;
     SequenceRef replacement;
+// Replaces the track's own level and stereo placement under an exact optimistic
+// gate. Carrying both values keeps undo and journal replay self-contained.
+struct SetTrackMixer {
+    ItemId sequence_id;
+    ItemId track_id;
+    TrackMixer expected;
+    TrackMixer replacement;
 };
 
 using Command =
@@ -306,7 +313,7 @@ using Command =
                  SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
                  SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
-                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef>;
+                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef, SetTrackMixer>;
 
 struct CommandEnvelope {
     CommandId id;

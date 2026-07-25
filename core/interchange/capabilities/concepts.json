@@ -45,13 +45,13 @@
     { "id": "timecode.origin", "detect": "format", "summary": "The wall-clock timecode the document's zero position represents." },
     { "id": "media.provenance", "detect": "format", "summary": "Where a media asset came from: source timecode, reel or tape name, original locator." },
 
-    { "id": "mixer.track-gain", "detect": "format", "summary": "Static per-track gain." },
-    { "id": "mixer.track-pan", "detect": "format", "summary": "Static per-track pan position." },
+    { "id": "mixer.track-gain", "detect": "model", "summary": "Static per-track gain." },
+    { "id": "mixer.track-pan", "detect": "model", "summary": "Static per-track pan position." },
     { "id": "mixer.sends", "detect": "format", "summary": "Track routing to busses and auxiliary sends." },
 
     { "id": "automation.device-param", "detect": "model", "summary": "An automation lane targeting a device parameter." },
-    { "id": "automation.track-gain", "detect": "format", "summary": "An automation lane targeting a track's gain." },
-    { "id": "automation.track-pan", "detect": "format", "summary": "An automation lane targeting a track's pan." },
+    { "id": "automation.track-gain", "detect": "model", "summary": "An automation lane targeting a track's gain." },
+    { "id": "automation.track-pan", "detect": "model", "summary": "An automation lane targeting a track's pan." },
 
     { "id": "device.placement", "detect": "model", "summary": "A device occupying a slot in a track's chain, by identity." },
     { "id": "device.payload", "detect": "format", "summary": "A device's type and saved parameter state." },

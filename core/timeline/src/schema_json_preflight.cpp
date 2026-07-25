@@ -704,6 +704,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"device_chain"},
             detail::JsonSpanMember{"freeze"},
             detail::JsonSpanMember{"id"},
+            detail::JsonSpanMember{"mixer"},
             detail::JsonSpanMember{"name"},
             detail::JsonSpanMember{"record_armed"},
             detail::JsonSpanMember{"take_lanes"},
@@ -714,30 +715,36 @@ class StructuralScanner {
         const auto clips = requested[1].span;
         const auto devices = requested[2].span;
         const auto freeze = requested[3].span;
-        const auto record_armed = requested[6].span;
-        const auto take_lanes = requested[7].span;
+        const auto mixer = requested[5].span;
+        const auto record_armed = requested[7].span;
+        const auto take_lanes = requested[8].span;
         const auto has_automation = requested[0].found;
         const auto has_clips = requested[1].found;
         const auto has_devices = requested[2].found;
         const auto has_freeze = requested[3].found;
-        const auto has_record_armed = requested[6].found;
-        const auto has_take_lanes = requested[7].found;
+        const auto has_mixer = requested[5].found;
+        const auto has_record_armed = requested[7].found;
+        const auto has_take_lanes = requested[8].found;
         if (!require_shape(requested[4], StringShape, data.begin, data_path) ||
-            !require_shape(requested[5], StringShape, data.begin, data_path))
+            !require_shape(requested[6], StringShape, data.begin, data_path))
             return false;
         const auto requires_devices = detail::track_schema_policy.requires_device_chain(version);
         const auto requires_automation = detail::track_schema_policy.requires_automation(version);
         const auto requires_takes = detail::track_schema_policy.requires_takes(version);
         const auto supports_freeze = detail::track_schema_policy.supports_freeze(version);
+        const auto supports_mixer = detail::track_schema_policy.supports_mixer(version);
         if (!has_clips || requires_devices != has_devices ||
             requires_automation != has_automation || requires_takes != has_take_lanes ||
             requires_takes != has_record_armed || (!supports_freeze && has_freeze) ||
+            (!supports_mixer && has_mixer) ||
             (has_take_lanes && !has_shape(take_lanes, ArrayShape)) ||
             (has_record_armed && !has_shape(record_armed, BooleanShape))) {
             auto invalid_path = path + "/data/clips";
             if (has_clips) {
                 if (!supports_freeze && has_freeze)
                     invalid_path = path + "/data/freeze";
+                else if (!supports_mixer && has_mixer)
+                    invalid_path = path + "/data/mixer";
                 else if (requires_takes != has_record_armed ||
                          (has_record_armed && !has_shape(record_armed, BooleanShape)))
                     invalid_path = path + "/data/record_armed";
@@ -761,6 +768,10 @@ class StructuralScanner {
              !require_member(freeze, "render_plan_hash", StringShape, data_path + "/freeze") ||
              !require_member(freeze, "sample_rate", ObjectShape, data_path + "/freeze") ||
              !require_member(freeze, "source_start", StringShape, data_path + "/freeze")))
+            return false;
+        if (has_mixer &&
+            (!require_member(mixer, "gain_linear_bits", StringShape, data_path + "/mixer") ||
+             !require_member(mixer, "pan_bits", StringShape, data_path + "/mixer")))
             return false;
         if (!governed_array(clips, counts_.clips, limits_.max_clips, path + "/data/clips",
                             [&](Span element, std::size_t index) {
@@ -895,7 +906,13 @@ class StructuralScanner {
         if (!envelope(target, target_envelope.type, target_envelope.version, target_envelope.data,
                       target_envelope.valid_shape))
             return false;
-        if (target_envelope.type != "pulp.timeline.automation_target.device_parameter" ||
+        // Each target kind declares its own envelope; one that names neither is
+        // refused here rather than being read as the other kind downstream.
+        const bool device_target =
+            target_envelope.type == "pulp.timeline.automation_target.device_parameter";
+        const bool mixer_target =
+            target_envelope.type == "pulp.timeline.automation_target.track_mixer";
+        if ((!device_target && !mixer_target) ||
             !require_structural_shape(target_envelope.valid_shape, target_envelope.version,
                                       data_path + "/target", target.begin)) {
             if (!has_error_)
@@ -903,6 +920,9 @@ class StructuralScanner {
                           data_path + "/target");
             return false;
         }
+        if (mixer_target)
+            return require_member(target_envelope.data, "parameter", StringShape,
+                                  data_path + "/target/data");
         return require_member(target_envelope.data, "device_placement_id", StringShape,
                               data_path + "/target/data") &&
                require_member(target_envelope.data, "parameter_id", NumberShape,
