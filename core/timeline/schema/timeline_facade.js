@@ -338,6 +338,7 @@ export const timelineSchema = Object.freeze({
     domain: "Document",
     version: 1,
     fields: Object.freeze([
+      Object.freeze({ name: "color", kind: "U32", jsType: "number", required: false }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "position", kind: "I64String", jsType: "string", required: true }),
@@ -346,7 +347,7 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.project": Object.freeze({
     schemaType: "pulp.timeline.project",
     domain: "Document",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
       Object.freeze({ name: "assets", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
@@ -356,6 +357,7 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "next_item_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "root_sequence_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "sequences", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "session_start", kind: "Object", jsType: "object", required: false }),
       Object.freeze({ name: "tempo_map", kind: "Array", jsType: "array", required: false }),
     ]),
   }),
@@ -364,6 +366,7 @@ export const timelineSchema = Object.freeze({
     domain: "Document",
     version: 1,
     fields: Object.freeze([
+      Object.freeze({ name: "color", kind: "U32", jsType: "number", required: false }),
       Object.freeze({ name: "duration", kind: "I64String", jsType: "string", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),

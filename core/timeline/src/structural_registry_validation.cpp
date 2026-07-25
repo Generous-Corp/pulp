@@ -1,4 +1,5 @@
 #include "asset_schema_policy.hpp"
+#include "project_schema_policy.hpp"
 #include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
@@ -55,6 +56,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"next_item_id", SchemaValueKind::U64String},
         {"root_sequence_id", SchemaValueKind::U64String},
         {"sequences", SchemaValueKind::Array},
+        {"session_start", SchemaValueKind::Object, false},
         {"tempo_map", SchemaValueKind::Array, false},
     };
     static constexpr ExpectedField asset_fields[] = {
@@ -80,14 +82,14 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"tracks", SchemaValueKind::Array},
     };
     static constexpr ExpectedField marker_fields[] = {
+        {"color", SchemaValueKind::U32, false},
         {"id", SchemaValueKind::U64String},
         {"name", SchemaValueKind::String},
         {"position", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField region_fields[] = {
-        {"duration", SchemaValueKind::I64String},
-        {"id", SchemaValueKind::U64String},
-        {"name", SchemaValueKind::String},
+        {"color", SchemaValueKind::U32, false},   {"duration", SchemaValueKind::I64String},
+        {"id", SchemaValueKind::U64String},       {"name", SchemaValueKind::String},
         {"position", SchemaValueKind::I64String},
     };
     static constexpr ExpectedField track_fields[] = {
@@ -141,7 +143,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"notes", SchemaValueKind::Array},
     };
     constexpr RequiredSchema required[] = {
-        {SchemaDomain::Document, "pulp.timeline.project", project_fields},
+        {SchemaDomain::Document, project_schema_policy.type_name, project_fields,
+         project_schema_policy.current_version, project_schema_policy.oldest_readable_version},
         {SchemaDomain::Document, asset_schema_policy.type_name, asset_fields,
          asset_schema_policy.current_version, asset_schema_policy.oldest_readable_version},
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",

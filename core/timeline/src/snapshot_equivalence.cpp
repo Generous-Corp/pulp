@@ -49,12 +49,13 @@ bool same_take_lane(const TakeLane& lhs, const TakeLane& rhs) noexcept {
 }
 
 bool same_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
-    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position;
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.color == rhs.color;
 }
 
 bool same_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
     return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
-           lhs.duration == rhs.duration;
+           lhs.duration == rhs.duration && lhs.color == rhs.color;
 }
 
 } // namespace
@@ -63,7 +64,8 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
         lhs.next_item_id() != rhs.next_item_id() ||
         lhs.root_sequence_id() != rhs.root_sequence_id() || lhs.tempo_map() != rhs.tempo_map() ||
-        lhs.meter_map() != rhs.meter_map() || lhs.assets().size() != rhs.assets().size() ||
+        lhs.meter_map() != rhs.meter_map() || lhs.session_start() != rhs.session_start() ||
+        lhs.assets().size() != rhs.assets().size() ||
         lhs.sequences().size() != rhs.sequences().size())
         return false;
     for (std::size_t i = 0; i < lhs.assets().size(); ++i) {

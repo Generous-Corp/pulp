@@ -2,6 +2,8 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "project_schema_migrations.hpp"
+#include "project_schema_policy.hpp"
 #include "sequence_schema_migrations.hpp"
 #include "sequence_schema_policy.hpp"
 #include "take_lane_schema_migrations.hpp"
@@ -260,16 +262,22 @@ runtime::Result<SchemaRegistry, SchemaError> SchemaRegistryBuilder::build() && {
 runtime::Result<SchemaRegistration, SchemaError>
 register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     std::vector<TypeSchema> schemas;
-    schemas.push_back(builtin("pulp.timeline.project", SchemaDomain::Document,
-                              {{"assets", SchemaValueKind::Array},
-                               {"id", SchemaValueKind::U64String},
-                               {"identities", SchemaValueKind::Array, false},
-                               {"meter_map", SchemaValueKind::Array, false},
-                               {"name", SchemaValueKind::String},
-                               {"next_item_id", SchemaValueKind::U64String},
-                               {"root_sequence_id", SchemaValueKind::U64String},
-                               {"sequences", SchemaValueKind::Array},
-                               {"tempo_map", SchemaValueKind::Array, false}}));
+    auto project =
+        builtin(std::string(detail::project_schema_policy.type_name), SchemaDomain::Document,
+                {{"assets", SchemaValueKind::Array},
+                 {"id", SchemaValueKind::U64String},
+                 {"identities", SchemaValueKind::Array, false},
+                 {"meter_map", SchemaValueKind::Array, false},
+                 {"name", SchemaValueKind::String},
+                 {"next_item_id", SchemaValueKind::U64String},
+                 {"root_sequence_id", SchemaValueKind::U64String},
+                 {"sequences", SchemaValueKind::Array},
+                 {"session_start", SchemaValueKind::Object, false},
+                 {"tempo_map", SchemaValueKind::Array, false}},
+                detail::project_schema_policy.current_version);
+    project.upgrades.push_back({1, 2, {}, detail::migrate_project_v1_to_v2});
+    project.downgrades.push_back({2, 1, {}, detail::migrate_project_v2_to_v1});
+    schemas.push_back(std::move(project));
     auto asset = builtin(std::string(detail::asset_schema_policy.type_name), SchemaDomain::Document,
                          {{"content_hash", SchemaValueKind::String},
                           {"frame_count", SchemaValueKind::U64String},
@@ -304,11 +312,13 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
     schemas.push_back(std::move(sequence));
     schemas.push_back(builtin("pulp.timeline.marker", SchemaDomain::Document,
-                              {{"id", SchemaValueKind::U64String},
+                              {{"color", SchemaValueKind::U32, false},
+                               {"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
                                {"position", SchemaValueKind::I64String}}));
     schemas.push_back(builtin("pulp.timeline.region", SchemaDomain::Document,
-                              {{"duration", SchemaValueKind::I64String},
+                              {{"color", SchemaValueKind::U32, false},
+                               {"duration", SchemaValueKind::I64String},
                                {"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
                                {"position", SchemaValueKind::I64String}}));

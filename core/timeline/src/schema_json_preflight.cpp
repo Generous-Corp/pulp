@@ -3,6 +3,7 @@
 #include "asset_schema_policy.hpp"
 #include "bounded_increment.hpp"
 #include "json_span_reader.hpp"
+#include "project_schema_policy.hpp"
 #include "schema_json_validation.hpp"
 #include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
@@ -266,11 +267,13 @@ class StructuralScanner {
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape))
             return false;
-        if (type != "pulp.timeline.project") {
+        if (type != detail::project_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, "", value.begin))
+        if (!require_structural_shape(valid_shape, version, "", value.begin,
+                                      detail::project_schema_policy.oldest_readable_version,
+                                      detail::project_schema_policy.current_version))
             return false;
         std::array requested{
             detail::JsonSpanMember{"assets"},
@@ -279,6 +282,7 @@ class StructuralScanner {
             detail::JsonSpanMember{"next_item_id"},
             detail::JsonSpanMember{"root_sequence_id"},
             detail::JsonSpanMember{"sequences"},
+            detail::JsonSpanMember{"session_start"},
         };
         if (!members(data, requested))
             return false;
@@ -302,6 +306,19 @@ class StructuralScanner {
         }
         if (!has_assets || !has_sequences) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, "/data");
+            return false;
+        }
+        // The session origin is optional, but a payload older than its
+        // introducing version may not carry it at all.
+        if (requested[6].found &&
+            (!detail::project_schema_policy.supports_session_start(version) ||
+             !has_shape(requested[6].span, ObjectShape) ||
+             !require_member(requested[6].span, "sample_rate", ObjectShape,
+                             "/data/session_start") ||
+             !require_member(requested[6].span, "start", StringShape, "/data/session_start"))) {
+            if (!has_error_)
+                set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                          "/data/session_start");
             return false;
         }
         if (has_assets &&
@@ -546,10 +563,20 @@ class StructuralScanner {
         if (!require_structural_shape(valid_shape, version, path, value.begin))
             return false;
         const auto data_path = path + "/data";
-        return require_member(data, "id", StringShape, data_path) &&
-               require_member(data, "name", StringShape, data_path) &&
-               require_member(data, "position", StringShape, data_path) &&
-               (!has_duration || require_member(data, "duration", StringShape, data_path));
+        if (!require_member(data, "id", StringShape, data_path) ||
+            !require_member(data, "name", StringShape, data_path) ||
+            !require_member(data, "position", StringShape, data_path) ||
+            (has_duration && !require_member(data, "duration", StringShape, data_path)))
+            return false;
+        Span color;
+        bool has_color = false;
+        if (!member(data, "color", color, has_color))
+            return false;
+        if (has_color && !has_shape(color, NumberShape)) {
+            set_error(PersistenceErrorCode::InvalidSchema, color.begin, 0, 0, data_path + "/color");
+            return false;
+        }
+        return true;
     }
 
     bool walk_track(Span value, const std::string& path) {

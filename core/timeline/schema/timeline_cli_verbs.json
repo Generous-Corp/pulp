@@ -980,6 +980,13 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U32",
+          "name": "color",
+          "required": false,
+          "schema_field": "color",
+          "value_type": "uint"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
@@ -1065,6 +1072,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Object",
+          "name": "session-start",
+          "required": false,
+          "schema_field": "session_start",
+          "value_type": "json"
+        },
+        {
           "kind": "Array",
           "name": "tempo-map",
           "required": false,
@@ -1074,11 +1088,18 @@
       ],
       "name": "timeline:project",
       "schema_type": "pulp.timeline.project",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Document",
       "flags": [
+        {
+          "kind": "U32",
+          "name": "color",
+          "required": false,
+          "schema_field": "color",
+          "value_type": "uint"
+        },
         {
           "kind": "I64String",
           "name": "duration",

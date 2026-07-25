@@ -14,6 +14,7 @@ function(pulp_resolve_timeline_sources root output)
         journal.cpp
         json_span_reader.cpp
         model.cpp
+        project_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp
         transaction_marker_internal.cpp

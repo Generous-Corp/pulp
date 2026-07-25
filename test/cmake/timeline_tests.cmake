@@ -279,6 +279,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/project_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_codegen.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp

@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
 #include "sequence_schema_policy.hpp"
@@ -531,7 +532,12 @@ bool write_track(EncodeContext& context, const Track& track) {
 
 bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
     return write_envelope(context, "pulp.timeline.marker", 1, [&] {
-        return context.writer.append("{\"id\":") && context.writer.u64(marker.id.value, true) &&
+        if (!context.writer.character('{'))
+            return false;
+        if (marker.color && (!context.writer.append("\"color\":") ||
+                             !context.writer.u64(*marker.color) || !context.writer.character(',')))
+            return false;
+        return context.writer.append("\"id\":") && context.writer.u64(marker.id.value, true) &&
                context.writer.append(",\"name\":") && context.writer.quoted(marker.name) &&
                context.writer.append(",\"position\":") &&
                context.writer.i64(marker.position.value, true) && context.writer.character('}');
@@ -540,7 +546,12 @@ bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
 
 bool write_region(EncodeContext& context, const SequenceRegion& region) {
     return write_envelope(context, "pulp.timeline.region", 1, [&] {
-        return context.writer.append("{\"duration\":") &&
+        if (!context.writer.character('{'))
+            return false;
+        if (region.color && (!context.writer.append("\"color\":") ||
+                             !context.writer.u64(*region.color) || !context.writer.character(',')))
+            return false;
+        return context.writer.append("\"duration\":") &&
                context.writer.i64(region.duration.value, true) &&
                context.writer.append(",\"id\":") && context.writer.u64(region.id.value, true) &&
                context.writer.append(",\"name\":") && context.writer.quoted(region.name) &&
@@ -663,54 +674,66 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         }
     }
     EncodeContext context{JsonWriter(options.max_output_bytes), registry, false, std::nullopt};
-    const auto wrote = write_envelope(context, "pulp.timeline.project", 1, [&] {
-        if (!context.writer.append("{\"assets\":["))
-            return false;
-        for (std::size_t index = 0; index < project.assets().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_asset(context, project.assets()[index]))
+    const auto wrote = write_envelope(
+        context, detail::project_schema_policy.type_name,
+        detail::project_schema_policy.current_version, [&] {
+            if (!context.writer.append("{\"assets\":["))
                 return false;
-        if (!context.writer.append("],\"id\":") || !context.writer.u64(project.id().value, true) ||
-            !context.writer.append(",\"identities\":["))
-            return false;
-        const auto identities = detail::ProjectStateAccess::identity_entries(project);
-        for (std::size_t index = 0; index < identities.size(); ++index) {
-            const auto& identity = identities[index];
-            const auto& location = identity.location;
-            if ((index != 0 && !context.writer.character(',')) ||
-                !context.writer.append("{\"active\":") ||
-                !context.writer.append(location.active ? "true" : "false") ||
-                !context.writer.append(",\"clip_id\":") ||
-                !context.writer.u64(location.clip_id.value, true) ||
-                !context.writer.append(",\"id\":") ||
-                !context.writer.u64(identity.item.value, true) ||
-                !context.writer.append(",\"kind\":") ||
-                !context.writer.quoted(item_kind_name(location.kind)) ||
-                !context.writer.append(",\"parent_id\":") ||
-                !context.writer.u64(location.parent_id.value, true) ||
-                !context.writer.append(",\"sequence_id\":") ||
-                !context.writer.u64(location.sequence_id.value, true) ||
-                !context.writer.append(",\"track_id\":") ||
-                !context.writer.u64(location.track_id.value, true) ||
-                !context.writer.character('}'))
+            for (std::size_t index = 0; index < project.assets().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_asset(context, project.assets()[index]))
+                    return false;
+            if (!context.writer.append("],\"id\":") ||
+                !context.writer.u64(project.id().value, true) ||
+                !context.writer.append(",\"identities\":["))
                 return false;
-        }
-        if (!context.writer.append("],\"meter_map\":") ||
-            !write_meter_map(context, project.meter_map()) ||
-            !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
-            !context.writer.append(",\"next_item_id\":") ||
-            !context.writer.u64(project.next_item_id(), true) ||
-            !context.writer.append(",\"root_sequence_id\":") ||
-            !context.writer.u64(project.root_sequence_id().value, true) ||
-            !context.writer.append(",\"sequences\":["))
-            return false;
-        for (std::size_t index = 0; index < project.sequences().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_sequence(context, project.sequences()[index]))
+            const auto identities = detail::ProjectStateAccess::identity_entries(project);
+            for (std::size_t index = 0; index < identities.size(); ++index) {
+                const auto& identity = identities[index];
+                const auto& location = identity.location;
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.append("{\"active\":") ||
+                    !context.writer.append(location.active ? "true" : "false") ||
+                    !context.writer.append(",\"clip_id\":") ||
+                    !context.writer.u64(location.clip_id.value, true) ||
+                    !context.writer.append(",\"id\":") ||
+                    !context.writer.u64(identity.item.value, true) ||
+                    !context.writer.append(",\"kind\":") ||
+                    !context.writer.quoted(item_kind_name(location.kind)) ||
+                    !context.writer.append(",\"parent_id\":") ||
+                    !context.writer.u64(location.parent_id.value, true) ||
+                    !context.writer.append(",\"sequence_id\":") ||
+                    !context.writer.u64(location.sequence_id.value, true) ||
+                    !context.writer.append(",\"track_id\":") ||
+                    !context.writer.u64(location.track_id.value, true) ||
+                    !context.writer.character('}'))
+                    return false;
+            }
+            if (!context.writer.append("],\"meter_map\":") ||
+                !write_meter_map(context, project.meter_map()) ||
+                !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
+                !context.writer.append(",\"next_item_id\":") ||
+                !context.writer.u64(project.next_item_id(), true) ||
+                !context.writer.append(",\"root_sequence_id\":") ||
+                !context.writer.u64(project.root_sequence_id().value, true) ||
+                !context.writer.append(",\"sequences\":["))
                 return false;
-        return context.writer.append("],\"tempo_map\":") &&
-               write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
-    });
+            for (std::size_t index = 0; index < project.sequences().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_sequence(context, project.sequences()[index]))
+                    return false;
+            if (!context.writer.character(']'))
+                return false;
+            if (project.session_start() &&
+                (!context.writer.append(",\"session_start\":{\"sample_rate\":") ||
+                 !write_rate(context, project.session_start()->sample_rate) ||
+                 !context.writer.append(",\"start\":") ||
+                 !context.writer.i64(project.session_start()->start.value, true) ||
+                 !context.writer.character('}')))
+                return false;
+            return context.writer.append(",\"tempo_map\":") &&
+                   write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
+        });
     if (!wrote) {
         if (context.failure)
             return runtime::Result<SerializedSnapshot, PersistenceError>(

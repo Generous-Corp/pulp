@@ -89,12 +89,13 @@ std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
 }
 
 bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
-    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position;
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.color == rhs.color;
 }
 
 bool equal_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
     return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
-           lhs.duration == rhs.duration;
+           lhs.duration == rhs.duration && lhs.color == rhs.color;
 }
 
 bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {

@@ -67,6 +67,7 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidAssetStoragePolicy,
     InvalidMarker,
     InvalidRegion,
+    InvalidSessionStart,
 };
 
 struct ModelError {
@@ -506,10 +507,21 @@ class Track {
 // A region is not a clip: it holds no content and never renders. When the
 // sequence declares a musical duration, a marker's position and a region's whole
 // span must lie inside it.
+//
+// Both are owned by the Sequence, not the Project. A Project holds many
+// sequences, so a project-level annotation list could not say which timeline it
+// annotates; sequence ownership makes the annotated timeline structural rather
+// than conventional.
+//
+// `color` is a packed 0xRRGGBBAA value, not a float colour: the document model
+// stores exact bytes that compare and re-serialize identically, and the float
+// colour types live in render layers outside this module's dependency floor.
+// It is optional — absent means the presentation layer chooses.
 struct SequenceMarker {
     ItemId id;
     std::string name;
     timebase::TickPosition position;
+    std::optional<std::uint32_t> color;
 };
 
 // Regions MAY overlap, including full containment. Named sections nest by
@@ -522,6 +534,7 @@ struct SequenceRegion {
     std::string name;
     timebase::TickPosition position;
     timebase::TickDuration duration;
+    std::optional<std::uint32_t> color;
 };
 
 class Sequence {
@@ -568,6 +581,20 @@ class Sequence {
     std::shared_ptr<const Data> data_;
 };
 
+// Where this session's zero sits on the source/house clock — the document form
+// of "this session starts at 01:00:00:00". Stored as an absolute sample offset
+// paired with its own rational rate, never as a formatted timecode string:
+// frame-rate formatting is a presentation concern and a string would make the
+// same instant compare unequal across display rates.
+struct SessionStart {
+    timebase::SamplePosition start;
+    timebase::RationalRate sample_rate;
+
+    constexpr bool operator==(const SessionStart& other) const noexcept {
+        return start == other.start && sample_rate == other.sample_rate;
+    }
+};
+
 struct ProjectInput {
     ItemId id;
     std::string name;
@@ -577,6 +604,7 @@ struct ProjectInput {
     std::vector<Sequence> sequences;
     timebase::TempoMap tempo_map{};
     timebase::MeterMap meter_map{};
+    std::optional<SessionStart> session_start;
 };
 
 enum class ItemKind : std::uint8_t {
@@ -676,6 +704,7 @@ class Project {
     std::span<const Sequence> sequences() const noexcept;
     const timebase::TempoMap& tempo_map() const noexcept;
     const timebase::MeterMap& meter_map() const noexcept;
+    const std::optional<SessionStart>& session_start() const noexcept;
     const MediaAsset* find_asset(ItemId id) const noexcept;
     const Sequence* find_sequence(ItemId id) const noexcept;
     std::optional<ItemLocation> locate(ItemId id) const noexcept;

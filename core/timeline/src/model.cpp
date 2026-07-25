@@ -678,6 +678,7 @@ struct Project::Data {
     std::vector<Sequence> sequences;
     timebase::TempoMap tempo_map;
     timebase::MeterMap meter_map;
+    std::optional<SessionStart> session_start;
     detail::IdentityDirectory identities;
 };
 
@@ -876,6 +877,14 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     visit_project_identities(input, [&](ItemId, ItemLocation) { ++identity_count; });
     std::vector<detail::IdentityRecord> identity_entries;
     identity_entries.reserve(identity_count);
+    // A session origin must be a real point on a real clock: a valid rate and a
+    // non-negative offset. The rate is normalized so the same instant expressed
+    // as 48000/1 and 96000/2 stores and compares identically.
+    if (input.session_start) {
+        if (!input.session_start->sample_rate.valid() || input.session_start->start.value < 0)
+            return fail<Project>(ModelErrorCode::InvalidSessionStart, input.id);
+        input.session_start->sample_rate = input.session_start->sample_rate.normalized();
+    }
     visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
         identity_entries.push_back({id, item_location});
     });
@@ -949,6 +958,7 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                                                   .sequences = std::move(input.sequences),
                                                   .tempo_map = std::move(input.tempo_map),
                                                   .meter_map = std::move(input.meter_map),
+                                                  .session_start = input.session_start,
                                                   .identities = std::move(identities)}))));
 }
 
@@ -972,6 +982,9 @@ std::span<const Sequence> Project::sequences() const noexcept {
 }
 const timebase::TempoMap& Project::tempo_map() const noexcept {
     return data_->tempo_map;
+}
+const std::optional<SessionStart>& Project::session_start() const noexcept {
+    return data_->session_start;
 }
 const timebase::MeterMap& Project::meter_map() const noexcept {
     return data_->meter_map;
@@ -1038,9 +1051,17 @@ Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutati
         std::lower_bound(assets.begin(), assets.end(), asset.id,
                          [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
     assets.insert(position, std::move(asset));
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, next, data_->root_sequence_id, std::move(assets),
-             data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = data_->id,
+                                                  .name = data_->name,
+                                                  .next_item_id = next,
+                                                  .root_sequence_id = data_->root_sequence_id,
+                                                  .assets = std::move(assets),
+                                                  .sequences = data_->sequences,
+                                                  .tempo_map = data_->tempo_map,
+                                                  .meter_map = data_->meter_map,
+                                                  .session_start = data_->session_start,
+                                                  .identities = std::move(identities)}))));
 }
 
 runtime::Result<Project, ModelError>
@@ -1070,10 +1091,17 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
         return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto assets = data_->assets;
     assets.erase(assets.begin() + (found - data_->assets.begin()));
-    return runtime::Result<Project, ModelError>(
-        runtime::Ok(Project(std::make_shared<const Data>(Data{
-            data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, std::move(assets),
-            data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = data_->id,
+                                                  .name = data_->name,
+                                                  .next_item_id = data_->next_item_id,
+                                                  .root_sequence_id = data_->root_sequence_id,
+                                                  .assets = std::move(assets),
+                                                  .sequences = data_->sequences,
+                                                  .tempo_map = data_->tempo_map,
+                                                  .meter_map = data_->meter_map,
+                                                  .session_start = data_->session_start,
+                                                  .identities = std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {

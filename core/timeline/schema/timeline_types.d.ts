@@ -235,12 +235,13 @@ export interface PulpTimelineDevicePlacement {
 
 /** `pulp.timeline.marker` — domain Document, schema version 1. */
 export interface PulpTimelineMarker {
+  color?: number | string;
   id: number | string;
   name: string;
   position: number | string;
 }
 
-/** `pulp.timeline.project` — domain Document, schema version 1. */
+/** `pulp.timeline.project` — domain Document, schema version 2. */
 export interface PulpTimelineProject {
   assets: readonly unknown[];
   id: number | string;
@@ -250,11 +251,13 @@ export interface PulpTimelineProject {
   next_item_id: number | string;
   root_sequence_id: number | string;
   sequences: readonly unknown[];
+  session_start?: Record<string, unknown>;
   tempo_map?: readonly unknown[];
 }
 
 /** `pulp.timeline.region` — domain Document, schema version 1. */
 export interface PulpTimelineRegion {
+  color?: number | string;
   duration: number | string;
   id: number | string;
   name: string;
