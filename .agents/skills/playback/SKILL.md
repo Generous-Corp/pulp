@@ -266,3 +266,16 @@ engine translation unit to native, WAM, and WebCLAP ownership together.
 runtime tests. Those tests exercise `pulp::audio` profile/runtime behavior and
 do not make Heritage profiles part of the immutable playback-program model;
 keep that ownership boundary when extending the shared test inventory.
+
+## Dependency floor
+
+`playback`'s floor is declared in `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py`, which scans both
+`#include <pulp/<module>/...>` in every source file under `core/playback/` and
+`target_link_libraries` in its `CMakeLists.txt`. Both axes must stay inside the
+declared set, so reaching for a format, host, or view type fails the gate even
+when the build would have linked.
+
+The table holds every engine-adjacent module, not just playback, and the selftest
+is generic over it. Adding a module there is how a new `core/` target gets the
+same enforcement; it does not widen anyone else's floor.
