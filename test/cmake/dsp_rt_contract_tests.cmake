@@ -170,3 +170,12 @@ pulp_add_test_suite(pulp-test-signal-feedforward-compressor
     SOURCES test_signal_feedforward_compressor.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 900)
+
+# The circuit-modelled clipper family. Distinct from the memoryless saturator:
+# a capacitor inside the clipping network makes the effective clip point a
+# function of recent history, which is why these are ODEs solved per sample
+# rather than a transfer-function table.
+pulp_add_test_suite(pulp-test-signal-distortion
+    SOURCES test_signal_distortion.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)
