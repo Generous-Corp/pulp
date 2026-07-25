@@ -56,6 +56,7 @@ set(PULP_PERFETTO_SHA256
     "c6fa3d89aee30f7da39402c9cd178c9f2e344544fda5c2109fd8457e319c3a2f"
     CACHE STRING "SHA-256 of the pinned Perfetto perfetto-cpp-sdk-src.zip")
 
+include(GNUInstallDirs)  # CMAKE_INSTALL_INCLUDEDIR for the install interface
 include(FetchContent)
 FetchContent_Declare(perfetto
     URL "https://github.com/google/perfetto/releases/download/${PULP_PERFETTO_VERSION}/perfetto-cpp-sdk-src.zip"
@@ -67,7 +68,16 @@ FetchContent_Declare(perfetto
 FetchContent_MakeAvailable(perfetto)
 
 add_library(pulp-perfetto STATIC "${perfetto_SOURCE_DIR}/perfetto.cc")
-target_include_directories(pulp-perfetto PUBLIC "${perfetto_SOURCE_DIR}")
+# BUILD_INTERFACE/INSTALL_INTERFACE rather than a bare path: with PULP_TRACING=ON
+# these targets are part of the installed PulpTargets export (see
+# PulpInstallRules.cmake), so a consumer building against the SDK resolves
+# perfetto.h from the install tree, not from this machine's FetchContent dir.
+target_include_directories(pulp-perfetto PUBLIC
+    "$<BUILD_INTERFACE:${perfetto_SOURCE_DIR}>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+# Remember where the amalgamated header lives so the install rules can ship it.
+set(PULP_PERFETTO_SOURCE_DIR "${perfetto_SOURCE_DIR}" CACHE INTERNAL
+    "Perfetto SDK source dir (perfetto.h/.cc) for install rules")
 set_target_properties(pulp-perfetto PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Silence the amalgamation's own warnings so it never trips a -Werror tree; the
 # MSVC flags are the hard-won set from melatonin_perfetto (large TU + conformance).

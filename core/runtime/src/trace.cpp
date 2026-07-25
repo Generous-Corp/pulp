@@ -30,6 +30,8 @@ bool tracing_reminder_first_time(std::atomic<bool>& already_emitted) {
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <thread>
 #include <memory>
 #include <mutex>
 
@@ -151,7 +153,37 @@ bool Tracing::active() {
     return static_cast<bool>(g_session);
 }
 
-void Tracing::attach() { g_refcount.fetch_add(1, std::memory_order_relaxed); }
+void Tracing::attach() {
+    const bool first = g_refcount.fetch_add(1, std::memory_order_relaxed) == 0;
+    if (!first) return;
+
+    // Env-driven autostart. A plug-in has no main() to call Tracing::start(),
+    // so without this a PULP_TRACING=ON plug-in could never actually record —
+    // the session API existed but nothing reached it. Setting PULP_TRACE_PATH
+    // in the host's environment is the whole opt-in.
+    const char* path = std::getenv("PULP_TRACE_PATH");
+    if (!path || !*path || active()) return;
+    start({}, path);
+
+    // PULP_TRACE_SECONDS already caps the Perfetto buffer duration, but the
+    // .pftrace is only written by stop(). Without a timed stop the file would
+    // appear only when the last instance detaches, which for an editor session
+    // means closing the plug-in — awkward when the thing being profiled IS the
+    // open editor. Flush on a timer instead so the capture is self-completing.
+    if (const char* s = std::getenv("PULP_TRACE_SECONDS"); s && *s) {
+        if (int secs = std::atoi(s); secs > 0) {
+            std::thread([secs] {
+                std::this_thread::sleep_for(std::chrono::seconds(secs));
+                if (active()) {
+                    auto r = stop();
+                    if (r.ok)
+                        log_info("Tracing: auto-flushed {} bytes to {}",
+                                 r.trace_bytes, r.path);
+                }
+            }).detach();
+        }
+    }
+}
 
 void Tracing::detach() {
     // Last owner gone — tear the session down (flush) if one is still active.

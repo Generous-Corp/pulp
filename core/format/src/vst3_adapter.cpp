@@ -20,6 +20,7 @@
 #include <pulp/format/ara.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
@@ -227,6 +228,15 @@ inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
+    // Reference-counted tracing attachment (no-op unless PULP_TRACING=ON).
+    // A plug-in has no main(), so this is where a dev build picks up
+    // $PULP_TRACE_PATH and starts recording; the matching detach() in the
+    // destructor flushes the .pftrace once the last instance goes away.
+    runtime::Tracing::attach();
+}
+
+PulpVst3Processor::~PulpVst3Processor() {
+    runtime::Tracing::detach();
 }
 
 tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {

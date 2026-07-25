@@ -38,6 +38,7 @@
 #endif
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>  // no-op unless PULP_TRACING=ON
 
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
@@ -412,6 +413,7 @@ public:
     }
 
     void handle_mouse_move(LPARAM lp, WPARAM wp) {
+        PULP_TRACE_SCOPE_NAMED("state", "wm_mousemove");
         // WM_MOUSEMOVE also fires for plain hover, and mouse capture keeps
         // delivering moves after the button is released outside the window.
         if (!drag_target_ ||
@@ -802,6 +804,10 @@ private:
 
     // Shared scene paint (matches the macOS plugin GPU host).
     void paint_scene(canvas::Canvas& canvas) {
+        // Background fill + layout + view-tree paint. The nested
+        // layout/layout_children span from View::layout_children() lands inside
+        // this one, which is what makes layout-vs-paint attribution possible.
+        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
@@ -832,6 +838,11 @@ private:
     }
 
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
+        // The real per-frame drive point (paint -> submit -> present below).
+        // Mirrors the macOS host so a Windows trace is readable with the same
+        // queries; without it the Windows editor showed only gpu_submit /
+        // gpu_present and there was no frame span to attribute them to.
+        PULP_TRACE_SCOPE_NAMED("render", "frame");
         if (!gpu_surface_ || !skia_surface_) return false;
         if (idle_callback_) idle_callback_();
         // Swapchain acquire, instrumented because it is the one part of the

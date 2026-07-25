@@ -74,6 +74,7 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                           public Steinberg::Vst::INoteExpressionController {
 public:
     PulpVst3Processor(ProcessorFactory factory);
+    ~PulpVst3Processor() override;
 
     // FUnknown — expose IMidiMapping alongside the SingleComponentEffect
     // interfaces. Refcounting is inherited from EditControllerEx1 via the
