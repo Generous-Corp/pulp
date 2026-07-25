@@ -539,12 +539,41 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // Wire gesture callbacks to VST3 host
     store_.set_gesture_callbacks(
         [this](state::ParamID id) {
+            editing_params_.insert(id);
             beginEdit(static_cast<ParamID>(id));
         },
         [this](state::ParamID id) {
+            // Report the final value before closing the gesture, so a host that
+            // latches on endEdit records where the control actually landed.
+            if (editing_params_.erase(id) > 0) {
+                performEdit(static_cast<ParamID>(id),
+                            static_cast<ParamValue>(store_.get_normalized(id)));
+            }
             endEdit(static_cast<ParamID>(id));
         }
     );
+
+    // Report editor-driven parameter edits to the host.
+    //
+    // The process() snapshot-diff below only catches changes made DURING
+    // process() (the snapshot is taken at the top of the block), so a value the
+    // editor wrote between two process calls is already in the snapshot and is
+    // never reported. Without this listener a knob drag moved the DSP while the
+    // host's own parameter — and therefore automation write, undo, and any
+    // generic UI — stayed frozen at the old value.
+    //
+    // Gated on an OPEN GESTURE so this only ever reports edits the editor is
+    // actually performing: host-driven changes are applied on the audio thread
+    // and have no gesture, so they can never be echoed back at the host.
+    editor_param_listener_ = store_.add_listener(
+        [this](state::ParamID id, float) {
+            if (editing_params_.find(id) == editing_params_.end()) return;
+            performEdit(static_cast<ParamID>(id),
+                        static_cast<ParamValue>(store_.get_normalized(id)));
+            setParamNormalized(static_cast<ParamID>(id),
+                               static_cast<ParamValue>(store_.get_normalized(id)));
+        },
+        state::ListenerThread::Main);
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux)
     for (const auto& bus : desc.input_buses) {
