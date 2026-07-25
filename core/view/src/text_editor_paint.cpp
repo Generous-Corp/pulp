@@ -481,8 +481,14 @@ void TextEditor::paint(canvas::Canvas& canvas) {
 
         CaretMetrics m;
         m.x = caret_x;
-        m.cell_top = b.y + 4;
-        m.cell_height = b.height - 8;
+        // The caret marks a position in the text, so it is sized by the line it
+        // sits on — not by the widget, which may be far taller than one line.
+        // Insetting the widget box instead made the caret grow with the field:
+        // a tall single-line editor (a chat composer sized for attachments, say)
+        // drew a caret spanning the whole box. The multi-line path above already
+        // sizes from the line; this matches it.
+        m.cell_top = text_y - metrics.ascent;
+        m.cell_height = metrics.line_height > 0.0f ? metrics.line_height : font_size_;
         m.baseline = text_y;
         // Zero at end of text: there is no glyph for the underline/block to cover.
         m.advance = next > caret_position_ ? (text_x + x_at(next)) - caret_x : 0.0f;
