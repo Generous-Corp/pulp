@@ -61,6 +61,7 @@ signal generators → scenarios → contracts → doctor
 | Doctor artifacts | `<pulp/audio/analysis/audio_doctor_artifacts.hpp>` | lib | `write_response_artifact()` / `write_thd_artifact()` / `write_phase_artifact()` + the JSON serializers (`phase_curve_to_json`); `kDoctorCurveSchemaVersion`. |
 | Latency evidence | `<pulp/audio/analysis/latency_evidence.hpp>` | lib | Delayed-null + impulse-marker latency policies as pure functions (see *Proving reported latency*). |
 | Generators | `"support/audio_test_signals.hpp"`, `"support/audio_signal_generators.hpp"` | test | Deterministic stimulus: sine/square/saw, impulse(+train), step, DC, multi-sine, swept sine, seeded white/pink/brown noise, stepped automation + MIDI note scripts. No clocks, no `random_device`. |
+| Reverb | `"support/reverb_metrics.hpp"` | test | `t60_schroeder` / `band_t60` (Schroeder backward integration, T20-extrapolated), `echo_density_curve` / `mixing_time_seconds` (Abel & Huang), `range_rms`, `band_energy`. Header-only; measures a reverberant DECAY, which is why it is not in the analysis lib (see *Measuring a reverb* below). |
 | Scenarios | `"support/render_scenario.hpp"` | test | `RenderScenario` builder over HeadlessHost (factory, sample rate, block size, channels, duration, input/MIDI/param scripts); `render()` → `ScenarioResult`. `run_matrix()` (SR × block sweeps) + `assert_block_partition_invariant()`. |
 | Contracts | `"support/audio_contracts.hpp"` | test | `AudioContract` — a named claim + scenario + accumulated `CheckResult`s; failures read `contract '<name>': ...`. Family helpers `expect_{passthrough,silence_preserved,tone,finite_and_unclipped}`. |
 | Doctor (offline) | `"support/audio_doctor.hpp"` | test | The **scenario-driven** entry points: `response_relative_to_input(scenario, …)`, `measure_thd(scenario, …)`, and `measure_group_delay(scenario, …)` (its results gated by `defined_at(hz)` for group delay and the stricter `phase_defined_at(hz)` for phase) synthesize the stimulus, drive the `Processor`, and delegate the math to `audio_spectrum.hpp`. It re-exports that header's result types, so a test that includes it needs nothing else. |
@@ -102,6 +103,30 @@ pass `'[doctor]'` to the binary itself).
 
 The `/audio-harness` slash command wraps this. JSON metric/curve artifacts (on failure or
 on demand) land under a temp `pulp-audio-metrics/` dir and are INFO-logged.
+
+## Measuring a reverb — two traps that make a working engine look broken
+
+Both of these cost real debugging time on the multirate FDN reverb, and both
+produce a *plausible* wrong number rather than an obvious one.
+
+**Measure decay IN A BAND, not broadband.** A broadband Schroeder integration
+folds the top two octaves into the number, and any fractional-delay read in a
+feedback loop — which is what delay modulation requires — costs real
+high-frequency energy per pass. On that engine the cost is 19% of the 10 kHz
+decay against 3% at 1 kHz, so the broadband T60 moved 10.6% when modulation was
+switched on and modulation looked like a decay control. It is not one. Use
+`band_t60(ir, fs, 1000.0)`; state the probe frequency in the test.
+
+**A proportional band's energy is not a level — normalize by bin count.** A
++/-12% band at 8 kHz is 32x wider than the same band at 250 Hz, so summing its
+bins builds a ~15 dB tilt into any band-to-band comparison and a perfectly flat
+tail reads as 16 dB of spread. `band_energy` returns the RMS across its bins (a
+density) for exactly this reason. If you hand-roll a band measure, do the same.
+
+A third, cheaper one: **use a band, not a bin, for anything granular.** A
+granular pitch shifter spreads its output into grain-rate sidebands, so a single
+880 Hz bin under-reports a working octave-up shifter by an order of magnitude
+and can read as zero.
 
 ## Copy-this patterns
 

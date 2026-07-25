@@ -534,6 +534,7 @@ a working convolution and would hide the bug. Assert
 | Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
 | Oversampling | `oversampling.hpp` | 2x/4x/8x/16x realtime up/downsampling; minimum-phase IIR and 96/140 dB-prototype linear-phase FIR tiers with exact latency reporting |
 | Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
+| FDN Reverb | `fdn_reverb.hpp` | 16-line feedback delay network with a selectable internal tank sample rate (16-96 kHz), Jot decay law, granular shimmer, and a provably bounded loop gain; wet-only |
 | Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
 | Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
 

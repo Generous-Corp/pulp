@@ -23,6 +23,7 @@ spectrum   (audio_spectrum)     — buffer-level FFT response + THD/THD+N
            (audio_doctor_artifacts) — JSON curve artifacts for response/THD
 
 test-only (test/support), links pulp::audio-analysis:
+reverb     (reverb_metrics)     — T60 / band T60 / echo density / band level, header-only
 signals    (audio_test_signals, audio_signal_generators) — deterministic stimulus + event scripts
    ↓
 scenarios  (render_scenario)    — HeadlessHost block-loop renders + matrix sweeps
@@ -31,6 +32,13 @@ contracts  (audio_contracts)    — named claims over one rendered scenario
    ↓
 doctor     (audio_doctor)       — scenario-driven response/THD (delegates to audio_spectrum)
 ```
+
+`reverb_metrics` sits beside the generators rather than in the analysis lib on
+purpose. It needs no `Processor`, so the layering rule would allow it there —
+but it measures a reverberant DECAY (it needs an impulse response and a decay
+model, not a spectrum), and the analysis lib is linked into the shipped
+`pulp audio validate` CLI, which has no use for a T60. Anything spectral a
+reverb test needs is already in `audio_spectrum` and must be taken from there.
 
 **No back-edges.** A layer may include layers above it in this list, never
 below. Generators must not measure; metrics must not render; the artifact
