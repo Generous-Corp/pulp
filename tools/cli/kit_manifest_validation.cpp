@@ -579,7 +579,7 @@ void validate_declared_paths(KitValidationResult& result,
     if (auto* exports = object_field(manifest, "exports")) {
         for (const auto* key : {"pulpUiScripts", "designTokens", "assets", "templates",
                                 "validationReports", "screenshots", "presets", "themes",
-                                "samples", "wavetables", "licenses", "sourceFiles",
+                                "samples", "sampleBanks", "wavetables", "licenses", "sourceFiles",
                                 "nativeComponentHeaders", "nativeComponentSources",
                                 "nodePackManifests", "graphFixtures", "stateFixtures"}) {
             validate_path_array(result, root, *exports, key);

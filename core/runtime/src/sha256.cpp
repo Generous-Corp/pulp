@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 
 namespace pulp::runtime {
 namespace {
@@ -165,6 +166,29 @@ std::string sha256_hex(const std::uint8_t* data, std::size_t size) {
 
 std::string sha256_hex(std::string_view data) {
     return sha256_hex(reinterpret_cast<const std::uint8_t*>(data.data()), data.size());
+}
+
+std::optional<std::string> sha256_file_hex(const std::filesystem::path& path,
+                                           std::uint64_t max_bytes) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return std::nullopt;
+
+    Sha256 hash;
+    std::array<std::uint8_t, 64 * 1024> buffer{};
+    std::uint64_t total = 0;
+    while (input) {
+        input.read(reinterpret_cast<char*>(buffer.data()),
+                   static_cast<std::streamsize>(buffer.size()));
+        const auto count = input.gcount();
+        if (count <= 0) break;
+        const auto bytes = static_cast<std::uint64_t>(count);
+        if (bytes > max_bytes - std::min(total, max_bytes))
+            return std::nullopt;
+        total += bytes;
+        hash.update(buffer.data(), static_cast<std::size_t>(count));
+    }
+    if (!input.eof()) return std::nullopt;
+    return digest_hex(hash.finish());
 }
 
 } // namespace pulp::runtime

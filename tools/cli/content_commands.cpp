@@ -9,11 +9,13 @@
 #include "json_writer.hpp"
 #include "kit_commands.hpp"
 
+#include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
 
 #include "../../external/miniz/miniz.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -24,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace pulp::cli::content {
@@ -48,6 +51,7 @@ struct ContentManifest {
     std::vector<std::string> capabilities;
     std::vector<std::string> exported_kinds;
     std::vector<std::string> exported_paths;
+    std::vector<std::string> sample_bank_paths;
 };
 
 struct RuntimeManifest {
@@ -241,8 +245,16 @@ ContentManifest load_manifest(const fs::path& input, std::string& error) {
     manifest.kinds = string_array_field(root, "kind");
     manifest.capabilities = string_array_field(root, "capabilities");
     if (auto* exports = object_field(root, "exports")) {
-        for (const auto* kind : {"presets", "themes", "samples", "wavetables"}) {
-            auto paths = string_array_field(*exports, kind);
+        constexpr std::array export_kinds{
+            std::pair{"presets", "presets"},
+            std::pair{"themes", "themes"},
+            std::pair{"samples", "samples"},
+            std::pair{"sampleBanks", "sample-banks"},
+            std::pair{"wavetables", "wavetables"}};
+        for (const auto& [field, kind] : export_kinds) {
+            auto paths = string_array_field(*exports, field);
+            if (std::string_view(field) == "sampleBanks")
+                manifest.sample_bank_paths = paths;
             if (!paths.empty())
                 manifest.exported_kinds.emplace_back(kind);
             manifest.exported_paths.insert(manifest.exported_paths.end(), paths.begin(), paths.end());
@@ -251,6 +263,25 @@ ContentManifest load_manifest(const fs::path& input, std::string& error) {
         manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(), licenses.end());
     }
     return manifest;
+}
+
+bool validate_sample_banks(const fs::path& root,
+                           ContentManifest& manifest,
+                           std::vector<std::string>& issues) {
+    const auto validation =
+        pulp::audio::validate_sample_bank_content(root, manifest.sample_bank_paths);
+    for (const auto& issue : validation.issues) {
+        issues.push_back("sample-bank: `" + issue.manifest_path + "` " +
+                         pulp::audio::sample_bank_status_name(issue.status) +
+                         " at " + issue.field_path);
+    }
+    for (const auto& sample_path : validation.sample_paths) {
+        if (std::find(manifest.exported_paths.begin(),
+                      manifest.exported_paths.end(),
+                      sample_path) == manifest.exported_paths.end())
+            manifest.exported_paths.push_back(sample_path);
+    }
+    return validation.valid();
 }
 
 RuntimeManifest load_runtime_manifest(const fs::path& path, std::string& error) {
@@ -647,6 +678,7 @@ bool validate_content_manifest(const fs::path& input,
                     for (const auto& issue : kit_result.issues)
                         issues.push_back(issue.code + ": " + issue.message);
                 }
+                ok = validate_sample_banks(temp_root, manifest, issues) && ok;
             }
             std::error_code ec;
             fs::remove_all(temp_root, ec);
@@ -658,6 +690,7 @@ bool validate_content_manifest(const fs::path& input,
             for (const auto& issue : kit_result.issues)
                 issues.push_back(issue.code + ": " + issue.message);
         }
+        ok = validate_sample_banks(manifest.directory_root, manifest, issues) && ok;
     }
     return ok;
 }
@@ -674,7 +707,7 @@ void print_usage() {
         << "  pulp content rescan [--json] [--root <dir>]\n"
         << "  pulp content remove <package-id> --plugin <plugin-id> [--version <version>] --yes [--root <dir>]\n"
         << "  pulp content reveal <package-id> --plugin <plugin-id> [--version <version>] [--root <dir>]\n\n"
-        << "Use content packs for presets, themes, samples, and wavetables installed into a known plugin.\n"
+        << "Use content packs for presets, themes, samples, sample banks, and wavetables installed into a known plugin.\n"
         << "They are not curated dependency packages and they do not transform projects.\n"
         << "Content commands copy data only. Preview reads a trusted plugin runtime manifest to report compatibility and reload policy before install. Update uses an explicit local path and rolls back a replaced version on failure. Rescan rebuilds the metadata index only. They do not execute package code.\n";
 }

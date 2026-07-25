@@ -449,7 +449,7 @@ function(_pulp_configure_plugin_runtime_manifest target bundle_id)
     set(_kinds ${PULP_${target}_CONTENT_KINDS})
     set(_hot_reload_kinds ${PULP_${target}_CONTENT_HOT_RELOAD_KINDS})
     set(_manual_rescan_kinds ${PULP_${target}_CONTENT_MANUAL_RESCAN_KINDS})
-    set(_pulp_valid_content_kinds presets themes samples wavetables)
+    set(_pulp_valid_content_kinds presets themes samples sample-banks wavetables)
 
     if(NOT _capabilities AND NOT _kinds)
         if(_hot_reload_kinds OR _manual_rescan_kinds)
@@ -477,7 +477,7 @@ function(_pulp_configure_plugin_runtime_manifest target bundle_id)
             message(FATAL_ERROR
                 "pulp_add_plugin(${target}): unsupported CONTENT_KINDS "
                 "'${_kind}'. Expected one of: presets, themes, samples, "
-                "wavetables.")
+                "sample-banks, wavetables.")
         endif()
     endforeach()
     foreach(_kind IN LISTS _hot_reload_kinds)

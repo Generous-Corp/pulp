@@ -48,7 +48,7 @@ static fs::path write_content_pack(const fs::path& data_root,
                                    const std::string& plugin_id,
                                    const std::string& package_id,
                                    const std::string& version,
-                                   std::string_view capabilities_json = R"json(["content.presets.v1","content.themes.v1","content.samples.v1","content.wavetables.v1"])json") {
+                                   std::string_view capabilities_json = R"json(["content.presets.v1","content.themes.v1","content.samples.v1","content.sample-banks.v1","content.wavetables.v1"])json") {
     const auto root = data_root / "Content" / plugin_id / package_id / version;
     write_text_file(root / "pulp.package.json",
                     std::string(R"json({
@@ -63,6 +63,7 @@ static fs::path write_content_pack(const fs::path& data_root,
     "presets": ["presets"],
     "themes": ["themes"],
     "samples": ["samples"],
+    "sampleBanks": ["sample-banks"],
     "wavetables": ["wavetables"]
   },
   "dependencies": {"pulp": [], "packages": []},
@@ -72,6 +73,8 @@ static fs::path write_content_pack(const fs::path& data_root,
                     R"json({"name":"Expansion Init","parameters":{"Gain":-12,"Mix":25}})json");
     write_text_file(root / "themes" / "Dark.json", R"json({"name":"Dark"})json");
     write_text_file(root / "samples" / "Kick.wav", "PULP fixture sample placeholder.");
+    write_text_file(root / "sample-banks" / "Expansion.bank.json",
+                    R"json({"schema":"pulp.sample-bank.v1","id":"expansion","name":"Expansion","samples":[],"zones":[]})json");
     write_text_file(root / "wavetables" / "Sine.wavetable.json",
                     R"json({"name":"Sine","frames":1,"samples":[0,1,0,-1]})json");
     return root;
@@ -924,6 +927,7 @@ TEST_CASE("ContentRegistry enumerates installed content packs by plugin capabili
     REQUIRE(all.front().presets.size() == 1);
     REQUIRE(all.front().themes.size() == 1);
     REQUIRE(all.front().samples.size() == 1);
+    REQUIRE(all.front().sample_banks.size() == 1);
     REQUIRE(all.front().wavetables.size() == 1);
 
     ContentCapabilityManifest matching;
@@ -938,6 +942,13 @@ TEST_CASE("ContentRegistry enumerates installed content packs by plugin capabili
     REQUIRE(sample_packs.size() == 1);
     REQUIRE(sample_packs.front().samples.front().filename() == "Kick.wav");
     REQUIRE(registry.presets_for_plugin(matching).empty());
+
+    matching.capabilities = {"content.sample-banks.v1"};
+    matching.content_kinds = {"sample-banks"};
+    auto bank_packs = registry.packs_for_plugin(matching);
+    REQUIRE(bank_packs.size() == 1);
+    REQUIRE(bank_packs.front().sample_banks.front().filename() ==
+            "Expansion.bank.json");
 
     matching.capabilities = {"content.themes.v1"};
     matching.content_kinds = {"themes"};
@@ -1201,6 +1212,121 @@ TEST_CASE("runtime content installer rejects bare manifest files before copying 
         return issue.find("bare manifest file") != std::string::npos;
     }));
     REQUIRE_FALSE(fs::exists(data_root / "Content"));
+}
+
+TEST_CASE("runtime content installer validates sample banks and copies referenced audio",
+          "[state][content][sample-bank]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-runtime-sample-bank");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = sandbox.root / "incoming";
+    write_text_file(source / "audio" / "kick.wav", "fixture sample bytes\n");
+    const auto audio_hash =
+        pulp::runtime::sha256_hex(std::string_view("fixture sample bytes\n"));
+    write_text_file(
+        source / "sample-banks" / "only.bank",
+        std::string(R"json({
+  "schema":"pulp.sample-bank.v1",
+  "id":"only",
+  "name":"Only",
+  "samples":[{"id":1,"path":"audio/kick.wav","sha256":")json") +
+            audio_hash +
+            R"json("}],
+  "zones":[{"sample_id":1}]
+})json");
+    write_text_file(source / "pulp.package.json", R"json({
+  "schema":"pulp-package-v1",
+  "id":"dev.pulp.test.sample-bank",
+  "name":"Sample Bank",
+  "version":"0.1.0",
+  "kind":["content-pack"],
+  "capabilities":["content.sample-banks.v1"],
+  "exports":{"sampleBanks":["sample-banks"]}
+})json");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.sample-banks.v1"};
+    manifest.content_kinds = {"sample-banks"};
+
+    auto preview = preview_content_pack_install(source, manifest, data_root);
+    REQUIRE(preview.ok);
+    auto installed = install_content_pack(source, manifest, data_root, true);
+    REQUIRE(installed.ok);
+    const auto install_root = data_root / "Content" / manifest.plugin_id /
+                              "dev.pulp.test.sample-bank" / "0.1.0";
+    REQUIRE(fs::exists(install_root / "sample-banks" / "only.bank"));
+    REQUIRE(fs::exists(install_root / "audio" / "kick.wav"));
+
+    const auto bad = sandbox.root / "bad";
+    fs::copy(source, bad, fs::copy_options::recursive);
+    write_text_file(bad / "audio" / "kick.wav", "tampered\n");
+    REQUIRE_FALSE(preview_content_pack_install(bad, manifest, data_root).ok);
+}
+
+TEST_CASE("an edited installed sample does not erase its pack from the index",
+          "[state][content][sample-bank]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-content-index-rebuild");
+    const auto data_root = sandbox.root / "user-data";
+    const auto source = sandbox.root / "incoming";
+    write_text_file(source / "audio" / "kick.wav", "fixture sample bytes\n");
+    const auto audio_hash =
+        pulp::runtime::sha256_hex(std::string_view("fixture sample bytes\n"));
+    write_text_file(source / "presets" / "lead.pulppreset", "{}\n");
+    write_text_file(
+        source / "sample-banks" / "only.bank",
+        std::string(R"json({
+  "schema":"pulp.sample-bank.v1",
+  "id":"only",
+  "name":"Only",
+  "samples":[{"id":1,"path":"audio/kick.wav","sha256":")json") +
+            audio_hash +
+            R"json("}],
+  "zones":[{"sample_id":1}]
+})json");
+    write_text_file(source / "pulp.package.json", R"json({
+  "schema":"pulp-package-v1",
+  "id":"dev.pulp.test.indexed-bank",
+  "name":"Indexed Bank",
+  "version":"0.1.0",
+  "kind":["content-pack"],
+  "capabilities":["content.sample-banks.v1","content.presets.v1"],
+  "exports":{"sampleBanks":["sample-banks"],"presets":["presets"]}
+})json");
+
+    ContentCapabilityManifest manifest;
+    manifest.plugin_id = "dev.pulp.test.plugin";
+    manifest.capabilities = {"content.sample-banks.v1", "content.presets.v1"};
+    manifest.content_kinds = {"sample-banks", "presets"};
+
+    REQUIRE(install_content_pack(source, manifest, data_root, true).ok);
+    const auto install_root = data_root / "Content" / manifest.plugin_id /
+                              "dev.pulp.test.indexed-bank" / "0.1.0";
+    REQUIRE(fs::exists(install_root / "audio" / "kick.wav"));
+
+    // A user edits an installed sample. Rebuilding the index is an inventory
+    // operation: it must not silently drop the pack, taking its presets with it.
+    write_text_file(install_root / "audio" / "kick.wav", "user edited this\n");
+
+    const auto second = sandbox.root / "second";
+    write_text_file(second / "presets" / "pad.pulppreset", "{}\n");
+    write_text_file(second / "pulp.package.json", R"json({
+  "schema":"pulp-package-v1",
+  "id":"dev.pulp.test.second-pack",
+  "name":"Second Pack",
+  "version":"0.1.0",
+  "kind":["content-pack"],
+  "capabilities":["content.presets.v1"],
+  "exports":{"presets":["presets"]}
+})json");
+    REQUIRE(install_content_pack(second, manifest, data_root, true).ok);
+
+    const auto index = data_root / "Content" / "index.json";
+    REQUIRE(fs::exists(index));
+    std::ifstream index_input(index);
+    const std::string index_text((std::istreambuf_iterator<char>(index_input)),
+                                 std::istreambuf_iterator<char>());
+    REQUIRE(index_text.find("dev.pulp.test.second-pack") != std::string::npos);
+    REQUIRE(index_text.find("dev.pulp.test.indexed-bank") != std::string::npos);
 }
 
 TEST_CASE("runtime content installer rejects incompatible drops before mutation",

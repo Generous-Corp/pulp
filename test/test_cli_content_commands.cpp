@@ -151,6 +151,7 @@ TEST_CASE("pulp content installs, lists, reveals, and removes data-only packs",
     REQUIRE(fs::exists(installed / "presets" / "init.json"));
     REQUIRE(fs::exists(installed / "themes" / "dark.json"));
     REQUIRE(fs::exists(installed / "samples" / "kick.wav"));
+    REQUIRE(fs::exists(installed / "sample-banks" / "basic.bank.json"));
     REQUIRE(fs::exists(installed / "wavetables" / "sine.wavetable.json"));
     REQUIRE(fs::exists(data.path / "Content" / "index.json"));
     const auto manifest_sha =
@@ -235,9 +236,10 @@ TEST_CASE("pulp content install is visible through ContentRegistry",
     manifest.capabilities = {
         "content.presets.v1",
         "content.samples.v1",
+        "content.sample-banks.v1",
         "content.wavetables.v1"
     };
-    manifest.content_kinds = {"presets", "samples", "wavetables"};
+    manifest.content_kinds = {"presets", "samples", "sample-banks", "wavetables"};
 
     ContentRegistry registry(data.path);
     auto packs = registry.packs_for_plugin(manifest);
@@ -245,6 +247,7 @@ TEST_CASE("pulp content install is visible through ContentRegistry",
     REQUIRE(packs.front().id == "dev.pulp.fixtures.basic-content-pack");
     REQUIRE(packs.front().presets.size() == 1);
     REQUIRE(packs.front().samples.size() == 1);
+    REQUIRE(packs.front().sample_banks.size() == 1);
     REQUIRE(packs.front().wavetables.size() == 1);
 
     auto presets = registry.presets_for_plugin(manifest);
@@ -483,6 +486,7 @@ TEST_CASE("pulp content rescan rebuilds the content index without touching packs
     REQUIRE(index_text.find("Content/" + plugin + "/" + pack_id + "/0.1.0") != std::string::npos);
     REQUIRE(fs::exists(installed / "presets" / "init.json"));
     REQUIRE(fs::exists(installed / "samples" / "kick.wav"));
+    REQUIRE(fs::exists(installed / "sample-banks" / "basic.bank.json"));
     REQUIRE(fs::exists(installed / "wavetables" / "sine.wavetable.json"));
 }
 
@@ -505,6 +509,9 @@ TEST_CASE("pulp content validates and installs a packed .pulpcontent archive",
     REQUIRE(fs::exists(data.path / "Content" / plugin /
                        "dev.pulp.fixtures.basic-content-pack" / "0.1.0" /
                        "samples" / "kick.wav"));
+    REQUIRE(fs::exists(data.path / "Content" / plugin /
+                       "dev.pulp.fixtures.basic-content-pack" / "0.1.0" /
+                       "sample-banks" / "basic.bank.json"));
     REQUIRE(fs::exists(data.path / "Content" / plugin /
                        "dev.pulp.fixtures.basic-content-pack" / "0.1.0" /
                        "wavetables" / "sine.wavetable.json"));
@@ -577,6 +584,110 @@ TEST_CASE("pulp content validation catches missing sample and wavetable exports"
     "createdBy": {"type": "human", "name": "Pulp Tests"},
     "humanReview": {"reviewed": true, "reviewer": "Pulp Tests"}
   }
+})json");
+
+    REQUIRE(cmd_content({"validate", pack.path.string(), "--json"}) == 1);
+}
+
+TEST_CASE("pulp content validation rejects malformed exported sample banks",
+          "[cli][content][sample-bank]") {
+    TempDir pack;
+    const auto fixture = repo_root() / "fixtures/packages/basic-content-pack";
+    fs::copy(fixture, pack.path,
+             fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    write_file(
+        pack.path / "sample-banks" / "basic.bank.json",
+        R"json({"schema":"pulp.sample-bank.v1","id":"bad","name":"Bad","samples":[],"zones":[],"unexpected":true})json");
+
+    int exit_code = -1;
+    const auto output = capture_stdout_for([&] {
+        return cmd_content({"validate", pack.path.string(), "--json"});
+    }, exit_code);
+    REQUIRE(exit_code == 1);
+    REQUIRE(output.find("sample-bank:") != std::string::npos);
+    REQUIRE(output.find("unknown_field") != std::string::npos);
+}
+
+TEST_CASE("pulp content installs audio referenced only by an exported sample bank",
+          "[cli][content][sample-bank]") {
+    TempDir pack;
+    TempDir data;
+    const auto audio = pack.path / "audio" / "kick.wav";
+    write_file(audio, "fixture sample bytes\n");
+    const auto hash = pulp::runtime::sha256_hex(read_file(audio));
+    write_file(pack.path / "sample-banks" / "only.bank",
+               std::string(R"json({
+  "schema": "pulp.sample-bank.v1",
+  "id": "only",
+  "name": "Only",
+  "samples": [{"id": 1, "path": "audio/kick.wav", "sha256": ")json") +
+                   hash +
+                   R"json("}],
+  "zones": [{"sample_id": 1}]
+})json");
+    write_file(pack.path / "pulp.package.json", R"json({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.tests.sample-bank-only",
+  "name": "Sample Bank Only",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {"content": "MIT"},
+  "kind": ["content-pack"],
+  "capabilities": ["content.sample-banks.v1"],
+  "exports": {"sampleBanks": ["sample-banks"]},
+  "content": {
+    "pluginIds": ["dev.pulp.tests.sample-bank-target"],
+    "kinds": ["sample-banks"]
+  },
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {},
+  "authoring": {"createdBy": "human", "humanReviewed": true}
+})json");
+
+    REQUIRE(cmd_content({"install", pack.path.string(),
+                         "--plugin", "dev.pulp.tests.sample-bank-target",
+                         "--root", data.path.string(), "--yes"}) == 0);
+    REQUIRE(fs::exists(data.path / "Content" /
+                       "dev.pulp.tests.sample-bank-target" /
+                       "dev.pulp.tests.sample-bank-only" / "0.1.0" /
+                       "audio" / "kick.wav"));
+}
+
+TEST_CASE("pulp content validation rejects sample-bank symlink escapes",
+          "[cli][content][sample-bank][security]") {
+    TempDir pack;
+    TempDir outside;
+    const auto outside_audio = outside.path / "outside.wav";
+    write_file(outside_audio, "outside sample bytes\n");
+    const auto hash = pulp::runtime::sha256_hex(read_file(outside_audio));
+    fs::create_directory_symlink(outside.path, pack.path / "linked-audio");
+    write_file(pack.path / "sample-banks" / "escape.bank",
+               std::string(R"json({
+  "schema": "pulp.sample-bank.v1",
+  "id": "escape",
+  "name": "Escape",
+  "samples": [{"id": 1, "path": "linked-audio/outside.wav", "sha256": ")json") +
+                   hash +
+                   R"json("}],
+  "zones": [{"sample_id": 1}]
+})json");
+    write_file(pack.path / "pulp.package.json", R"json({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.tests.sample-bank-escape",
+  "name": "Sample Bank Escape",
+  "version": "0.1.0",
+  "license": "MIT",
+  "licenses": {"content": "MIT"},
+  "kind": ["content-pack"],
+  "capabilities": ["content.sample-banks.v1"],
+  "exports": {"sampleBanks": ["sample-banks"]},
+  "content": {
+    "pluginIds": ["dev.pulp.tests.sample-bank-target"],
+    "kinds": ["sample-banks"]
+  },
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {},
+  "authoring": {"createdBy": "human", "humanReviewed": true}
 })json");
 
     REQUIRE(cmd_content({"validate", pack.path.string(), "--json"}) == 1);

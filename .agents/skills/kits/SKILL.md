@@ -127,3 +127,20 @@ the shared contract in
 - [`kits`](../kits/SKILL.md) — reusable Pulp code/UI/templates → a project
 - [`content`](../content/SKILL.md) — data-only packs (presets/samples) → an installed plugin
 - [`installable-tools`](../installable-tools/SKILL.md) — machine-level dev/agent tooling under `~/.pulp/tools/`, plus the shared validate-and-uninstall-from-outside-a-checkout bar
+
+## Sample-bank schemas live here, but banks are content, not kits
+
+`tools/kits/pulp-sample-bank.schema.json` describes `pulp.sample-bank.v1`, and
+`pulp-package.schema.json` carries the matching `exports.sampleBanks` array.
+The schema mirrors the C++ contract in `pulp/audio/sample_bank.hpp`: its
+`maxItems` bounds (4096 samples, 65536 zones) must stay equal to
+`kSampleBankMaxSamples` / `kSampleBankMaxZones`. A schema that permits more than
+the parser accepts turns a validation error into a confusing runtime
+`resource_limit_exceeded`.
+
+**`pulp kit apply` deliberately refuses content packs.** A manifest declaring a
+content-pack kind fails with `content-pack-wrong-lane` and points at
+`pulp content validate` / `preview` / `install`. Kits mutate a project; content
+packs install data for an already-installed plugin, and they must keep separate
+trust and confirmation paths. Do not "fix" that refusal by teaching `kit apply`
+to install content.

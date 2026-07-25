@@ -51,6 +51,7 @@ struct ContentPackInfo {
     std::vector<std::filesystem::path> presets;
     std::vector<std::filesystem::path> themes;
     std::vector<std::filesystem::path> samples;
+    std::vector<std::filesystem::path> sample_banks;
     std::vector<std::filesystem::path> wavetables;
 };
 

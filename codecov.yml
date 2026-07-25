@@ -261,6 +261,10 @@ flags:
     paths:
       - core/runtime/
     carryforward: true
+  sample_bank_manifest:
+    paths:
+      - core/sample_bank_manifest/
+    carryforward: true
   scene:
     paths:
       - core/scene/
@@ -472,6 +476,9 @@ component_management:
     - component_id: runtime
       name: runtime
       paths: ["core/runtime/**"]
+    - component_id: sample_bank_manifest
+      name: sample_bank_manifest
+      paths: ["core/sample_bank_manifest/**"]
     - component_id: scene
       name: scene
       paths: ["core/scene/**"]

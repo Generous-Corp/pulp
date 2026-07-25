@@ -1952,6 +1952,27 @@ TEST_CASE("pulp kit validation reports actionable manifest errors",
     REQUIRE(has_issue(result, "agent-auto-apply"));
 }
 
+TEST_CASE("pulp kit validation checks sample-bank export paths",
+          "[cli][kit][content]") {
+    TempDir tmp;
+    write_file(tmp.path / "pulp.package.json", R"JSON({
+  "schema": "pulp-package-v1",
+  "id": "dev.pulp.test.missing-sample-bank",
+  "name": "Missing Sample Bank",
+  "version": "0.1.0",
+  "license": "MIT",
+  "kind": ["content-pack"],
+  "capabilities": ["content.sample-banks.v1"],
+  "exports": {"sampleBanks": ["sample-banks/missing.bank.json"]},
+  "dependencies": {"pulp": [], "packages": []},
+  "validation": {}
+})JSON");
+
+    const auto result = validate_manifest_path(tmp.path);
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(has_issue(result, "missing-path"));
+}
+
 TEST_CASE("pulp kit validation rejects ids unsafe as project path components",
           "[cli][kit]") {
     TempDir tmp;
