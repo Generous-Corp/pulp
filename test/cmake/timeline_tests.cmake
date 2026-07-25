@@ -19,6 +19,14 @@ target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
 pulp_add_test_suite(pulp-test-timeline-smf
     SOURCES test_timeline_smf.cpp
     LIBRARIES pulp::smf-interop pulp::midi)
+pulp_add_test_suite(pulp-test-timeline-production-mode
+    SOURCES test_timeline_production_mode.cpp
+    LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-playback-production
+    SOURCES test_playback_production_class.cpp
+        test_playback_buffered_content_source.cpp
+        harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::playback pulp::audio pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport

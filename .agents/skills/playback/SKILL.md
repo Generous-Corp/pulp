@@ -390,6 +390,33 @@ program generation actually advanced in the same test, or "unchanged pointer"
 could just mean no compile happened at all. A dirty-set test that still passes
 when the subscription is ignored and everything recompiles is vacuous; break the
 resolution both ways (over-dirty and under-dirty) and confirm it goes red.
+## Production mode and replay honesty
+
+- `provider_production_declaration` / `track_production_declaration` /
+  `program_reproducibility` (`production_class.hpp`) derive what a compiled
+  program may claim about being replayed, rather than storing it on the program,
+  so the claim cannot drift from what the compiler actually lowered. A render
+  spanning several classes aggregates with `timeline::weakest`, never with the
+  first or the strongest.
+- **You cannot compile a `Launcher` or `ExternalInput` track today.**
+  `plan_compile` rejects any `TrackCompilePolicy` whose provider is not exactly
+  `Arrangement` with `available_mask == 1`, so a `PlaybackProgram` can only ever
+  carry arrangement tracks even though `ProviderSelectorProgram` models three
+  kinds and really does gate rendering. Unit-test per-provider behavior against a
+  hand-built `ProviderSelectorProgram`; a test that tries to compile one gets
+  `CompileErrorCode::InvalidRequest` and proves nothing.
+- `BufferedContentSource` composes `audio::StreamingSampleSource` with a zero
+  preload window, so every frame travels through the ring where it can be
+  counted. **The stream's own `underrun_frames` reads zero when a producer never
+  produces anything**: a zero return publishes `eos_frame_` and terminates the
+  stream instead of missing a deadline. Count starvation against the *declared*
+  frame count or a total production failure reads as success — an assertion on
+  the ring's underrun counter alone is vacuously green.
+- A new `core/playback/src/*.cpp` is compiled by
+  `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
+  -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
+  wasm lanes by the closure gate. Anything that owns a `std::thread` or throws
+  belongs in a header or a sibling module, not in `src/`.
 
 ## Dependency floor
 

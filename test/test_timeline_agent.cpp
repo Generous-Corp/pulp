@@ -169,6 +169,13 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE(explained.json.find(R"("audio_regions":1)") != std::string::npos);
     REQUIRE(explained.json.find(R"("clip_ids":["4"])") != std::string::npos);
     REQUIRE(explained.json.find(R"("pdc_offset_samples":null)") != std::string::npos);
+    // Replay honesty is reported per track and aggregated for the render, so a
+    // caller can see which parts of it are bit-reproducible.
+    REQUIRE(explained.json.find(R"("production_mode":"synchronous")") != std::string::npos);
+    REQUIRE(explained.json.find(R"("reproducibility":"deterministic","track_id")") !=
+            std::string::npos);
+    REQUIRE(explained.json.find(R"("reproducibility":"deterministic","sequence_id")") !=
+            std::string::npos);
 
     const auto changed =
         tools::timeline::command_apply(original_project, gain_command(1'056'964'608));

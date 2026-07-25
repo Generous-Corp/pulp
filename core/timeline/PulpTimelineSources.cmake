@@ -20,6 +20,7 @@ function(pulp_resolve_timeline_sources root output)
         sequence_context.cpp
         sequence_scene_internal.cpp
         note_transform.cpp
+        production_mode.cpp
         project_schema_migrations.cpp
         transaction.cpp
         transaction_automation_internal.cpp

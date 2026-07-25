@@ -16,6 +16,7 @@ function(pulp_resolve_playback_sources root output)
         external_sync_timecode.cpp
         midi_capture_materializer.cpp
         note_renderer.cpp
+        production_class.cpp
         program.cpp
         program_compiler.cpp
         recording_commit.cpp

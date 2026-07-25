@@ -737,6 +737,26 @@ timeline manifest and let the server consume it. The MCP render result can be
 fed to `pulp_audio_compare` for an advisory before/after judgment when the
 opt-in Audio Quality Lab tool is installed.
 
+## Production mode and reproducibility class
+
+`production_mode.hpp` declares `ProductionMode` (`Synchronous` / `Buffered`) and
+`ReproducibilityClass` (`Deterministic` / `Tolerance` / `Materialized` /
+`BestEffort`). Three rules that are easy to get wrong:
+
+- **They are in-memory declarations with no schema registration**, so nothing
+  round-trips them yet. Do not treat a declaration as persisted state or write a
+  round-trip assertion against one until a content type actually carries it.
+- **Lookahead is wall-clock milliseconds and is never latency.** Production cost
+  is wall-clock, so a tick-declared lookahead silently shrinks as tempo rises.
+  Nothing here may reach a latency or delay-compensation computation. A producer
+  that needs *musical* context is declaring a compile-context subscription, not a
+  lookahead.
+- **Parsing fails closed.** `production_mode_from_name` /
+  `reproducibility_class_from_name` return `nullopt` on an unknown name rather
+  than defaulting, so a document from a newer build never silently reads as the
+  strongest claim. Aggregate several classes with `weakest`, never by picking the
+  first.
+
 ## Scope boundary
 
 This subsystem owns authored take/comp state, durable launch scenes, slots, and
