@@ -11,6 +11,7 @@
 // RT contract: prepare() allocates; process/reset allocate nothing.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/fast_math.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
@@ -21,15 +22,12 @@
 
 namespace pulp::signal::fdn {
 
-// Padé tanh. Its derivative is (x^2-9)^2 / (9(3+x^2)^2), which is 1 at the
-// origin and strictly below 1 everywhere else — so it is 1-Lipschitz and adds
-// no energy at any drive setting. That property is why the loop saturator is a
-// crossfade onto THIS curve rather than tanh(k*x): a k above 1 raises the
-// small-signal gain, which silently raises the loop gain with it.
-inline double fast_tanh(double x) {
-    const double x2 = x * x;
-    return x * (27.0 + x2) / (27.0 + 9.0 * x2);
-}
+// The loop saturator's curve. See signal::lipschitz_tanh for why it is this
+// one — 1-Lipschitz so it can never raise the loop gain, and bounded so a
+// freeze-regime tail settles rather than merely decaying slower than it grows.
+// The character delay derived the same curve for its dub feedback; it lives in
+// fast_math.hpp now so there is one definition to reason about.
+using signal::lipschitz_tanh;
 
 // Transient ducker on the INPUT. Attacks excite the reverb less, sustains
 // excite it fully, which is what keeps a groove feeling dry under a big tail.
