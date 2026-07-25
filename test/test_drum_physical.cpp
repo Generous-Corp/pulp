@@ -62,15 +62,6 @@ double peak(const std::vector<float>& x) {
     return m;
 }
 
-double rms(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0) {
-    if (to == 0) to = x.size();
-    double sum = 0.0;
-    for (std::size_t i = from; i < to && i < x.size(); ++i) {
-        sum += static_cast<double>(x[i]) * x[i];
-    }
-    return std::sqrt(sum / static_cast<double>(to - from));
-}
-
 // Hann-windowed Goertzel amplitude at one frequency.
 template <typename Container>
 double tone_amplitude(const Container& x, double f, double fs = kFs) {
@@ -97,14 +88,6 @@ std::vector<double> sine(double f, std::size_t n, double amplitude = 1.0) {
         y[i] = amplitude * std::sin(2.0 * kPi * f * static_cast<double>(i) / kFs);
     }
     return y;
-}
-
-double crossing_rate(const std::vector<float>& x, std::size_t from, std::size_t to) {
-    int crossings = 0;
-    for (std::size_t i = from + 1; i < to && i < x.size(); ++i) {
-        if ((x[i - 1] <= 0.0f) != (x[i] <= 0.0f)) ++crossings;
-    }
-    return 0.5 * crossings * kFs / static_cast<double>(to - from);
 }
 
 // Fraction of energy above `split_hz`.
