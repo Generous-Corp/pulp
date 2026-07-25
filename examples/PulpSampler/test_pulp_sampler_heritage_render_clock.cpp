@@ -429,8 +429,10 @@ TEST_CASE("PulpSampler routes rich typed voice blocks through native DSP",
           "[audio][sampler][heritage][typed][native]") {
     const auto profile = typed_rich_voice_profile();
     auto sample = make_sine(4096);
-    HeritageFixture whole(512, &profile);
-    HeritageFixture split(512, &profile);
+    // Prepare at the largest single block these fixtures are driven with; the
+    // typed bus path sizes its per-frame activity buffer from this width.
+    HeritageFixture whole(2048, &profile);
+    HeritageFixture split(2048, &profile);
     whole.load(sample);
     split.load(sample);
     constexpr std::array one{std::size_t{2048}};
@@ -442,6 +444,23 @@ TEST_CASE("PulpSampler routes rich typed voice blocks through native DSP",
     REQUIRE(std::all_of(contiguous.begin(), contiguous.end(),
                         [](float value) { return std::isfinite(value); }));
     REQUIRE(contiguous != std::vector<float>(sample.begin(), sample.begin() + contiguous.size()));
+}
+
+TEST_CASE("PulpSampler refuses a typed bus segment wider than the prepared block",
+          "[audio][sampler][heritage][typed][native]") {
+    // The typed bus path hands process_bus one activity span covering the whole
+    // segment, and that buffer is sized at prepare. A host that exceeds the
+    // block size it declared must be refused rather than allowed to write past
+    // it — the overrun is silent, and corrupts the heap rather than faulting.
+    const auto profile = typed_rich_voice_profile();
+    auto sample = make_sine(4096);
+    HeritageFixture fixture(512, &profile);
+    fixture.load(sample);
+    constexpr std::array oversized{std::size_t{2048}};
+    const auto output = render(fixture, oversized);
+    REQUIRE(output.size() == 2048);
+    REQUIRE(std::all_of(output.begin(), output.end(),
+                        [](float value) { return value == 0.0f; }));
 }
 
 TEST_CASE("PulpSampler drains a finite typed voice tail after source exhaustion",
