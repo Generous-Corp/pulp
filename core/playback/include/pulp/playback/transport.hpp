@@ -18,6 +18,9 @@ enum class TransportError {
     InvalidLoop,
     LoopTooShortForMaximumBlock,
     InvalidFrameCount,
+    InvalidScrubWindow,
+    ScrubWindowTooShortForMaximumBlock,
+    NotScrubbing,
 };
 
 using MeterSignature = timebase::MeterSignature;
@@ -57,6 +60,11 @@ struct TransportSnapshot {
     MeterSignature meter{};
     LoopRegion loop{};
     bool is_playing = false;
+    /// True while the transport is rendering scrub windows. is_playing is also
+    /// true in that case: audio advances even when the musical transport is
+    /// stopped, and consumers that only care whether the playhead moves need no
+    /// scrub-specific branch.
+    bool scrubbing = false;
     bool transport_changed = false;
     bool transport_started = false;
     bool reset_requested = false;
@@ -114,6 +122,30 @@ class MasterTransport {
     TransportError set_loop(LoopRegion loop) noexcept;
     TransportError set_meter(MeterSignature meter) noexcept;
 
+    /// Enters scrub mode: the transport renders repeated `window_frames`-long
+    /// windows that each start at the latest posted anchor, which is how a
+    /// dragged playhead becomes audible. The anchor is latched, not immediate —
+    /// a new position takes effect at the next window boundary, so the grain
+    /// rate is the window length rather than the UI event rate. The window must
+    /// be at least one maximum block so a block spans at most two windows,
+    /// preserving the two-range snapshot contract.
+    ///
+    /// Scrubbing suspends loop wrapping. A drag is a direct statement of
+    /// position, so the transport must not pull the audible window back to the
+    /// loop start or make positions outside the loop unreachable; the loop is
+    /// still reported in the snapshot so a UI keeps drawing it, and wrapping
+    /// resumes at end_scrub().
+    ///
+    /// Starting a drag is itself immediate even mid-window: it abandons any
+    /// window in flight so a fresh drag's window length takes effect at once.
+    TransportError begin_scrub(std::uint32_t window_frames,
+                               timebase::TickPosition position) noexcept;
+    /// Moves the scrub anchor. Fails with NotScrubbing outside scrub mode.
+    TransportError scrub_to(timebase::TickPosition position) noexcept;
+    /// Leaves scrub mode and parks the playhead on the last posted anchor —
+    /// where the drag was released — never mid-window.
+    TransportError end_scrub() noexcept;
+
     TransportError begin_block(std::uint32_t frame_count, TransportSnapshot& snapshot) noexcept;
     void reset() noexcept;
 
@@ -122,8 +154,12 @@ class MasterTransport {
         MeterSignature meter{};
         LoopRegion loop{};
         timebase::TickPosition position{};
+        timebase::TickPosition scrub_position{};
+        std::uint32_t scrub_window_frames = 0;
         bool playing = false;
+        bool scrubbing = false;
         std::uint64_t seek_generation = 0;
+        std::uint64_t scrub_generation = 0;
     };
 
     static_assert(std::is_trivially_copyable_v<DesiredState>);
@@ -144,7 +180,10 @@ class MasterTransport {
     timebase::BarPosition meter_anchor_bar_{};
     MeterSignature meter_anchor_signature_{};
     std::uint64_t applied_seek_generation_ = 0;
+    std::uint64_t applied_scrub_generation_ = 0;
     std::uint64_t block_index_ = 0;
+    std::uint32_t scrub_window_remaining_ = 0;
+    bool previous_scrubbing_ = false;
     bool previous_playing_ = false;
     MeterSignature previous_meter_{};
     LoopRegion previous_loop_{};
