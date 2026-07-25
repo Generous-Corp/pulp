@@ -1,0 +1,100 @@
+{
+  "format": "dawproject",
+  "enumerator": "DawProject",
+  "display_name": "DAWproject",
+  "comment": [
+    "Capability declaration for the DAWproject interchange format.",
+    "",
+    "Import rows are the authority for the importer's documented subset: the",
+    "importer asks this table before admitting a construct, so a row flipped to",
+    "'none' turns the corresponding construct into a refusal.",
+    "",
+    "Export rows are a declaration of what a writer must do. No writer is",
+    "registered yet ('writer': false), so run_export refuses; plan_export still",
+    "produces a real plan and loss manifest from these rows."
+  ],
+  "writer": false,
+  "import": {
+    "track.flat": { "level": "full" },
+    "clip.musical": { "level": "full" },
+    "clip.note": { "level": "full" },
+    "clip.media": { "level": "full" },
+    "tempo.single": { "level": "full" },
+    "meter.single": { "level": "full" },
+    "asset.sealed-hash": { "level": "full" },
+    "asset.referenced-media": {
+      "level": "full",
+      "notes": "package-relative locator retained verbatim; identity sealed to the resolved bytes"
+    },
+
+    "track.group": { "level": "none", "refusal": "nested group tracks" },
+    "clip.absolute": { "level": "none", "refusal": "seconds-timed lanes, clips, and notes" },
+    "clip.warp": { "level": "none", "refusal": "warped clip content" },
+    "clip.launch": { "level": "none", "refusal": "scenes and clip-launcher content" },
+    "clip.gain": { "level": "none", "refusal": "per-clip gain" },
+    "clip.fades": { "level": "none", "refusal": "per-clip fades" },
+    "marker": { "level": "none", "refusal": "arrangement markers" },
+    "tempo.map": { "level": "none", "refusal": "tempo changing after bar 1" },
+    "meter.map": { "level": "none", "refusal": "time signature changing after bar 1" },
+    "automation.device-param": { "level": "none", "refusal": "automation lanes" },
+    "device.placement": { "level": "none", "refusal": "device chains" },
+    "device.payload": { "level": "none", "refusal": "plugin state" },
+    "mixer.track-gain": { "level": "none", "refusal": "channel volume" },
+    "mixer.track-pan": { "level": "none", "refusal": "channel pan" }
+  },
+  "export": {
+    "track.flat": { "level": "full" },
+    "clip.musical": { "level": "full" },
+    "clip.note": { "level": "full" },
+    "clip.media": { "level": "full" },
+    "tempo.single": { "level": "full" },
+    "meter.single": { "level": "full" },
+    "asset.sealed-hash": { "level": "full" },
+    "asset.referenced-media": { "level": "full" },
+    "asset.embedded-media": { "level": "full" },
+
+    "clip.absolute": {
+      "level": "degrade",
+      "to": "clip.musical",
+      "loss_class": "approximated",
+      "loss": "sample-anchored clips are re-expressed in beats against the tempo map; positions that are not exact land on the nearest tick"
+    },
+    "take.lane": {
+      "level": "degrade",
+      "to": "clip.media",
+      "loss_class": "flattened",
+      "loss": "the active comp is flattened into arrangement clips; alternate takes are dropped"
+    },
+    "take.comp": {
+      "level": "degrade",
+      "to": "clip.media",
+      "loss_class": "flattened",
+      "loss": "comp segment boundaries become clip boundaries; the selection is no longer editable"
+    },
+    "track.freeze": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "DAWproject has no freeze concept; the authored track is exported and the sealed render is dropped"
+    },
+    "clip.gain": { "level": "full" },
+    "clip.fades": { "level": "full" },
+    "automation.device-param": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "device identity does not survive without a device payload, so its automation has no target"
+    },
+    "device.placement": {
+      "level": "drop",
+      "loss_class": "dropped",
+      "loss": "devices are identity-only in the document; DAWproject requires a device type to place one"
+    },
+    "sequence.multiple": {
+      "level": "degrade",
+      "to": "track.flat",
+      "loss_class": "flattened",
+      "loss": "only the root sequence is written; other sequences are dropped"
+    },
+    "content.registered": { "level": "roundtrip-only" },
+    "content.opaque": { "level": "roundtrip-only" }
+  }
+}

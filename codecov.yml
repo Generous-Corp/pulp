@@ -229,6 +229,10 @@ flags:
     paths:
       - core/host/
     carryforward: true
+  interchange:
+    paths:
+      - core/interchange/
+    carryforward: true
   midi:
     paths:
       - core/midi/
@@ -434,6 +438,9 @@ component_management:
     - component_id: host
       name: host
       paths: ["core/host/**"]
+    - component_id: interchange
+      name: interchange
+      paths: ["core/interchange/**"]
     - component_id: midi
       name: midi
       paths:
