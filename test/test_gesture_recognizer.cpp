@@ -708,3 +708,33 @@ TEST_CASE("a widget carrying a recognizer still receives its own events",
     CHECK(probe->downs == 2);
     CHECK(probe->ups == 2);
 }
+
+TEST_CASE("a drag under a recognizer that never claims still gets its release",
+          "[view][gesture]") {
+    // The leak the claim-edge cases cannot see. Both of those use a recognizer
+    // that DOES claim, so they take the takeover path. Here the recognizer is a
+    // double-tap: present throughout the drag, recognizing nothing. Its
+    // per-move dispatch still returns true — a candidate exists — and OR-ing
+    // that into the release bail skipped on_mouse_up entirely, leaving the same
+    // begins=2/ends=1 shape as the host bug in the shared headless path.
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<Probe>();
+    auto* probe = owned.get();
+    owned->set_bounds({20, 20, 160, 160});
+    root.add_child(std::move(owned));
+    probe->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    root.simulate_drag({40, 40}, {150, 150}, /*steps=*/6);
+
+    CHECK(probe->downs == 1);
+    CHECK(probe->drags == 6);   // the widget kept the drag — nothing claimed it
+    CHECK(probe->ups == 1);     // ...and the bracket closed
+}

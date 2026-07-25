@@ -357,7 +357,14 @@ void View::simulate_drag(Point start, Point end, int steps) {
         move.button = MouseButton::left;
         move.is_down = true;
         move.phase = MousePhase::drag;
-        gesture_consumed = dispatch_gesture_pointer_event(move) || gesture_consumed;
+        if (dispatch_gesture_pointer_event(move) && gesture_claimed_pointer()) {
+            // A recognizer took the pointer partway through. The press was
+            // already delivered, so stop the raw drag but CLOSE the bracket —
+            // a control that opened a parameter gesture on press must see its
+            // release or the host holds an automation touch open.
+            target->on_mouse_up(to_target_local(p));
+            return;
+        }
         target->on_mouse_drag(to_target_local(p));
     }
     MouseEvent up;
@@ -366,10 +373,12 @@ void View::simulate_drag(Point start, Point end, int steps) {
     up.button = MouseButton::left;
     up.is_down = false;
     up.phase = MousePhase::release;
-    gesture_consumed =
-        (dispatch_gesture_pointer_event(up) && gesture_claimed_pointer()) ||
-        gesture_consumed;
-    if (gesture_consumed) return;
+    // The release is delivered unconditionally. Whether a recognizer claims on
+    // this edge or was merely a candidate throughout, the press was delivered
+    // and its bracket has to close exactly once. OR-ing a candidacy result into
+    // the bail is what leaked it: a widget carrying a recognizer that never
+    // recognized got its press and its drags and then no release at all.
+    dispatch_gesture_pointer_event(up);
     target->on_mouse_up(to_target_local(end));
 }
 
