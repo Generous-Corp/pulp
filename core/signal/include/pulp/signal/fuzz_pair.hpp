@@ -190,10 +190,24 @@ public:
     /// [design parameter] default 1e-6, range 1e-8 .. 1e-4 calibration units.
     static constexpr double kResidualTolerance = 1e-6;
 
-    /// Input scale: what full-scale audio represents in volts of base drive.
-    /// Chosen so a full-scale input drives both devices past their knees.
-    /// [design parameter] default 0.9 V, range 0.2 .. 2.0 V.
-    static constexpr double kInputDriveVolts = 0.9;
+    /// How far a full-scale input drives the stage, measured in RAIL-TO-RAIL
+    /// SWINGS rather than in volts.
+    ///
+    /// This has to be relative, not absolute, and getting it wrong is silent.
+    /// A common-emitter stage's gain is `R_c·gm`, and `gm` at a 1-unit
+    /// operating current is ~34 — so the input swing that takes the collector
+    /// from rail to rail is only about 60 mV. An absolute drive scale of a few
+    /// hundred millivolts therefore slams the stage at ANY input level, which
+    /// makes the source-impedance cleanup invisible (both ends of the sweep are
+    /// fully clipped) and keeps the solver permanently in the steepest part of
+    /// the exponential. Expressed as a multiple of the stage's own swing it
+    /// scales correctly across devices and operating points — series law 7.
+    ///
+    /// At 1.5 a full-scale input overdrives by half a rail, so it clips hard,
+    /// while a guitar volume rolled back to ~27 % sits inside the linear
+    /// region. That difference IS the cleanup the circuit is famous for.
+    /// [design parameter] default 1.5, range 0.5 .. 6.0 rail-to-rail swings.
+    static constexpr double kInputDriveRails = 1.5;
 
     /// Thermal-drift depth, in octaves of saturation current. Germanium's
     /// reverse saturation current is far more temperature-sensitive than
@@ -315,6 +329,10 @@ public:
     /// value: ~363 mV germanium, ~693 mV silicon.
     double bias_voltage() const { return bias_voltage_; }
 
+    /// Volts of base drive a full-scale input produces, derived from the
+    /// stage's own rail-to-rail swing.
+    double input_scale_volts() const { return input_scale_; }
+
     /// Available collector current after starvation.
     double available_current() const { return available_current_; }
 
@@ -415,7 +433,7 @@ private:
         }
         const double scale = saturation / saturation_;
 
-        const double drive = input * kInputDriveVolts * loading_;
+        const double drive = input * input_scale_ * loading_;
         double v1 = v1_;
         double v2 = v2_;
         double residual = 0.0;
@@ -521,6 +539,13 @@ private:
         // One ratio, two consequences: attenuation and loop-gain loading.
         loading_ = kInputImpedanceKohm / (source_kohm_ + kInputImpedanceKohm);
 
+        // The input scale, derived from the stage rather than declared: the
+        // base swing that moves the collector across its whole rail is
+        // `1 / (R_c · gm)` at the operating point.
+        const double gm = available_current_ / (ideality_ * kThermalVoltage);
+        const double rail_to_rail = 1.0 / std::max(collector_load_ * gm, 1e-12);
+        input_scale_ = kInputDriveRails * rail_to_rail;
+
         feedback_conductance_ =
             kFeedbackConductanceMin + fuzz_ * (kFeedbackConductanceMax - kFeedbackConductanceMin);
 
@@ -561,6 +586,7 @@ private:
     double bias_voltage_ = 0.0;
     double collector_load_ = 0.5;
     double loading_ = 1.0;
+    double input_scale_ = 1.0;
     double feedback_conductance_ = 0.0;
     double feedback_norm_ = 1.0;
     int latency_ = 0;
