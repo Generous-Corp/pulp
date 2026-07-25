@@ -1147,6 +1147,18 @@ rate change.
 
 ## Common tripwires
 
+- **Not every timeline automation lane addresses a device — skip, do not
+  refuse.** `AutomationTarget` also names a track's own mixer controls, so a
+  track can carry lanes that reference no `DevicePlacement` at all. The route
+  admission scan in `timeline_automation_delivery.cpp` walks
+  `TrackAutomationProgram::programs()` and must consult
+  `AutomationProgram::device_target()` first: a null one is **skipped**, not
+  reported as `MissingDevicePlacement`. Refusing it would fail admission for the
+  whole track — every device lane on it stops being delivered — because one lane
+  was never meant to reach a plugin. Those lanes are applied where the track's
+  audio is accumulated instead. The same rule holds in
+  `TrackAutomationRenderer`, which never builds a device batch for them.
+
 - **Instruments have no input bus — never address input element 0 blind.**
   An AU instrument (`aumu`) and a generator (`augn`) expose **zero input
   elements**; so does a MIDI processor (`aumi`, which despite the name is

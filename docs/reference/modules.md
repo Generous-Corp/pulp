@@ -936,6 +936,16 @@ placements. Publish `CreateAsset` before `SetTrackFreeze` in one transaction;
 clear the freeze before removing the asset. A journal replay selects the sealed
 artifact and never performs a hidden render.
 
+`TrackMixer` is the track's own level and stereo placement: a linear
+`gain_linear` and a `pan` balance in `[-1, 1]`, edited with `SetTrackMixer`.
+`AutomationTarget` accordingly names either a placed device parameter or one of
+these mixer controls, so volume and pan automation is expressible without
+inventing an out-of-band convention for which device is the fader. Sends, mute,
+solo, and routing are not modeled. Playback applies the mixer where the track's
+audio is accumulated, so the offline mixdown and the graph-hosted per-track
+renderer agree; a lane supersedes the authored constant rather than multiplying
+with it, and pan attenuates the opposite side without ever boosting.
+
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. An audio asset may also carry typed
 `AudioLoopInfo`: musical length and meter, one-shot intent, MIDI root note,

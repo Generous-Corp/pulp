@@ -403,6 +403,13 @@ Publish a freeze in one transaction ordered as `CreateAsset` followed by
 the document for thaw; playback merely selects the frozen artifact. Clear the
 freeze before removing its asset. Replay never re-renders a freeze.
 
+A track also carries a `TrackMixer` — `gain_linear` and a `pan` balance in
+`[-1, 1]` — replaced with `SetTrackMixer` under an exact optimistic gate. An
+`AutomationLane` may target one of those controls with `TrackMixerTarget` instead
+of a device parameter; such a lane references no device placement and supersedes
+the authored constant while it plays. Both values are refused outside their
+range, including a NaN, so a document can never hold a level that has no meaning.
+
 The realtime recorder is `<pulp/playback/capture_engine.hpp>`:
 
 1. Build a `CaptureEngineConfig` with explicit track, block, take-frame,

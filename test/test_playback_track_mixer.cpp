@@ -161,3 +161,22 @@ TEST_CASE("rendering an automated mixer allocates nothing", "[playback][mixer][r
         REQUIRE(probe.allocation_count() == 0);
     }
 }
+
+TEST_CASE("an out-of-range gain curve is bounded at the render", "[playback][mixer]") {
+    // An automation curve is authored point by point and is not range checked at
+    // insert time, so the render is the only place that can hold a lane to the
+    // same range the document accepts for a static fader.
+    MixerFixture excessive(
+        TrackMixer{}, {mixer_lane(40, TrackMixerParameter::Gain, 1'000.0f, 1'000.0f)});
+    REQUIRE_THAT(excessive.render_first(0), WithinAbs(64.0f, 1e-4f));
+
+    MixerFixture negative(TrackMixer{}, {mixer_lane(40, TrackMixerParameter::Gain, -5.0f, -5.0f)});
+    REQUIRE(negative.render_first(0) == 0.0f);
+
+    // A pan curve past hard left must not invert the opposite side into a
+    // negative multiplier, which would flip that channel's polarity.
+    MixerFixture over_panned(TrackMixer{},
+                             {mixer_lane(40, TrackMixerParameter::Pan, -4.0f, -4.0f)}, 2);
+    REQUIRE_THAT(over_panned.render_first(0, 0, 2), WithinAbs(1.0f, 1e-4f));
+    REQUIRE(over_panned.render_first(0, 1, 2) == 0.0f);
+}

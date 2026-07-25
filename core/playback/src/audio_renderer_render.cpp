@@ -121,8 +121,9 @@ struct TrackMixerRun {
 
     float factor(timebase::SamplePosition sample, std::size_t channel,
                  std::size_t channel_count) noexcept {
-        return gain.value_at(sample) *
-               track_mixer_channel_gain(pan.value_at(sample), channel, channel_count);
+        return clamped_track_gain(gain.value_at(sample)) *
+               track_mixer_channel_gain(clamped_track_pan(pan.value_at(sample)), channel,
+                                        channel_count);
     }
 };
 
@@ -194,6 +195,10 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                                    TrackMixerRun& mixer,
                                    audio::BufferView<float> output) noexcept {
     render_track(track, range, tempo_map, mixer, output, true);
+    // The absolute pass above left the cursors wherever its last clip ended, and
+    // this pass starts over at the head of the range.
+    if (!mixer.transparent)
+        mixer.restart(tempo_map);
     const auto clips = track.clips();
     for (std::uint32_t output_frame = 0; output_frame < range.frame_count; ++output_frame) {
         const auto fraction =

@@ -2,11 +2,21 @@
 
 #include <pulp/playback/automation_program.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timeline/model.hpp>
 
 #include <cstddef>
 #include <cstdint>
 
 namespace pulp::playback {
+
+/// Mirrors timeline::kMaximumTrackGainLinear. Kept here so the render path can
+/// bound a streamed curve value without the playback module reaching into the
+/// document model for a constant; the static_assert below keeps the two honest.
+inline constexpr float kMaximumTrackMixerGain = 64.0f;
+static_assert(kMaximumTrackMixerGain == timeline::kMaximumTrackGainLinear,
+              "the render path must bound an automated fader by exactly the range the "
+              "document accepts for a static one, or a curve could ask for a gain the "
+              "model refuses to store");
 
 /// The compiled form of a track's own level and stereo placement. A null lane
 /// pointer means the authored constant governs for the whole timeline; a
@@ -27,6 +37,25 @@ struct TrackMixerProgram {
                pan == 0.0f;
     }
 };
+
+/// Constrains a streamed control value to the range the document accepts for the
+/// same control as a constant. A curve is authored point by point and is not
+/// range checked at insert time, so without this a lane could ask for a gain the
+/// model refuses to store, and a single NaN point would poison every sample
+/// downstream of the track. A value the mixer cannot interpret rests at neutral
+/// rather than at an extreme, so a broken curve leaves the track audible and
+/// centred instead of silently muting or hard-panning it.
+constexpr float clamped_track_gain(float value) noexcept {
+    if (!(value >= 0.0f))
+        return value <= 0.0f ? 0.0f : 1.0f;
+    return value > kMaximumTrackMixerGain ? kMaximumTrackMixerGain : value;
+}
+
+constexpr float clamped_track_pan(float value) noexcept {
+    if (!(value >= -1.0f))
+        return value <= -1.0f ? -1.0f : 0.0f;
+    return value > 1.0f ? 1.0f : value;
+}
 
 /// Per-side multipliers for a stereo balance. Pan attenuates the opposite side
 /// and never boosts, so centre is exactly unity and a hard pan cannot make a

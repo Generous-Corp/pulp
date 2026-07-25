@@ -154,9 +154,13 @@ TEST_CASE("A decoded mixer outside the authored range is refused", "[timeline][m
     // decoder with a hand-built document to prove a hostile file cannot install
     // a gain the model would have rejected.
     auto document = serialized(mixer_project(TrackMixer{0.5f, 0.0f}));
-    const auto gain = document.find("\"gain_linear_bits\":\"");
+    // Scoped to the mixer member on purpose: a clip carries its own
+    // gain_linear_bits and is written first, so an unscoped search would corrupt
+    // the clip and prove nothing about the mixer.
+    const auto key = std::string("\"mixer\":{\"gain_linear_bits\":\"");
+    const auto gain = document.find(key);
     REQUIRE(gain != std::string::npos);
-    const auto begin = gain + std::string("\"gain_linear_bits\":\"").size();
+    const auto begin = gain + key.size();
     const auto end = document.find('"', begin);
     REQUIRE(end != std::string::npos);
     // 0x7fc00000 is a quiet NaN, which no comparison against the range accepts.

@@ -310,6 +310,15 @@ per-ABI entry point for it.** Go through the plugin's own state:
   not native render jobs, so list them in the native timeline target,
   no-exceptions target, WAM, and WebCLAP together. Browser replay consumes the
   persisted artifact reference; it must never attempt to rerender a freeze.
+  Track mixer state (gain/pan plus its automation targets) is the counter-case
+  worth knowing: it added **no** translation unit at all. The document field and
+  the new variant alternative land in existing timeline units, and the render-side
+  `track_mixer_program.hpp` is deliberately header-only, so the WAM and WebCLAP
+  lists are untouched and `web-timeline-source-closure` stays green without an
+  edit. Check whether a change adds a `.cpp` rather than assuming a feature-sized
+  change must touch the web lists — and keep new small render-path helpers
+  header-only when they have no state to define, so the closure surface does not
+  grow for free.
   These builds also share Timeline's persistent indexes: initial Track/Project
   construction and identity restoration bulk-build sorted balanced trees,
   while ordinary edits path-copy only the changed search paths. Do not replace

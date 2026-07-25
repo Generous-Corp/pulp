@@ -173,6 +173,11 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope(
             "pulp.timeline.command.set_clip_sequence_ref",
             R"({"clip_id":"7","expected":{"sequence_id":"30","source_start":"0"},"replacement":{"sequence_id":"30","source_start":"100"},"sequence_id":"5","track_id":"6"})"),
+        envelope(
+            "pulp.timeline.command.set_track_mixer",
+            R"({"expected":{"gain_linear_bits":"1065353216","pan_bits":"0"},)"
+            R"("replacement":{"gain_linear_bits":"1056964608","pan_bits":"0"},)"
+            R"("sequence_id":"5","track_id":"6"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -220,6 +225,8 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<CloneSequence>(commands[31]));
     REQUIRE(std::holds_alternative<RemoveSequence>(commands[32]));
     REQUIRE(std::holds_alternative<SetClipSequenceRef>(commands[33]));
+    REQUIRE(std::holds_alternative<SetTrackMixer>(commands[34]));
+    REQUIRE(std::get<SetTrackMixer>(commands[34]).replacement == TrackMixer{0.5f, 0.0f});
 
     DecodeLimits no_scenes;
     no_scenes.max_scenes = 0;
