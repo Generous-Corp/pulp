@@ -56,6 +56,7 @@ target_sources(pulp-audio PRIVATE
     src/realtime_sample_recorder.cpp
     src/rolling_audio_capture_buffer.cpp
     src/sample_asset_io.cpp
+    src/sample_bank_materializer.cpp
     src/sample_heritage_json.cpp
     src/sample_heritage_live_cyclic.cpp
     src/sample_heritage_runtime_state_json.cpp
@@ -129,7 +130,8 @@ if(TARGET signalsmith-stretch)
     message(STATUS "Pulp: Signalsmith Stretch time/pitch processor enabled")
 endif()
 
-target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state pulp::signal)
+target_link_libraries(pulp-audio PUBLIC pulp::runtime pulp::midi pulp::state pulp::signal
+                                pulp::sample-bank-manifest)
 
 # CHOC headers (audio file I/O)
 target_include_directories(pulp-audio PRIVATE

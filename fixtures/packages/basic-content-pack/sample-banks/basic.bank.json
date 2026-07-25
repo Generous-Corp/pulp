@@ -1,0 +1,7 @@
+{
+  "schema": "pulp.sample-bank.v1",
+  "id": "basic",
+  "name": "Basic Sample Bank",
+  "samples": [],
+  "zones": []
+}

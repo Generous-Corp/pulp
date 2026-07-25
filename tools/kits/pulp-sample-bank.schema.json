@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pulp.audio/schemas/pulp-sample-bank-v1.json",
+  "title": "Pulp Sample Bank v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "samples", "zones"],
+  "properties": {
+    "schema": { "const": "pulp.sample-bank.v1" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "name": { "type": "string", "minLength": 1 },
+    "extensions": { "$ref": "#/$defs/extensions" },
+    "samples": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "sha256"],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1, "maximum": 4294967294 },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*[\\\\:]).+$"
+          },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "license_ref": { "type": "string" },
+          "extensions": { "$ref": "#/$defs/extensions" }
+        }
+      }
+    },
+    "zones": {
+      "type": "array",
+      "maxItems": 65536,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sample_id"],
+        "properties": {
+          "sample_id": { "type": "integer", "minimum": 1, "maximum": 4294967294 },
+          "root_note": { "type": "integer", "minimum": 0, "maximum": 127 },
+          "lowest_note": { "type": "integer", "minimum": 0, "maximum": 127 },
+          "highest_note": { "type": "integer", "minimum": 0, "maximum": 127 },
+          "lowest_velocity": { "type": "integer", "minimum": 1, "maximum": 127 },
+          "highest_velocity": { "type": "integer", "minimum": 1, "maximum": 127 },
+          "keytrack_cents_per_key": { "type": "number" },
+          "tune_semitones": { "type": "number" },
+          "priority": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "round_robin_group": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "voice_group": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "choke_group": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+          "slice_index": { "type": "integer", "minimum": 0, "maximum": 4294967294 },
+          "slice_start_frame": { "type": "integer", "minimum": 0 },
+          "slice_end_frame": { "type": "integer", "minimum": 0 },
+          "loop_start_frame": { "type": "integer", "minimum": 0 },
+          "loop_end_frame": { "type": "integer", "minimum": 0 },
+          "extensions": { "$ref": "#/$defs/extensions" }
+        },
+        "dependentRequired": {
+          "slice_index": ["slice_start_frame", "slice_end_frame"],
+          "slice_start_frame": ["slice_index", "slice_end_frame"],
+          "slice_end_frame": ["slice_index", "slice_start_frame"],
+          "loop_start_frame": ["loop_end_frame"],
+          "loop_end_frame": ["loop_start_frame"]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "extensions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[^.]+(?:\\.[^.]+)+$" },
+      "additionalProperties": true
+    }
+  }
+}

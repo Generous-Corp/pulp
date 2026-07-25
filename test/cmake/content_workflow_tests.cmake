@@ -45,5 +45,5 @@ target_include_directories(pulp-test-cli-content-commands PRIVATE
 target_compile_definitions(pulp-test-cli-content-commands PRIVATE
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(pulp-test-cli-content-commands PRIVATE
-    pulp::platform pulp::runtime pulp::state Catch2::Catch2WithMain)
+    pulp::platform pulp::runtime pulp::state pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-content-commands)

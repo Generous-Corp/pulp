@@ -1,4 +1,5 @@
 #include <pulp/state/content_registry.hpp>
+#include <pulp/audio/sample_bank.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/system.hpp>
 
@@ -201,6 +202,7 @@ struct LocalContentManifest {
     ContentPackInfo pack;
     std::vector<std::string> exported_kind_names;
     std::vector<std::string> exported_paths;
+    std::vector<std::string> sample_bank_paths;
 };
 
 std::vector<fs::path> preset_files(const std::vector<fs::path>& paths) {
@@ -235,6 +237,36 @@ void validate_export_paths_exist(const fs::path& root,
                              + "` references missing or unsafe path `" + rel.generic_string() + "`");
         }
     }
+}
+
+bool validate_sample_banks(const fs::path& root,
+                           const std::vector<std::string>& declared_paths,
+                           std::vector<std::string>* copied_paths,
+                           std::vector<std::string>& issues) {
+    const auto validation =
+        pulp::audio::validate_sample_bank_content(root, declared_paths);
+    for (const auto& issue : validation.issues) {
+        issues.push_back("sample-bank: `" + issue.manifest_path + "` " +
+                         pulp::audio::sample_bank_status_name(issue.status) +
+                         " at " + issue.field_path);
+    }
+    if (copied_paths) {
+        for (const auto& sample_path : validation.sample_paths) {
+            if (std::find(copied_paths->begin(), copied_paths->end(),
+                          sample_path) == copied_paths->end())
+                copied_paths->push_back(sample_path);
+        }
+    }
+    return validation.valid();
+}
+
+fs::path temporary_content_validation_root() {
+    static std::atomic<unsigned> sequence{0};
+    const auto ticks =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    return fs::temp_directory_path() /
+           ("pulp-content-runtime-validate-" + std::to_string(ticks) + "-" +
+            std::to_string(sequence.fetch_add(1)));
 }
 
 bool validate_directory_entries(const fs::path& root, std::vector<std::string>& issues) {
@@ -512,17 +544,20 @@ std::optional<ContentPackInfo> load_pack(const fs::path& root) {
             const auto presets = string_array_member(exports, "presets");
             const auto themes = string_array_member(exports, "themes");
             const auto samples = string_array_member(exports, "samples");
+            const auto sample_banks = string_array_member(exports, "sampleBanks");
             const auto wavetables = string_array_member(exports, "wavetables");
             std::vector<std::string> issues;
             validate_export_paths_exist(root, presets, issues);
             validate_export_paths_exist(root, themes, issues);
             validate_export_paths_exist(root, samples, issues);
+            validate_export_paths_exist(root, sample_banks, issues);
             validate_export_paths_exist(root, wavetables, issues);
             if (!issues.empty()) return std::nullopt;
 
             append_files_under(root, presets, pack.presets);
             append_files_under(root, themes, pack.themes);
             append_files_under(root, samples, pack.samples);
+            append_files_under(root, sample_banks, pack.sample_banks);
             append_files_under(root, wavetables, pack.wavetables);
         }
 
@@ -539,12 +574,24 @@ std::vector<std::string> exported_kinds(const ContentPackInfo& pack) {
     if (!pack.presets.empty()) kinds.emplace_back("presets");
     if (!pack.themes.empty()) kinds.emplace_back("themes");
     if (!pack.samples.empty()) kinds.emplace_back("samples");
+    if (!pack.sample_banks.empty()) kinds.emplace_back("sample-banks");
     if (!pack.wavetables.empty()) kinds.emplace_back("wavetables");
     return kinds;
 }
 
-std::optional<LocalContentManifest> load_local_content_manifest(const fs::path& input,
-                                                               std::vector<std::string>& issues) {
+/// Verifying an archive's sample banks requires unpacking it, so callers that
+/// have already validated this exact input pass validate_archive_sample_banks
+/// = false rather than paying for a second full extraction.
+///
+/// Verifying a directory's sample banks hashes every referenced sample. That is
+/// right for validate/preview/install, but an inventory rebuild must not pay it
+/// for the whole installed library — and must not drop a pack from the index
+/// just because one of its samples was edited. Such callers pass
+/// validate_directory_sample_banks = false.
+std::optional<LocalContentManifest> load_local_content_manifest(
+    const fs::path& input, std::vector<std::string>& issues,
+    bool validate_archive_sample_banks = true,
+    bool validate_directory_sample_banks = true) {
     LocalContentManifest manifest;
     manifest.source = input;
 
@@ -600,56 +647,86 @@ std::optional<LocalContentManifest> load_local_content_manifest(const fs::path& 
             const auto presets = string_array_member(exports, "presets");
             const auto themes = string_array_member(exports, "themes");
             const auto samples = string_array_member(exports, "samples");
+            const auto sample_banks = string_array_member(exports, "sampleBanks");
             const auto wavetables = string_array_member(exports, "wavetables");
             const auto licenses = string_array_member(exports, "licenses");
             manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(), presets.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(), themes.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(), samples.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(), sample_banks.end());
+            manifest.sample_bank_paths = sample_banks;
             manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(), wavetables.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(), licenses.end());
             validate_export_paths(presets, issues);
             validate_export_paths(themes, issues);
             validate_export_paths(samples, issues);
+            validate_export_paths(sample_banks, issues);
             validate_export_paths(wavetables, issues);
             validate_export_paths(licenses, issues);
             validate_export_paths_exist(manifest.root, presets, issues);
             validate_export_paths_exist(manifest.root, themes, issues);
             validate_export_paths_exist(manifest.root, samples, issues);
+            validate_export_paths_exist(manifest.root, sample_banks, issues);
             validate_export_paths_exist(manifest.root, wavetables, issues);
             validate_export_paths_exist(manifest.root, licenses, issues);
             append_files_under(manifest.root, presets, manifest.pack.presets);
             append_files_under(manifest.root, themes, manifest.pack.themes);
             append_files_under(manifest.root, samples, manifest.pack.samples);
+            append_files_under(manifest.root, sample_banks, manifest.pack.sample_banks);
+            if (validate_directory_sample_banks)
+                validate_sample_banks(manifest.root, sample_banks,
+                                      &manifest.exported_paths, issues);
             append_files_under(manifest.root, wavetables, manifest.pack.wavetables);
             manifest.pack.presets = preset_files(manifest.pack.presets);
             if (!presets.empty()) manifest.exported_kind_names.emplace_back("presets");
             if (!themes.empty()) manifest.exported_kind_names.emplace_back("themes");
             if (!samples.empty()) manifest.exported_kind_names.emplace_back("samples");
+            if (!sample_banks.empty()) manifest.exported_kind_names.emplace_back("sample-banks");
             if (!wavetables.empty()) manifest.exported_kind_names.emplace_back("wavetables");
         } else if (exports.isObject()) {
             const auto presets = string_array_member(exports, "presets");
             const auto themes = string_array_member(exports, "themes");
             const auto samples = string_array_member(exports, "samples");
+            const auto sample_banks = string_array_member(exports, "sampleBanks");
             const auto wavetables = string_array_member(exports, "wavetables");
             const auto licenses = string_array_member(exports, "licenses");
             manifest.exported_paths.insert(manifest.exported_paths.end(), presets.begin(), presets.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), themes.begin(), themes.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), samples.begin(), samples.end());
+            manifest.exported_paths.insert(manifest.exported_paths.end(), sample_banks.begin(), sample_banks.end());
+            manifest.sample_bank_paths = sample_banks;
             manifest.exported_paths.insert(manifest.exported_paths.end(), wavetables.begin(), wavetables.end());
             manifest.exported_paths.insert(manifest.exported_paths.end(), licenses.begin(), licenses.end());
             if (!presets.empty()) manifest.exported_kind_names.emplace_back("presets");
             if (!themes.empty()) manifest.exported_kind_names.emplace_back("themes");
             if (!samples.empty()) manifest.exported_kind_names.emplace_back("samples");
+            if (!sample_banks.empty()) manifest.exported_kind_names.emplace_back("sample-banks");
             if (!wavetables.empty()) manifest.exported_kind_names.emplace_back("wavetables");
             validate_export_paths(presets, issues);
             validate_export_paths(themes, issues);
             validate_export_paths(samples, issues);
+            validate_export_paths(sample_banks, issues);
             validate_export_paths(wavetables, issues);
             validate_export_paths(licenses, issues);
         }
 
         if (manifest.archive)
             validate_archive_entries(input, issues, &manifest.exported_paths);
+        if (manifest.archive && validate_archive_sample_banks && issues.empty() &&
+            !manifest.sample_bank_paths.empty()) {
+            const auto temporary_root = temporary_content_validation_root();
+            std::string extract_error;
+            if (!extract_archive_content(input, temporary_root, extract_error)) {
+                issues.push_back("sample-bank: " + extract_error);
+            } else {
+                validate_sample_banks(temporary_root,
+                                      manifest.sample_bank_paths,
+                                      nullptr,
+                                      issues);
+            }
+            std::error_code remove_error;
+            fs::remove_all(temporary_root, remove_error);
+        }
     } catch (const std::exception& e) {
         issues.push_back(std::string("invalid-json: ") + e.what());
         return std::nullopt;
@@ -704,7 +781,12 @@ std::vector<LocalContentManifest> installed_content(const fs::path& data_root) {
                 if (!versions->is_directory(ec)) continue;
                 if (is_content_update_backup_dir(versions->path())) continue;
                 std::vector<std::string> issues;
-                if (auto manifest = load_local_content_manifest(versions->path(), issues)) {
+                // Inventory only: never hash the installed library here, and
+                // never let a bank issue erase an installed pack's presets and
+                // themes from the index. Verification belongs to validate,
+                // preview, and install.
+                if (auto manifest =
+                        load_local_content_manifest(versions->path(), issues, false, false)) {
                     manifest->root = versions->path();
                     manifest->pack.root = versions->path();
                     entries.push_back(std::move(*manifest));
@@ -995,7 +1077,9 @@ ContentInstallResult install_content_pack(const fs::path& input,
     }
 
     std::vector<std::string> issues;
-    auto local = load_local_content_manifest(input, issues);
+    // The preview above already validated this input's sample banks and is
+    // required to be ok, so re-extracting the archive here would prove nothing.
+    auto local = load_local_content_manifest(input, issues, false);
     if (!local) {
         result.issues.insert(result.issues.end(), issues.begin(), issues.end());
         return result;

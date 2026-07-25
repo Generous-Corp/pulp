@@ -1,6 +1,6 @@
 ---
 name: content
-description: Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. Use for presets, themes, samples, wavetables, and other end-user data that must be reviewed before install or update.
+description: Validate, install, update, list, rescan, remove, and reveal data-only Pulp content packs for installed plugins. Use for presets, themes, samples, sample banks, wavetables, and other end-user data that must be reviewed before install or update.
 requires:
   scripts:
     - tools/kits/pulp-package.schema.json
@@ -13,7 +13,7 @@ Use this skill when a user has a `.pulpcontent` archive or local `content-pack` 
 
 Content packs are valuable because:
 
-- plugin authors ship presets, themes, samples, and wavetables without custom installers;
+- plugin authors ship presets, themes, samples, sample banks, and wavetables without custom installers;
 - users get validation, a visible target plugin/content path, and reversible removal;
 - runtime plugins consume installed data through `ContentRegistry` or `PresetManager` content capabilities.
 
@@ -35,6 +35,12 @@ Trust rules:
 - removal deletes only the installed pack root; user edits stay in the plugin's normal user preset path. The OK line names the deleted pack path — `Removed content pack <id> for <plugin> (removed <path>)` — for parity with `tool uninstall`.
 
 Built plugins should embed `pulp.plugin-runtime.json` via `pulp_add_plugin(... CONTENT_CAPABILITIES ... CONTENT_KINDS ...)`. Agents and in-app installers should preview with that manifest before approval, then install with `approved=true`. Validate built bundles with `ValidationHarness::validate_plugin_runtime_manifest(...)`.
+
+For generic bundled-audio banks, use capability `content.sample-banks.v1`,
+kind `sample-banks`, and `exports.sampleBanks`. Bank manifests use
+`pulp.sample-bank.v1`; their audio paths are relative to the content-pack root
+and their lowercase SHA-256 hashes are verified before decode. Preserve future
+edit, analysis, and playback metadata under namespaced `extensions` keys.
 
 Sampler Heritage profile JSON is not a content pack: validate, canonicalize,
 inspect, and render it with `pulp audio heritage ...`. Use `pulp content` only

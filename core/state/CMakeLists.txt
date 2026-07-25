@@ -18,7 +18,7 @@ target_sources(pulp-state PRIVATE
 )
 
 target_link_libraries(pulp-state PUBLIC pulp::runtime)
-target_link_libraries(pulp-state PRIVATE pulp::events)
+target_link_libraries(pulp-state PRIVATE pulp::events pulp::sample-bank-manifest)
 
 # CHOC headers (used by store.cpp for endianness utilities)
 target_include_directories(pulp-state PRIVATE
