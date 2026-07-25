@@ -465,6 +465,68 @@ TEST_CASE("Every six-operator routing is structurally well formed",
     }
 }
 
+TEST_CASE("Modulation only ever flows from higher-numbered operators",
+          "[signal][drum][fm6]") {
+    // The documented layout of the original algorithm set: the highest-numbered
+    // operator sits at the top and an operator is modulated only by ones above
+    // it. This is the sharpest check available on the transcription -- an arrow
+    // pointing the wrong way is the easiest error to make and among the hardest
+    // to notice by ear, since a wrong-way routing still produces plausible FM.
+    for (int index = 0; index < Fm6DrumVoice::algorithm_count; ++index) {
+        const auto& alg = Fm6DrumVoice::algorithms[static_cast<std::size_t>(index)];
+        for (int op = 0; op < Fm6DrumVoice::operator_count; ++op) {
+            for (int src = 0; src < Fm6DrumVoice::operator_count; ++src) {
+                if (alg.modulated_by[static_cast<std::size_t>(op)] & (1u << src)) {
+                    INFO("algorithm " << (index + 1) << ": operator " << (op + 1)
+                                      << " modulated by operator " << (src + 1));
+                    REQUIRE(src > op);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("Algorithm 8 matches its documented topology",
+          "[signal][drum][fm6]") {
+    // One row pinned against the documentation as a worked example: operators 1
+    // and 3 are the carriers, operator 2 modulates 1, operators 4 and 5 both
+    // modulate 3, operator 6 modulates 5, and the self-feedback sits on
+    // operator 4. A transcription that drifted would almost certainly break
+    // this row along with others.
+    const auto& alg = Fm6DrumVoice::algorithms[7];
+    REQUIRE(alg.carriers == 0x05);          // operators 1 and 3
+    REQUIRE(alg.modulated_by[0] == 0x02);   // 1 <- 2
+    REQUIRE(alg.modulated_by[2] == 0x18);   // 3 <- 4 and 5
+    REQUIRE(alg.modulated_by[4] == 0x20);   // 5 <- 6
+    REQUIRE(alg.feedback_op == 3);          // self-feedback on operator 4
+}
+
+TEST_CASE("Carrier outputs are scaled by the carrier count",
+          "[signal][drum][fm6]") {
+    // The original compensates for how many operators reach the output, so
+    // routings with very different carrier counts arrive at comparable levels
+    // -- the fully additive one is scaled by a sixth. Without it, switching
+    // algorithm would be mostly a volume change.
+    auto level_for = [](int algorithm) {
+        Fm6DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(algorithm);
+        voice.set_tune_hz(140.0);
+        voice.set_depth(0.0);   // no modulation, so only the summing differs
+        voice.set_formant_hz(14000.0);
+        voice.set_formant_q(0.6);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return peak(hit(voice, 1.0f, 12000));
+    };
+
+    // Algorithm 32 sounds six operators, algorithm 1 sounds two. Unscaled, the
+    // first would be around three times louder.
+    const double six = level_for(31);
+    const double two = level_for(0);
+    REQUIRE(six < two * 2.0);
+    REQUIRE(six > two * 0.5);
+}
+
 TEST_CASE("Every six-operator routing renders audio and stays finite",
           "[signal][drum][fm6]") {
     for (int index = 0; index < Fm6DrumVoice::algorithm_count; ++index) {

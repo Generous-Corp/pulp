@@ -31,16 +31,31 @@ namespace pulp::signal::drum {
 /// `DecayEnvelopeT` rather than a transcribed rate/level table — the tables are
 /// where transcription risk actually lives, and nothing here needs them.
 ///
-/// The caveat: the routing table below is transcribed from published
-/// descriptions of the instrument's architecture and has **not** been verified
-/// row by row against a service manual. Its structural invariants are asserted
-/// by tests — every routing has at least one carrier, no operator modulates
-/// itself through the mask, every feedback index is in range, and every
-/// operator is reachable — so a malformed row cannot ship silently. But a row
-/// that is well-formed and simply *wrong* would pass those tests. Treat the
-/// algorithm numbering as indicative until someone checks it against the
-/// documentation; anything that depends on patch-level compatibility needs that
-/// verification first.
+/// The routing table is transcribed from published descriptions of the
+/// instrument's architecture. Three rules the documentation states about the
+/// original algorithm set are asserted over every row, which is what makes the
+/// transcription checkable rather than merely plausible:
+///
+///  * **Modulation only ever flows downward.** The set is laid out with the
+///    highest-numbered operator at the top, so an operator is modulated only by
+///    higher-numbered ones. This is the strongest of the three — it rejects any
+///    row whose arrows point the wrong way, which is the easiest transcription
+///    error to make and the hardest to hear.
+///  * **At most one self-feedback loop per routing**, which is why
+///    `feedback_op` is a single index rather than a mask.
+///  * **Carrier outputs are scaled by the carrier count**, so routings with
+///    different numbers of carriers arrive at comparable levels; the fully
+///    additive routing is scaled by a sixth. `render_add` does this.
+///
+/// Alongside those, the structural invariants: at least one carrier, no
+/// operator modulating itself through the mask, every index in range, and every
+/// operator reachable from a carrier. Algorithm 8 is additionally pinned
+/// against its documented topology as a worked example.
+///
+/// What none of that proves is that a given row *is* the routing that number
+/// names. A row can satisfy every rule above and still be the wrong shape.
+/// Anything depending on patch-level algorithm compatibility should verify the
+/// full table against the operation manual's diagrams first.
 ///
 /// Lineage: Chowning, JAES 21(7), 1973, for the synthesis technique.
 ///
