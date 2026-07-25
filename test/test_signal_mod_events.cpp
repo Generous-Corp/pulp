@@ -232,6 +232,33 @@ TEST_CASE("BurstGen ramps the per-hit level", "[signal][mod][trigger]") {
     for (std::size_t i = 1; i < levels.size(); ++i) REQUIRE(levels[i] < levels[i - 1]);
 }
 
+TEST_CASE("BurstGen count change on an idle generator fires nothing",
+          "[signal][mod][trigger]") {
+    BurstGen burst;
+    burst.prepare(kSampleRate);
+    burst.set_count(4);
+    burst.set_spacing_ms(10.0);
+
+    // Complete one burst, then only turn the count knob up. The finished
+    // marker is next_index_ == count_, so growing the count must not resurrect
+    // the burst.
+    int fired = 0;
+    for (int i = 0; i < 4800; ++i)
+        if (burst.process(i == 0).fired) ++fired;
+    REQUIRE(fired == 4);
+    REQUIRE_FALSE(burst.active());
+
+    burst.set_count(8);
+    REQUIRE_FALSE(burst.active());
+    for (int i = 0; i < 48000; ++i) REQUIRE_FALSE(burst.process(false).fired);
+
+    // A never-triggered generator stays inert through the same change.
+    BurstGen fresh;
+    fresh.prepare(kSampleRate);
+    fresh.set_count(8);
+    for (int i = 0; i < 48000; ++i) REQUIRE_FALSE(fresh.process(false).fired);
+}
+
 // ── TrigDelayT ───────────────────────────────────────────────────────────────
 
 TEST_CASE("TrigDelay delays by exactly the set time", "[signal][mod][trigger]") {
@@ -392,6 +419,28 @@ TEST_CASE("Dahdsr output stays zero for the whole delay stage",
     // one after it.
     REQUIRE(envelope.next() == 0.0f);
     REQUIRE(envelope.next() > 0.0f);
+}
+
+TEST_CASE("Dahdsr retrigger with a delay stage holds the current level",
+          "[signal][mod][envelope]") {
+    Dahdsr envelope;
+    envelope.prepare(kSampleRate);
+    envelope.set_delay_ms(10.0); // 480 samples
+    envelope.set_attack_ms(10.0);
+    envelope.set_decay_ms(10.0);
+    envelope.set_sustain(0.7f);
+
+    envelope.note_on();
+    float level = 0.0f;
+    for (int i = 0; i < 4800; ++i) level = envelope.next();
+    REQUIRE_THAT(level, WithinAbs(0.7f, 1e-4f));
+
+    // Retrigger-from-current-level: the delay must hold the captured level,
+    // not snap to zero and then jump back for the attack.
+    envelope.note_on();
+    for (int i = 0; i < 480; ++i)
+        REQUIRE_THAT(envelope.next(), WithinAbs(0.7f, 1e-4f));
+    REQUIRE(envelope.stage() == EnvelopeStage::attack);
 }
 
 TEST_CASE("Dahdsr velocity scales the peak and the sustain floor",

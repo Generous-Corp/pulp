@@ -237,6 +237,22 @@ TEST_CASE("Drift pitch factor is unity at zero cents", "[signal][mod][rng]") {
     }
 }
 
+TEST_CASE("Drift fraction honours the unit contract at extreme sigma",
+          "[signal][mod][rng]") {
+    Drift drift;
+    drift.prepare(48000.0);
+    drift.set_theta(1.0);
+    drift.set_sigma(4.0); // legal, and enough to saturate the walk's clamp
+    drift.seed(1234u);
+    drift.reset();
+    float peak = 0.0f;
+    for (int i = 0; i < 480000; ++i) {
+        drift.next();
+        peak = std::max(peak, std::abs(drift.fraction()));
+    }
+    REQUIRE(peak <= 1.0f);
+}
+
 // ── lfo: rate ────────────────────────────────────────────────────────────────
 
 TEST_CASE("Lfo frequency is accurate to 0.01 percent", "[signal][mod][lfo]") {
@@ -272,6 +288,16 @@ TEST_CASE("Lfo period_samples round-trips through set_period_samples",
     lfo.set_period_samples(9600.0);
     REQUIRE_THAT(lfo.period_samples(), WithinRel(9600.0, 1e-9));
     REQUIRE_THAT(lfo.rate_hz(), WithinRel(5.0, 1e-9));
+}
+
+TEST_CASE("Lfo rate survives a prepare at a lower sample rate",
+          "[signal][mod][lfo]") {
+    Lfo lfo;
+    lfo.prepare(8000.0);
+    lfo.set_rate_hz(6000.0);                 // clamped to 0.45 * 8000 = 3600
+    REQUIRE_THAT(lfo.rate_hz(), WithinRel(3600.0, 1e-9));
+    lfo.prepare(96000.0);                    // 6000 Hz is legal again
+    REQUIRE_THAT(lfo.rate_hz(), WithinRel(6000.0, 1e-9));
 }
 
 TEST_CASE("Lfo stays bounded and finite at audio rate", "[signal][mod][lfo]") {
@@ -736,6 +762,29 @@ TEST_CASE("Comparator hysteresis suppresses chatter", "[signal][mod][tools]") {
     REQUIRE(comparator.process(0.51f));
 }
 
+TEST_CASE("Comparator keeps a dead band at the default threshold of zero",
+          "[signal][mod][tools]") {
+    // A bipolar signal's natural threshold is 0, where a proportional-only
+    // auto hysteresis would derive a dead band of 0 — the exact chatter the
+    // class exists to prevent.
+    Comparator comparator;
+    REQUIRE(comparator.hysteresis() > 0.0f);
+
+    Xorshift32 rng(7u);
+    int transitions = 0;
+    bool prev = false;
+    for (int i = 0; i < 480000; ++i) {
+        // 0.5 Hz sine plus a sliver of noise, as any real mod signal carries.
+        const float x =
+            std::sin(static_cast<float>(2.0 * 3.14159265358979 * 0.5 * i / 48000.0))
+            + 2.0e-4f * rng.next_bipolar();
+        const bool gate = comparator.process(x);
+        if (gate != prev) ++transitions;
+        prev = gate;
+    }
+    REQUIRE(transitions == 10); // two clean crossings per cycle, five cycles
+}
+
 TEST_CASE("Quantizer snaps to N equally spaced levels", "[signal][mod][tools]") {
     Quantizer quantizer;
     quantizer.set_range(0.0f, 1.0f);
@@ -901,6 +950,18 @@ TEST_CASE("LogisticMap settles to a four-cycle at r = 3.5",
     for (float& value : orbit) value = map.next();
     for (int repeat = 0; repeat < 20; ++repeat)
         for (float value : orbit) REQUIRE_THAT(map.next(), WithinAbs(value, 1e-4f));
+}
+
+TEST_CASE("LogisticMap seed applies without an explicit reset",
+          "[signal][mod][chaos]") {
+    // Same immediate-application semantics as Xorshift32::seed(); reset()
+    // rewinds to the seed rather than being the only way to apply it.
+    LogisticMap seeded;
+    seeded.seed(0.123);
+    LogisticMap reference;
+    reference.seed(0.123);
+    reference.reset();
+    for (int i = 0; i < 100; ++i) REQUIRE(seeded.next() == reference.next());
 }
 
 TEST_CASE("LogisticMap bipolar output spans the range", "[signal][mod][chaos]") {

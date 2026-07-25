@@ -264,7 +264,12 @@ private:
         const float p = clock_.progress();
         switch (stage_) {
             case Stage::delay:
-                return SampleType{0};
+                // A fresh trigger enters the delay at zero because `start_` is
+                // zero. A retrigger holds the level it captured instead:
+                // snapping to zero for the delay and then resuming the attack
+                // from `start_` would be two full-scale steps, which is the
+                // opposite of retrigger-from-current-level.
+                return start_;
             case Stage::attack:
                 return start_ + (peak_ - start_)
                                     * static_cast<SampleType>(curve_rise(p, attack_curve_));

@@ -71,8 +71,13 @@ struct ModMatrixT {
     ///
     /// The caller owns `dests`: zero it (or seed it with the unmodulated base
     /// values) before calling, and clamp it in destination units afterwards.
-    /// Out-of-range indices are skipped rather than trapped, so a stale routing
-    /// left over from a smaller source list cannot read out of bounds.
+    ///
+    /// A stale routing left over from a larger source or destination list can
+    /// never read out of bounds, but the two cases differ deliberately. An
+    /// out-of-range `source` or `dest` skips the slot — the routing has nowhere
+    /// to come from or go to. An out-of-range `via` instead leaves the depth
+    /// unmodulated, because `via` scales a routing rather than defining it, and
+    /// silently dropping the whole routing is the worse failure of the two.
     void evaluate(std::span<const SampleType> sources, std::span<SampleType> dests) const {
         const auto source_count = static_cast<int>(sources.size());
         const auto dest_count = static_cast<int>(dests.size());

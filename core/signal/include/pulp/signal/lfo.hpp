@@ -130,9 +130,12 @@ public:
     // ── rate ─────────────────────────────────────────────────────────────────
 
     /// Free-running rate. The full range is legal, including audio rate; a
-    /// caller mapping this to a knob should use `units::taper_log()`.
+    /// caller mapping this to a knob should use `units::taper_log()`. The
+    /// requested value is kept separately from the effective one, so a rate
+    /// clamped by a low sample rate is restored by a later `prepare()` at a
+    /// higher one instead of being silently lost.
     void set_rate_hz(double hz) {
-        rate_hz_ = hz;
+        requested_rate_hz_ = hz;
         update_increment_();
     }
 
@@ -143,6 +146,7 @@ public:
         const double min_period = 1.0 / kMaxRateFraction;
         increment_ = 1.0 / std::max(samples, min_period);
         rate_hz_ = increment_ * sample_rate_;
+        requested_rate_hz_ = rate_hz_;
     }
 
     double rate_hz() const { return rate_hz_; }
@@ -314,7 +318,7 @@ private:
 
     void update_increment_() {
         const double max_rate = kMaxRateFraction * sample_rate_;
-        rate_hz_ = std::clamp(rate_hz_, kMinRateHz, std::max(kMinRateHz, max_rate));
+        rate_hz_ = std::clamp(requested_rate_hz_, kMinRateHz, std::max(kMinRateHz, max_rate));
         increment_ = rate_hz_ / sample_rate_;
     }
 
@@ -504,6 +508,7 @@ private:
 
     double sample_rate_ = 48000.0;
     double rate_hz_ = 1.0;
+    double requested_rate_hz_ = 1.0;
     double increment_ = 1.0 / 48000.0;
     double phase_ = 0.0;
 

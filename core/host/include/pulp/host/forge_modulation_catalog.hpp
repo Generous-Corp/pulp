@@ -196,14 +196,33 @@ inline CustomNodeType make_mod_lfo_node() {
 // during the decay starts from the cell's current state, so a fast roll
 // crescendos the way a real one does.
 //
+// A struck hit keeps driving the cell for as long as the control is still
+// rising, rather than sampling the control once at the instant it crosses the
+// threshold. Sampling once looks right and is wrong for every source with a
+// finite rise: a slewed or transient-derived control would strike at roughly
+// the threshold level no matter how loud the hit actually was, so velocity
+// would vanish the moment anything smoothed the CV — including the
+// `transient -> lpg` and `slew -> lpg` patches this node is meant for.
+// Re-driving with the running maximum keeps the attack's timing (the first
+// strike still lands on the edge) while the cell charges toward the control's
+// real peak, which is also what a vactrol does while its LED is still
+// brightening.
+//
 // Worst-case gain is unity: the amplitude law is control^1.5 with control in
 // [0, 1] and the filter is a one-pole lowpass, so the node can only attenuate.
 struct ModLpgInstance {
     signal::Lpg lpg;
     signal::TriggerDetect edge;
     float last_brightness_hz = -1.0f;
-    float last_cv = 0.0f;
+    /// Running maximum of the control since the current rising edge, and
+    /// whether that edge is still open. See the strike note below.
+    float strike_peak = 0.0f;
+    bool striking = false;
 };
+
+/// Control level a rising edge must cross to ping the cell, and the level it
+/// must fall back below before the next rise counts as a new hit.
+inline constexpr float kModLpgStrikeThreshold = 0.25f;
 
 inline CustomNodeType make_mod_lpg_node() {
     CustomNodeType t;
@@ -220,15 +239,17 @@ inline CustomNodeType make_mod_lpg_node() {
         s->lpg.prepare(static_cast<float>(sr));
         s->edge.prepare(sr);
         s->edge.set_refractory_ms(2.0);
-        s->edge.set_threshold(0.25f);
+        s->edge.set_threshold(kModLpgStrikeThreshold);
         s->last_brightness_hz = -1.0f;
-        s->last_cv = 0.0f;
+        s->strike_peak = 0.0f;
+        s->striking = false;
     };
     t.reset = [](void* p) {
         auto* s = static_cast<ModLpgInstance*>(p);
         s->lpg.reset();
         s->edge.reset();
-        s->last_cv = 0.0f;
+        s->strike_peak = 0.0f;
+        s->striking = false;
     };
     t.baked_params.push_back({kModLpgDecayMs, 20.0f, 2000.0f, 150.0f});
     t.baked_params.push_back({kModLpgColour, 0.0f, 1.0f, 0.5f});
@@ -264,10 +285,24 @@ inline CustomNodeType make_mod_lpg_node() {
                 const bool struck = params.value_at(kModLpgStruck, off) >= 0.5f;
                 if (struck) {
                     s->lpg.set_gate(0.0f);
-                    if (s->edge.process_signal(control))
+                    if (s->edge.process_signal(control)) {
+                        s->striking = true;
+                        s->strike_peak = control;
                         s->lpg.strike(signal::Lpg::velocity_to_strike(control));
+                    } else if (s->striking) {
+                        if (control > s->strike_peak) {
+                            // Still rising: re-drive toward the higher level.
+                            // strike() restarts the pulse, so the cell keeps
+                            // charging instead of coasting from the threshold.
+                            s->strike_peak = control;
+                            s->lpg.strike(signal::Lpg::velocity_to_strike(control));
+                        } else if (control < kModLpgStrikeThreshold) {
+                            s->striking = false;
+                        }
+                    }
                 } else {
                     s->lpg.set_gate(control);
+                    s->striking = false;
                 }
                 o[static_cast<std::size_t>(k)] = s->lpg.process(sig[static_cast<std::size_t>(k)]);
             }

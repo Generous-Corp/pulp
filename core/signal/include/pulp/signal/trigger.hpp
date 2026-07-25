@@ -326,7 +326,15 @@ public:
         reset();
     }
 
-    void set_count(int n) { count_ = std::clamp(n, 1, kMaxCount); }
+    /// Changing the count while the burst is idle keeps it idle: `next_index_`
+    /// marks "finished" by sitting at the count, so growing the count without
+    /// this guard would resume a finished burst and fire hits no trigger asked
+    /// for.
+    void set_count(int n) {
+        const bool idle = next_index_ >= count_;
+        count_ = std::clamp(n, 1, kMaxCount);
+        if (idle) next_index_ = count_;
+    }
     void set_spacing_ms(double ms) { spacing_ms_ = std::max(0.0, ms); }
     void set_spacing_curve(float c) { spacing_curve_ = std::clamp(c, -1.0f, 1.0f); }
 

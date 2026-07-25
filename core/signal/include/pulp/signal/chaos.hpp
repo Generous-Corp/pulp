@@ -42,8 +42,12 @@ public:
     double r() const { return r_; }
 
     /// Initial condition, in (0, 1). Two instances with the same seed and the
-    /// same `r` produce identical orbits forever.
-    void seed(double x0) { seed_ = std::clamp(x0, kEpsilon, 1.0 - kEpsilon); }
+    /// same `r` produce identical orbits forever. Applies immediately, like
+    /// `Xorshift32::seed()`; `reset()` rewinds to it.
+    void seed(double x0) {
+        seed_ = std::clamp(x0, kEpsilon, 1.0 - kEpsilon);
+        x_ = seed_;
+    }
 
     void reset() { x_ = seed_; }
 

@@ -311,8 +311,13 @@ public:
             std::exp2(cents_ * static_cast<double>(pitch_now_) / 1200.0));
     }
 
-    /// Signed unit drift, independent of the pitch walk.
-    SampleType fraction() const { return fraction_now_; }
+    /// Signed unit drift, independent of the pitch walk. Clamped to [-1, 1]:
+    /// the underlying walk is allowed out to `OuWalkT::kClamp` for pitch
+    /// headroom, but the unit contract is what downstream consumers — delay
+    /// percentages, cutoff offsets — size against.
+    SampleType fraction() const {
+        return std::clamp(fraction_now_, SampleType{-1}, SampleType{1});
+    }
 
 private:
     OuWalkT<SampleType> pitch_walk_{};

@@ -338,6 +338,41 @@ TEST_CASE("mod_lpg struck mode pings, decays, and accumulates on a roll",
     REQUIRE(peak(third) > peak(second));
 }
 
+TEST_CASE("mod_lpg struck velocity follows the control's peak, not its threshold crossing",
+          "[forge][catalog][mod]") {
+    // Sampling the control once at the instant it crosses the strike threshold
+    // reads roughly the threshold for ANY source with a finite rise, so a
+    // slewed or transient-derived control would lose its velocity entirely —
+    // which is exactly the `slew -> lpg` and `transient -> lpg` wiring this node
+    // is for. A hit that ramps to full must land close to one that steps there.
+    auto struck_peak = [](int rise_blocks) {
+        BakedFixture fixture(mod_cat::make_mod_lpg_node(), /*input_channels=*/2);
+        inject(fixture, mod_cat::kModLpgStruck, 1.0f);
+        inject(fixture, mod_cat::kModLpgColour, 0.0f);
+        inject(fixture, mod_cat::kModLpgDecayMs, 400.0f);
+
+        std::uint32_t seed = 606u;
+        const auto excitation = seeded_noise(seed);
+        float highest = 0.0f;
+        for (int b = 0; b < 30; ++b) {
+            float level = 1.0f;
+            if (rise_blocks > 0 && b < rise_blocks)
+                level = static_cast<float>(b + 1) / static_cast<float>(rise_blocks);
+            const auto out = run_block(*fixture.result.processor, {excitation, constant(level)});
+            highest = std::max(highest, peak(out));
+        }
+        return highest;
+    };
+
+    const float stepped = struck_peak(0);  // instant control
+    const float ramped = struck_peak(4);   // ~10 ms rise, as a slew would give
+
+    REQUIRE(stepped > 0.1f);
+    // Before the peak-tracking fix the ramped hit came back at roughly a third
+    // of the stepped one, because it struck at the threshold and coasted.
+    REQUIRE(ramped > 0.8f * stepped);
+}
+
 TEST_CASE("mod_lpg colour trades amplitude for brightness",
           "[forge][catalog][mod]") {
     auto render_at_colour = [](float colour, float control) {

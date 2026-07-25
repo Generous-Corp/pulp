@@ -312,11 +312,18 @@ public:
     /// Default dead band, as a fraction of the threshold magnitude.
     static constexpr SampleType kDefaultHysteresisFraction = SampleType{0.05};
 
+    /// Floor for the derived dead band. A threshold of 0 — the natural one for
+    /// any bipolar signal — would otherwise derive a dead band of 0, which is
+    /// exactly the chatter this class exists to prevent.
+    static constexpr SampleType kMinAutoHysteresis = SampleType{0.001};
+
     /// Setting a threshold re-derives the default hysteresis unless an explicit
     /// one was set first.
     void set_threshold(SampleType t) {
         threshold_ = t;
-        if (auto_hysteresis_) hysteresis_ = kDefaultHysteresisFraction * std::abs(t);
+        if (auto_hysteresis_)
+            hysteresis_ = std::max(kMinAutoHysteresis,
+                                   kDefaultHysteresisFraction * std::abs(t));
     }
 
     /// Absolute dead band, in the input's units. Pins the value against later
@@ -339,7 +346,7 @@ public:
 
 private:
     SampleType threshold_ = SampleType{0};
-    SampleType hysteresis_ = SampleType{0};
+    SampleType hysteresis_ = kMinAutoHysteresis;
     bool auto_hysteresis_ = true;
     bool gate_ = false;
 };
