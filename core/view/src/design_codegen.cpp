@@ -89,6 +89,23 @@ static std::string format_px(float v) {
     return ss.str();
 }
 
+// The lowercase tag `__widgetTagFactory__` (core/view/js/web-compat-element.js)
+// understands. Creating an audio widget through `document.createElement(<tag>)`
+// is what routes it to the native `createX(id, parent)` bridge call, so the
+// control gets a real bridge id, is parented where the design says, and can
+// carry an anchor and a parameter binding.
+static const char* audio_widget_web_tag(AudioWidgetType t) {
+    switch (t) {
+        case AudioWidgetType::knob:     return "knob";
+        case AudioWidgetType::fader:    return "fader";
+        case AudioWidgetType::meter:    return "meter";
+        case AudioWidgetType::xy_pad:   return "xypad";
+        case AudioWidgetType::waveform: return "waveform";
+        case AudioWidgetType::spectrum: return "spectrum";
+        default: return nullptr;
+    }
+}
+
 static const char* audio_widget_type_name(AudioWidgetType t) {
     switch (t) {
         case AudioWidgetType::knob:     return "Knob";
@@ -205,21 +222,80 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
 
     // Audio widgets get special treatment
     if (node.audio_widget != AudioWidgetType::none) {
-        auto widget_name = audio_widget_type_name(node.audio_widget);
-        if (widget_name) {
-            if (opts.include_comments && !node.audio_label.empty())
-                ss << ind << "// " << node.audio_label << " " << widget_name << "\n";
+        const char* tag_name = audio_widget_web_tag(node.audio_widget);
+        if (tag_name) {
+            if (opts.include_comments && !node.audio_label.empty()) {
+                // A comment is only a comment until the text ends the line. An
+                // authored label carrying a newline closed this one and the
+                // rest of it became executable bridge JavaScript, which is how
+                // an injected `setTheme('light')` survived a lowering that
+                // otherwise escapes everything.
+                std::string safe = node.audio_label;
+                for (char& c : safe)
+                    if (c == '\n' || c == '\r') c = ' ';
+                ss << ind << "// " << safe << " "
+                   << audio_widget_type_name(node.audio_widget) << "\n";
+            }
 
-            ss << ind << "const " << var << " = create" << widget_name << "({\n";
-            if (!node.audio_label.empty())
-                ss << ind << "  label: '" << node.audio_label << "',\n";
-            ss << ind << "  min: " << node.audio_min << ",\n";
-            ss << ind << "  max: " << node.audio_max << ",\n";
-            ss << ind << "  defaultValue: " << node.audio_default << "\n";
-            ss << ind << "});\n";
+            // Build the control through the web-compat DOM rather than a bare
+            // `createKnob({options})` call. The bridge signature is
+            // `createKnob(id, parentId)`, so an options object lowered to an
+            // EMPTY id: the widget registered as widgets_[""], parented at the
+            // session root instead of its design parent, carried no anchor, and
+            // was unaddressable by every later call. Going through
+            // createElement gives it the element's own `_id`, which the range,
+            // label, binding and anchor calls below all key off.
+            ss << ind << "const " << var << " = document.createElement('"
+               << tag_name << "');\n";
 
+            // Append BEFORE configuring. web-compat materializes the native
+            // widget lazily on mount, so a setLabel/setMin/setValue issued
+            // between createElement and appendChild addresses an id the bridge
+            // has not registered yet and is silently dropped — the control then
+            // renders its own id as its label with the design's range ignored.
             if (!parent_var.empty())
                 ss << ind << parent_var << ".appendChild(" << var << ");\n";
+
+            // An audio widget is still a laid-out box. Dropping the design's
+            // width/height collapses it to its intrinsic size, so a knob the
+            // design placed at 64x64 renders as a few pixels.
+            if (node.style.width)
+                ss << ind << var << ".style.width = '"
+                   << format_px(*node.style.width) << "';\n";
+            if (node.style.height)
+                ss << ind << var << ".style.height = '"
+                   << format_px(*node.style.height) << "';\n";
+
+            // Every user-authored string goes through the same escape as the
+            // rest of this file. Interpolating the label raw let a crafted
+            // design terminate the literal and inject executable bridge JS.
+            if (!node.audio_label.empty())
+                ss << ind << "setLabel(" << var << "._id, '"
+                   << js_single_quote_escape(node.audio_label) << "');\n";
+            ss << ind << "setMin(" << var << "._id, " << node.audio_min << ");\n";
+            ss << ind << "setMax(" << var << "._id, " << node.audio_max << ");\n";
+            ss << ind << "setValue(" << var << "._id, " << node.audio_default
+               << ");\n";
+
+            // A declared parameter binding is the reason an audio widget
+            // exists. Without it the generated UI renders a control that drives
+            // nothing, and an audit of the emitted JS counts zero bindings.
+            if (const auto binding = node.attributes.find("binding");
+                binding != node.attributes.end() && !binding->second.empty()) {
+                ss << ind
+                   << (node.audio_widget == AudioWidgetType::meter
+                           ? "bindMeter("
+                           : "bindWidgetToParam(")
+                   << var << "._id, '"
+                   << js_single_quote_escape(binding->second) << "');\n";
+            }
+
+            // Same anchor contract as every non-widget node below: the
+            // inspector and any tweaks layer key off stable_anchor_id, so an
+            // audio widget must not be the one node kind that silently drops it.
+            if (node.stable_anchor_id && !node.stable_anchor_id->empty())
+                ss << ind << "setAnchor(" << var << "._id, '"
+                   << js_single_quote_escape(*node.stable_anchor_id) << "');\n";
             ss << "\n";
             return;
         }
