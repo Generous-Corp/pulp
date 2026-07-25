@@ -400,7 +400,7 @@ public:
             if (!deliver_mouse_down(root_, drag_target_, pt,
                                     gesture_event.modifiers, 1))
                 drag_target_ = nullptr;
-            repaint();
+            request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse down handler threw: {}",
                               e.what());
@@ -429,7 +429,7 @@ public:
             if (!root_.dispatch_gesture_pointer_event(gesture_event))
                 deliver_mouse_drag(root_, drag_target_, pt,
                                    gesture_event.modifiers);
-            repaint();
+            request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse move handler threw: {}",
                               e.what());
@@ -463,7 +463,7 @@ public:
                                  gesture_event.modifiers, 1, up_host);
             }
             drag_target_ = nullptr;
-            repaint();
+            request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse up handler threw: {}",
                               e.what());
@@ -481,6 +481,26 @@ public:
             return;
         }
 #endif
+        if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    // Coalesced repaint for INPUT-driven updates (mouse down/move/up).
+    //
+    // repaint() renders synchronously on the GPU path, and the swapchain is
+    // configured Fifo (vsync) by default, so acquiring the next texture blocks
+    // until the next refresh. Rendering inline from the wndproc therefore costs
+    // a full vsync-blocked frame PER WM_MOUSEMOVE. Windows delivers moves far
+    // faster than that, so the queue backs up and a dragged control visibly
+    // trails the cursor — the lag is the queued input, not the render cost.
+    //
+    // Invalidating instead lets Windows collapse every move that arrived during
+    // a frame into ONE WM_PAINT, which repaints at the LATEST pointer position.
+    // Mouse handling becomes near-free and the control tracks the cursor.
+    //
+    // Safe for the embed path: these callers only reach us through the wndproc,
+    // which means a message pump exists to deliver the WM_PAINT. Callers that
+    // drive frames explicitly (pulp_embed_tick) still use repaint() directly.
+    void request_repaint_from_input() {
         if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
