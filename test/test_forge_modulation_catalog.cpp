@@ -457,6 +457,12 @@ TEST_CASE("mod_slew linear rise takes exactly the injected time",
     inject(fixture, mod_cat::kModSlewFallMs, 10.0f);
     inject(fixture, mod_cat::kModSlewCurved, 0.0f);
 
+    // Establish a resting value first. The node adopts its first control sample
+    // after a reset rather than ramping to it from zero, so the ramp under test
+    // has to be a step the limiter actually sees as a change — measuring from
+    // render start would measure the adopt, not the slew.
+    (void)render(*fixture.result.processor, {constant(0.0f)}, 1);
+
     const auto ramp = render(*fixture.result.processor, {constant(1.0f)}, 20);
     // The step arrives 480 samples after the input does, within a sample.
     int arrived = -1;
@@ -470,6 +476,27 @@ TEST_CASE("mod_slew linear rise takes exactly the injected time",
     REQUIRE(arrived <= 482);
     // And it is a ramp, not a step: the midpoint is halfway.
     REQUIRE_THAT(ramp[240], WithinAbs(0.5f, 0.01f));
+}
+
+TEST_CASE("mod_slew starts at its control, not at zero", "[forge][catalog][mod]") {
+    // A control signal's resting value is 0.5, not 0. Resetting the limiter to
+    // zero made every render open with a rise-time ramp from silence up to
+    // whatever the control already was — a start-of-playback modulation
+    // transient in any `... -> slew -> CV port` chain, and a long one at a long
+    // rise time.
+    BakedFixture fixture(mod_cat::make_mod_slew_node());
+    inject(fixture, mod_cat::kModSlewRiseMs, 1000.0f); // a long ramp makes it obvious
+    inject(fixture, mod_cat::kModSlewFallMs, 1000.0f);
+
+    // A control already sitting at 0.8 when the render begins.
+    const auto out = render(*fixture.result.processor, {constant(0.8f)}, 8);
+    for (float x : out) REQUIRE_THAT(x, WithinAbs(0.8f, 1e-6f));
+
+    // The limiter still limits once it is running: a step away from the adopted
+    // value is slewed, not followed.
+    const auto stepped = render(*fixture.result.processor, {constant(0.0f)}, 1);
+    REQUIRE(stepped.front() < 0.8f);
+    REQUIRE(stepped.back() > 0.7f); // 128 samples of a 1 s ramp is a small move
 }
 
 TEST_CASE("mod_slew fall time is independent of rise time",

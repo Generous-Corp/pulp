@@ -258,7 +258,7 @@ inline CustomNodeType make_mod_lpg_node() {
     t.baked_params.push_back({kModLpgDecayMs, 20.0f, 2000.0f, 150.0f});
     t.baked_params.push_back({kModLpgColour, 0.0f, 1.0f, 0.5f});
     t.baked_params.push_back({kModLpgDroop, 0.0f, 0.95f, 0.5f});
-    t.baked_params.push_back({kModLpgBrightnessHz, 500.0f, 18000.0f, 12000.0f});
+    t.baked_params.push_back({kModLpgBrightnessHz, 500.0f, 12000.0f, 12000.0f});
     t.baked_params.push_back({kModLpgStruck, 0.0f, 1.0f, 0.0f});
     t.process_instance_baked_param =
         [](void* p, audio::BufferView<float>& out,
@@ -325,6 +325,9 @@ inline CustomNodeType make_mod_lpg_node() {
 // is a trance gate instead of a hazard.
 struct ModSlewInstance {
     signal::SlewLimiter slew;
+    /// The first sample after a reset is adopted outright rather than slewed to,
+    /// so a render starts wherever its control already sits.
+    bool primed = false;
 };
 
 inline CustomNodeType make_mod_slew_node() {
@@ -340,7 +343,16 @@ inline CustomNodeType make_mod_slew_node() {
     t.prepare = [](void* p, double sr, int /*max_block*/) {
         static_cast<ModSlewInstance*>(p)->slew.prepare(static_cast<float>(sr));
     };
-    t.reset = [](void* p) { static_cast<ModSlewInstance*>(p)->slew.reset(0.0f); };
+    t.reset = [](void* p) {
+        auto* s = static_cast<ModSlewInstance*>(p);
+        // Reset to the CV convention's NEUTRAL, not to zero. A control signal is
+        // unipolar [0, 1] with 0.5 as its resting value, so resetting to 0 makes
+        // every render open with a rise-time ramp from silence up to whatever
+        // the incoming control actually is — a start-of-playback modulation
+        // transient in any `... -> slew -> CV port` chain.
+        s->slew.reset(0.5f);
+        s->primed = false;
+    };
     t.baked_params.push_back({kModSlewRiseMs, 0.0f, 2000.0f, 20.0f});
     t.baked_params.push_back({kModSlewFallMs, 0.0f, 2000.0f, 20.0f});
     t.baked_params.push_back({kModSlewCurved, 0.0f, 1.0f, 0.0f});
@@ -358,7 +370,12 @@ inline CustomNodeType make_mod_slew_node() {
                 s->slew.set_mode(params.value_at(kModSlewCurved, off) >= 0.5f
                                      ? signal::SlewLimiter::Mode::exponential
                                      : signal::SlewLimiter::Mode::linear);
-                o[static_cast<std::size_t>(k)] = s->slew.process(cv[static_cast<std::size_t>(k)]);
+                const float control = cv[static_cast<std::size_t>(k)];
+                if (!s->primed) {
+                    s->slew.reset(control);
+                    s->primed = true;
+                }
+                o[static_cast<std::size_t>(k)] = s->slew.process(control);
             }
         };
     return t;
