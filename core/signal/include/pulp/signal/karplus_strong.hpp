@@ -36,6 +36,16 @@ namespace pulp::signal {
 /// node at that point — the reason a string plucked near the bridge is thin
 /// and bright and one plucked at the middle is round.
 ///
+/// The fractional part of the loop length is taken by a first-order allpass
+/// rather than by interpolating between samples. Both approaches are standard,
+/// but they differ in a way that matters here: linear interpolation is itself a
+/// lowpass, and it sits *inside* the loop next to the damping filter, so its
+/// attenuation compounds on every round trip and shortens the note by an amount
+/// that depends on pitch. An allpass has unity magnitude at every frequency, so
+/// the decay stays the decay the caller asked for. The allpass delay is kept
+/// away from zero, where its pole and zero cancel on the unit circle and the
+/// delay becomes discontinuous.
+///
 /// Karplus & Strong, CMJ 7(2), 1983; the loss and stiffness extensions follow
 /// Jaffe & Smith, CMJ 7(2), 1983.
 ///
@@ -51,6 +61,8 @@ public:
         loop_.prepare(longest);
         excitation_.prepare(longest);
         damping_.prepare(static_cast<SampleType>(sample_rate_));
+        dynamic_.prepare(static_cast<SampleType>(sample_rate_));
+        set_dynamic_bandwidth_hz(dynamic_hz_);
         update();
         reset();
     }
@@ -80,10 +92,31 @@ public:
         pluck_position_ = std::clamp(position, 0.0, 0.5);
     }
 
+    /// Bandwidth of the excitation, in Hz — how hard the string is played.
+    ///
+    /// A harder attack is brighter, not merely louder, so this is where playing
+    /// dynamics belong. Setting it from velocity is what stops a soft note being
+    /// the same note turned down.
+    void set_dynamic_bandwidth_hz(double hz) {
+        dynamic_hz_ = std::clamp(hz, 100.0, 20000.0);
+        dynamic_.set_cutoff(static_cast<SampleType>(
+            std::min(dynamic_hz_, 0.49 * sample_rate_)));
+    }
+
+    /// Direction of the pick, 0 to 1. A one-pole on the excitation only; at 0 it
+    /// is bypassed, and raising it darkens the attack the way striking with the
+    /// flat of a pick does compared with its point.
+    void set_pick_direction(double amount) {
+        pick_direction_ = std::clamp(amount, 0.0, 0.99);
+    }
+
     void reset() {
         loop_.reset();
         excitation_.reset();
         damping_.reset();
+        dynamic_.reset();
+        pick_state_ = 0;
+        tuning_state_ = 0;
         stiffness_state_ = 0;
         burst_remaining_ = 0;
         settling_ = 0;
@@ -132,8 +165,25 @@ public:
             shaped = SampleType{0};
         }
 
-        SampleType y = loop_.read(static_cast<SampleType>(loop_length_));
+        // Excitation shaping, all outside the loop: pick direction darkens the
+        // attack, and the dynamic-level filter is where playing hard becomes
+        // playing bright.
+        if (pick_direction_ > 0.0) {
+            const auto a = static_cast<SampleType>(pick_direction_);
+            pick_state_ = (SampleType{1} - a) * shaped + a * pick_state_;
+            shaped = pick_state_;
+        }
+        shaped = dynamic_.process_lowpass(shaped);
+
+        SampleType y = loop_.read(static_cast<SampleType>(integer_delay_));
         y = damping_.process_lowpass(y);
+
+        // First-order allpass carrying the fractional part of the loop length.
+        // Unity magnitude, so unlike an interpolator it costs the decay nothing.
+        const SampleType out = static_cast<SampleType>(tuning_coefficient_) * y +
+                               tuning_state_;
+        tuning_state_ = y - static_cast<SampleType>(tuning_coefficient_) * out;
+        y = out;
 
         // First-order allpass: delays low frequencies more than high ones, so
         // the partials stretch sharp.
@@ -156,6 +206,21 @@ public:
 private:
     void update() {
         loop_length_ = sample_rate_ / frequency_;
+
+        // Split the loop into an integer delay plus an allpass whose delay sits
+        // in [0.1, 1.1) samples. Keeping it off zero is deliberate: at zero the
+        // allpass's pole and zero cancel on the unit circle and its delay is no
+        // longer continuous in the coefficient.
+        constexpr double kMinFractional = 0.1;
+        double fractional = loop_length_ - std::floor(loop_length_);
+        integer_delay_ = std::floor(loop_length_);
+        if (fractional < kMinFractional) {
+            fractional += 1.0;
+            integer_delay_ -= 1.0;
+        }
+        integer_delay_ = std::max(integer_delay_, 1.0);
+        // Delay d of a first-order allpass with coefficient c is (1-c)/(1+c).
+        tuning_coefficient_ = (1.0 - fractional) / (1.0 + fractional);
         // The loop runs f0 times a second, so reaching -60 dB after
         // `decay_seconds` means losing 3/(f0 * decay) decades per trip. Deriving
         // it this way is what makes a high note decay faster than a low one at
@@ -194,6 +259,7 @@ private:
     DelayLineT<SampleType> loop_;
     DelayLineT<SampleType> excitation_;
     TptFilterT<SampleType> damping_;
+    TptFilterT<SampleType> dynamic_;
 
     double sample_rate_ = 44100.0;
     double frequency_ = 220.0;
@@ -203,7 +269,13 @@ private:
     double pluck_position_ = 0.25;
 
     double loop_length_ = 200.0;
+    double integer_delay_ = 200.0;
+    double tuning_coefficient_ = 0.0;
     double loop_gain_ = 0.99;
+    double dynamic_hz_ = 12000.0;
+    double pick_direction_ = 0.0;
+    SampleType pick_state_ = 0;
+    SampleType tuning_state_ = 0;
     SampleType stiffness_state_ = 0;
     int burst_remaining_ = 0;
     int settling_ = 0;

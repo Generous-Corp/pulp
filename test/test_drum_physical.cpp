@@ -97,6 +97,14 @@ std::vector<double> sine(double f, std::size_t n, double amplitude = 1.0) {
     return y;
 }
 
+double crossing_rate(const std::vector<float>& x, std::size_t from, std::size_t to) {
+    int crossings = 0;
+    for (std::size_t i = from + 1; i < to && i < x.size(); ++i) {
+        if ((x[i - 1] <= 0.0f) != (x[i] <= 0.0f)) ++crossings;
+    }
+    return 0.5 * crossings * kFs / static_cast<double>(to - from);
+}
+
 int audible_length(const std::vector<float>& x, double floor_level) {
     for (std::size_t i = x.size(); i > 0; --i) {
         if (std::fabs(static_cast<double>(x[i - 1])) > floor_level) {
@@ -723,4 +731,108 @@ TEST_CASE("The physical voices allocate nothing on the audio thread",
         allocations = probe.allocation_count();
     }
     REQUIRE(allocations == 0);
+}
+
+// -- Extended Karplus-Strong blocks -------------------------------------------
+
+TEST_CASE("The tuning allpass costs the decay nothing",
+          "[signal][string]") {
+    // The reason the fractional delay is an allpass rather than an interpolator.
+    // Linear interpolation is itself a lowpass sitting inside the loop next to
+    // the damping filter, so its attenuation compounds every round trip and the
+    // note dies early -- by an amount that depends on where the fractional part
+    // happens to land. An allpass has unity magnitude, so two pitches whose loop
+    // lengths differ only in their fractional part must ring for the same time.
+    auto ring_length = [](double hz) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(hz);
+        string.set_decay_seconds(1.5);
+        string.set_damping(0.1);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(static_cast<std::size_t>(3.0 * kFs));
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return audible_length(y, 1e-4);
+    };
+
+    // 48000/220 = 218.18 (fraction 0.18); 48000/218.18... pick a pitch whose
+    // loop length is near-integer and one whose fraction is near a half.
+    const int near_integer = ring_length(kFs / 200.0);   // exactly 240 samples
+    const int half_sample = ring_length(kFs / 240.5);    // 199.58 samples
+    REQUIRE(near_integer > 0);
+    REQUIRE(half_sample > 0);
+    const double ratio = static_cast<double>(half_sample) / near_integer;
+    REQUIRE(ratio > 0.7);
+    REQUIRE(ratio < 1.4);
+}
+
+TEST_CASE("Playing harder is brighter, not just louder",
+          "[signal][string][velocity]") {
+    // The dynamic-level filter. Without it a string is the one voice in this set
+    // that would answer velocity with gain alone, which is the failure the whole
+    // VelocityResponse contract exists to prevent.
+    auto brightness = [](double bandwidth_hz) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(220.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(0.1);
+        string.set_dynamic_bandwidth_hz(bandwidth_hz);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(8192);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return tone_amplitude(y, 2200.0) / (tone_amplitude(y, 220.0) + 1e-20);
+    };
+
+    REQUIRE(brightness(16000.0) > brightness(800.0) * 2.0);
+}
+
+TEST_CASE("Pick direction darkens the attack without retuning the string",
+          "[signal][string]") {
+    auto measure = [](double direction) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(220.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(0.1);
+        string.set_pick_direction(direction);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(16384);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return std::pair<double, double>{
+            tone_amplitude(y, 2200.0) / (tone_amplitude(y, 220.0) + 1e-20),
+            tone_amplitude(y, 220.0) / (tone_amplitude(y, 250.0) + 1e-20)};
+    };
+
+    const auto bright = measure(0.0);
+    const auto dark = measure(0.9);
+    REQUIRE(bright.first > dark.first * 1.5);
+
+    // ...and the harmonic series stays where it was. Measured as the
+    // fundamental against a neighbouring non-harmonic frequency, because a
+    // zero-crossing rate here tracks how BRIGHT the signal is rather than how
+    // high it is -- which is the very thing the control changes.
+    REQUIRE(bright.second > 3.0);
+    REQUIRE(dark.second > 3.0);
 }
