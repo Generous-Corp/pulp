@@ -99,6 +99,63 @@ public:
 /// racing every sibling that drives the same lane. Scoping the root makes that
 /// bookkeeping observe only its own run. Restores the previous values on
 /// destruction so the override cannot leak into a later case.
+/// Scopes ambient Figma credentials away for the duration of a fixture lane.
+///
+/// The REST-fixture cases supply node JSON and frame SVG on disk, so they must
+/// not touch the network. figma_rest_export.py still consults $FIGMA_TOKEN and
+/// ~/.config/pulp/figma-token, and when a token IS present it makes a live
+/// /variables/local call — the exporter only takes its documented
+/// "no token (offline run)" path when it cannot find one. On a developer
+/// machine (which is also the CI runner) that token exists, so the fixture lane
+/// made real API calls: it passed wherever DNS worked and, when resolution
+/// failed, retried until it blew the case's 60s budget:
+///
+///     file variables: [Errno 8] nodename nor servname provided, or not known
+///
+/// Redirecting HOME/XDG_CONFIG_HOME as well as unsetting the variable keeps the
+/// on-disk token file out of reach too. Restores everything on destruction.
+class ScopedOfflineFigma {
+public:
+    explicit ScopedOfflineFigma(const fs::path& scratch_home) {
+        for (const char* name : {"FIGMA_TOKEN", "HOME", "XDG_CONFIG_HOME", "USERPROFILE"}) {
+            if (const char* prev = std::getenv(name)) saved_.emplace_back(name, prev);
+            else saved_.emplace_back(name, std::nullopt);
+        }
+        unset("FIGMA_TOKEN");
+        for (const char* name : {"HOME", "XDG_CONFIG_HOME", "USERPROFILE"}) {
+            set(name, scratch_home.string().c_str());
+        }
+    }
+
+    ~ScopedOfflineFigma() {
+        for (const auto& [name, value] : saved_) {
+            if (value) set(name.c_str(), value->c_str());
+            else unset(name.c_str());
+        }
+    }
+
+    ScopedOfflineFigma(const ScopedOfflineFigma&) = delete;
+    ScopedOfflineFigma& operator=(const ScopedOfflineFigma&) = delete;
+
+private:
+    static void set(const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        ::setenv(name, value, 1);
+#endif
+    }
+    static void unset(const char* name) {
+#ifdef _WIN32
+        _putenv_s(name, "");
+#else
+        ::unsetenv(name);
+#endif
+    }
+
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
+};
+
 class ScopedTempRoot {
 public:
     explicit ScopedTempRoot(const std::string& prefix) {
@@ -3000,6 +3057,8 @@ TEST_CASE("multi-state capture reaches add_frame through the REST faithful lane"
     }
 
     TempDir tmp("pulp-multi-state-real-lane");
+    // Fixtures on disk: this lane must not reach the network.
+    ScopedOfflineFigma offline(tmp.path);
     write_text(tmp.path / "typing.nodes.json", rest_nodes_json("1:1", "Typing"));
     write_text(tmp.path / "piano.nodes.json", rest_nodes_json("1:2", "Piano"));
     write_text(tmp.path / "typing.svg", rest_frame_svg("#111111"));
