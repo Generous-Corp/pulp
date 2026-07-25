@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <tuple>
 
 namespace pulp::timeline {
 
@@ -156,6 +157,10 @@ void visit_project_identities(const ProjectInput& input, Visitor&& visit) {
         visit(asset.id, location(ItemKind::Asset));
     for (const auto& sequence : input.sequences) {
         visit(sequence.id(), location(ItemKind::Sequence, sequence.id()));
+        for (const auto& marker : sequence.markers())
+            visit(marker.id, location(ItemKind::Marker, sequence.id()));
+        for (const auto& region : sequence.regions())
+            visit(region.id, location(ItemKind::Region, sequence.id()));
         for (const auto& track : sequence.tracks()) {
             visit(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
             for (const auto& device : track.device_chain())
@@ -403,6 +408,80 @@ Clip::with_playback_properties(ClipPlaybackProperties playback) const {
                            absolute_sample_rate(), content(), playback);
 }
 
+namespace {
+
+// Markers and regions share the sequence's annotation identity space, so one
+// ItemId can name at most one of them. Ordering is canonical, never authored:
+// callers hand over any order and the sequence stores the sorted result.
+bool marker_less(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
+    return std::pair(lhs.position.value, lhs.id.value) <
+           std::pair(rhs.position.value, rhs.id.value);
+}
+
+bool region_less(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
+    return std::tuple(lhs.position.value, lhs.duration.value, lhs.id.value) <
+           std::tuple(rhs.position.value, rhs.duration.value, rhs.id.value);
+}
+
+void sort_markers(std::vector<SequenceMarker>& markers) {
+    std::sort(markers.begin(), markers.end(), marker_less);
+}
+
+void sort_regions(std::vector<SequenceRegion>& regions) {
+    std::sort(regions.begin(), regions.end(), region_less);
+}
+
+// A musical duration bounds the annotation domain; without one the sequence is
+// absolute-anchored and only the lower bound applies.
+bool within_musical_span(std::int64_t start, std::int64_t length,
+                         const std::optional<timebase::TickDuration>& musical) noexcept {
+    if (start < 0 || length < 0 || start > std::numeric_limits<std::int64_t>::max() - length)
+        return false;
+    return !musical || start + length <= musical->value;
+}
+
+std::optional<ModelError>
+validate_markers(const std::vector<SequenceMarker>& markers,
+                 const std::optional<timebase::TickDuration>& musical) noexcept {
+    for (const auto& marker : markers) {
+        if (!marker.id.valid())
+            return ModelError{ModelErrorCode::InvalidItemId, marker.id, {}};
+        if (!within_musical_span(marker.position.value, 0, musical))
+            return ModelError{ModelErrorCode::InvalidMarker, marker.id, {}};
+    }
+    return std::nullopt;
+}
+
+std::optional<ModelError>
+validate_regions(const std::vector<SequenceRegion>& regions,
+                 const std::optional<timebase::TickDuration>& musical) noexcept {
+    for (const auto& region : regions) {
+        if (!region.id.valid())
+            return ModelError{ModelErrorCode::InvalidItemId, region.id, {}};
+        // A zero-length span is a marker, not a region; reject it rather than
+        // silently admitting an annotation that cannot be selected.
+        if (region.duration.value <= 0 ||
+            !within_musical_span(region.position.value, region.duration.value, musical))
+            return ModelError{ModelErrorCode::InvalidRegion, region.id, {}};
+    }
+    return std::nullopt;
+}
+
+std::optional<ItemId> duplicate_annotation_id(const std::vector<SequenceMarker>& markers,
+                                              const std::vector<SequenceRegion>& regions) {
+    std::vector<ItemId> ids;
+    ids.reserve(markers.size() + regions.size());
+    for (const auto& marker : markers)
+        ids.push_back(marker.id);
+    for (const auto& region : regions)
+        ids.push_back(region.id);
+    std::sort(ids.begin(), ids.end());
+    const auto duplicate = std::adjacent_find(ids.begin(), ids.end());
+    return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
+}
+
+} // namespace
+
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -410,6 +489,8 @@ struct Sequence::Data {
     std::optional<AbsoluteTimelineDuration> absolute_duration;
     std::vector<Track> tracks;
     std::vector<std::pair<ItemId, std::size_t>> track_id_index;
+    std::vector<SequenceMarker> markers;
+    std::vector<SequenceRegion> regions;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -421,6 +502,14 @@ Sequence::create(ItemId id, std::string name, std::optional<timebase::TickDurati
 runtime::Result<Sequence, ModelError> Sequence::create(
     ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
     std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks) {
+    return create(id, std::move(name), musical_duration, absolute_duration, std::move(tracks), {},
+                  {});
+}
+
+runtime::Result<Sequence, ModelError> Sequence::create(
+    ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
+    std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
+    std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions) {
     if (!id.valid())
         return fail<Sequence>(ModelErrorCode::InvalidItemId, id);
     if ((musical_duration && musical_duration->value < 0) ||
@@ -428,6 +517,14 @@ runtime::Result<Sequence, ModelError> Sequence::create(
         return fail<Sequence>(ModelErrorCode::InvalidDuration, id);
     if (absolute_duration)
         absolute_duration->sample_rate = absolute_duration->sample_rate.normalized();
+    if (const auto invalid = validate_markers(markers, musical_duration))
+        return fail<Sequence>(invalid->code, invalid->item, id);
+    if (const auto invalid = validate_regions(regions, musical_duration))
+        return fail<Sequence>(invalid->code, invalid->item, id);
+    if (const auto duplicate = duplicate_annotation_id(markers, regions))
+        return fail<Sequence>(ModelErrorCode::DuplicateItemId, *duplicate, id);
+    sort_markers(markers);
+    sort_regions(regions);
     std::vector<std::pair<ItemId, std::size_t>> by_id;
     by_id.reserve(tracks.size());
     for (std::size_t index = 0; index < tracks.size(); ++index) {
@@ -451,9 +548,9 @@ runtime::Result<Sequence, ModelError> Sequence::create(
                            [](const auto& lhs, const auto& rhs) { return lhs.first == rhs.first; });
     if (duplicate != by_id.end())
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, duplicate->first);
-    return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(
-        std::make_shared<const Data>(Data{id, std::move(name), musical_duration, absolute_duration,
-                                          std::move(tracks), std::move(by_id)}))));
+    return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
+        Data{id, std::move(name), musical_duration, absolute_duration, std::move(tracks),
+             std::move(by_id), std::move(markers), std::move(regions)}))));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -479,6 +576,70 @@ const Track* Sequence::find_track(ItemId id) const noexcept {
                ? &data_->tracks[found->second]
                : nullptr;
 }
+std::span<const SequenceMarker> Sequence::markers() const noexcept {
+    return data_->markers;
+}
+std::span<const SequenceRegion> Sequence::regions() const noexcept {
+    return data_->regions;
+}
+const SequenceMarker* Sequence::find_marker(ItemId id) const noexcept {
+    const auto found = std::find_if(data_->markers.begin(), data_->markers.end(),
+                                    [id](const SequenceMarker& marker) { return marker.id == id; });
+    return found == data_->markers.end() ? nullptr : &*found;
+}
+const SequenceRegion* Sequence::find_region(ItemId id) const noexcept {
+    const auto found = std::find_if(data_->regions.begin(), data_->regions.end(),
+                                    [id](const SequenceRegion& region) { return region.id == id; });
+    return found == data_->regions.end() ? nullptr : &*found;
+}
+
+runtime::Result<Sequence, ModelError>
+Sequence::with_annotations(std::vector<SequenceMarker> markers,
+                           std::vector<SequenceRegion> regions) const {
+    if (const auto invalid = validate_markers(markers, data_->musical_duration))
+        return fail<Sequence>(invalid->code, invalid->item, data_->id);
+    if (const auto invalid = validate_regions(regions, data_->musical_duration))
+        return fail<Sequence>(invalid->code, invalid->item, data_->id);
+    if (const auto duplicate = duplicate_annotation_id(markers, regions))
+        return fail<Sequence>(ModelErrorCode::DuplicateItemId, *duplicate, data_->id);
+    sort_markers(markers);
+    sort_regions(regions);
+    return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
+             data_->tracks, data_->track_id_index, std::move(markers), std::move(regions)}))));
+}
+
+runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
+    auto markers = data_->markers;
+    markers.push_back(std::move(marker));
+    return with_annotations(std::move(markers), data_->regions);
+}
+
+runtime::Result<Sequence, ModelError> Sequence::erase_marker(ItemId id) const {
+    auto markers = data_->markers;
+    const auto found = std::find_if(markers.begin(), markers.end(),
+                                    [id](const SequenceMarker& marker) { return marker.id == id; });
+    if (found == markers.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, id, data_->id);
+    markers.erase(found);
+    return with_annotations(std::move(markers), data_->regions);
+}
+
+runtime::Result<Sequence, ModelError> Sequence::insert_region(SequenceRegion region) const {
+    auto regions = data_->regions;
+    regions.push_back(std::move(region));
+    return with_annotations(data_->markers, std::move(regions));
+}
+
+runtime::Result<Sequence, ModelError> Sequence::erase_region(ItemId id) const {
+    auto regions = data_->regions;
+    const auto found = std::find_if(regions.begin(), regions.end(),
+                                    [id](const SequenceRegion& region) { return region.id == id; });
+    if (found == regions.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, id, data_->id);
+    regions.erase(found);
+    return with_annotations(data_->markers, std::move(regions));
+}
 
 runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const {
     const auto found =
@@ -501,7 +662,7 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     tracks[found->second] = std::move(track);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             std::move(tracks), data_->track_id_index}))));
+             std::move(tracks), data_->track_id_index, data_->markers, data_->regions}))));
 }
 
 bool Sequence::shares_storage_with(const Sequence& other) const noexcept {
@@ -517,6 +678,7 @@ struct Project::Data {
     std::vector<Sequence> sequences;
     timebase::TempoMap tempo_map;
     timebase::MeterMap meter_map;
+    std::optional<SessionStart> session_start;
     detail::IdentityDirectory identities;
 };
 
@@ -585,6 +747,10 @@ detail::ProjectStateAccess::restore_identities(Project project,
             case ItemKind::Track:
                 return location.sequence_id.valid() && location.sequence_id != entry.item &&
                        location.track_id == entry.item && location.clip_id == invalid;
+            case ItemKind::Marker:
+            case ItemKind::Region:
+                return location.sequence_id.valid() && location.sequence_id != entry.item &&
+                       location.track_id == invalid && location.clip_id == invalid;
             case ItemKind::Clip:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
@@ -628,6 +794,8 @@ detail::ProjectStateAccess::restore_identities(Project project,
             case ItemKind::Sequence:
                 return owner_is(location.parent_id, ItemKind::Project);
             case ItemKind::Track:
+            case ItemKind::Marker:
+            case ItemKind::Region:
                 return owner_is(location.parent_id, ItemKind::Sequence);
             case ItemKind::Clip: {
                 const auto* track = find_entry(location.parent_id);
@@ -709,6 +877,14 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
     visit_project_identities(input, [&](ItemId, ItemLocation) { ++identity_count; });
     std::vector<detail::IdentityRecord> identity_entries;
     identity_entries.reserve(identity_count);
+    // A session origin must be a real point on a real clock: a valid rate and a
+    // non-negative offset. The rate is normalized so the same instant expressed
+    // as 48000/1 and 96000/2 stores and compares identically.
+    if (input.session_start) {
+        if (!input.session_start->sample_rate.valid() || input.session_start->start.value < 0)
+            return fail<Project>(ModelErrorCode::InvalidSessionStart, input.id);
+        input.session_start->sample_rate = input.session_start->sample_rate.normalized();
+    }
     visit_project_identities(input, [&](ItemId id, ItemLocation item_location) {
         identity_entries.push_back({id, item_location});
     });
@@ -788,6 +964,7 @@ runtime::Result<Project, ModelError> Project::create(ProjectInput input) {
                                                   .sequences = std::move(input.sequences),
                                                   .tempo_map = std::move(input.tempo_map),
                                                   .meter_map = std::move(input.meter_map),
+                                                  .session_start = input.session_start,
                                                   .identities = std::move(identities)}))));
 }
 
@@ -811,6 +988,9 @@ std::span<const Sequence> Project::sequences() const noexcept {
 }
 const timebase::TempoMap& Project::tempo_map() const noexcept {
     return data_->tempo_map;
+}
+const std::optional<SessionStart>& Project::session_start() const noexcept {
+    return data_->session_start;
 }
 const timebase::MeterMap& Project::meter_map() const noexcept {
     return data_->meter_map;
@@ -877,9 +1057,17 @@ Project::append_asset(MediaAsset asset, std::span<const IdentityMutation> mutati
         std::lower_bound(assets.begin(), assets.end(), asset.id,
                          [](const MediaAsset& candidate, ItemId id) { return candidate.id < id; });
     assets.insert(position, std::move(asset));
-    return runtime::Result<Project, ModelError>(runtime::Ok(Project(std::make_shared<const Data>(
-        Data{data_->id, data_->name, next, data_->root_sequence_id, std::move(assets),
-             data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = data_->id,
+                                                  .name = data_->name,
+                                                  .next_item_id = next,
+                                                  .root_sequence_id = data_->root_sequence_id,
+                                                  .assets = std::move(assets),
+                                                  .sequences = data_->sequences,
+                                                  .tempo_map = data_->tempo_map,
+                                                  .meter_map = data_->meter_map,
+                                                  .session_start = data_->session_start,
+                                                  .identities = std::move(identities)}))));
 }
 
 runtime::Result<Project, ModelError>
@@ -914,10 +1102,17 @@ Project::remove_asset(ItemId asset_id, std::span<const IdentityMutation> mutatio
         return runtime::Result<Project, ModelError>(runtime::Err(*error));
     auto assets = data_->assets;
     assets.erase(assets.begin() + (found - data_->assets.begin()));
-    return runtime::Result<Project, ModelError>(
-        runtime::Ok(Project(std::make_shared<const Data>(Data{
-            data_->id, data_->name, data_->next_item_id, data_->root_sequence_id, std::move(assets),
-            data_->sequences, data_->tempo_map, data_->meter_map, std::move(identities)}))));
+    return runtime::Result<Project, ModelError>(runtime::Ok(
+        Project(std::make_shared<const Data>(Data{.id = data_->id,
+                                                  .name = data_->name,
+                                                  .next_item_id = data_->next_item_id,
+                                                  .root_sequence_id = data_->root_sequence_id,
+                                                  .assets = std::move(assets),
+                                                  .sequences = data_->sequences,
+                                                  .tempo_map = data_->tempo_map,
+                                                  .meter_map = data_->meter_map,
+                                                  .session_start = data_->session_start,
+                                                  .identities = std::move(identities)}))));
 }
 
 Project Project::replace_tempo_map(timebase::TempoMap tempo_map) const {

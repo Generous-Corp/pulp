@@ -288,6 +288,52 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "Object",
+          "name": "marker",
+          "ref": "pulp.timeline.marker",
+          "required": true,
+          "schema_field": "marker",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-marker",
+      "schema_type": "pulp.timeline.command.insert_marker",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "Object",
+          "name": "region",
+          "ref": "pulp.timeline.region",
+          "required": true,
+          "schema_field": "region",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-region",
+      "schema_type": "pulp.timeline.command.insert_region",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "U64String",
           "name": "lane-id",
           "required": true,
@@ -465,6 +511,50 @@
       ],
       "name": "timeline:command:remove-clip",
       "schema_type": "pulp.timeline.command.remove_clip",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "marker-id",
+          "required": true,
+          "schema_field": "marker_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-marker",
+      "schema_type": "pulp.timeline.command.remove_marker",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "region-id",
+          "required": true,
+          "schema_field": "region_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-region",
+      "schema_type": "pulp.timeline.command.remove_region",
       "version": 1
     },
     {
@@ -890,6 +980,42 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U32",
+          "name": "color",
+          "required": false,
+          "schema_field": "color",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "I64String",
+          "name": "position",
+          "required": true,
+          "schema_field": "position",
+          "value_type": "int"
+        }
+      ],
+      "name": "timeline:marker",
+      "schema_type": "pulp.timeline.marker",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "Array",
           "name": "assets",
           "required": true,
@@ -946,6 +1072,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Object",
+          "name": "session-start",
+          "required": false,
+          "schema_field": "session_start",
+          "value_type": "json"
+        },
+        {
           "kind": "Array",
           "name": "tempo-map",
           "required": false,
@@ -955,6 +1088,49 @@
       ],
       "name": "timeline:project",
       "schema_type": "pulp.timeline.project",
+      "version": 2
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U32",
+          "name": "color",
+          "required": false,
+          "schema_field": "color",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "duration",
+          "required": true,
+          "schema_field": "duration",
+          "value_type": "int"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "I64String",
+          "name": "position",
+          "required": true,
+          "schema_field": "position",
+          "value_type": "int"
+        }
+      ],
+      "name": "timeline:region",
+      "schema_type": "pulp.timeline.region",
       "version": 1
     },
     {
@@ -975,6 +1151,13 @@
           "value_type": "uint"
         },
         {
+          "kind": "Array",
+          "name": "markers",
+          "required": true,
+          "schema_field": "markers",
+          "value_type": "json"
+        },
+        {
           "kind": "I64String",
           "name": "musical-duration",
           "required": true,
@@ -990,6 +1173,13 @@
         },
         {
           "kind": "Array",
+          "name": "regions",
+          "required": true,
+          "schema_field": "regions",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
           "name": "tracks",
           "required": true,
           "schema_field": "tracks",
@@ -998,7 +1188,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Document",

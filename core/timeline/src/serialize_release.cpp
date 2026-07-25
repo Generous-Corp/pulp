@@ -199,6 +199,10 @@ class ReleaseRewriter {
                    nullptr;
         if (kind == "take_lane" || kind == "take")
             return release_.find(SchemaDomain::Document, "pulp.timeline.take_lane") != nullptr;
+        if (kind == "marker")
+            return release_.find(SchemaDomain::Document, "pulp.timeline.marker") != nullptr;
+        if (kind == "region")
+            return release_.find(SchemaDomain::Document, "pulp.timeline.region") != nullptr;
         return false;
     }
 
@@ -263,9 +267,18 @@ class ReleaseRewriter {
         if (type_name == "pulp.timeline.asset")
             return rewrite_array(data, "representations", SchemaDomain::AssetRepresentation,
                                  "pulp.timeline.asset_representation", path);
-        if (type_name == "pulp.timeline.sequence")
+        if (type_name == "pulp.timeline.sequence") {
+            auto markers = rewrite_array(data, "markers", SchemaDomain::Document,
+                                         "pulp.timeline.marker", path);
+            if (!markers)
+                return markers;
+            auto regions = rewrite_array(data, "regions", SchemaDomain::Document,
+                                         "pulp.timeline.region", path);
+            if (!regions)
+                return regions;
             return rewrite_array(data, "tracks", SchemaDomain::Document, "pulp.timeline.track",
                                  path);
+        }
         if (type_name == "pulp.timeline.track") {
             auto automation = rewrite_array(data, "automation_lanes", SchemaDomain::Document,
                                             "pulp.timeline.automation_lane", path);

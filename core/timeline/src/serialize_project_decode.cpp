@@ -1,7 +1,9 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
@@ -613,6 +615,75 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+// Colour is optional on both annotation kinds: absent means the presentation
+// layer chooses, and a present value must be a whole 32-bit packed RGBA.
+runtime::Result<std::optional<std::uint32_t>, PersistenceError>
+decode_annotation_color(const JsonValue& data, const std::string& path) {
+    const auto* color = data.find("color");
+    if (!color)
+        return runtime::Ok(std::optional<std::uint32_t>{});
+    auto decoded = parse_u32_number(*color, path + "/color");
+    if (!decoded)
+        return fail<std::optional<std::uint32_t>>(decoded.error().code, decoded.error().path,
+                                                  decoded.error().byte_offset);
+    return runtime::Ok(std::optional<std::uint32_t>{decoded.value()});
+}
+
+runtime::Result<SequenceMarker, PersistenceError>
+decode_marker(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment = bounded_increment(context.counts.markers, context.limits.max_markers);
+    if (!increment)
+        return fail<SequenceMarker>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                    increment.actual, context.limits.max_markers);
+    auto data = data_for(value, "pulp.timeline.marker", path);
+    if (!data)
+        return fail<SequenceMarker>(data.error().code, data.error().path, data.error().byte_offset);
+    auto id = required(*data.value(), "id", path + "/data");
+    auto name = string_field(*data.value(), "name", path + "/data");
+    auto position = required(*data.value(), "position", path + "/data");
+    if (!id || !name || !position)
+        return fail<SequenceMarker>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
+    if (!decoded_id || !decoded_position)
+        return fail<SequenceMarker>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
+    if (!decoded_color)
+        return runtime::Err(decoded_color.error());
+    return runtime::Ok(SequenceMarker{ItemId{decoded_id.value()}, std::move(name).value(),
+                                      timebase::TickPosition{decoded_position.value()},
+                                      decoded_color.value()});
+}
+
+runtime::Result<SequenceRegion, PersistenceError>
+decode_region(const JsonValue& value, DecodeContext& context, std::string path) {
+    const auto increment = bounded_increment(context.counts.regions, context.limits.max_regions);
+    if (!increment)
+        return fail<SequenceRegion>(PersistenceErrorCode::LimitExceeded, path, value.begin,
+                                    increment.actual, context.limits.max_regions);
+    auto data = data_for(value, "pulp.timeline.region", path);
+    if (!data)
+        return fail<SequenceRegion>(data.error().code, data.error().path, data.error().byte_offset);
+    auto id = required(*data.value(), "id", path + "/data");
+    auto name = string_field(*data.value(), "name", path + "/data");
+    auto position = required(*data.value(), "position", path + "/data");
+    auto duration = required(*data.value(), "duration", path + "/data");
+    if (!id || !name || !position || !duration)
+        return fail<SequenceRegion>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
+    auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
+    auto decoded_duration = parse_canonical_i64_string(*duration.value(), path + "/data/duration");
+    if (!decoded_id || !decoded_position || !decoded_duration)
+        return fail<SequenceRegion>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
+    if (!decoded_color)
+        return runtime::Err(decoded_color.error());
+    return runtime::Ok(SequenceRegion{ItemId{decoded_id.value()}, std::move(name).value(),
+                                      timebase::TickPosition{decoded_position.value()},
+                                      timebase::TickDuration{decoded_duration.value()},
+                                      decoded_color.value()});
+}
+
 runtime::Result<Sequence, PersistenceError>
 decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
                 const SchemaRegistry& registry, DecodeContext& context, std::string path) {
@@ -622,17 +693,47 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     if (!sequence_increment)
         return fail<Sequence>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                               sequence_increment.actual, limits.max_sequences);
-    auto data = data_for(value, "pulp.timeline.sequence", path);
-    if (!data)
-        return fail<Sequence>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto tracks = required(*data.value(), "tracks", path + "/data");
-    auto musical = required(*data.value(), "musical_duration", path + "/data");
-    auto absolute = required(*data.value(), "absolute_duration", path + "/data");
+    auto structural = data_for_versions(value, sequence_schema_policy.type_name,
+                                        sequence_schema_policy.oldest_readable_version,
+                                        sequence_schema_policy.current_version, path);
+    if (!structural)
+        return fail<Sequence>(structural.error().code, structural.error().path,
+                              structural.error().byte_offset);
+    const auto* data = structural.value().data;
+    auto id = required(*data, "id", path + "/data");
+    auto name = string_field(*data, "name", path + "/data");
+    auto tracks = required(*data, "tracks", path + "/data");
+    auto musical = required(*data, "musical_duration", path + "/data");
+    auto absolute = required(*data, "absolute_duration", path + "/data");
     if (!id || !name || !tracks || !musical || !absolute ||
         tracks.value()->kind != JsonValue::Kind::Array)
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
+    std::vector<SequenceMarker> decoded_markers;
+    std::vector<SequenceRegion> decoded_regions;
+    if (sequence_schema_policy.requires_annotations(structural.value().version)) {
+        auto markers = required(*data, "markers", path + "/data");
+        auto regions = required(*data, "regions", path + "/data");
+        if (!markers || markers.value()->kind != JsonValue::Kind::Array)
+            return fail<Sequence>(PersistenceErrorCode::MissingField, path + "/data/markers");
+        if (!regions || regions.value()->kind != JsonValue::Kind::Array)
+            return fail<Sequence>(PersistenceErrorCode::MissingField, path + "/data/regions");
+        decoded_markers.reserve(markers.value()->array.size());
+        for (std::size_t index = 0; index < markers.value()->array.size(); ++index) {
+            auto decoded = decode_marker(markers.value()->array[index], context,
+                                         path + "/data/markers/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_markers.push_back(std::move(decoded).value());
+        }
+        decoded_regions.reserve(regions.value()->array.size());
+        for (std::size_t index = 0; index < regions.value()->array.size(); ++index) {
+            auto decoded = decode_region(regions.value()->array[index], context,
+                                         path + "/data/regions/" + std::to_string(index));
+            if (!decoded)
+                return runtime::Err(decoded.error());
+            decoded_regions.push_back(std::move(decoded).value());
+        }
+    }
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
@@ -668,7 +769,8 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         decoded_tracks.push_back(std::move(decoded).value());
     }
     auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
-                                    decoded_absolute, std::move(decoded_tracks));
+                                    decoded_absolute, std::move(decoded_tracks),
+                                    std::move(decoded_markers), std::move(decoded_regions));
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));
@@ -679,9 +781,11 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
 namespace pulp::timeline {
 
 using detail::data_for;
+using detail::data_for_versions;
 using detail::decode_asset;
 using detail::decode_item_kind;
 using detail::decode_meter_map;
+using detail::decode_rate;
 using detail::decode_sequence;
 using detail::decode_tempo_map;
 using detail::DecodeContext;
@@ -702,9 +806,15 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
     if (!parsed)
         return fail<Project>(parsed.error().code, parsed.error().path, parsed.error().byte_offset,
                              parsed.error().actual, parsed.error().limit);
-    auto data = data_for(parsed.value()->root(), "pulp.timeline.project", "");
-    if (!data)
-        return fail<Project>(data.error().code, data.error().path, data.error().byte_offset);
+    auto envelope =
+        data_for_versions(parsed.value()->root(), detail::project_schema_policy.type_name,
+                          detail::project_schema_policy.oldest_readable_version,
+                          detail::project_schema_policy.current_version, "");
+    if (!envelope)
+        return fail<Project>(envelope.error().code, envelope.error().path,
+                             envelope.error().byte_offset);
+    const runtime::Result<const JsonValue*, PersistenceError> data =
+        runtime::Ok(envelope.value().data);
     auto id = required(*data.value(), "id", "/data");
     auto name = string_field(*data.value(), "name", "/data");
     auto next = required(*data.value(), "next_item_id", "/data");
@@ -800,14 +910,33 @@ runtime::Result<Project, PersistenceError> deserialize_project(std::string_view 
             return runtime::Err(decoded.error());
         decoded_meter_map = std::move(decoded).value();
     }
-    auto created = Project::create(ProjectInput{{decoded_id.value()},
-                                                std::move(name).value(),
-                                                decoded_next.value(),
-                                                {decoded_root.value()},
-                                                std::move(decoded_assets),
-                                                std::move(decoded_sequences),
-                                                std::move(decoded_tempo_map),
-                                                std::move(decoded_meter_map)});
+    // The session origin arrives only from a payload whose version admits it; a
+    // v1 document carrying one is a contradiction rather than a hint.
+    std::optional<SessionStart> decoded_session_start;
+    if (const auto* session_start = data.value()->find("session_start")) {
+        if (!detail::project_schema_policy.supports_session_start(envelope.value().version))
+            return fail<Project>(PersistenceErrorCode::InvalidSchema, "/data/session_start");
+        auto start = required(*session_start, "start", "/data/session_start");
+        auto rate = required(*session_start, "sample_rate", "/data/session_start");
+        if (!start || !rate)
+            return fail<Project>(PersistenceErrorCode::MissingField, "/data/session_start");
+        auto decoded_start =
+            parse_canonical_i64_string(*start.value(), "/data/session_start/start");
+        auto decoded_rate = decode_rate(*rate.value(), "/data/session_start/sample_rate");
+        if (!decoded_start || !decoded_rate)
+            return fail<Project>(PersistenceErrorCode::InvalidNumber, "/data/session_start");
+        decoded_session_start =
+            SessionStart{timebase::SamplePosition{decoded_start.value()}, decoded_rate.value()};
+    }
+    auto created = Project::create(ProjectInput{.id = {decoded_id.value()},
+                                                .name = std::move(name).value(),
+                                                .next_item_id = decoded_next.value(),
+                                                .root_sequence_id = {decoded_root.value()},
+                                                .assets = std::move(decoded_assets),
+                                                .sequences = std::move(decoded_sequences),
+                                                .tempo_map = std::move(decoded_tempo_map),
+                                                .meter_map = std::move(decoded_meter_map),
+                                                .session_start = decoded_session_start});
     if (!created)
         return model_fail<Project>(created.error(), "/");
     if (identities) {
