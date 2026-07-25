@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pulp/signal/denormal.hpp>
 #include <pulp/signal/tpt_filter.hpp>
+#include <pulp/signal/vactrol.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +31,13 @@ namespace pulp::signal {
 /// smoother that paper identifies as the tractable core of the behaviour,
 /// with a power-law mapping from control to gain.
 ///
+/// The vactrol lag itself lives in `VactrolConditionerT` (vactrol.hpp) because
+/// several unrelated circuits model the same component — this gate, the
+/// Univibe's staggered phase stages, an optical compressor's gain element —
+/// and they must not each carry their own copy of the law. This class is that
+/// conditioner plus the power-law gain mapping and the sweeping filter, which
+/// are the parts that ARE specific to a lowpass gate.
+///
 /// RT contract: every member allocates nothing and takes no locks.
 template <typename SampleType = float>
 class LowpassGateT {
@@ -42,22 +49,17 @@ public:
 
     void set_sample_rate(double sr) {
         sample_rate_ = sr > 0.0 ? sr : sample_rate_;
+        vactrol_.prepare(sample_rate_);
         update();
     }
 
     /// Time constant of the vactrol turning on, in milliseconds. Short: the
     /// LED reaches brightness far faster than the photoresistor recovers.
-    void set_rise_ms(double ms) {
-        rise_ms_ = std::max(ms, 0.01);
-        update();
-    }
+    void set_rise_ms(double ms) { vactrol_.set_rise_ms(ms); }
 
     /// Time constant of the vactrol turning off, in milliseconds. This is the
     /// control that sets how long a struck note takes to disappear.
-    void set_fall_ms(double ms) {
-        fall_ms_ = std::max(ms, 0.01);
-        update();
-    }
+    void set_fall_ms(double ms) { vactrol_.set_fall_ms(ms); }
 
     /// Blend between amplitude gating (0) and filtering (1).
     void set_colour(double amount) { colour_ = std::clamp(amount, 0.0, 1.0); }
@@ -80,21 +82,19 @@ public:
     void set_gain_exponent(double e) { gain_exponent_ = std::clamp(e, 0.25, 4.0); }
 
     void reset() {
-        control_ = 0.0;
+        vactrol_.reset();
         gate_filter_.reset();
     }
 
     /// Current smoothed control value in [0, 1]. Exposed because a voice often
     /// wants to know whether the gate has closed before it stops rendering.
-    double control() const { return control_; }
+    double control() const { return vactrol_.control(); }
 
     /// Advances the vactrol by one sample toward `target` and applies the
     /// resulting gate to `input`. `target` is the raw control (an envelope, a
     /// gate signal) in [0, 1].
     SampleType process(SampleType input, double target) {
-        const double clamped = std::clamp(target, 0.0, 1.0);
-        const double coefficient = clamped > control_ ? rise_a_ : fall_a_;
-        control_ = snap_to_zero(control_ + coefficient * (clamped - control_));
+        const double control_ = vactrol_.process(target);
 
         const double vca = std::pow(control_, gain_exponent_);
         // The two paths are complementary: the amplitude term carries the whole
@@ -116,8 +116,6 @@ public:
 
 private:
     void update() {
-        rise_a_ = 1.0 - std::exp(-1.0 / std::max(0.001 * rise_ms_ * sample_rate_, 1e-9));
-        fall_a_ = 1.0 - std::exp(-1.0 / std::max(0.001 * fall_ms_ * sample_rate_, 1e-9));
         gate_filter_.prepare(static_cast<SampleType>(sample_rate_));
         const double nyquist = 0.49 * sample_rate_;
         open_limit_ = std::min(open_hz_, nyquist);
@@ -125,19 +123,15 @@ private:
     }
 
     double sample_rate_ = 44100.0;
-    double rise_ms_ = 2.0;
-    double fall_ms_ = 200.0;
     double colour_ = 0.5;
     double closed_hz_ = 60.0;
     double open_hz_ = 12000.0;
     double gain_exponent_ = 1.5;
 
-    double rise_a_ = 0.0;
-    double fall_a_ = 0.0;
     double open_limit_ = 12000.0;
     double closed_limit_ = 60.0;
 
-    double control_ = 0.0;
+    VactrolConditionerT<SampleType> vactrol_{};
     TptFilterT<SampleType> gate_filter_;
 };
 

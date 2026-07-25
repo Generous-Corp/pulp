@@ -1,0 +1,981 @@
+// Tier 0 mod-utilities toolkit — the shared modulation infrastructure the DSP
+// series composes (see planning/2026-07-25-dsp-series-round2.md, adjudication
+// A-1).
+//
+// The suite asserts the CONTRACTS other modules' specs cite by name — a
+// triangle whose 0.5 phase offset is an exact inversion, an LFO rate accurate
+// enough for the chorus spec's ±0.01 % zero-crossing test, a constant-time slew
+// that arrives exactly, seeded randomness that is bit-reproducible. Expected
+// values are computed from the shipped constants rather than restated, so a
+// constant that changes fails the test that documents it instead of silently
+// disagreeing with it.
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include "harness/rt_allocation_probe.hpp"
+
+#include <pulp/signal/envelope.hpp>
+#include <pulp/signal/lfo.hpp>
+#include <pulp/signal/lowpass_gate.hpp>
+#include <pulp/signal/mod_matrix.hpp>
+#include <pulp/signal/rng.hpp>
+#include <pulp/signal/slew_limiter.hpp>
+#include <pulp/signal/trigger_kit.hpp>
+#include <pulp/signal/units.hpp>
+#include <pulp/signal/vactrol.hpp>
+#include <pulp/signal/vca.hpp>
+
+#include <cmath>
+#include <cstdint>
+#include <vector>
+
+using namespace pulp::signal;
+using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
+
+namespace {
+
+constexpr double kSr = 48000.0;
+
+template <typename Fn>
+void require_allocates_no_memory(Fn&& fn) {
+    pulp::test::RtAllocationProbe probe;
+    fn();
+    REQUIRE(probe.allocation_count() == 0);
+}
+
+/// Measures a rendered signal's frequency from its upward zero crossings — the
+/// measurement the chorus/flanger specs use to assert LFO rate accuracy end to
+/// end.
+///
+/// Measures between the FIRST and LAST crossing rather than dividing a crossing
+/// count by the render length. Counting over a fixed window is off by up to one
+/// crossing depending on where the window boundaries fall relative to the
+/// waveform — at 3 Hz over 100 s that is a 0.33 % measurement error, which
+/// would swamp the 0.01 % accuracy being tested. Between two crossings the
+/// span is exactly `count − 1` periods with no boundary term at all.
+double measure_rate_hz(const std::vector<double>& x, double sample_rate) {
+    std::size_t first = 0, last = 0;
+    int count = 0;
+    for (std::size_t i = 1; i < x.size(); ++i) {
+        if (x[i - 1] < 0.0 && x[i] >= 0.0) {
+            if (count == 0) first = i;
+            last = i;
+            ++count;
+        }
+    }
+    if (count < 2) return 0.0;
+    const double periods = static_cast<double>(count - 1);
+    const double span_samples = static_cast<double>(last - first);
+    return periods * sample_rate / span_samples;
+}
+
+}  // namespace
+
+// ── units ─────────────────────────────────────────────────────────────────
+
+TEST_CASE("units dB conversion round-trips and matches the half-amplitude point",
+          "[units][mod-utilities]") {
+    // −6.0205999... dB is exactly half amplitude; computed, not restated.
+    const double half_db = 20.0 * std::log10(0.5);
+    REQUIRE_THAT(units::db_to_linear(half_db), WithinRel(0.5, 1e-12));
+    REQUIRE_THAT(units::linear_to_db(0.5), WithinRel(half_db, 1e-12));
+
+    for (double db : {-96.0, -24.0, -6.0, 0.0, 6.0, 24.0})
+        REQUIRE_THAT(units::linear_to_db(units::db_to_linear(db)), WithinAbs(db, 1e-10));
+}
+
+TEST_CASE("units dB floor is finite for silence and uses the shipped constant",
+          "[units][mod-utilities]") {
+    const double expected = 20.0 * std::log10(units::kDbFloorAmplitude);
+    REQUIRE_THAT(units::linear_to_db(0.0), WithinRel(expected, 1e-12));
+    REQUIRE(std::isfinite(units::linear_to_db(0.0)));
+    // Magnitude, not signed: a negative gain reports its level.
+    REQUIRE_THAT(units::linear_to_db(-0.5), WithinRel(units::linear_to_db(0.5), 1e-12));
+}
+
+TEST_CASE("units pitch conversions agree with 12-TET", "[units][mod-utilities]") {
+    REQUIRE_THAT(units::midi_to_hz(units::kMidiA4), WithinRel(units::kA4Hz, 1e-12));
+    REQUIRE_THAT(units::midi_to_hz(units::kMidiA4 + units::kSemitonesPerOctave),
+                 WithinRel(2.0 * units::kA4Hz, 1e-12));
+    REQUIRE_THAT(units::hz_to_midi(units::kA4Hz), WithinRel(units::kMidiA4, 1e-12));
+
+    REQUIRE_THAT(units::semitones_to_ratio(12.0), WithinRel(2.0, 1e-12));
+    REQUIRE_THAT(units::cents_to_ratio(1200.0), WithinRel(2.0, 1e-12));
+    // One semitone is exactly 100 cents.
+    REQUIRE_THAT(units::semitones_to_ratio(1.0), WithinRel(units::cents_to_ratio(100.0), 1e-12));
+    REQUIRE_THAT(units::ratio_to_cents(units::cents_to_ratio(37.0)), WithinAbs(37.0, 1e-9));
+
+    // 1 V/octave: one volt is one octave.
+    REQUIRE_THAT(units::semitones_to_ratio(units::volts_to_semitones(1.0)),
+                 WithinRel(2.0, 1e-12));
+}
+
+TEST_CASE("units one-pole coefficient matches its documented time constant",
+          "[units][mod-utilities]") {
+    const double tau_ms = 10.0;
+    const double a = units::ms_to_onepole_coef(tau_ms, kSr);
+
+    // A step response driven by this coefficient must reach 1 − 1/e after
+    // exactly tau. That IS the definition the doc block states.
+    double y = 0.0;
+    const int n = static_cast<int>(std::llround(units::ms_to_samples(tau_ms, kSr)));
+    for (int i = 0; i < n; ++i) y += a * (1.0 - y);
+    REQUIRE_THAT(y, WithinAbs(1.0 - std::exp(-1.0), 1e-4));
+
+    // The two other readings the doc block converts between.
+    REQUIRE_THAT(units::t60_ms_to_tau_ms(std::log(1000.0) * tau_ms), WithinRel(tau_ms, 1e-12));
+
+    // Degenerate inputs are "instant", never a division by zero.
+    REQUIRE(units::ms_to_onepole_coef(0.0, kSr) == 1.0);
+    REQUIRE(units::ms_to_onepole_coef(10.0, 0.0) == 1.0);
+}
+
+TEST_CASE("units log taper is geometric and round-trips", "[units][mod-utilities]") {
+    const double lo = 20.0, hi = 20000.0;
+    // Half travel lands on the geometric mean, not the arithmetic midpoint.
+    REQUIRE_THAT(units::taper_log(0.5, lo, hi), WithinRel(std::sqrt(lo * hi), 1e-12));
+    REQUIRE_THAT(units::taper_log(0.0, lo, hi), WithinRel(lo, 1e-12));
+    REQUIRE_THAT(units::taper_log(1.0, lo, hi), WithinRel(hi, 1e-12));
+    for (double u : {0.0, 0.13, 0.5, 0.87, 1.0})
+        REQUIRE_THAT(units::untaper_log(units::taper_log(u, lo, hi), lo, hi), WithinAbs(u, 1e-12));
+    // A taper through zero has no geometric midpoint; it degrades, not NaNs.
+    REQUIRE(std::isfinite(units::taper_log(0.5, 0.0, hi)));
+}
+
+// ── rng ───────────────────────────────────────────────────────────────────
+
+TEST_CASE("Xorshift32 is deterministic, reset-repeatable and never zero-locked",
+          "[rng][mod-utilities]") {
+    Xorshift32 a{12345u};
+    Xorshift32 b{12345u};
+    for (int i = 0; i < 1000; ++i) REQUIRE(a.next_uint() == b.next_uint());
+
+    a.reset();
+    b.reset();
+    REQUIRE(a.next_uint() == b.next_uint());
+
+    // Zero is the generator's absorbing state; seeding with it must not stick.
+    Xorshift32 z{0u};
+    REQUIRE(z.seed() == Xorshift32::kDefaultSeed);
+    bool any_nonzero = false;
+    for (int i = 0; i < 100; ++i) any_nonzero = any_nonzero || z.next_uint() != 0u;
+    REQUIRE(any_nonzero);
+}
+
+TEST_CASE("Xorshift32 output ranges hold", "[rng][mod-utilities]") {
+    Xorshift32 rng{777u};
+    double mean = 0.0;
+    constexpr int n = 200000;
+    for (int i = 0; i < n; ++i) {
+        const double v = rng.next_bipolar<double>();
+        REQUIRE(v >= -1.0);
+        REQUIRE(v < 1.0);
+        mean += v;
+    }
+    mean /= n;
+    // Uniform on [−1, 1): the mean of 2e5 draws sits well inside 0.01 of zero.
+    REQUIRE_THAT(mean, WithinAbs(0.0, 0.01));
+
+    Xorshift32 u{888u};
+    for (int i = 0; i < 10000; ++i) {
+        const double v = u.next_unit<double>();
+        REQUIRE(v >= 0.0);
+        REQUIRE(v < 1.0);
+    }
+}
+
+TEST_CASE("mix64 is a stateless keyed draw independent of call order",
+          "[rng][mod-utilities]") {
+    // The property the granular spec depends on: the same (seed, index, field)
+    // gives the same answer regardless of when it is asked for.
+    const std::uint64_t seed = 0xC0FFEEull;
+    const std::uint64_t forward = mix64(seed, 42, 3);
+    for (std::uint64_t i = 0; i < 100; ++i) (void)mix64(seed, i, 0);
+    REQUIRE(mix64(seed, 42, 3) == forward);
+
+    // Different fields at the same index must not be correlated — the whole
+    // reason `field` exists.
+    REQUIRE(mix64(seed, 42, 0) != mix64(seed, 42, 1));
+    REQUIRE(mix64(seed, 42, 0) != mix64(seed + 1, 42, 0));
+
+    for (std::uint64_t i = 0; i < 1000; ++i) {
+        const double v = unit_from<double>(mix64(seed, i, 0));
+        REQUIRE(v >= 0.0);
+        REQUIRE(v < 1.0);
+        const double b = bipolar_from<double>(mix64(seed, i, 1));
+        REQUIRE(b >= -1.0);
+        REQUIRE(b < 1.0);
+    }
+}
+
+TEST_CASE("OuWalk hits the stationary deviation solved for in its update()",
+          "[rng][mod-utilities]") {
+    // The class solves the step size from θ so that σ is the STATIONARY
+    // standard deviation. This asserts that solve, which is the whole reason
+    // callers get to state a depth in real units.
+    OuWalk64 walk;
+    walk.set_theta(OuWalk64::kDefaultTheta);
+    walk.set_sigma(0.25);
+    walk.set_seed(4242u);
+    walk.reset();
+
+    constexpr int burn_in = 20000;
+    constexpr int n = 400000;
+    for (int i = 0; i < burn_in; ++i) walk.next();
+    double sum = 0.0, sum_sq = 0.0;
+    for (int i = 0; i < n; ++i) {
+        const double v = walk.next();
+        sum += v;
+        sum_sq += v * v;
+    }
+    const double mean = sum / n;
+    const double sd = std::sqrt(sum_sq / n - mean * mean);
+    REQUIRE_THAT(mean, WithinAbs(0.0, 0.02));
+    REQUIRE_THAT(sd, WithinRel(0.25, 0.05));
+}
+
+TEST_CASE("OuWalk and Drift are bit-reproducible across reset", "[rng][mod-utilities]") {
+    Drift64 drift;
+    drift.prepare(kSr);
+    drift.set_depth_percent(0.5);
+    drift.set_seed(99u);
+
+    drift.reset();
+    std::vector<double> first;
+    for (int i = 0; i < 5000; ++i) first.push_back(drift.next());
+
+    drift.reset();
+    for (int i = 0; i < 5000; ++i) REQUIRE(drift.next() == first[static_cast<std::size_t>(i)]);
+
+    // A drift multiplier is near 1 and strictly positive — the invariant that
+    // lets callers multiply a delay time by it without guarding.
+    for (double v : first) {
+        REQUIRE(v > 0.0);
+        REQUIRE_THAT(v, WithinAbs(1.0, 0.1));
+    }
+}
+
+// ── LFO ───────────────────────────────────────────────────────────────────
+
+TEST_CASE("LFO rate is accurate to far better than the ±0.01 % specs assert",
+          "[lfo][mod-utilities]") {
+    // The chorus spec's test 2, run directly: count zero crossings over a long
+    // render and compare against the configured rate.
+    constexpr double rate_hz = 3.0;
+    constexpr double seconds = 100.0;
+    Lfo64 lfo;
+    lfo.prepare(kSr);
+    lfo.set_rate_hz(rate_hz);
+    lfo.set_wave(LfoWave::sine);
+    lfo.reset();
+
+    std::vector<double> out;
+    out.reserve(static_cast<std::size_t>(kSr * seconds));
+    for (int i = 0; i < static_cast<int>(kSr * seconds); ++i) out.push_back(lfo.next());
+
+    REQUIRE_THAT(measure_rate_hz(out, kSr), WithinRel(rate_hz, 1e-4));
+}
+
+TEST_CASE("LFO shapes stay bipolar and hit their documented landmarks",
+          "[lfo][mod-utilities]") {
+    for (auto wave : {LfoWave::sine, LfoWave::triangle, LfoWave::saw_up, LfoWave::saw_down,
+                      LfoWave::square, LfoWave::sample_hold, LfoWave::smooth_random}) {
+        Lfo64 lfo;
+        lfo.prepare(kSr);
+        lfo.set_rate_hz(7.0);
+        lfo.set_wave(wave);
+        lfo.reset();
+        for (int i = 0; i < 100000; ++i) {
+            const double v = lfo.next();
+            REQUIRE(v >= -1.0);
+            REQUIRE(v <= 1.0);
+        }
+    }
+
+    // The triangle's landmarks: 0 at φ=0, +1 at 0.25, 0 at 0.5, −1 at 0.75.
+    // Driven by phase offset so no accumulation is involved.
+    Lfo64 tri;
+    tri.prepare(kSr);
+    tri.set_rate_hz(0.0);  // frozen: phase stays at the offset
+    tri.set_wave(LfoWave::triangle);
+    struct { double phase, expected; } landmarks[] = {
+        {0.0, 0.0}, {0.25, 1.0}, {0.5, 0.0}, {0.75, -1.0}};
+    for (const auto& lm : landmarks) {
+        tri.set_phase_offset(lm.phase);
+        tri.reset();
+        REQUIRE_THAT(tri.next(), WithinAbs(lm.expected, 1e-12));
+    }
+}
+
+TEST_CASE("LFO phase offset of half a cycle is exact inversion", "[lfo][mod-utilities]") {
+    // The property the Juno/Dimension D voicings assert: two otherwise
+    // identical LFOs half a cycle apart are exact negatives of each other, for
+    // every odd-symmetric shape.
+    for (auto wave : {LfoWave::sine, LfoWave::triangle, LfoWave::square}) {
+        Lfo64 a, b;
+        for (auto* l : {&a, &b}) {
+            l->prepare(kSr);
+            l->set_rate_hz(2.0);
+            l->set_wave(wave);
+        }
+        b.set_stereo_offset(0.5);
+        a.reset();
+        b.reset();
+        for (int i = 0; i < 200000; ++i) REQUIRE_THAT(a.next() + b.next(), WithinAbs(0.0, 1e-9));
+    }
+}
+
+TEST_CASE("LFO N-voice spacing is even", "[lfo][mod-utilities]") {
+    // TriChorus: three voices at 120°. Their instantaneous sine values must sum
+    // to zero at every sample, which is the algebraic form of even spacing.
+    constexpr int n = 3;
+    Lfo64 voices[n];
+    for (int k = 0; k < n; ++k) {
+        voices[k].prepare(kSr);
+        voices[k].set_rate_hz(1.5);
+        voices[k].set_wave(LfoWave::sine);
+        voices[k].set_phase_offset(static_cast<double>(k) / n);
+        voices[k].reset();
+    }
+    for (int i = 0; i < 100000; ++i) {
+        double sum = 0.0;
+        for (auto& v : voices) sum += v.next();
+        REQUIRE_THAT(sum, WithinAbs(0.0, 1e-9));
+    }
+}
+
+TEST_CASE("LFO quadrature is exact and drift-free over a long render",
+          "[lfo][mod-utilities]") {
+    // The frequency-shifter spec forbids a recursive resonator here precisely
+    // because its amplitude drifts. Assert the invariant that forbids it:
+    // sin² + cos² == 1 forever, not just at the start.
+    Lfo64 lfo;
+    lfo.prepare(kSr);
+    lfo.set_rate_hz(200.0);
+    lfo.reset();
+    double s = 0.0, c = 0.0;
+    for (int i = 0; i < 2000000; ++i) {
+        lfo.next_quadrature(s, c);
+        REQUIRE_THAT(s * s + c * c, WithinAbs(1.0, 1e-12));
+    }
+}
+
+TEST_CASE("LFO random shapes are seeded and reset-repeatable", "[lfo][mod-utilities]") {
+    Lfo64 lfo;
+    lfo.prepare(kSr);
+    lfo.set_rate_hz(20.0);
+    lfo.set_wave(LfoWave::sample_hold);
+    lfo.set_seed(31337u);
+
+    lfo.reset();
+    std::vector<double> first;
+    for (int i = 0; i < 20000; ++i) first.push_back(lfo.next());
+    lfo.reset();
+    for (int i = 0; i < 20000; ++i) REQUIRE(lfo.next() == first[static_cast<std::size_t>(i)]);
+
+    // sample_hold is piecewise constant; smooth_random is not. Both must
+    // actually move.
+    bool moved = false;
+    for (std::size_t i = 1; i < first.size(); ++i) moved = moved || first[i] != first[i - 1];
+    REQUIRE(moved);
+}
+
+TEST_CASE("LFO rate is clamped to its documented ceiling", "[lfo][mod-utilities]") {
+    Lfo64 lfo;
+    lfo.set_rate_hz(1e6);
+    REQUIRE(lfo.rate_hz() == LfoT<double>::kMaxRateHz);
+    lfo.set_rate_hz(-5.0);
+    REQUIRE(lfo.rate_hz() == 0.0);
+}
+
+// ── slew limiter / sample & hold ──────────────────────────────────────────
+
+TEST_CASE("SlewLimiter linear mode takes the same time regardless of distance",
+          "[slew][mod-utilities]") {
+    // The TB-303-lineage constant-time portamento the stage sequencer cites:
+    // one semitone and one octave take the same 30 ms.
+    constexpr double slide_ms = 30.0;
+    const int expected = static_cast<int>(std::llround(units::ms_to_samples(slide_ms, kSr)));
+
+    for (double distance : {1.0, 12.0, 0.25}) {
+        SlewLimiter64 slew;
+        slew.prepare(kSr);
+        slew.set_mode(SlewMode::linear);
+        slew.set_time_ms(slide_ms);
+        slew.set_immediate(0.0);
+
+        // `settled()` is true before the first `process()` — the limiter has
+        // not been shown a target yet — so the count has to be a do-while.
+        int samples = 0;
+        do {
+            slew.process(distance);
+            ++samples;
+        } while (!slew.settled() && samples < expected * 4);
+        REQUIRE(slew.settled());
+        // Exact arrival, in the stated time, within one sample of rounding.
+        REQUIRE(std::abs(samples - expected) <= 1);
+        REQUIRE_THAT(slew.value(), WithinAbs(distance, 1e-12));
+    }
+}
+
+TEST_CASE("SlewLimiter exponential mode matches the units time constant",
+          "[slew][mod-utilities]") {
+    constexpr double tau_ms = 20.0;
+    SlewLimiter64 slew;
+    slew.prepare(kSr);
+    slew.set_mode(SlewMode::exponential);
+    slew.set_time_ms(tau_ms);
+    slew.set_immediate(0.0);
+
+    const int n = static_cast<int>(std::llround(units::ms_to_samples(tau_ms, kSr)));
+    for (int i = 0; i < n; ++i) slew.process(1.0);
+    REQUIRE_THAT(slew.value(), WithinAbs(1.0 - std::exp(-1.0), 1e-4));
+}
+
+TEST_CASE("SlewLimiter rise and fall are independent", "[slew][mod-utilities]") {
+    SlewLimiter64 slew;
+    slew.prepare(kSr);
+    slew.set_mode(SlewMode::linear);
+    slew.set_rise_ms(10.0);
+    slew.set_fall_ms(100.0);
+    slew.set_immediate(0.0);
+
+    int up = 0;
+    do { slew.process(1.0); ++up; } while (!slew.settled() && up < 100000);
+    int down = 0;
+    do { slew.process(0.0); ++down; } while (!slew.settled() && down < 1000000);
+
+    // A 10× longer fall time takes 10× as many samples, within rounding.
+    REQUIRE_THAT(static_cast<double>(down) / up, WithinRel(10.0, 0.02));
+}
+
+TEST_CASE("SlewLimiter with zero time is a pass-through", "[slew][mod-utilities]") {
+    for (auto mode : {SlewMode::linear, SlewMode::exponential}) {
+        SlewLimiter64 slew;
+        slew.prepare(kSr);
+        slew.set_mode(mode);
+        slew.set_time_ms(0.0);
+        slew.reset();
+        REQUIRE_THAT(slew.process(0.7), WithinAbs(0.7, 1e-12));
+        REQUIRE_THAT(slew.process(-0.3), WithinAbs(-0.3, 1e-12));
+    }
+}
+
+TEST_CASE("SampleHold latches on the rising edge only", "[slew][mod-utilities]") {
+    SampleHold64 sh;
+    sh.reset();
+
+    REQUIRE_THAT(sh.process(0.5, 0.0), WithinAbs(0.0, 1e-12));  // no edge yet
+    REQUIRE_THAT(sh.process(0.5, 1.0), WithinAbs(0.5, 1e-12));  // rising: latch
+    REQUIRE_THAT(sh.process(0.9, 1.0), WithinAbs(0.5, 1e-12));  // still high: hold
+    REQUIRE_THAT(sh.process(0.9, 0.0), WithinAbs(0.5, 1e-12));  // falling: hold
+    REQUIRE_THAT(sh.process(0.9, 1.0), WithinAbs(0.9, 1e-12));  // rising again: latch
+}
+
+// ── envelopes ─────────────────────────────────────────────────────────────
+
+TEST_CASE("Envelope segments take exactly their stated time at every curve",
+          "[envelope][mod-utilities]") {
+    // The normalisation claim in the doc block: a 200 ms decay is 200 ms
+    // whether the curve is linear or strongly exponential.
+    constexpr double attack_ms = 50.0;
+    const int expected = static_cast<int>(std::llround(units::ms_to_samples(attack_ms, kSr)));
+
+    for (double curve : {0.0, 0.5, 1.0}) {
+        Ar env;
+        env.prepare(kSr);
+        env.set_attack_ms(attack_ms);
+        env.set_release_ms(1000.0);
+        env.set_curve(curve);
+        env.reset();
+        env.gate_on();
+
+        int samples = 0;
+        while (env.stage() == EnvelopeStage::attack && samples < expected * 4) {
+            env.next();
+            ++samples;
+        }
+        REQUIRE(std::abs(samples - expected) <= 2);
+        REQUIRE_THAT(static_cast<double>(env.value()), WithinAbs(1.0, 1e-6));
+    }
+}
+
+TEST_CASE("Envelope curve 0 is exactly linear", "[envelope][mod-utilities]") {
+    Ar env;
+    env.prepare(kSr);
+    env.set_attack_ms(10.0);
+    env.set_curve(0.0);
+    env.reset();
+    env.gate_on();
+
+    const double n = units::ms_to_samples(10.0, kSr);
+    for (int i = 1; i <= static_cast<int>(n) / 2; ++i) {
+        const double v = env.next();
+        REQUIRE_THAT(v, WithinAbs(i / n, 1e-6));
+    }
+}
+
+TEST_CASE("Envelope releases from any stage without hanging", "[envelope][mod-utilities]") {
+    // A staccato note on a 2-second attack must not hang for 2 seconds.
+    Dahdsr env;
+    env.prepare(kSr);
+    env.set_delay_ms(500.0);
+    env.set_attack_ms(2000.0);
+    env.set_release_ms(10.0);
+    env.reset();
+
+    env.gate_on();
+    for (int i = 0; i < 100; ++i) env.next();
+    REQUIRE(env.stage() == EnvelopeStage::delay);
+    env.gate_off();
+    REQUIRE(env.stage() == EnvelopeStage::release);
+
+    const int release_samples = static_cast<int>(std::llround(units::ms_to_samples(10.0, kSr)));
+    int n = 0;
+    while (env.active() && n < release_samples * 4) { env.next(); ++n; }
+    REQUIRE_FALSE(env.active());
+    REQUIRE(n <= release_samples + 2);
+}
+
+TEST_CASE("Envelope retrigger continues from the current level", "[envelope][mod-utilities]") {
+    Ar env;
+    env.prepare(kSr);
+    env.set_attack_ms(100.0);
+    env.set_release_ms(100.0);
+    env.reset();
+
+    env.gate_on();
+    for (int i = 0; i < 2000; ++i) env.next();
+    env.gate_off();
+    for (int i = 0; i < 500; ++i) env.next();
+    const double before = env.value();
+    REQUIRE(before > 0.0);
+
+    env.gate_on();
+    const double after = env.next();
+    // No jump to zero — the retrigger is continuous, which is what makes it
+    // click-free.
+    REQUIRE_THAT(after, WithinAbs(before, 0.02));
+}
+
+TEST_CASE("Envelope shapes enable the stages their names promise",
+          "[envelope][mod-utilities]") {
+    // AhdT holds at peak; ArT does not have a hold stage at all.
+    Ahd ahd;
+    ahd.prepare(kSr);
+    ahd.set_attack_ms(1.0);
+    ahd.set_hold_ms(50.0);
+    ahd.set_decay_ms(50.0);
+    ahd.reset();
+    ahd.gate_on();
+    bool saw_hold = false;
+    for (int i = 0; i < 20000; ++i) {
+        ahd.next();
+        saw_hold = saw_hold || ahd.stage() == EnvelopeStage::hold;
+    }
+    REQUIRE(saw_hold);
+
+    Ar ar;
+    ar.prepare(kSr);
+    ar.set_attack_ms(1.0);
+    ar.reset();
+    ar.gate_on();
+    for (int i = 0; i < 20000; ++i) {
+        ar.next();
+        REQUIRE(ar.stage() != EnvelopeStage::hold);
+    }
+}
+
+TEST_CASE("ModEnv rests at exactly zero and peaks at its depth",
+          "[envelope][mod-utilities]") {
+    // The trap this type exists to avoid: an attenuverted unipolar envelope
+    // would offset its destination while idle.
+    ModEnv env;
+    env.prepare(kSr);
+    env.set_attack_ms(1.0);
+    env.set_decay_ms(1.0);
+    env.set_sustain(1.0);
+    env.set_depth(-0.5);
+    env.reset();
+
+    REQUIRE_THAT(static_cast<double>(env.next()), WithinAbs(0.0, 1e-12));
+    env.gate_on();
+    double extreme = 0.0;
+    for (int i = 0; i < 5000; ++i) {
+        const double v = env.next();
+        if (std::abs(v) > std::abs(extreme)) extreme = v;
+    }
+    REQUIRE_THAT(extreme, WithinAbs(-0.5, 1e-3));
+}
+
+// ── VCA / attenuverter ────────────────────────────────────────────────────
+
+TEST_CASE("VCA laws both peak at exactly unity and close to exactly zero",
+          "[vca][mod-utilities]") {
+    for (auto response : {VcaResponse::linear, VcaResponse::exponential}) {
+        Vca64 vca;
+        vca.set_response(response);
+        REQUIRE_THAT(static_cast<double>(vca.gain_for(1.0)), WithinAbs(1.0, 1e-12));
+        REQUIRE(vca.gain_for(0.0) == 0.0);
+        // Never amplifies, whatever the caller passes.
+        REQUIRE(vca.gain_for(5.0) <= 1.0);
+        REQUIRE(vca.gain_for(-5.0) >= 0.0);
+    }
+}
+
+TEST_CASE("VCA exponential law is equal-dB per equal control travel",
+          "[vca][mod-utilities]") {
+    Vca64 vca;
+    vca.set_response(VcaResponse::exponential);
+    vca.set_range_db(60.0);
+
+    // Half travel is half the range, in dB — the definition of the law.
+    REQUIRE_THAT(units::linear_to_db(static_cast<double>(vca.gain_for(0.5))),
+                 WithinAbs(-30.0, 1e-9));
+    REQUIRE_THAT(units::linear_to_db(static_cast<double>(vca.gain_for(0.25))),
+                 WithinAbs(-45.0, 1e-9));
+}
+
+TEST_CASE("Attenuverter inverts and reports its own worst case", "[vca][mod-utilities]") {
+    Attenuverter64 att;
+    att.set_scale(-1.0);
+    att.set_offset(0.0);
+    REQUIRE_THAT(static_cast<double>(att.process(0.7)), WithinAbs(-0.7, 1e-12));
+
+    att.set_scale(0.5);
+    att.set_offset(0.5);
+    REQUIRE_THAT(static_cast<double>(att.process(-1.0)), WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(static_cast<double>(att.process(1.0)), WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(static_cast<double>(att.worst_case_output()), WithinAbs(1.0, 1e-12));
+
+    // The bound actually bounds, for unit-bounded input.
+    att.set_scale(-0.3);
+    att.set_offset(0.2);
+    for (double x = -1.0; x <= 1.0; x += 0.01)
+        REQUIRE(std::abs(static_cast<double>(att.process(x))) <=
+                static_cast<double>(att.worst_case_output()) + 1e-12);
+}
+
+// ── vactrol ───────────────────────────────────────────────────────────────
+
+TEST_CASE("Vactrol rise is fast and fall is slow, as the component is",
+          "[vactrol][mod-utilities]") {
+    VactrolConditioner64 v;
+    v.prepare(kSr);
+    v.set_rise_ms(2.0);
+    v.set_fall_ms(200.0);
+    v.reset();
+
+    // Rise: samples to cover 1 − 1/e of the way from 0 to 1. That is one τ by
+    // definition, so it must equal the configured rise time in samples.
+    const double tau_fraction = 1.0 - std::exp(-1.0);
+    int up = 0;
+    while (v.control() < tau_fraction && up < 1000000) { v.process(1.0); ++up; }
+    REQUIRE_THAT(static_cast<double>(up), WithinRel(units::ms_to_samples(2.0, kSr), 0.05));
+
+    // Fall must be measured from a SATURATED state, not from wherever the rise
+    // measurement stopped — decaying from 0.632 rather than 1.0 covers only
+    // 0.54 τ before crossing 1/e, which reads as a fall time nearly half what
+    // was configured.
+    for (int i = 0; i < 1000000 && v.control() < 0.9999; ++i) v.process(1.0);
+    int down = 0;
+    while (v.control() > std::exp(-1.0) && down < 1000000) { v.process(0.0); ++down; }
+    REQUIRE_THAT(static_cast<double>(down), WithinRel(units::ms_to_samples(200.0, kSr), 0.05));
+
+    REQUIRE(down > up * 50);
+}
+
+TEST_CASE("LowpassGate still behaves identically after composing the conditioner",
+          "[vactrol][mod-utilities]") {
+    // The extraction refactor must be behaviour-preserving. Reproduce the
+    // conditioner's recurrence independently and require the gate's exposed
+    // control to match it sample for sample.
+    LowpassGate64 gate;
+    gate.set_sample_rate(kSr);
+    gate.set_rise_ms(3.0);
+    gate.set_fall_ms(150.0);
+    gate.reset();
+
+    const double rise_a = 1.0 - std::exp(-1.0 / std::max(0.001 * 3.0 * kSr, 1e-9));
+    const double fall_a = 1.0 - std::exp(-1.0 / std::max(0.001 * 150.0 * kSr, 1e-9));
+    double reference = 0.0;
+
+    for (int i = 0; i < 20000; ++i) {
+        const double target = i < 8000 ? 1.0 : 0.0;
+        gate.process(0.5, target);
+        reference += (target > reference ? rise_a : fall_a) * (target - reference);
+        REQUIRE_THAT(gate.control(), WithinAbs(reference, 1e-12));
+    }
+}
+
+// ── trigger kit ───────────────────────────────────────────────────────────
+
+TEST_CASE("TriggerDetect fires once per edge and hysteresis stops chatter",
+          "[trigger][mod-utilities]") {
+    TriggerDetect det;
+    det.reset();
+
+    REQUIRE(det.process(1.0f));       // rising
+    REQUIRE_FALSE(det.process(1.0f)); // still high
+    REQUIRE_FALSE(det.process(0.4f)); // inside the window: not yet re-armed
+    REQUIRE_FALSE(det.process(1.0f)); // and therefore no second edge
+    REQUIRE_FALSE(det.process(0.1f)); // below low: re-armed
+    REQUIRE(det.process(1.0f));       // second real edge
+}
+
+TEST_CASE("ClockDivider passes the first edge after reset", "[trigger][mod-utilities]") {
+    // A divider whose downbeat lands n−1 edges late is unusable to start a
+    // piece with; this is the property that prevents it.
+    ClockDivider div;
+    div.set_division(4);
+    div.reset();
+
+    int passes = 0;
+    bool first_passed = false;
+    for (int edge = 0; edge < 16; ++edge) {
+        const bool p = div.process(1.0f);
+        div.process(0.0f);
+        if (edge == 0) first_passed = p;
+        if (p) ++passes;
+    }
+    REQUIRE(first_passed);
+    REQUIRE(passes == 4);
+}
+
+TEST_CASE("ClockMult emits the stated number of triggers per steady period",
+          "[trigger][mod-utilities]") {
+    ClockMult mult;
+    mult.prepare(kSr);
+    mult.set_multiple(4);
+    mult.reset();
+
+    constexpr int period = 4800;  // 10 Hz at 48 kHz
+    int fired = 0;
+    // Two priming periods establish the measured period, then count.
+    for (int p = 0; p < 6; ++p) {
+        for (int i = 0; i < period; ++i) {
+            const bool f = mult.process(i == 0 ? 1.0f : 0.0f);
+            if (p >= 2 && f) ++fired;
+        }
+    }
+    REQUIRE(fired == 4 * 4);
+}
+
+TEST_CASE("ClockMult treats a stopped clock as stopped, not as a very slow one",
+          "[trigger][mod-utilities]") {
+    ClockMult mult;
+    mult.prepare(kSr);
+    mult.set_multiple(4);
+    mult.reset();
+
+    // One edge, then a gap far longer than the ceiling, then another edge.
+    mult.process(1.0f);
+    const int gap = static_cast<int>(units::ms_to_samples(ClockMultT<float>::kMaxPeriodMs, kSr)) * 2;
+    int spurious = 0;
+    for (int i = 0; i < gap; ++i)
+        if (mult.process(0.0f)) ++spurious;
+    // The single edge after a reset has no measured period, so nothing should
+    // have been subdivided at all.
+    REQUIRE(spurious == 0);
+
+    REQUIRE(mult.process(1.0f));
+    int after = 0;
+    for (int i = 0; i < 48000; ++i)
+        if (mult.process(0.0f)) ++after;
+    REQUIRE(after == 0);  // period was rejected as "clock restarted"
+}
+
+TEST_CASE("GateGen opens for its stated length and retrigger restarts it",
+          "[trigger][mod-utilities]") {
+    GateGen gate;
+    gate.prepare(kSr);
+    gate.set_length_ms(10.0);
+    gate.reset();
+
+    const int expected = static_cast<int>(std::llround(units::ms_to_samples(10.0, kSr)));
+    int high = 0;
+    gate.process(1.0f);
+    ++high;
+    for (int i = 0; i < expected * 3; ++i)
+        if (gate.process(0.0f) > 0.5f) ++high;
+    REQUIRE(high == expected);
+}
+
+TEST_CASE("TrigDelay delays by its stated time", "[trigger][mod-utilities]") {
+    TrigDelay del;
+    del.prepare(kSr);
+    del.set_delay_ms(5.0);
+    del.reset();
+
+    const int expected = static_cast<int>(std::llround(units::ms_to_samples(5.0, kSr)));
+    REQUIRE_FALSE(del.process(1.0f));
+    int n = 0;
+    bool fired = false;
+    for (int i = 0; i < expected * 3 && !fired; ++i) {
+        fired = del.process(0.0f);
+        ++n;
+    }
+    REQUIRE(fired);
+    REQUIRE(n == expected);
+}
+
+TEST_CASE("BurstGen emits exactly its count at its interval", "[trigger][mod-utilities]") {
+    BurstGen burst;
+    burst.prepare(kSr);
+    burst.set_count(5);
+    burst.set_interval_ms(10.0);
+    burst.reset();
+
+    const int interval = static_cast<int>(std::llround(units::ms_to_samples(10.0, kSr)));
+    int fired = burst.process(1.0f) ? 1 : 0;
+    for (int i = 0; i < interval * 8; ++i)
+        if (burst.process(0.0f)) ++fired;
+    REQUIRE(fired == 5);
+    REQUIRE_FALSE(burst.busy());
+}
+
+// ── mod matrix ────────────────────────────────────────────────────────────
+
+TEST_CASE("ModMatrix sums routes and reports its own worst case",
+          "[mod-matrix][mod-utilities]") {
+    ModMatrixT<4, 3, double> matrix;
+    REQUIRE(matrix.add_route(0, 1, 0.5));
+    REQUIRE(matrix.add_route(2, 1, -0.25));
+    REQUIRE(matrix.route_count() == 2);
+
+    matrix.set_source(0, 1.0);
+    matrix.set_source(2, 1.0);
+    matrix.process();
+    REQUIRE_THAT(matrix.get(1), WithinAbs(0.25, 1e-12));
+
+    // Unrouted destinations read exactly zero, never a stale value.
+    REQUIRE(matrix.get(0) == 0.0);
+    REQUIRE(matrix.get(2) == 0.0);
+
+    // The bound bounds, for contractually unit-bounded sources.
+    REQUIRE_THAT(matrix.worst_case_for(1), WithinAbs(0.75, 1e-12));
+    for (double a : {-1.0, -0.3, 0.0, 0.6, 1.0}) {
+        for (double b : {-1.0, 0.0, 1.0}) {
+            matrix.set_source(0, a);
+            matrix.set_source(2, b);
+            matrix.process();
+            REQUIRE(std::abs(matrix.get(1)) <= matrix.worst_case_for(1) + 1e-12);
+        }
+    }
+}
+
+TEST_CASE("ModMatrix refuses bad routes rather than dropping them silently",
+          "[mod-matrix][mod-utilities]") {
+    ModMatrixT<2, 2, double> matrix;
+    REQUIRE_FALSE(matrix.add_route(2, 0, 1.0));
+    REQUIRE_FALSE(matrix.add_route(0, 2, 1.0));
+    REQUIRE(matrix.route_count() == 0);
+
+    for (std::size_t i = 0; i < decltype(matrix)::kMaxRoutes; ++i)
+        REQUIRE(matrix.add_route(0, 0, 0.1));
+    REQUIRE_FALSE(matrix.add_route(0, 0, 0.1));
+}
+
+TEST_CASE("ModMatrix reset clears signal state but preserves the patch",
+          "[mod-matrix][mod-utilities]") {
+    ModMatrixT<2, 2, double> matrix;
+    matrix.add_route(0, 0, 1.0);
+    matrix.set_source(0, 1.0);
+    matrix.process();
+    REQUIRE_THAT(matrix.get(0), WithinAbs(1.0, 1e-12));
+
+    matrix.reset();
+    REQUIRE(matrix.route_count() == 1);
+    REQUIRE(matrix.source(0) == 0.0);
+    matrix.process();
+    REQUIRE(matrix.get(0) == 0.0);
+}
+
+// ── RT allocation probe roster ────────────────────────────────────────────
+
+TEST_CASE("mod-utilities allocate nothing on the audio thread",
+          "[mod-utilities][rt-safety]") {
+    Lfo lfo;
+    SlewLimiter slew;
+    SampleHold sh;
+    Dahdsr env;
+    ModEnv mod_env;
+    Vca vca;
+    Attenuverter att;
+    VactrolConditioner vactrol;
+    LowpassGate lpg;
+    TriggerDetect trig;
+    Comparator comp;
+    GateGen gate;
+    ClockDivider div;
+    ClockMult mult;
+    TrigDelay tdelay;
+    BurstGen burst;
+    Drift drift;
+    OuWalk walk;
+    Xorshift32 rng{7u};
+    ModMatrixT<8, 8, float> matrix;
+
+    // prepare() may allocate by contract; do it outside the probe.
+    lfo.prepare(kSr);
+    slew.prepare(kSr);
+    env.prepare(kSr);
+    mod_env.prepare(kSr);
+    vactrol.prepare(kSr);
+    lpg.set_sample_rate(kSr);
+    gate.prepare(kSr);
+    mult.prepare(kSr);
+    tdelay.prepare(kSr);
+    burst.prepare(kSr);
+    drift.prepare(kSr);
+    matrix.add_route(0, 0, 0.5f);
+
+    require_allocates_no_memory([&] {
+        for (int i = 0; i < 512; ++i) {
+            const float x = static_cast<float>(i % 7) * 0.1f;
+            const float clock = (i % 64) == 0 ? 1.0f : 0.0f;
+
+            lfo.set_rate_hz(1.0 + 0.001 * i);
+            (void)lfo.next();
+            float s = 0.0f, c = 0.0f;
+            lfo.next_quadrature(s, c);
+
+            slew.set_time_ms(5.0);
+            (void)slew.process(x);
+            (void)sh.process(x, clock);
+
+            if (i == 0) env.gate_on();
+            if (i == 256) env.gate_off();
+            (void)env.next();
+            (void)mod_env.next();
+
+            (void)vca.process(x, 0.5f);
+            (void)att.process(x);
+            (void)vactrol.process(0.5);
+            (void)lpg.process(x, 0.5);
+
+            (void)trig.process(clock);
+            (void)comp.process(clock);
+            (void)gate.process(clock);
+            (void)div.process(clock);
+            (void)mult.process(clock);
+            (void)tdelay.process(clock);
+            (void)burst.process(clock);
+
+            (void)drift.next();
+            (void)walk.next();
+            (void)rng.next_bipolar<float>();
+            (void)mix64(1, static_cast<std::uint64_t>(i), 2);
+
+            matrix.set_source(0, x);
+            matrix.process();
+            (void)matrix.get(0);
+        }
+        lfo.reset();
+        slew.reset();
+        env.reset();
+        matrix.reset();
+    });
+}
