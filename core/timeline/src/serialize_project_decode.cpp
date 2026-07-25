@@ -142,6 +142,13 @@ runtime::Result<MediaAsset, PersistenceError> decode_asset(const JsonValue& valu
                                std::move(decoded_representations), std::move(decoded_loop_info)}));
 }
 
+static_assert(kClipContentAlternativeCount == 5,
+              "ClipContent gained an alternative: this decoder dispatches on envelope type "
+              "names, so an alternative with no branch below is admitted as OpaqueContent "
+              "and can never be remapped, exported, or rendered again. Give the new "
+              "content its own envelope name and decode branch, and register its schema, "
+              "before widening the variant.");
+
 runtime::Result<ClipContent, PersistenceError>
 decode_content(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
                const SchemaRegistry& registry, DecodeContext& context, std::string path) {

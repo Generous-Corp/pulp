@@ -16,20 +16,19 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
                                                                       : Concept::ClipAbsolute,
                id, limits);
 
-    std::visit(
-        [&](const auto& content) {
-            using Content = std::decay_t<decltype(content)>;
-            if constexpr (std::is_same_v<Content, timeline::NoteContent>)
-                out.record(Concept::ClipNote, id, limits);
-            else if constexpr (std::is_same_v<Content, timeline::MediaRef>)
-                out.record(Concept::ClipMedia, id, limits);
-            else if constexpr (std::is_same_v<Content, timeline::RegisteredContent>)
-                out.record(Concept::ContentRegistered, id, limits);
-            else if constexpr (std::is_same_v<Content, timeline::OpaqueContent>)
-                out.record(Concept::ContentOpaque, id, limits);
-            // EmptyContent is the absence of content, not a concept to carry.
-        },
-        clip.content());
+    std::visit(timeline::ClipContentCases{
+                   // EmptyContent is the absence of content, not a concept to carry.
+                   [&](const timeline::EmptyContent&) {},
+                   [&](const timeline::MediaRef&) { out.record(Concept::ClipMedia, id, limits); },
+                   [&](const timeline::NoteContent&) { out.record(Concept::ClipNote, id, limits); },
+                   [&](const timeline::RegisteredContent&) {
+                       out.record(Concept::ContentRegistered, id, limits);
+                   },
+                   [&](const timeline::OpaqueContent&) {
+                       out.record(Concept::ContentOpaque, id, limits);
+                   },
+               },
+               clip.content());
 
     const timeline::ClipPlaybackProperties playback = clip.playback_properties();
     if (playback.gain_linear != 1.0f)

@@ -304,51 +304,62 @@ bool write_asset(EncodeContext& context, const MediaAsset& asset) {
     });
 }
 
+// Every alternative owes an envelope. A content kind that falls off the end of
+// this dispatch is a clip saved without its payload, so the visit is exhaustive
+// by construction rather than by a trailing else.
 bool write_content(EncodeContext& context, const ClipContent& content) {
-    if (std::holds_alternative<EmptyContent>(content))
-        return write_envelope(context, "pulp.timeline.content.empty", 1,
-                              [&] { return context.writer.append("{}"); });
-    if (const auto* media = std::get_if<MediaRef>(&content)) {
-        return write_envelope(context, "pulp.timeline.content.media", 1, [&] {
-            return context.writer.append("{\"asset_id\":") &&
-                   context.writer.u64(media->asset_id.value, true) &&
-                   context.writer.append(",\"frame_count\":") &&
-                   context.writer.u64(media->frame_count, true) &&
-                   context.writer.append(",\"source_start\":") &&
-                   context.writer.i64(media->source_start.value, true) &&
-                   context.writer.character('}');
-        });
-    }
-    if (const auto* note_content = std::get_if<NoteContent>(&content)) {
-        return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
-            if (!context.writer.append("{\"notes\":["))
-                return false;
-            for (std::size_t index = 0; index < note_content->notes().size(); ++index) {
-                const auto& note = note_content->notes()[index];
-                if ((index != 0 && !context.writer.character(',')) ||
-                    !context.writer.append("{\"channel\":") || !context.writer.u64(note.channel) ||
-                    !context.writer.append(",\"duration_ticks\":") ||
-                    !context.writer.i64(note.duration.value, true) ||
-                    !context.writer.append(",\"id\":") ||
-                    !context.writer.u64(note.id.value, true) ||
-                    !context.writer.append(",\"pitch\":") || !context.writer.u64(note.pitch) ||
-                    !context.writer.append(",\"start_ticks\":") ||
-                    !context.writer.i64(note.start.value, true) ||
-                    !context.writer.append(",\"velocity\":") ||
-                    !context.writer.u64(note.velocity) || !context.writer.character('}'))
-                    return false;
-            }
-            return context.writer.append("]}");
-        });
-    }
-    if (const auto* registered = std::get_if<RegisteredContent>(&content)) {
-        return write_envelope(
-            context, registered->schema().type_name, registered->schema().version,
-            [&] { return context.writer.append(registered->canonical_payload_json()); });
-    }
-    const auto& unknown = std::get<OpaqueContent>(content);
-    context.opaque = true;
-    return context.writer.append(unknown.raw_json());
+    return std::visit(
+        ClipContentCases{
+            [&](const EmptyContent&) {
+                return write_envelope(context, "pulp.timeline.content.empty", 1,
+                                      [&] { return context.writer.append("{}"); });
+            },
+            [&](const MediaRef& media) {
+                return write_envelope(context, "pulp.timeline.content.media", 1, [&] {
+                    return context.writer.append("{\"asset_id\":") &&
+                           context.writer.u64(media.asset_id.value, true) &&
+                           context.writer.append(",\"frame_count\":") &&
+                           context.writer.u64(media.frame_count, true) &&
+                           context.writer.append(",\"source_start\":") &&
+                           context.writer.i64(media.source_start.value, true) &&
+                           context.writer.character('}');
+                });
+            },
+            [&](const NoteContent& note_content) {
+                return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
+                    if (!context.writer.append("{\"notes\":["))
+                        return false;
+                    for (std::size_t index = 0; index < note_content.notes().size(); ++index) {
+                        const auto& note = note_content.notes()[index];
+                        if ((index != 0 && !context.writer.character(',')) ||
+                            !context.writer.append("{\"channel\":") ||
+                            !context.writer.u64(note.channel) ||
+                            !context.writer.append(",\"duration_ticks\":") ||
+                            !context.writer.i64(note.duration.value, true) ||
+                            !context.writer.append(",\"id\":") ||
+                            !context.writer.u64(note.id.value, true) ||
+                            !context.writer.append(",\"pitch\":") ||
+                            !context.writer.u64(note.pitch) ||
+                            !context.writer.append(",\"start_ticks\":") ||
+                            !context.writer.i64(note.start.value, true) ||
+                            !context.writer.append(",\"velocity\":") ||
+                            !context.writer.u64(note.velocity) || !context.writer.character('}'))
+                            return false;
+                    }
+                    return context.writer.append("]}");
+                });
+            },
+            [&](const RegisteredContent& registered) {
+                return write_envelope(
+                    context, registered.schema().type_name, registered.schema().version,
+                    [&] { return context.writer.append(registered.canonical_payload_json()); });
+            },
+            [&](const OpaqueContent& unknown) {
+                context.opaque = true;
+                return context.writer.append(unknown.raw_json());
+            },
+        },
+        content);
 }
 
 bool write_clip(EncodeContext& context, const Clip& clip) {
