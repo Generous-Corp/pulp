@@ -1057,3 +1057,32 @@ Things that fixture learned the hard way, if you extend it:
   Deleting it changes no sample, so it was covered by nothing until the null's
   controller-read case; without that case a refactor that drops it ships green while the
   host UI and host-side automation reads show a stale value.
+
+## Editor parameter edits need `performEdit`
+
+The adapter's `process()` snapshot-diff reports parameter changes to the host,
+but `snapshot_param_values()` is taken at the **top of the block** — so a value
+the editor wrote *between* two process calls is already in the snapshot and is
+never reported. That path only ever detects changes made *during* `process()`
+(DSP-side), never editor-side.
+
+Symptom: dragging a knob moves the arc and the DSP while the host's own
+parameter, automation write, undo, and generic UI stay frozen.
+
+The adapter therefore tracks parameters with an open editor gesture
+(`set_gesture_callbacks`) and calls `performEdit` from a Main-thread store
+listener, plus once more on `endEdit`. **Keep the gesture gate**: host-driven
+changes arrive on the audio thread with no open gesture, so gating on one is
+what stops the listener echoing the host's own value back and starting an
+automation feedback loop.
+
+Widgets must actually open a gesture. `AutoUi` wired `on_change` but left
+`on_gesture_begin`/`on_gesture_end` unconnected, so nothing reached the host at
+all until that was fixed.
+
+## Tracing lifetime
+
+The adapter calls `runtime::Tracing::attach()`/`detach()` over its lifetime
+(no-op unless `PULP_TRACING=ON`). A plug-in has no `main()`, so this is where a
+dev build picks up `$PULP_TRACE_PATH`; the final `detach()` flushes the
+`.pftrace`.
