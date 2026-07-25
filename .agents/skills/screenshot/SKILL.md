@@ -260,3 +260,36 @@ When a verification pass reviews a render (see the read-only verifier in the
 not the pixel symptom. A "looks good" with no verdict is a failure mode; so is a
 reviewer that edits while reviewing. Keep review read-only and let the main agent
 apply fixes, then re-run the verifier.
+
+## Offscreen capture suspends the paint no-alloc contract
+
+`View::paint_all` opens a `pulp::runtime::ScopedNoAlloc` — "treat paint like the
+audio thread". A test binary that links
+`test/native_components/rt_intercept_test_support.cpp` overrides the **global**
+`operator new` and **aborts** on any allocation inside that scope. That override
+is per-binary, not per-test, so linking it to police one `Processor::process()`
+case also arms it for every paint the binary performs.
+
+The paint path has never satisfied that contract on any platform:
+
+- Skia's CPU device builds an `SkPath` for each rounded rect
+  (`SkBitmapDevice::drawRRect` → `SkPath::RRect` → `SkPathData::MakeNoCheck`)
+- `TextShaper::resolve_typeface` builds the font-family fallback
+  `vector<std::string>`
+
+So the capture entry points suspend the contract across their paint pass with
+`ScopedAllocAllowed` (same mechanism and rationale as the FU-3 subtree-cache
+record: a non-real-time event by definition). Live painting still runs under the
+contract, so a genuine per-frame allocation in widget code is still caught.
+
+**If you add a new capture entry point, suspend the contract in it too.** There
+is more than one implementation and they do not share a helper — on Apple builds
+the live ones are in `core/view/platform/mac/screenshot_mac.mm`
+(`render_to_png_skia`, `render_to_rgba_skia`), NOT `core/view/src/screenshot_skia.cpp`,
+which is the non-Apple path. Patching the wrong file builds clean and changes
+nothing; check a backtrace, not the filename.
+
+**Debugging the abort:** lldb cannot catch it — the trap fires in a forked
+death-test child and macOS lldb has no follow-fork-mode, so `b trap_now` + `run`
+just hangs. Add `backtrace_symbols_fd` to `trap_now` in
+`rt_intercept_test_support.cpp` and read the stack off stderr instead.

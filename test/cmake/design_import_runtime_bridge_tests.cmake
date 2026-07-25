@@ -71,6 +71,14 @@ target_link_libraries(pulp-test-channel-strip-view
 catch_discover_tests(pulp-test-channel-strip-view
     PROPERTIES LABELS "view")
 
+# Offscreen capture must suspend the paint no-alloc contract.
+add_executable(pulp-test-offscreen-capture-rt-contract
+    test_offscreen_capture_rt_contract.cpp)
+target_link_libraries(pulp-test-offscreen-capture-rt-contract
+    PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-offscreen-capture-rt-contract
+    PROPERTIES LABELS "view")
+
 # Faithful Figma-vector specimen catalog components (generated).
 add_executable(pulp-test-faithful-specimens
     test_faithful_specimens.cpp)
