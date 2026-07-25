@@ -19,6 +19,9 @@
 // drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
+#include <pulp/view/platform/win_pointer_input.hpp>
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -39,6 +42,7 @@
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
 #include <pulp/platform/win32_sane.hpp>
+
 #include <ole2.h>        // OleInitialize, RegisterDragDrop, IDropTarget, DoDragDrop
 #include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP, DROPFILES
 #include <shlobj.h>      // SHCreateStdEnumFmtEtc (outbound IDataObject enum)
@@ -58,6 +62,15 @@
 namespace pulp::view {
 
 namespace {
+
+// win_pointer_input.hpp duplicates the MK_* mouse bits as plain constants so
+// the header parses off Windows. This TU is the one place both definitions are
+// visible, so pin them together — a Windows SDK change becomes a compile error
+// here instead of a silently wrong modifier at run time.
+static_assert(win_input::kMkLButton == MK_LBUTTON);
+static_assert(win_input::kMkRButton == MK_RBUTTON);
+static_assert(win_input::kMkShift == MK_SHIFT);
+static_assert(win_input::kMkControl == MK_CONTROL);
 
 constexpr const wchar_t* kChildClassName = L"PulpPluginViewHostChild";
 
@@ -254,9 +267,6 @@ public:
             return;
         }
         scale_ = detect_dpi_scale(hwnd_);
-#ifdef PULP_HAS_SKIA
-        init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
-#endif
         init_drag_drop();
     }
 
@@ -313,6 +323,16 @@ public:
         }
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
+#ifdef PULP_HAS_SKIA
+        // Dawn configures its presentation surface for the HWND's current
+        // native-window shape. Creating it while this HWND is still the hidden
+        // WS_POPUP used during construction leaves presentation stale after
+        // SetParent converts it into REAPER's WS_CHILD. Initialize only after
+        // the final parent/style/size are in place.
+        if (!gpu_surface_ || !skia_surface_)
+            init_gpu(static_cast<float>(size_.width),
+                     static_cast<float>(size_.height));
+#endif
         repaint();
     }
 
@@ -326,6 +346,13 @@ public:
 
     void detach() override {
         if (!hwnd_) return;
+#ifdef PULP_HAS_SKIA
+        // The presentation surface is tied to the attached native-window
+        // shape. Recreate it on the next attach rather than carrying a surface
+        // configured for the old parent across a detach/reparent cycle.
+        skia_surface_.reset();
+        gpu_surface_.reset();
+#endif
         ShowWindow(hwnd_, SW_HIDE);
         SetParent(hwnd_, nullptr);
         // Restore the top-level style so the detached window is a valid
@@ -346,6 +373,105 @@ public:
         if (gpu_surface_ && skia_surface_) render_frame(nullptr, nullptr, nullptr);
 #endif
         EndPaint(hwnd_, &ps);
+    }
+
+    void handle_mouse_down(LPARAM lp, WPARAM wp) {
+        if (!hwnd_) return;
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = true;
+            gesture_event.phase = MousePhase::press;
+            if (root_.dispatch_gesture_pointer_event(gesture_event)) {
+                drag_target_ = nullptr;
+                SetCapture(hwnd_);
+                return;
+            }
+
+            drag_target_ = root_.hit_test(pt);
+            ComboBox::notify_global_click(drag_target_);
+            if (!drag_target_) return;
+            SetFocus(hwnd_);
+            SetCapture(hwnd_);
+            if (!deliver_mouse_down(root_, drag_target_, pt,
+                                    gesture_event.modifiers, 1))
+                drag_target_ = nullptr;
+            repaint();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse down handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse down handler threw");
+            drag_target_ = nullptr;
+        }
+    }
+
+    void handle_mouse_move(LPARAM lp, WPARAM wp) {
+        // WM_MOUSEMOVE also fires for plain hover, and mouse capture keeps
+        // delivering moves after the button is released outside the window.
+        if (!drag_target_ ||
+            !win_input::drag_continues(static_cast<uint32_t>(wp)))
+            return;
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = true;
+            gesture_event.phase = MousePhase::drag;
+            if (!root_.dispatch_gesture_pointer_event(gesture_event))
+                deliver_mouse_drag(root_, drag_target_, pt,
+                                   gesture_event.modifiers);
+            repaint();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse move handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse move handler threw");
+            drag_target_ = nullptr;
+        }
+    }
+
+    void handle_mouse_up(LPARAM lp, WPARAM wp) {
+        if (GetCapture() == hwnd_) ReleaseCapture();
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = false;
+            gesture_event.phase = MousePhase::release;
+            if (!root_.dispatch_gesture_pointer_event(gesture_event) &&
+                drag_target_) {
+                MouseUpHost up_host;
+                up_host.fire_click =
+                    [](const std::function<void()>& click_handler,
+                       const std::string&, uint16_t) {
+                        if (click_handler) click_handler();
+                    };
+                deliver_mouse_up(root_, drag_target_, pt,
+                                 gesture_event.modifiers, 1, up_host);
+            }
+            drag_target_ = nullptr;
+            repaint();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse up handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse up handler threw");
+            drag_target_ = nullptr;
+        }
     }
 
     void repaint() override {
@@ -514,6 +640,27 @@ private:
     // re-enters the wndproc synchronously on this thread, so this flag lets
     // handle_wm_size() distinguish a host-driven resize from our own echo.
     bool in_set_size_ = false;
+    View* drag_target_ = nullptr;
+
+    // Window-space mapping lives in win_pointer_input.hpp so the signed-word
+    // unpack and the physical→logical divide are unit-tested off Windows (the
+    // required CI gate is macOS). Only the design-viewport transform, which
+    // needs host state, stays here.
+    Point mouse_point(LPARAM lp) const {
+        return window_to_root_point(win_input::lparam_to_logical_point(
+            static_cast<uint32_t>(static_cast<uintptr_t>(lp)), scale_));
+    }
+
+    // Windows packs only Shift/Control into the message; Alt and the Windows
+    // key are keyboard state, so they are sampled here and passed to the pure
+    // mapper.
+    static uint16_t mouse_modifiers(WPARAM wp) {
+        const bool alt_down = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        const bool meta_down = (GetKeyState(VK_LWIN) & 0x8000) != 0 ||
+                               (GetKeyState(VK_RWIN) & 0x8000) != 0;
+        return win_input::mouse_modifiers(
+            static_cast<uint32_t>(wp), alt_down, meta_down);
+    }
 
     // Physical pixel dimensions = logical × scale (min 1 to avoid 0-sized
     // surfaces). The GPU surface/swapchain is allocated at this resolution.
@@ -587,6 +734,9 @@ private:
     std::unique_ptr<render::SkiaSurface> skia_surface_;
 
     void init_gpu(float width, float height) {
+        runtime::log_info(
+            "WinPluginViewHost: init GPU logical={}x{} physical={}x{} scale={}",
+            width, height, pixel_w(), pixel_h(), scale_);
         gpu_surface_ = render::GpuSurface::create_dawn();
         if (!gpu_surface_) {
             runtime::log_warn("WinPluginViewHost: gpu create_dawn failed; cpu-capture only");
@@ -625,7 +775,9 @@ private:
         if (!skia_surface_) {
             runtime::log_warn("WinPluginViewHost: skia surface create failed; cpu-capture only");
             gpu_surface_.reset();
+            return;
         }
+        runtime::log_info("WinPluginViewHost: GPU and Skia surfaces ready");
     }
 
     // Shared scene paint (matches the macOS plugin GPU host).
@@ -748,6 +900,18 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (host && msg == WM_PAINT) {
         host->handle_wm_paint();
+        return 0;
+    }
+    if (host && msg == WM_LBUTTONDOWN) {
+        host->handle_mouse_down(lp, wp);
+        return 0;
+    }
+    if (host && msg == WM_MOUSEMOVE) {
+        host->handle_mouse_move(lp, wp);
+        return 0;
+    }
+    if (host && msg == WM_LBUTTONUP) {
+        host->handle_mouse_up(lp, wp);
         return 0;
     }
     if (host && msg == WM_DPICHANGED) {

@@ -328,6 +328,12 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 # hosts (test/test_pointer_dispatch.cpp).
 pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
 
+# Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
+# scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
+# (test/test_win_pointer_input.cpp). Deliberately NOT gated on WIN32 — the
+# logic is HWND-free precisely so it runs on the required macOS gate.
+pulp_add_test_suite(pulp-test-win-pointer-input LIBRARIES pulp::view)
+
 # Headless characterization of the hosting/DAW input stack — mouse down/up/click
 # routing, keyboard focus protocol, and overlay/popup lifecycle — that the
 # window hosts drive. Anchors the S11 (root-owned interaction context) and S31
