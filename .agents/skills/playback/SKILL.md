@@ -172,6 +172,41 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   what makes the fixed two-range representation complete.
 - Timeline ticks wrap at the loop boundary. `MonotonicBeat` never wraps or
   reanchors on a seek; only a new prepare/reset lifecycle starts a new clock.
+- Scrubbing is a transport mode, not a renderer feature. `begin_scrub()` /
+  `scrub_to()` / `end_scrub()` make the transport emit repeated windows that
+  restart on the latest posted anchor, so a dragged playhead is audible without
+  a single line of scrub-aware code in any renderer: a window restart is
+  structurally a loop wrap (reposition + `discontinuity` + block split), which
+  the note and automation renderers already handle. Do not add a scrub branch to
+  a renderer; make the transport produce the right ranges instead.
+- The scrub anchor is **latched, not immediate**: a newly posted position takes
+  effect at the next window boundary. That makes the grain rate the window
+  length rather than the UI event rate — posting at 60 Hz against an immediate
+  anchor would machine-gun sub-grain restarts. The window must be at least
+  `max_buffer_size` (`begin_scrub` rejects shorter, and `begin_block` clamps
+  anyway) so a block still spans at most two windows and the fixed two-range
+  representation stays complete.
+- **Scrubbing suspends loop wrapping.** A drag states a position directly, so
+  the transport must not pull the window back to the loop start or make
+  positions outside the loop unreachable. The loop is still reported in the
+  snapshot (a UI keeps drawing it) and wrapping resumes on the first block after
+  `end_scrub()`, which parks the playhead on the anchor the drag released on.
+  This also keeps a loop wrap and a window restart from ever needing a third
+  range in one block.
+- While scrubbing, `is_playing` is true even when the musical transport is
+  stopped — consumers that only care whether the playhead moves need no scrub
+  branch — and `scrubbing` distinguishes the mode. Entering and leaving scrub
+  set `reset_requested`; the window restarts in between deliberately do not,
+  because they recur many times a second and `discontinuity` already describes
+  them.
+- Two existing discontinuity consumers inherit scrub behavior on purpose, and
+  both are correct as-is: `CaptureEngine` cancels active takes on a
+  non-loop-wrap jump, so scrubbing aborts a recording rather than splicing it,
+  and `ExternalSyncOutput` emits a song-position/MTC update per window restart,
+  so slaved gear chases the drag. A scrub block carries at most two ranges, the
+  same as a loop wrap, so neither exceeds `max_messages_per_block`. Do not add a
+  scrub branch to either; if the behavior needs to change, change what the
+  transport publishes.
 - A stopped block still emits one range covering all callback frames, but both
   musical clock intervals have zero duration.
 - The control thread is the sole writer of the complete desired-state `SeqLock`.
@@ -250,6 +285,17 @@ oracle (checked at each playing block's last played sample, stuck-direction
 only — a note whose onset precedes the new range is deliberately not chased, so
 covered-but-silent is legal) when touching this proof; without it, deleting the
 `range.discontinuity` flush in `note_renderer.cpp` leaves the fuzz green.
+
+The same file carries the scrub counterpart, which reuses that oracle over
+randomized `begin_scrub`/`scrub_to`/`end_scrub`/seek/play/loop sequences. Its
+non-vacuity witnesses are scrub-specific — window restarts that happened while
+notes were sounding, and restarts that split a block — because a scrub fuzz that
+never rewinds the playhead under a live note proves nothing. Deleting the
+`pending_discontinuity_` assignment in `start_scrub_window()` (transport.cpp)
+must red both that fuzz and the deterministic
+`a scrub window restart releases the notes it strands` case; if it does not, the
+scrub coverage has gone vacuous.
+
 When export/install wiring changes, also run the installed SDK consumer smoke.
 Also build `timeline-program-threadless-no-exceptions-check`; it compiles the
 program/compiler/executor/shell lane with `-fno-exceptions -fno-rtti` and the
@@ -266,3 +312,16 @@ engine translation unit to native, WAM, and WebCLAP ownership together.
 runtime tests. Those tests exercise `pulp::audio` profile/runtime behavior and
 do not make Heritage profiles part of the immutable playback-program model;
 keep that ownership boundary when extending the shared test inventory.
+
+## Dependency floor
+
+`playback`'s floor is declared in `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py`, which scans both
+`#include <pulp/<module>/...>` in every source file under `core/playback/` and
+`target_link_libraries` in its `CMakeLists.txt`. Both axes must stay inside the
+declared set, so reaching for a format, host, or view type fails the gate even
+when the build would have linked.
+
+The table holds every engine-adjacent module, not just playback, and the selftest
+is generic over it. Adding a module there is how a new `core/` target gets the
+same enforcement; it does not widen anyone else's floor.

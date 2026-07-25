@@ -318,6 +318,18 @@ per-ABI entry point for it.** Go through the plugin's own state:
   build. The closure checker scans sources, so adding such a header is
   correct even though it touches `core/timeline`.
 
+- The browser lanes inherit transport behavior for free, including behavior that
+  did not exist when the ABI lists were written. Playhead scrubbing is the worked
+  example: `MasterTransport::begin_scrub()` emits repeated windows whose restarts
+  are ordinary range discontinuities, so the WAM/WebCLAP builds got it purely
+  because `transport.cpp` was already in both lists — no source-list edit, no
+  worklet change, no JS surface. Prefer that shape when adding an engine feature
+  in the browser: express it as ranges the existing portable units already
+  publish. It also means a browser-visible behavior change can land with an
+  unchanged web source closure, so a green `web-timeline-source-closure` is not
+  evidence that the wasm lanes are unaffected — check what the transport now
+  publishes per block, not just which files moved.
+
 - Extraction produces a new translation unit and carries the same obligation.
   Moving a helper out of an already-listed engine `.cpp` into its own file reads
   as a pure refactor, because the origin unit stays listed everywhere — but the

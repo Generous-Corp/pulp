@@ -324,6 +324,19 @@ under `core/<subsystem>/tools/` (here, `schema_emit_main.cpp`), while a
 (`schema_drift_check.py`, alongside `timeline_engine_dependency_floor_check.py`).
 Don't invent a per-subsystem `tools/` dir for a gate script.
 
+`schema_drift_check.py` is generic — it takes `--artifact` and `--emit-cmd` and
+byte-compares. A new generated artifact anywhere in the repo reuses it as-is
+rather than growing its own gate; `core/interchange` registers three drift ctests
+against it (vocabulary header, capability tables, docs page) from one emitter.
+
+A module added under `core/` that should have an enforced dependency floor
+registers itself in `MODULE_FLOORS` in
+`tools/scripts/timeline_engine_dependency_floor_check.py`. The check's selftest
+iterates `MODULE_FLOORS` generically, so a new entry gets include-scan and
+link-scan coverage plus selftest proof without touching the selftest. Adding an
+entry is not the same as widening `timeline`'s own floor — a module that sits
+*above* timeline gets its own row and must not appear in timeline's set.
+
 ### Derived surfaces are projections of the manifest, not the registry
 
 Every downstream agent surface is a **pure function of the committed
