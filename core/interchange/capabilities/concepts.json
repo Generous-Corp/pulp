@@ -1,0 +1,76 @@
+{
+  "vocabulary_version": 1,
+  "comment": [
+    "The format-neutral interchange concept vocabulary. Concepts are capability",
+    "atoms: refusal and loss messages are only as precise as the vocabulary, so",
+    "these are finer-grained than 'tracks, clips'.",
+    "",
+    "The vocabulary is append-only. Adding a concept is a data change. Removing",
+    "one, or changing what one means, is a design change: every committed format",
+    "table is written against these ids.",
+    "",
+    "'detect' declares whether the census walker over a timeline Project can",
+    "observe the concept. 'model' concepts are read off the document; 'format'",
+    "concepts exist only in some interchange format and are never recorded by a",
+    "census. A concept whose model representation lands later flips to 'model'",
+    "in the same change that teaches the walker to find it."
+  ],
+  "concepts": [
+    {
+      "id": "unknown",
+      "detect": "format",
+      "summary": "A construct the reader could not classify. No format lists it, so it always refuses."
+    },
+    { "id": "track.flat", "detect": "model", "summary": "A track holding clips directly, with no children." },
+    { "id": "track.group", "detect": "format", "summary": "A track that contains other tracks (folder/group/nested scope)." },
+    { "id": "track.video", "detect": "format", "summary": "A track whose content is picture rather than audio or notes." },
+
+    { "id": "clip.musical", "detect": "model", "summary": "A clip anchored to musical time (canonical ticks)." },
+    { "id": "clip.absolute", "detect": "model", "summary": "A clip anchored to absolute time (samples at a rational rate)." },
+    { "id": "clip.note", "detect": "model", "summary": "Clip content that is a set of note events." },
+    { "id": "clip.media", "detect": "model", "summary": "Clip content that references a media asset." },
+    { "id": "clip.gain", "detect": "model", "summary": "Per-clip gain applied to the clip's content." },
+    { "id": "clip.fades", "detect": "model", "summary": "Per-clip fade in and fade out durations." },
+    { "id": "clip.crossfade", "detect": "format", "summary": "An overlap between two adjacent clips authored as one transition item." },
+    { "id": "clip.warp", "detect": "format", "summary": "A time-warp map deforming clip content against timeline time." },
+    { "id": "clip.launch", "detect": "format", "summary": "Non-arrangement clip playback (scenes, launcher grids)." },
+    { "id": "gap.explicit", "detect": "format", "summary": "A gap between clips authored as a first-class item rather than absence." },
+
+    { "id": "tempo.single", "detect": "model", "summary": "One tempo governing the whole document." },
+    { "id": "tempo.map", "detect": "model", "summary": "Tempo changing over the document at more than one point." },
+    { "id": "meter.single", "detect": "model", "summary": "One time signature governing the whole document." },
+    { "id": "meter.map", "detect": "model", "summary": "Time signature changing over the document at more than one point." },
+
+    { "id": "marker", "detect": "format", "summary": "A named point or range on the timeline." },
+    { "id": "timecode.origin", "detect": "format", "summary": "The wall-clock timecode the document's zero position represents." },
+    { "id": "media.provenance", "detect": "format", "summary": "Where a media asset came from: source timecode, reel or tape name, original locator." },
+
+    { "id": "mixer.track-gain", "detect": "format", "summary": "Static per-track gain." },
+    { "id": "mixer.track-pan", "detect": "format", "summary": "Static per-track pan position." },
+    { "id": "mixer.sends", "detect": "format", "summary": "Track routing to busses and auxiliary sends." },
+
+    { "id": "automation.device-param", "detect": "model", "summary": "An automation lane targeting a device parameter." },
+    { "id": "automation.track-gain", "detect": "format", "summary": "An automation lane targeting a track's gain." },
+    { "id": "automation.track-pan", "detect": "format", "summary": "An automation lane targeting a track's pan." },
+
+    { "id": "device.placement", "detect": "model", "summary": "A device occupying a slot in a track's chain, by identity." },
+    { "id": "device.payload", "detect": "format", "summary": "A device's type and saved parameter state." },
+    { "id": "effect.timewarp", "detect": "format", "summary": "An effect that remaps time rather than processing content." },
+
+    { "id": "take.lane", "detect": "model", "summary": "An alternate recording lane holding takes alongside the arrangement." },
+    { "id": "take.comp", "detect": "model", "summary": "A composite assembled by selecting segments across takes." },
+    { "id": "track.freeze", "detect": "model", "summary": "A sealed offline render standing in for a track's live output." },
+
+    { "id": "asset.sealed-hash", "detect": "model", "summary": "Media identity derived from a content hash of the actual bytes." },
+    { "id": "asset.embedded-media", "detect": "model", "summary": "Media bytes carried inside the document package." },
+    { "id": "asset.referenced-media", "detect": "model", "summary": "Media referenced by locator, stored outside the document." },
+
+    { "id": "sequence.multiple", "detect": "model", "summary": "More than one sequence in the document." },
+    { "id": "sequence.nested", "detect": "format", "summary": "A clip whose content is another sequence." },
+
+    { "id": "content.registered", "detect": "model", "summary": "Typed extension clip content serialized through the schema registry." },
+    { "id": "content.opaque", "detect": "model", "summary": "Uninterpreted clip content carried in a validated envelope." },
+
+    { "id": "edit-rate.non-audio", "detect": "format", "summary": "Positions at a rate that does not convert exactly to the document's rate." }
+  ]
+}
