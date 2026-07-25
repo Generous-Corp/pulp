@@ -271,6 +271,11 @@ private:
 
 class GestureArbiter {
 public:
+    /// True when a recognizer ACTIVELY claimed the last pointer event, as
+    /// opposed to merely being a candidate for it. Hosts must gate their
+    /// early-return on this, never on handle_pointer_event()'s return.
+    bool claimed_pointer() const { return claimed_pointer_; }
+
     bool handle_pointer_event(View& root, const MouseEvent& root_event,
                               double timestamp_seconds = -1.0);
     void advance_time(View& root, double timestamp_seconds = -1.0);
@@ -278,6 +283,8 @@ public:
     void reset();
 
 private:
+    bool claimed_pointer_ = false;
+
     struct Candidate {
         GestureRecognizer* recognizer = nullptr;
         View* owner = nullptr;

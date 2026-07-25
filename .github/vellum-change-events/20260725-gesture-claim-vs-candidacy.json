@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "event_id": "20260725-gesture-claim-vs-candidacy",
+  "kind": "change",
+  "created_at": "2026-07-25T08:52:00Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "A gesture recognizer that was only a CANDIDATE consumed the pointer: GestureArbiter reported consumption whenever any recognizer existed on the chain, so a widget that merely registered a gesture never received press, drag or release and was permanently undraggable while still painting normally. Reported as a large synth knob that could not be turned in Logic. The arbiter now reports a real CLAIM separately from candidacy, and every consumer gates on the claim. Pulp-only: the defect and the fix both originate here, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-buttons",
+    "pulp-test-gesture-recognizer",
+    "pulp-test-view",
+    "pulp-test-widget-bridge"
+  ],
+  "disposition": "pulp-only"
+}

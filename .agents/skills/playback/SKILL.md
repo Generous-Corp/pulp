@@ -247,6 +247,17 @@ the format-layer projection from playback snapshots to `ProcessContext`.
   target plus target-defining commands, so a subsystem-local helper executable
   whose own name shares the module prefix (e.g. `pulp-timeline-schema-emit`) may
   link `pulp::timeline` without tripping the floor.
+- The compiler asks `clip_content_role()` what a clip contributes before it
+  compiles anything, and that classifier visits `timeline::ClipContent` through
+  `ClipContentCases` — an overload set with no generic fallback. Do not go back
+  to testing alternatives inline with `holds_alternative` / `get_if`. A clip
+  whose content kind the compiler does not recognize produces no audio program
+  and no notes, and nothing anywhere reports it: the document is intact, the
+  compile succeeds, and the track is silent. Routing every content decision
+  through one exhaustive classifier turns that into a build failure at the point
+  where somebody has to decide whether the new kind renders. `audio_renderer.cpp`
+  carries the matching `static_assert` on the alternative count, because its
+  "not a `MediaRef` means not audio" assumption lives there too.
 - `ArrangementAudioRenderer::process()` clears output, validates the complete
   zero/one-wrap snapshot, and mixes arrangement-selected tracks in stable
   PlaybackProgram order. It is immutable-input RT safe, wraps `ScopedNoAlloc`,

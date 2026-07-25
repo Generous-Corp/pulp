@@ -1558,6 +1558,35 @@ contract is:
 - **AU**: scanned by `AudioComponent` API, not file-system walk. The
   AU component's type/subtype/manu four-char codes serve as identity.
 
+### An AU identity needs no scan at all
+
+AU is the one format whose identity is also its complete loader
+descriptor — there is no filesystem path to resolve. So when you already
+know which component you want, **do not scan for it**:
+
+```cpp
+PluginInfo info;
+if (pulp::host::plugin_info_from_au_identity("aumu:Vas7:RoCl", info))
+    auto slot = PluginSlot::load(info);   // straight to AudioComponentFindNext
+```
+
+Scanning to reach a known AU walks every installed plugin — slow, and it
+drags the caller through unrelated third-party bundles that may
+instantiate badly. `plugin_info_from_au_identity()` (in `scanner.hpp`) is
+pure string logic with no platform dependency, so it is testable and
+tested everywhere, not just where AUs exist.
+
+It accepts only the four component types Pulp can host, and the type
+code decides the bus shape: `aumu` is a MIDI instrument (0 in, MIDI in),
+`augn` is a no-input generator (0 in, **no** MIDI), and `aufx`/`aumf`
+are effects (stereo in). Getting `augn` wrong is the easy mistake — it
+is a source like an instrument but is not MIDI-driven.
+
+It returns false rather than throwing so callers can fall through to a
+scan for other formats. That fallback is why rejection is strict: a
+parser loose enough to accept a CLAP-style id would silently skip
+discovery and then report "no suitable plugin found".
+
 Bundles that don't expose their identity through the safe path (e.g.
 VST3 without moduleinfo.json) fall back to the directory stem. The
 graph_serializer rehydration handles stem IDs the same way it always
@@ -1596,3 +1625,33 @@ reports or gates on hosted latency must branch on `latency_query()` first.
 
 `pulp audio render --latency-report` does exactly that, which is why an LV2 plugin
 comes back `unsupported` rather than being falsely certified as zero-latency.
+
+## A `CustomNodeType` pack is one header, and its consumer needs to be told
+
+Bake-layer DSP packs live as header-only `CustomNodeType` factories under
+`core/host/include/pulp/host/forge_*_catalog.hpp` — one header per pack
+(`forge_lofi_catalog.hpp`, `forge_character_delay_catalog.hpp`,
+`forge_modulation_catalog.hpp`). Each node declares its stable `k…TypeId`, its
+`baked_params` (the injectable macro contract), and its port arity, and gets
+registered on a `SignalGraph` before `bake()`.
+
+Two things bite when adding a pack:
+
+- **A control signal is an ordinary audio port.** The convention across every
+  pack is a unipolar `[0, 1]` signal on a normal port — a source declares
+  `num_input_ports = 0`, a consumer takes the signal on port 0 and the control
+  on port 1. Nothing in the graph distinguishes CV from audio, which is exactly
+  why modulation needs no new graph concept and bakes like anything else.
+- **A downstream capability gate may enumerate the SDK by parsing one header
+  path.** Forge's `test_capability_contract` derives "no catalog node is
+  orphaned" from the catalog header the build points it at. A pack in a *new*
+  header is invisible to that check — the nodes exist, nothing reaches them, and
+  every test stays green — until the consumer's header list learns about it.
+  When you add a pack, add its header to that list in the same change.
+
+Reconfiguring state (a filter's cutoff range, an envelope's stage lengths) is a
+per-block-on-change read of `BakedParamView::value_at(id, 0)`, not a per-sample
+one: those setters recompute coefficients rather than scale a value, and a
+lifecycle whose boundaries move every sample has no boundaries. Values that
+genuinely scale (gain, depth, cutoff) stay per-sample so a knob sweep is
+sample-accurate.

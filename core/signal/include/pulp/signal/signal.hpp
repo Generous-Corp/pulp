@@ -55,3 +55,17 @@
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <pulp/signal/convolver.hpp>
+
+// Modulation and utility toolkit — deterministic randomness, LFO, control-signal
+// tools, the trigger/gate event kit, the envelope family, VCA, low-pass gate,
+// mod matrix, unit conversions, and a chaos source.
+#include <pulp/signal/rng.hpp>
+#include <pulp/signal/units.hpp>
+#include <pulp/signal/mod_tools.hpp>
+#include <pulp/signal/lfo.hpp>
+#include <pulp/signal/trigger.hpp>
+#include <pulp/signal/envelope.hpp>
+#include <pulp/signal/vca.hpp>
+#include <pulp/signal/lpg.hpp>
+#include <pulp/signal/mod_matrix.hpp>
+#include <pulp/signal/chaos.hpp>

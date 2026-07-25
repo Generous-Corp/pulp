@@ -4940,3 +4940,26 @@ native/authored trees clip strictly per CSS and pay nothing for the scan:
   hit expansion is gone; the hit area now follows the real overflow geometry.
   A tree relying on the old blanket inflation for off-bounds hit-testing must
   size its interactive children honestly instead.
+
+## A promoted button must be re-opened to reach an interactive child
+
+`TextButton` declares `PointerEvents::box_only` so a centred icon or label
+cannot swallow its own click. That default silently disables the promoted-child
+hit policy for imported buttons: `View::hit_test()` never descends past a
+`box_only` parent, so both escapes `promoted_widget_child_hit_policy` grants —
+`pass_through_self` (which sets `box_none` on the child) and `unchanged` (the
+child is itself interactive) — become unreachable, and `pulpHitTestable="true"`
+stops meaning anything on a button.
+
+Nothing looks wrong when this breaks. The materializer and the C++ codegen keep
+emitting the now-inert `box_none`, and the import still renders. So the
+materializer and codegen re-open the parent to `PointerEvents::auto_` whenever a
+promoted child's policy is not `disabled`.
+
+**Why the existing contract test did not catch it:** it promotes a **Knob**, and
+Knob has no `box_only` default. Any test pinning promoted-child hit behaviour
+needs a **button** parent as well as a knob — a widget's own pointer-events
+default decides whether the child policy can take effect at all. When adding a
+new promoted widget kind to `native_kind_owns_imported_child_hits`, check what
+that widget does to `pointer_events` in its constructor before assuming the
+child policy applies.

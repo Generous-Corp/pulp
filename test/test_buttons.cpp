@@ -88,3 +88,30 @@ TEST_CASE("TextButton paints a theme-driven face and label",
     REQUIRE(saw_face);
     REQUIRE(saw_label);
 }
+
+TEST_CASE("a button is one hit target, including its icon", "[view][buttons]") {
+    // Buttons draw their content as child views. hit_test() returns the
+    // topmost hit-testable view, so an icon or label centred in a button used
+    // to swallow the click and on_click never fired — while the button's few
+    // bare pixels still worked, making it look intermittent rather than dead.
+    TextButton button;
+    button.set_bounds({0, 0, 38, 38});
+
+    auto icon = std::make_unique<View>();
+    auto* icon_raw = icon.get();
+    button.add_child(std::move(icon));
+    button.layout_children();
+    // Placed after layout so flex cannot move it: centred, exactly where
+    // anyone aims.
+    icon_raw->set_bounds({9, 9, 20, 20});
+
+    // Dead centre is over the icon.
+    View* hit = button.hit_test({19, 19});
+    CHECK(hit == &button);
+    CHECK(hit != icon_raw);
+
+    // An opt-out remains available for a button that really wants an
+    // interactive child.
+    button.set_pointer_events(View::PointerEvents::auto_);
+    CHECK(button.hit_test({19, 19}) == icon_raw);
+}
