@@ -135,3 +135,10 @@ pulp_add_test_suite(pulp-test-drum-physical
     SOURCES test_drum_physical.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 900)
+
+# The FM voices. The eight-operator routing table is data, so its suite runs
+# every algorithm rather than a sample of them.
+pulp_add_test_suite(pulp-test-drum-fm
+    SOURCES test_drum_fm.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal
+    TIMEOUT 900)
