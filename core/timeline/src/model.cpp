@@ -549,6 +549,121 @@ bool ChordScaleLane::operator==(const ChordScaleLane& other) const noexcept {
     return events_.get() == other.events_.get() || *events_ == *other.events_;
 }
 
+namespace {
+
+// Scale `value` by `strength` per-mille, rounding halves away from zero so a
+// positive and a negative offset of the same size are attenuated by the same
+// amount. Truncation would bias every groove toward zero displacement.
+//
+// Both call sites pass a value the template already bounded at construction (an
+// offset smaller than a step, or a velocity deviation smaller than the scale
+// ceiling), so negating the magnitude and multiplying by the strength stay well
+// inside the signed domain.
+std::int64_t scaled_by_strength(std::int64_t value, std::int32_t strength) noexcept {
+    const auto magnitude = value < 0 ? -value : value;
+    const auto scaled = (magnitude * strength + kGrooveUnitScale / 2) / kGrooveUnitScale;
+    return value < 0 ? -scaled : scaled;
+}
+
+// Which entry of a repeating table `position` falls in. The table repeats in
+// both directions, so the index floors toward negative infinity and the modulus
+// is corrected into range rather than inheriting the sign of the dividend.
+std::size_t groove_slot(std::int64_t position, std::int64_t step, std::size_t size) noexcept {
+    const auto count = static_cast<std::int64_t>(size);
+    auto index = position / step;
+    if (position % step != 0 && (position < 0) != (step < 0))
+        --index;
+    auto slot = index % count;
+    if (slot < 0)
+        slot += count;
+    return static_cast<std::size_t>(slot);
+}
+
+} // namespace
+
+runtime::Result<GrooveTemplate, ModelError> GrooveTemplate::create(GrooveTemplateInput input) {
+    const auto swings = input.swing_grid.value != 0;
+    if (swings && !timebase::valid_swing_grid(input.swing_grid))
+        return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    if (!timebase::valid_swing_ratio(input.swing))
+        return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    // A step width and a table imply each other: a width with no entries names
+    // nothing, and entries with no width have no position to be read at.
+    if ((input.step.value != 0) != !input.steps.empty())
+        return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    if (input.step.value < 0 || input.step.value > timebase::kMaxSwingGridTicks ||
+        input.steps.size() > kMaxGrooveSteps)
+        return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    if (input.timing_strength < 0 || input.timing_strength > kGrooveUnitScale ||
+        input.velocity_strength < 0 || input.velocity_strength > kGrooveUnitScale)
+        return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    for (const auto& step : input.steps) {
+        // An offset of a whole step or more would move material past the step
+        // beyond its neighbour, which is a different table written wrong rather
+        // than an extreme feel.
+        const auto offset = step.timing_offset.value;
+        if (offset <= -input.step.value || offset >= input.step.value)
+            return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+        if (step.velocity_scale < 0 || step.velocity_scale > kMaxGrooveVelocityScale)
+            return fail<GrooveTemplate>(ModelErrorCode::InvalidGrooveTemplate);
+    }
+    return runtime::Result<GrooveTemplate, ModelError>(
+        runtime::Ok(GrooveTemplate(std::make_shared<const Data>(
+            Data{std::move(input.name), input.swing_grid, input.swing, input.step,
+                 std::move(input.steps), input.timing_strength, input.velocity_strength}))));
+}
+
+bool GrooveTemplate::states_no_feel() const noexcept {
+    return data_->swing_grid.value == 0 && data_->steps.empty();
+}
+
+bool GrooveTemplate::is_canonical_default() const noexcept {
+    return data_->name.empty() && data_->swing_grid.value == 0 &&
+           data_->swing == timebase::kStraightSwing && data_->step.value == 0 &&
+           data_->steps.empty() && data_->timing_strength == kGrooveUnitScale &&
+           data_->velocity_strength == kGrooveUnitScale;
+}
+
+const GrooveStep* GrooveTemplate::step_at(timebase::TickPosition position) const noexcept {
+    if (data_->steps.empty() || data_->step.value <= 0)
+        return nullptr;
+    return &data_->steps[groove_slot(position.value, data_->step.value, data_->steps.size())];
+}
+
+timebase::TickPosition
+GrooveTemplate::apply_timing(timebase::TickPosition position) const noexcept {
+    std::int64_t displacement = 0;
+    if (data_->swing_grid.value != 0) {
+        displacement = scaled_by_strength(
+            timebase::swing_displacement(position, data_->swing_grid, data_->swing).value,
+            data_->timing_strength);
+    }
+    // The table is indexed by the authored position, not the swung one, so a
+    // change of swing setting never re-assigns material to a different step.
+    const auto* step = step_at(position);
+    if (step)
+        displacement +=
+            scaled_by_strength(step->timing_offset.value, data_->timing_strength);
+    // Swing and table offsets can oppose one another at the signed boundary.
+    // Combine their bounded deltas before the one saturating position add so
+    // cancellation is preserved.
+    return position + timebase::TickDuration{displacement};
+}
+
+std::int32_t GrooveTemplate::velocity_scale_at(timebase::TickPosition position) const noexcept {
+    const auto* step = step_at(position);
+    if (!step)
+        return kGrooveUnitScale;
+    const auto deviation = static_cast<std::int64_t>(step->velocity_scale) -
+                           static_cast<std::int64_t>(kGrooveUnitScale);
+    return static_cast<std::int32_t>(kGrooveUnitScale +
+                                     scaled_by_strength(deviation, data_->velocity_strength));
+}
+
+bool GrooveTemplate::operator==(const GrooveTemplate& other) const noexcept {
+    return data_.get() == other.data_.get() || *data_ == *other.data_;
+}
+
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -559,6 +674,7 @@ struct Sequence::Data {
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
     ChordScaleLane chord_scale_lane;
+    GrooveTemplate groove;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -590,6 +706,32 @@ runtime::Result<Sequence, ModelError> Sequence::create(
     std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
     std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions,
     ChordScaleLane chord_scale_lane) {
+    return create(SequenceInput{id, std::move(name), musical_duration, absolute_duration,
+                                std::move(tracks), std::move(markers), std::move(regions),
+                                std::move(chord_scale_lane), std::nullopt});
+}
+
+runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
+    const auto id = input.id;
+    auto musical_duration = input.musical_duration;
+    auto absolute_duration = input.absolute_duration;
+    auto tracks = std::move(input.tracks);
+    auto markers = std::move(input.markers);
+    auto regions = std::move(input.regions);
+    // Absent context members mean the defaults the sequence would otherwise
+    // carry; both validate on construction, so neither can be default-built.
+    if (!input.chord_scale_lane) {
+        auto empty_lane = ChordScaleLane::create({});
+        if (!empty_lane)
+            return runtime::Result<Sequence, ModelError>(runtime::Err(empty_lane.error()));
+        input.chord_scale_lane = std::move(empty_lane).value();
+    }
+    if (!input.groove) {
+        auto straight = GrooveTemplate::create({});
+        if (!straight)
+            return runtime::Result<Sequence, ModelError>(runtime::Err(straight.error()));
+        input.groove = std::move(straight).value();
+    }
     if (!id.valid())
         return fail<Sequence>(ModelErrorCode::InvalidItemId, id);
     if ((musical_duration && musical_duration->value < 0) ||
@@ -629,9 +771,9 @@ runtime::Result<Sequence, ModelError> Sequence::create(
     if (duplicate != by_id.end())
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, duplicate->first);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{id, std::move(name), musical_duration, absolute_duration, std::move(tracks),
+        Data{id, std::move(input.name), musical_duration, absolute_duration, std::move(tracks),
              std::move(by_id), std::move(markers), std::move(regions),
-             std::move(chord_scale_lane)}))));
+             std::move(*input.chord_scale_lane), std::move(*input.groove)}))));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -688,7 +830,7 @@ Sequence::with_annotations(std::vector<SequenceMarker> markers,
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, std::move(markers), std::move(regions),
-             data_->chord_scale_lane}))));
+             data_->chord_scale_lane, data_->groove}))));
 }
 
 runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
@@ -745,7 +887,11 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane}))));
+             data_->chord_scale_lane, data_->groove}))));
+}
+
+const GrooveTemplate& Sequence::groove() const noexcept {
+    return data_->groove;
 }
 
 const ChordScaleLane& Sequence::chord_scale_lane() const noexcept {
@@ -760,7 +906,17 @@ Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
     return Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             std::move(lane)}));
+             std::move(lane), data_->groove}));
+}
+
+Sequence Sequence::with_groove(GrooveTemplate groove) const {
+    // Same reasoning as the lane swap: a groove validated its own ranges at
+    // construction and names no identities, so it cannot invalidate anything
+    // the sequence owns.
+    return Sequence(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
+             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
+             data_->chord_scale_lane, std::move(groove)}));
 }
 
 bool Sequence::shares_storage_with(const Sequence& other) const noexcept {

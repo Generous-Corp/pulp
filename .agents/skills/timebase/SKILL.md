@@ -42,6 +42,35 @@ quantizer's beat/frame arithmetic.
   arithmetic belongs in `<pulp/timebase/quantize.hpp>` and the format wrapper
   delegates to it.
 
+## Swing
+
+`swing_position()` moves the interior boundary of every pair of grid cells to an
+exact rational fraction of the pair and rescales the material on either side
+onto the new halves. Ticks are integers, so the two halves land on integer
+ranges of different lengths and one of them **compresses**: distinct input ticks
+can map to the same output tick. The map is therefore *not* a bijection, and
+claiming a lossless round trip would be wrong. What holds, and what to assert:
+
+- pair boundaries are exact fixed points, and the grid point inside a pair maps
+  exactly onto the pivot;
+- the map is non-decreasing, so material is never reordered;
+- at `kStraightSwing` it is the identity on every tick, bit for bit — the
+  general path produces it, so there is no early-out hiding a bug;
+- `unswing_position()` recovers a position only to within
+  `grid / (2 * min(pivot, pair - pivot)) + 1/2` ticks. That bound is tight: an
+  exhaustive sweep of a pair hits its floor at every swung ratio.
+
+State the bound rather than exactness. `SwingRatio` is a `{numerator,
+denominator}` rational and not a double on purpose — the result is a
+document-visible tick that two machines must agree on, and a float ratio makes
+that agreement depend on how one division rounds.
+
+The pivot is clamped inside the pair. A coarse grid does not have enough ticks
+to express an extreme ratio, and without the clamp the pivot would round onto a
+pair boundary and erase half the warp while still reporting a valid setting.
+An invalid grid or ratio makes both functions the identity: the caller
+validates, and a bad setting must not silently move music.
+
 ## Validation
 
 Build and run `pulp-test-timebase` and the existing

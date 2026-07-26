@@ -144,6 +144,12 @@ pulp_add_test_suite(pulp-test-timeline-agent
 pulp_add_test_suite(pulp-test-timeline-context-lane
     SOURCES test_timeline_context_lane.cpp
     LIBRARIES pulp::timeline)
+# The groove a sequence plays with, carried on the same contract: the swing and
+# step-table transform, the document type and its migrations, and the read side
+# that resolves a groove only for a renderer that declared it.
+pulp_add_test_suite(pulp-test-timeline-groove
+    SOURCES test_timeline_groove.cpp
+    LIBRARIES pulp::timeline)
 # The invalidation side of the same contract, driven through the real program
 # compiler so "did not recompile" is observed rather than assumed.
 pulp_add_test_suite(pulp-test-playback-compile-context

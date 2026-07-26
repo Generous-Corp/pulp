@@ -127,6 +127,8 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
         // claiming nothing was lost.
         if (!sequence.chord_scale_lane().empty())
             out.record(Concept::ContextChordScale, sequence.id(), limits);
+        if (!sequence.groove().is_canonical_default())
+            out.record(Concept::ContextGroove, sequence.id(), limits);
         for (const timeline::Track& track : sequence.tracks())
             record_track(out, track, limits);
     }

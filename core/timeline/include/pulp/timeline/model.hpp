@@ -3,6 +3,7 @@
 #include <pulp/runtime/result.hpp>
 #include <pulp/timebase/compiled_meter_map.hpp>
 #include <pulp/timebase/compiled_tempo_map.hpp>
+#include <pulp/timebase/quantize.hpp>
 #include <pulp/timebase/rational_time.hpp>
 #include <pulp/timebase/tick.hpp>
 #include <pulp/timeline/assets.hpp>
@@ -70,6 +71,7 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidSessionStart,
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
+    InvalidGrooveTemplate,
 };
 
 struct ModelError {
@@ -656,6 +658,147 @@ struct SequenceRegion {
     std::optional<std::uint32_t> color;
 };
 
+// Scales are per-mille integers rather than floats because a groove is
+// document data whose effect is a tick and a velocity: two machines must agree
+// on the result exactly, and a float would make that agreement depend on
+// rounding.
+inline constexpr std::int32_t kGrooveUnitScale = 1000;
+inline constexpr std::int32_t kMaxGrooveVelocityScale = 4000;
+inline constexpr std::size_t kMaxGrooveSteps = 1024;
+
+// One step of a groove's table: how far material inside that step moves, and
+// how hard it is played relative to what was authored.
+struct GrooveStep {
+    timebase::TickDuration timing_offset{};
+    std::int32_t velocity_scale = kGrooveUnitScale;
+
+    constexpr auto operator<=>(const GrooveStep&) const = default;
+};
+
+struct GrooveTemplateInput {
+    std::string name;
+    // Zero means the groove states no swing. A swing grid is a subdivision:
+    // the pair it warps spans twice this.
+    timebase::TickDuration swing_grid{};
+    timebase::SwingRatio swing = timebase::kStraightSwing;
+    // The width of one entry in `steps`. Zero exactly when there is no table.
+    timebase::TickDuration step{};
+    std::vector<GrooveStep> steps;
+    std::int32_t timing_strength = kGrooveUnitScale;
+    std::int32_t velocity_strength = kGrooveUnitScale;
+};
+
+// A named feel a sequence plays with: a swing setting and a repeating table of
+// per-step timing and accent, each scaled by its own strength.
+//
+// Groove carries velocity as well as timing deliberately. A feel is as much
+// accent as it is placement — the same timing with flat velocities does not
+// sound like the groove it was sampled from — and modelling accent now costs
+// one array rather than a second schema version later. The two are separately
+// attenuated so a project can borrow a groove's placement without its accents,
+// which is the common editing request.
+//
+// Swing and the table are two independent displacements of the same authored
+// position: the table is indexed by where a note was written, not by where
+// swing moved it, so changing the swing setting never re-assigns notes to
+// different steps.
+//
+// The swing half is order-preserving (see timebase::swing_position). The table
+// half is not: adjacent steps may lean in opposite directions, and material at
+// the end of one step can be pushed past material at the start of the next.
+// That is what a groove template is, so offsets are bounded to less than a
+// step rather than constrained into monotonicity.
+//
+// The template is sequence-owned context, not clip content: it is read by other
+// items' compile hooks. Reading it across entities is what the compile-context
+// subscription contract governs (see compile_context.hpp).
+class GrooveTemplate {
+  public:
+    static runtime::Result<GrooveTemplate, ModelError> create(GrooveTemplateInput input);
+
+    const std::string& name() const noexcept {
+        return data_->name;
+    }
+    timebase::TickDuration swing_grid() const noexcept {
+        return data_->swing_grid;
+    }
+    timebase::SwingRatio swing() const noexcept {
+        return data_->swing;
+    }
+    timebase::TickDuration step() const noexcept {
+        return data_->step;
+    }
+    std::span<const GrooveStep> steps() const noexcept {
+        return data_->steps;
+    }
+    std::int32_t timing_strength() const noexcept {
+        return data_->timing_strength;
+    }
+    std::int32_t velocity_strength() const noexcept {
+        return data_->velocity_strength;
+    }
+    // True when the groove displaces nothing: no swing and no table. This is
+    // what a sequence carries when it states no feel, and applying it is the
+    // identity on every position and every velocity.
+    bool states_no_feel() const noexcept;
+    // True only for the canonical default serialized by a newly created
+    // sequence. Authored metadata and controls count even when they currently
+    // produce no audible displacement.
+    bool is_canonical_default() const noexcept;
+
+    // Where material authored at `position` sounds.
+    timebase::TickPosition apply_timing(timebase::TickPosition position) const noexcept;
+    // The accent multiplier for material authored at `position`, in per-mille
+    // of the authored velocity.
+    std::int32_t velocity_scale_at(timebase::TickPosition position) const noexcept;
+
+    bool shares_storage_with(const GrooveTemplate& other) const noexcept {
+        return data_.get() == other.data_.get();
+    }
+    bool operator==(const GrooveTemplate& other) const noexcept;
+
+  private:
+    // The table entry `position` falls in, or null when the groove has no table.
+    const GrooveStep* step_at(timebase::TickPosition position) const noexcept;
+
+    struct Data {
+        std::string name;
+        timebase::TickDuration swing_grid;
+        timebase::SwingRatio swing;
+        timebase::TickDuration step;
+        std::vector<GrooveStep> steps;
+        std::int32_t timing_strength;
+        std::int32_t velocity_strength;
+
+        bool operator==(const Data&) const = default;
+    };
+    explicit GrooveTemplate(std::shared_ptr<const Data> data) noexcept : data_(std::move(data)) {}
+
+    std::shared_ptr<const Data> data_;
+};
+
+// The full construction surface for a Sequence, and the one to extend from here
+// on. The positional create() overloads below predate it and remain as thin
+// forwarders so no existing call site had to change; a new owned collection
+// belongs in this struct rather than in a ninth argument.
+//
+// The two context members are optional only so the struct stays
+// default-constructible for designated initializers — neither ChordScaleLane
+// nor GrooveTemplate has a default constructor, because both validate on
+// creation. Absent means the default the sequence would otherwise carry: a lane
+// stating no harmony, and a groove stating no feel.
+struct SequenceInput {
+    ItemId id;
+    std::string name;
+    std::optional<timebase::TickDuration> musical_duration;
+    std::optional<AbsoluteTimelineDuration> absolute_duration;
+    std::vector<Track> tracks;
+    std::vector<SequenceMarker> markers;
+    std::vector<SequenceRegion> regions;
+    std::optional<ChordScaleLane> chord_scale_lane;
+    std::optional<GrooveTemplate> groove;
+};
+
 class Sequence {
   public:
     static runtime::Result<Sequence, ModelError>
@@ -668,12 +811,12 @@ class Sequence {
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
            std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions);
-    // Sequence is pimpl'd behind a shared Data and constructed through these
-    // factories, so a new owned collection arrives as another overload rather
-    // than as a layout change every existing call site has to follow. This is
-    // the full-fidelity one; deliberately not a fifth partial overload, because
-    // the set is already long enough that the next owned collection should
-    // prompt a SequenceInput struct rather than another arity.
+    // Sequence is pimpl'd behind a shared Data, so a new owned collection never
+    // forces a layout change on a call site. The positional overloads above are
+    // the historical arities and forward into this one; groove was the next
+    // owned collection, and the arity note they carried said to stop adding
+    // arguments at that point, so it went into SequenceInput instead.
+    static runtime::Result<Sequence, ModelError> create(SequenceInput input);
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
@@ -688,6 +831,8 @@ class Sequence {
     const Track* find_track(ItemId id) const noexcept;
     // Always present; empty when the sequence states no harmony.
     const ChordScaleLane& chord_scale_lane() const noexcept;
+    // Always present; states no feel when the sequence plays straight.
+    const GrooveTemplate& groove() const noexcept;
     // Ordered by (position, id). Markers and regions share one identity space:
     // no marker may reuse a region's ItemId within the same sequence.
     std::span<const SequenceMarker> markers() const noexcept;
@@ -701,6 +846,7 @@ class Sequence {
     runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
     runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
     Sequence with_chord_scale_lane(ChordScaleLane lane) const;
+    Sequence with_groove(GrooveTemplate groove) const;
     bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:

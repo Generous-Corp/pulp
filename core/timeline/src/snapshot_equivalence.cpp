@@ -83,6 +83,7 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             !same_absolute_duration(left_sequence.absolute_duration(),
                                     right_sequence.absolute_duration()) ||
             !(left_sequence.chord_scale_lane() == right_sequence.chord_scale_lane()) ||
+            !(left_sequence.groove() == right_sequence.groove()) ||
             left_sequence.tracks().size() != right_sequence.tracks().size() ||
             left_sequence.markers().size() != right_sequence.markers().size() ||
             left_sequence.regions().size() != right_sequence.regions().size() ||

@@ -34,6 +34,7 @@
     "clip.gain": { "level": "none", "refusal": "per-clip gain" },
     "clip.fades": { "level": "none", "refusal": "per-clip fades" },
     "context.chord-scale": { "level": "none", "refusal": "chord and scale context lanes" },
+    "context.groove": { "level": "none", "refusal": "groove templates and swing" },
     "marker": { "level": "none", "refusal": "arrangement markers" },
     "tempo.map": { "level": "none", "refusal": "tempo changing after bar 1" },
     "meter.map": { "level": "none", "refusal": "time signature changing after bar 1" },

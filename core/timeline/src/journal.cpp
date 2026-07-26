@@ -28,7 +28,12 @@ TransactionError journal_error(const JournalEntry& entry) {
 bool same_dirty(const DirtySet& lhs, const DirtySet& rhs) noexcept {
     const auto left = lhs.items();
     const auto right = rhs.items();
-    return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
+    if (left.size() != right.size() || !std::equal(left.begin(), left.end(), right.begin()))
+        return false;
+    const auto left_contexts = lhs.contexts();
+    const auto right_contexts = rhs.contexts();
+    return left_contexts.size() == right_contexts.size() &&
+           std::equal(left_contexts.begin(), left_contexts.end(), right_contexts.begin());
 }
 
 struct ReplayWriter {
