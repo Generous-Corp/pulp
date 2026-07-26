@@ -108,6 +108,25 @@ constexpr std::int64_t swing_pivot(std::int64_t pair, SwingRatio ratio) noexcept
 
 } // namespace detail
 
+// The bounded displacement applied by swing_position(). Keeping the delta
+// available separately lets higher-level timing transforms combine it with
+// other authored displacements before saturating the final tick position.
+inline TickDuration swing_displacement(TickPosition position, TickDuration grid,
+                                       SwingRatio ratio) noexcept {
+    if (!valid_swing_grid(grid) || !valid_swing_ratio(ratio))
+        return {};
+    const auto pair = grid.value * 2;
+    const auto pivot = detail::swing_pivot(pair, ratio);
+    auto local = position.value % pair;
+    if (local < 0)
+        local += pair;
+    const auto warped =
+        local < grid.value
+            ? detail::rounded_scale(local, pivot, grid.value)
+            : pivot + detail::rounded_scale(local - grid.value, pair - pivot, grid.value);
+    return {warped - local};
+}
+
 // Contract, for a valid grid and ratio:
 //   * pair boundaries are exact fixed points, and the grid point inside a pair
 //     maps exactly onto the pivot;
@@ -120,21 +139,10 @@ constexpr std::int64_t swing_pivot(std::int64_t pair, SwingRatio ratio) noexcept
 // silently move music.
 inline TickPosition swing_position(TickPosition position, TickDuration grid,
                                    SwingRatio ratio) noexcept {
-    if (!valid_swing_grid(grid) || !valid_swing_ratio(ratio))
-        return position;
-    const auto pair = grid.value * 2;
-    const auto pivot = detail::swing_pivot(pair, ratio);
-    auto local = position.value % pair;
-    if (local < 0)
-        local += pair;
-    const auto warped =
-        local < grid.value
-            ? detail::rounded_scale(local, pivot, grid.value)
-            : pivot + detail::rounded_scale(local - grid.value, pair - pivot, grid.value);
     // Apply the displacement at the original position. Materializing the pair
     // boundary first can underflow below INT64_MIN for a negative, non-boundary
     // tick even though the final displaced position is representable.
-    return {detail::saturating_add(position.value, warped - local)};
+    return position + swing_displacement(position, grid, ratio);
 }
 
 // The left inverse of swing_position() under the same grid and ratio, to

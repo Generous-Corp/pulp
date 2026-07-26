@@ -145,14 +145,31 @@ TEST_CASE("groove strength attenuates timing and accent symmetrically", "[timeli
     REQUIRE(tiny.velocity_scale_at({kSixteenth}) == 999);
 
     // Zero strength is the identity while the authored table is preserved.
+    input.swing_grid = TickDuration{kEighth};
+    input.swing = kTripletSwing;
     input.timing_strength = 0;
     input.velocity_strength = 0;
     const auto silent = groove_of(input);
     REQUIRE_FALSE(silent.states_no_feel());
     REQUIRE_FALSE(silent.is_canonical_default());
     REQUIRE(silent.apply_timing({0}) == TickPosition{0});
+    REQUIRE(silent.apply_timing({kEighth}) == TickPosition{kEighth});
     REQUIRE(silent.velocity_scale_at({0}) == kGrooveUnitScale);
     REQUIRE(silent.steps().size() == 2);
+}
+
+TEST_CASE("groove combines opposing timing deltas before signed-domain saturation",
+          "[timeline][groove]") {
+    GrooveTemplateInput input;
+    input.swing_grid = TickDuration{5};
+    input.swing = kTripletSwing;
+    input.step = TickDuration{2};
+    input.steps = {GrooveStep{TickDuration{-1}, kGrooveUnitScale}};
+    const auto cancelling = groove_of(input);
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+
+    REQUIRE(swing_displacement({maximum}, input.swing_grid, input.swing) == TickDuration{1});
+    REQUIRE(cancelling.apply_timing({maximum}) == TickPosition{maximum});
 }
 
 TEST_CASE("a groove template refuses ranges it cannot mean", "[timeline][groove]") {

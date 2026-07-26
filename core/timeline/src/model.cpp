@@ -632,17 +632,22 @@ const GrooveStep* GrooveTemplate::step_at(timebase::TickPosition position) const
 
 timebase::TickPosition
 GrooveTemplate::apply_timing(timebase::TickPosition position) const noexcept {
-    auto placed = position;
-    if (data_->swing_grid.value != 0)
-        placed = timebase::swing_position(position, data_->swing_grid, data_->swing);
+    std::int64_t displacement = 0;
+    if (data_->swing_grid.value != 0) {
+        displacement = scaled_by_strength(
+            timebase::swing_displacement(position, data_->swing_grid, data_->swing).value,
+            data_->timing_strength);
+    }
     // The table is indexed by the authored position, not the swung one, so a
     // change of swing setting never re-assigns material to a different step.
     const auto* step = step_at(position);
-    if (!step)
-        return placed;
-    return placed +
-           timebase::TickDuration{scaled_by_strength(step->timing_offset.value,
-                                                     data_->timing_strength)};
+    if (step)
+        displacement +=
+            scaled_by_strength(step->timing_offset.value, data_->timing_strength);
+    // Swing and table offsets can oppose one another at the signed boundary.
+    // Combine their bounded deltas before the one saturating position add so
+    // cancellation is preserved.
+    return position + timebase::TickDuration{displacement};
 }
 
 std::int32_t GrooveTemplate::velocity_scale_at(timebase::TickPosition position) const noexcept {
