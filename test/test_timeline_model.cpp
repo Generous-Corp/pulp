@@ -230,6 +230,47 @@ TEST_CASE("Timeline launcher edits path-copy bounded persistent index paths at s
     REQUIRE(separately_built.shared_launcher_nodes_with(sequence) == 0);
 }
 
+TEST_CASE("Timeline launcher bulk-builds reference-heavy persistent indexes exactly once") {
+    constexpr std::size_t scene_count = 4096;
+    constexpr std::size_t slots_per_scene = 4;
+    constexpr std::size_t slot_count = scene_count * slots_per_scene;
+    const auto baseline = Sequence::launcher_index_stats();
+    {
+        auto track = take_value(Track::create({4}, "track", {clip({5}, 0, 1)}));
+        std::vector<Scene> scenes;
+        scenes.reserve(scene_count);
+        for (std::size_t scene_index = 0; scene_index < scene_count; ++scene_index) {
+            std::vector<Slot> slots;
+            slots.reserve(slots_per_scene);
+            for (std::size_t slot_index = 0; slot_index < slots_per_scene; ++slot_index) {
+                const ItemId slot_id{1'000'000 + scene_index * slots_per_scene + slot_index};
+                auto jump = follow_action(FollowActionKind::Jump, TickDuration{1});
+                jump.choices[0].target = slot_id;
+                slots.push_back(Slot{slot_id, {5}, launch_immediate(), jump});
+            }
+            scenes.push_back(Scene{{100'000 + scene_index}, "scene", std::move(slots)});
+        }
+        const auto sequence = take_value(Sequence::create(SequenceInput{
+            .id = {3},
+            .name = "reference-heavy launcher",
+            .tracks = {std::move(track)},
+            .scenes = std::move(scenes),
+        }));
+        const auto after = Sequence::launcher_index_stats();
+
+        // Scene, owner, and per-scene slot trees: 4096 + 16384 + 16384.
+        // One shared clip target: 1 outer + 16384 sources.
+        // One Jump target per slot: 16384 outer + 16384 sources.
+        constexpr std::uint64_t expected_nodes =
+            scene_count + slot_count + slot_count + 1 + slot_count + slot_count + slot_count;
+        REQUIRE(after.live_nodes - baseline.live_nodes == expected_nodes);
+        REQUIRE(after.nodes_created - baseline.nodes_created == expected_nodes);
+        REQUIRE(sequence.find_slot({1'000'000}));
+        REQUIRE(sequence.find_slot({1'000'000 + slot_count - 1}));
+    }
+    REQUIRE(Sequence::launcher_index_stats().live_nodes == baseline.live_nodes);
+}
+
 TEST_CASE("Timeline launcher persistent nodes reclaim with their snapshots") {
     const auto baseline = Sequence::launcher_index_stats();
     {

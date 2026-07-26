@@ -48,6 +48,7 @@ erase_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scen
                  ItemId slot_id);
 
 std::size_t launcher_scene_count(const LauncherStore& store) noexcept;
+std::size_t launcher_slot_list_owned_storage(const SlotList& slots) noexcept;
 ItemId launcher_head(const LauncherStore& store) noexcept;
 const Scene* launcher_find_scene(const LauncherStore& store, ItemId id) noexcept;
 ItemId launcher_next_scene(const LauncherStore& store, ItemId id) noexcept;

@@ -1,5 +1,7 @@
 #include <pulp/timeline/command.hpp>
 
+#include "sequence_scene_internal.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -331,7 +333,7 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, InsertScene>)
                 return saturated_add(
                     saturated_add(sizeof(T), value.scene.name.size()),
-                    saturated_multiply(value.scene.slots.size(), sizeof(Slot)));
+                    detail::launcher_slot_list_owned_storage(value.scene.slots));
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());

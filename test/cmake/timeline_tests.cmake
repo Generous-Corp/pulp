@@ -108,6 +108,20 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_transaction_launcher_complexity.py
             --self-test)
+    add_test(NAME timeline-launcher-bulk-build-contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --launcher-source
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_scene_internal.cpp)
+    add_test(NAME timeline-launcher-retained-size-contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --command-source
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp)
+    add_test(NAME timeline-launcher-resource-contract-mutation-control
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --self-test)
     add_test(NAME timeline-live-capture-verifier-self-test
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py

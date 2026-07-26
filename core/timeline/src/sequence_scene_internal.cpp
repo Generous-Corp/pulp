@@ -206,6 +206,40 @@ struct ReferenceRecord {
     NodePtr<SetRecord> sources;
 };
 
+struct ReferenceEdge {
+    ItemId target;
+    ItemId source;
+
+    constexpr auto operator<=>(const ReferenceEdge&) const = default;
+};
+
+NodePtr<SetRecord> build_source_set(std::span<const ReferenceEdge> edges, std::size_t begin,
+                                    std::size_t end) {
+    if (begin == end)
+        return {};
+    const auto middle = begin + (end - begin) / 2;
+    return std::make_shared<const PersistentNode<SetRecord>>(
+        SetRecord{edges[middle].source}, build_source_set(edges, begin, middle),
+        build_source_set(edges, middle + 1, end));
+}
+
+NodePtr<ReferenceRecord> build_references(std::vector<ReferenceEdge> edges) {
+    std::sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+    std::vector<ReferenceRecord> references;
+    references.reserve(edges.size());
+    std::size_t begin = 0;
+    while (begin < edges.size()) {
+        const auto target = edges[begin].target;
+        auto end = begin + 1;
+        while (end < edges.size() && edges[end].target == target)
+            ++end;
+        references.push_back(ReferenceRecord{target, build_source_set(edges, begin, end)});
+        begin = end;
+    }
+    return build_balanced<ReferenceRecord>(references, 0, references.size());
+}
+
 NodePtr<SetRecord> set_insert(NodePtr<SetRecord> root, ItemId id) {
     bool inserted = false;
     return put(std::move(root), SetRecord{id}, inserted);
@@ -413,6 +447,15 @@ class SlotListAccess {
     static const SlotListStore* store(const SlotList& list) noexcept {
         return list.store_.get();
     }
+
+    // Known owned object storage only. Allocation headers and shared_ptr control
+    // blocks are deliberately excluded because their layout is implementation
+    // defined; the payload and persistent-node overhead are exact C++ objects.
+    static std::size_t owned_storage(const SlotList& list) noexcept {
+        if (list.raw_)
+            return sizeof(std::vector<Slot>) + list.raw_->capacity() * sizeof(Slot);
+        return sizeof(SlotListStore) + list.store_->size * sizeof(PersistentNode<SlotRecord>);
+    }
 };
 
 } // namespace detail
@@ -513,8 +556,15 @@ namespace detail {
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
 build_launcher(std::vector<Scene> scenes, std::span<const Track> tracks) {
     std::vector<ItemId> owned_ids;
+    std::vector<ItemId> clip_ids;
     std::vector<SceneRecord> scene_records;
     std::vector<IdRecord> slot_owners;
+    std::vector<ReferenceEdge> clip_edges;
+    std::vector<ReferenceEdge> jump_edges;
+    for (const auto& track : tracks)
+        for (const auto& clip : track.clips())
+            clip_ids.push_back(clip.id());
+    std::sort(clip_ids.begin(), clip_ids.end());
     owned_ids.reserve(scenes.size());
     scene_records.reserve(scenes.size());
     ItemId previous_scene;
@@ -537,6 +587,11 @@ build_launcher(std::vector<Scene> scenes, std::span<const Track> tracks) {
                                                                   slot.id, scene.id);
             owned_ids.push_back(slot.id);
             slot_owners.push_back({slot.id, scene.id});
+            if (slot.clip_id.valid())
+                clip_edges.push_back({slot.clip_id, slot.id});
+            for (const auto& action : slot.follow.active())
+                if (action.kind == FollowActionKind::Jump)
+                    jump_edges.push_back({action.target, slot.id});
         }
     }
     std::sort(owned_ids.begin(), owned_ids.end());
@@ -560,26 +615,16 @@ build_launcher(std::vector<Scene> scenes, std::span<const Track> tracks) {
         store->tail = scene_records.back().id;
     }
 
-    for (const auto& scene : scenes) {
-        for (const auto& slot : scene.slots) {
-            if (slot.clip_id.valid()) {
-                if (!tracks_contain_clip(tracks, slot.clip_id))
-                    return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem,
-                                                                      slot.clip_id, slot.id);
-                store->clip_references =
-                    reference_add(std::move(store->clip_references), slot.clip_id, slot.id);
-            }
-            for (const auto& action : slot.follow.active()) {
-                if (action.kind != FollowActionKind::Jump)
-                    continue;
-                if (!store->find_slot_owner(action.target))
-                    return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem,
-                                                                      action.target, slot.id);
-                store->jump_references =
-                    reference_add(std::move(store->jump_references), action.target, slot.id);
-            }
-        }
-    }
+    for (const auto& edge : clip_edges)
+        if (!std::binary_search(clip_ids.begin(), clip_ids.end(), edge.target))
+            return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem,
+                                                              edge.target, edge.source);
+    for (const auto& edge : jump_edges)
+        if (!store->find_slot_owner(edge.target))
+            return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem,
+                                                              edge.target, edge.source);
+    store->clip_references = build_references(std::move(clip_edges));
+    store->jump_references = build_references(std::move(jump_edges));
     return runtime::Ok(std::shared_ptr<const LauncherStore>(std::move(store)));
 }
 
@@ -806,6 +851,10 @@ erase_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scen
 
 std::size_t launcher_scene_count(const LauncherStore& store) noexcept {
     return store.scene_count;
+}
+
+std::size_t launcher_slot_list_owned_storage(const SlotList& slots) noexcept {
+    return SlotListAccess::owned_storage(slots);
 }
 
 ItemId launcher_head(const LauncherStore& store) noexcept {
