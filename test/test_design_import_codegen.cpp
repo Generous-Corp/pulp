@@ -2137,6 +2137,13 @@ TEST_CASE("generate_pulp_js web-compat mode handles audio widgets", "[view][impo
     knob.stable_anchor_id = "figma:1:2";
     ir.root.children.push_back(knob);
 
+    IRNode meter;
+    meter.type = "meter";
+    meter.name = "OutputMeter";
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.attributes["binding"] = "output";
+    ir.root.children.push_back(meter);
+
     CodeGenOptions opts;
     opts.mode = CodeGenMode::web_compat;
     auto js = generate_pulp_js(ir, opts);
@@ -2156,10 +2163,76 @@ TEST_CASE("generate_pulp_js web-compat mode handles audio widgets", "[view][impo
     // A declared binding is why an audio widget exists.
     REQUIRE(js.find("bindWidgetToParam(") != std::string::npos);
     REQUIRE(js.find("'gain'") != std::string::npos);
+    // The binding API only pushes host state into the widget. Canonical
+    // DesignIR lowering must also route a user change back to the parameter.
+    // Without this handler the control renders and turns but is acoustically
+    // inert.
+    REQUIRE(js.find(
+        "'change', function (v) { setParam('gain', v); })") !=
+        std::string::npos);
+    REQUIRE(js.find("bindMeter(") != std::string::npos);
+    REQUIRE(js.find("setParam('output'") == std::string::npos);
     REQUIRE(js.find("setAnchor(") != std::string::npos);
     // Appended before configuring: web-compat materializes the native widget on
     // mount, so property calls issued before appendChild are dropped.
     REQUIRE(js.find(".appendChild(") < js.find("setLabel("));
+}
+
+TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
+          "[view][import][runtime]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+    ir.root.style.width = 240.0f;
+    ir.root.style.height = 160.0f;
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.audio_min = 0.0f;
+    knob.audio_max = 1.0f;
+    knob.audio_default = 0.5f;
+    knob.style.width = 80.0f;
+    knob.style.height = 80.0f;
+    knob.attributes["binding"] = "gain";
+    ir.root.children.push_back(knob);
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 240, 160});
+    pulp::state::StateStore store;
+    pulp::state::ParamInfo gain;
+    gain.id = 1;
+    gain.name = "gain";
+    gain.range = {0.0f, 1.0f, 0.5f};
+    store.add_parameter(gain);
+    WidgetBridge bridge(engine, root, store);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    bridge.load_script(generate_pulp_js(ir, opts));
+    root.layout_children();
+
+    Knob* live_knob = nullptr;
+    const auto find_knob = [&](auto&& self, View& view) -> void {
+        if (auto* found = dynamic_cast<Knob*>(&view)) {
+            live_knob = found;
+            return;
+        }
+        for (std::size_t i = 0; i < view.child_count() && !live_knob; ++i)
+            if (auto* child = view.child_at(i)) self(self, *child);
+    };
+    find_knob(find_knob, root);
+    REQUIRE(live_knob != nullptr);
+
+    const float before = store.get_normalized(gain.id);
+    live_knob->on_mouse_down({40.0f, 40.0f});
+    live_knob->on_mouse_drag({40.0f, 12.0f});
+    live_knob->on_mouse_up({40.0f, 12.0f});
+    REQUIRE(std::abs(store.get_normalized(gain.id) - before) > 1.0e-6f);
 }
 
 TEST_CASE("web-compat audio widget escapes an authored label",
