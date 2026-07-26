@@ -41,6 +41,31 @@
       "note": "test manifest owner include hub after the per-area split; new registrations belong in focused test/cmake/*_tests.cmake manifests"
     },
     {
+      "path": "test/test_signal_mod_contract.cpp",
+      "max_loc": 537,
+      "note": "modulation toolkit cross-cutting alias, precision, fresh-state, and reset contracts"
+    },
+    {
+      "path": "test/test_signal_mod_sources.cpp",
+      "max_loc": 760,
+      "note": "modulation toolkit RNG, LFO, and chaos source behavior"
+    },
+    {
+      "path": "test/test_signal_mod_tools.cpp",
+      "max_loc": 275,
+      "note": "modulation toolkit control-tool and unit-conversion behavior"
+    },
+    {
+      "path": "test/test_signal_mod_events.cpp",
+      "max_loc": 669,
+      "note": "modulation toolkit trigger, event, and envelope behavior"
+    },
+    {
+      "path": "test/test_signal_mod_voice.cpp",
+      "max_loc": 792,
+      "note": "modulation toolkit VCA, LPG, matrix, and composition behavior"
+    },
+    {
       "path": "test/test_design_import_codegen.cpp",
       "max_loc": 2101,
       "note": "design-import codegen test split; +7 for the interactive-element param_key + host-param routing codegen assertions"

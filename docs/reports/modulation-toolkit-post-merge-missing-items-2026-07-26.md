@@ -2,7 +2,7 @@
 
 ## Succinct goal
 
-Make `LpgT::cutoff_hz()` truthful across `reset()`, prove the reset-state
+Make `LpgT::commanded_cutoff_hz()` truthful across `reset()`, prove the reset-state
 coefficient and telemetry stay synchronized, and land the fix without
 reopening the already-closed G1-G5 work.
 
@@ -27,7 +27,7 @@ That is 144 cases and 1,790,769 assertions. G1-G5 remain closed.
 
 ### M1 — LPG cutoff telemetry is inconsistent across reset
 
-PR #6590 introduced `LpgT::cutoff_hz()` as the effective cutoff commanded by
+PR #6590 introduced cutoff telemetry as the effective cutoff commanded by
 the most recent `process()` call. Its `reset()` implementation then overwrote
 the telemetry with `fc_min_`, while `TptFilterT::reset()` cleared only the
 integrator state and retained its existing cutoff coefficient.
@@ -47,7 +47,8 @@ when callers supply a non-positive sample rate.
 ## Acceptance
 
 - `reset()` clears the vactrol and filter state, commands the cutoff derived
-  from that reset state, and reports the same value through `cutoff_hz()`.
+  from that reset state, and reports the same value through
+  `commanded_cutoff_hz()`.
 - `prepare(0)` uses a safe fallback rate, reports a finite 1 Hz cutoff, and can
   process without invalid filter clamp bounds.
 - The regression test fails on merge commit `04f96ef1` and passes with the fix.
