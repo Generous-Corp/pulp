@@ -33,7 +33,9 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <memory>
 
 namespace pulp::format::au {
 
@@ -403,6 +405,41 @@ public:
 void wire_host_parameter_bridge(state::StateStore& store,
                                 AudioUnit unit,
                                 state::ListenerToken& out_listener);
+
+// ── Host-facing parameter-name publishing ────────────────────────────────
+
+/// Coalesces StateStore presentation-name changes and republishes only the
+/// affected stable parameter IDs from the host's main thread.
+///
+/// The publisher owns a paced main-thread poll rather than observing names
+/// from an audio callback. Polling and host notification may allocate, lock,
+/// and re-enter the host; none of that work is reachable from Render() or
+/// ProcessBufferLists().
+class ParameterDisplayNamePublisher {
+public:
+    using Notify = std::function<void(state::ParamID)>;
+
+    ParameterDisplayNamePublisher();
+    ~ParameterDisplayNamePublisher();
+
+    ParameterDisplayNamePublisher(const ParameterDisplayNamePublisher&) = delete;
+    ParameterDisplayNamePublisher& operator=(const ParameterDisplayNamePublisher&) = delete;
+
+    /// Snapshot the current stable parameter list and begin the paced
+    /// main-thread poll. Repeated calls replace the prior publication target.
+    void start(state::StateStore& store, Notify notify);
+
+    /// Stop future polls and retire queued callbacks without touching the host.
+    void stop() noexcept;
+
+    /// Drain once on the caller's control/main thread. The paced poll and
+    /// control-thread adapter entrypoints share this operation.
+    void poll_main_thread();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 // ── State (preset) serialization ─────────────────────────────────────────
 

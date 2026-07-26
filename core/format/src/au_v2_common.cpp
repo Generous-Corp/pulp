@@ -6,11 +6,25 @@
 #include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/parameter_text.hpp>
 #include <pulp/format/plugin_state_io.hpp>
+#include <pulp/events/main_thread_dispatcher.hpp>
+#include <pulp/events/plugin_main_thread.hpp>
 
+#include <algorithm>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace pulp::format::au {
+
+namespace {
+
+constexpr int kParameterDisplayActivePollIntervalMs = 33;
+constexpr int kParameterDisplayIdlePollIntervalMs = 1000;
+
+}  // namespace
 
 // Cross-TU Cocoa-view hook (see au_v2_common.hpp). Hidden visibility keeps it
 // per-loaded-image so two Pulp AU components in one host don't share state.
@@ -122,10 +136,12 @@ OSStatus fill_parameter_info(const state::StateStore& store,
         (param->to_string || !param->value_labels.empty()))
         out_info.flags |= kAudioUnitParameterFlag_ValuesHaveStrings;
 
+    const std::string display_name =
+        store.parameter_display_name(static_cast<state::ParamID>(param_id));
     out_info.cfNameString = CFStringCreateWithCString(
-        kCFAllocatorDefault, param->name.c_str(), kCFStringEncodingUTF8);
+        kCFAllocatorDefault, display_name.c_str(), kCFStringEncodingUTF8);
     strlcpy(reinterpret_cast<char*>(out_info.name),
-            param->name.c_str(), sizeof(out_info.name));
+            display_name.c_str(), sizeof(out_info.name));
 
     out_info.minValue = param->range.min;
     out_info.maxValue = param->range.max;
@@ -246,6 +262,217 @@ void wire_host_parameter_bridge(state::StateStore& store,
                 unit, kAudioUnitEvent_ParameterValueChange, id);
         },
         state::ListenerThread::Audio);
+}
+
+struct ParameterDisplayNamePublisher::Impl {
+    struct Entry {
+        state::ParamID id = 0;
+        std::string name;
+    };
+
+    struct SharedState {
+        std::mutex mutex;
+        std::condition_variable idle;
+        state::StateStore* store = nullptr;
+        Notify notify;
+        std::vector<Entry> published;
+        std::uint64_t revision = 0;
+        std::size_t drains_in_flight = 0;
+        bool active = false;
+    };
+
+    struct DrainScope {
+        explicit DrainScope(SharedState* draining)
+            : state(draining), previous(current)
+        {
+            current = this;
+        }
+
+        ~DrainScope() { current = previous; }
+
+        SharedState* state = nullptr;
+        DrainScope* previous = nullptr;
+        static thread_local DrainScope* current;
+    };
+
+    struct InFlightDrain {
+        explicit InFlightDrain(std::shared_ptr<SharedState> shared_state)
+            : shared(std::move(shared_state))
+        {
+        }
+
+        InFlightDrain(const InFlightDrain&) = delete;
+        InFlightDrain& operator=(const InFlightDrain&) = delete;
+
+        ~InFlightDrain() noexcept {
+            std::lock_guard lock(shared->mutex);
+            --shared->drains_in_flight;
+            if (shared->drains_in_flight == 0)
+                shared->idle.notify_all();
+        }
+
+        std::shared_ptr<SharedState> shared;
+    };
+
+    std::shared_ptr<SharedState> state;
+    events::MainThreadDispatcher::Token main_thread_token = 0;
+
+    static bool draining_on_this_thread(const SharedState* shared) noexcept {
+        for (auto* scope = DrainScope::current; scope;
+             scope = scope->previous) {
+            if (scope->state == shared) return true;
+        }
+        return false;
+    }
+
+    static bool drain(const std::shared_ptr<SharedState>& shared) {
+        if (!shared) return false;
+        if (!events::MainThreadDispatcher::is_main_thread()) return false;
+        state::StateStore* store = nullptr;
+        std::uint64_t published_revision = 0;
+        {
+            std::lock_guard lock(shared->mutex);
+            if (!shared->active || !shared->store || !shared->notify)
+                return false;
+            store = shared->store;
+            published_revision = shared->revision;
+            ++shared->drains_in_flight;
+        }
+        InFlightDrain in_flight(shared);
+        DrainScope drain_scope(shared.get());
+
+        const std::uint64_t current_revision =
+            store->parameter_display_revision();
+        std::vector<Entry> current;
+        if (current_revision != published_revision) {
+            current.reserve(store->param_count());
+            for (const auto& parameter : store->all_params()) {
+                current.push_back(
+                    {parameter.id,
+                     store->parameter_display_name(parameter.id)});
+            }
+        }
+
+        Notify notify;
+        std::vector<state::ParamID> changed_ids;
+        bool revision_advanced = false;
+        {
+            std::lock_guard lock(shared->mutex);
+            if (shared->active && shared->store == store &&
+                current_revision != shared->revision) {
+                revision_advanced = true;
+                notify = shared->notify;
+                const std::size_t count =
+                    std::min(shared->published.size(), current.size());
+                changed_ids.reserve(count);
+                for (std::size_t i = 0; i < count; ++i) {
+                    if (shared->published[i].id == current[i].id &&
+                        shared->published[i].name != current[i].name) {
+                        const state::ParamID id = current[i].id;
+                        if (std::find(changed_ids.begin(), changed_ids.end(),
+                                      id) == changed_ids.end()) {
+                            changed_ids.push_back(id);
+                        }
+                    }
+                }
+                shared->published = std::move(current);
+                shared->revision = current_revision;
+            }
+        }
+
+        if (notify) {
+            for (state::ParamID id : changed_ids) {
+                {
+                    std::lock_guard lock(shared->mutex);
+                    if (!shared->active) break;
+                }
+                notify(id);
+            }
+        }
+        return revision_advanced;
+    }
+
+    static void schedule(const std::shared_ptr<SharedState>& shared,
+                         int delay_ms) {
+        if (!shared) return;
+        {
+            std::lock_guard lock(shared->mutex);
+            if (!shared->active) return;
+        }
+        events::MainThreadDispatcher::call_async_after(
+            [shared] {
+                const bool revision_advanced = drain(shared);
+                schedule(
+                    shared,
+                    revision_advanced
+                        ? kParameterDisplayActivePollIntervalMs
+                        : kParameterDisplayIdlePollIntervalMs);
+            },
+            delay_ms);
+    }
+};
+
+thread_local ParameterDisplayNamePublisher::Impl::DrainScope*
+    ParameterDisplayNamePublisher::Impl::DrainScope::current = nullptr;
+
+ParameterDisplayNamePublisher::ParameterDisplayNamePublisher()
+    : impl_(std::make_unique<Impl>())
+{
+}
+
+ParameterDisplayNamePublisher::~ParameterDisplayNamePublisher()
+{
+    stop();
+}
+
+void ParameterDisplayNamePublisher::start(state::StateStore& store,
+                                          Notify notify)
+{
+    stop();
+
+    auto shared = std::make_shared<Impl::SharedState>();
+    shared->store = &store;
+    shared->notify = std::move(notify);
+    shared->published.reserve(store.param_count());
+    for (const auto& parameter : store.all_params()) {
+        shared->published.push_back(
+            {parameter.id, store.parameter_display_name(parameter.id)});
+    }
+    shared->revision = store.parameter_display_revision();
+    shared->active = true;
+
+    impl_->main_thread_token = events::register_plugin_backend();
+    impl_->state = shared;
+    Impl::schedule(shared, kParameterDisplayActivePollIntervalMs);
+}
+
+void ParameterDisplayNamePublisher::stop() noexcept
+{
+    if (!impl_) return;
+    if (impl_->state) {
+        std::unique_lock lock(impl_->state->mutex);
+        impl_->state->active = false;
+        if (!Impl::draining_on_this_thread(impl_->state.get())) {
+            impl_->state->idle.wait(
+                lock, [state = impl_->state] {
+                    return state->drains_in_flight == 0;
+                });
+        }
+        impl_->state->notify = {};
+        impl_->state->store = nullptr;
+    }
+    if (impl_->main_thread_token != 0) {
+        events::unregister_plugin_backend(impl_->main_thread_token);
+        impl_->main_thread_token = 0;
+    }
+    impl_->state.reset();
+}
+
+void ParameterDisplayNamePublisher::poll_main_thread()
+{
+    if (!impl_) return;
+    auto shared = impl_->state;
+    Impl::drain(shared);
 }
 
 OSStatus save_pulp_state(state::StateStore& store,
