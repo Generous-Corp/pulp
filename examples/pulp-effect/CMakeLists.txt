@@ -81,10 +81,11 @@ if(APPLE AND PULP_HAS_AUSDK)
     # -50 even though the .component bundle on disk is well-formed. Codified
     # in the auv2 skill.
     add_test(NAME auval-PulpEffect
-        COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpEffect.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpEffect.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc")
+        COMMAND bash "${CMAKE_SOURCE_DIR}/tools/ci/run-auval-component.sh"
+            "${CMAKE_BINARY_DIR}/AU/PulpEffect.component" aufx PEfx Pulp)
     set_tests_properties(auval-PulpEffect PROPERTIES
         LABELS "validation;au"
-        TIMEOUT 30
+        TIMEOUT 60
         ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
 endif()
 

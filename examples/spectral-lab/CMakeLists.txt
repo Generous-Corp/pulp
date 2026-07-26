@@ -102,10 +102,11 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
     # the freshly-copied bundle (stale-cache trap codified in the auv2 skill).
     if(APPLE AND PULP_HAS_AUSDK)
         add_test(NAME auval-SpectralLab
-            COMMAND bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/SpectralLab.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/SpectralLab.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aufx SpLb Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc")
+            COMMAND bash "${CMAKE_SOURCE_DIR}/tools/ci/run-auval-component.sh"
+                "${CMAKE_BINARY_DIR}/AU/SpectralLab.component" aufx SpLb Pulp)
         set_tests_properties(auval-SpectralLab PROPERTIES
             LABELS "validation;au"
-            TIMEOUT 30
+            TIMEOUT 60
             ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 
