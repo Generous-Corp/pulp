@@ -437,7 +437,12 @@ void TextEditor::paint(canvas::Canvas& canvas) {
         sel_x = text_x + x_at(start);
         sel_w = x_at(end) - x_at(start);
         canvas.set_fill_color(selection_fill);
-        canvas.fill_rect(sel_x, b.y + 2, sel_w, b.height - 4);
+        // A selection highlights glyphs on this line, not the editor's whole
+        // content box. Tall single-line editors are useful for composers with
+        // attachments; using their bounds here made a short selection become a
+        // full-height color column while the text and caret stayed centered.
+        const auto& line = last_layout_.lines.front();
+        canvas.fill_rect(sel_x, line.top_y, sel_w, line.line_height);
     }
 
     if (display.empty() && !placeholder.empty() && !has_focus()) {
