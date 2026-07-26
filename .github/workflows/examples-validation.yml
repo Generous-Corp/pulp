@@ -107,8 +107,15 @@ jobs:
           # `ctest -L` exits 8 on "no tests" — that must not FALSE-FAIL an
           # example PR. On the self-hosted studio runners the tools exist, so
           # real validators do run and gate.
+          # AudioComponentRegistrar is a single per-user cache. Running several
+          # auval tests in parallel makes each test kill the registrar while its
+          # neighbors are scanning freshly copied components; a clean Tart guest
+          # then reports every component as missing. Keep non-AU validators
+          # parallel, but serialize the registrar-dependent AU checks.
           ctest --test-dir build --output-on-failure --repeat until-pass:2 \
-            --no-tests=ignore -L validation -j4
+            --no-tests=ignore -L validation -E '^auval-' -j4
+          ctest --test-dir build --output-on-failure --repeat until-pass:2 \
+            --no-tests=ignore -L validation -R '^auval-' -j1
       - name: Surface ctest failures
         if: failure()
         shell: bash

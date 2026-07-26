@@ -8,22 +8,27 @@
 #   cmake -B build -DPULP_SANITIZER=realtime  # RealtimeSanitizer (Clang 18+)
 
 set(PULP_SANITIZER "" CACHE STRING "Enable sanitizer: address, thread, undefined, memory, realtime")
+set(PULP_SANITIZER_COMPILE_FLAGS)
+set(PULP_SANITIZER_LINK_FLAGS)
 
 if(PULP_SANITIZER)
     message(STATUS "Pulp: Sanitizer enabled: ${PULP_SANITIZER}")
 
     if(PULP_SANITIZER STREQUAL "address")
-        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=address)
+        set(PULP_SANITIZER_COMPILE_FLAGS
+            -fsanitize=address -fno-omit-frame-pointer)
+        set(PULP_SANITIZER_LINK_FLAGS -fsanitize=address)
     elseif(PULP_SANITIZER STREQUAL "thread")
-        add_compile_options(-fsanitize=thread)
-        add_link_options(-fsanitize=thread)
+        set(PULP_SANITIZER_COMPILE_FLAGS -fsanitize=thread)
+        set(PULP_SANITIZER_LINK_FLAGS -fsanitize=thread)
     elseif(PULP_SANITIZER STREQUAL "undefined")
-        add_compile_options(-fsanitize=undefined -fno-sanitize-recover=all)
-        add_link_options(-fsanitize=undefined)
+        set(PULP_SANITIZER_COMPILE_FLAGS
+            -fsanitize=undefined -fno-sanitize-recover=all)
+        set(PULP_SANITIZER_LINK_FLAGS -fsanitize=undefined)
     elseif(PULP_SANITIZER STREQUAL "memory")
-        add_compile_options(-fsanitize=memory -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=memory)
+        set(PULP_SANITIZER_COMPILE_FLAGS
+            -fsanitize=memory -fno-omit-frame-pointer)
+        set(PULP_SANITIZER_LINK_FLAGS -fsanitize=memory)
     elseif(PULP_SANITIZER STREQUAL "realtime")
         # RealtimeSanitizer (RTSan) — detects real-time safety violations
         # such as memory allocation, mutex locks, or syscalls in audio callbacks.
@@ -34,14 +39,18 @@ if(PULP_SANITIZER)
         #   Linux (x86_64, aarch64): Fully supported with Clang 18+
         #   macOS: Requires upstream LLVM Clang 18+, NOT Apple Clang
         #   Windows: Not supported
-        add_compile_options(-fsanitize=realtime -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=realtime)
+        set(PULP_SANITIZER_COMPILE_FLAGS
+            -fsanitize=realtime -fno-omit-frame-pointer)
+        set(PULP_SANITIZER_LINK_FLAGS -fsanitize=realtime)
     else()
         message(WARNING "Unknown sanitizer: ${PULP_SANITIZER}")
     endif()
 
     # Force debug info for meaningful stack traces
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-g)
+        list(APPEND PULP_SANITIZER_COMPILE_FLAGS -g)
     endif()
+
+    add_compile_options(${PULP_SANITIZER_COMPILE_FLAGS})
+    add_link_options(${PULP_SANITIZER_LINK_FLAGS})
 endif()

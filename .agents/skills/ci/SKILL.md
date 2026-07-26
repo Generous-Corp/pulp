@@ -965,6 +965,12 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   example test without that signature. Keep the lane on the current hosted
   toolchain; do not suppress `vptr` or rewrite the shared ownership model to
   accommodate the stale runtime.
+- **UBSan uses `RelWithDebInfo`, not Debug/O0.** Keep
+  `-fsanitize=undefined -fno-sanitize-recover=all`, symbols, and the complete
+  CTest matrix, but run production-scale DSP spectral and stability
+  certifications with optimization. Debug/O0 can hit their hang guards without
+  emitting a sanitizer diagnostic; do not respond by excluding those tests or
+  increasing their already-generous timeouts.
 - **Flaky-lane retry (de-flaking).** The ASan/UBSan/TSan lanes
   (`sanitizers.yml`) and the coverage lanes (`scripts/run_coverage.sh`) run
   ctest with `--repeat until-pass:2`. Timing-sensitive tests intermittently

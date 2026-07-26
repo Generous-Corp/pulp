@@ -1368,10 +1368,12 @@ jobs:
   # than letting a PR merge on an unverified classification.
   macos:
     needs: [resolve-provider, classify]
-    # The required `macos` check is itself this alias job, so it must ride the
-    # same PULP_PREAMBLE_RUNS_ON_JSON toggle — otherwise the gate still queues on
-    # ubuntu-latest to *report* the result even after the preamble is relocated.
-    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # This job only polls the Actions API and sleeps while the real macOS matrix
+    # leg runs. Keeping it on `pulp-preamble` consumes the exact scarce runner
+    # needed by new resolve/classify jobs, so a handful of hour-long aliases can
+    # deadlock the merge queue. Default to hosted Linux; a dedicated alias pool
+    # can be selected explicitly without ever borrowing preamble capacity.
+    runs-on: ${{ fromJSON(vars.PULP_ALIAS_RUNS_ON_JSON || '"ubuntu-latest"') }}
     # Push runs are cache-warming only — no gate to report, and the macOS
     # leg they would poll for is deliberately absent from the matrix.
     if: always() && github.event_name != 'push'
