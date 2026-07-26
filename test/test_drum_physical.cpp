@@ -599,6 +599,64 @@ TEST_CASE("Cymbal decay controls how long the wash lasts",
     REQUIRE(length_for(3000.0) > length_for(200.0) * 3);
 }
 
+TEST_CASE("Upper cymbal combs carry their own high-pass damping",
+          "[signal][drum][cymbal]") {
+    auto render_with_corner = [](double corner_hz) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_ms(1200.0);
+        voice.set_shift_hz(0.0);
+        voice.set_variation(0.0);
+        voice.set_low_cut_hz(20.0);
+        voice.set_tone_hz(20000.0);
+        voice.set_upper_highpass_hz(corner_hz);
+        voice.set_velocity_feedback(0.0);
+        voice.set_velocity_high_mode_db(0.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 48000);
+    };
+
+    const auto bypassed = render_with_corner(0.0);
+    const auto damped = render_with_corner(3000.0);
+    REQUIRE(bypassed != damped);
+    REQUIRE(high_fraction(damped, 1200.0) >
+            high_fraction(bypassed, 1200.0) * 1.05);
+}
+
+TEST_CASE("Cymbal velocity excites feedback and upper modes",
+          "[signal][drum][cymbal][velocity]") {
+    auto pair_for = [](double feedback, double high_mode_db) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_variation(0.0);
+        voice.set_shift_hz(0.0);
+        voice.set_velocity_feedback(feedback);
+        voice.set_velocity_high_mode_db(high_mode_db);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto soft = hit(voice, 0.1f, 48000);
+        voice.reset();
+        const auto loud = hit(voice, 1.0f, 48000);
+        return std::pair{soft, loud};
+    };
+
+    // With level, generic brightness, and both cymbal-specific couplings off,
+    // velocity is a sample-exact no-op. This is the detector's negative
+    // control: either positive case can differ only through the named path.
+    const auto neutral = pair_for(0.0, 0.0);
+    REQUIRE(neutral.first == neutral.second);
+
+    const auto emphasized = pair_for(0.0, 10.0);
+    REQUIRE_FALSE(emphasized.first == emphasized.second);
+
+    const auto ringing = pair_for(1.0, 0.0);
+    const std::vector<float> soft_tail(ringing.first.begin() + 24000,
+                                       ringing.first.end());
+    const std::vector<float> loud_tail(ringing.second.begin() + 24000,
+                                       ringing.second.end());
+    REQUIRE(peak(loud_tail) > peak(soft_tail) * 1.1);
+}
+
 // -- Zap ---------------------------------------------------------------------
 
 TEST_CASE("The zap's distortion sweep is independent of its pitch sweep",
