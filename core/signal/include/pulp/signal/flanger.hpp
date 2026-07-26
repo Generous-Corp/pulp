@@ -337,12 +337,15 @@ public:
         apply_lfo_settings();
     }
 
-    /// Stereo spread in CYCLES of the sweep, `0 .. 1`. The house default is a
+    /// Stereo spread in CYCLES of the sweep, `0 .. 0.5`. The house default is a
     /// quarter cycle: far enough apart that the two channels decorrelate into
-    /// real width, never so far that both notch patterns line up in
-    /// anti-phase and the sum collapses toward mono.
+    /// real width. This is a PHASE control, not a waveform-normalized width
+    /// control: a half-cycle is exact inversion for sine, triangle and square,
+    /// but not for either saw. Saw still responds to every offset; its stereo
+    /// width simply does not vary monotonically by the same law as the
+    /// odd-symmetric shapes because its wrap discontinuity moves between rails.
     void set_stereo_spread(double cycles01) {
-        stereo_spread_ = std::clamp(cycles01, 0.0, 1.0);
+        stereo_spread_ = std::clamp(cycles01, 0.0, 0.5);
         apply_lfo_settings();
     }
 

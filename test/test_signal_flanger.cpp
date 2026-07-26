@@ -813,6 +813,71 @@ TEST_CASE("R12 a stereo spread decorrelates the two rails without breaking eithe
     for (std::size_t k = 0; k < ml.size(); ++k) REQUIRE(ml[k] == mr[k]);
 }
 
+TEST_CASE("R12 stereo spread clamps to the catalog half-cycle range",
+          "[signal][flanger][stereo]") {
+    // The prompt and catalog expose 0..180 degrees. A direct C++ caller gets
+    // the same contract in cycles: requests beyond 0.5 clamp to the endpoint,
+    // rather than wrapping back through narrower phase relationships.
+    Fl clamped;
+    Fl endpoint;
+    clamped.prepare(kSr);
+    endpoint.prepare(kSr);
+    clamped.set_stereo_spread(0.75);
+    endpoint.set_stereo_spread(0.5);
+    clamped.reset();
+    endpoint.reset();
+
+    constexpr int n = 8192;
+    std::vector<double> in(n), cl(n), cr(n), el(n), er(n);
+    for (int i = 0; i < n; ++i)
+        in[static_cast<std::size_t>(i)] = 0.5 * std::sin(2.0 * M_PI * 700.0 * i / kSr);
+    clamped.process_stereo(in.data(), in.data(), cl.data(), cr.data(), n);
+    endpoint.process_stereo(in.data(), in.data(), el.data(), er.data(), n);
+    for (int i = 0; i < n; ++i) {
+        REQUIRE(cl[static_cast<std::size_t>(i)] == el[static_cast<std::size_t>(i)]);
+        REQUIRE(cr[static_cast<std::size_t>(i)] == er[static_cast<std::size_t>(i)]);
+    }
+}
+
+TEST_CASE("R12 saw spread is a phase offset, not an ignored width control",
+          "[signal][flanger][stereo]") {
+    const auto render = [](double spread, std::vector<double>& left,
+                           std::vector<double>& right) {
+        Fl f;
+        f.prepare(kSr);
+        f.set_mode(Mode::classic);
+        f.set_waveform(LfoWave::saw_up);
+        f.set_rate_hz(1.0);
+        f.set_stereo_spread(spread);
+        f.set_feedback(0.0);
+        f.reset();
+
+        const int n = static_cast<int>(2.0 * kSr);
+        std::vector<double> in(static_cast<std::size_t>(n));
+        left.resize(static_cast<std::size_t>(n));
+        right.resize(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            in[static_cast<std::size_t>(i)] =
+                0.5 * std::sin(2.0 * M_PI * 700.0 * i / kSr);
+        f.process_stereo(in.data(), in.data(), left.data(), right.data(), n);
+    };
+
+    std::vector<double> zero_l, zero_r, quarter_l, quarter_r, half_l, half_r;
+    render(0.0, zero_l, zero_r);
+    render(0.25, quarter_l, quarter_r);
+    render(0.5, half_l, half_r);
+
+    double quarter_side = 0.0;
+    double spread_change = 0.0;
+    for (std::size_t i = 0; i < zero_l.size(); ++i) {
+        REQUIRE(zero_l[i] == zero_r[i]);
+        quarter_side = std::max(quarter_side, std::abs(quarter_l[i] - quarter_r[i]));
+        spread_change = std::max(spread_change, std::abs(quarter_r[i] - half_r[i]));
+    }
+    REQUIRE(quarter_side > 0.01);
+    REQUIRE(spread_change > 0.01);
+}
+
 // ── R13 — the mode switch is bounded ──────────────────────────────────────
 
 TEST_CASE("R13 switching mode mid-render steps no faster than the crossfade allows",

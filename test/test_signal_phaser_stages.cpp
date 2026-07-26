@@ -1015,6 +1015,31 @@ TEST_CASE("Zero stereo spread makes the two channels identical",
     for (std::size_t i = 0; i < ol.size(); ++i) REQUIRE(ol[i] == orr[i]);
 }
 
+TEST_CASE("Saw stereo spread remains a literal phase offset",
+          "[signal][phaser][stereo]") {
+    constexpr double center = kRefCenterHz;
+    const int frames = static_cast<int>(2.0 * kSr);
+    const auto zero = sweep_contours(frames, 1.0, 0.0, 0.9, center, LfoWave::saw_up);
+    const auto quarter = sweep_contours(frames, 1.0, 0.25, 0.9, center, LfoWave::saw_up);
+    const auto half = sweep_contours(frames, 1.0, 0.5, 0.9, center, LfoWave::saw_up);
+
+    double quarter_difference = 0.0;
+    double half_inversion_error = 0.0;
+    double spread_change = 0.0;
+    for (std::size_t i = 0; i < zero.left.size(); ++i) {
+        REQUIRE(zero.left[i] == zero.right[i]);
+        quarter_difference =
+            std::max(quarter_difference, std::abs(quarter.left[i] - quarter.right[i]));
+        half_inversion_error =
+            std::max(half_inversion_error, std::abs(half.left[i] + half.right[i] - 2.0 * center));
+        spread_change =
+            std::max(spread_change, std::abs(quarter.right[i] - half.right[i]));
+    }
+    REQUIRE(quarter_difference > 0.1 * center);
+    REQUIRE(half_inversion_error > 0.1 * center);
+    REQUIRE(spread_change > 0.1 * center);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Acceptance test 8 — triangle versus sine sweep shape
 // ═══════════════════════════════════════════════════════════════════════════

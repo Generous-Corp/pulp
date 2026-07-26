@@ -481,6 +481,12 @@ public:
     double stereo_spread() const { return spread_; }
 
     /// LFO shape, forwarded verbatim to both channels' LFOs.
+    ///
+    /// The catalog contract exposes triangle and sine. Direct C++ callers can
+    /// pass the wider shared `LfoWave` enum; when they do, stereo spread remains
+    /// literally a PHASE offset rather than a normalized-width macro. In
+    /// particular, saw at 0.5 cycles is not an inversion (its discontinuity is
+    /// phase-shifted), so its side/mid trajectory differs from triangle/sine.
     void set_wave(Wave wave) {
         for (auto& lfo : lfo_) lfo.set_wave(wave);
     }
