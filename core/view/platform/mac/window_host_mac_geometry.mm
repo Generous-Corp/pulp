@@ -19,6 +19,7 @@
 #if TARGET_OS_OSX
 
 #include <pulp/view/view.hpp>
+#include <pulp/view/pointer_dispatch.hpp>  // should_yield_to_gesture
 #include <pulp/view/ui_components.hpp>  // ScrollView (scroll-offset in to_local)
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/modal.hpp>
@@ -175,11 +176,11 @@ uint16_t modifiers_from_ns_flags(NSEventModifierFlags flags) {
     return m;
 }
 
-bool dispatch_mac_gesture_pointer_event(pulp::view::View* root,
-                                        pulp::view::Point pt,
-                                        NSEvent* event,
-                                        pulp::view::MousePhase phase,
-                                        bool is_down) {
+bool mac_should_yield_to_gesture(pulp::view::View* root,
+                                 pulp::view::Point pt,
+                                 NSEvent* event,
+                                 pulp::view::MousePhase phase,
+                                 bool is_down) {
     if (!root) return false;
     pulp::view::MouseEvent gesture_event;
     gesture_event.position = pt;
@@ -189,7 +190,7 @@ bool dispatch_mac_gesture_pointer_event(pulp::view::View* root,
     gesture_event.is_down = is_down;
     gesture_event.phase = phase;
     gesture_event.click_count = static_cast<int>(event.clickCount);
-    return root->dispatch_gesture_pointer_event(gesture_event);
+    return pulp::view::should_yield_to_gesture(*root, gesture_event);
 }
 
 pulp::view::Point to_local(pulp::view::Point pos, pulp::view::View* target, pulp::view::View* root) {

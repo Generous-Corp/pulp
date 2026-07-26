@@ -26,6 +26,30 @@ Point point_to_local(Point root_pos, View* target, View* root);
 /// Only the hit view is consulted — the callback does not bubble to ancestors.
 bool dispatch_context_menu(View& root, Point root_pos);
 
+/// Feed one pointer event to `root`'s gesture arbiter and report whether the
+/// host must now YIELD — i.e. whether a recognizer actually took the pointer,
+/// so the host skips its own delivery for this event.
+///
+/// This is the whole gesture-vs-delivery gating decision, in one place. Every
+/// host phase (press / drag / release) calls it and early-returns on true.
+///
+/// The distinction it encodes is the one that is easy to get wrong:
+/// `View::dispatch_gesture_pointer_event` returns whether the event was
+/// CONSUMED, which is true whenever a recognizer merely EXISTS anywhere on the
+/// hit chain — candidates are never pruned mid-session. Only
+/// `View::gesture_claimed_pointer` reports an actual claim. A host that yields
+/// on the consumed flag makes any control carrying a recognizer permanently
+/// undraggable: normal delivery never runs, so the widget sees no press, no
+/// drag and no release while looking perfectly alive. Both macOS hosts had
+/// that bug; each was fixed separately, and the standalone one was missed,
+/// which is why the decision now lives here instead of being spelled out at
+/// six call sites.
+///
+/// Always dispatches, including when it returns false. The arbiter has to see
+/// every event to advance its session, so this is NOT a predicate a caller may
+/// skip — the return value gates DELIVERY, never the dispatch itself.
+bool should_yield_to_gesture(View& root, const MouseEvent& event);
+
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
 ///
 /// ── Delivery contract (asserted by test_pointer_dispatch.cpp) ─────────────
@@ -162,5 +186,37 @@ struct MouseUpHost {
 void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host);
+
+/// Close the press bracket when a recognizer CLAIMS the pointer mid-gesture,
+/// after a press was already delivered to `target`.
+///
+/// The host stops its own delivery at that point (see `should_yield_to_gesture`)
+/// but the press it already delivered is still outstanding: a Knob opens
+/// `on_gesture_begin` and relative-mouse mode on press and clears them only on
+/// release, so bailing bare strands beginEdit with no endEdit — a stuck
+/// automation touch and a hidden cursor. Callers must clear their captured
+/// drag-target slot before invoking this user-callback pipeline, so a callback
+/// exception or a gesture that later goes terminal cannot retry or resume the
+/// raw drag with a position jump.
+///
+/// Runs the FULL release pipeline rather than a bare `on_mouse_up`, because the
+/// press ran the full press pipeline: a legacy-only close leaves the modern
+/// channel and the pointerdown bubble unmatched, and modern-only consumers
+/// stay stuck (`VirtualList` clears `dragging_scrollbar_` solely on an event
+/// with `is_down == false`). No click is fired — a handoff is not a click.
+///
+/// Delivered as a RELEASE, not a cancellation. A takeover is arguably
+/// `pointercancel` (`MouseEvent::is_cancelled` and `View::on_mouse_cancel`
+/// exist for it), which would let a cancellation-aware control roll its partial
+/// drag back instead of committing it. It stays a release because that is what
+/// every path does today — `View::simulate_drag` closes its own mid-loop claim
+/// the same way — and splitting the hosts off from the portable simulation
+/// would reintroduce the host-vs-headless divergence this seam removes.
+/// Changing it means teaching the release pipeline a cancel mode and moving
+/// all three call paths together.
+///
+/// No-op when `target` is null or no longer in the tree.
+void deliver_gesture_handoff(View& root, View* target, Point root_pt,
+                             uint16_t modifiers, int click_count);
 
 }  // namespace pulp::view

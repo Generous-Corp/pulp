@@ -55,6 +55,13 @@ bool dispatch_context_menu(View& root, Point root_pos) {
     return true;
 }
 
+bool should_yield_to_gesture(View& root, const MouseEvent& event) {
+    // Dispatch first and unconditionally — the arbiter must see every event to
+    // advance its session — then gate the caller's delivery on a real CLAIM.
+    const bool consumed = root.dispatch_gesture_pointer_event(event);
+    return consumed && root.gesture_claimed_pointer();
+}
+
 namespace {
 // Pointer-compare only, so it is safe to call with a `needle` that points at
 // freed memory: a captured drag target can be unmounted (and destroyed) between
@@ -291,6 +298,14 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     // default behavior still runs.
     target->on_mouse_event(me);
     repaint();
+}
+
+void deliver_gesture_handoff(View& root, View* target, Point root_pt,
+                             uint16_t modifiers, int click_count) {
+    // Liveness is deliver_mouse_up's own precondition, so no separate guard is
+    // needed here. Empty MouseUpHost: a handoff must not synthesize a click.
+    deliver_mouse_up(root, target, root_pt, modifiers, click_count,
+                     MouseUpHost{});
 }
 
 }  // namespace pulp::view
