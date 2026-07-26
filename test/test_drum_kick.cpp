@@ -870,6 +870,19 @@ TEST_CASE("A short output AHD survives the house FIR latency",
     REQUIRE(house > 0.1);
 }
 
+TEST_CASE("A delayed AHD attack does not leak stale unity gain",
+          "[signal][drum][output][ahd][latency]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(10.0, 5.0, 20.0);
+    output.trigger();
+
+    for (int i = 0; i <= output.latency_samples(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(output.process(i == 0 ? 1.0f : 0.0f) == 0.0f);
+    }
+}
+
 TEST_CASE("A delayed AHD retrigger preserves the preceding output tail",
           "[signal][drum][output][ahd][latency][lifecycle]") {
     OutputStage output;

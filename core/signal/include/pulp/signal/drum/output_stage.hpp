@@ -178,9 +178,13 @@ public:
         }
         ahd_delay_remaining_ = latency_samples();
         if (ahd_delay_remaining_ > 0) {
-            // Keep the preceding hit's envelope audible while its delayed
-            // samples leave the FIR. The replacement contour begins exactly
-            // when the new hit reaches the output.
+            // Keep an active preceding contour audible while its delayed
+            // samples leave the shared FIR. A first trigger is already silent:
+            // process_ahd() returns zero for the inactive phase regardless of
+            // the stored gain. One shared FIR cannot distinguish an old tail
+            // from a new hit's causal precursor on retrigger, so preserving the
+            // established contour is the only policy that does not truncate
+            // already-pending output.
             ahd_trigger_pending_ = true;
             return;
         }
