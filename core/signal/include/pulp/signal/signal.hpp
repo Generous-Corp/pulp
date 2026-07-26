@@ -19,6 +19,7 @@
 #include <pulp/signal/phaser.hpp>
 #include <pulp/signal/reverb.hpp>
 #include <pulp/signal/ladder_filter.hpp>
+#include <pulp/signal/analog_vcf.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>
 #include <pulp/signal/windowing.hpp>
 #include <pulp/signal/fft.hpp>
