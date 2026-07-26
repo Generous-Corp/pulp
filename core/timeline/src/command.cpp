@@ -230,6 +230,8 @@ std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
     size = saturated_add(size, sequence.groove().name().size());
     size = saturated_add(
         size, saturated_multiply(sequence.groove().steps().size(), sizeof(GrooveStep)));
+    size = saturated_add(
+        size, saturated_multiply(sequence.outgoing_sequence_refs().size(), sizeof(ItemId)));
     for (const auto& track : sequence.tracks()) {
         size = saturated_add(size, sizeof(Track));
         size = saturated_add(size, track.name().size());

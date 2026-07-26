@@ -305,3 +305,37 @@ TEST_CASE("Sequence commands include groove state in equality and retained size"
     REQUIRE(retained_size(first_insert) >=
             retained_size(Command{InsertSequence{plain.value()}}) + dynamic_groove_size);
 }
+
+TEST_CASE("Sequence command retained size includes derived outgoing references") {
+    auto reference_clips = [](bool distinct_targets) {
+        std::vector<Clip> clips;
+        for (std::uint64_t index = 0; index < 4; ++index) {
+            auto clip = Clip::create(
+                {100 + index},
+                TickPosition{static_cast<std::int64_t>(index * 120)},
+                TickDuration{120},
+                SequenceRef{{200 + (distinct_targets ? index : 0)}, TickPosition{0}});
+            REQUIRE(clip);
+            clips.push_back(std::move(clip).value());
+        }
+        return clips;
+    };
+
+    auto unique_track =
+        Track::create({60}, "references", reference_clips(true));
+    auto repeated_track =
+        Track::create({60}, "references", reference_clips(false));
+    REQUIRE(unique_track);
+    REQUIRE(repeated_track);
+    auto unique = Sequence::create(
+        {50}, "sequence", TickDuration{480}, {std::move(unique_track).value()});
+    auto repeated = Sequence::create(
+        {50}, "sequence", TickDuration{480}, {std::move(repeated_track).value()});
+    REQUIRE(unique);
+    REQUIRE(repeated);
+    REQUIRE(unique->outgoing_sequence_refs().size() == 4);
+    REQUIRE(repeated->outgoing_sequence_refs().size() == 1);
+    REQUIRE(retained_size(Command{InsertSequence{unique.value()}}) ==
+            retained_size(Command{InsertSequence{repeated.value()}}) +
+                3 * sizeof(ItemId));
+}

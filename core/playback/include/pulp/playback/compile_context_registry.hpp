@@ -68,8 +68,8 @@ class CompileContextRegistry {
     std::vector<ContentRendererRegistration> registrations_;
 };
 
-/// The reverse index §3.2 requires: context kind -> the tracks whose clips
-/// declared they read it.
+/// The reverse index §3.2 requires: context owner + kind -> the root tracks
+/// whose clips declared they read it.
 ///
 /// Built from one pinned snapshot, it is what turns "the chord lane changed"
 /// into an exact track set instead of a full recompile. It is rebuilt when the
@@ -85,12 +85,25 @@ class ContextSubscriberIndex {
                                         const CompileContextRegistry& registry);
 
     /// Sorted, deduplicated track ids that declared a read of `kind`.
+    /// This aggregate query includes declarations reached through references.
     std::span<const timeline::ItemId> subscribers(timeline::CompileContextKind kind) const noexcept;
+
+    /// Sorted, deduplicated root track ids that read `kind` from
+    /// `owner_sequence`.
+    std::span<const timeline::ItemId>
+    subscribers(timeline::ItemId owner_sequence,
+                timeline::CompileContextKind kind) const noexcept;
 
     bool empty() const noexcept;
 
   private:
+    struct OwnedSubscribers {
+        timeline::ItemId owner_sequence;
+        std::array<std::vector<timeline::ItemId>, timeline::kCompileContextKindCount> by_kind;
+    };
+
     std::array<std::vector<timeline::ItemId>, timeline::kCompileContextKindCount> by_kind_;
+    std::vector<OwnedSubscribers> by_owner_sequence_;
 };
 
 /// Translates a committed transaction's dirty set into the exact set of tracks

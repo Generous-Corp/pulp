@@ -339,6 +339,19 @@ TEST_CASE("a root track subscribes to contexts read through a sequence reference
     const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
     REQUIRE(subscribers.size() == 1);
     REQUIRE(subscribers[0] == ItemId{101});
+    REQUIRE(index.subscribers({2}, CompileContextKind::ChordScale).empty());
+    const auto child_subscribers =
+        index.subscribers({3}, CompileContextKind::ChordScale);
+    REQUIRE(child_subscribers.size() == 1);
+    REQUIRE(child_subscribers[0] == ItemId{101});
+
+    const DirtySet child_context_edit(
+        {{{3}, {}, {3}, DirtyFlags::Context}},
+        {{{3}, CompileContextKind::ChordScale}});
+    const auto resolved =
+        resolve_dirty_tracks(*project, {2}, child_context_edit, index);
+    REQUIRE_FALSE(resolved.all);
+    REQUIRE(resolved.tracks == std::vector<ItemId>{ItemId{101}});
 }
 
 TEST_CASE("shared referenced sequences fan out subscriptions without repeated graph walks",
