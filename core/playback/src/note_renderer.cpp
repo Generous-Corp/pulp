@@ -218,10 +218,9 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     }
 
     const bool reanchor_note_pass =
-        !has_note_pass_epoch_ || view.adoption == ShellAdoptionResult::Adopted ||
-        block_sequence_reset || transport.reset_requested ||
-        transport.transport_started || transport.transport_changed ||
-        transport.loop != note_pass_loop_;
+        !has_note_pass_epoch_ || block_sequence_reset ||
+        transport.reset_requested || transport.transport_started ||
+        transport.transport_changed || transport.loop != note_pass_loop_;
     if (reanchor_note_pass && transport.range_count != 0) {
         const auto& first_range = transport.ranges[0];
         note_pass_epoch_ = first_range.monotonic_start;

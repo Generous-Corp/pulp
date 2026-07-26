@@ -62,6 +62,7 @@ struct ProgramHarness {
     PlaybackProgramStore store;
     DeferredCompileExecutor executor;
     PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
+    std::uint64_t next_revision = 1;
 
     void publish(std::shared_ptr<const Project> project,
                  std::shared_ptr<const CompiledTempoMap> map) {
@@ -69,7 +70,7 @@ struct ProgramHarness {
         request.project = std::move(project);
         request.sequence_id = {2};
         request.tempo_map = std::move(map);
-        request.document_revision = 1;
+        request.document_revision = next_revision++;
         request.dirty = {.all = true};
         REQUIRE(compiler.submit(std::move(request)));
         while (compiler.status().busy)
@@ -298,6 +299,49 @@ TEST_CASE("An explicit seek re-anchors conditional note passes",
     for (const auto& event : renderer.events())
         first_note_sounded |= event.is_note_on() && event.data()[1] == 60;
     REQUIRE(first_note_sounded);
+}
+
+TEST_CASE("Program adoption preserves the current conditional note pass",
+          "[playback][note-modifier][transport]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier first_only = chance(30, note_probability_certain);
+    first_only.condition = NoteConditionKind::First;
+    ProgramHarness programs;
+    programs.publish(modifier_project({first_only}, 0), map);
+
+    const auto loop_samples =
+        map->ticks_to_samples(TickPosition{kLoopLength.value}).value;
+    REQUIRE(loop_samples > 0);
+    REQUIRE(loop_samples <= std::numeric_limits<std::uint32_t>::max());
+    const auto block_frames = static_cast<std::uint32_t>(loop_samples);
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = block_frames;
+    config.initially_playing = true;
+    config.loop = {true, {0}, TickPosition{kLoopLength.value}};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+
+    TransportSnapshot first_pass;
+    REQUIRE(transport.begin_block(block_frames, first_pass) == TransportError::None);
+    REQUIRE(renderer.process(latch.begin_block(programs.store), first_pass).code ==
+            NoteRenderCode::Ok);
+    REQUIRE_FALSE(renderer.events().empty());
+    REQUIRE(renderer.events()[0].is_note_on());
+    REQUIRE(renderer.events()[0].data()[1] == 60);
+
+    programs.publish(modifier_project({first_only}, 0), map);
+    TransportSnapshot after_adoption;
+    REQUIRE(transport.begin_block(block_frames, after_adoption) == TransportError::None);
+    const auto adopted =
+        renderer.process(latch.begin_block(programs.store), after_adoption);
+    REQUIRE(adopted.code == NoteRenderCode::Ok);
+    REQUIRE(adopted.adoption == ShellAdoptionResult::Adopted);
+    for (const auto& event : renderer.events())
+        REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
 }
 
 TEST_CASE("A ratchet subdivides a note into retriggers that fill its own span",
