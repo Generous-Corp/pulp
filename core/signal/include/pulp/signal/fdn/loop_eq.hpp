@@ -28,8 +28,8 @@
 // per-sample); process/reset allocate nothing.
 
 #include <pulp/signal/biquad.hpp>
-#include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fdn/config.hpp>
+#include <pulp/signal/fdn/filter_state.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
 
 #include <algorithm>
@@ -116,12 +116,8 @@ public:
     SampleType process(int channel, SampleType x) {
         for (int k = 0; k < num_active_; ++k) {
             const auto& c = coeffs_[static_cast<std::size_t>(k)];
-            State& s = state_[state_index(k, channel)];
-            const double in = finite_or_zero(static_cast<double>(x));
-            const double out = finite_or_zero(c.b0 * in + s.s1);
-            s.s1 = finite_or_zero(snap_to_zero(c.b1 * in - c.a1 * out + s.s2));
-            s.s2 = finite_or_zero(snap_to_zero(c.b2 * in - c.a2 * out));
-            x = static_cast<SampleType>(out);
+            x = static_cast<SampleType>(
+                state_[state_index(k, channel)].process(c, static_cast<double>(x)));
         }
         return x;
     }
@@ -131,11 +127,6 @@ private:
     // untouched EQ costs nothing per sample.
     static constexpr double kFlatBandDb = 0.01;
 
-    struct State {
-        double s1 = 0.0;
-        double s2 = 0.0;
-    };
-
     static std::size_t state_index(int active_slot, int channel) {
         return static_cast<std::size_t>(active_slot) *
                    static_cast<std::size_t>(kNumChannels) +
@@ -144,7 +135,8 @@ private:
 
     std::array<EqBand, kNumEqBands> bands_{};
     std::array<BiquadCoefficientsT<double>, kNumEqBands> coeffs_{};
-    std::array<State, static_cast<std::size_t>(kNumEqBands) * kNumChannels> state_{};
+    std::array<SanitizedBiquadState,
+               static_cast<std::size_t>(kNumEqBands) * kNumChannels> state_{};
     int num_active_ = 0;
     double worst_case_boost_ = 1.0;
 };
@@ -224,22 +216,13 @@ public:
 
     SampleType process(int channel, SampleType x) {
         const auto& c = coeffs_[static_cast<std::size_t>(channel)];
-        State& s = state_[static_cast<std::size_t>(channel)];
-        const double in = finite_or_zero(static_cast<double>(x));
-        const double out = finite_or_zero(c.b0 * in + s.s1);
-        s.s1 = finite_or_zero(snap_to_zero(c.b1 * in - c.a1 * out + s.s2));
-        s.s2 = finite_or_zero(snap_to_zero(c.b2 * in - c.a2 * out));
-        return static_cast<SampleType>(out);
+        return static_cast<SampleType>(
+            state_[static_cast<std::size_t>(channel)].process(c, static_cast<double>(x)));
     }
 
 private:
     static constexpr std::uint32_t kSeedBase = 0x5EED1u;
     static constexpr std::uint32_t kSeedStride = 0x85EBCA6Bu;
-
-    struct State {
-        double s1 = 0.0;
-        double s2 = 0.0;
-    };
 
     int interval_samples(int channel) {
         const double ms = kFluxIntervalMinMs +
@@ -261,7 +244,7 @@ private:
 
     std::array<XorShift32, kNumChannels> rng_{};
     std::array<BiquadCoefficientsT<double>, kNumChannels> coeffs_{};
-    std::array<State, kNumChannels> state_{};
+    std::array<SanitizedBiquadState, kNumChannels> state_{};
     std::array<double, kNumChannels> base_hz_{};
     std::array<double, kNumChannels> target_hz_{};
     std::array<double, kNumChannels> current_hz_{};

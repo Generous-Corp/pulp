@@ -33,6 +33,7 @@
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
 #include <pulp/signal/fdn/modulation.hpp>
+#include <pulp/signal/fdn/sanitize.hpp>
 
 #include <algorithm>
 #include <array>

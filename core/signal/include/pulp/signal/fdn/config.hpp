@@ -10,19 +10,9 @@
 // so all five catalog reverbs run byte-identical DSP.
 
 #include <array>
-#include <cmath>
 #include <cstddef>
 
 namespace pulp::signal::fdn {
-
-// Canonical non-finite recovery primitive for the recursive FDN stages. Keep
-// this deliberately narrower than the magnitude ceiling: most stage-local
-// guards only need to stop NaN/Inf propagation, while the tank write boundary
-// separately owns the emergency amplitude clamp.
-template <typename T>
-inline T finite_or_zero(T value) {
-    return std::isfinite(static_cast<double>(value)) ? value : T{0};
-}
 
 // ── Structural constants (topology, not taste) ───────────────────────────
 inline constexpr int kNumChannels = 16;        // FDN lines; Hadamard needs 2^k

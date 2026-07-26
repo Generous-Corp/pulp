@@ -42,6 +42,26 @@ struct ModalDecaySummary {
     double worst_ratio = 0.0;
 };
 
+struct DifferenceSummary {
+    std::size_t first = 0;
+    double maximum = 0.0;
+};
+
+DifferenceSummary summarize_difference(const std::vector<float>& lhs,
+                                       const std::vector<float>& rhs) {
+    DifferenceSummary summary{lhs.size(), 0.0};
+    for (std::size_t i = 0; i < lhs.size(); ++i) {
+        if (!std::isfinite(lhs[i]) || !std::isfinite(rhs[i]))
+            return {i, std::numeric_limits<double>::infinity()};
+        const double difference =
+            std::abs(static_cast<double>(lhs[i]) - rhs[i]);
+        if (difference != 0.0 && summary.first == lhs.size())
+            summary.first = i;
+        summary.maximum = std::max(summary.maximum, difference);
+    }
+    return summary;
+}
+
 ModalDecaySummary measure_modal_decay(std::span<const float> samples,
                                       double sample_rate) {
     constexpr int fft_size = 8192;
@@ -197,8 +217,16 @@ TEST_CASE("fdn reverb has no narrow mode that outlives its band",
     REQUIRE(decay.worst_ratio <= 2.0);
 }
 
-TEST_CASE("fdn reverb output THD rises monotonically with drive",
+TEST_CASE("fdn reverb loop saturator THD rises monotonically with drive",
           "[fdn][reverb][saturation]") {
+    FdnReverb public_path;
+    public_path.prepare(kHostRate, kBlock);
+    configure_neutral(public_path, 3.0, 5);
+    REQUIRE(public_path.tank().loop_drive() == 0.0);
+    public_path.set_parameter(Param::drive, 1.0);
+    public_path.snap_parameters();
+    REQUIRE(public_path.tank().loop_drive() == 1.0);
+
     constexpr int fft_length = 16384;
     constexpr int cycles = 341;
     const double tone_hz =
@@ -212,21 +240,32 @@ TEST_CASE("fdn reverb output THD rises monotonically with drive",
 
     std::array<double, 3> thd{};
     for (std::size_t d = 0; d < thd.size(); ++d) {
-        FdnReverb reverb;
-        reverb.prepare(kHostRate, kBlock);
-        configure_neutral(reverb, 3.0, 5);
-        reverb.set_parameter(Param::diffusion, 0.0);
-        reverb.set_parameter(Param::drive, static_cast<double>(d) * 0.5);
-        reverb.snap_parameters();
-        reverb.reset();
-        const auto out = render(reverb, input);
+        fdn::FdnTank<float> tank;
+        tank.prepare(fdn::kMaxTankRate);
+        tank.configure(kHostRate);
+        tank.set_flux_depth_db(0.0);
+        fdn::TankControls controls;
+        controls.decay = 3.0;
+        controls.damp_hi = 0.0;
+        controls.damp_lo = 0.0;
+        controls.diffusion = 0.0;
+        controls.mod = 0.0;
+        controls.drive = static_cast<double>(d) * 0.5;
+        tank.update_controls(controls);
+        tank.reset();
 
-        pulp::audio::Buffer<float> captured(1, out.left.size());
-        std::copy(out.left.begin(), out.left.end(), captured.channel(0).begin());
+        std::vector<float> output(input.size());
+        for (std::size_t i = 0; i < input.size(); ++i) {
+            float right = 0.0f;
+            tank.process(input[i], input[i], output[i], right);
+        }
+
+        pulp::audio::Buffer<float> captured(1, output.size());
+        std::copy(output.begin(), output.end(), captured.channel(0).begin());
         pulp::test::audio::ThdOptions options;
         options.fft_length = fft_length;
         options.analysis_offset =
-            static_cast<int>(out.left.size()) - fft_length;
+            static_cast<int>(output.size()) - fft_length;
         options.num_harmonics = 8;
         const auto result = pulp::test::audio::measure_thd(
             std::as_const(captured).view(), tone_hz, kHostRate, options);
@@ -318,8 +357,17 @@ TEST_CASE("fdn reverb kills non-finite state locally and recovers",
         REQUIRE(std::isfinite(state.process(coefficients.sections(), 0.25)));
     }
 
-    SECTION("complete bridge at both resampling directions") {
-        for (double rate : {16000.0, 96000.0}) {
+    SECTION("shared sanitized biquad state") {
+        fdn::SanitizedBiquadState state;
+        pulp::signal::BiquadCoefficientsT<double> coefficients;
+        coefficients.b0 = 0.0;
+        coefficients.b1 = 1e-20;
+        REQUIRE(state.process(coefficients, 1.0) == 0.0);
+        REQUIRE(state.process(coefficients, 0.0) == 0.0);
+    }
+
+    SECTION("complete bridge on equal, upsampled, and downsampled paths") {
+        for (double rate : {16000.0, kHostRate, 96000.0}) {
             fdn::MultirateBridge<float> bridge;
             bridge.prepare(kHostRate, 64);
             bridge.configure(rate);
@@ -372,6 +420,7 @@ TEST_CASE("fdn reverb rate switch resets every rate-domain state",
          {std::pair{0, 7}, std::pair{7, 0}}) {
         FdnReverb switched;
         switched.prepare(kHostRate, kBlock);
+        switched.set_mode(FdnReverb::Mode::hall);
         configure_neutral(switched, 2.0, from_rate);
         const auto dirty =
             render(switched, noise(static_cast<std::size_t>(kHostRate), 0.5f, 88u));
@@ -381,16 +430,72 @@ TEST_CASE("fdn reverb rate switch resets every rate-domain state",
 
         FdnReverb cold;
         cold.prepare(kHostRate, kBlock);
+        cold.set_mode(FdnReverb::Mode::hall);
         configure_neutral(cold, 2.0, to_rate);
+
+        for (int channel = 0; channel < fdn::kNumChannels; ++channel) {
+            REQUIRE(switched.tank().target_delay_samples(channel) ==
+                    cold.tank().target_delay_samples(channel));
+            REQUIRE(switched.tank().applied_gain(channel) ==
+                    cold.tank().applied_gain(channel));
+        }
+        REQUIRE(switched.tank().worst_case_boost() ==
+                cold.tank().worst_case_boost());
 
         const auto probe = impulse(static_cast<std::size_t>(kHostRate * 6.0));
         const auto after = render(switched, probe);
         const auto reference = render(cold, probe);
+        REQUIRE(all_finite(after));
+        REQUIRE(all_finite(reference));
+        const auto left_difference =
+            summarize_difference(after.left, reference.left);
+        const auto right_difference =
+            summarize_difference(after.right, reference.right);
         INFO("rate " << from_rate << " -> " << to_rate);
-        REQUIRE(after.left == reference.left);
-        REQUIRE(after.right == reference.right);
+        INFO("left first/max difference " << left_difference.first << " / "
+                                          << left_difference.maximum);
+        INFO("right first/max difference " << right_difference.first << " / "
+                                           << right_difference.maximum);
+        REQUIRE(left_difference.maximum == 0.0);
+        REQUIRE(right_difference.maximum == 0.0);
         const double after_t60 = band_t60(after.left, kHostRate, kDecayProbeHz);
         const double cold_t60 = band_t60(reference.left, kHostRate, kDecayProbeHz);
         REQUIRE(after_t60 == cold_t60);
     }
+}
+
+TEST_CASE("fdn reverb reset applies pending controls before clearing state",
+          "[fdn][reverb][reset]") {
+    FdnReverb reset_after_activity;
+    reset_after_activity.prepare(kHostRate, kBlock);
+    configure_neutral(reset_after_activity, 2.0, 5);
+    REQUIRE(peak(render(reset_after_activity,
+                        noise(static_cast<std::size_t>(kHostRate), 0.5f, 99u))) >
+            0.0);
+    reset_after_activity.set_parameter(Param::size, 0.9);
+    reset_after_activity.set_parameter(Param::mod, 0.7);
+    reset_after_activity.reset();
+
+    FdnReverb cold;
+    cold.prepare(kHostRate, kBlock);
+    configure_neutral(cold, 2.0, 5);
+    cold.set_parameter(Param::size, 0.9);
+    cold.set_parameter(Param::mod, 0.7);
+    cold.snap_parameters();
+    cold.reset();
+
+    for (int channel = 0; channel < fdn::kNumChannels; ++channel) {
+        REQUIRE(reset_after_activity.tank().target_delay_samples(channel) ==
+                cold.tank().target_delay_samples(channel));
+        REQUIRE(reset_after_activity.tank().applied_gain(channel) ==
+                cold.tank().applied_gain(channel));
+    }
+
+    const auto probe = impulse(static_cast<std::size_t>(kHostRate * 2.0));
+    const auto after = render(reset_after_activity, probe);
+    const auto reference = render(cold, probe);
+    REQUIRE(all_finite(after));
+    REQUIRE(all_finite(reference));
+    REQUIRE(summarize_difference(after.left, reference.left).maximum == 0.0);
+    REQUIRE(summarize_difference(after.right, reference.right).maximum == 0.0);
 }

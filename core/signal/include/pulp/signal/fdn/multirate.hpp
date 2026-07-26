@@ -32,6 +32,7 @@
 
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/fdn/config.hpp>
+#include <pulp/signal/fdn/filter_state.hpp>
 #include <pulp/signal/fdn/interp.hpp>
 
 #include <algorithm>
@@ -120,27 +121,14 @@ public:
 
     double process(const std::array<BiquadCoefficientsT<double>, 2>& sections,
                    double x) {
-        x = finite_or_zero(x);
-        for (int k = 0; k < 2; ++k) {
-            const auto& c = sections[static_cast<std::size_t>(k)];
-            const double out =
-                finite_or_zero(c.b0 * x + s_[static_cast<std::size_t>(k)].s1);
-            s_[static_cast<std::size_t>(k)].s1 =
-                finite_or_zero(c.b1 * x - c.a1 * out +
-                               s_[static_cast<std::size_t>(k)].s2);
-            s_[static_cast<std::size_t>(k)].s2 =
-                finite_or_zero(c.b2 * x - c.a2 * out);
-            x = out;
-        }
+        for (int k = 0; k < 2; ++k)
+            x = s_[static_cast<std::size_t>(k)].process(
+                sections[static_cast<std::size_t>(k)], x);
         return x;
     }
 
 private:
-    struct Section {
-        double s1 = 0.0;
-        double s2 = 0.0;
-    };
-    std::array<Section, 2> s_{};
+    std::array<SanitizedBiquadState, 2> s_{};
 };
 
 // Host <-> tank stereo bridge.
@@ -224,8 +212,10 @@ public:
     int host_to_tank(const SampleType* left, const SampleType* right, int n) {
         if (!resampling_) {
             for (int i = 0; i < n; ++i) {
-                tank_in_[0][static_cast<std::size_t>(i)] = left[i];
-                tank_in_[1][static_cast<std::size_t>(i)] = right[i];
+                tank_in_[0][static_cast<std::size_t>(i)] =
+                    finite_or_zero(left[i]);
+                tank_in_[1][static_cast<std::size_t>(i)] =
+                    finite_or_zero(right[i]);
             }
             return n;
         }
@@ -259,8 +249,10 @@ public:
     void tank_to_host(int tank_n, SampleType* left, SampleType* right, int host_n) {
         if (!resampling_) {
             for (int i = 0; i < tank_n; ++i) {
-                left[i] = tank_out_[0][static_cast<std::size_t>(i)];
-                right[i] = tank_out_[1][static_cast<std::size_t>(i)];
+                left[i] =
+                    finite_or_zero(tank_out_[0][static_cast<std::size_t>(i)]);
+                right[i] =
+                    finite_or_zero(tank_out_[1][static_cast<std::size_t>(i)]);
             }
             return;
         }
