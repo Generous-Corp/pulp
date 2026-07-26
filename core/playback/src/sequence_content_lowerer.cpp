@@ -175,8 +175,8 @@ class SequenceContentLowerer::Impl {
                                          placement.id()};
         if (!project_.find_sequence(reference.sequence_id))
             return SequenceLoweringError{CompileErrorCode::InvalidStructure, reference.sequence_id};
-        if (placement.duration().value >
-            std::numeric_limits<std::int64_t>::max() - reference.source_start.value)
+        if (reference.source_start.value >
+            std::numeric_limits<std::int64_t>::max() - placement.duration().value)
             return SequenceLoweringError{CompileErrorCode::InvalidStructure, placement.id()};
         return std::nullopt;
     }
@@ -246,7 +246,8 @@ class SequenceContentLowerer::Impl {
         }
 
         if (const auto* nested = std::get_if<timeline::SequenceRef>(&child.content())) {
-            if (left_trim > std::numeric_limits<std::int64_t>::max() - nested->source_start.value)
+            if (nested->source_start.value >
+                std::numeric_limits<std::int64_t>::max() - left_trim)
                 return {.error =
                             SequenceLoweringError{CompileErrorCode::InvalidStructure, child.id()}};
             auto nested_clip = timeline::Clip::create(
@@ -302,8 +303,12 @@ class SequenceContentLowerer::Impl {
         if (note.start.value < 0 || note.start.value > pending.child.duration().value ||
             note.duration.value > pending.child.duration().value - note.start.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
+        if (pending.child.start().value >
+            std::numeric_limits<std::int64_t>::max() - note.start.value)
+            return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_start = pending.child.start().value + note.start.value;
-        if (note.duration.value > std::numeric_limits<std::int64_t>::max() - note_start)
+        if (note_start >
+            std::numeric_limits<std::int64_t>::max() - note.duration.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
         const auto note_end = note_start + note.duration.value;
         const auto audible_start = std::max(note_start, pending.clipped_start.value);
