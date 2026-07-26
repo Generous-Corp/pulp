@@ -39,12 +39,28 @@ concept HasEventFactor = requires(Multiplier multiplier) { multiplier.set_multip
 template <typename Multiplier>
 concept HasSignalFactor = requires(Multiplier multiplier) { multiplier.set_multiple(4); };
 
+template <typename Detector>
+concept AcceptsIntegerTrigger = requires(Detector detector) { detector.process(1); };
+
+template <typename Detector>
+concept AcceptsFloatTrigger = requires(Detector detector) { detector.process(1.0f); };
+
+template <typename Detector>
+concept AcceptsExplicitSignalTrigger =
+    requires(Detector detector) { detector.process_signal(1.0f); };
+
 static_assert(!AcceptsIntegerClock<ClockMult>);
 static_assert(!AcceptsIntegerClock<SignalClockMult>);
 static_assert(HasEventFactor<ClockMult>);
 static_assert(!HasSignalFactor<ClockMult>);
 static_assert(!HasEventFactor<SignalClockMult>);
 static_assert(HasSignalFactor<SignalClockMult>);
+static_assert(std::same_as<ClockMultT<float>, ClockMult>);
+static_assert(std::same_as<ClockMultT<double>, ClockMult64>);
+static_assert(std::same_as<EventClockMult64, ClockMult64>);
+static_assert(!AcceptsIntegerTrigger<TriggerDetect>);
+static_assert(AcceptsFloatTrigger<TriggerDetect>);
+static_assert(AcceptsExplicitSignalTrigger<TriggerDetect>);
 
 } // namespace
 
@@ -88,6 +104,21 @@ TEST_CASE("TriggerDetect thresholds a continuous signal",
     REQUIRE_FALSE(detect.process_signal(0.9f));
     REQUIRE_FALSE(detect.process_signal(0.1f));
     REQUIRE(detect.process_signal(0.7f));
+}
+
+TEST_CASE("TriggerDetect keeps floating process compatibility on one signal state",
+          "[signal][mod][trigger][compatibility]") {
+    TriggerDetect explicit_signal;
+    TriggerDetect compatible_signal;
+    for (auto* detector : {&explicit_signal, &compatible_signal}) {
+        detector->set_thresholds(0.75, 0.25);
+        detector->reset();
+    }
+
+    for (float sample : {0.0f, 0.8f, 0.7f, 0.2f, 0.9f, 0.1f}) {
+        REQUIRE(explicit_signal.process_signal(sample) == compatible_signal.process(sample));
+        REQUIRE(explicit_signal.high() == compatible_signal.high());
+    }
 }
 
 // ── GateGenT ─────────────────────────────────────────────────────────────────
@@ -183,6 +214,12 @@ TEST_CASE("event and signal clock multipliers expose one scheduler each",
     // engine through overload resolution.
     REQUIRE(events.process(true));
     REQUIRE(signal.process(1.0f));
+
+    // The established precision-specialized event names remain source- and
+    // behavior-compatible while still accepting only decoded bool events.
+    ClockMult64 precise_events;
+    precise_events.set_multiplier(4);
+    REQUIRE(precise_events.process(true));
 }
 
 // ── BurstGenT ────────────────────────────────────────────────────────────────

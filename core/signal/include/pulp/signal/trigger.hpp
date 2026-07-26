@@ -24,6 +24,7 @@
 #include <cmath>
 #include <concepts>
 #include <cstdint>
+#include <limits>
 
 namespace pulp::signal {
 
@@ -62,8 +63,17 @@ public:
         update_refractory_();
     }
 
-    /// Threshold for `process_signal()`. Ignored by the boolean `process()`.
-    void set_threshold(SampleType t) { threshold_ = t; }
+    /// Single-threshold shorthand for `process_signal()`. This collapses the
+    /// hysteresis band to the established strict `x > threshold` transition
+    /// while retaining explicit signal dispatch. Ignored by boolean `process()`.
+    void set_threshold(SampleType t) {
+        const double threshold = static_cast<double>(t);
+        // The established single-threshold path fired on `x > threshold`, not
+        // equality. Express that through the inclusive hysteresis comparison
+        // without retaining a second signal detector.
+        high_threshold_ = std::nextafter(threshold, std::numeric_limits<double>::infinity());
+        low_threshold_ = threshold;
+    }
     void set_thresholds(double high, double low) {
         high_threshold_ = high;
         low_threshold_ = std::min(low, high - 1e-9);
@@ -88,7 +98,7 @@ public:
     /// Continuous-signal edge detection used by the sequencing lane. This
     /// deliberately has hysteresis and no refractory; the boolean overload is
     /// the already-decoded event lane and retains its optional debounce.
-    bool process(SampleType input) {
+    bool process_signal(SampleType input) {
         const double x = static_cast<double>(input);
         if (hysteresis_armed_ && x >= high_threshold_) {
             hysteresis_armed_ = false;
@@ -98,18 +108,28 @@ public:
         return false;
     }
 
-    void process(SampleType input, bool& rising, bool& falling) {
+    void process_signal(SampleType input, bool& rising, bool& falling) {
         const bool was_high = !hysteresis_armed_;
-        rising = process(input);
+        rising = process_signal(input);
         falling = was_high && hysteresis_armed_;
     }
 
-    bool high() const { return !hysteresis_armed_; }
+    /// Source-compatible bridge for callers that passed floating-point CV to
+    /// `process()`. New code should spell the signal domain explicitly. This is
+    /// one forwarding path into the same hysteretic state, not a second edge
+    /// detector selected by overload history.
+    template <std::floating_point Floating>
+    bool process(Floating input) {
+        return process_signal(static_cast<SampleType>(input));
+    }
 
-    /// Threshold a continuous signal and detect its rising edge. No hysteresis
-    /// here — the refractory period is the chatter guard, and a
-    /// `ComparatorT` upstream adds hysteresis when the source needs it.
-    bool process_signal(SampleType x) { return process(x > threshold_); }
+    /// Integer literals are neither decoded event gates nor continuous CV.
+    /// Reject them instead of leaving bool-vs-signal overload resolution
+    /// ambiguous.
+    template <std::integral Integer>
+    bool process(Integer) = delete;
+
+    bool high() const { return !hysteresis_armed_; }
 
     bool armed() const { return countdown_ == 0; }
 
@@ -123,7 +143,6 @@ private:
     double refractory_ms_ = kDefaultRefractoryMs;
     long long refractory_samples_ = 48;
     long long countdown_ = 0;
-    SampleType threshold_ = SampleType{0.5};
     double high_threshold_ = kTriggerHighThreshold;
     double low_threshold_ = kTriggerLowThreshold;
     bool prev_ = false;
@@ -216,7 +235,7 @@ public:
     }
 
     SampleType process(SampleType trigger) {
-        if (detector_.process(trigger)) remaining_ = length_samples_;
+        if (detector_.process_signal(trigger)) remaining_ = length_samples_;
         if (remaining_ <= 0) return low_level_;
         --remaining_;
         return high_level_;
@@ -277,7 +296,7 @@ public:
     }
 
     bool process(SampleType clock) {
-        if (!detector_.process(clock)) return false;
+        if (!detector_.process_signal(clock)) return false;
         const bool pass = counter_ == 0;
         counter_ = (counter_ + 1) % division_;
         return pass;
@@ -308,6 +327,7 @@ using ClockDivider64 = ClockDividerT<double>;
 ///
 /// USE: ratchets and rolls from a slow clock; hi-hats derived from a kick
 /// trigger; running a modulation source at 4x the pulse the user is tapping.
+template <typename SampleType = float>
 class ClockMultT {
 public:
     static constexpr int kMaxMultiplier = 16;
@@ -370,8 +390,10 @@ private:
 };
 
 /// Backward-compatible name for the already-decoded event adapter.
-using ClockMult = ClockMultT;
-using EventClockMult = ClockMultT;
+using ClockMult = ClockMultT<float>;
+using ClockMult64 = ClockMultT<double>;
+using EventClockMult = ClockMultT<float>;
+using EventClockMult64 = ClockMultT<double>;
 
 /// Continuous-signal clock multiplier.
 ///
@@ -420,7 +442,7 @@ public:
 
     bool process(SampleType clock) {
         since_edge_ += 1.0;
-        if (detector_.process(clock)) {
+        if (detector_.process_signal(clock)) {
             const bool usable = have_edge_ && since_edge_ <= max_period_samples_;
             period_ = usable ? since_edge_ : 0.0;
             have_edge_ = true;
@@ -549,7 +571,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process(trigger)) {
+        if (detector_.process_signal(trigger)) {
             remaining_ = count_ - 1;
             countdown_ = interval_samples_;
             return true;
@@ -679,7 +701,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process(trigger)) countdown_ = delay_samples_;
+        if (detector_.process_signal(trigger)) countdown_ = delay_samples_;
         if (countdown_ < 0) return false;
         if (countdown_ == 0) {
             countdown_ = -1;
