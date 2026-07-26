@@ -3383,3 +3383,91 @@ TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child
                 result.source,
                 "->set_pointer_events(pulp::view::View::PointerEvents::auto_);") == 1);
 }
+
+TEST_CASE("generate_pulp_js escapes raw box shadows and keeps audio labels escaped",
+          "[view][import][security]") {
+    // Design-supplied text reaching executable JS. The audio-label and comment
+    // paths are covered by the widget-lowering change that escapes the label and
+    // folds newlines out of the comment; this asserts both stay closed.
+    //
+    // Box shadows are the same class of hole and are still open: they emit
+    // through box_shadow_to_css, which returns the design's OWN text verbatim
+    // when a raw shadow string was kept for round-tripping, straight into a JS
+    // literal.
+    //
+    // Observed from Forge, whose designer test plants `setTheme('light');` into
+    // a node name, an anchor id, an audio label and a token key, then asserts
+    // none of it survives lowering.
+    //
+    // The payload ends in `//` on purpose: once the literal is broken, that
+    // comments out the orphaned `',` and the result parses, which is what makes
+    // this executable rather than merely malformed.
+    const std::string payload = "Rate\nsetTheme('light');\n//";
+
+    DesignIR ir;
+    ir.source = DesignSource::claude;
+    ir.root.type = "frame";
+    ir.root.name = "Root";
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "rate_knob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = payload;
+    knob.audio_min = 0.0f;
+    knob.audio_max = 1.0f;
+    knob.audio_default = 0.5f;
+
+    ir.root.children.push_back(knob);
+
+    // The shadow rides a plain node, not the knob: an audio widget lowers
+    // through the web-compat DOM path, whose style never reaches the boxShadow
+    // emitter, so a payload parked there would never be emitted and the
+    // assertion below would pass without proving anything.
+    //
+    // `raw` is the vector that matters — box_shadow_to_css returns it verbatim
+    // (design_ir_json.cpp: `if (!s.raw.empty()) { out += s.raw; continue; }`)
+    // so whatever the design authored lands directly in the JS literal.
+    IRNode panel;
+    panel.type = "frame";
+    panel.name = "shadow_panel";
+    IRBoxShadow shadow;
+    shadow.raw = "0 0 4px #000');\nsetTheme('light');\n//";
+    panel.style.box_shadow.push_back(shadow);
+    ir.root.children.push_back(panel);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;
+    const auto js = generate_pulp_js(ir, opts);
+
+    // The payload must not appear in a position where it would RUN.
+    REQUIRE(js.find("\nsetTheme('light');\n") == std::string::npos);
+
+    // Positively: the label survives as data, escaped, so the design still
+    // round-trips — escaping must not simply delete the text.
+    REQUIRE(js.find("setLabel(") != std::string::npos);
+    REQUIRE(js.find("\\n") != std::string::npos);
+
+    // Every emitted line must still be a balanced JS statement: a broken literal
+    // shows up as a line whose single quotes do not pair.
+    std::istringstream lines(js);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::size_t quotes = 0;
+        for (std::size_t i = 0; i < line.size(); ++i) {
+            if (line[i] != '\'') continue;
+            if (i > 0 && line[i - 1] == '\\') continue;  // an escaped quote is data
+            ++quotes;
+        }
+        INFO("unbalanced quotes on: " << line);
+        REQUIRE(quotes % 2 == 0);
+    }
+
+    // And with comments ON, design text must not be able to terminate one.
+    CodeGenOptions commented = opts;
+    commented.include_comments = true;
+    const auto with_comments = generate_pulp_js(ir, commented);
+    REQUIRE(with_comments.find("\nsetTheme('light');\n") == std::string::npos);
+}
