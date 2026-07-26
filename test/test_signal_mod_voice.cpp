@@ -153,6 +153,34 @@ TEST_CASE("Lpg droop lengthens the tail without changing the peak",
     REQUIRE(tail_after(0.9f, 7200) > tail_after(0.5f, 7200));
 }
 
+TEST_CASE("Lpg reset synchronizes cutoff telemetry with the filter command",
+          "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(kSampleRate);
+    lpg.set_range_hz(100.0f, 6400.0f);
+    lpg.set_colour(0.5f);
+    lpg.set_gate(1.0f);
+    for (int i = 0; i < 10000; ++i) (void)lpg.process(0.0f);
+    REQUIRE(lpg.cutoff_hz() > 6000.0f);
+
+    lpg.reset();
+
+    // At a reset cell state of zero and colour 0.5, the filter control is
+    // halfway through the logarithmic range: sqrt(100 * 6400) = 800 Hz.
+    REQUIRE_THAT(lpg.cutoff_hz(), WithinRel(800.0f, 1.0e-6f));
+    (void)lpg.process(0.0f);
+    REQUIRE_THAT(lpg.cutoff_hz(), WithinRel(800.0f, 1.0e-6f));
+}
+
+TEST_CASE("Lpg reset cutoff remains valid at a non-positive sample rate",
+          "[signal][mod][lpg]") {
+    Lpg lpg;
+    lpg.prepare(0.0f);
+
+    REQUIRE_THAT(lpg.cutoff_hz(), WithinRel(1.0f, 1.0e-6f));
+    REQUIRE(std::isfinite(lpg.process(0.0f)));
+}
+
 TEST_CASE("Lpg re-strike accumulates: a roll crescendos", "[signal][mod][lpg]") {
     Lpg lpg;
     lpg.prepare(kSampleRate);
