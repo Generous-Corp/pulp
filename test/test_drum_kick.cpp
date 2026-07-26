@@ -558,6 +558,29 @@ TEST_CASE("A second strike interferes with the ring rather than replacing it",
     REQUIRE(differs);
 }
 
+TEST_CASE("A resonant retrigger keeps the output-stage history",
+          "[signal][drum][kick][resonant][lifecycle]") {
+    KickVoice uninterrupted;
+    KickVoice retriggered;
+    for (KickVoice* voice : {&uninterrupted, &retriggered}) {
+        init(*voice, KickBody::resonant);
+        voice->set_tune_hz(70.0);
+        voice->set_body_decay_ms(1200.0);
+        voice->set_click_level(0.0);
+        voice->set_noise_level(0.0);
+        voice->note_on(1.0f);
+    }
+
+    (void)render(uninterrupted, 6000);
+    (void)render(retriggered, 6000);
+    retriggered.note_on(1.0f);
+
+    const auto control = render(uninterrupted, 32);
+    const auto after_retrigger = render(retriggered, 32);
+    REQUIRE(rms(control) > 1.0e-5);
+    REQUIRE(rms(after_retrigger) > rms(control) * 0.1);
+}
+
 // -- Circuit body ------------------------------------------------------------
 
 TEST_CASE("The circuit body produces a downward pitch drop with no pitch envelope",

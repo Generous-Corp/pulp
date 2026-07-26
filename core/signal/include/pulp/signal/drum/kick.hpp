@@ -240,8 +240,9 @@ protected:
             circuit_life =
                 circuit_life_.trigger(NoiseSource::default_seed);
 
-        if (body_mode_ != KickBody::circuit ||
-            circuit_life.reset_dsp_state)
+        if (body_mode_ == KickBody::oscillator ||
+            (body_mode_ == KickBody::circuit &&
+             circuit_life.reset_dsp_state))
             output_.reset();
         output_.trigger();
         const auto& response = velocity_response();
