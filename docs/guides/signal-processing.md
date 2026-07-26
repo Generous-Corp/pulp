@@ -767,10 +767,13 @@ for processors that select a fixed quality without owning a prepared stage.
 constructed engines without recovering their concrete types. `Kit` publishes
 one latency for its summed output and applies one quality to every registered
 voice before triggering or rendering, so layered voices cannot drift apart
-when a caller retains and reconfigures a concrete voice. A processor mixing a
-voice or kit with an undelayed parallel path must compensate the dry path or
-report that latency to its host. Voices keep rendering while the FIR owns
-delayed samples, so their final filter tail is drained rather than cut.
+when a caller retains and reconfigures a concrete voice. Existing custom
+`Voice` subclasses remain source-compatible: their default quality contract is
+zero-latency bypass, and registering one makes the whole kit fall back to that
+common aligned quality. A processor mixing a voice or kit with an undelayed
+parallel path must compensate the dry path or report that latency to its host.
+Voices keep rendering while the FIR owns delayed samples, so their final filter
+tail is drained rather than cut.
 `prepare()` creates the FIR storage; quality changes and the audio path are
 allocation-free, but a quality change resets the filter and lo-fi clock and
 therefore belongs outside the audio callback unless a kit is restoring its

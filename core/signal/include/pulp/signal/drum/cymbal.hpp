@@ -179,7 +179,7 @@ protected:
         const auto life = hit_life_.trigger(NoiseSource::default_seed);
         if (life.reset_dsp_state) {
             reset_dsp_memory();
-            output_.reset();
+            output_.reset_nonlinear_state();
         }
         if (life.reseed_excitation) {
             noise_.set_seed(life.seed);

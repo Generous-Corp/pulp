@@ -243,7 +243,7 @@ protected:
         if (body_mode_ == KickBody::oscillator ||
             (body_mode_ == KickBody::circuit &&
              circuit_life.reset_dsp_state))
-            output_.reset();
+            output_.reset_nonlinear_state();
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);

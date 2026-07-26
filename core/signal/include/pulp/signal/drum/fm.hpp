@@ -195,7 +195,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        output_.reset_nonlinear_state();
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
@@ -298,7 +298,8 @@ protected:
                             (2.0 * 3.14159265358979323846),
                     modulator_warp);
             const double modulator =
-                FmWaveTable::read(modulator_wave_, modulator_phase);
+                FmWaveTable::read(modulator_wave_, modulator_phase,
+                                  modulator_hz / sample_rate());
             modulator_z_ = modulator;
 
             const double carrier_phase =
@@ -307,7 +308,8 @@ protected:
                                          (2.0 * 3.14159265358979323846),
                     carrier_warp);
             const double carrier =
-                FmWaveTable::read(carrier_wave_, carrier_phase);
+                FmWaveTable::read(carrier_wave_, carrier_phase,
+                                  carrier_hz / sample_rate());
 
             const double body = filter_.process(static_cast<float>(carrier)) * amplitude;
             const double strike = click_.process(static_cast<double>(noise_.white()));
@@ -569,7 +571,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        output_.reset_nonlinear_state();
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
@@ -630,7 +632,8 @@ protected:
                     FmWaveTable::read(
                         waves_[op],
                         phases_[op] +
-                            modulation / (2.0 * 3.14159265358979323846)) *
+                            modulation / (2.0 * 3.14159265358979323846),
+                        hz / sample_rate()) *
                     envelopes_[op].process() * levels_[op];
             }
 

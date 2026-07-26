@@ -147,9 +147,9 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        output_.reset_nonlinear_state();
         burst_output_.sync_configuration_from(output_);
-        burst_output_.reset();
+        burst_output_.reset_nonlinear_state();
         output_.trigger();
         burst_output_.trigger();
         const auto& response = velocity_response();

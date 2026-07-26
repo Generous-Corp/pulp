@@ -53,7 +53,7 @@ public:
         // voice would run at whatever rate it was constructed with, which is
         // audible as a wrongly-pitched drum rather than as an error.
         if (voice != nullptr) {
-            voice->set_output_oversampling(oversampling_);
+            set_output_oversampling(oversampling_);
             voice->prepare(sample_rate_);
         }
         return slots_.size() - 1;
@@ -77,6 +77,21 @@ public:
         for (auto& slot : slots_) {
             if (slot.voice != nullptr)
                 slot.voice->set_output_oversampling(oversampling_);
+        }
+        for (const auto& slot : slots_) {
+            if (slot.voice != nullptr &&
+                slot.voice->output_oversampling() != oversampling_) {
+                // A source-compatible legacy Voice has no quality stage. Keep
+                // the entire sum honest and aligned by falling back to the
+                // zero-latency contract it reports.
+                oversampling_ = OutputOversampling::bypass;
+                for (auto& fallback_slot : slots_) {
+                    if (fallback_slot.voice != nullptr)
+                        fallback_slot.voice->set_output_oversampling(
+                            oversampling_);
+                }
+                break;
+            }
         }
     }
 

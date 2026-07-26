@@ -118,6 +118,22 @@ TEST_CASE("All 26 shared FM waves are bounded and distinct",
     }
 }
 
+TEST_CASE("FM wave tables omit harmonics above Nyquist",
+          "[signal][drum][fm][wave][aliasing]") {
+    constexpr double phase = 0.071;
+    constexpr double increment = 0.2;
+    const double fundamental = std::sin(2.0 * kPi * phase);
+    const double second = std::sin(4.0 * kPi * phase);
+    const double expected = 0.5 * (fundamental + second);
+
+    // Wave 20 has four equal harmonics. At a 0.2-cycle increment only its
+    // first two fit below Nyquist, so the reader renormalizes that pair.
+    REQUIRE(std::fabs(FmWaveTable::read(20, phase, increment) - expected) <
+            1.0e-12);
+    REQUIRE(FmWaveTable::read(20, phase, increment) !=
+            FmWaveTable::read(20, phase));
+}
+
 TEST_CASE("FM2 carrier and modulator wave tables reach emitted audio",
           "[signal][drum][fm][wave]") {
     auto render_wave = [](int carrier, int modulator) {
@@ -136,6 +152,30 @@ TEST_CASE("FM2 carrier and modulator wave tables reach emitted audio",
     const auto sine = render_wave(0, 0);
     REQUIRE_FALSE(render_wave(20, 0) == sine);
     REQUIRE_FALSE(render_wave(0, 20) == sine);
+}
+
+TEST_CASE("An FM retrigger keeps pending output-stage samples",
+          "[signal][drum][fm][output][lifecycle]") {
+    auto prepare = [](FmDrumVoice& voice) {
+        bare(voice);
+        voice.set_tune_hz(180.0);
+        voice.set_index(3.0);
+        voice.set_index_ms(1000.0);
+        voice.set_decay_ms(2000.0);
+        voice.note_on(1.0f);
+        (void)render(voice, 6000);
+    };
+
+    FmDrumVoice uninterrupted;
+    FmDrumVoice retriggered;
+    prepare(uninterrupted);
+    prepare(retriggered);
+    retriggered.note_on(1.0f);
+
+    const auto control = render(uninterrupted, 32);
+    const auto after_retrigger = render(retriggered, 32);
+    REQUIRE(peak(control) > 1.0e-5);
+    REQUIRE(peak(after_retrigger) > peak(control) * 0.1);
 }
 
 TEST_CASE("FM2 operator warp envelopes collapse independently",

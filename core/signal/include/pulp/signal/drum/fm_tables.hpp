@@ -47,13 +47,21 @@ struct FmWaveTable {
             {{1.00, -0.25, -0.500, 0.75}},
         }};
 
-    static double read(int wave, double phase) {
+    static double read(int wave, double phase,
+                       double phase_increment = 0.0) {
         const auto index =
             static_cast<std::size_t>(std::clamp(wave, 0, wave_count - 1));
         phase -= std::floor(phase);
+        const double increment = std::fabs(phase_increment);
+        const int available_harmonics =
+            increment > 0.0
+                ? std::clamp(
+                      static_cast<int>(std::floor(0.5 / increment)), 1,
+                      harmonic_count)
+                : harmonic_count;
         double sample = 0.0;
         double normalization = 0.0;
-        for (int harmonic = 0; harmonic < harmonic_count; ++harmonic) {
+        for (int harmonic = 0; harmonic < available_harmonics; ++harmonic) {
             const double coefficient =
                 harmonics[index][static_cast<std::size_t>(harmonic)];
             sample += coefficient *

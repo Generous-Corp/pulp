@@ -740,6 +740,7 @@ TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
 
     voice.set_hit_life(HitLifeMode::fixed_seed);
     const auto fixed_a = hit(voice, 0.8f, 12000);
+    voice.reset();
     const auto fixed_b = hit(voice, 0.8f, 12000);
     REQUIRE(fixed_a == fixed_b);
 

@@ -49,6 +49,21 @@ using pulp::signal::drum::find_engine;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kFs = 48000.0;
 
+class LegacyVoice : public Voice {
+protected:
+    void on_prepare(double) override {}
+    void on_reset() override { active_ = false; }
+    void on_note_on(float) override { active_ = true; }
+    bool on_is_active() const override { return active_; }
+    void render_add(float* out, int num_samples) override {
+        for (int i = 0; i < num_samples; ++i) out[i] += 0.25f;
+        active_ = false;
+    }
+
+private:
+    bool active_ = false;
+};
+
 std::vector<float> render(Voice& voice, int num_samples, int block = 64) {
     std::vector<float> out(static_cast<std::size_t>(num_samples), 0.0f);
     for (int i = 0; i < num_samples; i += block) {
@@ -1195,6 +1210,27 @@ TEST_CASE("A kit publishes and enforces one output latency",
     snare.output().set_oversampling(OutputOversampling::bypass);
     kit.trigger(38, 1.0f);
     REQUIRE(snare.latency_samples() == kit.latency_samples());
+}
+
+TEST_CASE("A legacy custom voice keeps the kit source-compatible and aligned",
+          "[signal][drum][kit][latency][compatibility]") {
+    LegacyVoice legacy;
+    SnareVoice snare;
+    Kit kit;
+    kit.add_voice(&snare, 38);
+    REQUIRE(kit.latency_samples() == 32);
+
+    kit.add_voice(&legacy, 60);
+    REQUIRE(legacy.latency_samples() == 0);
+    REQUIRE(legacy.output_oversampling() == OutputOversampling::bypass);
+    REQUIRE(kit.output_oversampling() == OutputOversampling::bypass);
+    REQUIRE(kit.latency_samples() == 0);
+    REQUIRE(snare.latency_samples() == 0);
+
+    kit.trigger(60, 1.0f);
+    std::vector<float> out(16, 0.0f);
+    kit.process(out.data(), static_cast<int>(out.size()));
+    REQUIRE(peak(out) > 0.0);
 }
 
 TEST_CASE("A voice registered after the kit was prepared still runs at the "

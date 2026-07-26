@@ -67,6 +67,10 @@ public:
         ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
 
+    /// Restarts hit-scoped degradation without discarding samples already
+    /// travelling through the linear-phase output filters.
+    void reset_nonlinear_state() { lofi_.reset(); }
+
     /// Changes the output quality outside the audio callback. The filter banks
     /// are prepared eagerly, so switching among the three choices does not
     /// allocate, but it resets their histories and the lo-fi clock.

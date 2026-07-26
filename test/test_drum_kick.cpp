@@ -318,7 +318,9 @@ TEST_CASE("The same parameters and velocity render identical samples",
     const auto second = hit(b, 0.7f, 8192);
     REQUIRE(first == second);
 
-    // ...and the same voice hit twice must repeat too.
+    // An explicit reset separates independent renders; an overlapping
+    // retrigger deliberately preserves samples already inside the output FIR.
+    a.reset();
     const auto third = hit(a, 0.7f, 8192);
     REQUIRE(third == first);
 }
@@ -333,6 +335,7 @@ TEST_CASE("Velocity changes timbre, not only level",
     voice.set_click_level(0.6);
 
     auto soft = hit(voice, 0.25f, 8192);
+    voice.reset();
     auto loud = hit(voice, 1.0f, 8192);
 
     const double soft_peak = peak(soft);
@@ -363,6 +366,7 @@ TEST_CASE("A level-only velocity response produces a level-only difference",
     voice.set_click_level(0.6);
 
     auto soft = hit(voice, 0.3f, 8192);
+    voice.reset();
     auto loud = hit(voice, 1.0f, 8192);
     const double ratio = peak(loud) / peak(soft);
     for (auto& v : soft) v = static_cast<float>(v * ratio);
@@ -741,6 +745,7 @@ TEST_CASE("The circuit anti-machine-gun policy is selectable",
     voice.set_circuit_hit_life(HitLifeMode::fixed_seed);
 
     const auto first = hit(voice, 1.0f, 12000);
+    voice.reset();
     const auto second = hit(voice, 1.0f, 12000);
     REQUIRE(first == second);
 
@@ -938,6 +943,25 @@ TEST_CASE("Reapplying the active drum quality does not reset its FIR history",
         expected[i] = reference.process(input);
         if (i == 16) reapplied.set_oversampling(OutputOversampling::x2);
         actual[i] = reapplied.process(input);
+    }
+
+    REQUIRE(actual == expected);
+}
+
+TEST_CASE("Restarting hit-scoped degradation preserves FIR history",
+          "[signal][drum][output][latency][lifecycle]") {
+    OutputStage reference;
+    OutputStage restarted;
+    reference.prepare(kFs);
+    restarted.prepare(kFs);
+
+    std::vector<float> expected(160, 0.0f);
+    std::vector<float> actual(160, 0.0f);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const float input = i == 0 ? 1.0f : 0.0f;
+        expected[i] = reference.process(input);
+        if (i == 16) restarted.reset_nonlinear_state();
+        actual[i] = restarted.process(input);
     }
 
     REQUIRE(actual == expected);
