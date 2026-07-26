@@ -209,7 +209,7 @@ Deviation measure_engine(Engine& engine, double carrier_hz, double modulator_hz)
 /// second copy of the engine, so agreement between the two is evidence and not
 /// a tautology.
 Deviation predict_from_corners(const std::vector<std::vector<double>>& corners_per_sample,
-                               double carrier_hz, double mix, int start, double modulator_hz) {
+                               double carrier_hz, double mix, int start) {
     const double omega = std::tan(std::numbers::pi * carrier_hz / kFs);
     std::vector<double> argument(corners_per_sample.size());
     for (std::size_t i = 0; i < corners_per_sample.size(); ++i) {
@@ -232,7 +232,6 @@ Deviation predict_from_corners(const std::vector<std::vector<double>>& corners_p
         result.up_cents = std::max(result.up_cents, cents);
         result.down_cents = std::min(result.down_cents, cents);
     }
-    (void)modulator_hz;
     return result;
 }
 
@@ -575,7 +574,7 @@ TEST_CASE("PhaseVibrato matches an independent allpass phase model", "[vibrato][
         }
         const auto predicted =
             predict_from_corners(corners, carrier, PhaseVibrato64::kDefaultMix,
-                                 static_cast<int>(cycle * kSkipCycles), kProbeRateHz);
+                                 static_cast<int>(cycle * kSkipCycles));
 
         CHECK(measured.up_cents == Approx(predicted.up_cents).epsilon(0.05));
         CHECK(measured.down_cents == Approx(predicted.down_cents).epsilon(0.05));
@@ -768,8 +767,8 @@ TEST_CASE("UniVibe audio matches its staggered corner trajectory", "[vibrato][un
                     UniVibe64::kStageBaseHz[static_cast<std::size_t>(k)] * scale;
             }
         }
-        const auto predicted = predict_from_corners(corners, carrier, UniVibe64::kVibratoMix,
-                                                    static_cast<int>(cycle), kRate);
+        const auto predicted =
+            predict_from_corners(corners, carrier, UniVibe64::kVibratoMix, static_cast<int>(cycle));
 
         CHECK(measured.up_cents == Approx(predicted.up_cents).epsilon(0.05));
         CHECK(measured.down_cents == Approx(predicted.down_cents).epsilon(0.05));
