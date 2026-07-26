@@ -82,7 +82,7 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
     # if any bundle isn't relocatable — the dylib-rpath footgun that ships a build
     # that only works on the build machine. See PulpBundleRelocatable.cmake.
     include(${CMAKE_SOURCE_DIR}/tools/cmake/PulpBundleRelocatable.cmake)
-    foreach(_sc_target SuperConvolver_CLAP SuperConvolver_VST3 SuperConvolver_AU SuperConvolver_Standalone)
+    foreach(_sc_target SuperConvolver_CLAP SuperConvolver_VST3 SuperConvolver_Standalone)
         if(TARGET ${_sc_target})
             target_link_libraries(${_sc_target} PRIVATE pulp::gpu-audio)
             pulp_make_bundle_relocatable(${_sc_target})
@@ -97,15 +97,16 @@ if(TARGET pulp::gpu-audio AND TARGET pulp::render)
         set_tests_properties(clap-dlopen-SuperConvolver PROPERTIES LABELS "validation;clap" TIMEOUT 10)
     endif()
 
-    # AU validation via auval. killall AudioComponentRegistrar forces a rescan of
-    # the freshly-copied bundle (stale-cache trap codified in the auv2 skill).
+    # Discover and validate an isolated, freshly-signed copy in the auto-login
+    # user's GUI bootstrap, matching the namespace used by AU hosts.
     if(APPLE AND PULP_HAS_AUSDK)
         add_test(NAME auval-SuperConvolver
             COMMAND bash "${CMAKE_SOURCE_DIR}/tools/ci/run-auval-component.sh"
                 "${CMAKE_BINARY_DIR}/AU/SuperConvolver.component" aufx SpCv Pulp)
         set_tests_properties(auval-SuperConvolver PROPERTIES
             LABELS "validation;au"
-            TIMEOUT 60
+            TIMEOUT 90
+            RESOURCE_LOCK pulp_au_discovery
             ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
     endif()
 

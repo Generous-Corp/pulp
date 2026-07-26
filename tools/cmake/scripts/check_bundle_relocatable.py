@@ -18,9 +18,13 @@ distributed, by reading Mach-O load commands (not just strings — the weaker
   1. Every `LC_RPATH` must be bundle-relative (`@loader_path` / `@executable_path`
      / `@rpath`) or a system path (`/usr/lib`, `/System`). Any other absolute
      path (a build cache, fetchcontent dir, home, build tree) → NOT relocatable.
-  2. Every `@rpath/<lib>` dependency must resolve to a file INSIDE the bundle via
-     a bundle-relative rpath. A dep only reachable through an external rpath →
-     NOT relocatable.
+  2. Every distributable `@rpath/<lib>` dependency must resolve to a file INSIDE
+     the bundle via a bundle-relative rpath. A dep only reachable through an
+     external rpath → NOT relocatable. Compiler-injected `libclang_rt.*_dynamic`
+     sanitizer runtimes are reported as test-only notes rather than shipping
+     failures only when the caller explicitly supplies
+     `--allow-toolchain-runtime`; sanitizer artifacts deliberately use the Xcode
+     toolchain runtime.
 
 Usage:
   check_bundle_relocatable.py <bundle-or-binary> [--strict] [--label NAME]
@@ -36,6 +40,12 @@ import sys
 # rpaths that are fine in a shipped bundle: bundle-relative loader tokens, or
 # OS-owned locations present on every Mac.
 _SYSTEM_RPATH_PREFIXES = ("/usr/lib", "/System/")
+
+
+def is_toolchain_runtime(dependency):
+    """Compiler-injected sanitizer runtimes are test-only, not shipped dylibs."""
+    name = os.path.basename(dependency)
+    return name.startswith("libclang_rt.") and name.endswith("_dynamic.dylib")
 
 
 def is_external_rpath(rpath):
@@ -129,7 +139,7 @@ def _macho_binaries(path):
                     yield os.path.join(root, name)
 
 
-def check_binary(binary, bundle_root):
+def check_binary(binary, bundle_root, allow_toolchain_runtime=False):
     rpaths = _otool_rpaths(binary)
     # A dylib's own install-name (LC_ID, e.g. @rpath/libwgpu_native.dylib) shows
     # up as the first `otool -L` line — it's a self-reference, not a dependency.
@@ -138,8 +148,22 @@ def check_binary(binary, bundle_root):
     binary_dir = os.path.dirname(os.path.abspath(binary))
     exe_dir = binary_dir  # for a single binary, loader == executable dir
     ext = [rp for rp in rpaths if is_external_rpath(rp)]
-    unres = unresolved_rpath_deps(deps, rpaths, binary_dir, exe_dir, None, os.path.exists)
-    return ext, unres
+    unresolved = unresolved_rpath_deps(
+        deps, rpaths, binary_dir, exe_dir, bundle_root, os.path.exists
+    )
+    toolchain = [
+        dep for dep in unresolved
+        if allow_toolchain_runtime and is_toolchain_runtime(dep)
+    ]
+    unres = [dep for dep in unresolved if dep not in toolchain]
+    return ext, unres, toolchain
+
+
+def bundle_context(target):
+    """Return a normalized target and the directory boundary its deps may use."""
+    target = os.path.abspath(os.path.normpath(target))
+    bundle_root = target if os.path.isdir(target) else os.path.dirname(target)
+    return target, bundle_root
 
 
 def main():
@@ -147,25 +171,38 @@ def main():
     ap.add_argument("target", help="a .app/.component/.vst3/.clap bundle or a Mach-O binary")
     ap.add_argument("--strict", action="store_true", help="exit 1 on findings (default: warn only)")
     ap.add_argument("--label", default="", help="name to show in messages")
+    ap.add_argument(
+        "--allow-toolchain-runtime",
+        action="store_true",
+        help="allow unresolved compiler sanitizer runtimes (test-only builds)",
+    )
     args = ap.parse_args()
 
-    if not os.path.exists(args.target):
+    target, bundle_root = bundle_context(args.target)
+    if not os.path.exists(target):
         print(f"check_bundle_relocatable: not found: {args.target}", file=sys.stderr)
         return 2
     if subprocess.run(["which", "otool"], capture_output=True).returncode != 0:
         print("check_bundle_relocatable: otool not found (macOS only)", file=sys.stderr)
         return 2
 
-    label = args.label or os.path.basename(args.target)
+    label = args.label or os.path.basename(target)
     # HARD failures: an @rpath dependency that resolves nowhere safe (the real
     # ship-breaker — e.g. libwgpu_native.dylib reachable only via a build cache).
     # SOFT warnings: a dangling external LC_RPATH that NO dependency relies on
     # (e.g. a leftover Xcode toolchain rpath on a pure-Swift app whose runtime
     # loads from the OS /usr/lib/swift) — harmless, surfaced for hygiene only.
     hard, soft = [], []
-    for binary in _macho_binaries(args.target):
-        ext, unres = check_binary(binary, args.target)
-        rel = os.path.relpath(binary, args.target) if os.path.isdir(args.target) else binary
+    for binary in _macho_binaries(target):
+        ext, unres, toolchain = check_binary(
+            binary, bundle_root, args.allow_toolchain_runtime
+        )
+        rel = os.path.relpath(binary, target) if os.path.isdir(target) else binary
+        for dep in toolchain:
+            soft.append(
+                f"{rel}: compiler sanitizer runtime remains external: {dep} "
+                "(test-only instrumentation)"
+            )
         for dep in unres:
             hard.append(f"{rel}: {dep} not resolvable inside the bundle (no @loader_path rpath to it)")
         # An external rpath only matters if a dependency would be unresolved

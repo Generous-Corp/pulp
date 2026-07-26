@@ -22,11 +22,12 @@
 # any binary has an external (build-machine-only) rpath or an unresolved
 # @rpath dependency — catching a regression before it can ship.
 #
-# NOTE for adoption in pulp_add_plugin: prefer the additive POST_BUILD
-# `install_name_tool -add_rpath @loader_path` form for targets that also depend
-# on OTHER runtime dylibs by build rpath (e.g. some V8 engines) — see FindV8.cmake
-# — because BUILD_WITH_INSTALL_RPATH drops ALL auto build rpaths, not just wgpu's.
-# wgpu-only bundles (the common case) are fine with the simple form below.
+# NOTE for adoption in pulp_add_plugin: prefer an additive
+# `target_link_options(... "LINKER:-rpath,@loader_path")` for targets that also
+# depend on OTHER runtime dylibs by build rpath (e.g. some V8 engines) — see
+# FindV8.cmake — because BUILD_WITH_INSTALL_RPATH drops ALL auto build rpaths,
+# not just wgpu's. wgpu-only bundles (the common case) are fine with the simple
+# form below.
 
 function(pulp_make_bundle_relocatable target)
     if(APPLE AND TARGET ${target})
@@ -44,11 +45,18 @@ function(pulp_validate_bundle_relocatable target)
         if(NOT _py)
             set(_py python3)
         endif()
+        set(_relocatable_args --strict --label "${target}")
+        # Sanitizer CI artifacts intentionally depend on the matching compiler
+        # runtime in the Xcode toolchain. Keep that exception explicit here so
+        # a sanitized release bundle cannot silently pass the shipping guard.
+        if(PULP_SANITIZER)
+            list(APPEND _relocatable_args --allow-toolchain-runtime)
+        endif()
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${_py}"
                 "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/check_bundle_relocatable.py"
                 "$<TARGET_FILE_DIR:${target}>/../.."
-                --strict --label "${target}"
+                ${_relocatable_args}
             COMMENT "Verifying ${target} bundle is self-contained (relocatable)"
             VERBATIM)
     endif()

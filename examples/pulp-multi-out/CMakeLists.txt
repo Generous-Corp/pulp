@@ -51,5 +51,6 @@ if(PULP_HAS_AUSDK AND APPLE AND NOT PULP_IOS)
     )
     set_tests_properties(auval-PulpMultiOut PROPERTIES
         LABELS "validation;au"
-        TIMEOUT 120)
+        TIMEOUT 90
+        RESOURCE_LOCK pulp_au_discovery)
 endif()

@@ -39,6 +39,7 @@ if(APPLE AND PULP_HAS_AUSDK)
     )
     set_tests_properties(auval-PulpPluck PROPERTIES
         LABELS "validation;au"
-        TIMEOUT 60
+        TIMEOUT 90
+        RESOURCE_LOCK pulp_au_discovery
         ENVIRONMENT "PULP_DISABLE_PLUGIN_EDITOR=1;PULP_HEADLESS=1;PULP_TEST_MODE=1")
 endif()
