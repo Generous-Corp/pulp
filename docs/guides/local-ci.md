@@ -497,6 +497,17 @@ two moved off the hosted pool.
 `tools/scripts/test_windows_runner_policy.py` asserts all three aliases resolve
 through the toggle and that none is pinned to a bare `ubuntu-latest`.
 
+The preamble can run from a checkout below `/Volumes/Workshop`. Inline Python
+started with `python3 -` resolves the current directory before executing its
+stdin script, so a wedged checkout volume can freeze the routing probe or the
+`macos` outcome poll even though the jobs API response is already available.
+`RUNNER_TEMP` is not a safe boundary here: on self-hosted Studios it can also
+live below `/Volumes/Workshop`. Those two helpers first `cd /tmp` (`/private/tmp`
+on macOS's system volume); the routing helper then uses `GITHUB_WORKSPACE` only
+as the absolute resolver-script argument. Keep new inline Python in a
+`PULP_PREAMBLE_RUNS_ON_JSON` job behind the same stable-cwd boundary.
+`tools/scripts/test_preamble_python_stable_cwd.py` enforces the complete set.
+
 ## Routing contract (checked)
 
 Every `*_RUNS_ON_JSON` repo variable is a **lane**: it names the labels a class
