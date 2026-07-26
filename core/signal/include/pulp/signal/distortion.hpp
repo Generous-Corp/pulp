@@ -311,8 +311,32 @@ public:
     /// tests, not a shipped preset.
     void set_capacitance(double farads) { capacitance_ = std::max(farads, 0.0); }
 
-    /// Enables the antiderivative-antialiasing evaluation of the diode term.
-    void set_adaa(bool on) { adaa_ = on; }
+    /// Antiderivative antialiasing is NOT offered on this class, deliberately.
+    ///
+    /// It was, and it diverged: a 440 Hz full-scale sine reached 5.8e25, growing
+    /// geometrically at roughly 3300x per sample, on every diode model and at
+    /// 8/48/192 kHz. It never reported failure because every value stayed
+    /// finite, and no test saw it because the only ADAA assertion compared two
+    /// renders for equality — which a deterministic divergence passes.
+    ///
+    /// The cause is structural, not a bug to patch. ADAA replaces the diode term
+    /// with its MEAN over `[v(n-1), v(n)]`, but trapezoidal rule is already
+    /// averaging the nonlinearity across the timestep. Stacking the two
+    /// double-counts the averaging, so the residual's root moves outside the
+    /// bracket `[min(0, v(n-1), vin), max(...)]` that makes the safeguarded
+    /// solve safe; the solver then clamps to an endpoint and the state ratchets
+    /// away. Matching the Jacobian to the residual (which was ALSO wrong here —
+    /// it used the plain conductance) is necessary and not sufficient: with a
+    /// finite-difference-verified derivative it still diverges.
+    ///
+    /// Doing this properly means antialiasing the explicit output shaping rather
+    /// than the implicit term, which is a different design and wants its own
+    /// validation. Until then the honest position is that the x1 path has no
+    /// antialiasing and the oversampled tiers are how you get it.
+    ///
+    /// `JunctionPair::adaa_current` remains, and remains correct: it is sound
+    /// for a MEMORYLESS shaper, which is how `diode_bridge_compressor.hpp` uses
+    /// it. The unsoundness is specific to putting it inside this implicit solve.
 
     void reset() {
         voltage_ = 0.0;
@@ -349,9 +373,16 @@ private:
     /// difference quotient. The guard and the fallback live in `JunctionPair`,
     /// so the two clipper classes cannot drift apart on either.
     double diode_term(double v) const {
-        return adaa_ ? network_.adaa_current(v, previous_voltage_,
-                                             ClipperSolverConfig::kAdaaEpsilon)
-                     : network_.current(v);
+        return network_.current(v);
+    }
+
+    /// `d/dv` of `diode_term`. It MUST follow whichever branch `diode_term`
+    /// took: a Newton step built from the plain `conductance()` while the
+    /// residual uses the ADAA quotient is solving one equation with another
+    /// equation's Jacobian, and that diverges rather than converging slowly.
+    /// See `JunctionPair::adaa_conductance` for the measured consequence.
+    double diode_slope(double v) const {
+        return network_.conductance(v);
     }
 
     double solve(double vin) {
@@ -372,15 +403,15 @@ private:
         // why the degenerate case gets the algebraic equation directly.
         const bool memoryless = capacitance_ <= 0.0;
         const auto residual = [&](double v) {
-            if (memoryless) return network_.current(v) - (vin - v) / resistance_;
+            if (memoryless) return diode_term(v) - (vin - v) / resistance_;
             return c_over_t * (v - previous_voltage_) -
                    0.5 * ((vin - v) / resistance_ - diode_term(v)) - history;
         };
         // Every term is strictly positive, so the residual is strictly
         // increasing in v — which is what makes the bracketed fallback safe.
         const auto derivative = [&](double v) {
-            if (memoryless) return network_.conductance(v) + 1.0 / resistance_;
-            return c_over_t + 0.5 / resistance_ + 0.5 * network_.conductance(v);
+            if (memoryless) return diode_slope(v) + 1.0 / resistance_;
+            return c_over_t + 0.5 / resistance_ + 0.5 * diode_slope(v);
         };
 
         return detail::solve_safeguarded_newton(
@@ -398,7 +429,6 @@ private:
     double timestep_ = 1.0 / 44100.0;
     double resistance_ = kResistanceDefault;
     double capacitance_ = kCapacitanceDefault;
-    bool adaa_ = false;
 
     double voltage_ = 0.0;
     double previous_input_ = 0.0;
@@ -486,10 +516,6 @@ public:
         update_capacitance();
     }
 
-    void set_adaa(bool on) {
-        adaa_ = on;
-        ground_stage_.set_adaa(on);
-    }
 
     /// The stage's linear (small-signal) gain, `Rf/Rin` — the bound the loop can
     /// never exceed at frequencies below the feedback capacitor's corner. Above
@@ -544,9 +570,16 @@ private:
     /// difference quotient. The guard and the fallback live in `JunctionPair`,
     /// so the two clipper classes cannot drift apart on either.
     double diode_term(double v) const {
-        return adaa_ ? network_.adaa_current(v, previous_voltage_,
-                                             ClipperSolverConfig::kAdaaEpsilon)
-                     : network_.current(v);
+        return network_.current(v);
+    }
+
+    /// `d/dv` of `diode_term`. It MUST follow whichever branch `diode_term`
+    /// took: a Newton step built from the plain `conductance()` while the
+    /// residual uses the ADAA quotient is solving one equation with another
+    /// equation's Jacobian, and that diverges rather than converging slowly.
+    /// See `JunctionPair::adaa_conductance` for the measured consequence.
+    double diode_slope(double v) const {
+        return network_.conductance(v);
     }
 
     /// The shared trapezoidal + Newton solve. `forcing` is the extra current
@@ -562,7 +595,7 @@ private:
                    0.5 * (forcing + (vin - v) / resistance - diode_term(v)) - history;
         };
         const auto derivative = [&](double v) {
-            return c_over_t + 0.5 / resistance + 0.5 * network_.conductance(v);
+            return c_over_t + 0.5 / resistance + 0.5 * diode_slope(v);
         };
 
         // Where the linear network alone would drive the node: the forcing
@@ -586,7 +619,6 @@ private:
     double input_resistance_ = kInputResistanceDefault;
     double knee_corner_hz_ = kKneeCornerHzDefault;
     double capacitance_ = 0.0;
-    bool adaa_ = false;
 
     double previous_input_ = 0.0;
     double previous_voltage_ = 0.0;

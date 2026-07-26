@@ -355,9 +355,8 @@ TEST_CASE("7 render, reset, re-render is bit-identical", "[distortion][determini
         return out;
     };
 
-    for (bool adaa : {false, true}) {
+    {
         auto clipper = make_clipper(DiodeModel::germanium, 0.5);
-        clipper.set_adaa(adaa);
         clipper.reset();
         const auto first = render(clipper, static_cast<int>(kSr * 2));
         clipper.reset();
@@ -367,7 +366,6 @@ TEST_CASE("7 render, reset, re-render is bit-identical", "[distortion][determini
 
         FeedbackClipperT<double> loop;
         loop.prepare(kSr);
-        loop.set_adaa(adaa);
         loop.reset();
         const auto loop_first = render(loop, static_cast<int>(kSr));
         loop.reset();
@@ -531,7 +529,6 @@ TEST_CASE("9 the clipper family allocates nothing on the audio thread",
             const float symmetry = std::sin(0.001f * static_cast<float>(n));
             ground.set_diode_model(model);
             ground.set_symmetry(symmetry);
-            ground.set_adaa((n % 2) == 0);
             loop.set_diode_model(model);
             loop.set_symmetry(symmetry);
             loop.set_topology((n % 3) == 0 ? ClipperTopology::to_ground
@@ -549,4 +546,62 @@ TEST_CASE("9 the clipper family allocates nothing on the audio thread",
         loop.reset();
         tone.reset();
     });
+}
+
+TEST_CASE("The clipper solve stays bounded at full scale on every model",
+          "[signal][distortion][solver]") {
+    // The test that was missing, and whose absence let a divergence ship.
+    //
+    // The only ADAA assertion this suite had compared two renders for equality.
+    // A DETERMINISTIC divergence passes that: the run reproduces perfectly, it
+    // just reproduces 5.8e25. Testing a property a broken implementation also
+    // satisfies is the failure mode to watch for — determinism, monotonicity and
+    // "the value changed" are all in that family.
+    //
+    // So this asserts the thing a caller actually needs: a full-scale input
+    // produces a bounded output. The clipper is a CLIPPER — its output cannot
+    // legitimately exceed the input's scale by more than its own small-signal
+    // gain, on any diode model, at any sample rate, either topology.
+    // 8 kHz is deliberately EXCLUDED and the exclusion is documented rather
+    // than silent: at that rate the trapezoidal solve rings — output alternates
+    // sign every sample (+1.20, -1.20, +1.75, -1.75 ...) at the iteration cap,
+    // reaching 2347 for silicon at symmetry 0. That is TR's non-L-stable
+    // behaviour at a stiff limit, the same effect this header already documents
+    // for the C = 0 degenerate case, and fixing it means TR-BDF2 or a damped
+    // scheme rather than a patch. Recorded in the planning doc with numbers.
+    for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+        for (auto model : {DiodeModel::silicon, DiodeModel::germanium, DiodeModel::led}) {
+            for (double symmetry : {-1.0, 0.0, 1.0}) {
+                DiodeClipperT<double> ground;
+                ground.prepare(sr);
+                ground.set_diode_model(model);
+                ground.set_symmetry(symmetry);
+                ground.reset();
+
+                FeedbackClipperT<double> loop;
+                loop.prepare(sr);
+                loop.set_diode_model(model);
+                loop.set_symmetry(symmetry);
+                loop.reset();
+
+                double ground_peak = 0.0;
+                double loop_peak = 0.0;
+                const int frames = static_cast<int>(sr / 10.0);
+                for (int n = 0; n < frames; ++n) {
+                    const double x = std::sin(2.0 * M_PI * 440.0 * n / sr);
+                    const double g = ground.process(x);
+                    const double l = loop.process(x);
+                    REQUIRE(std::isfinite(g));
+                    REQUIRE(std::isfinite(l));
+                    ground_peak = std::max(ground_peak, std::abs(g));
+                    loop_peak = std::max(loop_peak, std::abs(l));
+                }
+                // Shunt topology can only attenuate a full-scale input.
+                REQUIRE(ground_peak <= 1.0);
+                // The in-loop stage is a gain stage; its own documented
+                // small-signal bound is what caps it.
+                REQUIRE(loop_peak <= loop.linear_gain());
+            }
+        }
+    }
 }

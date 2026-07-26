@@ -21,7 +21,7 @@
 // THE OVERSAMPLING TIER IS ALSO A REALIZATION, and for the harder reason: it
 // determines `latency_samples()`. A node whose reported latency moves under the
 // audio thread breaks the host's delay compensation. ×1 is the zero-latency
-// ADAA path; ×2/×4/×8 report the composed oversampler's own exact group delay.
+// no antialiasing; ×2/×4/×8 report the composed oversampler's own exact group delay.
 //
 // MONO, one port in and one out. Every stage here is per-sample with no
 // cross-channel state, so a stereo instrument would be two independent copies —
@@ -42,7 +42,8 @@ namespace pulp::host::distortion {
 using DiodeModel = signal::DiodeModel;
 using Topology = signal::ClipperTopology;
 
-/// Oversampling tiers this node registers. ×1 is the ADAA path.
+/// Oversampling tiers this node registers. ×1 is the zero-latency tier
+/// and does NOT antialias.
 enum class OversampleTier : std::uint8_t { x1, x2, x4, x8 };
 
 // ── Stable type ids ───────────────────────────────────────────────────────
@@ -164,11 +165,11 @@ inline CustomNodeType make_distortion_node(Topology topology,
         const double inner_rate = sr * factor;
 
         s->loop_clipper.set_topology(signal::ClipperTopology::in_loop);
-        // ADAA is the ×1 path's antialiasing; above ×1 the half-band pair does
-        // the work and the extra per-sample cost of the difference quotient
-        // buys nothing.
-        s->ground_clipper.set_adaa(factor == 1);
-        s->loop_clipper.set_adaa(factor == 1);
+        // ×1 has NO antialiasing. It used to enable ADAA on both clippers,
+        // which diverged to 5.8e25 on a full-scale input — see the note on
+        // `DiodeClipperT` for why that path was structurally unsound rather
+        // than merely buggy. Oversampling is how this node antialiases; ×1 is
+        // the zero-latency tier and is honest about costing you that.
         s->ground_clipper.prepare(inner_rate);
         s->loop_clipper.prepare(inner_rate);
         s->tone.prepare(inner_rate);

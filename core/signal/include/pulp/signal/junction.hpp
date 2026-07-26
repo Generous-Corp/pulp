@@ -181,6 +181,38 @@ struct JunctionPair {
         if (std::abs(delta) <= epsilon) return current(v);
         return (antiderivative(v) - antiderivative(previous)) / delta;
     }
+
+    /// `d/dv` of `adaa_current` — the Jacobian a Newton solve needs when its
+    /// residual is built on the ADAA quotient rather than on `current`.
+    ///
+    /// This exists because pairing the ADAA residual with `conductance()` is a
+    /// silent catastrophe rather than a slow one. `conductance` is the slope of
+    /// the PLAIN current; the quotient's slope is a different function, and
+    /// feeding Newton a Jacobian that does not belong to its residual makes the
+    /// step direction wrong rather than merely inaccurate. Measured, a diode
+    /// clipper diverged geometrically at roughly 3300x per sample to 5.8e25 —
+    /// full-scale noise, from a solver that never reported failure because
+    /// every value stayed finite.
+    ///
+    /// Differentiating `(F1(v) − F1(p))/(v − p)` gives
+    /// `[i(v)·(v − p) − (F1(v) − F1(p))] / (v − p)²`, and it stays strictly
+    /// positive for the same reason `conductance` does: the quotient is the
+    /// MEAN of `i` over `[p, v]`, `i` is increasing, so `i(v)` is never below
+    /// that mean. The bracketed solver's monotone-residual precondition
+    /// therefore still holds — which is what makes the safeguard safe rather
+    /// than merely present.
+    double adaa_conductance(double v, double previous, double epsilon) const {
+        const double delta = v - previous;
+        // HALF the conductance, not the conductance. As `v → p` the quotient
+        // `(F1(v) − F1(p))/(v − p)` tends to `i(p)` but its SLOPE tends to
+        // `i'(p)/2` — the mean of `i` over a collapsing interval moves at half
+        // the rate of `i` itself. Returning the full conductance here overstates
+        // the Jacobian by exactly 2x near the fallback, which is where a solve
+        // spends most of its time on a slow-moving signal.
+        if (std::abs(delta) <= epsilon) return 0.5 * conductance(v);
+        const double integral = antiderivative(v) - antiderivative(previous);
+        return (current(v) * delta - integral) / (delta * delta);
+    }
 };
 
 }  // namespace pulp::signal::junction
