@@ -15,6 +15,7 @@
 
 #include <pulp/signal/drum/cymbal.hpp>
 #include <pulp/signal/drum/membrane.hpp>
+#include <pulp/signal/drum/string.hpp>
 #include <pulp/signal/drum/zap.hpp>
 #include <pulp/signal/frequency_shifter.hpp>
 #include <pulp/signal/karplus_strong.hpp>
@@ -34,6 +35,7 @@ using pulp::signal::PhaseDistortionOsc;
 using pulp::signal::PhaseDistortionShape;
 using pulp::signal::drum::CymbalVoice;
 using pulp::signal::drum::MembraneVoice;
+using pulp::signal::drum::StringVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
 using pulp::signal::drum::ZapVoice;
@@ -58,15 +60,6 @@ double peak(const std::vector<float>& x) {
     double m = 0.0;
     for (float v : x) m = std::max(m, std::fabs(static_cast<double>(v)));
     return m;
-}
-
-double rms(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0) {
-    if (to == 0) to = x.size();
-    double sum = 0.0;
-    for (std::size_t i = from; i < to && i < x.size(); ++i) {
-        sum += static_cast<double>(x[i]) * x[i];
-    }
-    return std::sqrt(sum / static_cast<double>(to - from));
 }
 
 // Hann-windowed Goertzel amplitude at one frequency.
@@ -95,6 +88,19 @@ std::vector<double> sine(double f, std::size_t n, double amplitude = 1.0) {
         y[i] = amplitude * std::sin(2.0 * kPi * f * static_cast<double>(i) / kFs);
     }
     return y;
+}
+
+// Fraction of energy above `split_hz`.
+double high_fraction(const std::vector<float>& x, double split_hz) {
+    const double a = 1.0 - std::exp(-2.0 * kPi * split_hz / kFs);
+    double lp = 0.0, low = 0.0, high = 0.0;
+    for (float v : x) {
+        lp += a * (static_cast<double>(v) - lp);
+        low += lp * lp;
+        const double hp = static_cast<double>(v) - lp;
+        high += hp * hp;
+    }
+    return high / (high + low + 1e-30);
 }
 
 int audible_length(const std::vector<float>& x, double floor_level) {
@@ -719,6 +725,235 @@ TEST_CASE("The physical voices allocate nothing on the audio thread",
                 voice->process(buffer.data(), static_cast<int>(buffer.size()));
                 voice->reset();
             }
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
+
+// -- Extended Karplus-Strong blocks -------------------------------------------
+
+TEST_CASE("The tuning allpass costs the decay nothing",
+          "[signal][string]") {
+    // The reason the fractional delay is an allpass rather than an interpolator.
+    // Linear interpolation is itself a lowpass sitting inside the loop next to
+    // the damping filter, so its attenuation compounds every round trip and the
+    // note dies early -- by an amount that depends on where the fractional part
+    // happens to land. An allpass has unity magnitude, so two pitches whose loop
+    // lengths differ only in their fractional part must ring for the same time.
+    auto ring_length = [](double hz) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(hz);
+        string.set_decay_seconds(1.5);
+        string.set_damping(0.1);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(static_cast<std::size_t>(3.0 * kFs));
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return audible_length(y, 1e-4);
+    };
+
+    // 48000/220 = 218.18 (fraction 0.18); 48000/218.18... pick a pitch whose
+    // loop length is near-integer and one whose fraction is near a half.
+    const int near_integer = ring_length(kFs / 200.0);   // exactly 240 samples
+    const int half_sample = ring_length(kFs / 240.5);    // 199.58 samples
+    REQUIRE(near_integer > 0);
+    REQUIRE(half_sample > 0);
+    const double ratio = static_cast<double>(half_sample) / near_integer;
+    REQUIRE(ratio > 0.7);
+    REQUIRE(ratio < 1.4);
+}
+
+TEST_CASE("Playing harder is brighter, not just louder",
+          "[signal][string][velocity]") {
+    // The dynamic-level filter. Without it a string is the one voice in this set
+    // that would answer velocity with gain alone, which is the failure the whole
+    // VelocityResponse contract exists to prevent.
+    auto brightness = [](double bandwidth_hz) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(220.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(0.1);
+        string.set_dynamic_bandwidth_hz(bandwidth_hz);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(8192);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return tone_amplitude(y, 2200.0) / (tone_amplitude(y, 220.0) + 1e-20);
+    };
+
+    REQUIRE(brightness(16000.0) > brightness(800.0) * 2.0);
+}
+
+TEST_CASE("Pick direction darkens the attack without retuning the string",
+          "[signal][string]") {
+    auto measure = [](double direction) {
+        KarplusStrong string;
+        string.prepare(kFs);
+        string.set_frequency(220.0);
+        string.set_decay_seconds(2.0);
+        string.set_damping(0.1);
+        string.set_pick_direction(direction);
+        string.reset();
+        string.pluck();
+
+        pulp::signal::NoiseSource noise;
+        noise.prepare(kFs);
+        noise.reset();
+        std::vector<float> y(16384);
+        for (std::size_t i = 0; i < y.size(); ++i) {
+            y[i] = string.process(i < 256 ? noise.white() : 0.0f);
+        }
+        return std::pair<double, double>{
+            tone_amplitude(y, 2200.0) / (tone_amplitude(y, 220.0) + 1e-20),
+            tone_amplitude(y, 220.0) / (tone_amplitude(y, 250.0) + 1e-20)};
+    };
+
+    const auto bright = measure(0.0);
+    const auto dark = measure(0.9);
+    REQUIRE(bright.first > dark.first * 1.5);
+
+    // ...and the harmonic series stays where it was. Measured as the
+    // fundamental against a neighbouring non-harmonic frequency, because a
+    // zero-crossing rate here tracks how BRIGHT the signal is rather than how
+    // high it is -- which is the very thing the control changes.
+    REQUIRE(bright.second > 3.0);
+    REQUIRE(dark.second > 3.0);
+}
+
+
+// -- String voice -------------------------------------------------------------
+
+TEST_CASE("The string voice rings at its tuning with a harmonic series",
+          "[signal][drum][string]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(220.0);
+    voice.set_decay_seconds(3.0);
+    voice.set_damping(0.1);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 32768);
+    REQUIRE(peak(y) > 1e-3);
+    REQUIRE(tone_amplitude(y, 220.0) > 1e-4);
+    REQUIRE(tone_amplitude(y, 440.0) > 1e-4);
+    // ...and nothing between the partials, which is what makes it a series.
+    REQUIRE(tone_amplitude(y, 330.0) < tone_amplitude(y, 220.0) * 0.4);
+}
+
+TEST_CASE("A harder string hit is brighter, not only louder",
+          "[signal][drum][string][velocity]") {
+    // The voice's velocity reaches the excitation bandwidth, so the contract
+    // every other drum here honours holds for the string too.
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(220.0);
+    voice.set_decay_seconds(2.0);
+
+    auto soft_full = hit(voice, 0.15f, 16384);
+    auto loud_full = hit(voice, 1.0f, 16384);
+    const double soft_peak = peak(soft_full);
+    const double loud_peak = peak(loud_full);
+    REQUIRE(soft_peak > 1e-5);
+    REQUIRE(loud_peak > soft_peak);
+
+    // Measured over the attack. The dynamic-level filter shapes the EXCITATION,
+    // and the loop's own damping then works on whatever it was handed -- so by
+    // the tail both notes have converged on the same spectrum and the
+    // difference to measure has already happened.
+    std::vector<float> soft(soft_full.begin(), soft_full.begin() + 2048);
+    std::vector<float> loud(loud_full.begin(), loud_full.begin() + 2048);
+    for (auto& v : soft) v = static_cast<float>(v / soft_peak);
+    for (auto& v : loud) v = static_cast<float>(v / loud_peak);
+    REQUIRE(high_fraction(loud, 1200.0) > high_fraction(soft, 1200.0) * 1.2);
+}
+
+TEST_CASE("Stiffness stretches the partials sharp", "[signal][drum][string]") {
+    // What separates a struck bar or a piano from a guitar: the upper partials
+    // sit above their true harmonic positions.
+    auto partial_at = [](double stiffness, double f) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(200.0);
+        voice.set_decay_seconds(3.0);
+        voice.set_damping(0.05);
+        voice.set_stiffness(stiffness);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return tone_amplitude(hit(voice, 1.0f, 32768), f);
+    };
+
+    // With no stiffness the fourth partial sits at 800; with stiffness it moves
+    // up, so 800 loses energy relative to a point above it.
+    const double rigid_at_800 = partial_at(0.0, 800.0);
+    const double stiff_at_800 = partial_at(0.9, 800.0);
+    REQUIRE(stiff_at_800 < rigid_at_800 * 0.8);
+}
+
+TEST_CASE("A second hit adds to the ringing string by default",
+          "[signal][drum][string]") {
+    // The physical behaviour, and why a fast repeated figure does not sound
+    // like one sample fired twice.
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(220.0);
+    voice.set_decay_seconds(3.0);
+    voice.set_restart_on_hit(false);
+
+    const auto single = hit(voice, 1.0f, 24000);
+
+    voice.reset();
+    voice.note_on(1.0f);
+    std::vector<float> doubled(24000, 0.0f);
+    for (int i = 0; i < 6000; i += 64) voice.process(doubled.data() + i, 64);
+    voice.note_on(1.0f);
+    for (int i = 6000; i < 24000; i += 64) voice.process(doubled.data() + i, 64);
+
+    bool differs = false;
+    for (std::size_t i = 6000; i < doubled.size(); ++i) {
+        if (std::fabs(static_cast<double>(doubled[i] - single[i])) > 1e-4) {
+            differs = true;
+            break;
+        }
+    }
+    REQUIRE(differs);
+}
+
+TEST_CASE("The string voice allocates nothing on the audio thread",
+          "[signal][drum][string][rt-safety]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_stiffness(0.4);
+    voice.set_pick_direction(0.3);
+    voice.output().set_drive(0.3);
+
+    std::vector<float> buffer(256, 0.0f);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (int repeat = 0; repeat < 6; ++repeat) {
+            voice.set_tune_hz(180.0 + 40.0 * repeat);
+            voice.note_on(0.5f + 0.07f * static_cast<float>(repeat));
+            for (int block = 0; block < 12; ++block) {
+                std::fill(buffer.begin(), buffer.end(), 0.0f);
+                voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            }
+            voice.choke(3.0f);
+            voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            voice.reset();
         }
         allocations = probe.allocation_count();
     }
