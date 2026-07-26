@@ -75,9 +75,9 @@ class CompileContextRegistry {
 /// into an exact track set instead of a full recompile. It is rebuilt when the
 /// document's structure changes; a context edit alone does not invalidate it,
 /// because editing a lane's contents does not change who reads it.
-/// Only arrangement clips selected by the program compiler are indexed:
-/// frozen tracks and tracks selecting a take lane have no live arrangement
-/// renderer to invalidate.
+/// Arrangement declarations remain indexed while a freeze or take lane is
+/// selected. Resolution filters them against the current snapshot, which keeps
+/// the index valid when playback later returns to the arrangement.
 class ContextSubscriberIndex {
   public:
     static ContextSubscriberIndex build(const timeline::Project& project,
@@ -107,7 +107,8 @@ class ContextSubscriberIndex {
 ///     companion or non-playback marker metadata, is a structural sequence
 ///     edit and requests a full recompile.
 /// Items belonging to another sequence are ignored.
-DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
+DirtyTrackSet resolve_dirty_tracks(const timeline::Project& project,
+                                   timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
                                    const ContextSubscriberIndex& index);
 
 } // namespace pulp::playback

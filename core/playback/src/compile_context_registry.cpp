@@ -53,11 +53,6 @@ ContextSubscriberIndex ContextSubscriberIndex::build(const timeline::Project& pr
     if (!sequence)
         return index;
     for (const timeline::Track& track : sequence->tracks()) {
-        // The program compiler replaces the arrangement wholesale when a
-        // freeze or take comp is selected. Arrangement clips on those tracks
-        // therefore have no live renderer program to invalidate.
-        if (track.freeze().has_value() || track.active_take_lane_id().valid())
-            continue;
         for (const timeline::Clip& clip : track.clips()) {
             const auto subscriptions = std::visit(
                 timeline::ClipContentCases{
@@ -112,7 +107,8 @@ bool ContextSubscriberIndex::empty() const noexcept {
     return true;
 }
 
-DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
+DirtyTrackSet resolve_dirty_tracks(const timeline::Project& project,
+                                   timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
                                    const ContextSubscriberIndex& index) {
     DirtyTrackSet result;
     for (const timeline::DirtyItem& item : dirty.items()) {
@@ -141,8 +137,18 @@ DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline:
     for (const timeline::DirtyContext& context : dirty.contexts()) {
         if (context.owner_sequence != sequence_id)
             continue;
+        const auto* sequence = project.find_sequence(sequence_id);
         const auto subscribers = index.subscribers(context.kind);
-        result.tracks.insert(result.tracks.end(), subscribers.begin(), subscribers.end());
+        for (const auto track_id : subscribers) {
+            const auto* track = sequence ? sequence->find_track(track_id) : nullptr;
+            // A freeze or selected take comp replaces the arrangement
+            // wholesale, so its arrangement renderer is not live in this
+            // snapshot. The declaration remains indexed so returning to the
+            // arrangement cannot make the index stale.
+            if (track && !track->freeze().has_value() &&
+                !track->active_take_lane_id().valid())
+                result.tracks.push_back(track_id);
+        }
     }
     std::sort(result.tracks.begin(), result.tracks.end());
     result.tracks.erase(std::unique(result.tracks.begin(), result.tracks.end()),
