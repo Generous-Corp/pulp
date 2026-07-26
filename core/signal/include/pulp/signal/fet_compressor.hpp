@@ -230,6 +230,7 @@
 
 #include <pulp/signal/biquad.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_core.hpp>
 #include <pulp/signal/units.hpp>
 #include <pulp/signal/windowed_sinc_design.hpp>
 
@@ -378,11 +379,10 @@ public:
     /// [design parameter] default −18 dBFS, range −24 .. −12 dBFS.
     static constexpr double kThresholdDbfs = -18.0;
 
-    /// Level-conversion floor, guarding `log10(0)`. Any value far below the
-    /// quietest representable signal works; this sits ~26 orders above the
-    /// float32 denormal floor and ~7 orders below −120 dBFS.
-    /// [design parameter] default 1e-12, range 1e-15 .. 1e-9.
-    static constexpr double kLevelEpsilon = 1e-12;
+    /// Level-conversion floor, guarding `log10(0)`. Declared in
+    /// `dynamics_core.hpp` alongside the conversions that consume it, and
+    /// re-exported here so the call sites and the catalog keep reading one name.
+    static constexpr double kLevelEpsilon = dynamics::kLevelEpsilon;
 
     // Control ranges. These mirror the catalog node's parameter table; the
     // table is the canonical declaration and these are the same numbers at the
@@ -500,13 +500,7 @@ public:
     /// compressor's own OUTPUT. This is NOT the input/output curve a user
     /// measures; `measured_static_curve_db()` is.
     double static_curve_db(double level_db) const {
-        const double over = level_db - kThresholdDbfs;
-        if (2.0 * over < -knee_db_) return level_db;
-        if (knee_db_ > 0.0 && 2.0 * std::abs(over) <= knee_db_) {
-            const double t = over + knee_db_ * 0.5;
-            return level_db + (1.0 / ratio_value_ - 1.0) * t * t / (2.0 * knee_db_);
-        }
-        return kThresholdDbfs + over / ratio_value_;
+        return dynamics::soft_knee_output_db(level_db, kThresholdDbfs, knee_db_, ratio_value_);
     }
 
     /// Gain reduction the static curve asks for, as a POSITIVE magnitude in dB.
@@ -678,8 +672,7 @@ public:
             // The detector reads the PREVIOUS oversampled divider output. That
             // one line is the entire topological difference from the
             // feedforward design.
-            const double level_db =
-                20.0 * std::log10(std::abs(feedback_) + kLevelEpsilon);
+            const double level_db = dynamics::amplitude_db(feedback_, kLevelEpsilon);
             const double requested = gain_computer_db(level_db) + bias_shift_db_;
             detector_db_ = snap_to_zero(
                 requested > detector_db_
@@ -823,11 +816,10 @@ private:
         release_coef_ = retain(release_s);
     }
 
-    /// `α = exp(−1/(τ·fs_os))` — the paper's coefficient mapping, at the
-    /// OVERSAMPLED rate, which is where the ballistics run.
+    /// The paper's coefficient mapping at the OVERSAMPLED rate, which is where
+    /// the ballistics run. RETAIN convention — see `dynamics_core.hpp`.
     double retain(double tau_seconds) const {
-        if (!(tau_seconds > 0.0) || !(oversampled_rate_ > 0.0)) return 0.0;
-        return std::exp(-1.0 / (tau_seconds * oversampled_rate_));
+        return dynamics::one_pole_retain(tau_seconds, oversampled_rate_);
     }
 
     void update_transformer() {

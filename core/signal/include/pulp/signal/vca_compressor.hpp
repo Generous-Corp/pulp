@@ -128,6 +128,7 @@
 /// 500 ms and 192 kHz is ~1e-5, where `float` starts to matter.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_core.hpp>
 #include <pulp/signal/units.hpp>
 
 #include <algorithm>
@@ -281,15 +282,12 @@ public:
     /// The static characteristic's output level for an input level, in dB — the
     /// gain computer alone, memoryless, with no detector in front of it.
     /// Exposed so a caller or a test can evaluate the curve directly.
+    /// The negative-ratio mode passes a NEGATIVE ratio straight through: the
+    /// shared equation is continuous across the sign, so "infinity+" needs no
+    /// branch of its own — only the `−ceiling_db` floor that
+    /// `gain_computer_db()` applies below.
     double static_curve_db(double input_db) const {
-        const double r = active_ratio();
-        const double over = input_db - threshold_db_;
-        if (2.0 * over < -knee_db_) return input_db;
-        if (knee_db_ > 0.0 && 2.0 * std::abs(over) <= knee_db_) {
-            const double t = over + knee_db_ * 0.5;
-            return input_db + (1.0 / r - 1.0) * t * t / (2.0 * knee_db_);
-        }
-        return threshold_db_ + over / r;
+        return dynamics::soft_knee_output_db(input_db, threshold_db_, knee_db_, active_ratio());
     }
 
     /// Gain reduction in dB (SIGNED, ≤ 0 — see the file doc block) the static

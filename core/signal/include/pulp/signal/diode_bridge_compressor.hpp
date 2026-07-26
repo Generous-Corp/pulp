@@ -119,6 +119,7 @@
 #include <pulp/signal/ballistics_filter.hpp>
 #include <pulp/signal/dc_blocker.hpp>
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_core.hpp>
 #include <pulp/signal/junction.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/units.hpp>
@@ -766,19 +767,12 @@ public:
     /// The static characteristic's gain reduction (≤ 0) for an input level in
     /// dB, ignoring the loop and the detector. Exposed so a caller or a test can
     /// plot the curve without running audio through it.
+    /// This lineage's ratio control maps its top of range onto a true limiter,
+    /// so the resolved slope — not the ratio — is what goes to the shared
+    /// equation: `1/ρ` normally, exactly 0 at and above `kLimitRatio`.
     double static_curve_db(double input_db) const {
-        const double over = input_db - threshold_db_;
         const double slope = ratio_ >= kLimitRatio ? 0.0 : 1.0 / ratio_;
-        if (knee_db_ > 0.0) {
-            if (2.0 * over <= -knee_db_) return 0.0;
-            if (2.0 * over < knee_db_) {
-                const double t = over + 0.5 * knee_db_;
-                return (slope - 1.0) * t * t / (2.0 * knee_db_);
-            }
-        } else if (over <= 0.0) {
-            return 0.0;
-        }
-        return (slope - 1.0) * over;
+        return dynamics::soft_knee_reduction_db(input_db - threshold_db_, knee_db_, slope);
     }
 
     /// The gain reduction the FEEDBACK loop settles at for a given input level

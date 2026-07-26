@@ -102,6 +102,7 @@
 /// channels before writing either, which the link path requires.
 
 #include <pulp/signal/denormal.hpp>
+#include <pulp/signal/dynamics_core.hpp>
 #include <pulp/signal/units.hpp>
 
 #include <algorithm>
@@ -126,11 +127,10 @@ public:
 
     // ── Design parameters (the complete roster) ───────────────────────────
 
-    /// Level-conversion floor, guarding `log10(0)`. Any value far below the
-    /// quietest representable signal works: this sits ~26 orders above the
-    /// float32 denormal floor and ~7 orders below −120 dBFS.
-    /// [design parameter] default 1e-12, range 1e-15 .. 1e-9.
-    static constexpr double kLevelEpsilon = 1e-12;
+    /// Level-conversion floor, guarding `log10(0)`. Declared in
+    /// `dynamics_core.hpp` alongside the conversions that consume it, and
+    /// re-exported here so the call sites and the catalog keep reading one name.
+    static constexpr double kLevelEpsilon = dynamics::kLevelEpsilon;
 
     /// Slow/fast release ratio for program-dependent release.
     /// **Honest gap:** no citable literature specifies this for a general
@@ -262,13 +262,7 @@ public:
     /// gain computer alone, with no smoothing. Exposed so a caller (or a test)
     /// can plot the curve without running audio through it.
     double static_curve_db(double input_db) const {
-        const double over = input_db - threshold_db_;
-        if (2.0 * over < -knee_db_) return input_db;
-        if (knee_db_ > 0.0 && 2.0 * std::abs(over) <= knee_db_) {
-            const double t = over + knee_db_ * 0.5;
-            return input_db + (1.0 / ratio_ - 1.0) * t * t / (2.0 * knee_db_);
-        }
-        return threshold_db_ + over / ratio_;
+        return dynamics::soft_knee_output_db(input_db, threshold_db_, knee_db_, ratio_);
     }
 
     /// Gain reduction in dB (≤ 0) the static curve applies at `input_db`.
@@ -336,13 +330,12 @@ private:
     /// Input level in dB for one channel, per the selected detector.
     double detect_level_db(int channel, double x) {
         auto& ch = channels_[static_cast<std::size_t>(channel)];
-        if (detector_ == Detector::peak)
-            return 20.0 * std::log10(std::abs(x) + kLevelEpsilon);
+        if (detector_ == Detector::peak) return dynamics::amplitude_db(x, kLevelEpsilon);
 
-        // `10·log10` rather than 20, because the integrator already holds a
-        // squared quantity.
+        // `power_db` is `10·log10`, not 20, because the integrator already holds
+        // a squared quantity — see its note in `dynamics_core.hpp`.
         ch.mean_square = snap_to_zero(rms_coef_ * ch.mean_square + (1.0 - rms_coef_) * x * x);
-        return 10.0 * std::log10(ch.mean_square + kLevelEpsilon);
+        return dynamics::power_db(ch.mean_square, kLevelEpsilon);
     }
 
     /// One channel's linear gain for an already-blended detector input level.
@@ -404,12 +397,10 @@ private:
         rms_coef_ = one_pole(rms_window_ms_);
     }
 
-    /// `α = exp(−1 / (τ·fs))` — the paper's coefficient mapping. Note this is
-    /// the RETAIN coefficient (`y = α·y + (1−α)·x`), the complement of the
-    /// `units::ms_to_onepole_coef` convention.
+    /// The paper's coefficient mapping, in ms. RETAIN convention — see
+    /// `dynamics_core.hpp` for why the name says so.
     double one_pole(double tau_ms) const {
-        if (!(tau_ms > 0.0) || !(sample_rate_ > 0.0)) return 0.0;
-        return std::exp(-1.0 / (tau_ms * 0.001 * sample_rate_));
+        return dynamics::one_pole_retain(tau_ms * 0.001, sample_rate_);
     }
 
     void update_lookahead() {
