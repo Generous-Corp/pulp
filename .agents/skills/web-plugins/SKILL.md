@@ -441,6 +441,28 @@ engine (`Version/…Safari/605`), and `page.mouse.wheel(0, 600)` over the canvas
 `window.scrollY` (measured 0→209 on the SuperConvolver editor). Chromium-only "it scrolls"
 is not proof for the browser the user is actually on.
 
+## Landmine: scripted controls need the browser host's `on_drag` channel
+
+A scripted gesture uses two distinct `View` callbacks:
+
+- `on_pointer_event` carries the press/release/cancel edges. A drag tick must not
+  become another `pointerdown` merely because its `is_down` field is true.
+- `on_drag` carries the JS `pointermove` stream. The legacy `on_mouse_drag`
+  virtual reaches stock C++ widgets, but it cannot reach a canvas-drawn control
+  whose handler was installed by `WidgetBridge`.
+
+Every browser drag tick must therefore deliver, to the target captured for that
+raw browser pointer ID, the modern event and legacy virtual, then `on_drag` for
+mouse or identity-bearing `on_pointer_move` for touch/pen. Do not redispatch
+that scripted move on native ancestors: the bridge event already bubbles
+through the JS element tree, so doing both double-fires ancestor and document
+listeners.
+Revalidate the captured target between callbacks because a handler may rebuild
+and destroy its own subtree synchronously. Missing the scripted channel produces
+a deceptive failure: the control renders and receives press/release, but it
+never moves. The router tests pin exact-target delivery, capture teardown, and
+the rule that release/uncaptured hover emit no extra move.
+
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 
 A host that remembers what it last *sent* (`values.set(id, v)`) goes stale the

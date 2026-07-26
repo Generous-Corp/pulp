@@ -19,7 +19,9 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace pulp::view::web {
 
@@ -346,21 +348,29 @@ public:
     /// Forget cached drag / hover / focus targets. The host calls this when the
     /// view tree is rebuilt and the raw pointers may dangle.
     void invalidate() {
-        drag_target_ = nullptr;
+        drag_targets_.clear();
         hover_target_ = nullptr;
         focus_target_ = nullptr;
     }
 
     View* focused_view() const { return focus_target_; }
-    View* drag_target() const { return drag_target_; }
+    View* drag_target() const {
+        if (drag_targets_.empty()) return nullptr;
+        const auto& capture = drag_targets_.begin()->second;
+        return capture.lifetime.expired() ? nullptr : capture.target;
+    }
 
     bool handle_pointer(const BrowserPointerEvent& event) {
         const MouseEvent me = translate_pointer(event, mapping_);
         switch (event.phase) {
-            case BrowserPointerPhase::down: return pointer_down(me);
-            case BrowserPointerPhase::move: return pointer_move(me);
-            case BrowserPointerPhase::up: return pointer_up(me, false);
-            case BrowserPointerPhase::cancel: return pointer_up(me, true);
+            case BrowserPointerPhase::down:
+                return pointer_down(me, event.pointer_id);
+            case BrowserPointerPhase::move:
+                return pointer_move(me, event.pointer_id);
+            case BrowserPointerPhase::up:
+                return pointer_up(me, event.pointer_id, false);
+            case BrowserPointerPhase::cancel:
+                return pointer_up(me, event.pointer_id, true);
         }
         return false;
     }
@@ -421,6 +431,27 @@ public:
     }
 
 private:
+    static bool in_tree(View* needle, View* root) {
+        if (!needle || !root) return false;
+        if (needle == root) return true;
+        for (size_t i = 0; i < root->child_count(); ++i)
+            if (in_tree(needle, root->child_at(i))) return true;
+        return false;
+    }
+
+    void clear_cached_target(
+        View* target,
+        const std::weak_ptr<const std::uint64_t>& lifetime) {
+        if (focus_target_ == target) {
+            focus_target_ = nullptr;
+            if (!lifetime.expired()) {
+                target->on_focus_changed(false);
+                if (!lifetime.expired()) target->release_input_focus();
+            }
+        }
+        if (hover_target_ == target) hover_target_ = nullptr;
+    }
+
     void mark_dirty() {
         if (on_dirty_) on_dirty_();
     }
@@ -438,7 +469,7 @@ private:
         }
     }
 
-    bool pointer_down(const MouseEvent& me) {
+    bool pointer_down(const MouseEvent& me, int raw_pointer_id) {
         // An active overlay (ComboBox popup, claimed popover) hit-tests first;
         // a click outside it dismisses it and then falls through to the view
         // underneath, matching the macOS host.
@@ -463,24 +494,60 @@ private:
 
         set_focus(target->focusable() ? target : nullptr);
 
+        const auto lifetime = target->import_binding_lifetime_token();
+        const auto target_is_live = [&] {
+            return !lifetime.expired() && in_tree(target, &root_);
+        };
         MouseEvent local_event = me;
         local_event.position = point_to_local(me.window_position, target, &root_);
         target->on_mouse_event(local_event);
-        target->on_mouse_down(local_event.position);
-        drag_target_ = target;
+        if (target_is_live()) target->on_mouse_down(local_event.position);
+        if (target_is_live())
+            drag_targets_[raw_pointer_id] = {target, lifetime};
+        else
+            clear_cached_target(target, lifetime);
         mark_dirty();
         return true;
     }
 
-    bool pointer_move(const MouseEvent& me) {
-        if (drag_target_) {
+    bool pointer_move(const MouseEvent& me, int raw_pointer_id) {
+        auto capture = drag_targets_.find(raw_pointer_id);
+        if (capture != drag_targets_.end()) {
+            const auto lifetime = capture->second.lifetime;
+            View* captured = capture->second.target;
+            if (lifetime.expired() || !in_tree(captured, &root_)) {
+                drag_targets_.erase(capture);
+                clear_cached_target(captured, lifetime);
+                return false;
+            }
+            const auto captured_is_live = [&] {
+                return !lifetime.expired() && in_tree(captured, &root_);
+            };
             MouseEvent local_event = me;
             local_event.position =
-                point_to_local(me.window_position, drag_target_, &root_);
+                point_to_local(me.window_position, captured, &root_);
             local_event.is_down = true;
             local_event.phase = MousePhase::drag;
-            drag_target_->on_mouse_event(local_event);
-            drag_target_->on_mouse_drag(local_event.position);
+
+            captured->on_mouse_event(local_event);
+            if (captured_is_live())
+                captured->on_mouse_drag(local_event.position);
+            if (captured_is_live()) {
+                if (local_event.pointer_type == PointerType::mouse) {
+                    if (captured->on_drag)
+                        captured->on_drag(local_event.position);
+                } else if (captured->on_pointer_move) {
+                    captured->on_pointer_move(local_event);
+                }
+            }
+            if (!captured_is_live()) {
+                drag_targets_.erase(raw_pointer_id);
+                // Comparing an invalidated pointer is safe; invoking focus or
+                // hover callbacks on it is not. The lifetime token lets a
+                // detached-but-retained view release its focus ownership while
+                // avoiding a dereference if the callback destroyed it.
+                clear_cached_target(captured, lifetime);
+            }
             mark_dirty();
             return true;
         }
@@ -502,18 +569,29 @@ private:
         return true;
     }
 
-    bool pointer_up(const MouseEvent& me, bool cancelled) {
-        if (!drag_target_) return false;
-        View* target = drag_target_;
-        drag_target_ = nullptr;
+    bool pointer_up(const MouseEvent& me, int raw_pointer_id, bool cancelled) {
+        auto capture = drag_targets_.find(raw_pointer_id);
+        if (capture == drag_targets_.end()) return false;
+        const auto lifetime = capture->second.lifetime;
+        View* target = capture->second.target;
+        if (lifetime.expired() || !in_tree(target, &root_)) {
+            drag_targets_.erase(capture);
+            clear_cached_target(target, lifetime);
+            return false;
+        }
+        drag_targets_.erase(raw_pointer_id);
 
         MouseEvent local_event = me;
         local_event.position = point_to_local(me.window_position, target, &root_);
         target->on_mouse_event(local_event);
-        if (cancelled)
-            target->on_mouse_cancel(local_event.position);
-        else
-            target->on_mouse_up(local_event.position);
+        if (!lifetime.expired() && in_tree(target, &root_)) {
+            if (cancelled)
+                target->on_mouse_cancel(local_event.position);
+            else
+                target->on_mouse_up(local_event.position);
+        } else {
+            clear_cached_target(target, lifetime);
+        }
         mark_dirty();
         return true;
     }
@@ -521,7 +599,11 @@ private:
     View& root_;
     ViewportMapping mapping_;
     std::function<void()> on_dirty_;
-    View* drag_target_ = nullptr;
+    struct PointerCapture {
+        View* target = nullptr;
+        std::weak_ptr<const std::uint64_t> lifetime;
+    };
+    std::unordered_map<int, PointerCapture> drag_targets_;
     View* hover_target_ = nullptr;
     View* focus_target_ = nullptr;
 };
