@@ -84,3 +84,27 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-synthesis-catalog
 pulp_dsp_series_catalog_suite(pulp-test-forge-space-catalog  test_forge_space_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-sequencing-catalog
                               test_forge_sequencing_catalog.cpp)
+
+# The three catalog suites written before this file existed, plus the fixture
+# smoke. They were hand-registered in app_audio_host_tests.cmake; they belong
+# here with the rest of the series.
+#
+# Moving them is not only tidiness. That file is one of the hashed inputs in
+# `verify_sampler_interpolation_benchmark.py`'s source bundle, which exists so a
+# recorded benchmark result cannot outlive a change to the code it measured.
+# Appending unrelated registrations there invalidated the recorded evidence and
+# failed the check — correctly. The series owns its own registration file
+# precisely so it never perturbs someone else's provenance.
+pulp_dsp_series_catalog_suite(pulp-test-forge-saturator-catalog
+                              test_forge_saturator_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-dynamics-catalog
+                              test_forge_dynamics_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-distortion-catalog
+                              test_forge_distortion_catalog.cpp)
+
+# Smoke test for the shared bake-layer fixture. Small on purpose: its job is to
+# keep the fixture compiling against both a mono and a stereo catalog node, so a
+# change to either shape fails here rather than in whichever suite happens to be
+# rebuilt next.
+pulp_dsp_series_catalog_suite(pulp-test-baked-node-fixture
+                              test_baked_node_fixture_smoke.cpp)
