@@ -23,6 +23,22 @@
 
 set -u
 
+# The neutral checker parses TOML with the Python 3.11+ stdlib. macOS still
+# ships /usr/bin/python3 as 3.9, and agent hooks intentionally inherit a small
+# PATH where that binary may shadow Homebrew. Resolve a capable interpreter
+# explicitly; this hook is advisory, so remain a clean no-op if none exists.
+PYTHON=""
+for candidate in python3 python3.14 python3.13 python3.12 python3.11 \
+                 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    resolved="$(command -v "$candidate" 2>/dev/null || true)"
+    [ -n "$resolved" ] || continue
+    if "$resolved" -c 'import tomllib' >/dev/null 2>&1; then
+        PYTHON="$resolved"
+        break
+    fi
+done
+[ -n "$PYTHON" ] || exit 0
+
 # ── Resolve the edited file path from the tool payload (agent-neutral) ────────
 # Claude exposes it as $TOOL_INPUT; Codex/others may pipe the JSON on stdin.
 PAYLOAD="${TOOL_INPUT:-}"
@@ -30,7 +46,7 @@ if [ -z "$PAYLOAD" ] && [ ! -t 0 ]; then
     PAYLOAD="$(cat 2>/dev/null || true)"
 fi
 
-FILE="$(printf '%s' "$PAYLOAD" | python3 -c '
+FILE="$(printf '%s' "$PAYLOAD" | "$PYTHON" -c '
 import sys, json
 try:
     data = json.load(sys.stdin)
@@ -57,5 +73,5 @@ CONTRACT="$ROOT/.agents/contract.toml"
 
 # Advisory surface for exactly this file. Prints nothing (clean no-op) unless
 # the path is a guarded fleet/CI config path. Never fails the hook.
-python3 "$CHECKER" --mode surface --contract "$CONTRACT" --paths "$FILE" 2>&1 || true
+"$PYTHON" "$CHECKER" --mode surface --contract "$CONTRACT" --paths "$FILE" 2>&1 || true
 exit 0
