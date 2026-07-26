@@ -335,6 +335,10 @@ public:
     /// a gain law that silently stops matching its own gain reduction. One
     /// argument cannot disagree with itself.
     SampleType process(SampleType input, double control_drive) {
+        if (!std::isfinite(static_cast<double>(input)) || !std::isfinite(control_drive)) {
+            reset();
+            return SampleType{0};
+        }
         const double x = std::max(0.0, control_drive);
         const double beta = curvature(x);
         const double limit = max_operating_amplitude(beta);
@@ -355,8 +359,12 @@ public:
 
         // Divide the drive back out: the shaper contributes harmonics, never
         // level (series law 1). See the class doc block.
-        return static_cast<SampleType>(
-            snap_to_zero(gain_for_control_drive(x) * shaped / drive_));
+        const double output = snap_to_zero(gain_for_control_drive(x) * shaped / drive_);
+        if (!std::isfinite(output)) {
+            reset();
+            return SampleType{0};
+        }
+        return static_cast<SampleType>(output);
     }
 
 private:
@@ -509,6 +517,10 @@ public:
     }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double u = std::clamp(static_cast<double>(input), -limit_, limit_);
 
         double shaped;
@@ -524,7 +536,12 @@ public:
         previous_input_ = u;
 
         const SampleType blocked = highpass_.process_highpass(static_cast<SampleType>(shaped));
-        return lowpass_.process_lowpass(blocked);
+        const SampleType output = lowpass_.process_lowpass(blocked);
+        if (!std::isfinite(static_cast<double>(output))) {
+            reset();
+            return SampleType{0};
+        }
+        return output;
     }
 
 private:

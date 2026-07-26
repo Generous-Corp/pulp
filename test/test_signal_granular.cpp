@@ -1489,3 +1489,108 @@ TEST_CASE("Granular prepare retains its finite sample rate on non-finite input",
         CHECK(engine.causality_guard_samples() == expected_guard);
     }
 }
+
+TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
+          "[granular][live][nan-recovery][rt]") {
+    const std::vector<double> continuation = noise_buffer(8192, 0xBAD5A11u);
+    const std::vector<double> warmup = noise_buffer(4096, 0x51A7E5u);
+
+    const auto configure = [](GranularEngine64& engine) {
+        engine.prepare(kFs);
+        engine.set_source(GrainSource::live_ring);
+        engine.set_density_hz(173.0);
+        engine.set_grain_ms(37.0);
+        engine.set_async_jitter(0.31);
+        engine.set_position(0.17);
+        engine.set_position_spray_ms(9.0);
+        engine.set_pitch_semitones(-3.0);
+        engine.set_pitch_spray_semitones(2.0);
+        engine.set_pan_spray(0.63);
+        engine.set_window_taper(0.71);
+        engine.set_level_db(-4.0);
+        engine.set_mix(0.58);
+        engine.set_seed(0xC001D00Du);
+        engine.reset();
+    };
+
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+        CAPTURE(invalid);
+
+        SECTION("interleaved live callback") {
+            GranularEngine64 poisoned;
+            GranularEngine64 fresh;
+            configure(poisoned);
+            configure(fresh);
+
+            std::vector<double> warm_left(warmup.size());
+            std::vector<double> warm_right(warmup.size());
+            poisoned.process(warmup.data(), warm_left.data(), warm_right.data(),
+                             static_cast<int>(warmup.size()));
+            REQUIRE(poisoned.active_grain_count() > 0);
+
+            double bad_left = 1.0;
+            double bad_right = 1.0;
+            {
+                pulp::test::RtAllocationProbe probe;
+                poisoned.process(&invalid, &bad_left, &bad_right, 1);
+                REQUIRE(probe.allocation_count() == 0);
+            }
+            REQUIRE(bad_left == 0.0);
+            REQUIRE(bad_right == 0.0);
+
+            fresh.reset();
+            std::vector<double> recovered_left(continuation.size());
+            std::vector<double> recovered_right(continuation.size());
+            std::vector<double> reference_left(continuation.size());
+            std::vector<double> reference_right(continuation.size());
+            poisoned.process(continuation.data(), recovered_left.data(), recovered_right.data(),
+                             static_cast<int>(continuation.size()));
+            fresh.process(continuation.data(), reference_left.data(), reference_right.data(),
+                          static_cast<int>(continuation.size()));
+
+            REQUIRE(recovered_left == reference_left);
+            REQUIRE(recovered_right == reference_right);
+            REQUIRE(poisoned.grain_index() == fresh.grain_index());
+            REQUIRE(poisoned.active_grain_count() == fresh.active_grain_count());
+        }
+
+        SECTION("two-call write_live path") {
+            GranularEngine64 poisoned;
+            GranularEngine64 fresh;
+            configure(poisoned);
+            configure(fresh);
+
+            poisoned.write_live(warmup.data(), static_cast<int>(warmup.size()));
+            std::vector<double> discarded_left(warmup.size());
+            std::vector<double> discarded_right(warmup.size());
+            poisoned.process(discarded_left.data(), discarded_right.data(),
+                             static_cast<int>(warmup.size()));
+            REQUIRE(poisoned.active_grain_count() > 0);
+
+            {
+                pulp::test::RtAllocationProbe probe;
+                poisoned.write_live(&invalid, 1);
+                REQUIRE(probe.allocation_count() == 0);
+            }
+            REQUIRE(poisoned.grain_index() == 0);
+            REQUIRE(poisoned.active_grain_count() == 0);
+
+            fresh.reset();
+            poisoned.write_live(continuation.data(), static_cast<int>(continuation.size()));
+            fresh.write_live(continuation.data(), static_cast<int>(continuation.size()));
+            std::vector<double> recovered_left(continuation.size());
+            std::vector<double> recovered_right(continuation.size());
+            std::vector<double> reference_left(continuation.size());
+            std::vector<double> reference_right(continuation.size());
+            poisoned.process(recovered_left.data(), recovered_right.data(),
+                             static_cast<int>(continuation.size()));
+            fresh.process(reference_left.data(), reference_right.data(),
+                          static_cast<int>(continuation.size()));
+
+            REQUIRE(recovered_left == reference_left);
+            REQUIRE(recovered_right == reference_right);
+        }
+    }
+}

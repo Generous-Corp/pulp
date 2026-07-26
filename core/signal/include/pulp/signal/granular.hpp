@@ -302,7 +302,13 @@ public:
         // Live freeze holds the captured material, not merely its nominal
         // centre while the ring overwrites it underneath us.
         if (!accepts_live_input()) return;
-        for (int i = 0; i < n; ++i) write_one(in[i]);
+        for (int i = 0; i < n; ++i) {
+            if (!std::isfinite(static_cast<double>(in[i]))) {
+                reset();
+                continue;
+            }
+            write_one(in[i]);
+        }
     }
 
     /// Playhead advance multiplier. 1 is realtime, 0 freezes, 4 scans four
@@ -787,6 +793,16 @@ private:
     void render(const SampleType* in, SampleType* out_left, SampleType* out_right, int n) {
         const double buffer_span = static_cast<double>(std::max(buffer_length_, 1));
         for (int i = 0; i < n; ++i) {
+            const double input_sample = in != nullptr ? static_cast<double>(in[i]) : 0.0;
+            if (in != nullptr && !std::isfinite(input_sample)) {
+                // Live input is ring history and the interleaved overload also
+                // exposes it as dry audio. Reject it before either path sees it,
+                // then restart from the documented fresh state.
+                reset();
+                out_left[i] = SampleType{0};
+                out_right[i] = SampleType{0};
+                continue;
+            }
             if (in != nullptr && accepts_live_input()) {
                 write_one(in[i]);
             }
@@ -819,7 +835,7 @@ private:
 
             const double level = level_.next();
             const double blend = mix_.next();
-            const double dry = in != nullptr ? static_cast<double>(in[i]) : 0.0;
+            const double dry = input_sample;
             const double wet_weight = in != nullptr ? blend : 1.0;
             const double dry_weight = in != nullptr ? 1.0 - blend : 0.0;
 

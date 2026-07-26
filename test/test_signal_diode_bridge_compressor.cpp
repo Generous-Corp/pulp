@@ -1395,6 +1395,20 @@ TEST_CASE("non-finite diode-bridge controls retain the last valid configuration"
             c->set_sc_hpf_hz(137.0);
         }
 
+        int sample_index = 0;
+        const auto continue_exactly = [&](int count) {
+            for (int i = 0; i < count; ++i, ++sample_index) {
+                const double input =
+                    0.35 * std::sin(2.0 * M_PI * 997.0 * sample_index / kSr);
+                REQUIRE(actual.process(input) == reference.process(input));
+                REQUIRE(actual.gain_reduction_db() == reference.gain_reduction_db());
+            }
+        };
+
+        // Invalid automation arrives after every recursive stage is live. A
+        // setter that resets detector, feedback, bracket, or follower state can
+        // no longer hide behind both instances starting fresh.
+        continue_exactly(512);
         for (double value : invalid) {
             actual.set_threshold_db(value);
             actual.set_ratio(value);
@@ -1405,42 +1419,111 @@ TEST_CASE("non-finite diode-bridge controls retain the last valid configuration"
             actual.set_character(value);
             actual.set_mix_percent(value);
             actual.set_sc_hpf_hz(value);
-        }
-
-        for (int i = 0; i < 2048; ++i) {
-            const double input = 0.35 * std::sin(2.0 * M_PI * 997.0 * i / kSr);
-            REQUIRE_THAT(actual.process(input), WithinAbs(reference.process(input), 1e-12));
-            REQUIRE_THAT(actual.gain_reduction_db(),
-                         WithinAbs(reference.gain_reduction_db(), 1e-12));
+            continue_exactly(256);
         }
     }
 
     SECTION("the diode bridge gain component retains its character") {
         Bridge actual;
         Bridge reference;
-        actual.set_character(0.73);
-        reference.set_character(0.73);
+        for (Bridge* bridge : {&actual, &reference}) {
+            bridge->prepare(kSr);
+            bridge->set_character(0.73);
+        }
 
+        int sample_index = 0;
+        const auto continue_exactly = [&](int count) {
+            for (int i = 0; i < count; ++i, ++sample_index) {
+                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * sample_index / kSr);
+                const double drive = 1.0 + 0.75 * std::sin(2.0 * M_PI * 7.0 * sample_index / kSr);
+                REQUIRE(actual.process(input, drive) == reference.process(input, drive));
+            }
+        };
+
+        continue_exactly(257);
         for (double value : invalid) {
             actual.set_character(value);
             REQUIRE_THAT(actual.drive(), WithinAbs(reference.drive(), 1e-15));
-            REQUIRE_THAT(actual.process(0.6, 2.0),
-                         WithinAbs(reference.process(0.6, 2.0), 1e-12));
+            continue_exactly(127);
         }
     }
 
     SECTION("the transformer bracket component retains its character") {
         Bracket actual;
         Bracket reference;
-        actual.set_character(0.73);
-        reference.set_character(0.73);
+        for (Bracket* bracket : {&actual, &reference}) {
+            bracket->prepare(kSr);
+            bracket->set_character(0.73);
+        }
 
+        int sample_index = 0;
+        const auto continue_exactly = [&](int count) {
+            for (int i = 0; i < count; ++i, ++sample_index) {
+                // Deliberately cross the character-dependent clamp so the
+                // comparison covers limit_ as well as saturation coefficients.
+                const double input = 8.0 * std::sin(2.0 * M_PI * 431.0 * sample_index / kSr);
+                REQUIRE(actual.process(input) == reference.process(input));
+            }
+        };
+
+        continue_exactly(257);
         for (double value : invalid) {
             actual.set_character(value);
             REQUIRE_THAT(actual.saturate(0.8),
                          WithinAbs(reference.saturate(0.8), 1e-15));
             REQUIRE_THAT(actual.saturate(-0.8),
                          WithinAbs(reference.saturate(-0.8), 1e-15));
+            continue_exactly(127);
+        }
+    }
+}
+
+TEST_CASE("public diode colour components recover exactly after non-finite audio",
+          "[diode-bridge][nan-recovery][rt-safety]") {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+
+    for (double invalid : {nan, inf, -inf}) {
+        CAPTURE(invalid);
+
+        SECTION("diode bridge gain") {
+            Bridge poisoned;
+            Bridge fresh;
+            for (Bridge* bridge : {&poisoned, &fresh}) {
+                bridge->prepare(kSr);
+                bridge->set_character(0.73);
+            }
+            for (int i = 0; i < 257; ++i) {
+                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * i / kSr);
+                (void)poisoned.process(input, 2.0);
+            }
+
+            REQUIRE(poisoned.process(invalid, 2.0) == 0.0);
+            REQUIRE(poisoned.process(0.5, invalid) == 0.0);
+            fresh.reset();
+            for (int i = 0; i < 1024; ++i) {
+                const double input = 0.7 * std::sin(2.0 * M_PI * 613.0 * i / kSr);
+                REQUIRE(poisoned.process(input, 2.0) == fresh.process(input, 2.0));
+            }
+        }
+
+        SECTION("transformer bracket") {
+            Bracket poisoned;
+            Bracket fresh;
+            for (Bracket* bracket : {&poisoned, &fresh}) {
+                bracket->prepare(kSr);
+                bracket->set_character(0.73);
+            }
+            for (int i = 0; i < 257; ++i) {
+                (void)poisoned.process(0.8 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+            }
+
+            REQUIRE(poisoned.process(invalid) == 0.0);
+            fresh.reset();
+            for (int i = 0; i < 1024; ++i) {
+                const double input = 0.8 * std::sin(2.0 * M_PI * 431.0 * i / kSr);
+                REQUIRE(poisoned.process(input) == fresh.process(input));
+            }
         }
     }
 }
