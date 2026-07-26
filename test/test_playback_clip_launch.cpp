@@ -9,6 +9,8 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
+#include <vector>
 
 using namespace pulp;
 using namespace pulp::playback;
@@ -59,6 +61,29 @@ MonotonicBeat target_after_samples(const CompiledTempoMap& map, const TransportR
                                    std::int64_t n) {
     const auto end_tick = map.samples_to_ticks({range.timeline_sample_start.value + n});
     return range.monotonic_start + (end_tick - range.timeline_tick_start);
+}
+
+using timeline::FollowActionKind;
+using timeline::FollowDraw;
+using timeline::FollowOutcome;
+using timeline::Slot;
+
+// A lane of `count` slots with ids 1..count, every slot filled. Slot i's clip id
+// is distinct from its slot id so an accidental swap of the two is visible.
+std::vector<Slot> make_lane(std::size_t count) {
+    std::vector<Slot> lane(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        lane[index].id = timeline::ItemId{index + 1};
+        lane[index].clip_id = timeline::ItemId{100 + index + 1};
+    }
+    return lane;
+}
+
+// The default follow grid used by resolution tests: one beat, fire on the first
+// period. Resolution never reads the grid, but a set must be `enabled()` to
+// resolve at all.
+timeline::FollowActionSet follow(FollowActionKind kind, std::uint32_t repetitions = 1) {
+    return timeline::follow_action(kind, timeline::launch_every_quarters(1).grid, repetitions);
 }
 
 } // namespace
@@ -333,6 +358,427 @@ TEST_CASE("LaunchHandle stop is quantized to the boundary") {
     REQUIRE(event.kind == LaunchEventKind::Stop);
     REQUIRE(handle.state() == LaunchState::Stopped);
     REQUIRE(event.sample_offset == 100); // 500 - 400 consumed
+}
+
+TEST_CASE("follow action resolves the deterministic navigation kinds") {
+    auto lane = make_lane(4);
+    const std::span<const Slot> view{lane};
+
+    SECTION("Stop names the acting slot") {
+        lane[1].follow = follow(FollowActionKind::Stop);
+        const auto resolved = timeline::resolve_follow_action(view, 1, {});
+        REQUIRE(resolved.outcome == FollowOutcome::Stop);
+        REQUIRE(resolved.slot_index == 1);
+        REQUIRE(resolved.slot_id == lane[1].id);
+    }
+
+    SECTION("Again replays the acting slot") {
+        lane[2].follow = follow(FollowActionKind::Again);
+        const auto resolved = timeline::resolve_follow_action(view, 2, {});
+        REQUIRE(resolved.outcome == FollowOutcome::Play);
+        REQUIRE(resolved.slot_index == 2);
+    }
+
+    SECTION("Next advances and wraps past the end") {
+        lane[1].follow = follow(FollowActionKind::Next);
+        REQUIRE(timeline::resolve_follow_action(view, 1, {}).slot_index == 2);
+        lane[3].follow = follow(FollowActionKind::Next);
+        REQUIRE(timeline::resolve_follow_action(view, 3, {}).slot_index == 0);
+    }
+
+    SECTION("Previous retreats and wraps past the start") {
+        lane[2].follow = follow(FollowActionKind::Previous);
+        REQUIRE(timeline::resolve_follow_action(view, 2, {}).slot_index == 1);
+        lane[0].follow = follow(FollowActionKind::Previous);
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).slot_index == 3);
+    }
+
+    SECTION("First and Last address the ends") {
+        lane[2].follow = follow(FollowActionKind::First);
+        REQUIRE(timeline::resolve_follow_action(view, 2, {}).slot_index == 0);
+        lane[1].follow = follow(FollowActionKind::Last);
+        REQUIRE(timeline::resolve_follow_action(view, 1, {}).slot_index == 3);
+    }
+
+    SECTION("Jump addresses a slot by id") {
+        auto set = follow(FollowActionKind::Jump);
+        set.choices[0].target = lane[3].id;
+        lane[0].follow = set;
+        const auto resolved = timeline::resolve_follow_action(view, 0, {});
+        REQUIRE(resolved.outcome == FollowOutcome::Play);
+        REQUIRE(resolved.slot_index == 3);
+        REQUIRE(resolved.slot_id == lane[3].id);
+    }
+}
+
+TEST_CASE("follow action skips empty slots and stays inert when unsatisfiable") {
+    auto lane = make_lane(4);
+    lane[1].clip_id = {}; // empty
+    lane[2].clip_id = {}; // empty
+    const std::span<const Slot> view{lane};
+
+    SECTION("Next and Previous step over the empty slots") {
+        lane[0].follow = follow(FollowActionKind::Next);
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).slot_index == 3);
+        lane[3].follow = follow(FollowActionKind::Previous);
+        REQUIRE(timeline::resolve_follow_action(view, 3, {}).slot_index == 0);
+    }
+
+    SECTION("Last skips a trailing empty slot") {
+        auto tail = make_lane(3);
+        tail[2].clip_id = {};
+        tail[0].follow = follow(FollowActionKind::Last);
+        REQUIRE(timeline::resolve_follow_action(tail, 0, {}).slot_index == 1);
+    }
+
+    SECTION("a jump to an unknown id is inert rather than a stop") {
+        auto set = follow(FollowActionKind::Jump);
+        set.choices[0].target = timeline::ItemId{9'999};
+        lane[0].follow = set;
+        const auto resolved = timeline::resolve_follow_action(view, 0, {});
+        REQUIRE(resolved.outcome == FollowOutcome::None);
+        REQUIRE(resolved.slot_index == timeline::FollowResolution::kNoSlot);
+    }
+
+    SECTION("a jump to an empty slot is inert") {
+        auto set = follow(FollowActionKind::Jump);
+        set.choices[0].target = lane[1].id;
+        lane[0].follow = set;
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).outcome == FollowOutcome::None);
+    }
+
+    SECTION("navigation in a lane with no filled slot is inert") {
+        std::vector<Slot> empty_lane(3);
+        empty_lane[0].id = timeline::ItemId{1};
+        empty_lane[0].follow = follow(FollowActionKind::Next);
+        REQUIRE(timeline::resolve_follow_action(empty_lane, 0, {}).outcome == FollowOutcome::None);
+    }
+
+    SECTION("a disabled set never resolves") {
+        // A zero period, no candidates, and zero repetitions each disable it.
+        lane[0].follow = timeline::follow_action(FollowActionKind::Next, TickDuration{0});
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).outcome == FollowOutcome::None);
+        lane[0].follow = follow(FollowActionKind::Next, 0);
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).outcome == FollowOutcome::None);
+        lane[0].follow = follow(FollowActionKind::Next);
+        lane[0].follow.choice_count = 0;
+        REQUIRE(timeline::resolve_follow_action(view, 0, {}).outcome == FollowOutcome::None);
+    }
+
+    SECTION("an out-of-range acting index is inert") {
+        REQUIRE(timeline::resolve_follow_action(view, 99, {}).outcome == FollowOutcome::None);
+    }
+}
+
+TEST_CASE("random follow actions are seeded and reproducible") {
+    auto lane = make_lane(5);
+    lane[0].follow = follow(FollowActionKind::Any);
+    lane[1].follow = follow(FollowActionKind::Other);
+    const std::span<const Slot> view{lane};
+
+    constexpr std::uint64_t kSeed = 0xC0FFEE'1234ULL;
+
+    // The same (seed, slot, draw index) triple always resolves the same way, and
+    // a replay of the whole decision sequence is identical — the determinism
+    // contract for a random follow action.
+    std::vector<std::size_t> first_pass;
+    std::vector<std::size_t> replay;
+    for (std::uint64_t draw = 0; draw < 64; ++draw) {
+        first_pass.push_back(
+            timeline::resolve_follow_action(view, 0, {kSeed, lane[0].id, draw}).slot_index);
+        replay.push_back(
+            timeline::resolve_follow_action(view, 0, {kSeed, lane[0].id, draw}).slot_index);
+    }
+    REQUIRE(first_pass == replay);
+
+    SECTION("Any reaches every filled slot including the acting one") {
+        std::array<int, 5> hits{};
+        for (std::size_t index : first_pass)
+            hits[index]++;
+        for (int count : hits)
+            REQUIRE(count > 0);
+    }
+
+    SECTION("Other never picks the acting slot") {
+        for (std::uint64_t draw = 0; draw < 256; ++draw) {
+            const auto resolved =
+                timeline::resolve_follow_action(view, 1, {kSeed, lane[1].id, draw});
+            REQUIRE(resolved.outcome == FollowOutcome::Play);
+            REQUIRE(resolved.slot_index != 1);
+        }
+    }
+
+    SECTION("Other in a single-filled-slot lane replays that slot") {
+        auto solo = make_lane(3);
+        solo[1].clip_id = {};
+        solo[2].clip_id = {};
+        solo[0].follow = follow(FollowActionKind::Other);
+        const auto resolved = timeline::resolve_follow_action(solo, 0, {kSeed, solo[0].id, 7});
+        REQUIRE(resolved.outcome == FollowOutcome::Play);
+        REQUIRE(resolved.slot_index == 0);
+    }
+
+    SECTION("a different seed produces a different sequence") {
+        std::vector<std::size_t> other_seed;
+        for (std::uint64_t draw = 0; draw < 64; ++draw)
+            other_seed.push_back(
+                timeline::resolve_follow_action(view, 0, {kSeed + 1, lane[0].id, draw})
+                    .slot_index);
+        REQUIRE(other_seed != first_pass);
+    }
+
+    SECTION("two slots drawing at the same index do not share a stream") {
+        // Each decision hashes its own slot id, so no slot's draw depends on how
+        // many other slots resolved first — evaluation order cannot change it.
+        std::vector<std::size_t> from_slot_0;
+        std::vector<std::size_t> from_slot_3;
+        lane[3].follow = follow(FollowActionKind::Any);
+        for (std::uint64_t draw = 0; draw < 64; ++draw) {
+            from_slot_0.push_back(
+                timeline::resolve_follow_action(view, 0, {kSeed, lane[0].id, draw}).slot_index);
+            from_slot_3.push_back(
+                timeline::resolve_follow_action(view, 3, {kSeed, lane[3].id, draw}).slot_index);
+        }
+        REQUIRE(from_slot_0 != from_slot_3);
+    }
+}
+
+TEST_CASE("weighted follow-action candidates are drawn in proportion") {
+    auto lane = make_lane(3);
+    timeline::FollowActionSet set;
+    set.grid = timeline::launch_every_quarters(1).grid;
+    set.choices[0] = {FollowActionKind::Again, {}, 3};
+    set.choices[1] = {FollowActionKind::Next, {}, 1};
+    set.choice_count = 2;
+    lane[0].follow = set;
+    const std::span<const Slot> view{lane};
+
+    int again = 0;
+    int next = 0;
+    constexpr int kDraws = 4'000;
+    for (std::uint64_t draw = 0; draw < kDraws; ++draw) {
+        const auto resolved = timeline::resolve_follow_action(view, 0, {7, lane[0].id, draw});
+        REQUIRE(resolved.outcome == FollowOutcome::Play);
+        (resolved.slot_index == 0 ? again : next)++;
+    }
+    REQUIRE(again + next == kDraws);
+    // 3:1 weighting: the heavier candidate takes roughly three quarters. A wide
+    // band keeps this an assertion about the weighting, not about the hash.
+    REQUIRE(again > next * 2);
+    REQUIRE(again < next * 4);
+
+    SECTION("a zero weight makes a candidate unreachable") {
+        lane[0].follow.choices[1].weight = 0;
+        for (std::uint64_t draw = 0; draw < 256; ++draw)
+            REQUIRE(timeline::resolve_follow_action(view, 0, {7, lane[0].id, draw}).slot_index ==
+                    0);
+    }
+
+    SECTION("an all-zero-weight set is inert") {
+        lane[0].follow.choices[0].weight = 0;
+        lane[0].follow.choices[1].weight = 0;
+        REQUIRE(timeline::resolve_follow_action(view, 0, {7, lane[0].id, 0}).outcome ==
+                FollowOutcome::None);
+    }
+}
+
+TEST_CASE("FollowActionTimer fires one grid period after the launch it follows") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    setup.initial_position = map.samples_to_ticks({23'500});
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    LaunchHandle handle;
+    handle.arm(timeline::launch_every_quarters(1));
+    FollowActionTimer timer;
+
+    std::uint64_t consumed = 0;
+    std::uint64_t launched_at = 0;
+    std::uint64_t followed_at = 0;
+    for (int guard = 0; guard < 1'000 && followed_at == 0; ++guard) {
+        const auto snapshot = block(transport, 1024);
+        const auto event = handle.process(snapshot, map);
+        if (event.kind == LaunchEventKind::Start) {
+            launched_at = consumed + event.sample_offset;
+            REQUIRE(handle.has_last_start());
+            // The grid is anchored to the beat the launch resolved to, not to the
+            // block that carried it.
+            REQUIRE(handle.last_start().position == TickPosition{kTicksPerQuarter});
+            timer.arm(handle.last_start(), follow(FollowActionKind::Next));
+            REQUIRE(timer.armed());
+        }
+        const auto follow_event = timer.process(snapshot, map);
+        if (follow_event.fired)
+            followed_at = consumed + follow_event.sample_offset;
+        consumed += snapshot.frame_count;
+    }
+
+    REQUIRE(launched_at == 500);
+    // One beat at 120 bpm / 48 kHz is 24000 samples past the launch.
+    REQUIRE(followed_at == 24'500);
+    REQUIRE_FALSE(timer.armed());
+    REQUIRE(timer.fire_count() == 1);
+}
+
+TEST_CASE("FollowActionTimer grid is anchored to the launch, not the transport grid") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    // An off-grid start: the monotonic clock begins 23500 samples in, which is
+    // not a whole beat, and an immediate launch inherits that off-grid position.
+    setup.initial_position = map.samples_to_ticks({23'500});
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    LaunchHandle handle;
+    handle.arm(timeline::launch_immediate());
+    FollowActionTimer timer;
+
+    std::uint64_t consumed = 0;
+    std::uint64_t followed_at = 0;
+    for (int guard = 0; guard < 1'000 && followed_at == 0; ++guard) {
+        const auto snapshot = block(transport, 1024);
+        if (handle.process(snapshot, map).kind == LaunchEventKind::Start)
+            timer.arm(handle.last_start(), follow(FollowActionKind::Next));
+        const auto follow_event = timer.process(snapshot, map);
+        if (follow_event.fired)
+            followed_at = consumed + follow_event.sample_offset;
+        consumed += snapshot.frame_count;
+    }
+
+    // A full beat after the off-grid launch. A grid anchored to the monotonic
+    // origin instead would have fired at played sample 500 — the transport's own
+    // next beat — so this number distinguishes the two anchorings.
+    REQUIRE(followed_at == 24'000);
+}
+
+TEST_CASE("FollowActionTimer counts repetitions before it fires") {
+    const auto map = constant_map();
+    auto setup = config();
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    FollowActionTimer timer;
+    timer.arm({{0}}, follow(FollowActionKind::Next, 3));
+
+    std::uint64_t consumed = 0;
+    std::uint64_t fired_at = 0;
+    for (int guard = 0; guard < 1'000 && fired_at == 0; ++guard) {
+        const auto snapshot = block(transport, 512);
+        const auto event = timer.process(snapshot, map);
+        if (event.fired)
+            fired_at = consumed + event.sample_offset;
+        consumed += snapshot.frame_count;
+    }
+    // Three one-beat periods: the first two boundaries are consumed silently.
+    REQUIRE(fired_at == 3 * 24'000);
+    REQUIRE(timer.fire_count() == 1);
+
+    SECTION("a disabled set leaves the timer disarmed") {
+        FollowActionTimer inert;
+        inert.arm({{0}}, timeline::follow_action(FollowActionKind::Next, TickDuration{0}));
+        REQUIRE_FALSE(inert.armed());
+        const auto snapshot = block(transport, 4096);
+        REQUIRE_FALSE(inert.process(snapshot, map).fired);
+    }
+
+    SECTION("repetition boundaries falling inside one block are consumed there") {
+        // A block long enough to span all three one-beat periods must still fire
+        // exactly once, at the third boundary.
+        auto wide_setup = config(1 << 17);
+        wide_setup.initially_playing = true;
+        MasterTransport wide;
+        REQUIRE(wide.prepare(map, wide_setup) == TransportError::None);
+        FollowActionTimer bulk;
+        bulk.arm({{0}}, follow(FollowActionKind::Next, 3));
+        const auto snapshot = block(wide, 100'000);
+        const auto event = bulk.process(snapshot, map);
+        REQUIRE(event.fired);
+        REQUIRE(event.sample_offset == 3 * 24'000);
+        REQUIRE_FALSE(bulk.armed());
+    }
+}
+
+TEST_CASE("FollowActionTimer fire is sample-accurate across a real loop wrap") {
+    const auto map = constant_map();
+    // A three-beat loop: the follow action's intermediate boundaries and its fire
+    // land on different sides of the wrap.
+    const LoopRegion loop{true, {0}, {3 * kTicksPerQuarter}};
+
+    auto run_to_follow = [&](std::uint32_t block_frames) -> std::uint64_t {
+        auto setup = config();
+        setup.initially_playing = true;
+        setup.loop = loop;
+        setup.initial_position = map.samples_to_ticks({23'500});
+        MasterTransport transport;
+        REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+        LaunchHandle handle;
+        // Launching immediately from an off-grid position puts the follow grid
+        // off the transport's own beat grid, so the fire sample also proves the
+        // grid stayed anchored to the launch across the wrap.
+        handle.arm(timeline::launch_immediate());
+        FollowActionTimer timer;
+
+        std::uint64_t consumed = 0;
+        for (int guard = 0; guard < 400'000; ++guard) {
+            const auto snapshot = block(transport, block_frames);
+            const auto event = handle.process(snapshot, map);
+            if (event.kind == LaunchEventKind::Start)
+                timer.arm(handle.last_start(), follow(FollowActionKind::Next, 3));
+            const auto follow_event = timer.process(snapshot, map);
+            if (follow_event.fired)
+                return consumed + follow_event.sample_offset;
+            consumed += snapshot.frame_count;
+        }
+        FAIL("follow action never fired");
+        return 0;
+    };
+
+    // Frame-granular blocks never split, so their absolute fire sample is ground
+    // truth; every larger block size splits differently at the wrap and must
+    // agree exactly. The launch lands at played sample 0, and the third one-beat
+    // period is 72000 samples later — one wrap (at played sample 48500) behind.
+    const auto truth = run_to_follow(1);
+    REQUIRE(truth == 72'000);
+    REQUIRE(run_to_follow(1024) == truth);
+    REQUIRE(run_to_follow(333) == truth);
+    REQUIRE(run_to_follow(500) == truth);
+    // A block boundary landing exactly on the loop wrap.
+    REQUIRE(run_to_follow(250) == truth);
+}
+
+TEST_CASE("follow-action resolution does not allocate on the audio thread") {
+    const auto map = constant_map();
+    // One block long enough to contain the whole one-beat follow period, so the
+    // fire and its resolution both happen inside the probe.
+    auto setup = config(32'768);
+    setup.initially_playing = true;
+    MasterTransport transport;
+    REQUIRE(transport.prepare(map, setup) == TransportError::None);
+
+    auto lane = make_lane(5);
+    lane[0].follow = follow(FollowActionKind::Any);
+    const std::span<const Slot> view{lane};
+
+    FollowActionTimer timer;
+    timer.arm({{0}}, lane[0].follow);
+    const auto snapshot = block(transport, 32'768);
+
+    timeline::FollowResolution resolved;
+    {
+        test::ScopedRtProcessProbe probe;
+        const auto event = timer.process(snapshot, map);
+        if (event.fired)
+            resolved = timeline::resolve_follow_action(view, 0, {42, lane[0].id,
+                                                                 timer.fire_count()});
+        REQUIRE(probe.allocation_count() == 0);
+        REQUIRE(event.fired);
+    }
+    REQUIRE(resolved.outcome == FollowOutcome::Play);
 }
 
 TEST_CASE("LaunchHandle::process does not allocate on the audio thread") {
