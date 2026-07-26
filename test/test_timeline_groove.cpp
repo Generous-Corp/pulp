@@ -343,6 +343,18 @@ TEST_CASE("a groove round trips and re-saves byte-identically",
     REQUIRE(second.value().json == first.value().json);
 }
 
+TEST_CASE("a groove name must be valid UTF-8 before persistence",
+          "[timeline][groove][persistence]") {
+    GrooveTemplateInput input;
+    input.name.assign(1, static_cast<char>(0xc0));
+    const auto encoded =
+        serialize_project(project_with_groove(groove_of(std::move(input))), builtins());
+
+    REQUIRE_FALSE(encoded);
+    REQUIRE(encoded.error().code == PersistenceErrorCode::InvalidUtf8);
+    REQUIRE(encoded.error().path == "/data/sequences/0/data/groove/name");
+}
+
 TEST_CASE("a document whose groove is malformed is rejected on load",
           "[timeline][groove][persistence]") {
     const auto registry = builtins();

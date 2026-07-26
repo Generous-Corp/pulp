@@ -719,6 +719,9 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
+        if (!is_valid_utf8(sequence.groove().name()))
+            return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                            sequence_path + "/groove/name");
         for (std::size_t index = 0; index < sequence.markers().size(); ++index)
             if (!is_valid_utf8(sequence.markers()[index].name))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
