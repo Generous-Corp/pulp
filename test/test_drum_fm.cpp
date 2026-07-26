@@ -27,6 +27,7 @@ namespace {
 using pulp::signal::drum::Fm6DrumVoice;
 using pulp::signal::drum::Fm8DrumVoice;
 using pulp::signal::drum::FmDrumVoice;
+using pulp::signal::drum::FmWaveTable;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
 
@@ -96,6 +97,143 @@ void bare(FmDrumVoice& voice) {
 }  // namespace
 
 // -- Two operators -----------------------------------------------------------
+
+TEST_CASE("All 26 shared FM waves are bounded and distinct",
+          "[signal][drum][fm][wave]") {
+    std::vector<std::vector<double>> waves;
+    for (int wave = 0; wave < FmWaveTable::wave_count; ++wave) {
+        std::vector<double> samples(512);
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            samples[i] = FmWaveTable::read(
+                wave, static_cast<double>(i) / static_cast<double>(samples.size()));
+            REQUIRE(std::isfinite(samples[i]));
+            REQUIRE(std::fabs(samples[i]) <= 1.0000001);
+        }
+        waves.push_back(std::move(samples));
+    }
+    for (std::size_t wave = 0; wave < waves.size(); ++wave) {
+        for (std::size_t other = wave + 1; other < waves.size(); ++other) {
+            REQUIRE_FALSE(waves[wave] == waves[other]);
+        }
+    }
+}
+
+TEST_CASE("FM2 carrier and modulator wave tables reach emitted audio",
+          "[signal][drum][fm][wave]") {
+    auto render_wave = [](int carrier, int modulator) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_tune_hz(180.0);
+        voice.set_ratio(1.7);
+        voice.set_index(5.0);
+        voice.set_index_ms(1000.0);
+        voice.set_decay_ms(1000.0);
+        voice.set_carrier_wave(carrier);
+        voice.set_modulator_wave(modulator);
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto sine = render_wave(0, 0);
+    REQUIRE_FALSE(render_wave(20, 0) == sine);
+    REQUIRE_FALSE(render_wave(0, 20) == sine);
+}
+
+TEST_CASE("FM2 operator warp envelopes collapse independently",
+          "[signal][drum][fm][warp]") {
+    auto warped = [](double amount, double decay_ms) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_tune_hz(180.0);
+        voice.set_index(0.0);
+        voice.set_decay_ms(1000.0);
+        voice.set_carrier_warp(amount);
+        voice.set_carrier_warp_ms(decay_ms);
+        voice.set_modulator_warp(0.0);
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto unwarped = warped(0.0, 5.0);
+    const auto fast = warped(1.0, 5.0);
+    const auto slow = warped(1.0, 1000.0);
+    REQUIRE_FALSE(fast == slow);
+    auto late_error = [&unwarped](const std::vector<float>& candidate) {
+        double energy = 0.0;
+        for (std::size_t i = 12000; i < candidate.size(); ++i) {
+            const double difference =
+                static_cast<double>(candidate[i] - unwarped[i]);
+            energy += difference * difference;
+        }
+        return energy;
+    };
+    REQUIRE(late_error(fast) < late_error(slow) * 0.1);
+
+    auto modulator_warp = [](double amount) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_tune_hz(180.0);
+        voice.set_ratio(1.7);
+        voice.set_index(6.0);
+        voice.set_index_ms(1000.0);
+        voice.set_modulator_warp(amount);
+        voice.set_modulator_warp_ms(1000.0);
+        return hit(voice, 1.0f, 12000);
+    };
+    REQUIRE_FALSE(modulator_warp(0.0) == modulator_warp(1.0));
+}
+
+TEST_CASE("FM2 pitch LFO waits, fades in, and then bends pitch",
+          "[signal][drum][fm][lfo]") {
+    auto lfo = [](double depth) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_tune_hz(220.0);
+        voice.set_index(0.0);
+        voice.set_decay_ms(1000.0);
+        voice.set_lfo_rate_hz(7.0);
+        voice.set_lfo_depth_octaves(depth);
+        voice.set_lfo_delay_ms(20.0);
+        voice.set_lfo_fade_ms(30.0);
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto still = lfo(0.0);
+    const auto moving = lfo(0.25);
+    REQUIRE(std::equal(still.begin(), still.begin() + 900, moving.begin()));
+    REQUIRE_FALSE(still == moving);
+}
+
+TEST_CASE("FM2 hard sync resets the modulator from the carrier",
+          "[signal][drum][fm][sync]") {
+    auto synced = [](bool enabled) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_tune_hz(200.0);
+        voice.set_ratio(1.73);
+        voice.set_index(6.0);
+        voice.set_index_ms(1000.0);
+        voice.set_decay_ms(1000.0);
+        voice.set_hard_sync(enabled);
+        return hit(voice, 1.0f, 12000);
+    };
+    REQUIRE_FALSE(synced(false) == synced(true));
+}
+
+TEST_CASE("Every procedural FM transient renders a distinct finite strike",
+          "[signal][drum][fm][transient]") {
+    std::vector<float> previous;
+    for (int transient = 0; transient < 24; ++transient) {
+        FmDrumVoice voice;
+        bare(voice);
+        voice.set_index(0.0);
+        voice.set_transient(transient);
+        const auto y = hit(voice, 1.0f, 2400);
+        INFO("transient " << transient);
+        REQUIRE(peak(y) > 1e-4);
+        for (float sample : y) REQUIRE(std::isfinite(sample));
+        if (!previous.empty()) REQUIRE_FALSE(y == previous);
+        previous = y;
+    }
+}
 
 TEST_CASE("Sidebands land at the carrier plus and minus the modulator",
           "[signal][drum][fm]") {
@@ -228,6 +366,41 @@ TEST_CASE("Velocity opens the index rather than only the level",
 
 // -- Eight operators ---------------------------------------------------------
 
+TEST_CASE("FM8 selects a wave independently for every operator",
+          "[signal][drum][fm8][wave]") {
+    auto wave = [](int op_to_hear, int selected) {
+        Fm8DrumVoice voice;
+        voice.prepare(kFs);
+        voice.set_algorithm(0);
+        voice.set_depth(0.0);
+        voice.set_formant_hz(16000.0);
+        voice.set_formant_q(0.6);
+        for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
+            voice.set_operator_level(op, op == op_to_hear ? 1.0 : 0.0);
+        }
+        voice.set_operator_wave(op_to_hear, selected);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 12000);
+    };
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
+        INFO("operator " << op);
+        REQUIRE_FALSE(wave(op, 0) == wave(op, 20));
+    }
+}
+
+TEST_CASE("FM8 can emit the shared tinted-noise transient without operators",
+          "[signal][drum][fm8][transient]") {
+    Fm8DrumVoice voice;
+    voice.prepare(kFs);
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
+        voice.set_operator_level(op, 0.0);
+    }
+    voice.set_transient(23);
+    const auto y = hit(voice, 1.0f, 4800);
+    REQUIRE(peak(y) > 1e-3);
+    for (float sample : y) REQUIRE(std::isfinite(sample));
+}
+
 TEST_CASE("Every algorithm renders audio and stays finite",
           "[signal][drum][fm8]") {
     // The routing table is data, so the cheapest guard against a bad row is to
@@ -348,6 +521,8 @@ TEST_CASE("An out-of-range algorithm or operator index is clamped, not UB",
     voice.set_operator_level(99, 1.0);
     voice.set_operator_decay_ms(-2, 100.0);
     voice.set_operator_feedback(50, 1.0);
+    voice.set_operator_wave(-1, 3);
+    voice.set_operator_wave(Fm8DrumVoice::operator_count, 3);
 
     const auto y = hit(voice, 1.0f, 4800);
     for (float v : y) REQUIRE(std::isfinite(v));
@@ -361,6 +536,13 @@ TEST_CASE("The FM voices stay finite at extreme settings", "[signal][drum][fm]")
     two.set_index(24.0);
     two.set_feedback(1.0);
     two.set_pitch_sweep_octaves(6.0);
+    two.set_carrier_wave(25);
+    two.set_modulator_wave(24);
+    two.set_carrier_warp(1.0);
+    two.set_modulator_warp(1.0);
+    two.set_lfo_depth_octaves(2.0);
+    two.set_hard_sync(true);
+    two.set_transient(23);
     two.output().set_drive(1.0);
     two.output().set_fold(1.0);
 
@@ -372,7 +554,9 @@ TEST_CASE("The FM voices stay finite at extreme settings", "[signal][drum][fm]")
     for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
         eight.set_operator_feedback(op, 1.0);
         eight.set_operator_level(op, 1.0);
+        eight.set_operator_wave(op, 25 - op);
     }
+    eight.set_transient(23);
     eight.output().set_drive(1.0);
     eight.output().set_fold(1.0);
 
@@ -391,11 +575,22 @@ TEST_CASE("The FM voices allocate nothing on the audio thread",
     FmDrumVoice two;
     two.prepare(kFs);
     two.set_feedback(0.5);
+    two.set_carrier_wave(20);
+    two.set_modulator_wave(21);
+    two.set_carrier_warp(0.7);
+    two.set_modulator_warp(0.6);
+    two.set_lfo_depth_octaves(0.2);
+    two.set_hard_sync(true);
+    two.set_transient(23);
     two.output().set_drive(0.4);
 
     Fm8DrumVoice eight;
     eight.prepare(kFs);
     eight.set_algorithm(12);
+    eight.set_transient(23);
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op) {
+        eight.set_operator_wave(op, op * 3);
+    }
     eight.output().set_drive(0.4);
 
     std::vector<float> buffer(256, 0.0f);
