@@ -79,6 +79,27 @@ inline void hadamard16(std::array<T, kNumChannels>& v) {
     for (auto& x : v) x *= T{0.25};  // 1/sqrt(16)
 }
 
+// The matrix is the last point where one corrupt line can spread into all
+// sixteen. Guard it before input fan-out: non-finite state is killed locally,
+// and a finite overflow is contained below the tank's wider emergency ceiling.
+template <typename T>
+inline T post_hadamard_guard(T value) {
+    if (!std::isfinite(static_cast<double>(value))) return T{0};
+    return snap_to_zero(
+        std::clamp(value, static_cast<T>(-kPostHadamardCeil),
+                   static_cast<T>(kPostHadamardCeil)));
+}
+
+inline double damping_state_step(double input, double coefficient,
+                                 double& state) {
+    state = snap_to_zero(input + (state - input) * coefficient);
+    if (!std::isfinite(state)) state = 0.0;
+    state = snap_to_zero(
+        std::clamp(state, -static_cast<double>(kSanityCeil),
+                   static_cast<double>(kSanityCeil)));
+    return state;
+}
+
 template <typename SampleType = float>
 class FdnTank {
 public:
@@ -173,6 +194,13 @@ public:
         return gain_[static_cast<std::size_t>(channel)];
     }
     double worst_case_boost() const { return worst_case_boost_; }
+    // Structural telemetry for the acceptance suite: delay construction is a
+    // normative equation, so expose its realized sample count rather than
+    // asking a spectral test to infer rounding from a dense 16-line response.
+    double target_delay_samples(int channel) const {
+        return target_delay_[static_cast<std::size_t>(
+            std::clamp(channel, 0, kNumChannels - 1))];
+    }
 
     // One control-rate tick: re-derive lengths, decay gains, damping, and the
     // stability normalization, then advance the walk and flux sources.
@@ -247,14 +275,10 @@ public:
             // Damping: one-pole LP then one-pole HP, both scaled per line so
             // the frequency-dependent decay is consistent across lengths.
             double x = static_cast<double>(s);
-            if (lp_a_[ui] > 0.0) {
-                lp_state_[ui] = snap_to_zero(x + (lp_state_[ui] - x) * lp_a_[ui]);
-                x = lp_state_[ui];
-            }
-            if (hp_a_[ui] > 0.0) {
-                hp_state_[ui] = snap_to_zero(x + (hp_state_[ui] - x) * hp_a_[ui]);
-                x -= hp_state_[ui];
-            }
+            if (lp_a_[ui] > 0.0)
+                x = damping_state_step(x, lp_a_[ui], lp_state_[ui]);
+            if (hp_a_[ui] > 0.0)
+                x -= damping_state_step(x, hp_a_[ui], hp_state_[ui]);
             s = static_cast<SampleType>(x);
 
             s = eq_.process(i, s);
@@ -283,6 +307,7 @@ public:
         for (int i = active_n_; i < kNumChannels; ++i) v[static_cast<std::size_t>(i)] = 0;
 
         hadamard16(v);
+        for (auto& sample : v) sample = post_hadamard_guard(sample);
 
         out_l = tap_l * tap_scale_;
         out_r = tap_r * tap_scale_;
@@ -291,7 +316,7 @@ public:
         // separation is built into the topology rather than bolted on after.
         for (int i = 0; i < active_n_; ++i) {
             const auto ui = static_cast<std::size_t>(i);
-            const SampleType w = sanitize(v[ui]) + in_gain_ * ((i & 1) ? in_r : in_l);
+            const SampleType w = v[ui] + in_gain_ * ((i & 1) ? in_r : in_l);
             lines_[ui].push(sanitize(w));
         }
     }
@@ -325,7 +350,7 @@ private:
             // primes guarantees pairwise-distinct lengths with a bounded
             // distortion of the intended distribution.
             target_delay_[i] =
-                std::floor(base * tank_rate_) +
+                std::round(base * tank_rate_) +
                 static_cast<double>(kChannelPrimes[static_cast<std::size_t>(i)]);
             const double cap = static_cast<double>(lines_[static_cast<std::size_t>(i)]
                                                        .max_delay());

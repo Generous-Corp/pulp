@@ -18,6 +18,7 @@
 # stability sweep is a hidden [fdn-fuzz-full] case, so the default run stays
 # inside a normal suite budget.
 pulp_add_test_suite(pulp-test-fdn-reverb
+    SOURCES test_fdn_reverb.cpp test_fdn_reverb_acceptance.cpp
     LIBRARIES pulp::signal pulp::audio-analysis
     TIMEOUT 900)
 
