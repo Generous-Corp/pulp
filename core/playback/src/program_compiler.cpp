@@ -248,8 +248,6 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
                      live->generated_id_base() != request_->project->next_item_id() ||
-                     request_->maximum_note_events_per_track !=
-                         ProgramCompileRequest::default_maximum_note_events_per_track ||
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
             *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
@@ -337,6 +335,10 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                                      AudioRendererErrorCode::CapacityExceeded});
                     total_audio_clips_ += count;
                 }
+                if ((*old)->arrangement_note_events().size() >
+                    request_->maximum_note_events_per_track)
+                    return fail({CompileErrorCode::NoteProgramCapacityExceeded, track.id(),
+                                 request_->document_revision});
                 tracks_.push_back(*old);
                 core_->track_completed();
                 ++track_index_;
