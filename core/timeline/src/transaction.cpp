@@ -55,7 +55,10 @@ std::vector<detail::OwnedIdentity> owned_identities(const Clip& clip, ItemId seq
 
 } // namespace
 
-DirtySet::DirtySet(std::vector<DirtyItem> items) : items_(std::move(items)) {
+DirtySet::DirtySet(std::vector<DirtyItem> items, std::vector<DirtyContext> contexts)
+    : items_(std::move(items)), contexts_(std::move(contexts)) {
+    std::sort(contexts_.begin(), contexts_.end());
+    contexts_.erase(std::unique(contexts_.begin(), contexts_.end()), contexts_.end());
     std::sort(items_.begin(), items_.end(), [](const DirtyItem& lhs, const DirtyItem& rhs) {
         return std::tuple(lhs.owner_sequence, lhs.owner_track, lhs.item) <
                std::tuple(rhs.owner_sequence, rhs.owner_track, rhs.item);
@@ -75,7 +78,8 @@ DirtySet::DirtySet(std::vector<DirtyItem> items) : items_(std::move(items)) {
 }
 
 std::size_t DirtySet::retained_size() const noexcept {
-    return sizeof(DirtySet) + items_.size() * sizeof(DirtyItem);
+    return sizeof(DirtySet) + items_.size() * sizeof(DirtyItem) +
+           contexts_.size() * sizeof(DirtyContext);
 }
 
 runtime::Result<ReducedTransaction, TransactionError>
@@ -103,6 +107,7 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
 
     Project project = original;
     std::vector<DirtyItem> dirty;
+    std::vector<DirtyContext> dirty_contexts;
     std::vector<Command> inverses;
     inverses.reserve(transaction.commands.size());
 
@@ -353,6 +358,26 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             inverses.emplace_back(CreateAsset{removed});
             dirty.push_back(
                 {drop_asset->asset_id, {}, {}, DirtyFlags::Structure | DirtyFlags::Removed});
+        } else if (const auto* chord = std::get_if<SetChordScaleLane>(&envelope.command)) {
+            if (const auto code = detail::target_error(
+                    project, chord->sequence_id,
+                    expected_location(ItemKind::Sequence, project, chord->sequence_id)))
+                return fail_target(*code, chord->sequence_id);
+            const auto* sequence = project.find_sequence(chord->sequence_id);
+            if (!sequence)
+                return fail_target(ConflictCode::TargetMissing, chord->sequence_id);
+            if (!(sequence->chord_scale_lane() == chord->expected))
+                return fail_target(ConflictCode::ExpectedValueMismatch, chord->sequence_id);
+            auto next_project = ProjectEditAccess::replace_sequence(
+                project, sequence->with_chord_scale_lane(chord->replacement));
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
+                        detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(
+                SetChordScaleLane{chord->sequence_id, chord->replacement, chord->expected});
+            dirty.push_back({chord->sequence_id, {}, chord->sequence_id, DirtyFlags::Context});
+            dirty_contexts.push_back({chord->sequence_id, CompileContextKind::ChordScale});
         } else {
             const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
             if (const auto code = detail::target_error(
@@ -391,8 +416,10 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         }
     }
     std::reverse(inverses.begin(), inverses.end());
-    return runtime::Result<ReducedTransaction, TransactionError>(runtime::Ok(
-        ReducedTransaction{std::move(project), DirtySet(std::move(dirty)), std::move(inverses)}));
+    return runtime::Result<ReducedTransaction, TransactionError>(
+        runtime::Ok(ReducedTransaction{std::move(project),
+                                       DirtySet(std::move(dirty), std::move(dirty_contexts)),
+                                       std::move(inverses)}));
 }
 
 runtime::Result<ReducedTransaction, TransactionError>

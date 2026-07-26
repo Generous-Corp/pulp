@@ -60,6 +60,7 @@ is not a reason to add a model feature.
 | `content.registered` | yes | Typed extension clip content serialized through the schema registry. |
 | `content.opaque` | yes | Uninterpreted clip content carried in a validated envelope. |
 | `edit-rate.non-audio` | format-only | Positions at a rate that does not convert exactly to the document's rate. |
+| `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
 
 ## DAWproject
 
@@ -110,6 +111,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `content.registered` | none | not declared |
 | `content.opaque` | none | not declared |
 | `edit-rate.non-audio` | none | not declared |
+| `context.chord-scale` | none | chord and scale context lanes |
 
 ### Export
 
@@ -156,6 +158,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `content.registered` | roundtrip-only |  |  |  |
 | `content.opaque` | roundtrip-only |  |  |  |
 | `edit-rate.non-audio` | drop | | dropped | not declared |
+| `context.chord-scale` | drop | | dropped | not declared |
 
 ## Adding a format
 

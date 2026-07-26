@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "chord_scale_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "sequence_schema_policy.hpp"
@@ -615,6 +616,71 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+// A pre-v3 sequence carries no lane member at all, so a null value decodes as
+// an empty lane: the sequence predates the context lane and
+// decodes as an empty one. Everything else is validated exactly, including the
+// ordering the model requires — a document whose harmony is out of order is
+// rejected rather than silently sorted into a different tune.
+runtime::Result<ChordScaleLane, PersistenceError>
+decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+    if (!value) {
+        auto empty = ChordScaleLane::create({});
+        if (!empty)
+            return model_fail<ChordScaleLane>(empty.error(), std::move(lane_path));
+        return runtime::Result<ChordScaleLane, PersistenceError>(
+            runtime::Ok(std::move(empty).value()));
+    }
+    const auto& limits = context.limits;
+    auto& counts = context.counts;
+    if (value->array.size() >
+        limits.max_chord_scale_events -
+            std::min(counts.chord_scale_events, limits.max_chord_scale_events))
+        return fail<ChordScaleLane>(PersistenceErrorCode::LimitExceeded, lane_path, value->begin,
+                                    counts.chord_scale_events + value->array.size(),
+                                    limits.max_chord_scale_events);
+    counts.chord_scale_events += value->array.size();
+    std::vector<ChordScaleEvent> events;
+    events.reserve(value->array.size());
+    for (std::size_t index = 0; index < value->array.size(); ++index) {
+        const auto& encoded = value->array[index];
+        const auto item_path = lane_path + "/" + std::to_string(index);
+        auto quality = string_field(encoded, "chord_quality", item_path);
+        auto chord_root = required(encoded, "chord_root", item_path);
+        auto position = required(encoded, "position", item_path);
+        auto mode = string_field(encoded, "scale_mode", item_path);
+        auto scale_root = required(encoded, "scale_root", item_path);
+        if (!quality || !chord_root || !position || !mode || !scale_root)
+            return fail<ChordScaleLane>(PersistenceErrorCode::MissingField, item_path);
+        const auto decoded_quality = detail::chord_quality_from_name(quality.value());
+        const auto decoded_mode = detail::scale_mode_from_name(mode.value());
+        auto decoded_position = parse_canonical_i64_string(*position.value(),
+                                                           item_path + "/position");
+        if (!decoded_quality || !decoded_mode || !decoded_position ||
+            chord_root.value()->kind != JsonValue::Kind::Number ||
+            scale_root.value()->kind != JsonValue::Kind::Number)
+            return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+        auto decoded_chord_root =
+            parse_u32_number(*chord_root.value(), item_path + "/chord_root");
+        auto decoded_scale_root =
+            parse_u32_number(*scale_root.value(), item_path + "/scale_root");
+        // Narrowing to the model's byte-wide pitch class must not be the thing
+        // that makes an out-of-range root look valid: 256 truncates to 0, which
+        // the model would then happily accept as C.
+        if (!decoded_chord_root || !decoded_scale_root ||
+            decoded_chord_root.value() > 0xffu || decoded_scale_root.value() > 0xffu)
+            return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+        events.push_back(ChordScaleEvent{timebase::TickPosition{decoded_position.value()},
+                                         *decoded_quality,
+                                         static_cast<std::uint8_t>(decoded_chord_root.value()),
+                                         *decoded_mode,
+                                         static_cast<std::uint8_t>(decoded_scale_root.value())});
+    }
+    auto created = ChordScaleLane::create(std::move(events));
+    if (!created)
+        return model_fail<ChordScaleLane>(created.error(), lane_path);
+    return runtime::Result<ChordScaleLane, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
 // Colour is optional on both annotation kinds: absent means the presentation
 // layer chooses, and a present value must be a whole 32-bit packed RGBA.
 runtime::Result<std::optional<std::uint32_t>, PersistenceError>
@@ -705,8 +771,12 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     auto tracks = required(*data, "tracks", path + "/data");
     auto musical = required(*data, "musical_duration", path + "/data");
     auto absolute = required(*data, "absolute_duration", path + "/data");
+    const auto* chord_lane = data->find("chord_scale_lane");
+    const auto requires_chord_lane =
+        sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
     if (!id || !name || !tracks || !musical || !absolute ||
-        tracks.value()->kind != JsonValue::Kind::Array)
+        tracks.value()->kind != JsonValue::Kind::Array || (!requires_chord_lane && chord_lane) ||
+        (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
     std::vector<SequenceMarker> decoded_markers;
     std::vector<SequenceRegion> decoded_regions;
@@ -734,6 +804,10 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
             decoded_regions.push_back(std::move(decoded).value());
         }
     }
+    auto decoded_lane =
+        decode_chord_scale_lane(chord_lane, context, path + "/data/chord_scale_lane");
+    if (!decoded_lane)
+        return runtime::Err(decoded_lane.error());
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
@@ -770,7 +844,8 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     }
     auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
                                     decoded_absolute, std::move(decoded_tracks),
-                                    std::move(decoded_markers), std::move(decoded_regions));
+                                    std::move(decoded_markers), std::move(decoded_regions),
+                                    std::move(decoded_lane).value());
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));

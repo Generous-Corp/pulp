@@ -8,6 +8,7 @@ function(pulp_resolve_timeline_sources root output)
         automation_document_internal.cpp
         automation_lane.cpp
         command.cpp
+        compile_context.cpp
         document_session.cpp
         identity_directory.cpp
         id_remap.cpp

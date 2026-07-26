@@ -263,6 +263,9 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, SetChordScaleLane>) {
+                return left.sequence_id == right.sequence_id && left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, InsertMarker>) {
                 return left.sequence_id == right.sequence_id &&
                        equal_marker(left.marker, right.marker);
@@ -324,6 +327,11 @@ std::size_t retained_size(const Command& command) noexcept {
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
                                                        value.replacement.points().size()),
                                          sizeof(timebase::TempoPoint)));
+            if constexpr (std::is_same_v<T, SetChordScaleLane>)
+                return saturated_add(
+                    sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
+                                                                value.replacement.events().size()),
+                                                  sizeof(ChordScaleEvent)));
             if constexpr (std::is_same_v<T, SetMeterMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),

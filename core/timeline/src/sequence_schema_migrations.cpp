@@ -53,7 +53,7 @@ struct RawEdit {
     std::string_view replacement;
 };
 
-bool apply_edits(std::string_view source, std::array<RawEdit, 3> edits, BoundedJsonSink& output) {
+bool apply_edits(std::string_view source, std::span<RawEdit> edits, BoundedJsonSink& output) {
     std::sort(edits.begin(), edits.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.begin < rhs.begin; });
     std::size_t cursor = 0;
@@ -80,6 +80,9 @@ constexpr std::string_view v1_members[] = {"absolute_duration", "id", "musical_d
                                            "tracks"};
 constexpr std::string_view v2_members[] = {
     "absolute_duration", "id", "markers", "musical_duration", "name", "regions", "tracks"};
+constexpr std::string_view v3_members[] = {"absolute_duration", "chord_scale_lane", "id",
+                                           "markers",           "musical_duration", "name",
+                                           "regions",           "tracks"};
 
 } // namespace
 
@@ -98,11 +101,10 @@ migrate_sequence_v1_to_v2(std::string_view source, BoundedJsonSink& output, cons
     const auto& name_value = data->object[3].second;
     if (id_value.begin >= id_value.end || name_value.begin >= name_value.end)
         return fail();
-    return finish(output, apply_edits(source,
-                                      {RawEdit{id_value.end, id_value.end, ",\"markers\":[]"},
-                                       RawEdit{name_value.end, name_value.end, ",\"regions\":[]"},
-                                       RawEdit{version->begin, version->end, "2"}},
-                                      output));
+    std::array edits{RawEdit{id_value.end, id_value.end, ",\"markers\":[]"},
+                     RawEdit{name_value.end, name_value.end, ",\"regions\":[]"},
+                     RawEdit{version->begin, version->end, "2"}};
+    return finish(output, apply_edits(source, edits, output));
 }
 
 runtime::Result<SchemaWriteSuccess, PersistenceError>
@@ -128,11 +130,57 @@ migrate_sequence_v2_to_v1(std::string_view source, BoundedJsonSink& output, cons
     if (markers_comma == std::string_view::npos || markers_comma >= markers.begin ||
         regions_comma == std::string_view::npos || regions_comma >= regions.begin)
         return fail();
-    return finish(output, apply_edits(source,
-                                      {RawEdit{markers_comma, markers.end, {}},
-                                       RawEdit{regions_comma, regions.end, {}},
-                                       RawEdit{version->begin, version->end, "1"}},
-                                      output));
+    std::array edits{RawEdit{markers_comma, markers.end, {}},
+                     RawEdit{regions_comma, regions.end, {}},
+                     RawEdit{version->begin, version->end, "1"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v2_to_v3(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 2) || !has_exact_members(*data, v2_members) ||
+        version->begin >= version->end)
+        return fail();
+    // The lane sorts immediately after absolute_duration in canonical order, and
+    // has_exact_members already proved that order, so this offset is trustworthy.
+    const auto& absolute_value = data->object[0].second;
+    if (absolute_value.begin >= absolute_value.end)
+        return fail();
+    std::array edits{
+        RawEdit{absolute_value.end, absolute_value.end, ",\"chord_scale_lane\":[]"},
+        RawEdit{version->begin, version->end, "3"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v3_to_v2(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 3) || !has_exact_members(*data, v3_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& lane = data->object[1].second;
+    // A v2 reader has nowhere to put authored harmony. Writing the document
+    // without it would silently retune every generator that follows the lane, so
+    // only the empty array a v2 reader would have produced can be dropped.
+    if (lane.kind != JsonValue::Kind::Array || !lane.array.empty())
+        return fail();
+    const auto lane_comma = source.find(',', data->object[0].second.end);
+    if (lane_comma == std::string_view::npos || lane_comma >= lane.begin)
+        return fail();
+    std::array edits{RawEdit{lane_comma, lane.end, {}},
+                     RawEdit{version->begin, version->end, "2"}};
+    return finish(output, apply_edits(source, edits, output));
 }
 
 } // namespace pulp::timeline::detail

@@ -485,6 +485,7 @@ class StructuralScanner {
         const auto data_path = path + "/data";
         std::array requested{
             detail::JsonSpanMember{"absolute_duration"},
+            detail::JsonSpanMember{"chord_scale_lane"},
             detail::JsonSpanMember{"id"},
             detail::JsonSpanMember{"markers"},
             detail::JsonSpanMember{"musical_duration"},
@@ -495,34 +496,45 @@ class StructuralScanner {
         if (!members(data, requested))
             return false;
         if (!require_shape(requested[0], ObjectShape | NullShape, data.begin, data_path) ||
-            !require_shape(requested[1], StringShape, data.begin, data_path) ||
-            !require_shape(requested[3], StringShape | NullShape, data.begin, data_path) ||
-            !require_shape(requested[4], StringShape, data.begin, data_path))
+            !require_shape(requested[2], StringShape, data.begin, data_path) ||
+            !require_shape(requested[4], StringShape | NullShape, data.begin, data_path) ||
+            !require_shape(requested[5], StringShape, data.begin, data_path))
             return false;
         // Markers and regions arrive together at v2: a payload that declares one
         // without the other, or carries either at v1, is rejected rather than
         // silently half-decoded.
         const auto requires_annotations =
             detail::sequence_schema_policy.requires_annotations(version);
-        const auto markers = requested[2].span;
-        const auto regions = requested[5].span;
-        if (requires_annotations != requested[2].found ||
-            (requested[2].found && !has_shape(markers, ArrayShape))) {
+        const auto markers = requested[3].span;
+        const auto regions = requested[6].span;
+        if (requires_annotations != requested[3].found ||
+            (requested[3].found && !has_shape(markers, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       data_path + "/markers");
             return false;
         }
-        if (requires_annotations != requested[5].found ||
-            (requested[5].found && !has_shape(regions, ArrayShape))) {
+        if (requires_annotations != requested[6].found ||
+            (requested[6].found && !has_shape(regions, ArrayShape))) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
                       data_path + "/regions");
             return false;
         }
-        if (!requested[6].found) {
+        // The chord/scale lane arrives at v3, one version after the annotations,
+        // so it is gated on its own predicate rather than on requires_annotations.
+        const auto requires_chord_scale_lane =
+            detail::sequence_schema_policy.requires_chord_scale_lane(version);
+        const auto chord_scale_lane = requested[1].span;
+        if (requires_chord_scale_lane != requested[1].found ||
+            (requested[1].found && !has_shape(chord_scale_lane, ArrayShape))) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/chord_scale_lane");
+            return false;
+        }
+        if (!requested[7].found) {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
-        if (requested[2].found &&
+        if (requested[3].found &&
             !governed_array(markers, counts_.markers, limits_.max_markers, data_path + "/markers",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.marker", false,
@@ -530,7 +542,7 @@ class StructuralScanner {
                                                            std::to_string(index));
                             }))
             return false;
-        if (requested[5].found &&
+        if (requested[6].found &&
             !governed_array(regions, counts_.regions, limits_.max_regions, data_path + "/regions",
                             [&](Span element, std::size_t index) {
                                 return walk_annotation(element, "pulp.timeline.region", true,
@@ -538,7 +550,23 @@ class StructuralScanner {
                                                            std::to_string(index));
                             }))
             return false;
-        const auto tracks = requested[6].span;
+        if (requested[1].found &&
+            !governed_array(chord_scale_lane, counts_.chord_scale_events,
+                            limits_.max_chord_scale_events, data_path + "/chord_scale_lane",
+                            [&](Span event, std::size_t index) {
+                                const auto event_path =
+                                    data_path + "/chord_scale_lane/" + std::to_string(index);
+                                return require_member(event, "chord_quality", StringShape,
+                                                      event_path) &&
+                                       require_member(event, "chord_root", NumberShape,
+                                                      event_path) &&
+                                       require_member(event, "position", StringShape, event_path) &&
+                                       require_member(event, "scale_mode", StringShape,
+                                                      event_path) &&
+                                       require_member(event, "scale_root", NumberShape, event_path);
+                            }))
+            return false;
+        const auto tracks = requested[7].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
                                   return walk_track(element,
