@@ -217,7 +217,10 @@ public:
     // Thereafter the widget's value is pushed from the atomic param store to
     // the widget every frame in C++ — off the host FrameClock, with ZERO
     // per-frame JS bridge crossing — by service_param_bindings(), which
-    // service_frame_callbacks() drives on the host idle cadence.
+    // service_frame_callbacks() drives on the host idle cadence. For native
+    // gesture-capable value widgets, the binding also routes begin/end to the
+    // StateStore so a JS `change` handler's writes remain a balanced host
+    // automation gesture.
     //
     // This replaces the requestAnimationFrame loop a live-metering / param-
     // following UI would otherwise run (the one thing that guarantees QuickJS
@@ -456,6 +459,12 @@ private:
         float last_applied = std::numeric_limits<float>::quiet_NaN();  ///< skip repaint when unchanged
     };
     std::vector<ParamBinding> param_bindings_;
+    struct ParamGestureRoute {
+        state::ParamID active_param_id = 0;
+        bool active = false;
+    };
+    std::unordered_map<std::string, std::shared_ptr<ParamGestureRoute>>
+        param_gesture_routes_;
     // Register (or replace) a binding for `widget_id`. Resolves `param_name` to
     // its id; returns false (no binding added) if the store has no such param.
     // `transform` is the optional JS transform object (may be null → identity).
@@ -473,6 +482,14 @@ private:
     // removeWidget subtree teardown) so a later widget reusing that id is not
     // silently re-bound.
     void prune_dangling_bindings();
+    // Route a gesture-capable widget through its CURRENT declarative binding.
+    // The route retains the parameter that began an active gesture so rebinding
+    // mid-drag still ends the original parameter exactly once.
+    void wire_parameter_gestures(const std::string& widget_id, View* widget);
+    void finish_param_gesture_route(
+        const std::shared_ptr<ParamGestureRoute>& route);
+    void release_param_gesture_route(const std::string& widget_id) noexcept;
+    void release_all_param_gesture_routes() noexcept;
     // Forget every native bridge reference to the removed subtree. This is
     // stronger than erasing widgets_: native event-registration guards are also
     // keyed by id and must be cleared before recycled ids can be rewired.

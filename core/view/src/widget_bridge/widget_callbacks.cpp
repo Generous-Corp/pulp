@@ -31,10 +31,12 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
     auto alive = callback_alive_;
     auto* engine = &engine_;
     if (auto* k = dynamic_cast<Knob*>(w)) {
+        wire_parameter_gestures(id, w);
         k->on_change = [alive, engine, id](float v) {
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
     } else if (auto* f = dynamic_cast<Fader*>(w)) {
+        wire_parameter_gestures(id, w);
         f->on_change = [alive, engine, id](float v) {
             dispatch_event(alive, engine, id, "change", std::to_string(v));
         };
@@ -43,6 +45,7 @@ void WidgetBridge::wire_callbacks(const std::string& id, View* w) {
             dispatch_event(alive, engine, id, "toggle", v ? "1" : "0");
         };
     } else if (auto* r = dynamic_cast<RangeSlider*>(w)) {
+        wire_parameter_gestures(id, w);
         // HTML <input type="range"> change event. The payload is the
         // post-quantisation value, not normalized, so JS callers see the same
         // number they handed us via setValue/setMin/setMax/setStep.

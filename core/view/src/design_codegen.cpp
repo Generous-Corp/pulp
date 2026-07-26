@@ -278,16 +278,26 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
                << ");\n";
 
             // A declared parameter binding is the reason an audio widget
-            // exists. Without it the generated UI renders a control that drives
-            // nothing, and an audit of the emitted JS counts zero bindings.
+            // exists. `bindWidgetToParam` is deliberately host-to-widget only:
+            // it keeps automation and restored state visible, but does not
+            // turn a user gesture back into a parameter write. Emit the reverse
+            // change path alongside it or the imported control looks live while
+            // dragging it changes no audio or host automation.
             if (const auto binding = node.attributes.find("binding");
                 binding != node.attributes.end() && !binding->second.empty()) {
-                ss << ind
-                   << (node.audio_widget == AudioWidgetType::meter
-                           ? "bindMeter("
-                           : "bindWidgetToParam(")
-                   << var << "._id, '"
-                   << js_single_quote_escape(binding->second) << "');\n";
+                const std::string escaped =
+                    js_single_quote_escape(binding->second);
+                if (node.audio_widget == AudioWidgetType::meter) {
+                    ss << ind << "bindMeter(" << var << "._id, '"
+                       << escaped << "');\n";
+                } else if (node.audio_widget == AudioWidgetType::knob ||
+                           node.audio_widget == AudioWidgetType::fader) {
+                    ss << ind << "bindWidgetToParam(" << var << "._id, '"
+                       << escaped << "');\n";
+                    ss << ind << "on(" << var
+                       << "._id, 'change', function (v) { setParam('"
+                       << escaped << "', v); });\n";
+                }
             }
 
             // Same anchor contract as every non-widget node below: the
