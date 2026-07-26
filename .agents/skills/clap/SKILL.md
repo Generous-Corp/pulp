@@ -214,6 +214,29 @@ Before calling `Processor::process()`, the adapter attaches that queue via
 `processor->set_param_events(&param_events)`, so sample-accurate processors
 read the same sorted events through `Processor::param_events()`.
 
+Editor-originated automation takes a separate bounded path. `clap_init()`
+installs the store's gesture callbacks plus an inline value listener; they push
+`BEGIN`, `VALUE`, and `END` records, in call order, into the per-instance
+`outbound_param_events` SPSC queue and call the host params extension's
+`request_flush()`. Both `clap_process()` and `params.flush()` drain that queue,
+so a drag remains visible to the host when transport is either running or
+stopped. CLAP guarantees those two consumers do not run concurrently. Keep
+these invariants when changing the path:
+
+- The sole producer is the CLAP init/main thread. Audio/background store writes
+  stay on the existing explicit-event or snapshot-diff path; letting them push
+  here turns the SPSC queue into an unsafe multi-producer queue.
+- Host-originated writes are guarded while `params.flush()` applies them, so
+  they are never echoed back as plugin automation.
+- Every emitted editor record uses `header.time = 0` and drains before the
+  snapshot fallback and sample-offset merge, preserving global ascending time.
+- If `out_events->try_push()` rejects a record, retain that exact head record
+  and retry it before later records. Dropping a rejected `BEGIN` or `END` can
+  leave host automation permanently unbalanced.
+- The queue is allocated/bounded before processing and must remain
+  allocation-free at both drains. A queued value marks the snapshot skip-set
+  only after the host accepts it, preventing duplicate `PARAM_VALUE` output.
+
 The **modulation offset is per-buffer**: `store.reset_all_mod()` runs
 at the top of every `process()` before applying new `PARAM_MOD` events.
 DSP reads modulated values via `store.get_modulated(id)` = base +
