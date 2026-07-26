@@ -2509,6 +2509,33 @@ TEST_CASE("CLAP param automation preserves all sample offsets while dual-writing
     REQUIRE(g_capturing->state().get_value(CapturingProcessor::kParamId) == 0.75f);
 }
 
+TEST_CASE("CLAP process reports editor gesture boundaries and values without duplicates",
+          "[clap][params][gesture][process]") {
+    Harness h(make_capturing);
+
+    h.plugin.store.begin_gesture(CapturingProcessor::kParamId);
+    h.plugin.store.set_value(CapturingProcessor::kParamId, 0.25f);
+    h.plugin.store.set_value(CapturingProcessor::kParamId, 0.75f);
+    h.plugin.store.end_gesture(CapturingProcessor::kParamId);
+
+    InputEventList in;
+    OutputEventList out;
+    REQUIRE(h.run(in, &out) == CLAP_PROCESS_CONTINUE);
+    REQUIRE(out.size() == 4);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_GESTURE_BEGIN);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(2)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(3)->type == CLAP_EVENT_PARAM_GESTURE_END);
+
+    const auto values =
+        out.by_type<clap_event_param_value_t>(CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(values.size() == 2);
+    REQUIRE(values[0]->param_id == CapturingProcessor::kParamId);
+    REQUIRE(values[0]->value == 0.25);
+    REQUIRE(values[1]->param_id == CapturingProcessor::kParamId);
+    REQUIRE(values[1]->value == 0.75);
+}
+
 TEST_CASE("CLAP parameter automation drops past realtime event capacity without growing",
           "[clap][params][realtime][capacity]") {
     static constexpr uint32_t kLargeBlockFrames = 4096;
