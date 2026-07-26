@@ -718,7 +718,18 @@ public:
     /// The closed-form feed-forward bound: `dry + 2·voice` at unity. There is
     /// no feedback path, so this is arithmetic rather than an invariant to
     /// test. At the +6 dB ceiling on all three the sum is 3·10^(6/20) ≈ 5.98.
-    static constexpr double kWorstCaseGain = 3.0;
+    /// `1 + kMaxVoices · kDcBlockerPeakGain` = 5.0, not 3.0.
+    ///
+    /// This was 3.0, from "unity dry plus two unity voices" — each wet voice
+    /// bounded by 1 because the tap crossfade is convex. But each voice's wet
+    /// leg passes a DC blocker, whose worst-case SAMPLE gain is the L1 norm of
+    /// its impulse response, exactly 2 — not the `2/(1+p)` = 1.000327 magnitude
+    /// peak the derivation used. Inherited from `PitchShifterT`, along with the
+    /// error: a magnitude-response peak bounds a steady sinusoid, not a single
+    /// sample. Understating a registry headroom figure by 4.4 dB is the
+    /// expensive direction.
+    static constexpr double kWorstCaseGain =
+        1.0 + kMaxVoices * PitchShifterT<double>::kDcBlockerPeakGain;
 
     /// Below this the mute gate is treated as fully closed, so an unvoiced
     /// passage costs nothing and cannot leak a denormal tail.

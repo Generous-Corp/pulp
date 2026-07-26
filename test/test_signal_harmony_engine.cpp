@@ -1140,8 +1140,13 @@ TEST_CASE("T11 the shifter buffer outruns the deepest downshift",
 
 TEST_CASE("the gain bound is the feed-forward sum", "[signal][harmony-engine]") {
     // No feedback path exists, so the bound is arithmetic rather than an
-    // invariant to discover: dry + 2 voices, all at unity.
-    REQUIRE(Engine::kWorstCaseGain == 1.0 + Engine::kMaxVoices * 1.0);
+    // invariant to discover — but the per-voice term is NOT unity. Each wet
+    // voice passes a DC blocker whose worst-case sample gain is its impulse
+    // response's L1 norm, exactly 2. This asserted `1 + 2·1.0 = 3.0`, treating
+    // the convex crossfade as the whole story and missing the blocker sitting
+    // after it.
+    REQUIRE(Engine::kWorstCaseGain ==
+            1.0 + Engine::kMaxVoices * PitchShifter64::kDcBlockerPeakGain);
 
     Engine engine;
     engine.prepare(kSr);
@@ -1166,20 +1171,21 @@ TEST_CASE("the gain bound is the feed-forward sum", "[signal][harmony-engine]") 
     REQUIRE(engine.voiced());
 
     // The exact bound is the nominal sum times the ONE thing in either leg that
-    // can exceed unity: the DC blocker on each shifter's wet output, whose peak
-    // magnitude is `2/(1+p)`. The crossfade itself is a convex combination and
-    // is bounded by 1. Inherited from `PitchShifterT`, not introduced here.
+    // can exceed unity: the DC blocker on each shifter's wet output, whose
+    // worst-case SAMPLE gain is the L1 norm of its impulse response — exactly
+    // 2, not the `2/(1+p)` = 1.000327 magnitude peak this used to cite. A
+    // magnitude peak bounds a steady sinusoid; it says nothing about the largest
+    // single sample. Inherited from `PitchShifterT` along with the error.
     PitchShifter64 reference;
     reference.prepare(kSr);
-    const double exact_bound = 1.0 + Engine::kMaxVoices * reference.dc_blocker_peak_gain();
+    const double exact_bound =
+        1.0 + Engine::kMaxVoices * PitchShifter64::kDcBlockerPeakGain;
     REQUIRE(peak(out) <= exact_bound);
 
-    // The registry ships the nominal 3.0. That is 0.0019 dB under the exact
-    // bound — correct to any precision a headroom budget cares about, but it is
-    // NOT a hard ceiling, and saying so here is cheaper than someone
-    // rediscovering it from a clipped render.
-    REQUIRE(exact_bound > Engine::kWorstCaseGain);
-    REQUIRE(20.0 * std::log10(exact_bound / Engine::kWorstCaseGain) < 0.01);
+    // The registry now ships exactly this bound rather than a nominal figure
+    // sitting under it. It was 3.0 against a true 5.0 — 4.4 dB of headroom a
+    // consumer would not have budgeted.
+    REQUIRE_THAT(Engine::kWorstCaseGain, WithinAbs(exact_bound, 1e-12));
 
     // The +6 dB ceiling on all three raises the arithmetic sum to ~5.98, which
     // is what a registry consumer must budget for if it exposes those limits.
