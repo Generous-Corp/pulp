@@ -286,6 +286,7 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
                 "REQUESTED_PROVIDER": "github-hosted",
                 "GITHUB_EVENT_NAME": event_name,
                 "GITHUB_REPOSITORY": "Generous-Corp/pulp",
+                "GITHUB_WORKSPACE": str(REPO_ROOT),
                 "EXPLICIT_LINUX_RUNNER_SELECTOR_JSON": "",
                 "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON": "",
                 "WORKFLOW_DISPATCH_MACOS_SELECTOR": "",
