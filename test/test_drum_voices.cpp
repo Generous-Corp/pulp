@@ -842,6 +842,71 @@ TEST_CASE("The tom stays finite at extreme settings", "[signal][drum][tom]") {
     }
 }
 
+TEST_CASE("The one tom topology ships all named clean voicings",
+          "[signal][drum][tom][preset]") {
+    REQUIRE(TomVoice::presets.size() == 8);
+
+    std::vector<std::vector<float>> renders;
+    for (const auto& preset : TomVoice::presets) {
+        INFO("preset " << preset.name);
+        REQUIRE_FALSE(preset.name.empty());
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.apply_preset(preset.id);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        auto y = hit(voice, 1.0f, 24000);
+        REQUIRE(peak(y) > 1e-4);
+        for (float sample : y) REQUIRE(std::isfinite(sample));
+        renders.push_back(std::move(y));
+    }
+
+    for (std::size_t i = 1; i < renders.size(); ++i) {
+        REQUIRE_FALSE(renders[i] == renders[i - 1]);
+    }
+}
+
+TEST_CASE("Low, mid, and high tom presets settle in pitch order",
+          "[signal][drum][tom][preset]") {
+    auto settled = [](TomVoice::Preset preset) {
+        TomVoice voice;
+        voice.prepare(kFs);
+        voice.apply_preset(preset);
+        voice.set_noise_balance(0.0);
+        voice.set_click_level(0.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto y = hit(voice, 1.0f, 24000);
+        return period_frequency(y, 9600, 22000);
+    };
+
+    const double low = settled(TomVoice::Preset::low_tom);
+    const double mid = settled(TomVoice::Preset::mid_tom);
+    const double high = settled(TomVoice::Preset::hi_tom);
+    REQUIRE(low < mid);
+    REQUIRE(mid < high);
+}
+
+TEST_CASE("Tom preset application allocates nothing on the audio thread",
+          "[signal][drum][tom][rt-safety]") {
+    TomVoice voice;
+    voice.prepare(kFs);
+    std::vector<float> buffer(256, 0.0f);
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        for (const auto& preset : TomVoice::presets) {
+            voice.apply_preset(preset.id);
+            voice.note_on(0.8f);
+            for (int block = 0; block < 4; ++block) {
+                std::fill(buffer.begin(), buffer.end(), 0.0f);
+                voice.process(buffer.data(), static_cast<int>(buffer.size()));
+            }
+            voice.reset();
+        }
+        allocations = probe.allocation_count();
+    }
+    REQUIRE(allocations == 0);
+}
+
 // -- Kit ---------------------------------------------------------------------
 
 TEST_CASE("A voice registered after the kit was prepared still runs at the "
