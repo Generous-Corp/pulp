@@ -222,6 +222,10 @@ private:
 
     std::atomic<std::uint64_t> play_pos_{0};    ///< Audio-thread owned: next source frame to emit.
     std::atomic<std::uint64_t> reader_pos_{0};  ///< Background owned: next source frame to push.
+    // Absolute source frame represented by the next FIFO frame. Deadline-bound
+    // mode uses this tag to drain a producer write that became late while it
+    // raced an audio-thread underrun.
+    std::atomic<std::uint64_t> ring_start_frame_{0};
     // Effective end-of-stream in source frames: starts at total_frames_ and is
     // shrunk by the background reader to the realized length if the FrameReader
     // signals an early end/error mid-stream (a short/zero return before the

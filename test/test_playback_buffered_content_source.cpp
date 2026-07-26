@@ -6,7 +6,9 @@
 #include <pulp/playback/buffered_content_source.hpp>
 #include <pulp/timeline/production_mode.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 using namespace pulp;
@@ -189,6 +191,56 @@ TEST_CASE("a buffered source discards frames that miss their playhead deadline",
     REQUIRE(stats.produced_frames == 2 * kChunkFrames);
     REQUIRE(stats.starved_frames == kChunkFrames);
     REQUIRE(stats.produced_frames + stats.starved_frames == source.position());
+}
+
+TEST_CASE("a concurrent producer cannot publish a missed block into the next deadline",
+          "[playback][production]") {
+    auto config = default_config();
+    config.ring_capacity_frames = kChunkFrames;
+    config.start_background_thread = true;
+
+    std::atomic<std::uint32_t> calls{0};
+    std::atomic<bool> late_read_started{false};
+    std::atomic<bool> release_late_read{false};
+    playback::BufferedContentSource source;
+    REQUIRE(source.prepare(
+        buffered_declaration(), config,
+        [&](std::uint64_t start_frame, audio::BufferView<float> dest,
+            std::uint64_t frames, audio::FrameReaderStopToken stop) {
+            const auto call = calls.fetch_add(1, std::memory_order_relaxed);
+            if (call == 1) {
+                late_read_started.store(true, std::memory_order_release);
+                while (!release_late_read.load(std::memory_order_acquire) &&
+                       !stop.stop_requested())
+                    std::this_thread::yield();
+            }
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                dest.channel(0)[static_cast<std::size_t>(frame)] =
+                    static_cast<float>(start_frame + frame);
+            return frames;
+        }));
+
+    audio::Buffer<float> block(1, static_cast<std::size_t>(kChunkFrames));
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+    for (std::uint32_t spins = 0;
+         spins < 1'000'000 && !late_read_started.load(std::memory_order_acquire);
+         ++spins)
+        std::this_thread::yield();
+    REQUIRE(late_read_started.load(std::memory_order_acquire));
+
+    // Advance through the block while its producer call is still in flight.
+    REQUIRE(source.pull(block.view(), kChunkFrames) == 0);
+    REQUIRE(source.position() == 2 * kChunkFrames);
+    release_late_read.store(true, std::memory_order_release);
+
+    for (std::uint32_t spins = 0;
+         spins < 1'000'000 && source.stats().ring_available_frames == 0;
+         ++spins)
+        std::this_thread::yield();
+    REQUIRE(source.stats().ring_available_frames != 0);
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+    REQUIRE(block.view().channel(0).front() == static_cast<float>(2 * kChunkFrames));
+    source.release();
 }
 
 TEST_CASE("the audio-thread pull path allocates nothing", "[playback][production][rt-safety]") {

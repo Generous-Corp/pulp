@@ -109,6 +109,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
             1, ring_capacity);
         read_scratch_.resize(channels_, static_cast<std::size_t>(read_chunk_));
         reader_pos_.store(preload_valid_, std::memory_order_relaxed);
+        ring_start_frame_.store(preload_valid_, std::memory_order_relaxed);
 
         // Prime the ring before any audio is pulled.
         while (pump_background() > 0) {
@@ -157,6 +158,7 @@ void StreamingSampleSource::release() noexcept {
     advance_on_underrun_ = false;
     play_pos_.store(0, std::memory_order_relaxed);
     reader_pos_.store(0, std::memory_order_relaxed);
+    ring_start_frame_.store(0, std::memory_order_relaxed);
     eos_frame_.store(0, std::memory_order_relaxed);
     streamed_frames_.store(0, std::memory_order_relaxed);
     read_errors_.store(0, std::memory_order_relaxed);
@@ -180,6 +182,7 @@ bool StreamingSampleSource::reset() noexcept {
     if (!fully_resident_) {
         ring_.reset();
         reader_pos_.store(preload_valid_, std::memory_order_relaxed);
+        ring_start_frame_.store(preload_valid_, std::memory_order_relaxed);
         while (pump_background() > 0) {
             if (ring_.free_frames() == 0) break;
         }
@@ -263,6 +266,28 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             produced += from_preload;
             play_pos_.store(pos + from_preload, std::memory_order_relaxed);
         } else {
+            if (advance_on_underrun_) {
+                // The FIFO may have received a producer result after an earlier
+                // pull had already emitted that interval as silence. Its
+                // absolute start tag lets this consumer discard only those
+                // stale frames before considering current-playhead audio.
+                const std::uint64_t ring_start =
+                    ring_start_frame_.load(std::memory_order_acquire);
+                if (ring_start < pos) {
+                    const std::uint64_t stale =
+                        std::min(pos - ring_start, ring_.available_frames());
+                    const std::uint64_t drained = ring_.drain(stale);
+                    std::uint64_t expected_start = ring_start;
+                    ring_start_frame_.compare_exchange_strong(
+                        expected_start, ring_start + drained,
+                        std::memory_order_release, std::memory_order_relaxed);
+                    if (drained < pos - ring_start) {
+                        underrun_frames_.fetch_add(want, std::memory_order_relaxed);
+                        play_pos_.store(pos + want, std::memory_order_release);
+                        break;
+                    }
+                }
+            }
             // Streamed tail: consume sequentially from the ring. The ring is a
             // strict FIFO whose Nth frame is source frame preload_valid_+N, so
             // on an underrun we must advance play_pos_ only by what we actually
@@ -284,6 +309,14 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
                 dest.slice(static_cast<std::size_t>(produced),
                            static_cast<std::size_t>(avail));
             ring_.read(sub, avail);
+            if (advance_on_underrun_) {
+                const std::uint64_t ring_start =
+                    ring_start_frame_.load(std::memory_order_acquire);
+                std::uint64_t expected_start = ring_start;
+                ring_start_frame_.compare_exchange_strong(
+                    expected_start, ring_start + avail,
+                    std::memory_order_release, std::memory_order_relaxed);
+            }
             produced += avail;
             play_pos_.store(pos + avail, std::memory_order_relaxed);
             if (avail < want) {
@@ -354,6 +387,8 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     const std::uint64_t skipped =
         play_pos > rpos ? std::min(clamped, play_pos - rpos) : 0;
     const std::uint64_t ready = clamped - skipped;
+    if (advance_on_underrun_ && ring_.available_frames() == 0)
+        ring_start_frame_.store(rpos + skipped, std::memory_order_release);
     const std::uint64_t written =
         ring_.write(read_scratch_.view().slice(static_cast<std::size_t>(skipped),
                                                static_cast<std::size_t>(ready)),

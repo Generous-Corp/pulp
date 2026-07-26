@@ -83,6 +83,8 @@ class BufferedContentSource {
         std::uint64_t starvation_events = 0;
         /// Ring-level underruns reported by the underlying stream.
         std::uint64_t ring_underrun_frames = 0;
+        /// Frames currently ready for the audio thread.
+        std::uint64_t ring_available_frames = 0;
         /// Producer calls that returned nothing.
         std::uint64_t producer_errors = 0;
     };
@@ -192,6 +194,7 @@ class BufferedContentSource {
         result.starved_frames = starved_frames_.load(std::memory_order_relaxed);
         result.starvation_events = starvation_events_.load(std::memory_order_relaxed);
         result.ring_underrun_frames = stream_stats.underrun_frames;
+        result.ring_available_frames = stream_stats.ring_available_frames;
         result.producer_errors = stream_stats.read_errors;
         return result;
     }
