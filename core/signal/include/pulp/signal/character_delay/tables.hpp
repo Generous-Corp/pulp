@@ -115,6 +115,12 @@ inline constexpr std::array<double, 4> kTapeFlutterDepthMs = {0.0, 0.05, 0.15, 0
 inline constexpr std::array<double, 4> kTapeLossLpHz = {12000.0, 9000.0, 6000.0, 3500.0};
 inline constexpr std::array<double, 4> kTapeBumpDb = {1.5, 2.0, 3.0, 4.0};
 
+/// Inverse linear gains for kTapeBumpDb. The physical tier applies these in
+/// the feedback path through unity, then releases the compensation across the
+/// explicit 1.0–1.1 over-unity range so maximum feedback still oscillates.
+inline constexpr std::array<double, 4> kTapeBumpFeedbackCompensation = {
+    0.8413951416, 0.7943282347, 0.7079457844, 0.6309573445};
+
 /// Record/playback EQ bracketing the saturator: boost HF into saturation, cut
 /// it after, so the saturator works the highs harder than the lows. The pair
 /// is exactly inverse, so with the saturator bypassed it is transparent.

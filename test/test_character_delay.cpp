@@ -499,9 +499,20 @@ TEST_CASE("repeats decay at the feedback amount", "[character-delay][feedback]")
 
 TEST_CASE("saturating characters self-oscillate bounded at maximum feedback",
           "[character-delay][feedback][slow]") {
-    for (auto character : {Character::tape, Character::bbd, Character::vintage_digital}) {
+    struct Config {
+        Character character;
+        double amount;
+        TapeTier tier;
+    };
+    const Config configs[] = {
+        {Character::tape, 0.7, TapeTier::standard},
+        {Character::tape, 1.0, TapeTier::physical},
+        {Character::bbd, 0.7, TapeTier::standard},
+        {Character::vintage_digital, 0.7, TapeTier::standard},
+    };
+    for (const auto& config : configs) {
         Engine delay;
-        configure(delay, character, 250.0, 1.1, 0.7);
+        configure(delay, config.character, 250.0, 1.1, config.amount, config.tier);
 
         // R4's protocol: a single small impulse, then a long zero-input settle.
         // The settle is 25 s rather than 10 because the BBD's clocked
@@ -517,10 +528,35 @@ TEST_CASE("saturating characters self-oscillate bounded at maximum feedback",
         render(delay, tail);
 
         const double level = rms(tail.left, 0, static_cast<int>(tail.left.size()));
-        INFO("character index " << static_cast<int>(character) << " rms " << level);
+        INFO("character index " << static_cast<int>(config.character) << ", tier "
+                                << static_cast<int>(config.tier) << " rms " << level);
         CHECK(all_finite(tail.left));
         CHECK(level > 1e-3);
         CHECK(peak(tail.left, 0, static_cast<int>(tail.left.size())) < 4.0);
+    }
+}
+
+TEST_CASE("physical tape keeps sub-unity feedback below oscillation",
+          "[character-delay][feedback][tape][slow]") {
+    for (double feedback : {0.72, 0.9}) {
+        for (double age : {0.72, 1.0}) {
+            Engine delay;
+            configure(delay, Character::tape, 375.0, feedback, age, TapeTier::physical);
+
+            // The worn physical loop can take more than 12 seconds to cross from
+            // a quiet tail into oscillation, so observe the same 20-second horizon
+            // used by the acceptance sweep rather than accepting an early lull.
+            auto seed = make_stereo(static_cast<int>(kSr * 20.0));
+            seed.left[0] = 0.3f;
+            seed.right[0] = 0.3f;
+            render(delay, seed);
+
+            const double level = rms(seed.left, static_cast<int>(kSr * 18.0),
+                                     static_cast<int>(seed.left.size()));
+            INFO("feedback " << feedback << ", age " << age << " tail rms " << level);
+            CHECK(all_finite(seed.left));
+            CHECK(level < 2e-3);
+        }
     }
 }
 
