@@ -49,18 +49,25 @@ template <typename Detector>
 concept AcceptsExplicitSignalTrigger =
     requires(Detector detector) { detector.process_signal(1.0f); };
 
-static_assert(!AcceptsIntegerClock<ClockMult>);
+template <typename Detector>
+concept AcceptsExplicitHystereticCv =
+    requires(Detector detector) { detector.process_hysteretic_cv(1.0f); };
+
+static_assert(AcceptsIntegerClock<ClockMult>);
 static_assert(!AcceptsIntegerClock<SignalClockMult>);
 static_assert(HasEventFactor<ClockMult>);
 static_assert(!HasSignalFactor<ClockMult>);
 static_assert(!HasEventFactor<SignalClockMult>);
 static_assert(HasSignalFactor<SignalClockMult>);
-static_assert(std::same_as<ClockMultT<float>, ClockMult>);
-static_assert(std::same_as<ClockMultT<double>, ClockMult64>);
+static_assert(std::same_as<ClockMultT, ClockMult>);
+static_assert(std::same_as<ClockMultT, ClockMult64>);
 static_assert(std::same_as<EventClockMult64, ClockMult64>);
+static_assert(std::same_as<round2::ClockMultT<float>, ClockMult>);
+static_assert(std::same_as<round2::ClockMultT<double>, ClockMult>);
 static_assert(!AcceptsIntegerTrigger<TriggerDetect>);
 static_assert(AcceptsFloatTrigger<TriggerDetect>);
 static_assert(AcceptsExplicitSignalTrigger<TriggerDetect>);
+static_assert(AcceptsExplicitHystereticCv<TriggerDetect>);
 
 } // namespace
 
@@ -106,6 +113,37 @@ TEST_CASE("TriggerDetect thresholds a continuous signal",
     REQUIRE(detect.process_signal(0.7f));
 }
 
+TEST_CASE("TriggerDetect process_signal preserves strict threshold and refractory",
+          "[signal][mod][trigger][compatibility]") {
+    TriggerDetect detect;
+    detect.prepare(1000.0);
+    detect.set_refractory_ms(10.0);
+    detect.set_threshold(0.5f);
+
+    REQUIRE_FALSE(detect.process_signal(0.5f));
+    REQUIRE(detect.process_signal(0.6f));
+    REQUIRE_FALSE(detect.process_signal(0.0f));
+    REQUIRE_FALSE(detect.process_signal(0.6f));
+
+    // Let the ten-sample refractory expire, then prove recovery on the next
+    // strict crossing.
+    REQUIRE_FALSE(detect.process_signal(0.0f));
+    for (int i = 0; i < 7; ++i) REQUIRE_FALSE(detect.process_signal(0.0f));
+    REQUIRE(detect.process_signal(0.6f));
+}
+
+TEST_CASE("TriggerDetect hysteretic CV path never inherits refractory debounce",
+          "[signal][mod][trigger][compatibility]") {
+    TriggerDetect detect;
+    detect.prepare(kSampleRate);
+    detect.set_refractory_ms(1000.0);
+    detect.set_thresholds(0.75, 0.25);
+
+    REQUIRE(detect.process_hysteretic_cv(0.8f));
+    REQUIRE_FALSE(detect.process_hysteretic_cv(0.2f));
+    REQUIRE(detect.process_hysteretic_cv(0.8f));
+}
+
 TEST_CASE("TriggerDetect keeps floating process compatibility on one signal state",
           "[signal][mod][trigger][compatibility]") {
     TriggerDetect explicit_signal;
@@ -116,7 +154,8 @@ TEST_CASE("TriggerDetect keeps floating process compatibility on one signal stat
     }
 
     for (float sample : {0.0f, 0.8f, 0.7f, 0.2f, 0.9f, 0.1f}) {
-        REQUIRE(explicit_signal.process_signal(sample) == compatible_signal.process(sample));
+        REQUIRE(explicit_signal.process_hysteretic_cv(sample) ==
+                compatible_signal.process(sample));
         REQUIRE(explicit_signal.high() == compatible_signal.high());
     }
 }
@@ -199,6 +238,21 @@ TEST_CASE("ClockMult at 1x passes the input through", "[signal][mod][trigger]") 
     REQUIRE(times == std::vector<int>{0, 250, 500, 750});
 }
 
+TEST_CASE("ClockMultT preserves concrete type-position and integral event compatibility",
+          "[signal][mod][trigger][compatibility]") {
+    const auto accepts_concrete = [](ClockMultT& multiplier) {
+        multiplier.set_multiplier(1);
+        return multiplier.process(1);
+    };
+
+    ClockMultT multiplier;
+    REQUIRE(accepts_concrete(multiplier));
+    REQUIRE_FALSE(multiplier.process(0));
+
+    round2::ClockMultT<double> round2_spelling;
+    REQUIRE(round2_spelling.process(1));
+}
+
 TEST_CASE("event and signal clock multipliers expose one scheduler each",
           "[signal][mod][trigger][regression]") {
     EventClockMult events;
@@ -209,9 +263,10 @@ TEST_CASE("event and signal clock multipliers expose one scheduler each",
     signal.set_multiple(4);
 
     // The event adapter consumes a deliberately decoded bool. The signal
-    // adapter consumes a deliberately floating-point CV sample. An integer
-    // call is rejected by the static assertions above instead of selecting an
-    // engine through overload resolution.
+    // adapter consumes a deliberately floating-point CV sample. The signal
+    // adapter rejects integers; the concrete event adapter preserves its
+    // established implicit bool conversion because no overload ambiguity
+    // remains after the type split.
     REQUIRE(events.process(true));
     REQUIRE(signal.process(1.0f));
 

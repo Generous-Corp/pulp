@@ -24,7 +24,6 @@
 #include <cmath>
 #include <concepts>
 #include <cstdint>
-#include <limits>
 
 namespace pulp::signal {
 
@@ -63,17 +62,9 @@ public:
         update_refractory_();
     }
 
-    /// Single-threshold shorthand for `process_signal()`. This collapses the
-    /// hysteresis band to the established strict `x > threshold` transition
-    /// while retaining explicit signal dispatch. Ignored by boolean `process()`.
-    void set_threshold(SampleType t) {
-        const double threshold = static_cast<double>(t);
-        // The established single-threshold path fired on `x > threshold`, not
-        // equality. Express that through the inclusive hysteresis comparison
-        // without retaining a second signal detector.
-        high_threshold_ = std::nextafter(threshold, std::numeric_limits<double>::infinity());
-        low_threshold_ = threshold;
-    }
+    /// Threshold for the refractory `process_signal()` lane. Ignored by the
+    /// decoded-event and hysteretic-CV lanes.
+    void set_threshold(SampleType t) { threshold_ = t; }
     void set_thresholds(double high, double low) {
         high_threshold_ = high;
         low_threshold_ = std::min(low, high - 1e-9);
@@ -95,10 +86,10 @@ public:
         return true;
     }
 
-    /// Continuous-signal edge detection used by the sequencing lane. This
-    /// deliberately has hysteresis and no refractory; the boolean overload is
-    /// the already-decoded event lane and retains its optional debounce.
-    bool process_signal(SampleType input) {
+    /// Continuous-CV edge detection used by the sequencing lane. This
+    /// deliberately has hysteresis and no refractory: a clock must not lose
+    /// fast legitimate edges to a debounce window.
+    bool process_hysteretic_cv(SampleType input) {
         const double x = static_cast<double>(input);
         if (hysteresis_armed_ && x >= high_threshold_) {
             hysteresis_armed_ = false;
@@ -108,10 +99,21 @@ public:
         return false;
     }
 
-    void process_signal(SampleType input, bool& rising, bool& falling) {
+    void process_hysteretic_cv(SampleType input, bool& rising, bool& falling) {
         const bool was_high = !hysteresis_armed_;
-        rising = process_signal(input);
+        rising = process_hysteretic_cv(input);
         falling = was_high && hysteresis_armed_;
+    }
+
+    /// Established single-threshold signal lane. It first decodes the signal
+    /// with strict `x > threshold`, then applies the same refractory policy as
+    /// an already-decoded boolean event.
+    bool process_signal(SampleType input) { return process(input > threshold_); }
+
+    void process_signal(SampleType input, bool& rising, bool& falling) {
+        const bool was_high = prev_;
+        rising = process_signal(input);
+        falling = was_high && !prev_;
     }
 
     /// Source-compatible bridge for callers that passed floating-point CV to
@@ -120,7 +122,12 @@ public:
     /// detector selected by overload history.
     template <std::floating_point Floating>
     bool process(Floating input) {
-        return process_signal(static_cast<SampleType>(input));
+        return process_hysteretic_cv(static_cast<SampleType>(input));
+    }
+
+    template <std::floating_point Floating>
+    void process(Floating input, bool& rising, bool& falling) {
+        process_hysteretic_cv(static_cast<SampleType>(input), rising, falling);
     }
 
     /// Integer literals are neither decoded event gates nor continuous CV.
@@ -143,6 +150,7 @@ private:
     double refractory_ms_ = kDefaultRefractoryMs;
     long long refractory_samples_ = 48;
     long long countdown_ = 0;
+    SampleType threshold_ = SampleType{0.5};
     double high_threshold_ = kTriggerHighThreshold;
     double low_threshold_ = kTriggerLowThreshold;
     bool prev_ = false;
@@ -235,7 +243,7 @@ public:
     }
 
     SampleType process(SampleType trigger) {
-        if (detector_.process_signal(trigger)) remaining_ = length_samples_;
+        if (detector_.process_hysteretic_cv(trigger)) remaining_ = length_samples_;
         if (remaining_ <= 0) return low_level_;
         --remaining_;
         return high_level_;
@@ -296,7 +304,7 @@ public:
     }
 
     bool process(SampleType clock) {
-        if (!detector_.process_signal(clock)) return false;
+        if (!detector_.process_hysteretic_cv(clock)) return false;
         const bool pass = counter_ == 0;
         counter_ = (counter_ + 1) % division_;
         return pass;
@@ -327,7 +335,6 @@ using ClockDivider64 = ClockDividerT<double>;
 ///
 /// USE: ratchets and rolls from a slow clock; hi-hats derived from a kick
 /// trigger; running a modulation source at 4x the pulse the user is tapping.
-template <typename SampleType = float>
 class ClockMultT {
 public:
     static constexpr int kMaxMultiplier = 16;
@@ -366,11 +373,6 @@ public:
         return true;
     }
 
-    /// Integer literals are not clocks. Require callers to spell event input
-    /// as `bool` so an API split cannot silently redirect their scheduler.
-    template <std::integral Integer>
-    bool process(Integer) = delete;
-
     /// Measured input period in samples; 0 until two triggers have arrived.
     long long period_samples() const { return have_period_ ? period_ : 0; }
 
@@ -390,10 +392,18 @@ private:
 };
 
 /// Backward-compatible name for the already-decoded event adapter.
-using ClockMult = ClockMultT<float>;
-using ClockMult64 = ClockMultT<double>;
-using EventClockMult = ClockMultT<float>;
-using EventClockMult64 = ClockMultT<double>;
+using ClockMult = ClockMultT;
+using ClockMult64 = ClockMultT;
+using EventClockMult = ClockMultT;
+using EventClockMult64 = ClockMultT;
+
+/// Compatibility spelling for Round 2 code that briefly treated the event
+/// multiplier as precision-specialised. The event engine stores only integer
+/// counters, so the parameter never selected behavior.
+namespace round2 {
+template <typename SampleType = float>
+using ClockMultT = ::pulp::signal::ClockMultT;
+} // namespace round2
 
 /// Continuous-signal clock multiplier.
 ///
@@ -442,7 +452,7 @@ public:
 
     bool process(SampleType clock) {
         since_edge_ += 1.0;
-        if (detector_.process_signal(clock)) {
+        if (detector_.process_hysteretic_cv(clock)) {
             const bool usable = have_edge_ && since_edge_ <= max_period_samples_;
             period_ = usable ? since_edge_ : 0.0;
             have_edge_ = true;
@@ -571,7 +581,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process_signal(trigger)) {
+        if (detector_.process_hysteretic_cv(trigger)) {
             remaining_ = count_ - 1;
             countdown_ = interval_samples_;
             return true;
@@ -701,7 +711,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process_signal(trigger)) countdown_ = delay_samples_;
+        if (detector_.process_hysteretic_cv(trigger)) countdown_ = delay_samples_;
         if (countdown_ < 0) return false;
         if (countdown_ == 0) {
             countdown_ = -1;

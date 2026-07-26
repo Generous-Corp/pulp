@@ -21,12 +21,12 @@ TEST_CASE("TriggerDetect fires once per edge and hysteresis stops chatter",
     TriggerDetect det;
     det.reset();
 
-    REQUIRE(det.process_signal(1.0f));
-    REQUIRE_FALSE(det.process_signal(1.0f));
-    REQUIRE_FALSE(det.process_signal(0.4f));
-    REQUIRE_FALSE(det.process_signal(1.0f));
-    REQUIRE_FALSE(det.process_signal(0.1f));
-    REQUIRE(det.process_signal(1.0f));
+    REQUIRE(det.process_hysteretic_cv(1.0f));
+    REQUIRE_FALSE(det.process_hysteretic_cv(1.0f));
+    REQUIRE_FALSE(det.process_hysteretic_cv(0.4f));
+    REQUIRE_FALSE(det.process_hysteretic_cv(1.0f));
+    REQUIRE_FALSE(det.process_hysteretic_cv(0.1f));
+    REQUIRE(det.process_hysteretic_cv(1.0f));
 }
 
 TEST_CASE("ClockDivider passes the first edge after reset", "[trigger][mod-utilities]") {
@@ -234,7 +234,7 @@ TEST_CASE("trigger-kit utilities allocate nothing on the audio thread",
     pulp::test::RtAllocationProbe probe;
     for (int i = 0; i < 512; ++i) {
         const float clock = (i % 64) == 0 ? 1.0f : 0.0f;
-        (void)trigger.process_signal(clock);
+        (void)trigger.process_hysteretic_cv(clock);
         (void)comparator.process(clock);
         (void)gate.process(clock);
         (void)divider.process(clock);
