@@ -72,6 +72,12 @@ public:
         update();
     }
 
+    /// Retunes only the lossless fractional-delay path for audio-rate pitch
+    /// modulation. Decay and damping remain tied to the static frequency.
+    void set_modulated_frequency(double hz) {
+        update_tuning(std::clamp(hz, 20.0, 0.25 * sample_rate_));
+    }
+
     /// Time for the note to fall by 60 dB, in seconds.
     void set_decay_seconds(double seconds) {
         decay_seconds_ = std::max(seconds, 0.01);
@@ -206,22 +212,8 @@ public:
 
 private:
     void update() {
-        loop_length_ = sample_rate_ / frequency_;
+        update_tuning(frequency_);
 
-        // Split the loop into an integer delay plus an allpass whose delay sits
-        // in [0.1, 1.1) samples. Keeping it off zero is deliberate: at zero the
-        // allpass's pole and zero cancel on the unit circle and its delay is no
-        // longer continuous in the coefficient.
-        constexpr double kMinFractional = 0.1;
-        double fractional = loop_length_ - std::floor(loop_length_);
-        integer_delay_ = std::floor(loop_length_);
-        if (fractional < kMinFractional) {
-            fractional += 1.0;
-            integer_delay_ -= 1.0;
-        }
-        integer_delay_ = std::max(integer_delay_, 1.0);
-        // Delay d of a first-order allpass with coefficient c is (1-c)/(1+c).
-        tuning_coefficient_ = (1.0 - fractional) / (1.0 + fractional);
         // The loop runs f0 times a second, so reaching -60 dB after
         // `decay_seconds` means losing 3/(f0 * decay) decades per trip. Deriving
         // it this way is what makes a high note decay faster than a low one at
@@ -255,6 +247,25 @@ private:
         // requested. That is what a heavily damped string does.
         const double ratio = frequency_ / std::max(corner, 1e-9);
         loop_gain_ = std::min(loop_gain_ * std::sqrt(1.0 + ratio * ratio), 0.9999);
+    }
+
+    void update_tuning(double frequency) {
+        loop_length_ = sample_rate_ / frequency;
+
+        // Split the loop into an integer delay plus an allpass whose delay sits
+        // in [0.1, 1.1) samples. Keeping it off zero is deliberate: at zero the
+        // allpass's pole and zero cancel on the unit circle and its delay is no
+        // longer continuous in the coefficient.
+        constexpr double kMinFractional = 0.1;
+        double fractional = loop_length_ - std::floor(loop_length_);
+        integer_delay_ = std::floor(loop_length_);
+        if (fractional < kMinFractional) {
+            fractional += 1.0;
+            integer_delay_ -= 1.0;
+        }
+        integer_delay_ = std::max(integer_delay_, 1.0);
+        // Delay d of a first-order allpass with coefficient c is (1-c)/(1+c).
+        tuning_coefficient_ = (1.0 - fractional) / (1.0 + fractional);
     }
 
     DelayLineT<SampleType> loop_;

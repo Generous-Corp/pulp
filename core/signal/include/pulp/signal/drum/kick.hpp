@@ -296,6 +296,8 @@ protected:
                         noise_.reset();
                     }
                 }
+                circuit_excitation_gain_ =
+                    1.0 + 0.03 * static_cast<double>(noise_.white());
                 pulse_remaining_ = std::max(
                     1, static_cast<int>(0.001 * circuit_pulse_ms_ * sample_rate()));
                 shunt_remaining_ =
@@ -403,7 +405,8 @@ private:
 
         const double drive_volts =
             kPulseVoltsMin + circuit_drive_ * (kPulseVoltsMax - kPulseVoltsMin);
-        const auto ring = circuit_.process(diode * drive_volts, feedback_z_, 0.0);
+        const auto ring = circuit_.process(
+            diode * drive_volts * circuit_excitation_gain_, feedback_z_, 0.0);
 
         // One sample of delay breaks the delay-free loop. The sign is negative
         // because the network already subtracts its feedback injection, so a
@@ -500,6 +503,7 @@ private:
     double mod_phase_ = 0.0;
     double feedback_z_ = 0.0;
     double ring_level_ = 0.0;
+    double circuit_excitation_gain_ = 1.0;
     int pulse_remaining_ = 0;
     int shunt_remaining_ = 0;
     int excite_remaining_ = 0;

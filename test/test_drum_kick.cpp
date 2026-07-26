@@ -26,6 +26,7 @@ namespace {
 using pulp::signal::NoiseColor;
 using pulp::signal::drum::KickBody;
 using pulp::signal::drum::KickVoice;
+using pulp::signal::drum::HitLifeMode;
 using pulp::signal::drum::OutputOversampling;
 using pulp::signal::drum::OutputStage;
 using pulp::signal::drum::VelocityResponse;
@@ -735,8 +736,6 @@ TEST_CASE("A preserved circuit retrigger keeps the output-stage history",
 
 TEST_CASE("The circuit anti-machine-gun policy is selectable",
           "[signal][drum][kick][circuit][life]") {
-    using pulp::signal::drum::HitLifeMode;
-
     KickVoice voice;
     init(voice, KickBody::circuit);
     voice.set_circuit_feedback(0.95);
@@ -753,6 +752,23 @@ TEST_CASE("The circuit anti-machine-gun policy is selectable",
     REQUIRE(voice.circuit_hit_life() == HitLifeMode::preserved_state);
     const auto living = hit(voice, 1.0f, 12000);
     REQUIRE_FALSE(living == first);
+}
+
+TEST_CASE("Advancing circuit hit-life varies the circuit excitation itself",
+          "[signal][drum][kick][circuit][life]") {
+    auto body = [](HitLifeMode life) {
+        KickVoice voice;
+        init(voice, KickBody::circuit);
+        voice.set_circuit_feedback(0.95);
+        voice.set_click_level(0.0);
+        voice.set_noise_level(0.0);
+        voice.set_circuit_hit_life(life);
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto fixed = body(HitLifeMode::fixed_seed);
+    const auto advancing = body(HitLifeMode::advancing_seed);
+    REQUIRE_FALSE(fixed == advancing);
 }
 
 // -- Output stage and realtime contract --------------------------------------

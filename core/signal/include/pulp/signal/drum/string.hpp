@@ -101,17 +101,23 @@ public:
     /// by a sine, and Sync substitutes a slave saw reset by the string pitch.
     void set_modulation(StringModulation mode) {
         if (modulation_ == StringModulation::fm &&
-            mode != StringModulation::fm && is_active()) {
+            mode != StringModulation::fm) {
             string_.set_frequency(base_frequency_);
         }
         modulation_ = mode;
     }
-    void set_modulation_mix(double mix) { modulation_mix_ = std::clamp(mix, 0.0, 1.0); }
+    void set_modulation_mix(double mix) {
+        modulation_mix_ = std::clamp(mix, 0.0, 1.0);
+        if (modulation_mix_ == 0.0)
+            string_.set_frequency(base_frequency_);
+    }
     void set_modulation_ratio(double ratio) {
         modulation_ratio_ = std::clamp(ratio, 0.125, 16.0);
     }
     void set_fm_depth_octaves(double octaves) {
         fm_depth_octaves_ = std::clamp(octaves, 0.0, 2.0);
+        if (fm_depth_octaves_ == 0.0)
+            string_.set_frequency(base_frequency_);
     }
 
     /// Amount of the lowpass-gate stage after modulation. Zero is a transparent
@@ -200,10 +206,11 @@ protected:
             }
             const double modulator =
                 std::sin(2.0 * 3.14159265358979323846 * modulation_phase_);
-            if (modulation_ == StringModulation::fm) {
-                string_.set_frequency(base_frequency_ *
-                                      std::exp2(fm_depth_octaves_ *
-                                                modulation_mix_ * modulator));
+            const double fm_depth =
+                fm_depth_octaves_ * modulation_mix_;
+            if (modulation_ == StringModulation::fm && fm_depth > 0.0) {
+                string_.set_modulated_frequency(
+                    base_frequency_ * std::exp2(fm_depth * modulator));
             }
 
             const double burst = exciter_env_.is_active()
