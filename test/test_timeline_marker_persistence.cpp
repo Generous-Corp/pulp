@@ -142,8 +142,10 @@ TEST_CASE("Timeline sequence downgrade refuses to discard authored annotations")
     DecodeLimits limits;
     const auto populated =
         sequence_envelope(take(serialize_project(annotated_project(), registry)).json);
+    // The chain walks 3 -> 2 (the empty chord lane drops cleanly) and then
+    // refuses at 2 -> 1, where the authored annotations would be lost.
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1, populated, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 1, populated, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 }
@@ -158,7 +160,7 @@ TEST_CASE("Timeline version-one sequences decode with no markers or regions") {
     // Re-saving lifts the sequence to the current schema version.
     const auto resaved = take(serialize_project(decoded, registry)).json;
     REQUIRE(resaved.find(R"("markers":[],"musical_duration")") != std::string::npos);
-    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":2)") !=
+    REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":3)") !=
             std::string::npos);
 }
 
@@ -191,10 +193,10 @@ TEST_CASE("Timeline snapshots reject malformed marker and region payloads") {
 
     // A version-one sequence carrying markers is a contradiction, not a hint.
     auto mismatched = snapshot;
-    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":2)");
+    const auto version = mismatched.find(R"("type_name":"pulp.timeline.sequence","version":3)");
     REQUIRE(version != std::string::npos);
     mismatched.replace(
-        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":2)").size(),
+        version, std::string_view(R"("type_name":"pulp.timeline.sequence","version":3)").size(),
         R"("type_name":"pulp.timeline.sequence","version":1)");
     auto rejected_version = deserialize_project(mismatched, registry);
     REQUIRE_FALSE(rejected_version);

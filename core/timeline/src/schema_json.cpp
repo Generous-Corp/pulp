@@ -50,6 +50,7 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_take_comp_segments = 1'000'000;
     limits.max_markers = 25'000;
     limits.max_regions = 25'000;
+    limits.max_chord_scale_events = 250'000;
     return limits;
 }
 

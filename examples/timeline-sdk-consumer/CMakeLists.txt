@@ -108,6 +108,8 @@ set(_expected_importer_closure
     Pulp::events
     Pulp::everest
     Pulp::hwy
+    # The importer's refusal sites derive from the interchange capability table,
+    # so interchange is part of its installed closure, not an internal detail.
     Pulp::interchange
     Pulp::mbedcrypto
     Pulp::mbedtls

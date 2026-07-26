@@ -71,6 +71,8 @@
     { "id": "content.registered", "detect": "model", "summary": "Typed extension clip content serialized through the schema registry." },
     { "id": "content.opaque", "detect": "model", "summary": "Uninterpreted clip content carried in a validated envelope." },
 
-    { "id": "edit-rate.non-audio", "detect": "format", "summary": "Positions at a rate that does not convert exactly to the document's rate." }
+    { "id": "edit-rate.non-audio", "detect": "format", "summary": "Positions at a rate that does not convert exactly to the document's rate." },
+
+    { "id": "context.chord-scale", "detect": "model", "summary": "A sequence-owned lane of chord and scale statements that other items read while compiling." }
   ]
 }

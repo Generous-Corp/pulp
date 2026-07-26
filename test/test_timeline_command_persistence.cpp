@@ -144,6 +144,9 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
                  "{\"region\":" + std::string(parsed->raw(region)) + R"(,"sequence_id":"5"})"),
         envelope("pulp.timeline.command.remove_region",
                  R"({"region_id":"15","sequence_id":"5"})"),
+        envelope(
+            "pulp.timeline.command.set_chord_scale_lane",
+            R"({"expected":[],"replacement":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"sequence_id":"5"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -178,6 +181,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<RemoveMarker>(commands[20]));
     REQUIRE(std::holds_alternative<InsertRegion>(commands[21]));
     REQUIRE(std::holds_alternative<RemoveRegion>(commands[22]));
+    REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[23]));
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {

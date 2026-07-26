@@ -68,6 +68,8 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidMarker,
     InvalidRegion,
     InvalidSessionStart,
+    InvalidChordScaleEvent,
+    UnorderedChordScaleLane,
 };
 
 struct ModelError {
@@ -538,6 +540,86 @@ class Track {
     std::shared_ptr<const Data> data_;
 };
 
+// The harmonic quality of a chord symbol on the context lane. Spelling is
+// deliberately absent: the lane states harmony, not notation, so a renderer
+// derives voicings from (root, quality) rather than from an authored note set.
+enum class ChordQuality : std::uint8_t {
+    Major,
+    Minor,
+    Diminished,
+    Augmented,
+    Dominant7,
+    Major7,
+    Minor7,
+    HalfDiminished7,
+    Suspended2,
+    Suspended4,
+};
+
+// The scale a passage is drawn from. A chord names the vertical, a scale names
+// the horizontal; a generator following the lane usually needs both, and one
+// does not determine the other (the same chord sits in several scales).
+enum class ScaleMode : std::uint8_t {
+    Major,
+    NaturalMinor,
+    HarmonicMinor,
+    MelodicMinor,
+    Dorian,
+    Phrygian,
+    Lydian,
+    Mixolydian,
+    Locrian,
+    Chromatic,
+};
+
+// One harmonic statement, in force from `position` until the next event. Roots
+// are pitch classes (0 = C .. 11 = B), not MIDI notes: the lane says what the
+// harmony is, never which octave to play it in.
+struct ChordScaleEvent {
+    timebase::TickPosition position;
+    ChordQuality chord_quality = ChordQuality::Major;
+    std::uint8_t chord_root = 0;
+    ScaleMode scale_mode = ScaleMode::Major;
+    std::uint8_t scale_root = 0;
+
+    constexpr auto operator<=>(const ChordScaleEvent&) const = default;
+};
+
+// The chord/scale context lane a sequence carries. Events are strictly ordered
+// by position with no duplicates, so "the harmony at tick t" is a single
+// well-defined answer rather than a resolution policy.
+//
+// The lane is sequence-owned context, not clip content: it is read by other
+// items' compile hooks. Reading it across entities is what the compile-context
+// subscription contract governs (see compile_context.hpp) — a renderer declares
+// that it reads this lane, and the compiler dirties exactly those declared
+// readers when the lane is edited.
+class ChordScaleLane {
+  public:
+    static runtime::Result<ChordScaleLane, ModelError> create(std::vector<ChordScaleEvent> events);
+
+    std::span<const ChordScaleEvent> events() const noexcept {
+        return *events_;
+    }
+    bool empty() const noexcept {
+        return events_->empty();
+    }
+    // The event in force at `position`: the last one starting at or before it.
+    // Null before the first event — the lane states harmony where it was
+    // authored and never invents a default key.
+    const ChordScaleEvent* at(timebase::TickPosition position) const noexcept;
+    bool shares_storage_with(const ChordScaleLane& other) const noexcept {
+        return events_.get() == other.events_.get();
+    }
+    bool operator==(const ChordScaleLane& other) const noexcept;
+
+  private:
+    explicit ChordScaleLane(std::shared_ptr<const std::vector<ChordScaleEvent>> events) noexcept
+        : events_(std::move(events)) {}
+
+    std::shared_ptr<const std::vector<ChordScaleEvent>> events_;
+};
+
 // A marker is a named point on the sequence timeline; a region is a named span.
 // Both are anchored in canonical ticks — the same musical domain a musical clip
 // uses — and both carry a stable ItemId so a command can address one by identity.
@@ -586,6 +668,17 @@ class Sequence {
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
            std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions);
+    // Sequence is pimpl'd behind a shared Data and constructed through these
+    // factories, so a new owned collection arrives as another overload rather
+    // than as a layout change every existing call site has to follow. This is
+    // the full-fidelity one; deliberately not a fifth partial overload, because
+    // the set is already long enough that the next owned collection should
+    // prompt a SequenceInput struct rather than another arity.
+    static runtime::Result<Sequence, ModelError>
+    create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
+           std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
+           std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions,
+           ChordScaleLane chord_scale_lane);
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -593,6 +686,8 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
+    // Always present; empty when the sequence states no harmony.
+    const ChordScaleLane& chord_scale_lane() const noexcept;
     // Ordered by (position, id). Markers and regions share one identity space:
     // no marker may reuse a region's ItemId within the same sequence.
     std::span<const SequenceMarker> markers() const noexcept;
@@ -605,6 +700,7 @@ class Sequence {
     runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
     runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
     runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
+    Sequence with_chord_scale_lane(ChordScaleLane lane) const;
     bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:

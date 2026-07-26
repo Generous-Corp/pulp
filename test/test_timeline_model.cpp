@@ -595,3 +595,27 @@ TEST_CASE("Timeline remap allocates first then fixes internal references") {
     REQUIRE(terminal.project.next_item_id() == std::numeric_limits<std::uint64_t>::max());
     REQUIRE_FALSE(terminal.project.item_id_allocator().allocate().has_value());
 }
+
+TEST_CASE("Timeline remap preserves sequence context and project session origin") {
+    const auto lane = take_value(ChordScaleLane::create(
+        {{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    const auto sequence = take_value(Sequence::create(
+        {2}, "context", TickDuration{400}, std::nullopt, {}, {}, {}, lane));
+    const SessionStart session_start{{172'800'000}, {48'000, 1}};
+    const auto project = take_value(Project::create(ProjectInput{.id = {1},
+                                                                 .name = "context",
+                                                                 .next_item_id = 3,
+                                                                 .root_sequence_id = {2},
+                                                                 .sequences = {sequence},
+                                                                 .session_start = session_start}));
+
+    ItemIdAllocator allocator(100);
+    const auto remapped_sequence = take_value(remap_ids(sequence, allocator)).sequence;
+    REQUIRE(remapped_sequence.chord_scale_lane() == lane);
+
+    const auto remapped_project = take_value(remap_ids(project, 200)).project;
+    REQUIRE(remapped_project.session_start() == session_start);
+    const auto* rebuilt_sequence = remapped_project.find_sequence({201});
+    REQUIRE(rebuilt_sequence != nullptr);
+    REQUIRE(rebuilt_sequence->chord_scale_lane() == lane);
+}

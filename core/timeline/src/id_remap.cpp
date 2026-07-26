@@ -364,7 +364,7 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
         region.id = *table.find(region.id);
     return Sequence::create(*table.find(sequence.id()), sequence.name(), sequence.duration(),
                             sequence.absolute_duration(), std::move(tracks), std::move(markers),
-                            std::move(regions));
+                            std::move(regions), sequence.chord_scale_lane());
 }
 
 } // namespace
@@ -501,10 +501,16 @@ runtime::Result<RemappedProject, ModelError> remap_ids(const Project& project,
                                          rebuilt.error().related_item);
         sequences.push_back(std::move(rebuilt).value());
     }
-    auto rebuilt = Project::create(
-        ProjectInput{*table.find(project.id()), project.name(), allocator.next_value(),
-                     *table.find(project.root_sequence_id()), std::move(assets),
-                     std::move(sequences), project.tempo_map(), project.meter_map()});
+    auto rebuilt =
+        Project::create(ProjectInput{.id = *table.find(project.id()),
+                                     .name = project.name(),
+                                     .next_item_id = allocator.next_value(),
+                                     .root_sequence_id = *table.find(project.root_sequence_id()),
+                                     .assets = std::move(assets),
+                                     .sequences = std::move(sequences),
+                                     .tempo_map = project.tempo_map(),
+                                     .meter_map = project.meter_map(),
+                                     .session_start = project.session_start()});
     if (!rebuilt)
         return fail<RemappedProject>(rebuilt.error().code, rebuilt.error().item,
                                      rebuilt.error().related_item);

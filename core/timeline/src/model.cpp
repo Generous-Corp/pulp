@@ -410,6 +410,42 @@ Clip::with_playback_properties(ClipPlaybackProperties playback) const {
 
 namespace {
 
+constexpr std::uint8_t kPitchClassCount = 12;
+
+constexpr bool valid_chord_quality(ChordQuality quality) noexcept {
+    switch (quality) {
+    case ChordQuality::Major:
+    case ChordQuality::Minor:
+    case ChordQuality::Diminished:
+    case ChordQuality::Augmented:
+    case ChordQuality::Dominant7:
+    case ChordQuality::Major7:
+    case ChordQuality::Minor7:
+    case ChordQuality::HalfDiminished7:
+    case ChordQuality::Suspended2:
+    case ChordQuality::Suspended4:
+        return true;
+    }
+    return false;
+}
+
+constexpr bool valid_scale_mode(ScaleMode mode) noexcept {
+    switch (mode) {
+    case ScaleMode::Major:
+    case ScaleMode::NaturalMinor:
+    case ScaleMode::HarmonicMinor:
+    case ScaleMode::MelodicMinor:
+    case ScaleMode::Dorian:
+    case ScaleMode::Phrygian:
+    case ScaleMode::Lydian:
+    case ScaleMode::Mixolydian:
+    case ScaleMode::Locrian:
+    case ScaleMode::Chromatic:
+        return true;
+    }
+    return false;
+}
+
 // Markers and regions share the sequence's annotation identity space, so one
 // ItemId can name at most one of them. Ordering is canonical, never authored:
 // callers hand over any order and the sequence stores the sorted result.
@@ -482,6 +518,37 @@ std::optional<ItemId> duplicate_annotation_id(const std::vector<SequenceMarker>&
 
 } // namespace
 
+runtime::Result<ChordScaleLane, ModelError>
+ChordScaleLane::create(std::vector<ChordScaleEvent> events) {
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        if (event.position.value < 0 || event.chord_root >= kPitchClassCount ||
+            event.scale_root >= kPitchClassCount || !valid_chord_quality(event.chord_quality) ||
+            !valid_scale_mode(event.scale_mode))
+            return fail<ChordScaleLane>(ModelErrorCode::InvalidChordScaleEvent);
+        // Authored order is the document's order. Sorting a caller's events
+        // here would silently accept a lane whose harmony the caller did not
+        // mean, so an out-of-order or duplicated position is a rejection.
+        if (index != 0 && events[index - 1].position.value >= event.position.value)
+            return fail<ChordScaleLane>(ModelErrorCode::UnorderedChordScaleLane);
+    }
+    return runtime::Result<ChordScaleLane, ModelError>(runtime::Ok(ChordScaleLane(
+        std::make_shared<const std::vector<ChordScaleEvent>>(std::move(events)))));
+}
+
+const ChordScaleEvent* ChordScaleLane::at(timebase::TickPosition position) const noexcept {
+    const auto found = std::upper_bound(
+        events_->begin(), events_->end(), position,
+        [](timebase::TickPosition wanted, const ChordScaleEvent& event) {
+            return wanted.value < event.position.value;
+        });
+    return found == events_->begin() ? nullptr : &*(found - 1);
+}
+
+bool ChordScaleLane::operator==(const ChordScaleLane& other) const noexcept {
+    return events_.get() == other.events_.get() || *events_ == *other.events_;
+}
+
 struct Sequence::Data {
     ItemId id;
     std::string name;
@@ -491,6 +558,7 @@ struct Sequence::Data {
     std::vector<std::pair<ItemId, std::size_t>> track_id_index;
     std::vector<SequenceMarker> markers;
     std::vector<SequenceRegion> regions;
+    ChordScaleLane chord_scale_lane;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -510,6 +578,18 @@ runtime::Result<Sequence, ModelError> Sequence::create(
     ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
     std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
     std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions) {
+    auto empty_lane = ChordScaleLane::create({});
+    if (!empty_lane)
+        return runtime::Result<Sequence, ModelError>(runtime::Err(empty_lane.error()));
+    return create(id, std::move(name), musical_duration, absolute_duration, std::move(tracks),
+                  std::move(markers), std::move(regions), std::move(empty_lane).value());
+}
+
+runtime::Result<Sequence, ModelError> Sequence::create(
+    ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
+    std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
+    std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions,
+    ChordScaleLane chord_scale_lane) {
     if (!id.valid())
         return fail<Sequence>(ModelErrorCode::InvalidItemId, id);
     if ((musical_duration && musical_duration->value < 0) ||
@@ -550,7 +630,8 @@ runtime::Result<Sequence, ModelError> Sequence::create(
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, duplicate->first);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{id, std::move(name), musical_duration, absolute_duration, std::move(tracks),
-             std::move(by_id), std::move(markers), std::move(regions)}))));
+             std::move(by_id), std::move(markers), std::move(regions),
+             std::move(chord_scale_lane)}))));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -606,7 +687,8 @@ Sequence::with_annotations(std::vector<SequenceMarker> markers,
     sort_regions(regions);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, std::move(markers), std::move(regions)}))));
+             data_->tracks, data_->track_id_index, std::move(markers), std::move(regions),
+             data_->chord_scale_lane}))));
 }
 
 runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
@@ -662,7 +744,23 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     tracks[found->second] = std::move(track);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             std::move(tracks), data_->track_id_index, data_->markers, data_->regions}))));
+             std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
+             data_->chord_scale_lane}))));
+}
+
+const ChordScaleLane& Sequence::chord_scale_lane() const noexcept {
+    return data_->chord_scale_lane;
+}
+
+Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
+    // The lane validated its own ordering at construction and names no
+    // identities, so replacing it cannot invalidate tracks, clips, the
+    // annotations, or the sequence's duration — the swap is total and cannot
+    // fail.
+    return Sequence(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
+             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
+             std::move(lane)}));
 }
 
 bool Sequence::shares_storage_with(const Sequence& other) const noexcept {
