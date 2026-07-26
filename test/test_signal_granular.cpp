@@ -1493,7 +1493,9 @@ TEST_CASE("Granular prepare retains its finite sample rate on non-finite input",
 TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
           "[granular][live][nan-recovery][rt]") {
     const std::vector<double> continuation = noise_buffer(8192, 0xBAD5A11u);
-    const std::vector<double> warmup = noise_buffer(4096, 0x51A7E5u);
+    constexpr double ring_sentinel = 0.375;
+    constexpr int sentinel_index = 2048;
+    const std::vector<double> warmup(4096, ring_sentinel);
 
     const auto configure = [](GranularEngine64& engine) {
         engine.prepare(kFs);
@@ -1529,6 +1531,7 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
             poisoned.process(warmup.data(), warm_left.data(), warm_right.data(),
                              static_cast<int>(warmup.size()));
             REQUIRE(poisoned.active_grain_count() > 0);
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == ring_sentinel);
 
             double bad_left = 1.0;
             double bad_right = 1.0;
@@ -1539,8 +1542,28 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
             }
             REQUIRE(bad_left == 0.0);
             REQUIRE(bad_right == 0.0);
+            // Timing-independent proof that the audio-thread recovery did not
+            // perform the O(ring_length) clear that public reset() performs.
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == ring_sentinel);
 
             fresh.reset();
+            // The logical write head has rewound even though physical storage
+            // remains. With no newly written samples, stale sentinels must be
+            // unreachable and therefore inaudible.
+            constexpr int stale_probe_samples = 512;
+            std::vector<double> stale_left(stale_probe_samples);
+            std::vector<double> stale_right(stale_probe_samples);
+            std::vector<double> fresh_stale_left(stale_probe_samples);
+            std::vector<double> fresh_stale_right(stale_probe_samples);
+            poisoned.process(stale_left.data(), stale_right.data(), stale_probe_samples);
+            fresh.process(fresh_stale_left.data(), fresh_stale_right.data(), stale_probe_samples);
+            REQUIRE(stale_left == fresh_stale_left);
+            REQUIRE(stale_right == fresh_stale_right);
+            REQUIRE(std::all_of(stale_left.begin(), stale_left.end(),
+                                [](double sample) { return sample == 0.0; }));
+            REQUIRE(std::all_of(stale_right.begin(), stale_right.end(),
+                                [](double sample) { return sample == 0.0; }));
+
             std::vector<double> recovered_left(continuation.size());
             std::vector<double> recovered_right(continuation.size());
             std::vector<double> reference_left(continuation.size());
@@ -1554,6 +1577,9 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
             REQUIRE(recovered_right == reference_right);
             REQUIRE(poisoned.grain_index() == fresh.grain_index());
             REQUIRE(poisoned.active_grain_count() == fresh.active_grain_count());
+
+            poisoned.reset();
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == 0.0);
         }
 
         SECTION("two-call write_live path") {
@@ -1568,6 +1594,7 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
             poisoned.process(discarded_left.data(), discarded_right.data(),
                              static_cast<int>(warmup.size()));
             REQUIRE(poisoned.active_grain_count() > 0);
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == ring_sentinel);
 
             {
                 pulp::test::RtAllocationProbe probe;
@@ -1576,8 +1603,23 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
             }
             REQUIRE(poisoned.grain_index() == 0);
             REQUIRE(poisoned.active_grain_count() == 0);
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == ring_sentinel);
 
             fresh.reset();
+            constexpr int stale_probe_samples = 512;
+            std::vector<double> stale_left(stale_probe_samples);
+            std::vector<double> stale_right(stale_probe_samples);
+            std::vector<double> fresh_stale_left(stale_probe_samples);
+            std::vector<double> fresh_stale_right(stale_probe_samples);
+            poisoned.process(stale_left.data(), stale_right.data(), stale_probe_samples);
+            fresh.process(fresh_stale_left.data(), fresh_stale_right.data(), stale_probe_samples);
+            REQUIRE(stale_left == fresh_stale_left);
+            REQUIRE(stale_right == fresh_stale_right);
+            REQUIRE(std::all_of(stale_left.begin(), stale_left.end(),
+                                [](double sample) { return sample == 0.0; }));
+            REQUIRE(std::all_of(stale_right.begin(), stale_right.end(),
+                                [](double sample) { return sample == 0.0; }));
+
             poisoned.write_live(continuation.data(), static_cast<int>(continuation.size()));
             fresh.write_live(continuation.data(), static_cast<int>(continuation.size()));
             std::vector<double> recovered_left(continuation.size());
@@ -1591,6 +1633,9 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
 
             REQUIRE(recovered_left == reference_left);
             REQUIRE(recovered_right == reference_right);
+
+            poisoned.reset();
+            REQUIRE(poisoned.ring_storage_sample(sentinel_index) == 0.0);
         }
     }
 }

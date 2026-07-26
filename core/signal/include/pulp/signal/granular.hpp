@@ -266,8 +266,22 @@ public:
     /// pure function of the grain index, so rewinding the index to zero *is*
     /// reseeding. Never allocates.
     void reset() {
-        for (auto& grain : grains_) grain = Grain{};
         std::fill(ring_.begin(), ring_.end(), SampleType{0});
+        reset_runtime_state();
+    }
+
+private:
+    /// Rewinds every logical owner of ring validity without touching the ring
+    /// allocation itself. The grain pool is a compile-time 64-slot bound; all
+    /// remaining work is scalar. After `write_head_ = 0`, `place_live_read()`'s
+    /// oldest/newest bounds admit only slots overwritten since this rewind, so
+    /// stale physical storage is unreachable.
+    void audio_fault_reset() {
+        reset_runtime_state();
+    }
+
+    void reset_runtime_state() {
+        for (auto& grain : grains_) grain = Grain{};
         write_head_ = 0;
         sample_clock_ = 0;
         grain_index_ = 0;
@@ -280,6 +294,7 @@ public:
         mix_.set_immediate(mix_target_);
     }
 
+public:
     // ── Source ────────────────────────────────────────────────────────────
 
     void set_source(GrainSource source) { source_ = source; }
@@ -304,7 +319,7 @@ public:
         if (!accepts_live_input()) return;
         for (int i = 0; i < n; ++i) {
             if (!std::isfinite(static_cast<double>(in[i]))) {
-                reset();
+                audio_fault_reset();
                 continue;
             }
             write_one(in[i]);
@@ -501,6 +516,14 @@ public:
     std::uint64_t clamp_count() const { return clamp_count_; }
 
     int ring_length() const { return ring_length_; }
+
+    /// Physical live-ring storage for diagnostics. Logical validity is still
+    /// governed by `write_head_`; after an audio fault this may expose stale
+    /// storage that the renderer must not read until it has been overwritten.
+    SampleType ring_storage_sample(int index) const {
+        if (index < 0 || index >= ring_length_) return SampleType{0};
+        return ring_[static_cast<std::size_t>(index)];
+    }
 
     /// The derived causality guard, in samples: the worst-case total
     /// displacement a grain's read pointer can reach away from its nominal
@@ -798,7 +821,7 @@ private:
                 // Live input is ring history and the interleaved overload also
                 // exposes it as dry audio. Reject it before either path sees it,
                 // then restart from the documented fresh state.
-                reset();
+                audio_fault_reset();
                 out_left[i] = SampleType{0};
                 out_right[i] = SampleType{0};
                 continue;
