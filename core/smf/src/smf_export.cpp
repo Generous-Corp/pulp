@@ -265,7 +265,7 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
                 SmfErrorCode::UnsupportedFeature,
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
                     " is anchored to absolute time, which has no musical tick position")));
-        if (!notes->modifiers().empty())
+        if (!notes->modifiers().empty() || notes->modifier_seed() != 0)
             return TrackResult(Err(smf_error(
                 SmfErrorCode::UnsupportedFeature,
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
