@@ -4456,6 +4456,20 @@ what happens. Both are documented below, in that order.
 | `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
 | `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
 
+**Required/advisory isolation.** The `pulp-build*` and `pulp-preamble*` labels
+are reserved for required merge-gate work. Example validation and format
+baseline validation resolve `PULP_ADVISORY_MACOS_RUNS_ON_JSON`, falling back to
+hosted `macos-15`; the real-GPU web proof resolves
+`PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON` and skips when it is unset. Both paths
+pass through `tools/scripts/resolve_advisory_macos_runner.py`, which rejects
+required-pool label prefixes and rejects a configured self-hosted selector that
+lacks a `pulp-advisory-*` identity. Hosted strings are accepted only from the
+resolver's explicit reviewed allowlist; do not broaden it to a numeric pattern.
+Do not work around the identity guard by assigning an advisory label to a
+required runner. A local advisory lane needs its own tartci supervisor,
+governor capacity, and GitHub runner label. Shipyard and tartci are the
+placement/control path; do not use Orchard.
+
 So macOS overflow lands on **local JIT VMs**, not the cloud. Namespace vars are
 deliberately UNSET for cost control — do not treat them as an available lane.
 

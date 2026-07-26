@@ -34,12 +34,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-advisory-macos:
+    name: Resolve isolated advisory macOS runner
+    runs-on: ubuntu-latest
+    outputs:
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --fallback-json '"macos-15"'
+
   baseline-diff:
     # Self-hosted macOS runner — required because auval is macOS-only
     # and pluginval / clap-validator are easiest to pin there. Linux /
     # Windows runners would only cover a subset of validators and would
     # fragment the baseline.
-    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '["macos-14"]') }}
+    needs: resolve-advisory-macos
+    # The resolver rejects the required pulp-build* and pulp-preamble* pools.
+    runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -91,8 +109,7 @@ jobs:
           # target is missing because its SDK couldn't be fetched
           # (transient network failure), build the rest and let
           # format_baseline_diff.py skip the missing lane.
-          # This job resolves to PULP_LOCAL_MACOS_RUNS_ON_JSON — the shared
-          # self-hosted Studios — so each format build takes a governed share
+          # A configured self-hosted advisory lane still takes a governed share
           # (a tartci lease) instead of `-j$(sysctl -n hw.ncpu)` (every core).
           available=()
           for fmt in AU VST3 CLAP; do

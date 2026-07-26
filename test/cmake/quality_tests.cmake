@@ -136,6 +136,12 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME format-baseline-diff-selftest COMMAND ${Python3_EXECUTABLE}
         "${CMAKE_SOURCE_DIR}/tools/scripts/test_format_baseline_diff.py")
 
+    # Advisory macOS jobs must never consume the required merge-gate labels.
+    # This validates both the fail-closed resolver and every workflow that uses
+    # the advisory selector.
+    add_test(NAME advisory-macos-runner-policy COMMAND ${Python3_EXECUTABLE}
+        "${CMAKE_SOURCE_DIR}/tools/scripts/test_advisory_macos_runner_policy.py")
+
     # Version-at-land: single-writer version assignment on main. Drives
     # plan_assignments over throwaway git ranges, asserting it reproduces the
     # same path + conventional-commit heuristic the hand-bump model uses (the

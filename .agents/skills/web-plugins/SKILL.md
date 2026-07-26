@@ -35,6 +35,17 @@ Be precise about this; it is easy to overclaim and the claims get quoted.
 
 ## GPU audio in the browser: it exists, and it is a THIRD lane
 
+**CI capacity isolation.** The real-GPU macOS proof is advisory and must not
+consume a required merge-gate runner. `.github/workflows/web-plugins.yml`
+therefore reads `PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON`, not
+`PULP_LOCAL_MACOS_RUNS_ON_JSON`, and passes it through
+`tools/scripts/resolve_advisory_macos_runner.py`. The proof skips when the
+advisory selector is unset; configured selectors must be self-hosted and cannot
+contain `pulp-build*` or `pulp-preamble*`, and must carry a
+`pulp-advisory-*` identity. Give the proof its own governed tartci supervisor
+and `pulp-advisory-gpu` label. Do not add that advisory label to a required
+runner, and do not use Orchard.
+
 `examples/web-demos/gpu-audio/` runs SuperConvolver's convolution as a **WGSL
 compute shader on the browser's real WebGPU device**. Do not repeat the old line
 that this is impossible or unstarted. But be equally precise about its shape,
