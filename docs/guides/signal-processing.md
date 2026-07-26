@@ -760,13 +760,15 @@ and final level. That shared stage owns the drum-specific quality policy:
   adds no latency, and preserves the aliasing of period-authentic digital drum
   machines.
 
-`OutputStage::latency_samples()` reports the selected constant. A processor
-mixing the drum path with an undelayed parallel path must compensate the dry
-path or report the maximum delay to its host. Voices keep rendering while the
-FIR owns delayed samples, so their final filter tail is drained rather than
-cut. `prepare()` creates the FIR storage; quality changes and the audio path
-are allocation-free, but a quality change resets the filter and lo-fi clock
-and therefore belongs outside the audio callback.
+`OutputStage::latency_samples()` reports the selected constant.
+`OutputStage::latency_samples_for()` exposes the same contract at compile time
+for processors that select a fixed quality without owning a prepared stage. A
+processor mixing the drum path with an undelayed parallel path must compensate
+the dry path or report the maximum delay to its host. Voices keep rendering
+while the FIR owns delayed samples, so their final filter tail is drained
+rather than cut. `prepare()` creates the FIR storage; quality changes and the
+audio path are allocation-free, but a quality change resets the filter and
+lo-fi clock and therefore belongs outside the audio callback.
 
 Drum voices expose additive mono `process()` and additive
 `process_stereo()`. The default stereo realization is centered and its two

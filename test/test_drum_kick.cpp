@@ -707,6 +707,12 @@ TEST_CASE("The drum output stage defaults to the exact house x2 latency",
     OutputStage output;
     output.prepare(kFs);
 
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::bypass) == 0);
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::x2) == 32);
+    STATIC_REQUIRE(OutputStage::latency_samples_for(
+                       OutputOversampling::x4) == 48);
     REQUIRE(output.oversampling() == OutputOversampling::x2);
     REQUIRE(output.latency_samples() == 32);
 

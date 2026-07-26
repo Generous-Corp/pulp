@@ -77,16 +77,25 @@ public:
 
     OutputOversampling oversampling() const noexcept { return oversampling_; }
 
-    /// Constant group delay at the host rate. Consumers that place a drum path
-    /// beside an undelayed path can report or compensate this exact value.
-    int latency_samples() const noexcept {
-        switch (oversampling_) {
+    /// Exact host-rate latency for a quality choice. This is constexpr so a
+    /// processor that selects one fixed drum quality can report its latency
+    /// without constructing or preparing an output stage.
+    static constexpr int latency_samples_for(
+        OutputOversampling factor) noexcept {
+        switch (factor) {
             case OutputOversampling::bypass: return 0;
             case OutputOversampling::x2: return halfband_latency_samples();
             case OutputOversampling::x4:
-                return halfband_latency_samples() + halfband_latency_samples() / 2;
+                return halfband_latency_samples() +
+                       halfband_latency_samples() / 2;
         }
         return 0;
+    }
+
+    /// Constant group delay at the host rate. Consumers that place a drum path
+    /// beside an undelayed path can report or compensate this exact value.
+    int latency_samples() const noexcept {
+        return latency_samples_for(oversampling_);
     }
 
     /// True while the linear-phase pair still owns delayed output after the
