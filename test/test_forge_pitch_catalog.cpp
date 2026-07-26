@@ -686,18 +686,24 @@ TEST_CASE("The worst-case gain cites the invariant the DSP suite asserts",
     // expression, read from the same shipped accessor.
     Shifter probe;
     probe.prepare(kSr);
-    const double expected = Shifter::kWorstCaseGain * probe.dc_blocker_peak_gain();
+    const double expected = Shifter::kWorstCaseGain;
     REQUIRE_THAT(static_cast<double>(whammy::whammy_worst_case_gain(kSr)),
                  WithinRel(expected, 1e-6));
 
     // Neither factor may be dropped. √2 is the topology; the DC blocker's
-    // Nyquist peak is the one place the wet leg exceeds 1.0, and it is
-    // sample-rate dependent — larger at lower rates, so rounding it away would
-    // make the registry number a slightly WRONG bound rather than a right one.
-    REQUIRE_THAT(Shifter::kWorstCaseGain, WithinRel(std::sqrt(2.0), 1e-12));
-    REQUIRE(probe.dc_blocker_peak_gain() > 1.0);
-    REQUIRE(whammy::whammy_worst_case_gain(44100.0) >
-            whammy::whammy_worst_case_gain(96000.0));
+    // The wet leg's bound is the DC blocker's TIME-DOMAIN peak — the L1 norm
+    // of its impulse response, exactly 2 — not its magnitude peak at Nyquist
+    // (1.000327), which bounds the response to a steady sinusoid and says
+    // nothing about the largest single sample.
+    REQUIRE_THAT(Shifter::kWorstCaseGain, WithinRel(std::sqrt(5.0), 1e-12));
+    REQUIRE_THAT(Shifter::kDcBlockerPeakGain, WithinAbs(2.0, 1e-12));
+    // Rate-INDEPENDENT, derived rather than simplified: the L1 norm is 2 for
+    // every pole position, so the 5 Hz corner — and hence the sample rate —
+    // drops out. This asserted the OPPOSITE while the bound was built from the
+    // rate-dependent magnitude peak, so the wrong bound had a passing test
+    // certifying a property only the wrong derivation had.
+    REQUIRE_THAT(static_cast<double>(whammy::whammy_worst_case_gain(44100.0)),
+                 WithinRel(static_cast<double>(whammy::whammy_worst_case_gain(96000.0)), 1e-9));
 
     // And the baked node honours it. The bound is over the whole mix sweep,
     // which is where the equal-power sum peaks.

@@ -327,16 +327,40 @@ public:
     static constexpr double kClickBound = 0.25;
 
     /// Analytic peak-gain bound with an equal-power dry/wet mix and no
-    /// feedback: both legs are bounded by the input peak and the mix sums them
-    /// at worst at the 50/50 point. This is Forge's `worst_case_gain`.
-    static constexpr double kWorstCaseGain = 1.4142135623730951;  // √2
+    /// feedback. This is Forge's `worst_case_gain`, so it is a headroom figure
+    /// downstream plans against and understating it is the expensive direction.
+    ///
+    /// `√5`, not `√2`. The dry leg is bounded by the input peak and the wet leg
+    /// by `kDcBlockerPeakGain = 2`, and an equal-power mix maximises
+    /// `cos θ · 1 + sin θ · 2` at `√(1² + 2²)`. It was `√2` — derived from both
+    /// legs being bounded by 1 — which understated the real peak by 3.9 dB.
+    static constexpr double kWorstCaseGain = 2.23606797749979;  // √5
+    static_assert(kWorstCaseGain > 2.0, "the wet leg alone can reach 2x");
 
-    /// The DC blocker's peak magnitude, `2/(1+p)` at Nyquist — the one place
-    /// the wet leg can exceed the crossfade's convex-combination bound of 1.0.
-    /// At the default 5 Hz corner and 48 kHz this is 1.000327, so the spec's
-    /// "wet peak ≤ 1.0 · peak_in" holds to within 0.03 %; the exact bound is
-    /// this, and the suite asserts against it rather than against a rounded 1.
-    double dc_blocker_peak_gain() const { return 2.0 / (1.0 + dc_pole()); }
+    /// The DC blocker's TIME-DOMAIN peak gain: the L1 norm of its impulse
+    /// response, which is exactly 2 for every pole position.
+    ///
+    /// This used to return `2/(1+p)` — the peak of the MAGNITUDE response at
+    /// Nyquist, 1.000327 at the default corner — and call it "the exact bound".
+    /// A magnitude-response peak bounds the response to a STEADY SINUSOID; it
+    /// says nothing about the largest single sample. For `y[n] = x[n] − x[n−1] +
+    /// p·y[n−1]` the impulse response is `h[0] = 1`, `h[n] = p^(n−1)(p−1)`, so
+    /// the worst-case sample gain is `1 + (1−p)/(1−p) = 2` — 5.9 dB above what
+    /// was claimed, reachable on sustained near-DC content (bass, organ pedal).
+    ///
+    /// The suite certified the old bound with a single 997 Hz sine, which is
+    /// precisely the signal for which a magnitude-response bound IS valid. That
+    /// is why it shipped.
+    static constexpr double kDcBlockerPeakGain = 2.0;
+
+    /// The DC blocker's MAGNITUDE-response peak, `2/(1+p)` at Nyquist.
+    ///
+    /// Deliberately a separate accessor from `kDcBlockerPeakGain` above, and
+    /// deliberately renamed: the two differ by a factor of ~2 and confusing
+    /// them is exactly the defect this pair now documents. Use THIS one for
+    /// steady-state questions — sideband amplitudes, frequency response — and
+    /// the L1 constant for anything about a worst single sample.
+    double dc_blocker_magnitude_peak() const { return 2.0 / (1.0 + dc_pole()); }
 
     /// Fallback sample rate for a block that is queried before `prepare`.
     static constexpr double kDefaultSampleRate = 48000.0;

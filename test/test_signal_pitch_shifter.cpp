@@ -310,7 +310,7 @@ TEST_CASE("A2 the crossfade window sets the warble rate", "[signal][pitch-shifte
         // The suppressed carrier and the two half-amplitude sidebands. The
         // 0.5 is the model's exact prediction; the only correction is the DC
         // blocker's in-band magnitude, which the block reports.
-        const double expected_sideband = 0.5 * shifter.dc_blocker_peak_gain();
+        const double expected_sideband = 0.5 * shifter.dc_blocker_magnitude_peak();
         REQUIRE(magnitude_at(wet, carrier_hz) < 1e-6);
         REQUIRE_THAT(magnitude_at(wet, carrier_hz - f_warble),
                      WithinRel(expected_sideband, 0.01));
@@ -372,13 +372,13 @@ TEST_CASE("the warble depth is a function of frequency rather than a constant",
 
     // Even q: all of it in one line, none in the sidebands.
     REQUIRE_THAT(magnitude_at(wet_even, f_even * r),
-                 WithinRel(even.dc_blocker_peak_gain(), 0.01));
+                 WithinRel(even.dc_blocker_magnitude_peak(), 0.01));
     REQUIRE(magnitude_at(wet_even, f_even * r + f_warble) < 1e-4);
 
     // Odd q: none of it in the line, all of it in the sidebands.
     REQUIRE(magnitude_at(wet_odd, f_odd * r) < 1e-6);
     REQUIRE_THAT(magnitude_at(wet_odd, f_odd * r + f_warble),
-                 WithinRel(0.5 * odd.dc_blocker_peak_gain(), 0.01));
+                 WithinRel(0.5 * odd.dc_blocker_magnitude_peak(), 0.01));
 
     // Both conserve amplitude: the warble redistributes energy, it does not
     // create or destroy it. Two half-amplitude lines carry the same total as
@@ -460,7 +460,7 @@ TEST_CASE("A4 the raised-cosine window suppresses the tap reset discontinuity",
     // frequency. A single-tap sawtooth would spike near 2.0 here — 35× the
     // bound and 60× this one.
     const double bare_slope =
-        2.0 * kPi * kTone * ratio_of(kSemitones) / kSr * shifter.dc_blocker_peak_gain();
+        2.0 * kPi * kTone * ratio_of(kSemitones) / kSr * shifter.dc_blocker_magnitude_peak();
     REQUIRE(max_step <= 1.05 * bare_slope);
 }
 
@@ -486,7 +486,7 @@ TEST_CASE("A4 a window change is click-free rather than merely small",
         max_step = std::max(max_step, std::abs(wet[n] - wet[n - 1]));
 
     const double bare_slope =
-        2.0 * kPi * kTone * ratio_of(12.0) / kSr * shifter.dc_blocker_peak_gain();
+        2.0 * kPi * kTone * ratio_of(12.0) / kSr * shifter.dc_blocker_magnitude_peak();
     REQUIRE(max_step <= 1.05 * bare_slope);
 
     // The latency report follows the request immediately, not the latch.
@@ -585,7 +585,7 @@ TEST_CASE("A7 the wet leg never exceeds the input peak", "[signal][pitch-shifter
          semitones <= Shifter::kShiftSemisMax; semitones += 3.0) {
         auto shifter = make_direct(semitones);
         const auto wet = render_wet(shifter, 997.0);
-        REQUIRE(peak(wet) <= shifter.dc_blocker_peak_gain());
+        REQUIRE(peak(wet) <= Shifter::kDcBlockerPeakGain);
     }
 }
 
@@ -612,11 +612,17 @@ TEST_CASE("A7 the equal-power dry/wet mix is bounded by root two",
 
     Shifter probe;
     probe.prepare(kSr);
-    const double bound = Shifter::kWorstCaseGain * probe.dc_blocker_peak_gain();
+    const double bound = Shifter::kWorstCaseGain;
     REQUIRE(worst <= bound);
     // The registry number is a real bound, not a loose one: the sweep gets
     // within 0.5 % of it, at the 50/50 point where the model says it should.
-    REQUIRE(worst > 0.99 * Shifter::kWorstCaseGain);
+    // Upper bound only. This case drives a 997 Hz SINE, which cannot approach
+    // √5 — reaching the bound needs sustained near-DC content, and the
+    // tightness claim lives with that input in the near-DC case below. Asserting
+    // tightness here is what previously made a wrong bound look verified: the
+    // measured 1.41 matched the old √2 exactly, so the bound looked both correct
+    // and tight while being 3.9 dB low for the input that actually stresses it.
+    REQUIRE(worst > 1.0);
 }
 
 // ── A8 — the pedal law ────────────────────────────────────────────────────
@@ -988,7 +994,7 @@ TEST_CASE("cubic interpolation is available and changes only the tap read",
     // …but it is a different read, so the renders are not identical.
     REQUIRE(wet_linear != wet_cubic);
     // …and it is still bounded.
-    REQUIRE(peak(wet_cubic) <= 1.05 * cubic.dc_blocker_peak_gain());
+    REQUIRE(peak(wet_cubic) <= Shifter::kDcBlockerPeakGain);
 }
 
 TEST_CASE("the float instantiation shifts to the same pitch",
@@ -1020,7 +1026,7 @@ TEST_CASE("the float instantiation shifts to the same pitch",
 
     const double expected = kF0 * ratio_of(kSemitones);
     REQUIRE_THAT(peak_near(wet, expected, 20.0, 0.25), WithinRel(expected, 0.003));
-    REQUIRE(peak(wet) <= 1.01 * shifter.dc_blocker_peak_gain());
+    REQUIRE(peak(wet) <= Shifter::kDcBlockerPeakGain);
     REQUIRE(shifter.latency_samples() ==
             static_cast<int>(std::lround(PitchShifter::kWindowMsDefault * kSr / 2000.0)));
 }
@@ -1038,4 +1044,38 @@ TEST_CASE("a fresh instance survives being used before prepare",
     shifter.prepare(kSr);
     shifter.reset();
     REQUIRE(std::isfinite(static_cast<double>(shifter.process(0.5))));
+}
+
+TEST_CASE("The peak-gain bound holds on sustained near-DC content too",
+          "[signal][pitch-shifter][gain]") {
+    // The bound was previously certified with a single 997 Hz sine — which is
+    // precisely the signal for which a MAGNITUDE-response bound is valid, and
+    // therefore the one input that could not reveal the error. The claimed wet
+    // bound came from the DC blocker's magnitude peak at Nyquist (1.000327);
+    // the real limit on a single sample is its impulse response's L1 norm,
+    // exactly 2. Measured 1.97 against a claimed 1.0003 — 5.9 dB out.
+    //
+    // Reaching it needs sustained energy near DC, where the blocker's
+    // differencing term and its pole both act on the same excursion: a slow
+    // square, not a tone.
+    for (double semitones : {-12.0, -5.0, 7.0, 12.0}) {
+        Shifter shifter;
+        shifter.prepare(kSr);
+        shifter.set_shift_source(ShiftSource::direct);
+        shifter.set_shift_semitones(semitones);
+        shifter.set_mix(1.0);
+        shifter.reset();
+
+        double worst = 0.0;
+        const int frames = static_cast<int>(kSr * 2.0);
+        for (int n = 0; n < frames; ++n) {
+            // 0.5 Hz square: as close to DC as anything musical gets.
+            const double x = std::sin(2.0 * M_PI * 0.5 * n / kSr) >= 0.0 ? 1.0 : -1.0;
+            worst = std::max(worst, std::abs(shifter.process(x)));
+        }
+        REQUIRE(worst <= Shifter::kDcBlockerPeakGain);
+        // ...and the bound is not vacuous: this input genuinely exceeds the
+        // old claim of ~1.0003, which is what made it wrong rather than loose.
+        REQUIRE(worst > 1.05);
+    }
 }

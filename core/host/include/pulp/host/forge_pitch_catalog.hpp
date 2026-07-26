@@ -165,32 +165,26 @@ inline signal::PedalMode decode_pedal_mode(float v) {
 
 /// Worst-case linear gain for the Forge registry (series law 8).
 ///
-/// Cited from the invariant the DSP suite already asserts, not re-derived here.
-/// That suite's peak-gain case sweeps the mix and asserts
-/// `worst <= kWorstCaseGain * dc_blocker_peak_gain()` and
-/// `worst > 0.99 * kWorstCaseGain` — so the bound is both an upper bound AND
-/// tight, and this is that same expression.
+/// Cited from the invariant the DSP suite asserts, not re-derived here.
 ///
-/// The two factors are different kinds of thing, which is why neither can be
-/// dropped:
+/// This used to be `kWorstCaseGain * dc_blocker_peak_gain()` with
+/// `kWorstCaseGain = √2` and the DC blocker contributing `2/(1+p)` at Nyquist —
+/// 1.000327 at 48 kHz, so the product was 1.4147. Measured, the node reaches
+/// 2.2117 on sustained near-DC content: the registry was understating the
+/// headroom a downstream stage plans against by 3.9 dB.
 ///
-///   * `kWorstCaseGain = √2` is the topology. There is no feedback, both legs
-///     are bounded by the input peak, and the equal-power dry/wet mix sums them
-///     at worst at the 50/50 point.
-///   * `dc_blocker_peak_gain()` is `2/(1+p)` at Nyquist — the one place the wet
-///     leg can exceed the crossfade's convex-combination bound of 1.0. It is
-///     SAMPLE-RATE DEPENDENT (the pole comes from a 5 Hz corner) and grows as
-///     the rate falls: 1.000327 at 48 kHz, 1.000356 at 44.1 kHz. Small, but
-///     rounding it to 1.0 would make the registry number a slightly wrong
-///     bound rather than a right one.
+/// The error was using the DC blocker's MAGNITUDE-response peak as a bound on
+/// its worst single SAMPLE. Those are different quantities; the sample bound is
+/// the impulse response's L1 norm, which is exactly 2 at every pole position.
+/// `Shifter::kWorstCaseGain` now folds that in — an equal-power mix maximises
+/// `cos θ · 1 + sin θ · 2` at `√5` — so it is the whole bound and multiplying
+/// by the blocker again would double-count it.
 ///
-/// Control-path only: this constructs and prepares a probe shifter to read the
-/// shipped accessor rather than duplicating its formula, so it allocates. Call
-/// it when registering, never from `process`.
-inline float whammy_worst_case_gain(double sample_rate) {
-    Shifter probe;
-    probe.prepare(sample_rate);
-    return static_cast<float>(Shifter::kWorstCaseGain * probe.dc_blocker_peak_gain());
+/// No longer sample-rate dependent, and that is a consequence rather than a
+/// simplification: the L1 norm of `y[n] = x[n] − x[n−1] + p·y[n−1]` is 2 for
+/// every `p`, so the pole's position (and hence the rate) drops out.
+inline float whammy_worst_case_gain(double /*sample_rate*/) {
+    return static_cast<float>(Shifter::kWorstCaseGain);
 }
 
 /// The node's reported latency at a given window and sample rate, in samples.
