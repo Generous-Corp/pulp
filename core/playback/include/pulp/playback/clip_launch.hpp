@@ -158,6 +158,7 @@ class LaunchHandle {
     constexpr void reset() noexcept {
         state_ = LaunchState::Stopped;
         has_target_ = false;
+        has_last_start_ = false;
     }
 
     // Advance one block. Emits at most one Start/Stop transition per block.
@@ -180,14 +181,117 @@ class LaunchHandle {
         const bool starting = state_ == LaunchState::Armed;
         state_ = starting ? LaunchState::Playing : LaunchState::Stopped;
         has_target_ = false;
+        if (starting) {
+            last_start_ = target_;
+            has_last_start_ = true;
+        }
         return {starting ? LaunchEventKind::Start : LaunchEventKind::Stop, *offset};
+    }
+
+    // The monotonic beat the most recent Start resolved to — the exact tick the
+    // clip began on, not an approximation recovered from a sample offset. A
+    // follow-action grid anchors here so it inherits the launch's accuracy.
+    constexpr bool has_last_start() const noexcept {
+        return has_last_start_;
+    }
+    constexpr timebase::MonotonicBeat last_start() const noexcept {
+        return last_start_;
     }
 
   private:
     LaunchQuantize quantize_{};
     timebase::MonotonicBeat target_{};
+    timebase::MonotonicBeat last_start_{};
     LaunchState state_ = LaunchState::Stopped;
     bool has_target_ = false;
+    bool has_last_start_ = false;
+};
+
+// Counts off a slot's follow-action grid from the beat its launch resolved to.
+// The grid is anchored to that beat (phase == launch beat), so the boundaries
+// are exactly { launch + k*grid } and each one resolves through the same
+// resolve_launch_sample() path a launch does — a follow action is therefore
+// sample-accurate under the same block splits and loop wraps a launch is.
+// `repetitions` grid periods elapse before the action fires, so a two-bar grid
+// with three repetitions fires six bars after the clip started.
+//
+// The timer copies the grid and repetition count out of the set it is armed
+// with and holds no pointer into it, so the authored model may change under a
+// running timer without a dangling read on the audio thread.
+struct FollowActionEvent {
+    bool fired = false;
+    std::uint32_t sample_offset = 0;
+};
+
+class FollowActionTimer {
+  public:
+    static constexpr audio::RtSafetyClass process_rt_safety_class =
+        audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+
+    // Start counting from `launch_beat`. A set that cannot fire (no candidates,
+    // an immediate grid, zero repetitions) leaves the timer disarmed.
+    constexpr void arm(timebase::MonotonicBeat launch_beat,
+                       const timeline::FollowActionSet& set) noexcept {
+        if (!set.enabled()) {
+            disarm();
+            return;
+        }
+        grid_ = set.grid;
+        remaining_ = set.repetitions;
+        target_ = advance(launch_beat);
+        armed_ = true;
+    }
+
+    constexpr void disarm() noexcept {
+        armed_ = false;
+        remaining_ = 0;
+    }
+
+    constexpr bool armed() const noexcept {
+        return armed_;
+    }
+    constexpr timebase::MonotonicBeat target() const noexcept {
+        return target_;
+    }
+    // How many times this timer has fired. Used as the follow-action draw index,
+    // which is what makes a repeated random choice reproducible.
+    constexpr std::uint64_t fire_count() const noexcept {
+        return fire_count_;
+    }
+
+    // Advance one block. Emits at most one fire per block; intermediate
+    // repetition boundaries falling in the same block are consumed silently.
+    FollowActionEvent process(const TransportSnapshot& snapshot,
+                              const timebase::CompiledTempoMap& tempo_map) noexcept {
+        if (!armed_ || snapshot.range_count == 0)
+            return {};
+        // Bounded by remaining_: every iteration consumes one repetition.
+        while (true) {
+            const auto offset = resolve_launch_sample(snapshot, tempo_map, target_);
+            if (!offset)
+                return {}; // boundary still ahead: keep counting
+            --remaining_;
+            if (remaining_ == 0) {
+                armed_ = false;
+                ++fire_count_;
+                return {true, *offset};
+            }
+            target_ = advance(target_);
+        }
+    }
+
+  private:
+    // The next boundary strictly after `from` on a grid anchored at `from`.
+    constexpr timebase::MonotonicBeat advance(timebase::MonotonicBeat from) const noexcept {
+        const LaunchQuantize anchored{grid_, from.position};
+        return next_launch_boundary({from.position + timebase::TickDuration{1}}, anchored);
+    }
+
+    timebase::TickDuration grid_{0};
+    timebase::MonotonicBeat target_{};
+    std::uint32_t remaining_ = 0;
+    std::uint64_t fire_count_ = 0;
+    bool armed_ = false;
 };
 
 } // namespace pulp::playback
