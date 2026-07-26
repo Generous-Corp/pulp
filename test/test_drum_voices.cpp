@@ -16,6 +16,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/drum/clap.hpp>
+#include <pulp/signal/drum/engine_registry.hpp>
 #include <pulp/signal/drum/hat.hpp>
 #include <pulp/signal/drum/kit.hpp>
 #include <pulp/signal/drum/snare.hpp>
@@ -30,12 +31,17 @@ namespace {
 
 using pulp::signal::NoiseColor;
 using pulp::signal::drum::ClapVoice;
+using pulp::signal::drum::EngineId;
+using pulp::signal::drum::EngineProvenance;
 using pulp::signal::drum::HatVoice;
 using pulp::signal::drum::Kit;
 using pulp::signal::drum::SnareVoice;
 using pulp::signal::drum::TomVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
+using pulp::signal::drum::create_engine;
+using pulp::signal::drum::engine_registry;
+using pulp::signal::drum::find_engine;
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kFs = 48000.0;
@@ -1177,5 +1183,45 @@ TEST_CASE("Every voice stays finite at extreme settings",
             for (float v : y) REQUIRE(std::isfinite(v));
             REQUIRE(peak(y) < 20.0);
         }
+    }
+}
+
+TEST_CASE("The engine registry has stable unique names and an explicit DX7 hold",
+          "[signal][drum][registry]") {
+    for (std::size_t i = 0; i < engine_registry.size(); ++i) {
+        const auto& engine = engine_registry[i];
+        REQUIRE_FALSE(engine.name.empty());
+        REQUIRE_FALSE(engine.display_name.empty());
+        REQUIRE_FALSE(engine.lineage.empty());
+        REQUIRE(find_engine(engine.name) == &engine);
+        for (std::size_t j = i + 1; j < engine_registry.size(); ++j) {
+            REQUIRE(engine.name != engine_registry[j].name);
+            REQUIRE(engine.id != engine_registry[j].id);
+        }
+    }
+
+    REQUIRE(find_engine("not-a-drum") == nullptr);
+    const auto* held = find_engine("dx7.msfa");
+    REQUIRE(held != nullptr);
+    REQUIRE_FALSE(held->available);
+    REQUIRE(held->provenance == EngineProvenance::license_hold);
+    REQUIRE(create_engine(EngineId::dx7_msfa) == nullptr);
+}
+
+TEST_CASE("Every available registry entry constructs a finite audible voice",
+          "[signal][drum][registry]") {
+    for (const auto& engine : engine_registry) {
+        auto voice = create_engine(engine.id);
+        INFO(engine.name);
+        if (!engine.available) {
+            REQUIRE(voice == nullptr);
+            continue;
+        }
+
+        REQUIRE(voice != nullptr);
+        voice->prepare(kFs);
+        const auto y = hit(*voice, 0.8f, 4096);
+        for (float sample : y) REQUIRE(std::isfinite(sample));
+        REQUIRE(peak(y) > 1e-6);
     }
 }
