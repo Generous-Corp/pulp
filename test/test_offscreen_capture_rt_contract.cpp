@@ -27,22 +27,55 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <pulp/runtime/scoped_no_alloc.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/screenshot.hpp>
-#include <pulp/canvas/recording_canvas.hpp>
 
 #include <cstdint>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include "native_components/rt_test_scope.hpp"
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 namespace {
+
+class NoOpCanvas final : public pulp::canvas::Canvas {
+public:
+    void save() override {}
+    void restore() override {}
+    void translate(float, float) override {}
+    void scale(float, float) override {}
+    void rotate(float) override {}
+    void clip_rect(float, float, float, float) override {}
+    void set_fill_color(pulp::canvas::Color) override {}
+    void set_stroke_color(pulp::canvas::Color) override {}
+    void set_line_width(float) override {}
+    void set_line_cap(pulp::canvas::LineCap) override {}
+    void set_line_join(pulp::canvas::LineJoin) override {}
+    void fill_rect(float, float, float, float) override {}
+    void stroke_rect(float, float, float, float) override {}
+    void fill_rounded_rect(float, float, float, float, float) override {}
+    void stroke_rounded_rect(float, float, float, float, float) override {}
+    void fill_circle(float, float, float) override {}
+    void stroke_circle(float, float, float) override {}
+    void stroke_arc(float, float, float, float, float) override {}
+    void stroke_line(float, float, float, float) override {}
+    void set_font(const std::string&, float) override {}
+    void set_text_align(pulp::canvas::TextAlign) override {}
+    void fill_text(const std::string&, float, float) override {}
+    float measure_text(const std::string&) override { return 0.0f; }
+};
 
 // Records what the no-alloc contract reported at the moment it was painted.
 class ContractProbeView : public pulp::view::View {
 public:
-    void paint(pulp::canvas::Canvas& canvas) override {
+    void paint(pulp::canvas::Canvas&) override {
         painted = true;
         in_no_alloc_scope_during_paint = pulp::runtime::is_in_no_alloc_scope();
         guard_depth_during_paint = pulp::runtime::no_alloc_scope_depth();
-        View::paint(canvas);
     }
 
     bool painted = false;
@@ -50,16 +83,44 @@ public:
     int guard_depth_during_paint = 0;
 };
 
+void require_capture_was_suspended(const ContractProbeView& root) {
+    REQUIRE(root.painted);
+    REQUIRE_FALSE(root.in_no_alloc_scope_during_paint);
+#ifndef NDEBUG
+    // The inner ScopedNoAlloc still exists; only its enforcement is suspended.
+    REQUIRE(root.guard_depth_during_paint > 0);
+#endif
+}
+
 }  // namespace
+
+#if defined(__unix__) || defined(__APPLE__)
+TEST_CASE("offscreen capture contract target has the allocator trap armed",
+          "[view][rt-safety][issue-6344]") {
+    const pid_t child = ::fork();
+    REQUIRE(child >= 0);
+    if (child == 0) {
+        pulp::native_components::test::RtNoAllocScope no_alloc;
+        void* allocation = ::operator new(64);
+        ::operator delete(allocation);
+        ::_exit(0);
+    }
+
+    int status = 0;
+    REQUIRE(::waitpid(child, &status, 0) == child);
+    REQUIRE(WIFSIGNALED(status));
+    REQUIRE(WTERMSIG(status) == SIGABRT);
+}
+#endif
 
 TEST_CASE("live paint runs under the no-alloc contract",
           "[view][rt-safety][issue-6344]") {
     ContractProbeView root;
     root.set_bounds({0, 0, 64, 64});
 
-    // Paint straight into a canvas, the way a live window host does — no
-    // capture wrapper in the call chain.
-    pulp::canvas::RecordingCanvas canvas;
+    // This canvas itself never allocates, so the only state under test is the
+    // live paint contract rather than a recording backend's command buffer.
+    NoOpCanvas canvas;
     root.paint_all(canvas);
 
     REQUIRE(root.painted);
@@ -76,29 +137,54 @@ TEST_CASE("live paint runs under the no-alloc contract",
 #endif
 }
 
-TEST_CASE("offscreen capture suspends the no-alloc contract",
+TEST_CASE("offscreen raster capture suspends the no-alloc contract",
           "[view][rt-safety][issue-6344]") {
     ContractProbeView root;
     root.set_bounds({0, 0, 64, 64});
 
     const auto png = pulp::view::render_to_png(root, 64, 64, 1.0f,
                                                pulp::view::ScreenshotBackend::skia);
-
-    // The capture must have actually painted us — otherwise the assertion below
-    // would pass vacuously on a build where the backend silently no-ops.
-    REQUIRE(root.painted);
-
-    // Holds in BOTH build types, and is the invariant that actually protects the
-    // suite: the capture completes instead of aborting on the trap.
-    REQUIRE_FALSE(root.in_no_alloc_scope_during_paint);
+    require_capture_was_suspended(root);
     REQUIRE_FALSE(png.empty());
+}
 
-#ifndef NDEBUG
-    // Debug only — the guard has a body here, so we can prove the interesting
-    // part: the ScopedNoAlloc is still ON THE STACK during the capture
-    // (paint_all opens it unconditionally) and the contract nonetheless reports
-    // SUSPENDED. Under NDEBUG the depth is always 0, so asserting it would be
-    // asserting the compiler flag, not the behaviour.
-    REQUIRE(root.guard_depth_during_paint > 0);
+#ifdef __APPLE__
+TEST_CASE("offscreen CoreGraphics capture suspends the no-alloc contract",
+          "[view][rt-safety][issue-6344]") {
+    ContractProbeView root;
+    const auto png = pulp::view::render_to_png(
+        root, 64, 64, 1.0f, pulp::view::ScreenshotBackend::coregraphics);
+    require_capture_was_suspended(root);
+    REQUIRE_FALSE(png.empty());
+}
 #endif
+
+#ifdef PULP_HAS_SKIA
+TEST_CASE("offscreen raw RGBA capture suspends the no-alloc contract",
+          "[view][rt-safety][issue-6344]") {
+    ContractProbeView root;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    const auto rgba =
+        pulp::view::render_to_rgba(root, 64, 64, 1.0f, &width, &height);
+    require_capture_was_suspended(root);
+    REQUIRE_FALSE(rgba.empty());
+    REQUIRE(width == 64);
+    REQUIRE(height == 64);
+}
+#endif
+
+TEST_CASE("offscreen GPU capture suspends the no-alloc contract",
+          "[view][rt-safety][issue-6344][gpu]") {
+    if (!pulp::view::has_gpu_capture()) {
+        SKIP("GPU capture is not compiled into this build");
+    }
+
+    ContractProbeView root;
+    const auto png = pulp::view::render_to_png_gpu(root, 64, 64, 1.0f);
+    if (png.empty() && !root.painted) {
+        SKIP("GPU capture is compiled in but no runtime adapter is available");
+    }
+    require_capture_was_suspended(root);
+    REQUIRE_FALSE(png.empty());
 }

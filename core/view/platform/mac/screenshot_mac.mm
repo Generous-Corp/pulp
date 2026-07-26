@@ -79,6 +79,16 @@ std::vector<uint8_t> encode_rgba_to_png(const uint8_t* pixels,
     }
 }
 
+// Offscreen capture is not a live frame or an audio callback. Its backend may
+// legitimately allocate while rasterizing (for example, Skia builds paths for
+// rounded rectangles), so suspend the paint no-allocation contract for exactly
+// the view-tree paint and overlay pass. Live hosts do not call this helper.
+void paint_offscreen(canvas::Canvas& canvas, View& root) {
+    pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
+    root.paint_all(canvas);
+    View::paint_overlays(canvas, &root);
+}
+
 std::vector<uint8_t> render_to_png_coregraphics(View& root,
                                                 uint32_t width,
                                                 uint32_t height,
@@ -104,18 +114,7 @@ std::vector<uint8_t> render_to_png_coregraphics(View& root,
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
-    // An offscreen capture is a NON-real-time event by definition: one shot, no
-    // audio thread, no frame deadline. paint_all opens a ScopedNoAlloc ("treat
-    // paint like the audio thread"), and a test binary that links the RT
-    // interceptor overrides global operator new to abort inside it. The paint
-    // path has never met that contract -- Skia's CPU device builds an SkPath per
-    // rounded rect (SkBitmapDevice::drawRRect -> SkPath::RRect) and TextShaper
-    // builds the font-family fallback vector -- so arming it here aborts the
-    // capture instead of reporting a real-time defect. Live painting keeps the
-    // contract; only the capture suspends it.
-    pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
-    root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas, &root);
+    paint_offscreen(canvas, root);
 
     CGImageRef image = CGBitmapContextCreateImage(ctx);
     CGContextRelease(ctx);
@@ -164,18 +163,7 @@ std::vector<uint8_t> render_to_png_skia(View& root,
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
-    // An offscreen capture is a NON-real-time event by definition: one shot, no
-    // audio thread, no frame deadline. paint_all opens a ScopedNoAlloc ("treat
-    // paint like the audio thread"), and a test binary that links the RT
-    // interceptor overrides global operator new to abort inside it. The paint
-    // path has never met that contract -- Skia's CPU device builds an SkPath per
-    // rounded rect (SkBitmapDevice::drawRRect -> SkPath::RRect) and TextShaper
-    // builds the font-family fallback vector -- so arming it here aborts the
-    // capture instead of reporting a real-time defect. Live painting keeps the
-    // contract; only the capture suspends it.
-    pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
-    root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas, &root);
+    paint_offscreen(canvas, root);
 
     std::vector<uint8_t> pixels(static_cast<size_t>(pixel_w) * pixel_h * 4u);
     SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pixel_w) * 4u);
@@ -214,18 +202,7 @@ std::vector<uint8_t> render_to_rgba_skia(View& root,
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
-    // An offscreen capture is a NON-real-time event by definition: one shot, no
-    // audio thread, no frame deadline. paint_all opens a ScopedNoAlloc ("treat
-    // paint like the audio thread"), and a test binary that links the RT
-    // interceptor overrides global operator new to abort inside it. The paint
-    // path has never met that contract -- Skia's CPU device builds an SkPath per
-    // rounded rect (SkBitmapDevice::drawRRect -> SkPath::RRect) and TextShaper
-    // builds the font-family fallback vector -- so arming it here aborts the
-    // capture instead of reporting a real-time defect. Live painting keeps the
-    // contract; only the capture suspends it.
-    pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
-    root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas, &root);
+    paint_offscreen(canvas, root);
 
     std::vector<uint8_t> pixels(static_cast<size_t>(pixel_w) * pixel_h * 4u);
     SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pixel_w) * 4u);
