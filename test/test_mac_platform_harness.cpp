@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/theme.hpp>
@@ -970,4 +971,58 @@ TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDo
 
     REQUIRE(context_menus == 1);
     REQUIRE(left_clicks == 0);
+}
+
+// ── Gesture-vs-delivery gating in the standalone host ────────────────────
+//
+// A recognizer that is merely a CANDIDATE must not stop the widget under it
+// from receiving press / drag / release. `-[PulpView mouseDown:]` and friends
+// early-return on `mac_should_yield_to_gesture`, which yields only on a real
+// claim; yielding on the raw dispatch return instead makes every control that
+// carries a recognizer permanently undraggable in a standalone app, because
+// normal delivery never runs. The plugin-view host had the same defect and was
+// fixed separately, so this pins the standalone side against re-drift.
+//
+// Driven through real AppKit events on the real content view: the gating lives
+// inside the Obj-C mouse handlers, so a portable View-level test cannot reach
+// it. The decision itself is unit-tested in test_pointer_dispatch.cpp.
+TEST_CASE("mac harness: a non-claiming recognizer still lets the widget drag",
+          "[mac][platform-harness][gesture]") {
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<Probe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    // A double-tap recognizer: present on the whole drag, recognizing nothing.
+    // Every per-event dispatch still reports "consumed" (a candidate exists),
+    // which is exactly the value the host must NOT gate on.
+    probe->add_gesture_recognizer(std::make_unique<pulp::view::TapRecognizer>(2));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 100.0f, .y = 100.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 140.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 180.0f, .y = 140.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 180.0f, .y = 140.0f}));
+
+    CHECK(probe->downs == 1);
+    CHECK(probe->drags == 2);   // nothing claimed, so the widget kept the drag
+    CHECK(probe->ups == 1);     // ...and the bracket closed
 }

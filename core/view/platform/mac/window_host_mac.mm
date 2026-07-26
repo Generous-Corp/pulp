@@ -503,7 +503,7 @@ static void install_app_menu(NSString* appName) {
             }
         }
 
-        if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::press, true)) { _dragTarget = nullptr; [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
+        if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::press, true)) { _dragTarget = nullptr; [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
         _dragTarget = self.rootView->hit_test(pt);
         pulp::view::ComboBox::notify_global_click(_dragTarget);
 
@@ -586,7 +586,7 @@ static void install_app_menu(NSString* appName) {
             // live tree before any deref.
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
-            if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) { [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
+            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) { [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
             if (!_dragTarget) return;
             if (!view_is_in_tree(_dragTarget, self.rootView)) {
                 _dragTarget = nullptr;
@@ -636,7 +636,7 @@ static void install_app_menu(NSString* appName) {
                 }
             }
             auto pt = [self localPoint:event];
-            if (dispatch_mac_gesture_pointer_event(self.rootView, pt, event, pulp::view::MousePhase::release, false)) { _dragTarget = nullptr; [self setNeedsDisplay:YES]; return; }
+            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) { _dragTarget = nullptr; [self setNeedsDisplay:YES]; return; }
             if (_dragTarget && self.rootView) {
                 // Routing — legacy up, modern release, the W3C pointerup bubble,
                 // and the same-target click-suppression decision (release must
