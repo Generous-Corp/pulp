@@ -8,6 +8,12 @@
 using namespace pulp::interchange;
 
 TEST_CASE("concept vocabulary is a closed, self-describing set", "[interchange]") {
+    // Concept is an installed public enum. New vocabulary atoms append after
+    // every existing ordinal rather than renumbering downstream binaries.
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipCrossfade) == 10);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ContextGroove) == 42);
+    STATIC_REQUIRE(static_cast<std::uint16_t>(Concept::ClipNoteModifier) == 43);
+
     SECTION("Unknown is the zero value so an unclassified construct refuses by default") {
         REQUIRE(static_cast<std::size_t>(Concept::Unknown) == 0);
         REQUIRE(concept_id(Concept::Unknown) == "unknown");

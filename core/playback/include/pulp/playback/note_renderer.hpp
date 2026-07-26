@@ -112,6 +112,9 @@ class ArrangementNoteRenderer {
     bool has_note_pass_state_ = false;
     std::uint64_t note_pass_index_ = 0;
     LoopRegion note_pass_loop_{};
+    bool note_pass_has_precise_host_loop_ = false;
+    double note_pass_host_loop_start_beats_ = 0.0;
+    double note_pass_host_loop_end_beats_ = 0.0;
     std::uint32_t dropped_events_ = 0;
 };
 

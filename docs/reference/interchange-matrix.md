@@ -29,7 +29,6 @@ is not a reason to add a model feature.
 | `clip.media` | yes | Clip content that references a media asset. |
 | `clip.gain` | yes | Per-clip gain applied to the clip's content. |
 | `clip.fades` | yes | Per-clip fade in and fade out durations. |
-| `clip.note-modifier` | yes | Per-note playback modifiers: probability, pass condition, and ratchet. |
 | `clip.crossfade` | format-only | An overlap between two adjacent clips authored as one transition item. |
 | `clip.warp` | format-only | A time-warp map deforming clip content against timeline time. |
 | `clip.launch` | yes | Non-arrangement clip playback (scenes, launcher grids). |
@@ -63,6 +62,7 @@ is not a reason to add a model feature.
 | `edit-rate.non-audio` | format-only | Positions at a rate that does not convert exactly to the document's rate. |
 | `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
 | `context.groove` | yes | A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling. |
+| `clip.note-modifier` | yes | Per-note playback modifiers: probability, pass condition, and ratchet. |
 
 ## DAWproject
 
@@ -82,7 +82,6 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `clip.media` | full |  |
 | `clip.gain` | none | per-clip gain |
 | `clip.fades` | none | per-clip fades |
-| `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
 | `clip.crossfade` | none | not declared |
 | `clip.warp` | none | warped clip content |
 | `clip.launch` | none | scenes and clip-launcher content |
@@ -116,6 +115,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `edit-rate.non-audio` | none | not declared |
 | `context.chord-scale` | none | chord and scale context lanes |
 | `context.groove` | none | groove templates and swing |
+| `clip.note-modifier` | none | per-note probability, conditions, and ratchets |
 
 ### Export
 
@@ -131,7 +131,6 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `clip.media` | full |  |  |  |
 | `clip.gain` | full |  |  |  |
 | `clip.fades` | full |  |  |  |
-| `clip.note-modifier` | drop |  | dropped | DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once |
 | `clip.crossfade` | drop | | dropped | not declared |
 | `clip.warp` | drop | | dropped | not declared |
 | `clip.launch` | drop | | dropped | not declared |
@@ -165,6 +164,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `edit-rate.non-audio` | drop | | dropped | not declared |
 | `context.chord-scale` | drop | | dropped | not declared |
 | `context.groove` | drop | | dropped | not declared |
+| `clip.note-modifier` | drop |  | dropped | DAWproject notes carry no probability, pass condition, or ratchet; the notes are written and play unconditionally once |
 
 ## Adding a format
 

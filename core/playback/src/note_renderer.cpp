@@ -84,6 +84,9 @@ void ArrangementNoteRenderer::reset() noexcept {
     has_note_pass_state_ = false;
     note_pass_index_ = 0;
     note_pass_loop_ = {};
+    note_pass_has_precise_host_loop_ = false;
+    note_pass_host_loop_start_beats_ = 0.0;
+    note_pass_host_loop_end_beats_ = 0.0;
     dropped_events_ = 0;
 }
 
@@ -199,8 +202,15 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     last_block_index_ = transport.block_index;
     has_block_index_ = true;
     const auto pass_loop = transport.scrubbing ? LoopRegion{} : transport.loop;
+    const bool pass_has_precise_host_loop =
+        !transport.scrubbing && pass_loop.enabled && transport.has_precise_host_loop;
     const bool note_pass_loop_changed =
-        has_note_pass_state_ && pass_loop != note_pass_loop_;
+        has_note_pass_state_ &&
+        (pass_loop != note_pass_loop_ ||
+         pass_has_precise_host_loop != note_pass_has_precise_host_loop_ ||
+         (pass_has_precise_host_loop &&
+          (transport.host_loop_start_beats != note_pass_host_loop_start_beats_ ||
+           transport.host_loop_end_beats != note_pass_host_loop_end_beats_)));
     if (pending_flush_ || view.adoption == ShellAdoptionResult::Adopted ||
         block_sequence_reset || note_pass_loop_changed) {
         if (!flush(0)) {
@@ -228,6 +238,11 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     if (reanchor_note_pass && transport.range_count != 0) {
         note_pass_index_ = 0;
         note_pass_loop_ = pass_loop;
+        note_pass_has_precise_host_loop_ = pass_has_precise_host_loop;
+        note_pass_host_loop_start_beats_ =
+            pass_has_precise_host_loop ? transport.host_loop_start_beats : 0.0;
+        note_pass_host_loop_end_beats_ =
+            pass_has_precise_host_loop ? transport.host_loop_end_beats : 0.0;
         has_note_pass_state_ = true;
     }
 
