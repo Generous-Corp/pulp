@@ -662,11 +662,13 @@ TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
     REQUIRE(voice.hit_life() == HitLifeMode::advancing_seed);
 
     voice.set_hit_life(HitLifeMode::fixed_seed);
-    voice.reset();
     const auto fixed_a = hit(voice, 0.8f, 12000);
-    voice.reset();
     const auto fixed_b = hit(voice, 0.8f, 12000);
     REQUIRE(fixed_a == fixed_b);
+
+    voice.reset();
+    const auto fixed_after_reset = hit(voice, 0.8f, 12000);
+    REQUIRE(fixed_after_reset == fixed_a);
 
     voice.set_hit_life(HitLifeMode::preserved_state);
     const auto living_a = hit(voice, 0.8f, 12000);
@@ -1142,6 +1144,39 @@ TEST_CASE("A second hit adds to the ringing string by default",
         }
     }
     REQUIRE(differs);
+}
+
+TEST_CASE("An additive string retrigger keeps the output filter ringing",
+          "[signal][drum][string][output][lifecycle]") {
+    auto prepare = [](StringVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(220.0);
+        voice.set_decay_seconds(3.0);
+        voice.set_restart_on_hit(false);
+        voice.note_on(1.0f);
+        (void)render(voice, 6000);
+    };
+
+    StringVoice control;
+    StringVoice retriggered;
+    prepare(control);
+    prepare(retriggered);
+
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render(control, 32);
+    const auto after_retrigger = render(retriggered, 32);
+
+    auto energy = [](const std::vector<float>& samples) {
+        double sum = 0.0;
+        for (float sample : samples) {
+            sum += static_cast<double>(sample) *
+                   static_cast<double>(sample);
+        }
+        return sum;
+    };
+    const double uninterrupted_energy = energy(uninterrupted);
+    REQUIRE(uninterrupted_energy > 1e-8);
+    REQUIRE(energy(after_retrigger) > uninterrupted_energy * 0.5);
 }
 
 TEST_CASE("The string voice allocates nothing on the audio thread",

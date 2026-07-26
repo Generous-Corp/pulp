@@ -235,6 +235,28 @@ TEST_CASE("Every procedural FM transient renders a distinct finite strike",
     }
 }
 
+TEST_CASE("FM2 remains active for the full shared noise transient",
+          "[signal][drum][fm][transient][lifecycle]") {
+    auto noise_is_still_active = [](auto& voice) {
+        voice.prepare(kFs);
+        voice.set_noise_level(1.0);
+        voice.set_noise_decay_ms(500.0);
+        voice.set_click_level(0.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        voice.note_on(1.0f);
+        (void)render(voice, 24000);
+        return voice.is_active();
+    };
+
+    Fm8DrumVoice control;
+    REQUIRE(noise_is_still_active(control));
+
+    FmDrumVoice voice;
+    voice.set_decay_ms(10.0);
+    REQUIRE(noise_is_still_active(voice));
+}
+
 TEST_CASE("Sidebands land at the carrier plus and minus the modulator",
           "[signal][drum][fm]") {
     // The defining property. With a carrier at 200 and a ratio of 2 the

@@ -151,13 +151,8 @@ protected:
     }
 
     void on_reset() override {
-        for (auto& comb : combs_) comb.reset();
-        for (auto& damper : dampers_) damper.reset();
-        for (auto& highpass : upper_highpasses_) highpass.reset();
+        reset_dsp_memory();
         strike_env_.reset();
-        shifter_.reset();
-        tone_.reset();
-        low_cut_.reset();
         output_.reset();
         noise_.reset();
         hit_life_.reset();
@@ -166,18 +161,21 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
-        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         const double brightness = response.brightness_scale(velocity);
         velocity_ = velocity;
 
         const auto life = hit_life_.trigger(NoiseSource::default_seed);
+        if (life.reset_dsp_state) {
+            reset_dsp_memory();
+            output_.reset();
+        }
         if (life.reseed_excitation) {
             noise_.set_seed(life.seed);
             noise_.reset();
         }
+        output_.trigger();
 
         update_combs();
         shifter_.set_shift_hz(shift_hz_);
@@ -252,6 +250,15 @@ protected:
 private:
     static constexpr double kSilenceLevel = 1e-5;
     static constexpr double kLevelDecay = 0.99995;
+
+    void reset_dsp_memory() {
+        for (auto& comb : combs_) comb.reset();
+        for (auto& damper : dampers_) damper.reset();
+        for (auto& highpass : upper_highpasses_) highpass.reset();
+        shifter_.reset();
+        tone_.reset();
+        low_cut_.reset();
+    }
 
     void update_combs() {
         for (int c = 0; c < comb_count; ++c) {

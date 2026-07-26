@@ -244,7 +244,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return amp_env_.is_active() || click_.is_active() || output_.has_tail();
+        return amp_env_.is_active() || noise_env_.is_active() ||
+               click_.is_active() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
