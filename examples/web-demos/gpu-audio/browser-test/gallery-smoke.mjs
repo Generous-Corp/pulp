@@ -60,17 +60,17 @@ const TARGETS = [
 // else about them is pinned byte-for-byte.
 const CACHEBUST = /\?v=[0-9a-f]{8}/g;
 const normalize = (html) => html.replace(CACHEBUST, "?v=<player>");
-// Re-pinned after rebasing onto main. These moved because MAIN moved them (the browser
-// UI + Safari editor work changed both shipped pages), NOT because the GPU work touched
-// them — verified by running origin/main's OWN assembler against the same stub inputs and
-// getting byte-identical output. That check is the only thing that makes a re-pin
-// honest: without it, "re-pin until green" quietly launders exactly the regression this
-// pin exists to catch. Re-do it, do not just paste the new value.
+// Re-pinned after proving origin/main at 7d5105144 with its OWN assembler and the
+// same stub inputs. Main produced these exact bytes before this test-only repair;
+// none of the PR's runtime or assembler files moves either shipped page. That
+// comparison is the only thing that makes a re-pin honest: without it, "re-pin
+// until green" quietly launders exactly the regression this pin exists to catch.
+// Re-do the main-side proof on the next mismatch; do not just paste a new value.
 const SHIPPED = {
   "super-convolver/wam/index.html":
-    "0d5e576326bb5268a347ec121b59a4fe3bf67073843eb4c823cc949ccfd4f79d",
+    "e0de9108d85338ad227ee6a1553022dc1c288a175356dc33b40e2c4458157997",
   "super-convolver/wclap/index.html":
-    "7f4e977e0f6ed025067aee0cba535978da53022f31fdbd846e8c7b7c05304c97",
+    "26ebac4b98a2bb5fe8b20c85ca4ff836a167af3ba106f26f3248217f0065dcfe",
 };
 
 const steps = [];
@@ -137,11 +137,10 @@ try {
     check("the CPU module is loaded when the handshake fails",
           html.includes('gpuOk ? "./SuperConvolverGpu.wasm" : "./SuperConvolver.wasm"'),
           "dspUrl is chosen from the handshake result");
-    check("the Engine toggle is HIDDEN, not disabled, when there is no working GPU lane",
-          /const mountEngineToggle = \(\) => \{[\s\S]*?<select id="engine"/.test(html) &&
-            !/disabled/.test(html),
-          "the <select> only exists inside mountEngineToggle(); nothing is rendered disabled");
-    check("the toggle is gated on the ring ACTUALLY being attached in the worklet",
+    check("the obsolete page-level Engine select is absent",
+          !/<select[^>]*\bid=["']engine["']/i.test(html),
+          "the editor's CPU/GPU chip is the only engine control");
+    check("GPU lane activation is gated on the ring ACTUALLY being attached in the worklet",
           html.includes("adapter.descriptor.gpuLane"),
           "ringAttached = gpuOk && descriptor.gpuLane");
 
@@ -156,11 +155,11 @@ try {
     check("the page forwards the PLUGIN's IR to the worker",
           html.includes("adapter.onIrChanged") && html.includes("lane.setIr("),
           "plugin (pulp_ir_* exports) → worklet → adapter.onIrChanged → lane.setIr() → worker");
-    check("the Engine toggle appears only once the worker HAS that IR",
+    check("the GPU lane activates only once the worker HAS that IR",
           /if \(lane\.setIr\(ir\)\) mountEngineToggle\(\)/.test(html),
-          "mountEngineToggle() is called from the IR handler and nowhere else — a toggle " +
-          "offered earlier would switch the audio to a GPU still convolving with the unit " +
-          "impulse it was self-tested with, and the reverb would audibly vanish");
+          "mountEngineToggle() is called from the IR handler and nowhere else — activating " +
+          "earlier would expose a GPU still convolving with the unit impulse it was self-tested " +
+          "with, and the reverb would audibly vanish");
     // The DISCLAIMER must be present and no speed claim may be. The exact wording is allowed
     // to change — the copy got shorter because the long version pushed the plugin below the
     // fold on a phone — but "not faster than the CPU" is the one sentence that cannot be
