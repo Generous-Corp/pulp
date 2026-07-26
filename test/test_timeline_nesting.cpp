@@ -512,6 +512,33 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     REQUIRE(scan_compiler.status().last_error.item == ItemId{14});
     REQUIRE_FALSE(scan_store.has_value());
 
+    auto skipped_notes = take(NoteContent::create(
+        {NoteEvent{{20}, {20}, {10}, 40'000, 64, 0},
+         NoteEvent{{21}, {40}, {10}, 40'000, 64, 0}}));
+    auto note_scan_clip =
+        take(Clip::create({12}, {0}, {100}, std::move(skipped_notes)));
+    auto note_scan_child = take(Sequence::create(
+        {10}, "note scan child", TickDuration{100}, {track(11, {note_scan_clip})}));
+    auto note_scan_root =
+        take(Sequence::create({2}, "root", std::nullopt,
+                              {track(3, {nested_clip(4, 10, 0, 10)})}));
+    auto note_scan_limited = take(Project::create(ProjectInput{
+        {1}, "note scan limited", 100, {2}, {}, {note_scan_root, note_scan_child}}));
+    PlaybackProgramStore note_scan_store;
+    InlineExecutor note_scan_executor;
+    PlaybackProgramCompiler note_scan_compiler(
+        note_scan_store, note_scan_executor, std::chrono::microseconds(0));
+    request.project = shared(std::move(note_scan_limited));
+    request.document_revision = 6;
+    request.max_expanded_note_events = 2;
+    request.audio_limits = {};
+    REQUIRE(note_scan_compiler.submit(request));
+    REQUIRE(note_scan_compiler.status().has_error);
+    REQUIRE(note_scan_compiler.status().last_error.code ==
+            CompileErrorCode::ExpansionBudgetExceeded);
+    REQUIRE(note_scan_compiler.status().last_error.item == ItemId{12});
+    REQUIRE_FALSE(note_scan_store.has_value());
+
     auto invalid_notes = take(NoteContent::create({NoteEvent{{20}, {90}, {20}, 40'000, 64, 0}}));
     auto invalid_note_clip = take(Clip::create({12}, {0}, {100}, invalid_notes));
     auto invalid_child =
@@ -525,7 +552,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     PlaybackProgramCompiler invalid_note_compiler(invalid_note_store, invalid_note_executor,
                                                   std::chrono::microseconds(0));
     request.project = shared(std::move(invalid_note_project));
-    request.document_revision = 6;
+    request.document_revision = 7;
     request.audio_limits = {};
     REQUIRE(invalid_note_compiler.submit(request));
     REQUIRE(invalid_note_compiler.status().has_error);
@@ -573,7 +600,7 @@ TEST_CASE("Nested compile refuses unsupported child state and expansion overflow
     PlaybackProgramCompiler truncated_compiler(truncated_store, truncated_executor,
                                                std::chrono::microseconds(0));
     request.project = shared(take(Project::create(std::move(faded_input))));
-    request.document_revision = 7;
+    request.document_revision = 8;
     REQUIRE(truncated_compiler.submit(request));
     REQUIRE(truncated_compiler.status().has_error);
     REQUIRE(truncated_compiler.status().last_error.code ==

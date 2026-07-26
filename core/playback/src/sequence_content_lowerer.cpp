@@ -294,6 +294,11 @@ class SequenceContentLowerer::Impl {
         if (pending.note_index == notes.size())
             return finish_pending_leaf();
         const auto& note = notes[pending.note_index++];
+        if (inspected_note_events_ > max_expanded_note_events_ ||
+            max_expanded_note_events_ - inspected_note_events_ < 2)
+            return {.error = SequenceLoweringError{CompileErrorCode::ExpansionBudgetExceeded,
+                                                   pending.child.id()}};
+        inspected_note_events_ += 2;
         if (note.start.value < 0 || note.start.value > pending.child.duration().value ||
             note.duration.value > pending.child.duration().value - note.start.value)
             return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure, note.id}};
@@ -388,6 +393,7 @@ class SequenceContentLowerer::Impl {
     std::uint64_t max_expanded_note_events_ = 0;
     std::uint64_t max_expanded_clips_ = 0;
     std::uint64_t expanded_note_events_ = 0;
+    std::uint64_t inspected_note_events_ = 0;
     std::uint64_t expanded_clips_ = 0;
     std::uint64_t next_generated_id_ = 0;
     const timeline::Track* root_ = nullptr;
