@@ -1,5 +1,4 @@
 # Pulp test suite -- Catch2
-#
 # Keep this file as shared setup plus ordered owner includes only.
 # Add new test registrations to the matching test/cmake/*_tests.cmake file.
 
@@ -25,6 +24,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/core_runtime_canvas_signal_tests.cmak
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/timeline_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/interchange_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sampler_runtime_tests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/sampler_interpolation_benchmark_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/core_audio_platform_format_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/scene3d_tests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/render_gpu_tests.cmake")
