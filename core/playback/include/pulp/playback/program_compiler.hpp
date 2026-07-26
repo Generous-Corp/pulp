@@ -3,6 +3,7 @@
 #include <pulp/playback/compile_executor.hpp>
 #include <pulp/playback/audio_renderer.hpp>
 #include <pulp/playback/program.hpp>
+#include <pulp/timeline/transaction.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -16,6 +17,10 @@ struct DirtyTrackSet {
     bool all = false;
     std::vector<timeline::ItemId> tracks;
 };
+
+DirtyTrackSet lower_dirty_set(const timeline::Project& project,
+                              timeline::ItemId root_sequence_id,
+                              const timeline::DirtySet& dirty);
 
 struct TrackCompilePolicy {
     timeline::ItemId track_id;
@@ -33,6 +38,7 @@ struct ProgramCompileRequest {
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets;
     AudioRendererLimits audio_limits;
     AutomationPlaybackLimits automation_limits = AutomationPlaybackLimits::platform_defaults();
+    std::uint64_t max_expanded_note_events = 1'000'000u;
 };
 
 enum class CompileErrorCode : std::uint8_t {
@@ -44,6 +50,8 @@ enum class CompileErrorCode : std::uint8_t {
     CompilerAlreadyBound,
     AudioProgramInvalid,
     AutomationProgramInvalid,
+    NestedSequenceUnsupported,
+    ExpansionBudgetExceeded,
 };
 
 struct CompileError {

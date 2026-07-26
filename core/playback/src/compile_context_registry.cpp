@@ -1,7 +1,9 @@
 #include <pulp/playback/compile_context_registry.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <variant>
+#include <vector>
 
 namespace pulp::playback {
 namespace {
@@ -14,6 +16,61 @@ bool by_type_name(const ContentRendererRegistration& registration,
 std::size_t kind_index(timeline::CompileContextKind kind) noexcept {
     return static_cast<std::size_t>(kind);
 }
+
+void merge_subscriptions(timeline::CompileContextSubscriptions& destination,
+                         timeline::CompileContextSubscriptions source) noexcept {
+    for (std::size_t kind = 0; kind < timeline::kCompileContextKindCount; ++kind) {
+        const auto context = static_cast<timeline::CompileContextKind>(kind);
+        if (source.reads(context))
+            destination.subscribe(context);
+    }
+}
+
+class ReferencedSequenceSubscriptionCache {
+  public:
+    ReferencedSequenceSubscriptionCache(const timeline::Project& project,
+                                        const CompileContextRegistry& registry)
+        : project_(project), registry_(registry), cached_(project.sequences().size()) {}
+
+    timeline::CompileContextSubscriptions subscriptions_for(timeline::ItemId sequence_id) {
+        const auto* sequence = project_.find_sequence(sequence_id);
+        if (!sequence)
+            return timeline::CompileContextSubscriptions::none();
+        const auto index =
+            static_cast<std::size_t>(sequence - project_.sequences().data());
+        if (cached_[index])
+            return *cached_[index];
+
+        auto result = timeline::CompileContextSubscriptions::none();
+        for (const timeline::Track& track : sequence->tracks()) {
+            for (const timeline::Clip& clip : track.clips()) {
+                std::visit(timeline::ClipContentCases{
+                               [](const timeline::EmptyContent&) {},
+                               [](const timeline::MediaRef&) {},
+                               [](const timeline::NoteContent&) {},
+                               [&](const timeline::RegisteredContent& content) {
+                                   merge_subscriptions(
+                                       result, registry_.subscriptions_for(
+                                                   content.schema().type_name));
+                               },
+                               [](const timeline::OpaqueContent&) {},
+                               [&](const timeline::SequenceRef& reference) {
+                                   merge_subscriptions(
+                                       result, subscriptions_for(reference.sequence_id));
+                               },
+                           },
+                           clip.content());
+            }
+        }
+        cached_[index] = result;
+        return result;
+    }
+
+  private:
+    const timeline::Project& project_;
+    const CompileContextRegistry& registry_;
+    std::vector<std::optional<timeline::CompileContextSubscriptions>> cached_;
+};
 
 } // namespace
 
@@ -52,6 +109,7 @@ ContextSubscriberIndex ContextSubscriberIndex::build(const timeline::Project& pr
     const auto* sequence = project.find_sequence(sequence_id);
     if (!sequence)
         return index;
+    ReferencedSequenceSubscriptionCache referenced_subscriptions(project, registry);
     for (const timeline::Track& track : sequence->tracks()) {
         for (const timeline::Clip& clip : track.clips()) {
             const auto subscriptions = std::visit(
@@ -76,6 +134,10 @@ ContextSubscriberIndex ContextSubscriberIndex::build(const timeline::Project& pr
                     // invalidate, so it subscribes to nothing.
                     [](const timeline::OpaqueContent&) {
                         return timeline::CompileContextSubscriptions::none();
+                    },
+                    [&](const timeline::SequenceRef& reference) {
+                        return referenced_subscriptions.subscriptions_for(
+                            reference.sequence_id);
                     },
                 },
                 clip.content());

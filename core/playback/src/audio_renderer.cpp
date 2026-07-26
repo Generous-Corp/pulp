@@ -137,6 +137,8 @@ validate_clip_program(const AudioClipRendererProgram& clip,
         !add_fits(clip.timeline_start, clip.timeline_frame_count) || clip.source_frame_count == 0 ||
         clip.source_start > source_frames ||
         clip.source_frame_count > source_frames - clip.source_start ||
+        !std::isfinite(clip.source_frame_offset) || clip.source_frame_offset < 0.0 ||
+        clip.source_frame_offset >= static_cast<double>(clip.source_frame_count) ||
         !std::isfinite(clip.source_frames_per_timeline_frame) ||
         clip.source_frames_per_timeline_frame <= 0.0)
         return error(AudioRendererErrorCode::InvalidClipRange);
@@ -279,6 +281,19 @@ std::optional<std::uint64_t> scale_duration_ceil(std::uint64_t value, timebase::
     return static_cast<std::uint64_t>(std::ceil(scaled));
 }
 
+std::optional<std::uint64_t>
+scale_duration_ceil_from_offset(std::uint64_t value, double offset,
+                                timebase::RationalRate from,
+                                timebase::RationalRate to) noexcept {
+    const auto remaining =
+        static_cast<long double>(value) - static_cast<long double>(offset);
+    const auto scaled = remaining * to.as_long_double() / from.as_long_double();
+    if (!std::isfinite(scaled) || scaled <= 0.0L ||
+        scaled > static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+        return std::nullopt;
+    return static_cast<std::uint64_t>(std::ceil(scaled));
+}
+
 } // namespace
 
 runtime::Result<std::shared_ptr<const DecodedAudioAssetPool>, AudioRendererError>
@@ -331,7 +346,7 @@ std::int64_t AudioClipRendererProgram::timeline_end() const noexcept {
 // only reading of a clip that has no samples of its own, and it is why the
 // program compiler classifies content before it gets here — but the assumption
 // lives in this file too, so it is asserted here.
-static_assert(timeline::kClipContentAlternativeCount == 5,
+static_assert(timeline::kClipContentAlternativeCount == 6,
               "ClipContent gained an alternative: this renderer resolves audio through "
               "MediaRef alone and treats every other alternative as silent. If the new "
               "content can produce audio, give it a resolve path here before widening the "
@@ -343,9 +358,13 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
                                           const timebase::CompiledTempoMap& tempo_map,
                                           const DecodedAudioAssetPool& assets,
                                           const AudioRendererLimits& limits,
-                                          AudioSampleRateConverterCache& cache) {
+                                          AudioSampleRateConverterCache& cache,
+                                          double source_frame_offset) {
     const auto* media = std::get_if<timeline::MediaRef>(&clip.content());
     if (!media)
+        return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
+    if (!std::isfinite(source_frame_offset) || source_frame_offset < 0.0 ||
+        source_frame_offset >= static_cast<double>(media->frame_count))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::InvalidClipRange, clip.id());
     auto resolved = resolve_audio_media(clip.id(), *media, project, assets, limits);
     if (!resolved)
@@ -366,7 +385,10 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     if (!converter)
         return runtime::Err(converter.error());
     const auto renderable_frames =
-        scale_duration_ceil(media->frame_count, source_rate, timeline_rate);
+        source_frame_offset == 0.0
+            ? scale_duration_ceil(media->frame_count, source_rate, timeline_rate)
+            : scale_duration_ceil_from_offset(media->frame_count, source_frame_offset,
+                                              source_rate, timeline_rate);
     if (!renderable_frames ||
         *renderable_frames > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
         return fail<AudioClipRendererProgram>(AudioRendererErrorCode::UnsupportedSampleRate,
@@ -428,7 +450,7 @@ detail::compile_audio_clip_program_cached(const timeline::Clip& clip,
     }
     return runtime::Ok(AudioClipRendererProgram{
         clip.id(), media->asset_id, resolved->decoded->audio, timeline_start, timeline_frames,
-        resolved->source_start, media->frame_count, *renderable_frames,
+        resolved->source_start, media->frame_count, source_frame_offset, *renderable_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         std::make_shared<AudioClipConversionArtifact>(
             resolved->decoded->audio, resolved->source_start, media->frame_count,
@@ -594,6 +616,7 @@ detail::compile_take_comp_segment_program_cached(
         timeline_frames,
         resolved->source_start + offset,
         segment.range.sample_count,
+        0.0,
         timeline_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         std::make_shared<AudioClipConversionArtifact>(
@@ -665,6 +688,7 @@ detail::compile_track_freeze_program_cached(const timeline::Track& track,
         timeline_frames,
         resolved->source_start,
         freeze.media.frame_count,
+        0.0,
         timeline_frames,
         static_cast<double>(source_rate.as_long_double() / timeline_rate.as_long_double()),
         std::make_shared<AudioClipConversionArtifact>(

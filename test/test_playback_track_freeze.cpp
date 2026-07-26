@@ -100,6 +100,7 @@ TEST_CASE("Frozen track playback selects one rendered artifact and hides authore
     REQUIRE(compiled_track);
     REQUIRE(compiled_track->ordered_clip_ids().empty());
     REQUIRE(compiled_track->arrangement_note_events().empty());
+    REQUIRE(compiled_track->expanded_clip_count() == 1);
     REQUIRE(compiled_track->ordered_device_placement_ids().empty());
     REQUIRE(compiled_track->automation_program() == nullptr);
     REQUIRE(compiled_track->audio_program());
@@ -236,7 +237,8 @@ TEST_CASE("Frozen track playback accounts for capacity and rejects coordinate ov
     request.audio_limits.max_clips = 1;
     REQUIRE(compiler.submit(std::move(request)));
     REQUIRE_FALSE(store.has_value());
-    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::ExpansionBudgetExceeded);
+    REQUIRE(compiler.status().last_error.item == ItemId{11});
 
     auto overflow = take(
         Track::create(TrackInput{.id = {12},

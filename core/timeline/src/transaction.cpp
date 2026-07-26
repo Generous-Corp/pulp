@@ -4,8 +4,11 @@
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
 #include "transaction_scene_internal.hpp"
+#include "media_reference_validation.hpp"
+#include "owned_identity_traversal.hpp"
 #include "transaction_note_internal.hpp"
 #include "transaction_reduction_support.hpp"
+#include "transaction_sequence_internal.hpp"
 #include "transaction_take_internal.hpp"
 #include "transaction_track_state_internal.hpp"
 
@@ -15,21 +18,6 @@
 namespace pulp::timeline {
 
 namespace {
-
-std::optional<ModelError> validate_media(const Project& project, const Clip& clip) noexcept {
-    const auto* media = std::get_if<MediaRef>(&clip.content());
-    if (!media)
-        return std::nullopt;
-    const auto* asset = project.find_asset(media->asset_id);
-    if (!asset)
-        return ModelError{ModelErrorCode::MissingAsset, clip.id(), media->asset_id};
-    if (media->source_start.value < 0)
-        return ModelError{ModelErrorCode::InvalidMediaRange, clip.id(), media->asset_id};
-    const auto start = static_cast<std::uint64_t>(media->source_start.value);
-    if (start > asset->frame_count || media->frame_count > asset->frame_count - start)
-        return ModelError{ModelErrorCode::InvalidMediaRange, clip.id(), media->asset_id};
-    return std::nullopt;
-}
 
 // An active target identity with parent_id computed the one canonical way.
 // detail::target_error compares a located identity against this expectation.
@@ -42,16 +30,17 @@ ItemLocation expected_location(ItemKind kind, const Project& project, ItemId seq
 
 std::vector<detail::OwnedIdentity> owned_identities(const Clip& clip, ItemId sequence,
                                                     ItemId track) {
-    const auto clip_parent = immediate_parent_id(ItemKind::Clip, {}, sequence, track, clip.id());
-    const auto note_parent = immediate_parent_id(ItemKind::Note, {}, sequence, track, clip.id());
-    std::vector<detail::OwnedIdentity> result{
-        {clip.id(), ItemLocation{ItemKind::Clip, clip_parent, sequence, track, clip.id(), true}}};
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content())) {
-        result.reserve(1 + notes->notes().size());
-        for (const auto& note : notes->notes())
-            result.push_back({note.id, ItemLocation{ItemKind::Note, note_parent, sequence, track,
-                                                    clip.id(), true}});
-    }
+    std::vector<detail::OwnedIdentity> result;
+    detail::visit_clip_owned_identities(
+        clip, track, [&](const detail::ModelOwnedIdentity& identity) {
+            result.push_back(
+                {identity.id,
+                 ItemLocation{identity.kind,
+                              immediate_parent_id(identity.kind, {}, sequence,
+                                                  identity.track, identity.clip,
+                                                  identity.lane),
+                              sequence, identity.track, identity.clip, true}});
+        });
     return result;
 }
 
@@ -128,9 +117,18 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                                          expected_location(ItemKind::Track, project,
                                                            insert->sequence_id, insert->track_id)))
                 return fail_target(*code, insert->track_id, insert->sequence_id);
-            if (const auto media_error = validate_media(project, insert->clip))
+            if (const auto media_error =
+                    detail::validate_clip_media(project, insert->clip))
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(detail::model_failure(transaction, envelope.id, *media_error)));
+            if (const auto* reference =
+                    std::get_if<SequenceRef>(&insert->clip.content()))
+                if (const auto graph_error = validate_sequence_edge(
+                        project.sequences(), insert->sequence_id,
+                        reference->sequence_id))
+                    return runtime::Result<ReducedTransaction, TransactionError>(
+                        runtime::Err(detail::model_failure(
+                            transaction, envelope.id, *graph_error)));
             const auto identities =
                 owned_identities(insert->clip, insert->sequence_id, insert->track_id);
             auto identity_plan = detail::plan_identity_insert(
@@ -230,6 +228,16 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         } else if (detail::is_track_state_command(envelope.command)) {
             auto reduced = detail::reduce_track_state_command(project, envelope.command,
                                                               transaction, envelope.id);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
+        } else if (detail::is_sequence_command(envelope.command)) {
+            auto reduced = detail::reduce_sequence_command(
+                project, envelope.command, transaction, envelope.id,
+                allow_tombstone_restore);
             if (!reduced)
                 return runtime::Result<ReducedTransaction, TransactionError>(
                     runtime::Err(reduced.error()));

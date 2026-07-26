@@ -922,9 +922,11 @@ does not make Timeline responsible for sample traversal or rendering.
 immutable registry with typed extension codecs and bounded per-version
 migrations. `schema_release.hpp` exposes release-labeled structural version
 maps, and `serialize_project_for_release()` uses them to produce canonical
-snapshots for `v0.736.0`, `v0.744.0`, or `v0.748.0`. Older-release export fails
+snapshots for `v0.736.0`, `v0.744.0`, `v0.748.0`, or `v0.750.0`. The latter
+records the historical Track-v4 schema set; it predates `SequenceRef` content
+and sequence mutation commands. Release export fails
 when it would discard populated device, automation, take, audio-loop, or
-extension state.
+extension state, including nested-sequence content unsupported by the target.
 It removes inactive identity tombstones for kinds the target release cannot
 name while preserving `next_item_id` as the durable no-reuse boundary.
 `serialize.hpp` reads and writes deterministic JSON snapshots: 64-bit values are
@@ -960,8 +962,17 @@ journal files are rejected because atomic checkpoint replacement cannot
 preserve hard-link identity. Package containers remain outside this module
 surface.
 
+`SequenceRef` clips place another project-owned sequence without transferring
+ownership. Project construction rejects missing references, cycles, and depth
+greater than eight. Sequence mutation, eager copy-on-edit divergence, and
+reference retargeting use typed commands and the ordinary journal/undo path.
+Playback expands supported child note/audio content into immutable root-track
+programs before publication and fans child dirtiness out through every
+transitive placement; unsupported child processing state fails compilation
+closed.
+
 This surface intentionally excludes package I/O, playback delivery, launch
-slots, nesting, device implementation and routing, and UI.
+slots, device implementation and routing, and UI.
 
 ## playback
 

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "../tools/mcp/mcp_tools.hpp"
+#include "../tools/timeline/src/timeline_agent_internal.hpp"
 #include "mcp_server_test_support.hpp"
 
 namespace {
@@ -61,6 +62,72 @@ std::string make_timeline_project_json(
     return require_timeline_result(serialize_project(project, registry)).json;
 }
 
+std::string
+make_nested_timeline_project_json(const std::filesystem::path& source) {
+    using namespace pulp::timeline;
+    using pulp::timebase::kTicksPerQuarter;
+    constexpr std::uint64_t frame_count = 32;
+    auto child_clip = require_timeline_result(Clip::create(
+        {12}, {0}, {kTicksPerQuarter},
+        MediaRef{{5}, {0}, frame_count}));
+    auto unreachable_clip = require_timeline_result(Clip::create(
+        {13}, {2 * kTicksPerQuarter}, {kTicksPerQuarter},
+        MediaRef{{6}, {0}, frame_count}));
+    auto child_track =
+        require_timeline_result(Track::create({11}, "child audio",
+                                              {child_clip,
+                                               unreachable_clip}));
+    auto child = require_timeline_result(Sequence::create(
+        {10}, "child",
+        pulp::timebase::TickDuration{3 * kTicksPerQuarter},
+        {child_track}));
+    auto root_clip = require_timeline_result(Clip::create(
+        {4}, {0}, {kTicksPerQuarter},
+        SequenceRef{{10}, {0}}));
+    auto root_track =
+        require_timeline_result(Track::create({3}, "root", {root_clip}));
+    auto root = require_timeline_result(Sequence::create(
+        {2}, "root", pulp::timebase::TickDuration{kTicksPerQuarter},
+        {root_track}));
+
+    std::ifstream stream(source, std::ios::binary);
+    REQUIRE(stream);
+    const std::string bytes{std::istreambuf_iterator<char>(stream),
+                            std::istreambuf_iterator<char>()};
+    auto hash = ContentHash::from_hex(pulp::runtime::sha256_hex(bytes));
+    REQUIRE(hash);
+    MediaAsset asset{{5},
+                     "source.wav",
+                     frame_count,
+                     {48'000, 1},
+                     *hash,
+                     AssetStoragePolicy::External,
+                     {{AssetLocatorKind::ExternalUri, source.string()}},
+                     {},
+                     {}};
+    MediaAsset unreachable_asset{
+        {6},
+        "unreachable.wav",
+        frame_count,
+        {48'000, 1},
+        *ContentHash::from_hex(std::string(64, 'b')),
+        AssetStoragePolicy::External,
+        {{AssetLocatorKind::ExternalUri,
+          source.string() + ".missing"}},
+        {},
+        {}};
+    auto project = require_timeline_result(Project::create(
+        ProjectInput{{1},
+                     "nested mcp",
+                     14,
+                     {2},
+                     {asset, unreachable_asset},
+                     {root, child}}));
+    auto registry =
+        require_timeline_result(make_builtin_timeline_registry());
+    return require_timeline_result(serialize_project(project, registry)).json;
+}
+
 std::string timeline_project_from_response(const std::string& response) {
     auto parsed = require_timeline_result(pulp::timeline::parse_json(response));
     const auto* structured = parsed->root().find("structuredContent");
@@ -68,6 +135,77 @@ std::string timeline_project_from_response(const std::string& response) {
     const auto* project = structured->find("project");
     REQUIRE(project != nullptr);
     return std::string(parsed->raw(*project));
+}
+
+TEST_CASE("timeline asset discovery budgets non-intersecting nested probes",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+
+    auto child_a = require_timeline_result(
+        Clip::create({12}, {20}, {10}, EmptyContent{}));
+    auto child_b = require_timeline_result(
+        Clip::create({13}, {40}, {10}, EmptyContent{}));
+    auto child_track = require_timeline_result(
+        Track::create({11}, "child", {child_a, child_b}));
+    auto child = require_timeline_result(Sequence::create(
+        {10}, "child", pulp::timebase::TickDuration{200}, {child_track}));
+    auto first_reference = require_timeline_result(Clip::create(
+        {4}, {0}, {10}, SequenceRef{{10}, {0}}));
+    auto second_reference = require_timeline_result(Clip::create(
+        {5}, {10}, {10}, SequenceRef{{10}, {100}}));
+    auto root_track = require_timeline_result(
+        Track::create({3}, "root", {first_reference, second_reference}));
+    auto root = require_timeline_result(Sequence::create(
+        {2}, "root", pulp::timebase::TickDuration{20}, {root_track}));
+    auto project = require_timeline_result(Project::create(
+        ProjectInput{{1}, "bounded probes", 14, {2}, {},
+                     {root, child}}));
+    auto tempo = require_timeline_result(
+        pulp::timebase::CompiledTempoMap::compile(
+            project.tempo_map().points(), {48'000, 1}));
+
+    auto reachable =
+        pulp::tools::timeline::detail::reachable_assets(
+            project, *project.find_sequence({2}), tempo, 100, 4);
+    REQUIRE_FALSE(reachable);
+    REQUIRE(reachable.error().code ==
+            pulp::playback::CompileErrorCode::ExpansionBudgetExceeded);
+    REQUIRE(reachable.error().item == ItemId{12});
+}
+
+TEST_CASE("timeline asset discovery attributes active-take budget overflow to its track",
+          "[mcp][tools][timeline]") {
+    using namespace pulp::timeline;
+
+    const auto hash =
+        *ContentHash::from_hex(std::string(64, 'a'));
+    auto recorded = require_timeline_result(
+        Take::create({5}, MediaRef{{20}, {0}, 4}, {0}, {48'000, 1}));
+    auto lane = require_timeline_result(TakeLane::create(
+        {4}, "comp", {recorded},
+        {{.take_id = {5}, .range = {{0}, 2, {48'000, 1}}},
+         {.take_id = {5}, .range = {{2}, 2, {48'000, 1}}}}));
+    auto track = require_timeline_result(Track::create(
+        TrackInput{.id = {3},
+                   .name = "active comp",
+                   .take_lanes = {lane},
+                   .active_take_lane_id = {4}}));
+    auto root = require_timeline_result(Sequence::create(
+        {2}, "root", std::nullopt, std::nullopt, {track}));
+    MediaAsset asset{{20}, "take.wav", 4, {48'000, 1}, hash};
+    auto project = require_timeline_result(Project::create(
+        ProjectInput{{1}, "bounded comp", 21, {2}, {asset}, {root}}));
+    auto tempo = require_timeline_result(
+        pulp::timebase::CompiledTempoMap::compile(
+            project.tempo_map().points(), {48'000, 1}));
+
+    auto reachable =
+        pulp::tools::timeline::detail::reachable_assets(
+            project, *project.find_sequence({2}), tempo, 100, 1);
+    REQUIRE_FALSE(reachable);
+    REQUIRE(reachable.error().code ==
+            pulp::playback::CompileErrorCode::ExpansionBudgetExceeded);
+    REQUIRE(reachable.error().item == ItemId{3});
 }
 
 TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tools][timeline]") {
@@ -108,6 +246,29 @@ TEST_CASE("timeline MCP operations edit and render inline projects", "[mcp][tool
         handle_timeline_explain("{\"project\":" + project_argument + ",\"sample_rate\":44100}");
     require_contains(explained, R"JSON("audio_regions":1)JSON");
     require_contains(explained, R"JSON("pdc_offset_samples":null)JSON");
+
+    const auto nested_project =
+        make_nested_timeline_project_json(source_path);
+    const auto nested_explained = handle_timeline_explain(
+        "{\"project\":" +
+        pulp::timeline::quote_json_string(nested_project) + "}");
+    require_contains(nested_explained, R"JSON("audio_regions":1)JSON");
+    require_contains(nested_explained, R"JSON("ok":true)JSON");
+
+    auto overflowing_project = nested_project;
+    const std::string valid_window = "\"sequence_id\":\"10\",\"source_start\":\"0\"";
+    const std::string overflowing_window =
+        "\"sequence_id\":\"10\",\"source_start\":\"9223372036854775807\"";
+    const auto window_offset = overflowing_project.find(valid_window);
+    REQUIRE(window_offset != std::string::npos);
+    overflowing_project.replace(window_offset, valid_window.size(),
+                                overflowing_window);
+    const auto overflowing_explained = handle_timeline_explain(
+        "{\"project\":" +
+        pulp::timeline::quote_json_string(overflowing_project) + "}");
+    require_contains(overflowing_explained, R"JSON("isError":true)JSON");
+    require_contains(overflowing_explained,
+                     R"JSON("stage":"open")JSON");
 
     const std::string command =
         R"JSON([{"data":{"clip_id":"4","expected":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1065353216"},"replacement":{"fade_in_duration":"0","fade_out_duration":"0","gain_linear_bits":"1056964608"},"sequence_id":"2","track_id":"3"},"type_name":"pulp.timeline.command.set_clip_playback_properties","version":1}])JSON";

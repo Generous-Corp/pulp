@@ -54,6 +54,9 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
                 const auto& right = std::get<OpaqueContent>(rhs);
                 return left.schema() == right.schema() && left.raw_json() == right.raw_json();
             },
+            [&](const SequenceRef& left) {
+                return left == std::get<SequenceRef>(rhs);
+            },
         },
         lhs);
 }
@@ -74,21 +77,22 @@ std::size_t saturated_multiply(std::size_t lhs, std::size_t rhs) noexcept {
 // branch here reports its payload as free and lets the journal grow past the
 // limit the caller asked for. Each alternative states its own cost.
 std::size_t clip_retained_size(const Clip& clip) noexcept {
-    return std::visit(ClipContentCases{
-                          [](const EmptyContent&) { return sizeof(Clip); },
-                          [](const MediaRef&) { return sizeof(Clip); },
-                          [](const NoteContent& notes) {
-                              return saturated_add(sizeof(Clip),
-                                                   notes.notes().size() * sizeof(NoteEvent));
-                          },
-                          [](const RegisteredContent& registered) {
-                              return saturated_add(sizeof(Clip), registered.retained_bytes());
-                          },
-                          [](const OpaqueContent& opaque) {
-                              return saturated_add(sizeof(Clip), opaque.raw_json().size());
-                          },
-                      },
-                      clip.content());
+    return std::visit(
+        ClipContentCases{
+            [](const EmptyContent&) { return sizeof(Clip); },
+            [](const MediaRef&) { return sizeof(Clip); },
+            [](const NoteContent& notes) {
+                return saturated_add(sizeof(Clip), notes.notes().size() * sizeof(NoteEvent));
+            },
+            [](const RegisteredContent& registered) {
+                return saturated_add(sizeof(Clip), registered.retained_bytes());
+            },
+            [](const OpaqueContent& opaque) {
+                return saturated_add(sizeof(Clip), opaque.raw_json().size());
+            },
+            [](const SequenceRef&) { return sizeof(Clip); },
+        },
+        clip.content());
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
@@ -161,7 +165,133 @@ std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
     return size;
 }
 
+bool equal_absolute_duration(const std::optional<AbsoluteTimelineDuration>& lhs,
+                             const std::optional<AbsoluteTimelineDuration>& rhs) noexcept {
+    return lhs.has_value() == rhs.has_value() &&
+           (!lhs || (lhs->sample_count == rhs->sample_count &&
+                     lhs->sample_rate == rhs->sample_rate));
+}
+
+bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
+    if (lhs.id() != rhs.id() || lhs.name() != rhs.name() || lhs.duration() != rhs.duration() ||
+        !equal_absolute_duration(lhs.absolute_duration(), rhs.absolute_duration()) ||
+        lhs.tracks().size() != rhs.tracks().size() ||
+        lhs.markers().size() != rhs.markers().size() ||
+        lhs.regions().size() != rhs.regions().size() ||
+        lhs.chord_scale_lane() != rhs.chord_scale_lane() ||
+        !std::equal(lhs.markers().begin(), lhs.markers().end(), rhs.markers().begin(),
+                    equal_marker) ||
+        !std::equal(lhs.regions().begin(), lhs.regions().end(), rhs.regions().begin(),
+                    equal_region))
+        return false;
+    for (std::size_t index = 0; index < lhs.tracks().size(); ++index) {
+        const auto& left = lhs.tracks()[index];
+        const auto& right = rhs.tracks()[index];
+        if (left.id() != right.id() || left.name() != right.name() ||
+            left.device_chain().size() != right.device_chain().size() ||
+            left.clips().size() != right.clips().size() ||
+            left.automation_lanes().size() != right.automation_lanes().size() ||
+            left.take_lanes().size() != right.take_lanes().size() ||
+            left.record_armed() != right.record_armed() ||
+            left.active_take_lane_id() != right.active_take_lane_id() ||
+            left.freeze() != right.freeze() ||
+            !std::equal(left.device_chain().begin(), left.device_chain().end(),
+                        right.device_chain().begin()) ||
+            !std::equal(left.take_lanes().begin(), left.take_lanes().end(),
+                        right.take_lanes().begin(),
+                        [](const TakeLane& a, const TakeLane& b) {
+                            return equivalent(a, b);
+                        }))
+            return false;
+        for (std::size_t clip = 0; clip < left.clips().size(); ++clip)
+            if (!equivalent(left.clips()[clip], right.clips()[clip]))
+                return false;
+        for (std::size_t lane = 0; lane < left.automation_lanes().size(); ++lane)
+            if (!equivalent(left.automation_lanes()[lane], right.automation_lanes()[lane]))
+                return false;
+    }
+    return true;
+}
+
+std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
+    auto size = saturated_add(sizeof(Sequence), sequence.name().size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.markers().size(), sizeof(SequenceMarker)));
+    for (const auto& marker : sequence.markers())
+        size = saturated_add(size, marker.name.size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.regions().size(), sizeof(SequenceRegion)));
+    for (const auto& region : sequence.regions())
+        size = saturated_add(size, region.name.size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.chord_scale_lane().events().size(),
+                                 sizeof(ChordScaleEvent)));
+    for (const auto& track : sequence.tracks()) {
+        size = saturated_add(size, sizeof(Track));
+        size = saturated_add(size, track.name().size());
+        size = saturated_add(
+            size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
+        for (const auto& clip : track.clips())
+            size = saturated_add(size, clip_retained_size(clip));
+        for (const auto& lane : track.automation_lanes())
+            size = saturated_add(size, automation_lane_retained_size(lane));
+        for (const auto& lane : track.take_lanes())
+            size = saturated_add(size, take_lane_retained_size(lane));
+    }
+    return size;
+}
+
 } // namespace
+
+runtime::Result<Transaction, ModelError>
+build_diverge_transaction(const Project& project, ItemLocation location,
+                          TransactionId transaction_id, DocumentRevision expected_revision,
+                          CommandId clone_command_id, CommandId retarget_command_id,
+                          std::optional<UndoGroupId> undo_group) {
+    const auto invalid = [&](ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
+        return runtime::Result<Transaction, ModelError>(
+            runtime::Err(ModelError{code, item, related}));
+    };
+    if (!transaction_id.valid() || !clone_command_id.valid() ||
+        !retarget_command_id.valid() ||
+        transaction_id.writer != clone_command_id.writer ||
+        transaction_id.writer != retarget_command_id.writer ||
+        clone_command_id == retarget_command_id)
+        return invalid(ModelErrorCode::InvalidItemId);
+    if (!location.active || location.kind != ItemKind::Clip)
+        return invalid(ModelErrorCode::MissingItem, location.clip_id);
+    const auto* sequence = project.find_sequence(location.sequence_id);
+    const auto* track = sequence ? sequence->find_track(location.track_id) : nullptr;
+    const auto* clip = track ? track->find_clip(location.clip_id) : nullptr;
+    const auto* reference =
+        clip ? std::get_if<SequenceRef>(&clip->content()) : nullptr;
+    if (!reference)
+        return invalid(ModelErrorCode::MissingSequenceReference, location.clip_id);
+    const auto* source = project.find_sequence(reference->sequence_id);
+    if (!source)
+        return invalid(ModelErrorCode::MissingSequenceReference, location.clip_id,
+                       reference->sequence_id);
+    auto allocator = project.item_id_allocator();
+    auto cloned = remap_ids(*source, allocator);
+    if (!cloned)
+        return runtime::Result<Transaction, ModelError>(runtime::Err(cloned.error()));
+    const auto cloned_id = cloned->sequence.id();
+    std::vector<std::pair<ItemId, ItemId>> mapping(cloned->ids.entries().begin(),
+                                                   cloned->ids.entries().end());
+    Transaction result;
+    result.id = transaction_id;
+    result.expected_revision = expected_revision;
+    result.undo_group = undo_group;
+    result.gesture_phase = GesturePhase::Single;
+    result.commands.push_back(
+        {clone_command_id,
+         CloneSequence{source->id(), cloned_id, std::move(mapping)}});
+    result.commands.push_back(
+        {retarget_command_id,
+         SetClipSequenceRef{location.sequence_id, location.track_id, location.clip_id,
+                            *reference, SequenceRef{cloned_id, reference->source_start}}});
+    return runtime::Ok(std::move(result));
+}
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
     if (lhs.index() != rhs.index())
@@ -296,6 +426,19 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveSlot>) {
                 return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
                        left.slot_id == right.slot_id;
+            } else if constexpr (std::is_same_v<T, InsertSequence>) {
+                return equal_sequence(left.sequence, right.sequence);
+            } else if constexpr (std::is_same_v<T, CloneSequence>) {
+                return left.source_sequence_id == right.source_sequence_id &&
+                       left.cloned_sequence_id == right.cloned_sequence_id &&
+                       left.id_remap == right.id_remap;
+            } else if constexpr (std::is_same_v<T, RemoveSequence>) {
+                return left.sequence_id == right.sequence_id;
+            } else if constexpr (std::is_same_v<T, SetClipSequenceRef>) {
+                return left.sequence_id == right.sequence_id &&
+                       left.track_id == right.track_id && left.clip_id == right.clip_id &&
+                       left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -340,6 +483,13 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(
                     saturated_add(sizeof(T), value.scene.name.size()),
                     detail::launcher_slot_list_owned_storage(value.scene.slots));
+            if constexpr (std::is_same_v<T, InsertSequence>)
+                return saturated_add(sizeof(T), sequence_retained_size(value.sequence));
+            if constexpr (std::is_same_v<T, CloneSequence>)
+                return saturated_add(
+                    sizeof(T),
+                    saturated_multiply(value.id_remap.size(),
+                                       sizeof(std::pair<ItemId, ItemId>)));
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());

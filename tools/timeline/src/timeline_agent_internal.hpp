@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_set>
 
 namespace pulp::audio {
 struct AudioFileData;
@@ -37,6 +38,13 @@ struct CompiledProject {
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
 load_project(const ProjectSource& source, const pulp::timeline::SchemaRegistry& registry);
+
+runtime::Result<std::unordered_set<std::uint64_t>, playback::CompileError>
+reachable_assets(const pulp::timeline::Project& project,
+                 const pulp::timeline::Sequence& root,
+                 const timebase::CompiledTempoMap& tempo_map,
+                 std::uint64_t max_expanded_note_events,
+                 std::uint64_t max_expanded_clips);
 
 runtime::Result<std::unique_ptr<CompiledProject>, playback::CompileError>
 compile_project(const LoadedProject& loaded, std::uint32_t sample_rate);

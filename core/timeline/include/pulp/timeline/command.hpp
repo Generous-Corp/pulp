@@ -275,13 +275,38 @@ struct RemoveSlot {
     ItemId slot_id;
 };
 
+struct InsertSequence {
+    Sequence sequence;
+};
+
+struct CloneSequence {
+    ItemId source_sequence_id;
+    ItemId cloned_sequence_id;
+    // Complete old -> new mapping for every identity owned by the source
+    // sequence. Canonical order is ascending by old id.
+    std::vector<std::pair<ItemId, ItemId>> id_remap;
+};
+
+struct RemoveSequence {
+    ItemId sequence_id;
+};
+
+struct SetClipSequenceRef {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    SequenceRef expected;
+    SequenceRef replacement;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, ReplaceNoteContent, SetClipPlaybackProperties, SetTempoMap,
                  SetMeterMap, CreateAsset, RemoveAsset, InsertTakeLane, RemoveTakeLane,
                  SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
                  SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
-                 SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot>;
+                 SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot,
+                 InsertSequence, CloneSequence, RemoveSequence, SetClipSequenceRef>;
 
 struct CommandEnvelope {
     CommandId id;
@@ -295,6 +320,12 @@ struct Transaction {
     GesturePhase gesture_phase = GesturePhase::Single;
     std::vector<CommandEnvelope> commands;
 };
+
+runtime::Result<Transaction, ModelError>
+build_diverge_transaction(const Project& project, ItemLocation clip,
+                          TransactionId transaction_id, DocumentRevision expected_revision,
+                          CommandId clone_command_id, CommandId retarget_command_id,
+                          std::optional<UndoGroupId> undo_group = std::nullopt);
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept;
 bool equivalent(const Clip& lhs, const Clip& rhs) noexcept;

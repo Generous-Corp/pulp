@@ -150,6 +150,35 @@ std::shared_ptr<const Project> make_project_with_inactive_arrangement(
         take(Project::create(std::move(project_input))));
 }
 
+std::shared_ptr<const Project>
+make_project_with_nested_generator(const SchemaRegistry& registry,
+                                   std::size_t reference_count = 1) {
+    auto generator =
+        take(Clip::create({30}, {0}, {480}, generator_content(registry, kFollowsHarmony)));
+    auto child_track = take(Track::create({20}, "child", {std::move(generator)}));
+    auto child =
+        take(Sequence::create({3}, "child", std::nullopt, std::nullopt, {std::move(child_track)}));
+
+    std::vector<Track> root_tracks;
+    for (std::size_t index = 0; index < reference_count; ++index) {
+        auto reference = take(
+            Clip::create({100 + index * 2}, {0}, {480}, SequenceRef{{3}, {0}}));
+        root_tracks.push_back(
+            take(Track::create({101 + index * 2}, "root", {std::move(reference)})));
+    }
+    auto root =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                              std::move(root_tracks)));
+
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested context";
+    input.next_item_id = 100 + reference_count * 2;
+    input.root_sequence_id = {2};
+    input.sequences = {std::move(root), std::move(child)};
+    return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
 CompileContextRegistry context_registry() {
     CompileContextRegistry registry;
     auto reads_harmony = CompileContextSubscriptions::none();
@@ -299,6 +328,30 @@ TEST_CASE("the subscriber index names only the tracks that declared the context"
     // the index reflects declarations, not the presence of the lane.
     REQUIRE(ContextSubscriberIndex::build(*project, {2}, CompileContextRegistry{}).empty());
     REQUIRE(ContextSubscriberIndex::build(*project, {99}, context_registry()).empty());
+}
+
+TEST_CASE("a root track subscribes to contexts read through a sequence reference",
+          "[playback][compile-context][subscription][sequence-ref]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project_with_nested_generator(schemas);
+    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+
+    const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
+    REQUIRE(subscribers.size() == 1);
+    REQUIRE(subscribers[0] == ItemId{101});
+}
+
+TEST_CASE("shared referenced sequences fan out subscriptions without repeated graph walks",
+          "[playback][compile-context][subscription][sequence-ref]") {
+    const auto schemas = generator_schema_registry();
+    constexpr std::size_t reference_count = 1'000;
+    const auto project = make_project_with_nested_generator(schemas, reference_count);
+    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+
+    const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
+    REQUIRE(subscribers.size() == reference_count);
+    REQUIRE(subscribers.front() == ItemId{101});
+    REQUIRE(subscribers.back() == ItemId{101 + (reference_count - 1) * 2});
 }
 
 TEST_CASE("context resolution excludes arrangement clips replaced in playback",

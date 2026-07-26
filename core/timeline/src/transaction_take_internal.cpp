@@ -1,5 +1,6 @@
 #include "transaction_take_internal.hpp"
 
+#include "media_reference_validation.hpp"
 #include "transaction_reduction_support.hpp"
 
 #include <algorithm>
@@ -37,22 +38,6 @@ OwnedIdentity owned_identity(const Take& take, ItemId sequence, ItemId track, It
                          true}};
 }
 
-// A take references a sealed asset the same way a clip MediaRef does; the recorder
-// emits CreateAsset first, so by the time this command reduces the asset exists.
-// A missing or out-of-range reference is rejected fail-closed.
-std::optional<ModelError> validate_take_media(const Project& project, const Take& take) noexcept {
-    const auto& media = take.media();
-    const auto* asset = project.find_asset(media.asset_id);
-    if (!asset)
-        return ModelError{ModelErrorCode::MissingAsset, take.id(), media.asset_id};
-    if (media.source_start.value < 0)
-        return ModelError{ModelErrorCode::InvalidMediaRange, take.id(), media.asset_id};
-    const auto start = static_cast<std::uint64_t>(media.source_start.value);
-    if (start > asset->frame_count || media.frame_count > asset->frame_count - start)
-        return ModelError{ModelErrorCode::InvalidMediaRange, take.id(), media.asset_id};
-    return std::nullopt;
-}
-
 runtime::Result<TakeCommandReduction, TransactionError>
 reduce_insert(const Project& project, const InsertTakeLane& insert, const Transaction& transaction,
               CommandId command, bool allow_tombstone_restore) {
@@ -79,7 +64,8 @@ reduce_insert(const Project& project, const InsertTakeLane& insert, const Transa
         return reject_reduction<TakeCommandReduction>(*code, transaction, command, insert.track_id,
                                                       insert.sequence_id);
     for (const auto& take : insert.lane.takes())
-        if (const auto media_error = validate_take_media(project, take))
+        if (const auto media_error =
+                validate_media_reference(project, take.media(), take.id()))
             return runtime::Err(model_failure(transaction, command, *media_error));
 
     const auto identities = owned_identities(insert.lane, insert.sequence_id, insert.track_id);
@@ -173,7 +159,8 @@ reduce_insert_take(const Project& project, const InsertTake& insert, const Trans
                                       true}))
         return reject_reduction<TakeCommandReduction>(*code, transaction, command, insert.lane_id,
                                                       insert.track_id);
-    if (const auto media_error = validate_take_media(project, insert.take))
+    if (const auto media_error = validate_media_reference(
+            project, insert.take.media(), insert.take.id()))
         return runtime::Err(model_failure(transaction, command, *media_error));
 
     const std::array identity{

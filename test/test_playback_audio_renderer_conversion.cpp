@@ -708,7 +708,7 @@ TEST_CASE("compiler invalidation covers global clip counts assets and exact temp
     over_limit.audio_limits.max_clips = 2;
     REQUIRE(compiler.submit(std::move(over_limit)));
     REQUIRE(compiler.status().has_error);
-    REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::ExpansionBudgetExceeded);
     REQUIRE(store.read()->document_revision() == 1);
 
     auto second_pool = pool({{3, data}});

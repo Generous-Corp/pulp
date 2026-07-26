@@ -23,6 +23,17 @@ struct ProjectEditAccess {
         return project.append_asset(std::move(asset), identities, next_item_id);
     }
     static runtime::Result<Project, ModelError>
+    append_sequence(const Project& project, Sequence sequence,
+                    std::span<const IdentityMutation> identities = {},
+                    std::optional<std::uint64_t> next_item_id = std::nullopt) {
+        return project.append_sequence(std::move(sequence), identities, next_item_id);
+    }
+    static runtime::Result<Project, ModelError>
+    remove_sequence(const Project& project, ItemId sequence_id,
+                    std::span<const IdentityMutation> identities = {}) {
+        return project.remove_sequence(sequence_id, identities);
+    }
+    static runtime::Result<Project, ModelError>
     remove_asset(const Project& project, ItemId asset_id,
                  std::span<const IdentityMutation> identities = {}) {
         return project.remove_asset(asset_id, identities);

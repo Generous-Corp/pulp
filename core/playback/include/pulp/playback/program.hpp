@@ -119,6 +119,18 @@ class TrackProgram {
     const std::shared_ptr<const TrackAutomationProgram>& automation_program_owner() const noexcept {
         return automation_program_;
     }
+    std::uint64_t expanded_clip_count() const noexcept {
+        return expanded_clip_count_;
+    }
+    std::uint64_t expanded_note_event_count() const noexcept {
+        return expanded_note_event_count_;
+    }
+    std::uint64_t generated_id_count() const noexcept {
+        return generated_id_count_;
+    }
+    std::uint64_t generated_id_start() const noexcept {
+        return generated_id_start_;
+    }
 
   private:
     friend class ProgramCompilerTask;
@@ -127,7 +139,11 @@ class TrackProgram {
                  std::vector<timeline::ItemId> clip_ids, std::vector<NoteProgramEvent> note_events,
                  std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                  std::vector<timeline::ItemId> device_placement_ids,
-                 std::shared_ptr<const TrackAutomationProgram> automation_program) noexcept;
+                 std::shared_ptr<const TrackAutomationProgram> automation_program,
+                 std::uint64_t expanded_clip_count,
+                 std::uint64_t expanded_note_event_count,
+                 std::uint64_t generated_id_start,
+                 std::uint64_t generated_id_count) noexcept;
 
     timeline::ItemId id_;
     ProgramGeneration generation_ = 0;
@@ -138,6 +154,10 @@ class TrackProgram {
     std::shared_ptr<const AudioTrackRendererProgram> audio_program_;
     std::vector<timeline::ItemId> device_placement_ids_;
     std::shared_ptr<const TrackAutomationProgram> automation_program_;
+    std::uint64_t expanded_clip_count_ = 0;
+    std::uint64_t expanded_note_event_count_ = 0;
+    std::uint64_t generated_id_start_ = 0;
+    std::uint64_t generated_id_count_ = 0;
 };
 
 class PlaybackProgram {
@@ -169,6 +189,9 @@ class PlaybackProgram {
     const AutomationPlaybackLimits& automation_limits() const noexcept {
         return automation_limits_;
     }
+    std::uint64_t generated_id_base() const noexcept {
+        return generated_id_base_;
+    }
     std::span<const std::shared_ptr<const TrackProgram>> tracks() const noexcept {
         return tracks_;
     }
@@ -181,6 +204,7 @@ class PlaybackProgram {
                     std::shared_ptr<const timebase::CompiledTempoMap> tempo_map,
                     std::shared_ptr<const DecodedAudioAssetPool> audio_assets,
                     AudioRendererLimits audio_limits, AutomationPlaybackLimits automation_limits,
+                    std::uint64_t generated_id_base,
                     std::vector<std::shared_ptr<const TrackProgram>> tracks) noexcept;
     const std::shared_ptr<const TrackProgram>* find_track_owner(timeline::ItemId id) const noexcept;
 
@@ -192,6 +216,7 @@ class PlaybackProgram {
     std::shared_ptr<const DecodedAudioAssetPool> audio_assets_;
     AudioRendererLimits audio_limits_;
     AutomationPlaybackLimits automation_limits_;
+    std::uint64_t generated_id_base_ = 0;
     std::vector<std::shared_ptr<const TrackProgram>> tracks_;
 };
 

@@ -216,6 +216,34 @@ For native crash-consistent storage, call `FileJournal::open()` first. Use
 project beside the session independently; the journal sink is the durability
 boundary.
 
+### Reusing and diverging sequences
+
+A musical clip may contain `SequenceRef{sequence_id, source_start}` instead of
+notes or media. The clip places the referenced sequence's source window at the
+clip start; multiple clips can share one sequence. Project construction and
+command reduction reject missing targets, cycles, and nesting deeper than
+eight reference edges.
+
+Edits to a shared sequence intentionally affect every placement. Before a
+placement-specific edit, call `build_diverge_transaction()` with the reference
+clip's `ItemLocation` and two command IDs allocated from the session's
+`WriterToken`. It allocates a complete clone from `next_item_id` and returns one
+atomic `CloneSequence` plus `SetClipSequenceRef` transaction, so journal replay
+and undo reproduce the exact copy-on-edit boundary without synthesizing or
+reusing writer-scoped command IDs.
+
+`PlaybackProgramCompiler` expands supported child notes and audio away from the
+audio thread. Stage 1 fails closed when a child contains device processing,
+automation, takes, freeze/record state, absolute clips, or when a reference has
+gain/fades. A source window that cuts through a child audio fade also fails
+closed because Stage 1 has no envelope-offset representation. Set
+`ProgramCompileRequest::max_expanded_note_events` to bound note
+expansion; `audio_limits.max_clips` also caps the total clip materialization
+and reference traversal performed by nested lowering, including charges carried
+by reused track programs. When compiling incrementally, pass child
+dirtiness through `lower_dirty_set(project, root_sequence_id, dirty)` so every
+root track that places the child is rebuilt.
+
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree
 CLI/MCP facade uses `pulp::tools::timeline::ProjectSource` to distinguish

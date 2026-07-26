@@ -79,6 +79,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "time_range", kind: "Object", jsType: "object", required: true }),
     ]),
   }),
+  "pulp.timeline.command.clone_sequence": Object.freeze({
+    schemaType: "pulp.timeline.command.clone_sequence",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "cloned_sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "id_remap", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "source_sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.create_asset": Object.freeze({
     schemaType: "pulp.timeline.command.create_asset",
     domain: "Command",
@@ -125,25 +135,12 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
-  "pulp.timeline.command.insert_scene": Object.freeze({
-    schemaType: "pulp.timeline.command.insert_scene",
+  "pulp.timeline.command.insert_sequence": Object.freeze({
+    schemaType: "pulp.timeline.command.insert_sequence",
     domain: "Command",
     version: 1,
     fields: Object.freeze([
-      Object.freeze({ name: "before_scene_id", kind: "U64String", jsType: "string", required: false }),
-      Object.freeze({ name: "scene", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.scene" }),
-      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
-    ]),
-  }),
-  "pulp.timeline.command.insert_slot": Object.freeze({
-    schemaType: "pulp.timeline.command.insert_slot",
-    domain: "Command",
-    version: 1,
-    fields: Object.freeze([
-      Object.freeze({ name: "before_slot_id", kind: "U64String", jsType: "string", required: false }),
-      Object.freeze({ name: "scene_id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "slot", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.slot" }),
+      Object.freeze({ name: "sequence", kind: "Object", jsType: "object", required: true, ref: "pulp.timeline.sequence" }),
     ]),
   }),
   "pulp.timeline.command.insert_take": Object.freeze({
@@ -225,23 +222,12 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
-  "pulp.timeline.command.remove_scene": Object.freeze({
-    schemaType: "pulp.timeline.command.remove_scene",
+  "pulp.timeline.command.remove_sequence": Object.freeze({
+    schemaType: "pulp.timeline.command.remove_sequence",
     domain: "Command",
     version: 1,
     fields: Object.freeze([
-      Object.freeze({ name: "scene_id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
-    ]),
-  }),
-  "pulp.timeline.command.remove_slot": Object.freeze({
-    schemaType: "pulp.timeline.command.remove_slot",
-    domain: "Command",
-    version: 1,
-    fields: Object.freeze([
-      Object.freeze({ name: "scene_id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "slot_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
   "pulp.timeline.command.remove_take": Object.freeze({
@@ -300,6 +286,18 @@ export const timelineSchema = Object.freeze({
   }),
   "pulp.timeline.command.set_clip_playback_properties": Object.freeze({
     schemaType: "pulp.timeline.command.set_clip_playback_properties",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
+  "pulp.timeline.command.set_clip_sequence_ref": Object.freeze({
+    schemaType: "pulp.timeline.command.set_clip_sequence_ref",
     domain: "Command",
     version: 1,
     fields: Object.freeze([
@@ -409,6 +407,15 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "notes", kind: "Array", jsType: "array", required: true }),
     ]),
   }),
+  "pulp.timeline.content.sequence_ref": Object.freeze({
+    schemaType: "pulp.timeline.content.sequence_ref",
+    domain: "Content",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "source_start", kind: "I64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.device_placement": Object.freeze({
     schemaType: "pulp.timeline.device_placement",
     domain: "Document",
@@ -481,20 +488,10 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "position", kind: "I64String", jsType: "string", required: true }),
     ]),
   }),
-  "pulp.timeline.scene": Object.freeze({
-    schemaType: "pulp.timeline.scene",
-    domain: "Document",
-    version: 1,
-    fields: Object.freeze([
-      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
-      Object.freeze({ name: "slots", kind: "Array", jsType: "array", required: true }),
-    ]),
-  }),
   "pulp.timeline.sequence": Object.freeze({
     schemaType: "pulp.timeline.sequence",
     domain: "Document",
-    version: 5,
+    version: 4,
     fields: Object.freeze([
       Object.freeze({ name: "absolute_duration", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "chord_scale_lane", kind: "Array", jsType: "array", required: true }),
@@ -504,19 +501,7 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "musical_duration", kind: "I64String", jsType: "string", required: true }),
       Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
       Object.freeze({ name: "regions", kind: "Array", jsType: "array", required: true }),
-      Object.freeze({ name: "scenes", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "tracks", kind: "Array", jsType: "array", required: true }),
-    ]),
-  }),
-  "pulp.timeline.slot": Object.freeze({
-    schemaType: "pulp.timeline.slot",
-    domain: "Document",
-    version: 1,
-    fields: Object.freeze([
-      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "follow", kind: "Object", jsType: "object", required: true }),
-      Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
-      Object.freeze({ name: "launch_quantize", kind: "Object", jsType: "object", required: true }),
     ]),
   }),
   "pulp.timeline.take": Object.freeze({
@@ -569,13 +554,13 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.automation_target.device_parameter",
   "pulp.timeline.chord_scale_event",
   "pulp.timeline.clip",
+  "pulp.timeline.command.clone_sequence",
   "pulp.timeline.command.create_asset",
   "pulp.timeline.command.insert_automation_lane",
   "pulp.timeline.command.insert_clip",
   "pulp.timeline.command.insert_marker",
   "pulp.timeline.command.insert_region",
-  "pulp.timeline.command.insert_scene",
-  "pulp.timeline.command.insert_slot",
+  "pulp.timeline.command.insert_sequence",
   "pulp.timeline.command.insert_take",
   "pulp.timeline.command.insert_take_lane",
   "pulp.timeline.command.move_clip",
@@ -584,14 +569,14 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_clip",
   "pulp.timeline.command.remove_marker",
   "pulp.timeline.command.remove_region",
-  "pulp.timeline.command.remove_scene",
-  "pulp.timeline.command.remove_slot",
+  "pulp.timeline.command.remove_sequence",
   "pulp.timeline.command.remove_take",
   "pulp.timeline.command.remove_take_lane",
   "pulp.timeline.command.replace_note_content",
   "pulp.timeline.command.set_active_take_lane",
   "pulp.timeline.command.set_chord_scale_lane",
   "pulp.timeline.command.set_clip_playback_properties",
+  "pulp.timeline.command.set_clip_sequence_ref",
   "pulp.timeline.command.set_groove",
   "pulp.timeline.command.set_meter_map",
   "pulp.timeline.command.set_note_velocity",
@@ -602,15 +587,14 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.content.empty",
   "pulp.timeline.content.media",
   "pulp.timeline.content.notes",
+  "pulp.timeline.content.sequence_ref",
   "pulp.timeline.device_placement",
   "pulp.timeline.groove_step",
   "pulp.timeline.groove_template",
   "pulp.timeline.marker",
   "pulp.timeline.project",
   "pulp.timeline.region",
-  "pulp.timeline.scene",
   "pulp.timeline.sequence",
-  "pulp.timeline.slot",
   "pulp.timeline.take",
   "pulp.timeline.take_lane",
   "pulp.timeline.track",

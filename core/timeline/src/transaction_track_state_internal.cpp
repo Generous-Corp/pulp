@@ -1,5 +1,6 @@
 #include "transaction_track_state_internal.hpp"
 
+#include "media_reference_validation.hpp"
 #include "project_state_access.hpp"
 #include "transaction_reduction_support.hpp"
 
@@ -10,14 +11,10 @@ std::optional<ModelError> validate_freeze(const Project& project, ItemId track_i
                                           const std::optional<TrackFreeze>& freeze) noexcept {
     if (!freeze)
         return std::nullopt;
+    if (const auto error =
+            validate_media_reference(project, freeze->media, track_id))
+        return error;
     const auto* asset = project.find_asset(freeze->media.asset_id);
-    if (!asset)
-        return ModelError{ModelErrorCode::MissingAsset, track_id, freeze->media.asset_id};
-    if (freeze->media.source_start.value < 0)
-        return ModelError{ModelErrorCode::InvalidMediaRange, track_id, freeze->media.asset_id};
-    const auto start = static_cast<std::uint64_t>(freeze->media.source_start.value);
-    if (start > asset->frame_count || freeze->media.frame_count > asset->frame_count - start)
-        return ModelError{ModelErrorCode::InvalidMediaRange, track_id, freeze->media.asset_id};
     if (asset->sample_rate.normalized() != freeze->sample_rate.normalized())
         return ModelError{ModelErrorCode::IncompatibleSampleRate, track_id, freeze->media.asset_id};
     return std::nullopt;

@@ -971,6 +971,11 @@ class StructuralScanner {
                    require_member(content_data, "frame_count", StringShape, content_path) &&
                    require_member(content_data, "source_start", StringShape, content_path);
         }
+        if (content_type == "pulp.timeline.content.sequence_ref" && version == 1) {
+            const auto content_path = path + "/data/content/data";
+            return require_member(content_data, "sequence_id", StringShape, content_path) &&
+                   require_member(content_data, "source_start", StringShape, content_path);
+        }
         if (content_type != "pulp.timeline.content.notes" || version != 1) {
             const auto* schema =
                 registry_ ? registry_->find(SchemaDomain::Content, content_type) : nullptr;

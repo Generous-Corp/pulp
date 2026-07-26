@@ -86,4 +86,8 @@ decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::str
 runtime::Result<GrooveTemplate, PersistenceError>
 decode_groove(const JsonValue* value, DecodeContext& context, std::string groove_path);
 
+runtime::Result<Sequence, PersistenceError>
+decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
+                const SchemaRegistry& registry, DecodeContext& context, std::string path);
+
 } // namespace pulp::timeline::detail

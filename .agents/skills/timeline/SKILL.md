@@ -69,6 +69,26 @@ artifact is needed. Never modify canonical project JSON text directly.
   Track until a context-owned tempo/rate projection can compare them safely.
 - `NoteContent` is a flat POD array sorted by `(start, ItemId)`. Note durations
   are positive, pitch is MIDI 0-127, and channel is 0-15.
+- `SequenceRef` makes a musical clip a non-owning placement of another
+  sequence. Its source window begins at `source_start`; project construction
+  rejects missing targets, cycles, and nesting deeper than eight reference
+  edges. Sequence
+  identity remains project-owned, so removing a referenced sequence fails.
+  Playback expands references off the audio thread into immutable root-track
+  programs. Stage 1 accepts child note/audio clips and rejects child devices,
+  automation, takes, freeze, record-arm state, absolute clips, and non-neutral
+  reference gain/fades. Source windows that intersect child audio fades also
+  fail closed because Stage 1 cannot represent an envelope offset. Expansion
+  is bounded by `ProgramCompileRequest::max_expanded_note_events` and by
+  `audio_limits.max_clips` across materialized clips, reference traversal, and
+  reused track programs.
+- Shared edits affect every placement. Use `build_diverge_transaction()` for
+  eager copy-on-edit: it emits a complete-ID `CloneSequence` followed by
+  `SetClipSequenceRef`. Pass two command IDs allocated from the session
+  `WriterToken`; the helper consumes item IDs from `Project::next_item_id`
+  before publication but never synthesizes writer-scoped IDs.
+  `lower_dirty_set()` maps child dirtiness through all transitive references to
+  the root tracks that must be recompiled.
 - `AutomationCurve` is a position-ordered immutable point sequence. Point IDs
   and positions are unique within a curve; values are finite; curvature is in
   `[-1, 1]`. Continuous segments use a monotonic quadratic blend, while Hold
@@ -236,9 +256,11 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Asset schema v2 adds optional `loop_info`. Its v2 to v1 downgrade succeeds
   only when that field is absent, and a v1 envelope that illegally contains
   the field is rejected rather than silently normalized.
-- `schema_release.hpp` records the exact structural type/version sets first
-  shipped in `v0.736.0` (Track v1), `v0.744.0` (Track v2), and `v0.748.0`
-  (Track v3). `serialize_project_for_release()` applies the registry's
+- `schema_release.hpp` records exact shipped structural type/version sets,
+  including `v0.736.0` (Track v1), `v0.744.0` (Track v2), `v0.748.0`
+  (Track v3), and `v0.750.0` (Track v4, before SequenceRef content and sequence
+  mutation commands).
+  `serialize_project_for_release()` applies the registry's
   downgrade callbacks parent-first, then rewrites reachable child envelopes.
   It fails closed when a removed feature is populated, an encountered
   extension has no explicit target, or the target map names a type/version the

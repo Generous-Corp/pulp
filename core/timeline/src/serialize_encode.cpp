@@ -364,6 +364,15 @@ bool write_content(EncodeContext& context, const ClipContent& content) {
                 context.opaque = true;
                 return context.writer.append(unknown.raw_json());
             },
+            [&](const SequenceRef& reference) {
+                return write_envelope(context, "pulp.timeline.content.sequence_ref", 1, [&] {
+                    return context.writer.append("{\"sequence_id\":") &&
+                           context.writer.u64(reference.sequence_id.value, true) &&
+                           context.writer.append(",\"source_start\":") &&
+                           context.writer.i64(reference.source_start.value, true) &&
+                           context.writer.character('}');
+                });
+            },
         },
         content);
 }
