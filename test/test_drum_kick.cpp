@@ -883,6 +883,25 @@ TEST_CASE("A delayed AHD attack does not leak stale unity gain",
     }
 }
 
+TEST_CASE("A close AHD retrigger does not postpone the pending contour",
+          "[signal][drum][output][ahd][latency][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(0.0, 1000.0, 1.0);
+    output.trigger();
+
+    std::vector<float> y(96, 0.0f);
+    for (int i = 0; i < 16; ++i) {
+        y[static_cast<std::size_t>(i)] =
+            output.process(i == 0 ? 1.0f : 0.0f);
+    }
+    output.trigger();
+    for (std::size_t i = 16; i < y.size(); ++i) {
+        y[i] = output.process(0.0f);
+    }
+    REQUIRE(peak(y) > 0.5);
+}
+
 TEST_CASE("A delayed AHD retrigger preserves the preceding output tail",
           "[signal][drum][output][ahd][latency][lifecycle]") {
     OutputStage output;

@@ -72,10 +72,14 @@ public:
         update();
     }
 
-    /// Retunes only the lossless fractional-delay path for audio-rate pitch
-    /// modulation. Decay and damping remain tied to the static frequency.
+    /// Uses the delay line's continuously interpolated reader for audio-rate
+    /// pitch modulation. Decay and damping remain tied to the static frequency;
+    /// returning to `set_frequency()` restores the lossless allpass path.
     void set_modulated_frequency(double hz) {
-        update_tuning(std::clamp(hz, 20.0, 0.25 * sample_rate_));
+        const double frequency =
+            std::clamp(hz, 20.0, 0.25 * sample_rate_);
+        modulated_loop_length_ = sample_rate_ / frequency;
+        modulated_ = true;
     }
 
     /// Time for the note to fall by 60 dB, in seconds.
@@ -182,15 +186,24 @@ public:
         }
         shaped = dynamic_.process_lowpass(shaped);
 
-        SampleType y = loop_.read(static_cast<SampleType>(integer_delay_));
+        SampleType y = modulated_
+                           ? loop_.read(
+                                 static_cast<SampleType>(modulated_loop_length_))
+                           : loop_.read(
+                                 static_cast<SampleType>(integer_delay_));
         y = damping_.process_lowpass(y);
 
-        // First-order allpass carrying the fractional part of the loop length.
-        // Unity magnitude, so unlike an interpolator it costs the decay nothing.
-        const SampleType out = static_cast<SampleType>(tuning_coefficient_) * y +
-                               tuning_state_;
-        tuning_state_ = y - static_cast<SampleType>(tuning_coefficient_) * out;
-        y = out;
+        if (!modulated_) {
+            // First-order allpass carrying the fractional part of the static
+            // loop length. The variable-delay FM reader above is interpolated
+            // instead so crossing an integer tap cannot zipper.
+            const SampleType out =
+                static_cast<SampleType>(tuning_coefficient_) * y +
+                tuning_state_;
+            tuning_state_ =
+                y - static_cast<SampleType>(tuning_coefficient_) * out;
+            y = out;
+        }
 
         // First-order allpass: delays low frequencies more than high ones, so
         // the partials stretch sharp.
@@ -212,6 +225,7 @@ public:
 
 private:
     void update() {
+        modulated_ = false;
         update_tuning(frequency_);
 
         // The loop runs f0 times a second, so reaching -60 dB after
@@ -281,11 +295,13 @@ private:
     double pluck_position_ = 0.25;
 
     double loop_length_ = 200.0;
+    double modulated_loop_length_ = 200.0;
     double integer_delay_ = 200.0;
     double tuning_coefficient_ = 0.0;
     double loop_gain_ = 0.99;
     double dynamic_hz_ = 12000.0;
     double pick_direction_ = 0.0;
+    bool modulated_ = false;
     SampleType pick_state_ = 0;
     SampleType tuning_state_ = 0;
     SampleType stiffness_state_ = 0;

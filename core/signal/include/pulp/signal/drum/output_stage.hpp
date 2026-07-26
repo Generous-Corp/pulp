@@ -176,6 +176,11 @@ public:
             ahd_gain_ = 1.0;
             return;
         }
+        // Hits closer than the FIR latency share the contour that is already
+        // queued for the first hit. Restarting this countdown would keep the
+        // envelope inactive while that first hit reaches the output and erase
+        // its pending samples.
+        if (ahd_trigger_pending_) return;
         ahd_delay_remaining_ = latency_samples();
         if (ahd_delay_remaining_ > 0) {
             // Keep an active preceding contour audible while its delayed
