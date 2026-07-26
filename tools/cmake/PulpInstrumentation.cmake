@@ -86,12 +86,18 @@ set(_pulp_coverage_link_flags
     -fprofile-instr-generate
     -fcoverage-mapping)
 
+# Keep the effective options available to external-consumer smoke fixtures.
+# Installed static libraries retain instrumentation runtime references, so the
+# fixture executable must link with the same options.
+set(PULP_COVERAGE_COMPILE_FLAGS ${_pulp_coverage_compile_flags})
+set(PULP_COVERAGE_LINK_FLAGS ${_pulp_coverage_link_flags})
+
 # Global application: coverage is all-or-nothing across the Pulp
 # tree (it's a build-config thing, not per-target). Using
 # add_compile_options + add_link_options keeps it consistent with
 # Sanitizers.cmake and means no per-subsystem wiring change.
-add_compile_options(${_pulp_coverage_compile_flags})
-add_link_options(${_pulp_coverage_link_flags})
+add_compile_options(${PULP_COVERAGE_COMPILE_FLAGS})
+add_link_options(${PULP_COVERAGE_LINK_FLAGS})
 
 # Expose a helper variable so scripts/CI can confirm the build is
 # instrumented (read back by llvm-cov report as a sanity check).

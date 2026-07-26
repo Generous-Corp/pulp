@@ -126,6 +126,15 @@ class WorkflowBuildDirTests(unittest.TestCase):
         self.assertNotIn("cmake --build build ", text)
         self.assertNotIn("ctest --test-dir build ", text)
 
+    def test_ubsan_optimizes_instrumented_dsp_certifications(self) -> None:
+        """UBSan keeps symbols without running production-scale DSP at O0."""
+        text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
+        ubsan = text.split("  ubsan:", 1)[1].split("  rtsan:", 1)[0]
+
+        self.assertIn("-DCMAKE_BUILD_TYPE=RelWithDebInfo", ubsan)
+        self.assertIn("-fsanitize=undefined -fno-sanitize-recover=all", ubsan)
+        self.assertNotIn("-DCMAKE_BUILD_TYPE=Debug", ubsan)
+
     def test_tsan_selects_network_reader_thread_suites(self) -> None:
         text = SANITIZERS_WORKFLOW.read_text(encoding="utf-8")
         regex_line = next(

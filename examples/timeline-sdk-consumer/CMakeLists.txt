@@ -108,6 +108,7 @@ set(_expected_importer_closure
     Pulp::events
     Pulp::everest
     Pulp::hwy
+    Pulp::interchange
     Pulp::mbedcrypto
     Pulp::mbedtls
     Pulp::mbedx509
