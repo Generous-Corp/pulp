@@ -145,15 +145,31 @@ TEST_CASE("Forge dynamics: the stereo link survives the graph",
     REQUIRE(linked_right < unlinked_right - 6.0);       // the loud channel pulled it down
 }
 
-TEST_CASE("Forge dynamics: feedforward lookahead is retired from the node contract",
+TEST_CASE("Forge dynamics: feedforward lookahead is a stable realization axis",
           "[host][baked][forge][forge-dynamics][latency]") {
-    // The sole stable realization is zero-lookahead. Param id 8 remains retired,
-    // and no custom latency callback is needed for the historical zero-latency
-    // contract. At ratio 1 with no makeup an impulse must pass at sample zero.
-    const auto type = dyn::make_feedforward_compressor_node();
-    REQUIRE(std::none_of(type.baked_params.begin(), type.baked_params.end(),
-                         [](const CustomNodeBakedParam& p) { return p.id == 8; }));
-    REQUIRE_FALSE(type.latency_samples);
+    const auto zero = dyn::make_feedforward_compressor_node(0.0f);
+    const auto three = dyn::make_feedforward_compressor_node(3.0f);
+    const auto ten = dyn::make_feedforward_compressor_node(10.0f);
+
+    REQUIRE(zero.type_id == dyn::kFeedforwardCompressorTypeId);
+    REQUIRE(three.type_id != zero.type_id);
+    REQUIRE(ten.type_id != three.type_id);
+    REQUIRE(three.type_id == dyn::make_feedforward_compressor_node(3.0f).type_id);
+    REQUIRE(dyn::make_feedforward_compressor_node(-1.0f).type_id == zero.type_id);
+    REQUIRE(dyn::make_feedforward_compressor_node(99.0f).type_id == ten.type_id);
+    for (const auto* realization : {&zero, &three, &ten}) {
+        REQUIRE(std::none_of(realization->baked_params.begin(),
+                             realization->baked_params.end(),
+                             [](const CustomNodeBakedParam& p) { return p.id == 8; }));
+        REQUIRE(realization->latency_samples);
+    }
+    REQUIRE(zero.latency_samples(kSr) == 0);
+    REQUIRE(three.latency_samples(kSr) == 144);
+    REQUIRE(ten.latency_samples(kSr) == 480);
+
+    // At ratio 1 with no makeup the zero-lookahead realization still passes an
+    // impulse at sample zero, preserving its historical behavior and identity.
+    const auto type = zero;
     auto fx = make_fixture(type);
     ParamInjector inj = fx.claim_injector();
 
@@ -179,6 +195,17 @@ TEST_CASE("Forge dynamics: feedforward lookahead is retired from the node contra
         }
     }
     REQUIRE(index == 0);
+}
+
+TEST_CASE("Forge dynamics: 0, 3, and 10 ms feedforward factories prepare and run",
+          "[host][baked][forge][forge-dynamics][latency]") {
+    const auto tone = sine(0.25f);
+    for (float lookahead_ms : {0.0f, 3.0f, 10.0f}) {
+        auto fx = make_fixture(dyn::make_feedforward_compressor_node(lookahead_ms));
+        const auto out = fx.settle({tone, tone}, 8);
+        for (const auto& channel : out)
+            for (float sample : channel) REQUIRE(std::isfinite(sample));
+    }
 }
 
 TEST_CASE("Forge dynamics: auto-makeup restores level through the graph",

@@ -24,11 +24,54 @@
 #include <cmath>
 #include <concepts>
 #include <cstdint>
+#include <type_traits>
 
 namespace pulp::signal {
 
 inline constexpr double kTriggerHighThreshold = 0.5;
 inline constexpr double kTriggerLowThreshold = 0.25;
+
+/// Hysteretic continuous-CV edge detector. CV thresholding owns a Schmitt latch
+/// and never debounces; decoded events own a refractory counter in
+/// `TriggerDetectT`. Separate types keep overload selection from changing the
+/// edge policy or selecting a different history.
+template <typename SampleType = float>
+class HystereticTriggerDetectT {
+public:
+    void set_thresholds(double high, double low) {
+        if (!std::isfinite(high) || !std::isfinite(low)) return;
+        high_threshold_ = high;
+        low_threshold_ = std::min(low, high - 1e-9);
+    }
+
+    void reset() { armed_ = true; }
+
+    bool process(SampleType input) {
+        const double x = static_cast<double>(input);
+        if (armed_ && x >= high_threshold_) {
+            armed_ = false;
+            return true;
+        }
+        if (!armed_ && x <= low_threshold_) armed_ = true;
+        return false;
+    }
+
+    void process(SampleType input, bool& rising, bool& falling) {
+        const bool was_high = !armed_;
+        rising = process(input);
+        falling = was_high && armed_;
+    }
+
+    bool high() const { return !armed_; }
+
+private:
+    double high_threshold_ = kTriggerHighThreshold;
+    double low_threshold_ = kTriggerLowThreshold;
+    bool armed_ = true;
+};
+
+using HystereticTriggerDetect = HystereticTriggerDetectT<float>;
+using HystereticTriggerDetect64 = HystereticTriggerDetectT<double>;
 
 /// Rising-edge detector with a refractory period.
 ///
@@ -65,15 +108,10 @@ public:
     /// Threshold for the refractory `process_signal()` lane. Ignored by the
     /// decoded-event and hysteretic-CV lanes.
     void set_threshold(SampleType t) { threshold_ = t; }
-    void set_thresholds(double high, double low) {
-        high_threshold_ = high;
-        low_threshold_ = std::min(low, high - 1e-9);
-    }
 
     void reset() {
         prev_ = false;
         countdown_ = 0;
-        hysteresis_armed_ = true;
     }
 
     /// @return true on the sample an accepted rising edge occurs.
@@ -86,24 +124,12 @@ public:
         return true;
     }
 
-    /// Continuous-CV edge detection used by the sequencing lane. This
-    /// deliberately has hysteresis and no refractory: a clock must not lose
-    /// fast legitimate edges to a debounce window.
-    bool process_hysteretic_cv(SampleType input) {
-        const double x = static_cast<double>(input);
-        if (hysteresis_armed_ && x >= high_threshold_) {
-            hysteresis_armed_ = false;
-            return true;
-        }
-        if (!hysteresis_armed_ && x <= low_threshold_) hysteresis_armed_ = true;
-        return false;
-    }
-
-    void process_hysteretic_cv(SampleType input, bool& rising, bool& falling) {
-        const bool was_high = !hysteresis_armed_;
-        rising = process_hysteretic_cv(input);
-        falling = was_high && hysteresis_armed_;
-    }
+    /// Prevent continuous values from silently selecting the decoded-event
+    /// lane through implicit conversion to bool. Use `process_signal()` for a
+    /// refractory threshold or `HystereticTriggerDetectT` for Schmitt CV.
+    template <typename Value>
+        requires(!std::same_as<std::remove_cvref_t<Value>, bool>)
+    bool process(Value) = delete;
 
     /// Established single-threshold signal lane. It first decodes the signal
     /// with strict `x > threshold`, then applies the same refractory policy as
@@ -115,28 +141,6 @@ public:
         rising = process_signal(input);
         falling = was_high && !prev_;
     }
-
-    /// Source-compatible bridge for callers that passed floating-point CV to
-    /// `process()`. New code should spell the signal domain explicitly. This is
-    /// one forwarding path into the same hysteretic state, not a second edge
-    /// detector selected by overload history.
-    template <std::floating_point Floating>
-    bool process(Floating input) {
-        return process_hysteretic_cv(static_cast<SampleType>(input));
-    }
-
-    template <std::floating_point Floating>
-    void process(Floating input, bool& rising, bool& falling) {
-        process_hysteretic_cv(static_cast<SampleType>(input), rising, falling);
-    }
-
-    /// Integer literals are neither decoded event gates nor continuous CV.
-    /// Reject them instead of leaving bool-vs-signal overload resolution
-    /// ambiguous.
-    template <std::integral Integer>
-    bool process(Integer) = delete;
-
-    bool high() const { return !hysteresis_armed_; }
 
     bool armed() const { return countdown_ == 0; }
 
@@ -151,10 +155,7 @@ private:
     long long refractory_samples_ = 48;
     long long countdown_ = 0;
     SampleType threshold_ = SampleType{0.5};
-    double high_threshold_ = kTriggerHighThreshold;
-    double low_threshold_ = kTriggerLowThreshold;
     bool prev_ = false;
-    bool hysteresis_armed_ = true;
 };
 
 using TriggerDetect = TriggerDetectT<float>;
@@ -243,7 +244,7 @@ public:
     }
 
     SampleType process(SampleType trigger) {
-        if (detector_.process_hysteretic_cv(trigger)) remaining_ = length_samples_;
+        if (detector_.process(trigger)) remaining_ = length_samples_;
         if (remaining_ <= 0) return low_level_;
         --remaining_;
         return high_level_;
@@ -262,7 +263,7 @@ private:
     long long length_samples_ = 2400;
     long long remaining_ = 0;
     Retrigger retrigger_ = Retrigger::restart;
-    TriggerDetectT<SampleType> detector_{};
+    HystereticTriggerDetectT<SampleType> detector_{};
     SampleType low_level_ = SampleType{0};
     SampleType high_level_ = SampleType{1};
 };
@@ -304,7 +305,7 @@ public:
     }
 
     bool process(SampleType clock) {
-        if (!detector_.process_hysteretic_cv(clock)) return false;
+        if (!detector_.process(clock)) return false;
         const bool pass = counter_ == 0;
         counter_ = (counter_ + 1) % division_;
         return pass;
@@ -313,7 +314,7 @@ public:
 private:
     int division_ = kDefaultDivision;
     int counter_ = 0;
-    TriggerDetectT<SampleType> detector_{};
+    HystereticTriggerDetectT<SampleType> detector_{};
 };
 
 using ClockDivider = ClockDividerT<float>;
@@ -452,7 +453,7 @@ public:
 
     bool process(SampleType clock) {
         since_edge_ += 1.0;
-        if (detector_.process_hysteretic_cv(clock)) {
+        if (detector_.process(clock)) {
             const bool usable = have_edge_ && since_edge_ <= max_period_samples_;
             period_ = usable ? since_edge_ : 0.0;
             have_edge_ = true;
@@ -484,7 +485,7 @@ private:
     double next_at_ = 0.0;
     int pending_ = 0;
     bool have_edge_ = false;
-    TriggerDetectT<SampleType> detector_{};
+    HystereticTriggerDetectT<SampleType> detector_{};
 };
 
 using SignalClockMult = SignalClockMultT<float>;
@@ -581,7 +582,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process_hysteretic_cv(trigger)) {
+        if (detector_.process(trigger)) {
             remaining_ = count_ - 1;
             countdown_ = interval_samples_;
             return true;
@@ -636,7 +637,7 @@ private:
     long long interval_samples_ = 1;
     long long remaining_ = 0;
     long long countdown_ = 0;
-    TriggerDetectT<SampleType> detector_{};
+    HystereticTriggerDetectT<SampleType> detector_{};
 };
 
 using BurstGen = BurstGenT<float>;
@@ -711,7 +712,7 @@ public:
     }
 
     bool process(SampleType trigger) {
-        if (detector_.process_hysteretic_cv(trigger)) countdown_ = delay_samples_;
+        if (detector_.process(trigger)) countdown_ = delay_samples_;
         if (countdown_ < 0) return false;
         if (countdown_ == 0) {
             countdown_ = -1;
@@ -745,7 +746,7 @@ private:
     long long delay_samples_ = 0;
     long long dropped_ = 0;
     long long countdown_ = -1;
-    TriggerDetectT<SampleType> detector_{};
+    HystereticTriggerDetectT<SampleType> detector_{};
 };
 
 using TrigDelay = TrigDelayT<float>;

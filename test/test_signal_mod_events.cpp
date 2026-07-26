@@ -51,10 +51,6 @@ template <typename Detector>
 concept AcceptsExplicitSignalTrigger =
     requires(Detector detector) { detector.process_signal(1.0f); };
 
-template <typename Detector>
-concept AcceptsExplicitHystereticCv =
-    requires(Detector detector) { detector.process_hysteretic_cv(1.0f); };
-
 static_assert(AcceptsIntegerClock<ClockMult>);
 static_assert(!AcceptsIntegerClock<SignalClockMult>);
 static_assert(HasEventFactor<ClockMult>);
@@ -67,15 +63,18 @@ static_assert(std::same_as<EventClockMult64, ClockMult64>);
 static_assert(std::same_as<round2::ClockMultT<float>, ClockMult>);
 static_assert(std::same_as<round2::ClockMultT<double>, ClockMult>);
 static_assert(!AcceptsIntegerTrigger<TriggerDetect>);
-static_assert(AcceptsFloatTrigger<TriggerDetect>);
+static_assert(!AcceptsFloatTrigger<TriggerDetect>);
 static_assert(AcceptsExplicitSignalTrigger<TriggerDetect>);
-static_assert(AcceptsExplicitHystereticCv<TriggerDetect>);
+static_assert(AcceptsFloatTrigger<HystereticTriggerDetect>);
+static_assert(!AcceptsExplicitSignalTrigger<HystereticTriggerDetect>);
 
 } // namespace
 
 TEST_CASE("event and envelope aliases start fresh and track their double forms",
           "[signal][mod][parity][zero-init]") {
     STATIC_REQUIRE(std::is_same_v<TriggerDetect64, TriggerDetectT<double>>);
+    STATIC_REQUIRE(
+        std::is_same_v<HystereticTriggerDetect64, HystereticTriggerDetectT<double>>);
     STATIC_REQUIRE(std::is_same_v<GateGen64, GateGenT<double>>);
     STATIC_REQUIRE(std::is_same_v<ClockDivider64, ClockDividerT<double>>);
     STATIC_REQUIRE(std::is_same_v<ClockMult64, ClockMultT>);
@@ -294,31 +293,25 @@ TEST_CASE("TriggerDetect process_signal preserves strict threshold and refractor
     REQUIRE(detect.process_signal(0.6f));
 }
 
-TEST_CASE("TriggerDetect hysteretic CV path never inherits refractory debounce",
-          "[signal][mod][trigger][compatibility]") {
-    TriggerDetect detect;
-    detect.prepare(kSampleRate);
-    detect.set_refractory_ms(1000.0);
+TEST_CASE("HystereticTriggerDetect rearms at the low threshold",
+          "[signal][mod][trigger][hysteresis]") {
+    HystereticTriggerDetect detect;
     detect.set_thresholds(0.75, 0.25);
 
-    REQUIRE(detect.process_hysteretic_cv(0.8f));
-    REQUIRE_FALSE(detect.process_hysteretic_cv(0.2f));
-    REQUIRE(detect.process_hysteretic_cv(0.8f));
+    REQUIRE(detect.process(0.8f));
+    REQUIRE_FALSE(detect.process(0.2f));
+    REQUIRE(detect.process(0.8f));
 }
 
-TEST_CASE("TriggerDetect keeps floating process compatibility on one signal state",
-          "[signal][mod][trigger][compatibility]") {
-    TriggerDetect explicit_signal;
-    TriggerDetect compatible_signal;
-    for (auto* detector : {&explicit_signal, &compatible_signal}) {
-        detector->set_thresholds(0.75, 0.25);
-        detector->reset();
-    }
-
+TEST_CASE("HystereticTriggerDetect reports the state owned by its process lane",
+          "[signal][mod][trigger][hysteresis]") {
+    HystereticTriggerDetect detector;
+    detector.set_thresholds(0.75, 0.25);
+    detector.reset();
     for (float sample : {0.0f, 0.8f, 0.7f, 0.2f, 0.9f, 0.1f}) {
-        REQUIRE(explicit_signal.process_hysteretic_cv(sample) ==
-                compatible_signal.process(sample));
-        REQUIRE(explicit_signal.high() == compatible_signal.high());
+        const bool was_high = detector.high();
+        const bool rising = detector.process(sample);
+        REQUIRE(rising == (!was_high && detector.high()));
     }
 }
 

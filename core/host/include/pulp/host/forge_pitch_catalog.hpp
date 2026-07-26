@@ -359,7 +359,6 @@ enum : state::ParamID {
     kGlideMs,
     kDryLevel,
     kHumanize,
-    kFormantPreserve,
 };
 
 using Engine = signal::HarmonyEngine;
@@ -407,7 +406,6 @@ inline CustomNodeType make_harmony_engine_node() {
          static_cast<float>(Engine::kLevelMaxDb), 0.0f},
         {kHumanize, 0.0f, static_cast<float>(Engine::kHumanizeMaxCents),
          static_cast<float>(Engine::kHumanizeDefault)},
-        {kFormantPreserve, 0.0f, 1.0f, 0.0f},
     };
     t.process_instance_baked_param =
         [](void* p, audio::BufferView<float>& out,
@@ -435,7 +433,6 @@ inline CustomNodeType make_harmony_engine_node() {
                 engine.set_glide_ms(params.value_at(kGlideMs, offset));
                 engine.set_dry_level_db(params.value_at(kDryLevel, offset));
                 engine.set_humanize_cents(params.value_at(kHumanize, offset));
-                engine.set_formant_preserve(params.value_at(kFormantPreserve, offset) >= 0.5f);
                 output[i] = engine.process(input[i]);
             }
         };

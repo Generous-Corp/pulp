@@ -148,7 +148,6 @@ public:
         lifecycle_.set_curve(0.0);
         lifecycle_.set_hold_ms(0.0);
         lifecycle_.set_decay_ms(0.0);
-        lifecycle_.set_sustain(1.0);
         update();
     }
 

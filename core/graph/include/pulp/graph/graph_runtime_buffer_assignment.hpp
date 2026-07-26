@@ -65,6 +65,11 @@ struct GraphRuntimeBufferAssignment {
     // position) lives in the GraphRuntimeBufferPool, which knows max_frames; the
     // assignment carries only the per-connection sample counts.
     std::vector<std::uint32_t> connection_delay_samples;
+    // Maximum latency at any AudioOutput node after topology propagation. This
+    // is the graph's externally reported latency; keeping it beside the
+    // per-connection delays makes this assignment the single owner of latency
+    // analysis instead of requiring each host path to repeat the graph walk.
+    std::uint32_t routed_output_latency_samples = 0;
     // True if any connection needs a non-zero delay.
     bool has_delay = false;
     bool ok = false;

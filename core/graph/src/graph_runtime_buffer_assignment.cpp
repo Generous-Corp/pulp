@@ -196,6 +196,10 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
             }
             input_latency[node_index] = max_upstream;
             output_latency[node_index] = max_upstream + node.latency_samples;
+            if (node.kind == GraphRuntimeNodeKind::AudioOutput) {
+                assignment.routed_output_latency_samples = std::max(
+                    assignment.routed_output_latency_samples, max_upstream);
+            }
         }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {
             const auto& conn = plan.connections[i];

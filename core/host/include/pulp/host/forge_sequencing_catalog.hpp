@@ -288,7 +288,7 @@ inline Grid default_grid() {
 struct Instance {
     signal::CartesianWalk walk;
     signal::TransportEdge transport;          // run + reset + the X clock
-    signal::TriggerDetectT<float> y_detect;   // the second clock, same edge definition
+    signal::HystereticTriggerDetectT<float> y_detect;   // the second clock, same edge definition
 };
 
 /// Worst-case linear gain for the Forge registry (series law 8).
@@ -534,7 +534,7 @@ using Quant = signal::QuantizeScale;
 
 struct Instance {
     signal::QuantizeScale quant;
-    signal::TriggerDetectT<float> reset_detect;
+    signal::HystereticTriggerDetectT<float> reset_detect;
 };
 
 /// Worst-case linear gain for the Forge registry (series law 8).
@@ -724,7 +724,7 @@ using Prob = signal::ProbGate;
 
 struct Instance {
     signal::ProbGate gate;
-    signal::TriggerDetectT<float> reset_detect;
+    signal::HystereticTriggerDetectT<float> reset_detect;
 };
 
 /// Worst-case linear gain for the Forge registry (series law 8).

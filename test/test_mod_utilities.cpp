@@ -585,14 +585,14 @@ TEST_CASE("Envelope curve 0 is exactly linear", "[envelope][mod-utilities]") {
     env.gate_on();
 
     const double n = units::ms_to_samples(10.0, kSr);
-    for (int i = 1; i <= static_cast<int>(n) / 2; ++i) {
+    for (int i = 0; i < static_cast<int>(n) / 2; ++i) {
         const double v = env.next();
         REQUIRE_THAT(v, WithinAbs(i / n, 1e-6));
     }
 }
 
-TEST_CASE("Round-2 Ar sample ordering persists through release",
-          "[envelope][mod-utilities][compatibility]") {
+TEST_CASE("Ar uses level-before-advance ordering through release",
+          "[envelope][mod-utilities][contract]") {
     Ar env;
     env.prepare(kSr);
     env.set_attack_ms(0.0);
@@ -604,6 +604,7 @@ TEST_CASE("Round-2 Ar sample ordering persists through release",
 
     env.gate_off();
     const double release_samples = units::ms_to_samples(10.0, kSr);
+    REQUIRE_THAT(env.next(), WithinAbs(1.0, 1e-12));
     REQUIRE_THAT(env.next(), WithinAbs(1.0 - 1.0 / release_samples, 1e-6));
 }
 

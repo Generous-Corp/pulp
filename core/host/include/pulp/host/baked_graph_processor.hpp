@@ -49,6 +49,7 @@ namespace detail {
 // widely-included header stays free of param_cursor/store.
 struct BakedParamMailbox;
 struct BakedParamNodeState;
+struct BakedCustomNodeRuntime;
 }  // namespace detail
 
 // Bake-layer parameter-injection binding captured at bake() for one param-
@@ -130,6 +131,16 @@ struct CustomNodeLifecycle {
     // initial Custom state. Runs after prepare/reset so those hooks cannot erase
     // the authenticated state. False leaves the processor unprepared.
     std::function<bool()> restore_state;
+};
+
+// Complete bake-time binding for one Custom node. Keeping process, lifecycle,
+// parameter support, and latency under one NodeId-keyed record prevents the
+// four parallel maps from drifting as Custom-node capabilities evolve.
+struct BakedCustomNodeBinding {
+    CustomNodeProcessFn process;
+    CustomNodeLifecycle lifecycle;
+    BakedCustomParamBinding params;
+    std::function<int(double)> latency_samples;
 };
 
 // Outcome of a ParamInjector::inject() call. Distinguishes the two failure
@@ -214,29 +225,11 @@ public:
                         int output_channels,
                         std::string name,
                         std::string bundle_id,
-                        // Resolved Custom-node process callbacks captured from the
-                        // live graph at bake() (NodeId → fn). Each fn is a COPY that
-                        // captured the custom instance shared_ptr by value, so the
-                        // baked Processor OWNS the instance keepalive — no external
-                        // state. Empty for a custom-free graph.
-                        std::unordered_map<NodeId, CustomNodeProcessFn>
-                            custom_processors = {},
-                        // Per-node lifecycle hooks (NodeId → prepare/reset) for
-                        // stateful Custom instances, run by prepare() so a
-                        // re-prepare re-inits the instance's DSP state at the
-                        // host's real rate/block. Empty for stateless nodes.
-                        std::unordered_map<NodeId, CustomNodeLifecycle>
-                            custom_lifecycles = {},
-                        // Bake-layer param-injection bindings (NodeId → bound
-                        // param-aware process + declared params). Empty for a
-                        // graph with no param-declaring custom nodes.
-                        std::unordered_map<NodeId, BakedCustomParamBinding>
-                            param_bindings = {},
-                        // Prepare-stable Custom latency callbacks captured from
-                        // registered types. Re-evaluated at the baked host's
-                        // real sample rate before its routed PDC plan is built.
-                        std::unordered_map<NodeId, std::function<int(double)>>
-                            custom_latencies = {});
+                        // One complete binding per Custom node. Callback copies
+                        // capture their instance keepalive, so the baked
+                        // Processor owns all required runtime state.
+                        std::unordered_map<NodeId, BakedCustomNodeBinding>
+                            custom_nodes = {});
 
     ~BakedGraphProcessor() override;
 
@@ -260,8 +253,8 @@ public:
     ParamInjector claim_param_injection(NodeId node) noexcept;
 
 private:
-    // Build per-node injection state and install the draining wrapper into
-    // custom_processors_ for each param-declaring custom node. Called by prepare()
+    // Build per-node injection state and install the draining wrapper into each
+    // param-declaring Custom runtime. Called by prepare()
     // before the executor snapshot is built; off the audio thread.
     void prepare_param_injection();
 
@@ -285,17 +278,11 @@ private:
     // snapshot builder requires the storage to exist.
     std::vector<PluginBindingContext> plugin_ctx_;
     PluginRoutingScratch plugin_scratch_;
-    // Resolved Custom-node process callbacks (NodeId → fn, each holding its
-    // instance keepalive) + the executor's Custom binding storage. Empty for a
-    // custom-free graph; prepare() binds custom_ctx_ from custom_processors_.
-    std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors_;
+    // One owned runtime record per Custom node, consolidating its process,
+    // lifecycle, parameter injection, mailbox/state, and latency callback.
+    std::unordered_map<NodeId, std::unique_ptr<detail::BakedCustomNodeRuntime>>
+        custom_nodes_;
     std::vector<CustomBindingContext> custom_ctx_;
-    // Per-node stateful-Custom lifecycle hooks captured at bake(); prepare()
-    // runs each (prepare at the host's real rate/block, then reset) so stale
-    // instance state — e.g. a delay line's contents — never survives a
-    // re-prepare. Control-thread only, like the graph's own instance prepare.
-    std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles_;
-    std::unordered_map<NodeId, std::function<int(double)>> custom_latencies_;
 
     // In-place-host guard scratch: when the host's input channels alias its
     // output channels, process() copies the input here BEFORE process_routed
@@ -303,23 +290,6 @@ private:
     // the audio thread only detects overlap and memcpys — no allocation.
     std::vector<float> input_alias_scratch_;
     std::vector<float*> input_alias_ptrs_;
-
-    // Bake-layer parameter injection. `param_bindings_` is captured at bake().
-    // `param_mailboxes_` (one single-writer mailbox per param node) is built in
-    // the constructor and PERSISTS across prepare() so a control-side claim is
-    // never dropped by a re-prepare. `param_states_` (per-node store + cursor
-    // scratch + held values) is (re)built in prepare(); prepare() also installs a
-    // draining wrapper into custom_processors_ for each param node BEFORE the
-    // executor snapshot is built, so the routed path invokes the injection path.
-    // A4 (should-fix-soon, not this slice): a param node is currently keyed
-    // across four NodeId-indexed maps (custom_processors_, param_bindings_,
-    // param_mailboxes_, param_states_). Consider consolidating into one
-    // NodeId → struct map once the shape settles.
-    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings_;
-    std::unordered_map<NodeId, std::shared_ptr<detail::BakedParamMailbox>>
-        param_mailboxes_;
-    std::unordered_map<NodeId, std::unique_ptr<detail::BakedParamNodeState>>
-        param_states_;
 
     std::string name_;
     std::string bundle_id_;

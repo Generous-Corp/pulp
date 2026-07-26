@@ -168,14 +168,6 @@ public:
         return level_;
     }
 
-    /// Compatibility ordering for the former effect-envelope API, whose
-    /// first rendered attack sample was 1/N rather than the trigger point 0.
-    SampleType next_advanced() {
-        advance_();
-        level_ = level_at_();
-        return level_;
-    }
-
     SampleType current() const { return level_; }
     Stage stage() const { return stage_; }
     bool active() const { return stage_ != Stage::idle; }
@@ -378,10 +370,6 @@ public:
 
     void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
     void set_release_ms(double ms) { engine_.set_release_ms(ms); }
-    /// Compatibility with the former shared envelope core. `ArT` has no
-    /// adjustable sustain segment: while gated it always holds its peak, so
-    /// this setter is intentionally a no-op (the old core ignored it too).
-    void set_sustain(SampleType) {}
     void set_attack_curve(float c) { engine_.set_attack_curve(c); }
     void set_release_curve(float c) { engine_.set_release_curve(c); }
 
@@ -397,20 +385,15 @@ public:
     /// Gate edges drive the envelope; repeated calls with the same state are
     /// no-ops, so this can be called every sample from a gate signal.
     void gate(bool on) {
-        // `gate(bool)` selects the shipped level-before-advance contract when
-        // it starts a note. A note-off must not change that note's sample
-        // ordering halfway through its lifecycle.
-        if (on) advance_before_output_ = false;
         if (on == gate_) return;
         gate_ = on;
         if (on) engine_.trigger(SampleType{1});
         else engine_.release();
     }
 
-    void gate_on() {
-        gate(true);
-        advance_before_output_ = true;
-    }
+    /// Convenience spelling with exactly the same level-before-advance sample
+    /// ordering as `gate(true)`.
+    void gate_on() { gate(true); }
     void gate_off() { gate(false); }
 
     void reset() {
@@ -418,9 +401,7 @@ public:
         gate_ = false;
     }
 
-    SampleType next() {
-        return advance_before_output_ ? engine_.next_advanced() : engine_.next();
-    }
+    SampleType next() { return engine_.next(); }
     SampleType current() const { return engine_.current(); }
     SampleType value() const { return current(); }
     bool active() const { return engine_.active(); }
@@ -429,7 +410,6 @@ public:
 private:
     detail::EnvelopeEngine<SampleType> engine_{};
     bool gate_ = false;
-    bool advance_before_output_ = false;
 };
 
 using Ar = ArT<float>;

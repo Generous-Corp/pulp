@@ -137,6 +137,10 @@ TEST_CASE("Forge tape: the baked table mirrors the module's canonical ranges",
             FAIL("parameter not declared: " << id);
             return type.baked_params.front();
         };
+        auto has_row = [&](pulp::state::ParamID id) {
+            return std::any_of(type.baked_params.begin(), type.baked_params.end(),
+                               [id](const auto& p) { return p.id == id; });
+        };
 
         const auto bias = row(tape_node::kBias);
         REQUIRE_THAT(bias.min_value, WithinAbs(TapeMachine::kBiasMin, 1e-6));
@@ -175,12 +179,19 @@ TEST_CASE("Forge tape: the baked table mirrors the module's canonical ranges",
                                                          1e-6));
 
         // The EQ curve's range is the archetype's front panel, not the enum.
-        const auto curve = row(tape_node::kEqCurve);
+        // A fixed realization omits the row instead of exposing a dead knob.
         const tape_node::CurveRange range = tape_node::curve_range(archetype);
-        REQUIRE_THAT(curve.min_value, WithinAbs(static_cast<float>(range.min_curve), 1e-6));
-        REQUIRE_THAT(curve.max_value, WithinAbs(static_cast<float>(range.max_curve), 1e-6));
-        REQUIRE_THAT(curve.default_value,
-                     WithinAbs(static_cast<float>(preset.default_curve), 1e-6));
+        if (range.min_curve != range.max_curve) {
+            const auto curve = row(tape_node::kEqCurve);
+            REQUIRE_THAT(curve.min_value,
+                         WithinAbs(static_cast<float>(range.min_curve), 1e-6));
+            REQUIRE_THAT(curve.max_value,
+                         WithinAbs(static_cast<float>(range.max_curve), 1e-6));
+            REQUIRE_THAT(curve.default_value,
+                         WithinAbs(static_cast<float>(preset.default_curve), 1e-6));
+        } else {
+            REQUIRE_FALSE(has_row(tape_node::kEqCurve));
+        }
 
         const auto mix = row(tape_node::kMix);
         REQUIRE_THAT(mix.min_value, WithinAbs(0.0f, 1e-6));
@@ -217,7 +228,10 @@ TEST_CASE("Forge tape: speed is a realization, and it snaps to the legal set",
             REQUIRE(p.default_value >= p.min_value);
             REQUIRE(p.default_value <= p.max_value);
         }
-        REQUIRE(type.baked_params.size() == 9u);
+        const bool variable_curve =
+            tape_node::curve_range(archetype).min_curve !=
+            tape_node::curve_range(archetype).max_curve;
+        REQUIRE(type.baked_params.size() == (variable_curve ? 9u : 8u));
     }
 
     // A cassette node asked for 30 ips runs at 1.875 rather than refusing, so a
@@ -238,8 +252,11 @@ TEST_CASE("Forge tape speed and pre-echo identities are stable and distinct",
     REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 29.9).type_id ==
             tape_node::make_tape_machine_node(A::studer_a800, 30.0).type_id);
     REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id != base.type_id);
-    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id ==
+    const auto pre_echo = tape_node::make_tape_machine_node(A::studer_a800, 15.0, true);
+    REQUIRE(pre_echo.type_id ==
             tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id);
+    REQUIRE(std::none_of(pre_echo.baked_params.begin(), pre_echo.baked_params.end(),
+                         [](const auto& p) { return p.id == tape_node::kPrintOffsetMs; }));
 }
 
 TEST_CASE("Forge tape: injecting drive changes harmonic content",
@@ -435,7 +452,9 @@ TEST_CASE("Forge tape: the node's process path allocates nothing",
                 injector.inject(immediate(tape_node::kAge, 0.05f * f));
                 injector.inject(immediate(tape_node::kCrosstalkDb, -44.0f + f));
                 injector.inject(immediate(tape_node::kPrintThroughDb, -79.0f + 2.0f * f));
-                injector.inject(immediate(tape_node::kPrintOffsetMs, 210.0f + 20.0f * f));
+                if (!pre_echo)
+                    injector.inject(
+                        immediate(tape_node::kPrintOffsetMs, 210.0f + 20.0f * f));
                 injector.inject(immediate(tape_node::kCompanding, block % 2 ? 1.0f : 0.0f));
                 injector.inject(immediate(tape_node::kMix, 0.05f * f));
                 renderer.render();

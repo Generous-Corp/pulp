@@ -147,11 +147,11 @@ namespace pulp::host::synthesis {
 namespace additive {
 
 /// The two registered voices. See the header note: the split exists because a
-/// modal voice makes `inharmonicity` inert, not merely because the tables
+/// modal voice has no inharmonicity control, not merely because the tables
 /// differ.
 enum class Voice : std::uint8_t {
     organ,  ///< Harmonic, sustained. `inharmonicity` applies.
-    bell,   ///< Modal, per-partial decays. `inharmonicity` is inert by design.
+    bell,   ///< Modal, per-partial decays. No inharmonicity parameter.
 };
 
 inline constexpr const char* kOrganTypeId = "synthesis.additive_organ";
@@ -260,9 +260,11 @@ inline CustomNodeType make_additive_bank_node(Voice voice = Voice::organ,
                               static_cast<float>(Bank::kFundamentalDefaultHz)});
     t.baked_params.push_back({kPartialCount, 1.0f, static_cast<float>(partials),
                               static_cast<float>(std::min(Bank::kPartialCountDefault, partials))});
-    t.baked_params.push_back({kInharmonicity, 0.0f,
-                              static_cast<float>(Bank::kInharmonicityMax),
-                              static_cast<float>(Bank::kInharmonicityDefault)});
+    if (voice == Voice::organ) {
+        t.baked_params.push_back({kInharmonicity, 0.0f,
+                                  static_cast<float>(Bank::kInharmonicityMax),
+                                  static_cast<float>(Bank::kInharmonicityDefault)});
+    }
     t.baked_params.push_back({kSpectralTilt, static_cast<float>(Bank::kSpectralTiltMinDbOct),
                               static_cast<float>(Bank::kSpectralTiltMaxDbOct),
                               static_cast<float>(Bank::kSpectralTiltDefaultDbOct)});
@@ -280,9 +282,9 @@ inline CustomNodeType make_additive_bank_node(Voice voice = Voice::organ,
     t.baked_params.push_back({kDetuneCents, 0.0f, static_cast<float>(Bank::kDetuneMaxCents),
                               static_cast<float>(Bank::kDetuneDefaultCents)});
 
-    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
-                                        const audio::BufferView<const float>& in, int n,
-                                        const BakedParamView& params) {
+    t.process_instance_baked_param = [voice](void* p, audio::BufferView<float>& out,
+                                              const audio::BufferView<const float>& in,
+                                              int n, const BakedParamView& params) {
         auto* s = static_cast<Instance*>(p);
         const float* gate = in.channel_ptr(0);
         float* output = out.channel_ptr(0);
@@ -295,7 +297,8 @@ inline CustomNodeType make_additive_bank_node(Voice voice = Voice::organ,
             s->bank.set_fundamental_hz(params.value_at(kFundamentalHz, offset));
             s->bank.set_partial_count(
                 static_cast<int>(std::lround(params.value_at(kPartialCount, offset))));
-            s->bank.set_inharmonicity_b(params.value_at(kInharmonicity, offset));
+            if (voice == Voice::organ)
+                s->bank.set_inharmonicity_b(params.value_at(kInharmonicity, offset));
             s->bank.set_spectral_tilt_db_oct(params.value_at(kSpectralTilt, offset));
             s->bank.set_master_gain_db(params.value_at(kMasterGainDb, offset));
             s->bank.set_envelope_mode(

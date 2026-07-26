@@ -284,6 +284,7 @@ TEST_CASE("Buffer assignment propagates latency into per-connection delays",
     check_invariants(plan.plan, a);
 
     REQUIRE(a.has_delay);
+    CHECK(a.routed_output_latency_samples == 64u);
     REQUIRE(a.connection_delay_samples.size() == plan.plan.connections.size());
     // Dense indices: gain == node index 2, output == node index 3.
     for (std::size_t i = 0; i < plan.plan.connections.size(); ++i) {
@@ -311,6 +312,7 @@ TEST_CASE("Buffer assignment reports no delay when no node adds latency",
     const auto a = build_graph_runtime_buffer_assignment(plan.plan);
     check_invariants(plan.plan, a);
     CHECK_FALSE(a.has_delay);
+    CHECK(a.routed_output_latency_samples == 0u);
     for (const auto d : a.connection_delay_samples) CHECK(d == 0u);
 }
 

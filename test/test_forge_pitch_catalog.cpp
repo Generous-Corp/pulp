@@ -894,7 +894,7 @@ TEST_CASE("The harmony factory exposes the complete canonical parameter surface"
     REQUIRE(node.type_id == harmony::kTypeId);
     REQUIRE(node.num_input_ports == 1);
     REQUIRE(node.num_output_ports == 1);
-    REQUIRE(node.baked_params.size() == 13);
+    REQUIRE(node.baked_params.size() == 12);
     REQUIRE(harmony::worst_case_gain() ==
             static_cast<float>(pulp::signal::HarmonyEngine::kWorstCaseGain));
     REQUIRE(harmony::worst_case_gain() > 9.9f);

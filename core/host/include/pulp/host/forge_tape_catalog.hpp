@@ -33,14 +33,14 @@
 //     compensation — the same rule that makes the saturator's alias policy a
 //     realization rather than a param.
 //
-// The EQ curve IS a parameter, which is the one case where this file departs
+// The EQ curve MAY be a parameter, which is the one case where this file departs
 // from the saturator's "enums are realizations" instinct. It departs because on
 // the machines being modelled the EQ standard is a FRONT-PANEL SWITCH — the
 // A800's master EQ selector, the cassette deck's Type I/II tape-type selector —
 // and because unlike a waveshaper shape it is allocation-free, latency-neutral,
 // and confined to four coefficients of a first-order section whose entire state
-// is one sample. The legal range is narrowed per archetype so an Ampex-class
-// node cannot be told to run a cassette curve.
+// is one sample. It is omitted entirely when the archetype has only one legal
+// curve; a one-position selector is implementation detail, not a capability.
 //
 // ── Control parameters are applied per BLOCK, not per sample ──────────────
 //
@@ -216,6 +216,7 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
         std::isfinite(speed_ips) && speed_ips > 0.0 ? speed_ips : preset.default_speed_ips;
     const double speed = signal::tape::snap_speed_ips(fixed_archetype, requested_speed);
     const CurveRange curves = curve_range(fixed_archetype);
+    const bool curve_is_variable = curves.min_curve != curves.max_curve;
 
     CustomNodeType t;
     t.type_id = tape_type_id(fixed_archetype);
@@ -259,9 +260,11 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
     // Ranges and defaults are the module's canonical contract, in REAL units;
     // the Forge layer mirrors them and owns the display curve. Every row here is
     // a design-parameter declaration per the series contract.
-    t.baked_params.push_back({kEqCurve, static_cast<float>(curves.min_curve),
-                              static_cast<float>(curves.max_curve),
-                              static_cast<float>(preset.default_curve)});
+    if (curve_is_variable) {
+        t.baked_params.push_back({kEqCurve, static_cast<float>(curves.min_curve),
+                                  static_cast<float>(curves.max_curve),
+                                  static_cast<float>(preset.default_curve)});
+    }
     t.baked_params.push_back({kBias, static_cast<float>(Machine::kBiasMin),
                               static_cast<float>(Machine::kBiasMax),
                               static_cast<float>(Machine::kBiasDefault)});
@@ -276,21 +279,21 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
         {kPrintThroughDb, static_cast<float>(Machine::kPrintThroughDbMin),
          static_cast<float>(Machine::kPrintThroughDbMax),
          static_cast<float>(signal::tape::age_print_through_db(preset.age01))});
-    // With pre-echo disabled the offset is latency-neutral. The pre-echo
-    // realization keeps the row for catalog/state compatibility but freezes
-    // the DSP at this default below so injected changes cannot move PDC.
+    // With pre-echo disabled the offset is latency-neutral. A pre-echo
+    // realization fixes it at construction because it contributes to latency,
+    // so exposing a frozen row there would advertise a capability that cannot
+    // do anything.
     const float print_offset_default =
         static_cast<float>(Machine::kPrintThroughOffsetMsDefault);
-    t.baked_params.push_back(
-        {kPrintOffsetMs,
-         pre_echo_enabled ? print_offset_default
-                          : static_cast<float>(Machine::kPrintThroughOffsetMsMin),
-         pre_echo_enabled ? print_offset_default
-                          : static_cast<float>(Machine::kPrintThroughOffsetMsMax),
-         print_offset_default});
+    if (!pre_echo_enabled) {
+        t.baked_params.push_back(
+            {kPrintOffsetMs, static_cast<float>(Machine::kPrintThroughOffsetMsMin),
+             static_cast<float>(Machine::kPrintThroughOffsetMsMax),
+             print_offset_default});
+    }
     t.baked_params.push_back({kMix, 0.0f, 1.0f, 1.0f});
 
-    t.process_instance_baked_param = [pre_echo_enabled](
+    t.process_instance_baked_param = [pre_echo_enabled, curve_is_variable](
                                          void* p, audio::BufferView<float>& out,
                                          const audio::BufferView<const float>& in, int n,
                                          const BakedParamView& params) {
@@ -305,7 +308,8 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
             return true;
         };
 
-        if (changed(instance->curve, params.value_at(kEqCurve, 0)))
+        if (curve_is_variable &&
+            changed(instance->curve, params.value_at(kEqCurve, 0)))
             machine.set_eq_curve(static_cast<Curve>(
                 static_cast<std::uint8_t>(std::lround(instance->curve))));
         if (changed(instance->drive, params.value_at(kDrive, 0)))

@@ -83,7 +83,7 @@ inline constexpr state::ParamID kReleaseMs = 5;        // ms
 inline constexpr state::ParamID kDetectorMode = 6;     // stepped 0 = peak, 1 = RMS
 inline constexpr state::ParamID kRmsWindowMs = 7;      // ms
 // Param id 8 is intentionally reserved. Lookahead changes the node's latency,
-// so this zero-latency realization does not expose it as injectable automation.
+// so it is fixed by the realization factory rather than injectable automation.
 inline constexpr state::ParamID kProgramDependent = 9; // stepped 0/1
 inline constexpr state::ParamID kMakeupDb = 10;        // dB
 inline constexpr state::ParamID kAutoMakeup = 11;      // stepped 0/1
@@ -115,25 +115,39 @@ inline float feedforward_compressor_worst_case_gain() {
 
 /// The transparent/modern compressor as a lowerable custom node.
 ///
-/// This catalog realization is deliberately zero-lookahead. Lookahead changes
-/// intrinsic latency, so supporting non-zero variants would require distinct,
-/// stable custom-node identities rather than an injectable control or an
-/// unencoded factory argument.
-inline CustomNodeType make_feedforward_compressor_node() {
+/// `lookahead_ms` is a construction-time realization axis because it changes
+/// intrinsic latency. Non-zero values therefore receive stable, collision-free
+/// type identities; the historical zero-lookahead node retains its base id.
+inline CustomNodeType make_feedforward_compressor_node(float lookahead_ms = 0.0f) {
+    using Comp = signal::FeedforwardCompressor;
+    const double fixed_lookahead_ms = std::clamp(
+        std::isfinite(static_cast<double>(lookahead_ms))
+            ? static_cast<double>(lookahead_ms)
+            : 0.0,
+        0.0, static_cast<double>(kNodeMaxLookaheadMs));
+
     CustomNodeType t;
     t.type_id = kFeedforwardCompressorTypeId;
+    if (fixed_lookahead_ms != 0.0)
+        t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms);
     t.version = 1;
     t.num_input_ports = 2;  // 0 = left, 1 = right (ONE logical stereo wire)
     t.num_output_ports = 2;
     t.default_name = "Compressor";
     t.lowerable = true;
+    t.latency_samples = [fixed_lookahead_ms](double sample_rate) {
+        Comp probe;
+        probe.prepare(sample_rate, kNodeMaxLookaheadMs);
+        probe.set_lookahead_ms(fixed_lookahead_ms);
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new FeedforwardCompressorInstance{}; };
     t.destroy = [](void* p) { delete static_cast<FeedforwardCompressorInstance*>(p); };
-    t.prepare = [](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_lookahead_ms](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<FeedforwardCompressorInstance*>(p);
         s->compressor.prepare(sr, kNodeMaxLookaheadMs);
-        s->compressor.set_lookahead_ms(0.0);
+        s->compressor.set_lookahead_ms(fixed_lookahead_ms);
     };
     t.reset = [](void* p) {
         static_cast<FeedforwardCompressorInstance*>(p)->compressor.reset();
@@ -143,7 +157,6 @@ inline CustomNodeType make_feedforward_compressor_node() {
     // Each row is a design-parameter declaration per the series contract; the
     // `set_*` comments in the DSP header mirror these same numbers for
     // readability at the call site and are not a second declaration.
-    using Comp = signal::FeedforwardCompressor;
     t.baked_params.push_back({kThresholdDb, static_cast<float>(Comp::kThresholdDbMin),
                               static_cast<float>(Comp::kThresholdDbMax), -18.0f});
     t.baked_params.push_back({kRatio, static_cast<float>(Comp::kRatioMin),

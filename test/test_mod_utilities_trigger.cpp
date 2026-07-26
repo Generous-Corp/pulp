@@ -18,15 +18,15 @@ constexpr double kSr = 48000.0;
 
 TEST_CASE("TriggerDetect fires once per edge and hysteresis stops chatter",
           "[trigger][mod-utilities]") {
-    TriggerDetect det;
+    HystereticTriggerDetect det;
     det.reset();
 
-    REQUIRE(det.process_hysteretic_cv(1.0f));
-    REQUIRE_FALSE(det.process_hysteretic_cv(1.0f));
-    REQUIRE_FALSE(det.process_hysteretic_cv(0.4f));
-    REQUIRE_FALSE(det.process_hysteretic_cv(1.0f));
-    REQUIRE_FALSE(det.process_hysteretic_cv(0.1f));
-    REQUIRE(det.process_hysteretic_cv(1.0f));
+    REQUIRE(det.process(1.0f));
+    REQUIRE_FALSE(det.process(1.0f));
+    REQUIRE_FALSE(det.process(0.4f));
+    REQUIRE_FALSE(det.process(1.0f));
+    REQUIRE_FALSE(det.process(0.1f));
+    REQUIRE(det.process(1.0f));
 }
 
 TEST_CASE("ClockDivider passes the first edge after reset", "[trigger][mod-utilities]") {
@@ -218,7 +218,7 @@ TEST_CASE("BurstGen emits exactly its count at its interval", "[trigger][mod-uti
 
 TEST_CASE("trigger-kit utilities allocate nothing on the audio thread",
           "[trigger][mod-utilities][rt-safety]") {
-    TriggerDetect trigger;
+    HystereticTriggerDetect trigger;
     Comparator comparator;
     GateGen gate;
     ClockDivider divider;
@@ -234,7 +234,7 @@ TEST_CASE("trigger-kit utilities allocate nothing on the audio thread",
     pulp::test::RtAllocationProbe probe;
     for (int i = 0; i < 512; ++i) {
         const float clock = (i % 64) == 0 ? 1.0f : 0.0f;
-        (void)trigger.process_hysteretic_cv(clock);
+        (void)trigger.process(clock);
         (void)comparator.process(clock);
         (void)gate.process(clock);
         (void)divider.process(clock);
