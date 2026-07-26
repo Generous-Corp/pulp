@@ -428,9 +428,18 @@ OSStatus PulpAUMidiProcessor::Render(AudioUnitRenderActionFlags& ioActionFlags,
             ProcessBusBufferSet<const float>{std::span(input_buses)},
             ProcessBusBufferSet<float>{std::span(output_buses)},
         };
-        {
+        // Prove no class-info restore is installing underneath this block.
+        // Hosts set class info on the main thread while the unit is rendering,
+        // and Processor::deserialize_plugin_state() is documented as running
+        // with the audio thread stopped. A contended block emits no MIDI and
+        // renders nothing; a MIDI processor's audio bus carries no channels.
+        auto render_lock = state_restore_gate_.lock_for_render();
+        if (render_lock) {
             pulp::runtime::ScopedNoAlloc no_alloc_guard;
             processor_->process(process_buffers, midi_in_, midi_out_, ctx);
+        } else {
+            midi_out_.clear();
+            midi_out_.clear_sysex();
         }
     }
 
@@ -484,7 +493,7 @@ OSStatus PulpAUMidiProcessor::RestoreState(CFPropertyListRef plist)
     if (!processor_) return kAudioUnitErr_Uninitialized;
     // store_ is the source of truth (GetParameter reads it) — no Globals mirror
     // to update.
-    return restore_pulp_state(store_, *processor_, plist);
+    return restore_pulp_state(store_, *processor_, state_restore_gate_, plist);
 }
 
 Float64 PulpAUMidiProcessor::GetLatency()

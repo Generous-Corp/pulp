@@ -141,6 +141,10 @@ private:
     // about to join. Reversing these two lines hands that thread a freed store.
     state::StateStore store_;
     std::unique_ptr<Processor> processor_;
+    // Keeps a host class-info restore off the processor while Render() is
+    // inside it. Declared after processor_ so it outlives every render that
+    // consults it.
+    StateRestoreGate state_restore_gate_;
     // Declared after processor_ so reverse member destruction retires retained
     // editor handles before either referenced object is released.
     runtime::AliveToken owner_alive_;

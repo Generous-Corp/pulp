@@ -505,6 +505,7 @@ OSStatus save_pulp_state(state::StateStore& store,
 
 OSStatus restore_pulp_state(state::StateStore& store,
                             Processor& processor,
+                            StateRestoreGate& gate,
                             CFPropertyListRef plist)
 {
     if (!plist || CFGetTypeID(plist) != CFDictionaryGetTypeID()) return noErr;
@@ -516,6 +517,7 @@ OSStatus restore_pulp_state(state::StateStore& store,
 
     const auto* bytes = CFDataGetBytePtr(cf_data);
     const auto length = CFDataGetLength(cf_data);
+    auto restore_lock = gate.lock_for_restore();
     if (!plugin_state_io::deserialize(
             {bytes, static_cast<std::size_t>(length)}, store, processor))
         return kAudioUnitErr_InvalidPropertyValue;

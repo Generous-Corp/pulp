@@ -448,3 +448,8 @@ catch_discover_tests(pulp-test-xcode-developer-path)
 # host parameter — a step grid is too big and too structured to expose as one
 # automatable param per cell, so it travels its own channel instead.
 pulp_add_test_suite(pulp-test-step-sequencer-roundtrip LIBRARIES pulp::view pulp::state pulp::format pulp::midi pulp::audio)
+
+# The gate that keeps a host state restore off a Processor while the audio
+# thread is inside process(). Header-only primitive plus its buffer helpers, so
+# it needs no adapter or SDK — pulp::audio supplies BufferView.
+pulp_add_test_suite(pulp-test-state-restore-gate LIBRARIES pulp::audio pulp::format)
