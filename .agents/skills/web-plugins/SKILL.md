@@ -321,6 +321,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   function and the no-exceptions library like any other timeline TU, even though
   they never run in a render path.
 
+- Only translation units under `core/timeline/src` join those lists. A public
+  header added under `core/timeline/include` for a foreign-format interop
+  target — `dawproject_import.hpp`, `smf.hpp` — stays out of every web source
+  list, because its implementation lives in its own target
+  (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
+  build. The closure checker scans sources, so adding such a header is
+  correct even though it touches `core/timeline`.
+
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked
   example: `MasterTransport::begin_scrub()` emits repeated windows whose restarts
