@@ -250,9 +250,8 @@ protected:
 
     bool on_is_active() const override {
         return pluck_pending_ || exciter_env_.is_active() || gate_env_.is_active() ||
-               (sub_level_ > 0.0 && sub_env_.is_active()) ||
-               (air_level_ > 0.0 && air_env_.is_active()) ||
-               (click_level_ > 0.0 && click_env_.is_active()) ||
+               sub_env_.is_active() || air_env_.is_active() ||
+               click_env_.is_active() ||
                level_ > kSilenceLevel || output_.has_tail();
     }
 
@@ -283,19 +282,19 @@ protected:
                 const double gated = gate_.process(body_[static_cast<std::size_t>(i)],
                                                    gate_env_.process());
                 double layers = 0.0;
-                if (sub_level_ > 0.0 && sub_env_.is_active()) {
+                if (sub_env_.is_active()) {
                     sub_phase_ +=
                         0.5 * applied_fundamental_hz_ / sample_rate();
                     if (sub_phase_ >= 1.0) sub_phase_ -= std::floor(sub_phase_);
                     layers += std::sin(2.0 * 3.14159265358979323846 * sub_phase_) *
                               sub_env_.process() * sub_level_;
                 }
-                if (air_level_ > 0.0 && air_env_.is_active()) {
+                if (air_env_.is_active()) {
                     layers += static_cast<double>(air_filter_.process_highpass(
                                   air_noise_.white())) *
                               air_env_.process() * air_level_;
                 }
-                if (click_level_ > 0.0 && click_env_.is_active()) {
+                if (click_env_.is_active()) {
                     layers += static_cast<double>(click_filter_.process_lowpass(
                                   click_noise_.white())) *
                               click_env_.process() * click_level_;

@@ -605,6 +605,29 @@ TEST_CASE("The membrane's sub, air, and click layers reach emitted audio",
     REQUIRE(peak(click_attack) > peak(body_attack) * 1.5);
 }
 
+TEST_CASE("Muted membrane layers drain instead of resuming stale transients",
+          "[signal][drum][membrane][lifecycle]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_decay_ms(20.0);
+    voice.set_sub_level(1.0);
+    voice.set_air_level(1.0);
+    voice.set_air_decay_ms(10.0);
+    voice.set_click_level(1.0);
+    voice.set_click_decay_ms(5.0);
+    voice.note_on(1.0f);
+
+    voice.set_sub_level(0.0);
+    voice.set_air_level(0.0);
+    voice.set_click_level(0.0);
+    (void)render(voice, 96000);
+
+    voice.set_sub_level(1.0);
+    voice.set_air_level(1.0);
+    voice.set_click_level(1.0);
+    REQUIRE_FALSE(voice.is_active());
+}
+
 TEST_CASE("Membrane velocity tension moves the body and sub together",
           "[signal][drum][membrane][velocity]") {
     MembraneVoice voice;
