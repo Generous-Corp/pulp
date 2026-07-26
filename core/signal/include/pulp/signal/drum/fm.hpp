@@ -556,6 +556,7 @@ protected:
         applied_depth_ =
             depth_ * static_cast<double>(response.brightness_scale(velocity));
 
+        noise_.reset();
         phases_.fill(0.0);
         previous_.fill(0.0);
         formant_.set_frequency(

@@ -166,7 +166,10 @@ public:
         reset();
     }
 
-    void reset() { filter_.reset(); }
+    void reset() {
+        filter_.reset();
+        ring_level_ = 0.0;
+    }
 
     void set_level(double level) { level_ = std::max(level, 0.0); }
     void set_frequency_hz(double hz) {
@@ -181,12 +184,20 @@ public:
     double level() const { return level_; }
     double frequency_hz() const { return frequency_hz_; }
     double resonance() const { return resonance_; }
+    bool is_ringing() const {
+        return level_ > 0.0 && ring_level_ > kSilenceLevel;
+    }
 
     double process(double excitation) {
-        if (level_ <= 0.0) return excitation;
-        return excitation +
-               level_ * static_cast<double>(
-                            filter_.process(static_cast<float>(excitation)));
+        if (level_ <= 0.0) {
+            ring_level_ = 0.0;
+            return excitation;
+        }
+        const double resonance = static_cast<double>(
+            filter_.process(static_cast<float>(excitation)));
+        ring_level_ =
+            std::max(std::fabs(resonance), ring_level_ * kLevelDecay);
+        return excitation + level_ * resonance;
     }
 
 private:
@@ -196,10 +207,14 @@ private:
         filter_.set_resonance(static_cast<float>(resonance_));
     }
 
+    static constexpr double kSilenceLevel = 1.0e-6;
+    static constexpr double kLevelDecay = 0.999;
+
     double sample_rate_ = 44100.0;
     double level_ = 0.0;
     double frequency_hz_ = 180.0;
     double resonance_ = 12.0;
+    double ring_level_ = 0.0;
     Svf filter_;
 };
 

@@ -911,6 +911,7 @@ TEST_CASE("The reusable shell block bypasses cleanly and preserves its ring",
     shell.set_resonance(12.0);
     double ring_energy = 0.0;
     (void)shell.process(1.0);
+    CHECK(shell.is_ringing());
     for (int i = 0; i < 2048; ++i) {
         const double sample = shell.process(0.0);
         ring_energy += sample * sample;
@@ -918,9 +919,30 @@ TEST_CASE("The reusable shell block bypasses cleanly and preserves its ring",
     CHECK(ring_energy > 1.0e-4);
 
     shell.reset();
+    CHECK_FALSE(shell.is_ringing());
     for (int i = 0; i < 512; ++i) {
         CHECK(shell.process(0.0) == 0.0);
     }
+}
+
+TEST_CASE("The snare drains its shell resonance after the strike ends",
+          "[signal][drum][snare][shell][lifecycle]") {
+    SnareVoice voice;
+    voice.prepare(kFs);
+    voice.set_tone_level(0.0);
+    voice.set_noise_level(0.0);
+    voice.set_snap_level(1.0);
+    voice.set_snap_decay_ms(0.5);
+    voice.set_shell_level(1.0);
+    voice.set_shell_resonance(30.0);
+    voice.output().set_oversampling(
+        pulp::signal::drum::OutputOversampling::bypass);
+
+    voice.note_on(1.0f);
+    (void)render(voice, 256);
+    REQUIRE(voice.is_active());
+    (void)render(voice, 48000);
+    REQUIRE_FALSE(voice.is_active());
 }
 
 // -- Tom ---------------------------------------------------------------------

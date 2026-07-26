@@ -553,6 +553,22 @@ TEST_CASE("The eight-operator voice is deterministic",
     REQUIRE(first == second);
 }
 
+TEST_CASE("Successive FM8 transient hits restart deterministic excitation",
+          "[signal][drum][fm8][transient][lifecycle]") {
+    Fm8DrumVoice voice;
+    voice.prepare(kFs);
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op)
+        voice.set_operator_level(op, 0.0);
+    voice.set_transient(23);
+    voice.output().set_oversampling(
+        pulp::signal::drum::OutputOversampling::bypass);
+
+    const auto first = hit(voice, 1.0f, 12000);
+    const auto second = hit(voice, 1.0f, 12000);
+    REQUIRE(peak(first) > 1.0e-4);
+    REQUIRE(second == first);
+}
+
 TEST_CASE("An out-of-range algorithm or operator index is clamped, not UB",
           "[signal][drum][fm8]") {
     Fm8DrumVoice voice;

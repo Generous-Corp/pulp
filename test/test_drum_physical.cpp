@@ -1140,6 +1140,25 @@ TEST_CASE("The string's lowpass gate darkens its release",
             high_fraction(bypassed_tail, 1200.0) * 0.8);
 }
 
+TEST_CASE("The optional string lowpass gate is bypassed by default",
+          "[signal][drum][string][compatibility]") {
+    auto render_default = [](bool explicit_bypass) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_damping(0.05);
+        if (explicit_bypass) voice.set_lpg_amount(0.0);
+        voice.gate().set_colour(1.0);
+        voice.gate().set_fall_ms(120.0);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 24000);
+    };
+
+    REQUIRE(render_default(false) == render_default(true));
+}
+
 TEST_CASE("A second hit adds to the ringing string by default",
           "[signal][drum][string]") {
     // The physical behaviour, and why a fast repeated figure does not sound

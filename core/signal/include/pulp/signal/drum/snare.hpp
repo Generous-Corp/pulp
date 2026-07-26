@@ -207,7 +207,7 @@ protected:
     bool on_is_active() const override {
         return (tone_level_ > 0.0 && tone_env_.is_active()) ||
                (noise_level_ > 0.0 && noise_env_.is_active()) || snap_.is_active() ||
-               output_.has_tail();
+               shell_.is_ringing() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

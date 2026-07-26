@@ -249,7 +249,7 @@ private:
     double modulation_mix_ = 0.0;
     double modulation_ratio_ = 2.0;
     double fm_depth_octaves_ = 0.25;
-    double lpg_amount_ = 1.0;
+    double lpg_amount_ = 0.0;
 
     NoiseSource noise_;
     KarplusStrong string_;
