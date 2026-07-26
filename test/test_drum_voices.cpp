@@ -309,10 +309,11 @@ TEST_CASE("Velocity shifts the snare toward its wires",
     REQUIRE(high_fraction(loud, 1000.0) > high_fraction(soft, 1000.0) * 1.1);
 }
 
-TEST_CASE("The snare's second lo-fi chain acts only on the wires",
+TEST_CASE("The snare's tone and wire lo-fi chains are independent",
           "[signal][drum][snare]") {
-    // One shared chain cannot crush the wires harder than the shell, which is
-    // a standard sound. The control is that the tone path is untouched.
+    // One shared chain cannot age the pitched shell and wires independently.
+    // Each direction has a negative control so a disconnected setter cannot
+    // satisfy the test merely because the deterministic render repeated.
     SnareVoice voice;
     voice.prepare(kFs);
     voice.set_noise_level(0.0);
@@ -324,10 +325,20 @@ TEST_CASE("The snare's second lo-fi chain acts only on the wires",
     const auto tone_after = hit(voice, 1.0f, 12000);
     REQUIRE(tone_before == tone_after);
 
+    voice.tone_lofi().set_bits(3.0);
+    const auto tone_crushed = hit(voice, 1.0f, 12000);
+    REQUIRE_FALSE(tone_before == tone_crushed);
+
     voice.set_tone_level(0.0);
     voice.set_noise_level(1.0);
+    voice.tone_lofi().set_bits(24.0);
     voice.noise_lofi().set_bits(24.0);
     const auto wires_clean = hit(voice, 1.0f, 12000);
+
+    voice.tone_lofi().set_bits(3.0);
+    const auto wires_after_tone_change = hit(voice, 1.0f, 12000);
+    REQUIRE(wires_clean == wires_after_tone_change);
+
     voice.noise_lofi().set_bits(3.0);
     const auto wires_crushed = hit(voice, 1.0f, 12000);
     REQUIRE_FALSE(wires_clean == wires_crushed);

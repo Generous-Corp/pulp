@@ -115,6 +115,11 @@ public:
 
     OutputStage& output() { return output_; }
 
+    /// Degradation applied to the pitched shell before it meets the wires.
+    /// Keeping this separate from both the wire path and the shared output
+    /// stage lets a preset age either half of the instrument independently.
+    LofiChain& tone_lofi() { return tone_lofi_; }
+
     /// A second degradation chain on the noise path alone. Crushing the wires
     /// harder than the shell is a distinct and much-used sound, and one shared
     /// chain cannot produce it.
@@ -131,6 +136,7 @@ protected:
         shell_.set_sample_rate(static_cast<float>(sample_rate));
         shell_.set_mode(Svf::Mode::bandpass);
         snap_hp_.prepare(static_cast<float>(sample_rate));
+        tone_lofi_.set_sample_rate(sample_rate);
         noise_lofi_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
     }
@@ -143,6 +149,7 @@ protected:
         noise_filter_.reset();
         shell_.reset();
         snap_hp_.reset();
+        tone_lofi_.reset();
         noise_lofi_.reset();
         output_.reset();
         noise_.reset();
@@ -208,9 +215,11 @@ protected:
         const double wire_gain = noise_level_ * (1.0 + noise_tilt_);
 
         for (int i = 0; i < num_samples; ++i) {
+            const auto tone = tone_lofi_.process(
+                static_cast<float>(render_tone(tone_gain)));
             out[i] += static_cast<float>(
                 output_.process(static_cast<float>(
-                    render_tone(tone_gain) + render_wires(wire_gain))) *
+                    static_cast<double>(tone) + render_wires(wire_gain))) *
                 velocity_gain_);
         }
     }
@@ -300,6 +309,7 @@ private:
     Svf noise_filter_;
     Svf shell_;
     TptFilter snap_hp_;
+    LofiChain tone_lofi_;
     LofiChain noise_lofi_;
     OutputStage output_;
 
