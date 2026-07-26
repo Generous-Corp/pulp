@@ -11,11 +11,13 @@
 /// it follows from that one structural fact:
 ///
 /// - **It cleans up from the guitar's volume knob far more than a gain-staged
-///   distortion does.** Raising the source impedance both attenuates the signal
-///   AND lightens the loading on Q1's base, which lowers the loop gain. Two
-///   effects, one ratio, both pushing the same direction. A model that
-///   implements only the attenuation reproduces half the behaviour — see
-///   `set_source_impedance_kohm`.
+///   distortion does.** Raising the source impedance attenuates the signal AND
+///   reduces how much of the feedback the input node returns to Q1's base, which
+///   lowers the loop gain. Two effects, one ratio, both pushing the same
+///   direction — at the tested settings the divider accounts for 11 dB of the
+///   drop and the loop gain for another 7. A model that implements only the
+///   attenuation reproduces half the behaviour — see
+///   `set_source_impedance_kohm` and the adjudication in `loop_gain()`.
 /// - **Starving the bias makes it gate and sputter per note**, not per level. A
 ///   loud attack passes, the decaying tail of that same note falls below the
 ///   available current and cuts out, and the next attack re-opens it. That is
@@ -31,11 +33,12 @@
 ///
 /// ## The circuit model
 ///
-/// Each stage is a common-emitter amplifier in normalised units, with the
-/// operating point at 1.0 calibration unit of collector current:
+/// Each stage is a common-emitter amplifier with emitter degeneration, in
+/// normalised units, biased at 1.0 calibration unit of collector current:
 ///
 /// ```
 /// i(v_be) = Is·(exp(v_be/(n·V_T)) − 1)          // Ebers-Moll, forward-active term
+/// v_b     = v_be + R_e·i                        // base node — the emitter rises with i
 /// v_c     = clamp(1 − R_c·i, 0, 1)              // collector node, normalised rail
 /// ```
 ///
@@ -45,19 +48,28 @@
 /// solution at all. `R_c` is set so the quiescent collector sits mid-rail,
 /// which is also where the clipping headroom is symmetric.
 ///
-/// The stages couple through collector-voltage DEVIATION from quiescent, which
-/// is what the feedback resistor's DC servo achieves in the real circuit while
-/// keeping the interstage coupling direct.
+/// The emitter degeneration `R_e` is what makes the two stages composable, and
+/// it is the element a reduced model is most tempted to drop. Drop it and
+/// `R_c` — pinned by the mid-rail bias — forces a stage gain of ~19, so a
+/// stage's whole usable input window is 50 mV while the stage before it hands
+/// over 85 % of a full rail. Every setting then clips identically, the cleanup
+/// has nothing to show, and the solver never leaves the steep part of the
+/// exponential. With it, `gm_eff = gm/(1 + gm·R_e)`, the gain approaches the
+/// resistor ratio `R_c/R_e`, and the two stages' scales match. See
+/// `kEmitterDegeneration`.
 ///
-/// ## Why six fixed iterations are enough
+/// The stages couple through collector-voltage DEVIATION from each stage's own
+/// quiescent point, which is what the feedback resistor's DC servo achieves in
+/// the real circuit while keeping the interstage coupling direct.
 ///
-/// The loop is solved by fixed-point iteration, and its convergence condition
-/// is exactly its stability condition: the iteration contracts when the
-/// linearised loop gain `|A·β| < 1`, which is precisely what
-/// `kLoopGainCeiling` enforces. So the bound that keeps the circuit from
-/// oscillating is the same bound that keeps the solver converging — the fixed
-/// iteration count is safe by construction rather than by luck, and the
-/// parameter sweep that asserts the gain bound also asserts convergence.
+/// ## Why a fixed iteration count is enough
+///
+/// The pair is solved by a 2×2 Newton descent whose conditioning is governed by
+/// the same quantity as the circuit's stability: the Jacobian's determinant,
+/// normalised by its diagonal, is exactly `1 − A·β`. So the bound that keeps the
+/// circuit from oscillating is the bound that keeps the solve well conditioned —
+/// the fixed iteration count is safe by construction rather than by luck, and
+/// the parameter sweep that asserts the gain bound also asserts convergence.
 ///
 /// The loop is **explicitly bounded rather than unity-compensated** (series law
 /// 1). Compensating it to unity would remove the module's reason for existing:
@@ -65,12 +77,23 @@
 ///
 /// ## Bias starvation
 ///
-/// Starvation lowers the available collector current, and therefore the
-/// QUIESCENT BIAS, rather than clamping the current mid-solve. That distinction
-/// decides whether the module gates or merely goes quiet: with the bias lowered
-/// the stage sits near cutoff, so small signals do not turn it on and loud
-/// transients do — which is gating that tracks per-note dynamics. Clamping the
-/// current instead pins the collector at a constant and produces silence.
+/// Starvation lowers the current available to the SECOND stage — the supply
+/// feeding its collector node is what runs down — and therefore lowers that
+/// stage's quiescent bias, rather than clamping the current mid-solve. Two
+/// distinctions, both of which decide whether the module gates or merely goes
+/// quiet:
+///
+/// - **Lowering the bias, not clamping the current.** With the bias lowered the
+///   stage sits near cutoff, so small signals do not turn it on and loud
+///   transients do — gating that tracks per-note dynamics. Clamping the current
+///   instead pins the collector at a constant, which compresses loud passages
+///   and leaves quiet ones alone: the opposite of a gate.
+/// - **Starving one stage, not both.** A healthy first stage still swinging its
+///   full rail into a second stage that can no longer follow it is what gates.
+///   Starving both leaves the loop gain falling as the SQUARE of the current, so
+///   the feedback path dies long before the operating point is asymmetric enough
+///   to fold — and the feedback amplifying that asymmetry is the whole mechanism
+///   behind the octave-up.
 ///
 /// ## RT contract
 ///
@@ -142,6 +165,34 @@ public:
     /// [design parameter] default 0.5, range 0.3 .. 0.7.
     static constexpr double kQuiescentCollector = 0.5;
 
+    /// Emitter degeneration `R_e`, in the same normalised volts-per-calibration-
+    /// unit as the collector load.
+    ///
+    /// This is the element that makes the stage gain a DESIGN CHOICE instead of
+    /// an accident of the bias point, and leaving it out is not a simplification
+    /// — it is a different circuit. Without it, putting the quiescent collector
+    /// mid-rail fixes `R_c = 0.5/I_q`, and the stage gain `R_c·gm` collapses to
+    /// `0.5/(n·V_T) ≈ 19` no matter what else is chosen. A gain of 19 means the
+    /// base-voltage window that swings the collector across its whole rail is
+    /// ~50 mV, while the interstage coupling hands the next stage 85 % of a full
+    /// rail — a 14x overdrive before any input arrives, so the second stage is a
+    /// square wave at every setting and every source impedance. The circuit's
+    /// signature cleanup then does not exist to be measured, and the solver
+    /// never leaves the steepest part of the exponential.
+    ///
+    /// With degeneration the emitter voltage rises with the current the base
+    /// asks for, so `gm_eff = gm/(1 + gm·R_e)` and the stage gain approaches the
+    /// resistor ratio `R_c/R_e` — independent of the operating current. That is
+    /// how the real circuit does it too: the Fuzz-Face-class second stage sits
+    /// on an emitter resistor precisely so its input window is volts-scale and
+    /// matches the previous collector's swing.
+    ///
+    /// The default gives a stage gain near 2.4, so a FULL-rail swing out of the
+    /// first stage overdrives the second by about 2x — enough that a hot input
+    /// slams the pair, little enough that a rolled-back guitar does not.
+    /// [design parameter] default 0.18, range 0.05 .. 0.5.
+    static constexpr double kEmitterDegeneration = 0.18;
+
     /// Starvation exponent: how sharply available current falls with the
     /// starve control. [design parameter] default 1.6, range 1.0 .. 3.0.
     static constexpr double kStarveExponent = 1.6;
@@ -190,24 +241,36 @@ public:
     /// [design parameter] default 1e-6, range 1e-8 .. 1e-4 calibration units.
     static constexpr double kResidualTolerance = 1e-6;
 
-    /// How far a full-scale input drives the stage, measured in RAIL-TO-RAIL
-    /// SWINGS rather than in volts.
+    /// How far a full-scale input drives the first stage, measured in
+    /// RAIL-TO-RAIL SWINGS of that stage rather than in volts.
     ///
-    /// This has to be relative, not absolute, and getting it wrong is silent.
-    /// A common-emitter stage's gain is `R_c·gm`, and `gm` at a 1-unit
-    /// operating current is ~34 — so the input swing that takes the collector
-    /// from rail to rail is only about 60 mV. An absolute drive scale of a few
-    /// hundred millivolts therefore slams the stage at ANY input level, which
-    /// makes the source-impedance cleanup invisible (both ends of the sweep are
-    /// fully clipped) and keeps the solver permanently in the steepest part of
-    /// the exponential. Expressed as a multiple of the stage's own swing it
-    /// scales correctly across devices and operating points — series law 7.
+    /// This has to be relative, not absolute, and getting it wrong is silent: an
+    /// absolute scale of a few hundred millivolts slams a stage whose whole
+    /// input window is tens of millivolts, so every input level clips
+    /// identically and the source-impedance cleanup has nothing to show.
+    /// Expressed as a multiple of the stage's own swing it tracks the device row
+    /// and the collector load automatically — series law 7.
     ///
-    /// At 1.5 a full-scale input overdrives by half a rail, so it clips hard,
-    /// while a guitar volume rolled back to ~27 % sits inside the linear
-    /// region. That difference IS the cleanup the circuit is famous for.
-    /// [design parameter] default 1.5, range 0.5 .. 6.0 rail-to-rail swings.
-    static constexpr double kInputDriveRails = 1.5;
+    /// The swing it is measured against is the NOMINAL one, taken at the
+    /// unstarved operating point, because the input network is a fixed property
+    /// of the circuit. Referring it to the starved operating point instead would
+    /// turn the drive up by exactly as much as starvation turned the stage's
+    /// gain down, and bias starvation would be close to inaudible.
+    ///
+    /// The linear window is half a swing either side of the quiescent point, so
+    /// the number to compare against is 0.5. At the default, a full-scale input
+    /// at a low source impedance lands past that before the feedback loop
+    /// amplifies it further — it clips hard — while the same input through the
+    /// ~27 % divider of a rolled-back guitar volume stays inside it. That
+    /// difference IS the cleanup the circuit is famous for, and Acceptance Test
+    /// 2 measures precisely the gap.
+    ///
+    /// At the default, a full-scale input through a 10 kΩ source arrives as 0.35
+    /// swings, which the feedback loop's ~2.8x closed-loop gain turns into about
+    /// two full windows — hard clipping — while the same input through 220 kΩ
+    /// arrives as 0.09 and stays under a quarter of a window.
+    /// [design parameter] default 0.4, range 0.2 .. 3.0 rail-to-rail swings.
+    static constexpr double kInputDriveRails = 0.4;
 
     /// Thermal-drift depth, in octaves of saturation current. Germanium's
     /// reverse saturation current is far more temperature-sensitive than
@@ -258,10 +321,8 @@ public:
     }
 
     void reset() {
-        v1_ = bias_voltage_;
-        v2_ = bias_voltage_;
-        collector1_ = kQuiescentCollector;
-        collector2_ = kQuiescentCollector;
+        collector1_ = quiescent1_;
+        collector2_ = quiescent2_;
         blocker_.reset();
         drift_.reset();
         oversampler_.reset();
@@ -324,13 +385,32 @@ public:
     /// and the loop-gain loading factor — one number, deliberately.
     double loading_factor() const { return loading_; }
 
-    /// The quiescent base voltage, i.e. the conduction knee at the current
-    /// available collector current. Unstarved this is the §3 worked example's
-    /// value: ~363 mV germanium, ~693 mV silicon.
-    double bias_voltage() const { return bias_voltage_; }
+    /// The STARVED stage's quiescent junction voltage: the conduction knee at
+    /// whatever current is still available to it. Unstarved this is the §3
+    /// worked example's value — ~363 mV germanium, ~693 mV silicon — because
+    /// unstarved is exactly the nominal current. The base sits one emitter drop
+    /// above it, see `base_bias_voltage()`.
+    ///
+    /// This reports Stage 2 because Stage 2 is the one the starve control moves;
+    /// Stage 1 stays at the nominal knee by construction.
+    double bias_voltage() const { return knee2_; }
+
+    /// The starved stage's quiescent BASE voltage: its junction knee plus the
+    /// drop its quiescent current develops across the emitter degeneration.
+    double base_bias_voltage() const { return base_bias2_; }
+
+    /// Where the starved stage's collector rests. Unstarved it is mid-rail;
+    /// starving walks it toward the supply rail, and the headroom asymmetry that
+    /// creates is what folds the waveform into even harmonics.
+    double quiescent_collector() const { return quiescent2_; }
+
+    /// One stage's small-signal gain `R_c·gm_eff` at the nominal operating
+    /// point. A design consequence of the collector load and the emitter
+    /// degeneration together, not of the bias point alone.
+    double stage_gain() const { return stage_gain_; }
 
     /// Volts of base drive a full-scale input produces, derived from the
-    /// stage's own rail-to-rail swing.
+    /// nominal stage's own rail-to-rail swing.
     double input_scale_volts() const { return input_scale_; }
 
     /// Available collector current after starvation.
@@ -342,18 +422,33 @@ public:
     /// quantity `kLoopGainCeiling` bounds, and the one the parameter sweep
     /// asserts.
     ///
-    /// It is `β · g_couple² · R_c² · gm² · loading`, where `gm` is the
-    /// transconductance at the quiescent current. Two collector loads appear
-    /// because the loop passes through both stages' collector nodes; the
-    /// specification's own formula omits them, which is what leaves it
-    /// unbounded (it evaluates to ~560 at the defaults). Loading multiplies it,
-    /// so a higher source impedance LOWERS the loop gain — the behaviour the
-    /// spec's acceptance test 2 demands, though its §5.2 prose says the
-    /// opposite. See adjudication A-14.
+    /// It is `β · g_couple² · (R_c·gm_eff1) · (R_c·gm_eff2) · loading`, where
+    /// `gm_eff = gm/(1 + gm·R_e)` is the DEGENERATED transconductance at each
+    /// stage's own operating current. The two differ under starvation, which is
+    /// why the loop gain falls only in proportion to the surviving stage rather
+    /// than as its square — the feedback path stays alive far enough into
+    /// starvation to amplify the operating point's asymmetry, which is the
+    /// stated mechanism for the octave-up fold.
+    ///
+    /// Two collector loads appear because the loop passes through both stages'
+    /// collector nodes; the specification's own formula omits them, which is
+    /// what leaves it unbounded (it evaluates to ~560 at the defaults). Loading
+    /// multiplies it, so a higher source impedance LOWERS the loop gain — the
+    /// behaviour the spec's acceptance test 2 demands, though its §5.2 prose
+    /// says the opposite. See adjudication A-14.
+    ///
+    /// This is not a separate formula bolted alongside the solve: it is exactly
+    /// the off-diagonal product over the diagonal product of the Jacobian in
+    /// `solve_stage`, so the number reported here IS the solver's contraction
+    /// factor rather than an estimate of it.
     double loop_gain() const {
-        const double gm = available_current_ / (ideality_ * kThermalVoltage);
-        return feedback_conductance_ * feedback_norm_ * kCouplingGain * kCouplingGain *
-               collector_load_ * collector_load_ * gm * gm * loading_;
+        const double stage1 = collector_load_ * (kNominalCollectorCurrent /
+                                                 (ideality_ * kThermalVoltage)) /
+                              degeneration1_;
+        const double stage2 =
+            collector_load_ * (available_current_ / (ideality_ * kThermalVoltage)) / degeneration2_;
+        return feedback_conductance_ * feedback_norm_ * kCouplingGain * kCouplingGain * stage1 *
+               stage2 * loading_;
     }
 
     /// The largest solver residual seen since `reset()` — so the fixed
@@ -409,18 +504,34 @@ private:
     /// slowness is the mathematical shadow of running near instability, not a
     /// tuning problem. Newton converges quadratically regardless.
     ///
+    /// ## The unknowns are the JUNCTION voltages, not the base voltages
+    ///
+    /// With emitter degeneration a stage's own equation
+    /// `i = Is·(exp((v_b − R_e·i)/θ) − 1)` is implicit in `i` — which would put
+    /// a nested solve inside every iteration of the outer one. Solving for
+    /// `v_be` instead removes it: the base node is then the EXPLICIT function
+    /// `v_b = v_be + R_e·i(v_be)`, and the degeneration appears as a term added
+    /// to the Jacobian's diagonal rather than as an inner loop. Same circuit,
+    /// same fixed cost per sample, no nesting.
+    ///
     /// The Jacobian is closed-form. With `v_c = 1 − R_c·i(v)`, so
     /// `dv_c/dv = −R_c·gm(v)`:
     ///
     /// ```
-    /// ∂F1/∂v1 = 1                     ∂F1/∂v2 = +β·g_couple·R_c·gm(v2)
-    /// ∂F2/∂v1 = +g_couple·R_c·gm(v1)  ∂F2/∂v2 = 1
-    /// det     = 1 − loop_gain
+    /// ∂F1/∂v1 = 1 + R_e·gm(v1)          ∂F1/∂v2 = +β·loading·g_couple·R_c·gm(v2)
+    /// ∂F2/∂v1 = +g_couple·R_c·gm(v1)    ∂F2/∂v2 = 1 + R_e·gm(v2)
+    /// det / (∂F1/∂v1 · ∂F2/∂v2) = 1 − loop_gain
     /// ```
     ///
-    /// The determinant IS one minus the loop gain — which is why the stability
-    /// ceiling and the solve's conditioning are the same quantity, and why
-    /// bounding one bounds the other.
+    /// The diagonal terms carry the degeneration, which is where
+    /// `gm_eff = gm/(1 + gm·R_e)` comes from: dividing the off-diagonal product
+    /// by them turns each `gm` into a `gm_eff`, and the result is exactly
+    /// `loop_gain()`. So the determinant is one minus the loop gain up to that
+    /// positive scale — which is why the stability ceiling and the solve's
+    /// conditioning are the same quantity, and why bounding one bounds the
+    /// other. The degeneration also damps every Newton step by the same factor
+    /// where the exponential is steepest, which is what lets a fixed iteration
+    /// count clear the residual tolerance at full-scale drive.
     double solve_stage(double input) {
         // Thermal drift rides on the saturation current, which is the
         // temperature-sensitive quantity — germanium's far more so than
@@ -434,20 +545,50 @@ private:
         const double scale = saturation / saturation_;
 
         const double drive = input * input_scale_ * loading_;
-        double v1 = v1_;
-        double v2 = v2_;
         double residual = 0.0;
 
-        const double beta = feedback_conductance_ * feedback_norm_;
+        // The feedback path carries the source-impedance loading for the same
+        // reason the input does: it is the same node. One ratio, two
+        // consequences — and because it multiplies the loop here, the ceiling
+        // `loop_gain()` reports is the one the solver actually runs at.
+        const double beta = feedback_conductance_ * feedback_norm_ * loading_;
 
-        // Warm start. Stage 1's equation is very nearly explicit — its base
-        // voltage is the bias plus the drive plus the feedback from the
-        // PREVIOUS collector — so evaluating it directly puts the iteration
-        // within one Newton step of the answer even after a full-scale jump.
-        // Without it the solve starts wherever the last sample left it, which
-        // on a transient is far enough away that a steep exponential's first
-        // Newton step overshoots and six iterations do not recover.
-        v1 = bias_voltage_ + drive + beta * (collector2_ - kQuiescentCollector) * kCouplingGain;
+        // Warm start. Both stages' base voltages are explicit given the PREVIOUS
+        // sample's collectors, so the per-stage equation `v + R_e·i(v) = base`
+        // can be pre-solved approximately before the coupled iteration begins.
+        // Without it the solve starts wherever the last sample left it, which on
+        // a transient is far enough away that the fixed iteration count does not
+        // recover: a junction Newton descends by only about one thermal voltage
+        // per step while it is deep in conduction, so an initial guess 400 mV
+        // high needs a dozen iterations to walk back.
+        //
+        // TWO estimates are taken and the smaller kept, because each is a bound
+        // that is tight in the regime the other is loose in, and both sit ABOVE
+        // the root (the base-voltage function is convex, so Newton from above
+        // descends monotonically — starting below it can overshoot into the
+        // steep region instead):
+        //
+        //   * the linearised inverse — divide the base excursion by `1 + R_e·gm`
+        //     at the bias point — which is exact for small excursions and
+        //     increasingly conservative for large ones;
+        //   * the conduction estimate `θ·ln(base/(R_e·Is))`, which assumes the
+        //     whole base voltage is dropped across the degeneration. That is the
+        //     right asymptote once the stage is driven hard, and it is what
+        //     rescues the deeply starved settings: there the bias sits near
+        //     cutoff, `1 + R_e·gm` is barely above 1, and the linear estimate
+        //     alone lands hundreds of millivolts too high.
+        //
+        // The estimate is asked for at `R_e·scale` rather than `R_e` so the
+        // drift-perturbed saturation current is the one it inverts — the ratio
+        // it forms is `base/(R_e·Is·scale)`, which is the quantity that matters.
+        const double base1 =
+            base_bias1_ + drive + beta * (collector2_ - quiescent2_) * kCouplingGain;
+        const double base2 = base_bias2_ + (collector1_ - quiescent1_) * kCouplingGain;
+        const double degeneration_scale = kEmitterDegeneration * scale;
+        double v1 = std::min(knee1_ + (base1 - base_bias1_) / degeneration1_,
+                             network_.conduction_estimate(base1, degeneration_scale));
+        double v2 = std::min(knee2_ + (base2 - base_bias2_) / degeneration2_,
+                             network_.conduction_estimate(base2, degeneration_scale));
 
         // Per-iteration step limit, in thermal voltages. The standard remedy
         // for Newton on a junction: unlimited, a step taken where the
@@ -464,12 +605,23 @@ private:
             // Stage 1's base sees the bias, the loaded input, and the feedback
             // from Stage 2's collector DEVIATION — the deviation rather than the
             // absolute voltage because the feedback resistor's DC servo is what
-            // holds the quiescent point in the real circuit.
+            // holds the quiescent point in the real circuit. The left-hand side
+            // is the base node `v_be + R_e·i`, not the junction voltage: the
+            // emitter rises under the current its own base asked for, and that
+            // is what keeps the stage gain off the bias point.
             const double f1 =
-                v1 - (bias_voltage_ + drive + beta * (c2 - kQuiescentCollector) * kCouplingGain);
-            // Direct coupling: Stage 2's base tracks Stage 1's collector.
+                v1 + kEmitterDegeneration * i1 -
+                (base_bias1_ + drive + beta * (c2 - quiescent2_) * kCouplingGain);
+            // Direct coupling: Stage 2's base tracks Stage 1's collector. It is
+            // taken in natural units, not renormalised, because the degeneration
+            // has already put Stage 2's input window on the same scale as Stage
+            // 1's collector swing — a full rail out of Stage 1 overdrives Stage
+            // 2 by about `g_couple · R_c/R_e`, which is the ~2x a hot input is
+            // supposed to feel and the ~0.5x a rolled-back guitar is supposed to
+            // stay under.
             const double f2 =
-                v2 - (bias_voltage_ + (c1 - kQuiescentCollector) * kCouplingGain);
+                v2 + kEmitterDegeneration * i2 -
+                (base_bias2_ + (c1 - quiescent1_) * kCouplingGain);
             // The CONVERGED residual, not the running maximum: the first
             // iteration's residual is the initial guess's error, which after a
             // large input step is legitimately big and says nothing about
@@ -477,31 +629,38 @@ private:
             residual = std::max(std::abs(f1), std::abs(f2));
             if (residual < kResidualTolerance) break;
 
-            // The collector clamps flatten the derivative to zero where they
-            // engage, which is physically right — a saturated stage has no gain
-            // — and keeps the Jacobian well conditioned there.
-            const double slope1 = c1 > 0.0 && c1 < 1.0 ? collector_load_ * scale * transconductance(v1) : 0.0;
-            const double slope2 = c2 > 0.0 && c2 < 1.0 ? collector_load_ * scale * transconductance(v2) : 0.0;
+            const double gm1 = scale * transconductance(v1);
+            const double gm2 = scale * transconductance(v2);
+            // The collector clamps flatten the COUPLING derivative to zero where
+            // they engage, which is physically right — a saturated stage passes
+            // no signal on — and keeps the Jacobian well conditioned there. The
+            // diagonal degeneration terms are unaffected: the emitter still
+            // rises with the current, clamped collector or not.
+            const double slope1 = c1 > 0.0 && c1 < 1.0 ? collector_load_ * gm1 : 0.0;
+            const double slope2 = c2 > 0.0 && c2 < 1.0 ? collector_load_ * gm2 : 0.0;
+            const double j11 = 1.0 + kEmitterDegeneration * gm1;
+            const double j22 = 1.0 + kEmitterDegeneration * gm2;
             const double j12 = beta * kCouplingGain * slope2;
             const double j21 = kCouplingGain * slope1;
-            const double det = 1.0 - j12 * j21;
+            const double det = j11 * j22 - j12 * j21;
             if (!(std::abs(det) > 1e-12)) break;
 
-            v1 -= std::clamp((f1 - j12 * f2) / det, -step_limit, step_limit);
-            v2 -= std::clamp((f2 - j21 * f1) / det, -step_limit, step_limit);
+            v1 -= std::clamp((j22 * f1 - j12 * f2) / det, -step_limit, step_limit);
+            v2 -= std::clamp((j11 * f2 - j21 * f1) / det, -step_limit, step_limit);
         }
 
+        // The only state carried to the next sample. The junction voltages are
+        // NOT kept: the warm start re-derives them from these collectors, so
+        // holding them too would be a second copy of the same operating point
+        // that could disagree with this one after a parameter change.
         collector1_ = collector(scale * junction_current(v1));
         collector2_ = collector(scale * junction_current(v2));
-
-        v1_ = v1;
-        v2_ = v2;
         worst_residual_ = std::max(worst_residual_, residual);
 
         // The output is Q2's collector deviation — bounded to the rail by
         // construction, which is also where the hard fuzz clipping comes from.
         return static_cast<double>(
-            blocker_.process(static_cast<SampleType>(collector2_ - kQuiescentCollector)));
+            blocker_.process(static_cast<SampleType>(collector2_ - quiescent2_)));
     }
 
     void update() {
@@ -522,28 +681,67 @@ private:
             std::max(kNominalCollectorCurrent * std::pow(1.0 - starve_, kStarveExponent),
                      kMinAvailableCurrent);
 
-        // The quiescent bias IS the conduction knee at the available current —
-        // the same formula §3's worked example evaluates, so the documented
-        // 363 mV / 693 mV fall out of the shipped constants rather than being
-        // restated. Starvation lowers it toward cutoff, which is the gating
-        // mechanism.
-        // The quiescent bias IS the conduction knee at the available current, and
-        // it is INVERTED FROM THE SAME LAW the forward path uses rather than
-        // written out again — so the documented 363 mV / 693 mV figures are
-        // consequences of the shipped (n, Is) rows and cannot drift from them.
-        bias_voltage_ = network_.knee_voltage(available_current_);
-
-        // The collector load puts the quiescent collector mid-rail.
+        // The collector load puts the UNSTARVED quiescent collector mid-rail.
         collector_load_ = (1.0 - kQuiescentCollector) / kNominalCollectorCurrent;
 
         // One ratio, two consequences: attenuation and loop-gain loading.
         loading_ = kInputImpedanceKohm / (source_kohm_ + kInputImpedanceKohm);
 
-        // The input scale, derived from the stage rather than declared: the
-        // base swing that moves the collector across its whole rail is
-        // `1 / (R_c · gm)` at the operating point.
-        const double gm = available_current_ / (ideality_ * kThermalVoltage);
-        const double rail_to_rail = 1.0 / std::max(collector_load_ * gm, 1e-12);
+        // ── The two operating points ──────────────────────────────────────
+        //
+        // Starvation is applied to STAGE 2 ONLY, because that is what it is: the
+        // supply feeding Q2's collector node runs down. Stage 1 keeps its
+        // healthy bias throughout.
+        //
+        // Starving both stages together is the tempting simplification and it
+        // quietly removes two of the three behaviours the starve control exists
+        // for. With both stages down, the loop gain falls as the SQUARE of the
+        // current, so the feedback path is gone long before the operating point
+        // is asymmetric enough to fold — yet the feedback path amplifying the
+        // asymmetry is precisely the stated mechanism for octave-up. And a
+        // uniformly quiet pair is not a gate: what gates is a healthy first
+        // stage still swinging its full rail into a second stage that can no
+        // longer follow it.
+        //
+        // The bias of each stage is its own conduction knee at its own current,
+        // INVERTED FROM THE SAME LAW the forward path uses rather than written
+        // out again — so the documented 363 mV germanium / 693 mV silicon
+        // figures are consequences of the shipped `(n, Is)` rows and cannot
+        // drift from them. The base sits one emitter drop above that knee.
+        knee1_ = network_.knee_voltage(kNominalCollectorCurrent);
+        knee2_ = network_.knee_voltage(available_current_);
+        base_bias1_ = knee1_ + kEmitterDegeneration * kNominalCollectorCurrent;
+        base_bias2_ = knee2_ + kEmitterDegeneration * available_current_;
+
+        const double gm1 = kNominalCollectorCurrent / (ideality_ * kThermalVoltage);
+        const double gm2 = available_current_ / (ideality_ * kThermalVoltage);
+        degeneration1_ = 1.0 + gm1 * kEmitterDegeneration;
+        degeneration2_ = 1.0 + gm2 * kEmitterDegeneration;
+
+        // Where each collector actually rests. Starving raises Stage 2's toward
+        // the supply rail, because less current means less drop across the load
+        // — that asymmetric headroom is what folds the waveform and produces the
+        // octave, so it must not be assumed away.
+        //
+        // Every coupling in the solve is taken as a deviation from THESE, not
+        // from `kQuiescentCollector`. Referring them to the unstarved mid-rail
+        // instead injects a DC step of `R_c·(I_nominal − I_available)` — nearly
+        // half a rail at full starvation — into the next stage's base, which
+        // drives the starved stage hard ON. That is backwards from what
+        // starvation means, and it is also what makes the solve intractable
+        // there: the junction is pushed hundreds of millivolts past its knee
+        // every sample, where a fixed iteration count cannot follow.
+        quiescent1_ = kQuiescentCollector;
+        quiescent2_ = std::clamp(1.0 - collector_load_ * available_current_, 0.0, 1.0);
+
+        // The stage gain, and with it the input scale, come from STAGE 1 at its
+        // nominal operating point — the stage the input actually drives, and one
+        // whose bias the starve control does not touch. Referring the drive to
+        // the starved stage instead would raise it by exactly the factor
+        // starvation lowered that stage's gain, and the starve control would do
+        // almost nothing.
+        stage_gain_ = collector_load_ * gm1 / degeneration1_;
+        const double rail_to_rail = 1.0 / std::max(stage_gain_, 1e-12);
         input_scale_ = kInputDriveRails * rail_to_rail;
 
         feedback_conductance_ =
@@ -561,10 +759,14 @@ private:
         // The worst case uses the SMALLER ideality factor, because a smaller
         // one means a steeper exponential and therefore more transconductance
         // at the same current — silicon is the binding device, not germanium.
+        // Degeneration narrows that margin (it divides out most of a `gm`
+        // difference) without reversing it, so the binding device is unchanged.
         constexpr double worst_ideality = std::min(kGermaniumIdeality, kSiliconIdeality);
         const double worst_gm = kNominalCollectorCurrent / (worst_ideality * kThermalVoltage);
-        const double worst_open_loop = kCouplingGain * kCouplingGain * collector_load_ *
-                                       collector_load_ * worst_gm * worst_gm;
+        const double worst_gm_eff = worst_gm / (1.0 + worst_gm * kEmitterDegeneration);
+        const double worst_stage = collector_load_ * worst_gm_eff;
+        const double worst_open_loop =
+            kCouplingGain * kCouplingGain * worst_stage * worst_stage;
         feedback_norm_ =
             kLoopGainCeiling / std::max(worst_open_loop * kFeedbackConductanceMax, 1e-12);
     }
@@ -583,7 +785,13 @@ private:
     double ideality_ = kGermaniumIdeality;
     double saturation_ = kGermaniumSaturation;
     double available_current_ = kNominalCollectorCurrent;
-    double bias_voltage_ = 0.0;
+    double knee1_ = 0.0;
+    double knee2_ = 0.0;
+    double base_bias1_ = 0.0;
+    double base_bias2_ = 0.0;
+    double degeneration1_ = 1.0;
+    double degeneration2_ = 1.0;
+    double stage_gain_ = 1.0;
     double collector_load_ = 0.5;
     double loading_ = 1.0;
     double input_scale_ = 1.0;
@@ -591,8 +799,8 @@ private:
     double feedback_norm_ = 1.0;
     int latency_ = 0;
 
-    double v1_ = 0.0;
-    double v2_ = 0.0;
+    double quiescent1_ = kQuiescentCollector;
+    double quiescent2_ = kQuiescentCollector;
     double collector1_ = kQuiescentCollector;
     double collector2_ = kQuiescentCollector;
     double worst_residual_ = 0.0;

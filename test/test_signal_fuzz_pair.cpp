@@ -127,6 +127,62 @@ TEST_CASE("1 the conduction knees fall out of the shipped device rows",
     REQUIRE(silicon - germanium > 0.25);
 }
 
+// ── Gain staging: the scale the rest of the suite rests on ────────────────
+
+TEST_CASE("the stage gain is set by the degeneration, not by the bias point",
+          "[fuzz][gain-staging]") {
+    // Everything downstream — the cleanup, the octave, the solver's
+    // conditioning — depends on the two stages sharing a scale, and nothing
+    // observable says so directly. Without emitter degeneration the mid-rail
+    // bias pins `R_c`, the stage gain collapses to `R_c/(n*V_T)`, and the
+    // interstage coupling hands a stage 85% of a full rail through a window
+    // fourteen times narrower than that. Every setting then clips identically.
+    // These are the numbers that made that true, so a regression in the
+    // staging is caught here rather than as three unrelated-looking failures.
+    for (auto device : {FuzzDevice::germanium, FuzzDevice::silicon}) {
+        auto f = make_fuzz(device);
+        const double theta = (device == FuzzDevice::germanium ? Fuzz::kGermaniumIdeality
+                                                              : Fuzz::kSiliconIdeality) *
+                             Fuzz::kThermalVoltage;
+        const double load = (1.0 - Fuzz::kQuiescentCollector) / Fuzz::kNominalCollectorCurrent;
+        const double gm = Fuzz::kNominalCollectorCurrent / theta;
+        const double gm_eff = gm / (1.0 + gm * Fuzz::kEmitterDegeneration);
+
+        // The gain is the degenerated one, computed from the shipped rows.
+        REQUIRE_THAT(f.stage_gain(), WithinRel(load * gm_eff, 1e-12));
+
+        // ...and it is an order of magnitude below what the bias point alone
+        // would force, which is the whole point of the element.
+        REQUIRE(f.stage_gain() < 0.15 * load * gm);
+
+        // The interstage overdrive: how many of the receiving stage's input
+        // windows a FULL rail out of the sending stage represents. A couple is
+        // the design intent — a hot input slams the pair, a rolled-back guitar
+        // does not. Fourteen is the failure this replaced.
+        const double overdrive = Fuzz::kCouplingGain * f.stage_gain();
+        REQUIRE(overdrive > 1.0);
+        REQUIRE(overdrive < 4.0);
+    }
+
+    // The cleanup's precondition, asserted on the drive itself rather than only
+    // through the rendered level: a full-scale input past a 10 kohm source
+    // exceeds the stage's linear window (half a swing either side of quiescent)
+    // and clips, while the same input past 220 kohm stays well inside it.
+    //
+    // The comparison is against the CLOSED-loop drive. The feedback is not a
+    // trim on top of the divider here — at these settings it multiplies the
+    // drive by nearly three, so the open-loop figure alone sits below the window
+    // at both impedances and says nothing about which one clips.
+    auto low = make_fuzz(FuzzDevice::germanium, 0.8, 0.0, 10.0);
+    auto high = make_fuzz(FuzzDevice::germanium, 0.8, 0.0, 220.0);
+    const double half_window = 0.5 / low.stage_gain();
+    const auto closed_loop_drive = [](const Fuzz& f) {
+        return f.input_scale_volts() * f.loading_factor() / (1.0 - f.loop_gain());
+    };
+    REQUIRE(closed_loop_drive(low) > half_window);
+    REQUIRE(closed_loop_drive(high) < 0.5 * half_window);
+}
+
 // ── 2. Source impedance: two consequences, one ratio ──────────────────────
 
 TEST_CASE("2 a higher source impedance cleans up beyond the level drop",
@@ -271,6 +327,28 @@ TEST_CASE("4 starvation lowers the bias toward cutoff", "[fuzz][starvation]") {
     // The spec's worked example: roughly 4.8 % of nominal.
     REQUIRE_THAT(starved.available_current(), WithinAbs(0.048, 0.005));
     REQUIRE(starved.bias_voltage() < healthy.bias_voltage());
+
+    // The bias falls by exactly the knee shift the same junction law predicts
+    // for that current — starvation moves the operating point along the device
+    // curve rather than applying a separate offset.
+    const double theta = Fuzz::kGermaniumIdeality * Fuzz::kThermalVoltage;
+    const double expected_shift =
+        theta * std::log((Fuzz::kNominalCollectorCurrent / Fuzz::kGermaniumSaturation + 1.0) /
+                         (expected_available / Fuzz::kGermaniumSaturation + 1.0));
+    REQUIRE_THAT(healthy.bias_voltage() - starved.bias_voltage(),
+                 WithinRel(expected_shift, 1e-9));
+
+    // Starvation is applied to the SECOND stage only: its collector walks toward
+    // the supply rail, which is the headroom asymmetry the octave-up needs,
+    // while the first stage keeps a full mid-rail swing to drive it with. A
+    // model that starves both stages instead loses the loop gain as the square
+    // of the current and gates nothing — see the header's bias-starvation note.
+    REQUIRE_THAT(healthy.quiescent_collector(), WithinRel(Fuzz::kQuiescentCollector, 1e-12));
+    REQUIRE(starved.quiescent_collector() > 0.9);
+    // The first stage is untouched, so the pair's overall gain is NOT simply
+    // squared down: the loop gain falls by one stage's worth, not two.
+    const double stage_ratio = expected_available / Fuzz::kNominalCollectorCurrent;
+    REQUIRE(starved.loop_gain() > healthy.loop_gain() * stage_ratio * stage_ratio);
 }
 
 // ── 5. Octave-up under misbias ────────────────────────────────────────────
@@ -333,12 +411,18 @@ TEST_CASE("6 germanium's thermal drift far exceeds silicon's", "[fuzz][drift]") 
 
 TEST_CASE("7 the fixed iteration count converges across the grid",
           "[fuzz][solver]") {
-    // The spec asks for a residual under 1e-6 after the fixed iteration count
-    // at every grid point. Germanium clears it; SILICON DOES NOT at extreme
-    // excursions — see adjudication A-15. What is asserted is the bound the
-    // solver actually achieves, measured rather than assumed, plus the property
-    // that matters musically: the residual is far below the calibration-unit
-    // scale the signal path works in, so it is inaudible.
+    // The spec asks for a residual under `kResidualTolerance` after the fixed
+    // iteration count at every grid point, and both devices now clear it —
+    // including the deeply starved settings, which is where a fixed count has
+    // the least room. Two things buy that: the emitter degeneration puts
+    // `1 + R_e·gm` on the Jacobian's diagonal, damping every step by the same
+    // factor that makes the exponential steep; and the warm start pre-solves
+    // each stage's base-voltage equation so the iteration begins a step or two
+    // away rather than hundreds of millivolts away.
+    //
+    // The assertion is non-vacuous: the solve only records a residual below
+    // tolerance when it actually broke out early, so a regression that stops
+    // converging leaves the last iteration's residual here instead.
     double worst = 0.0;
     constexpr int kPointsPerAxis = 9;
 
@@ -358,18 +442,20 @@ TEST_CASE("7 the fixed iteration count converges across the grid",
     }
 
     INFO("worst converged residual across the grid: " << worst);
-    // Three orders of magnitude below the calibration unit the circuit's
-    // currents and voltages are expressed in — inaudible, and bounded.
-    REQUIRE(worst < 1e-3);
+    REQUIRE(worst < Fuzz::kResidualTolerance);
 }
 
-TEST_CASE("7 germanium clears the specified tolerance exactly", "[fuzz][solver]") {
-    // The half of the criterion that IS achievable, pinned so a regression in
-    // the solver shows up here rather than only in the looser grid bound.
-    auto f = make_fuzz(FuzzDevice::germanium, 0.8);
-    const double w = 2.0 * M_PI * 440.0 / kSr;
-    for (int i = 0; i < 48000; ++i) f.process(std::sin(w * i));
-    REQUIRE(f.worst_residual() <= Fuzz::kResidualTolerance);
+TEST_CASE("7 both devices hold the tolerance over a long full-scale render",
+          "[fuzz][solver]") {
+    // The grid above covers breadth; this covers duration, so a slow drift in
+    // the operating point that only shows up after a second of audio is caught
+    // here rather than nowhere.
+    for (auto device : {FuzzDevice::germanium, FuzzDevice::silicon}) {
+        auto f = make_fuzz(device, 0.8);
+        const double w = 2.0 * M_PI * 440.0 / kSr;
+        for (int i = 0; i < 48000; ++i) f.process(std::sin(w * i));
+        REQUIRE(f.worst_residual() < Fuzz::kResidualTolerance);
+    }
 }
 
 // ── 8. Aliasing suppression ───────────────────────────────────────────────
