@@ -271,11 +271,16 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
                 // pull had already emitted that interval as silence. Its
                 // absolute start tag lets this consumer discard only those
                 // stale frames before considering current-playhead audio.
+                // Observe FIFO publication first. The producer stores the
+                // absolute start tag before its release-published ring write,
+                // so an available-frame acquire makes the following tag load
+                // describe that same (or a newer) interval.
+                const std::uint64_t available = ring_.available_frames();
                 const std::uint64_t ring_start =
                     ring_start_frame_.load(std::memory_order_acquire);
                 if (ring_start < pos) {
                     const std::uint64_t stale =
-                        std::min(pos - ring_start, ring_.available_frames());
+                        std::min(pos - ring_start, available);
                     const std::uint64_t drained = ring_.drain(stale);
                     std::uint64_t expected_start = ring_start;
                     ring_start_frame_.compare_exchange_strong(
