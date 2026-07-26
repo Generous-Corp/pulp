@@ -39,6 +39,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/host/baked_graph_processor.hpp>
+#include <pulp/host/forge_analog_vcf_catalog.hpp>
 #include <pulp/host/forge_lofi_catalog.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <pulp/midi/buffer.hpp>
@@ -976,6 +977,9 @@ TEST_CASE("Forge lo-fi: inject + process is allocation-free for every catalog no
                      lofi::kFilterResonance, 6.0f});
     cases.push_back({lofi::make_filter_node(pulp::signal::Svf::Mode::notch), 1,
                      lofi::kFilterResonance, 6.0f});
+    cases.push_back(
+        {lofi::make_analog_vcf_node(pulp::signal::AnalogVcf::Voicing::juno),
+         1, lofi::kAnalogVcfCutoff, 0.7f});
     cases.push_back({lofi::make_waveshaper_node(), 1, lofi::kWaveshaperDrive, 8.0f});
     cases.push_back({lofi::make_drywet_node(), 2, lofi::kDryWetMix, 0.5f});
     cases.push_back({lofi::make_noise_node(), 1, lofi::kNoiseLevel, 0.5f});
