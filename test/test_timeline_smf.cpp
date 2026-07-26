@@ -719,6 +719,37 @@ TEST_CASE("SMF export rejects values with no MIDI representation",
         REQUIRE_FALSE(exported);
         CHECK(exported.error().code == SmfErrorCode::UnsupportedFeature);
     }
+    SECTION("per-note playback modifiers") {
+        NoteEvent note{ItemId{1}, timebase::TickPosition{0},
+                       timebase::TickDuration{kQuarter}, 0xffffu, 60, 0};
+        NoteModifier modifier;
+        modifier.note_id = note.id;
+        modifier.probability = 0;
+        auto content = NoteContent::create({note}, {modifier}, 42);
+        REQUIRE(content);
+        auto clip = Clip::create(ItemId{2}, timebase::TickPosition{0},
+                                 timebase::TickDuration{kQuarter},
+                                 std::move(content.value()));
+        REQUIRE(clip);
+        auto track = Track::create(ItemId{3}, "Modified", {std::move(clip.value())});
+        REQUIRE(track);
+        auto sequence =
+            Sequence::create(ItemId{4}, "Arrangement", std::nullopt, {std::move(track.value())});
+        REQUIRE(sequence);
+        ProjectInput input{};
+        input.id = ItemId{5};
+        input.next_item_id = 6;
+        input.root_sequence_id = ItemId{4};
+        input.sequences.push_back(std::move(sequence.value()));
+        auto project = Project::create(std::move(input));
+        REQUIRE(project);
+
+        auto exported = export_smf(project.value());
+        REQUIRE_FALSE(exported);
+        CHECK(exported.error().code == SmfErrorCode::UnsupportedFeature);
+        CHECK(exported.error().message.find("per-note playback modifiers") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("SMF round trip preserves grid-aligned notes exactly",

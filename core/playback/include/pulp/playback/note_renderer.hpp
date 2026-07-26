@@ -29,50 +29,13 @@ constexpr bool note_event_offset_in_range(timebase::SamplePosition event,
     return true;
 }
 
-constexpr std::uint64_t positive_tick_distance(std::int64_t later,
-                                               std::int64_t earlier) noexcept {
-    return static_cast<std::uint64_t>(later) - static_cast<std::uint64_t>(earlier);
-}
-
-constexpr std::uint64_t note_modifier_loop_length(const LoopRegion& loop) noexcept {
-    return loop.enabled && loop.end > loop.start
-               ? positive_tick_distance(loop.end.value, loop.start.value)
-               : 0;
-}
-
-constexpr std::uint64_t
-note_modifier_first_wrap_distance(timebase::TickPosition position,
-                                  const LoopRegion& loop) noexcept {
-    const auto length = note_modifier_loop_length(loop);
-    if (length == 0)
-        return 0;
-    if (position < loop.end)
-        return positive_tick_distance(loop.end.value, position.value);
-    return length;
-}
-
-/// Which loop pass a transport range is playing relative to the most recent
-/// playback epoch. Explicit seeks re-anchor the epoch; loop wraps do not.
-constexpr std::uint64_t
-note_modifier_pass_index(const TransportRange& range, const LoopRegion& loop,
-                         timebase::MonotonicBeat epoch,
-                         std::uint64_t first_wrap_distance) noexcept {
-    const auto length = note_modifier_loop_length(loop);
-    if (length == 0 || range.monotonic_start <= epoch)
-        return 0;
-    const auto elapsed = positive_tick_distance(
-        range.monotonic_start.position.value, epoch.position.value);
-    if (elapsed < first_wrap_distance)
-        return 0;
-    return 1u + (elapsed - first_wrap_distance) / length;
-}
-
-/// Compatibility helper for callers whose monotonic origin is the loop start.
-constexpr std::uint64_t note_modifier_pass_index(const TransportRange& range,
-                                                 const LoopRegion& loop) noexcept {
-    return note_modifier_pass_index(
-        range, loop, timebase::MonotonicBeat{{loop.start.value}},
-        note_modifier_loop_length(loop));
+/// A discontinuous range at the loop start is the transport's explicit wrap
+/// marker. Counting those markers avoids deriving an epoch from MonotonicBeat,
+/// whose signed tick storage deliberately saturates at the domain boundary.
+constexpr bool note_modifier_starts_new_pass(const TransportRange& range,
+                                             const LoopRegion& loop) noexcept {
+    return loop.enabled && loop.end > loop.start && range.discontinuity &&
+           range.timeline_tick_start == loop.start;
 }
 
 } // namespace detail
@@ -146,9 +109,8 @@ class ArrangementNoteRenderer {
     bool state_overflow_ = false;
     bool has_block_index_ = false;
     std::uint64_t last_block_index_ = 0;
-    bool has_note_pass_epoch_ = false;
-    timebase::MonotonicBeat note_pass_epoch_{};
-    std::uint64_t note_pass_first_wrap_distance_ = 0;
+    bool has_note_pass_state_ = false;
+    std::uint64_t note_pass_index_ = 0;
     LoopRegion note_pass_loop_{};
     std::uint32_t dropped_events_ = 0;
 };

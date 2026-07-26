@@ -83,7 +83,8 @@ struct ProgramHarness {
 /// loop enabled so the pass index advances the way a session actually does.
 std::vector<std::vector<std::uint8_t>> pitches_per_pass(ProgramHarness& programs,
                                                         const CompiledTempoMap& map,
-                                                        std::size_t passes) {
+                                                        std::size_t passes,
+                                                        bool saturate_monotonic = false) {
     // The block size divides the loop exactly, so every rendered block belongs
     // to one pass and a bucket can never borrow an event from its neighbour.
     constexpr std::uint32_t kBlock = 1'000;
@@ -106,6 +107,14 @@ std::vector<std::vector<std::uint8_t>> pitches_per_pass(ProgramHarness& programs
         for (std::size_t block = 0; block < blocks_per_pass; ++block) {
             TransportSnapshot snapshot;
             REQUIRE(transport.begin_block(kBlock, snapshot) == TransportError::None);
+            if (saturate_monotonic) {
+                for (std::uint8_t range = 0; range < snapshot.range_count; ++range) {
+                    snapshot.ranges[range].monotonic_start =
+                        MonotonicBeat{{std::numeric_limits<std::int64_t>::max()}};
+                    snapshot.ranges[range].monotonic_end =
+                        MonotonicBeat{{std::numeric_limits<std::int64_t>::max()}};
+                }
+            }
             auto program = latch.begin_block(programs.store);
             REQUIRE(renderer.process(program, snapshot).code == NoteRenderCode::Ok);
             for (const auto& event : renderer.events())
@@ -137,61 +146,36 @@ std::size_t count_pitch(const std::vector<std::vector<std::uint8_t>>& passes, st
 
 } // namespace
 
-TEST_CASE("The loop pass index is derived from the monotonic beat",
+TEST_CASE("Loop-start discontinuities identify note modifier pass boundaries",
           "[playback][note-modifier][determinism]") {
     const LoopRegion loop{true, {0}, TickPosition{kLoopLength.value}};
     TransportRange range;
+    range.timeline_tick_start = loop.start;
+    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(range, loop));
+    range.discontinuity = true;
+    REQUIRE(playback::detail::note_modifier_starts_new_pass(range, loop));
+    range.timeline_tick_start = {1};
+    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(range, loop));
+    range.timeline_tick_start = loop.start;
+    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(
+        range, LoopRegion{false, loop.start, loop.end}));
+    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(
+        range, LoopRegion{true, loop.start, loop.start}));
+}
 
-    range.monotonic_start = {{0}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, loop) == 0);
-    range.monotonic_start = {{kLoopLength.value - 1}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, loop) == 0);
-    range.monotonic_start = {{kLoopLength.value}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, loop) == 1);
-    range.monotonic_start = {{kLoopLength.value * 7 + 3}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, loop) == 7);
+TEST_CASE("Conditional passes keep advancing after the monotonic clock saturates",
+          "[playback][note-modifier][determinism][transport]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier every_third = chance(30, note_probability_certain);
+    every_third.condition = NoteConditionKind::EveryNth;
+    every_third.condition_period = 3;
+    ProgramHarness programs;
+    programs.publish(modifier_project({every_third}, 0), map);
 
-    // A linear playthrough is the first pass, not an undefined one.
-    const LoopRegion off{false, {0}, TickPosition{kLoopLength.value}};
-    range.monotonic_start = {{kLoopLength.value * 9}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, off) == 0);
-
-    // An empty or inverted loop cannot divide, and a position before the loop
-    // has completed no pass.
-    const LoopRegion empty{true, {kLoopLength.value}, TickPosition{kLoopLength.value}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, empty) == 0);
-    const LoopRegion later{true, {kLoopLength.value * 20}, TickPosition{kLoopLength.value * 21}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, later) == 0);
-
-    // A seek starts a fresh pass epoch even though the transport's monotonic
-    // clock deliberately keeps its lifetime value.
-    const MonotonicBeat seek_epoch{{kLoopLength.value * 9}};
-    range.monotonic_start = seek_epoch;
-    REQUIRE(playback::detail::note_modifier_pass_index(
-                range, loop, seek_epoch,
-                static_cast<std::uint64_t>(kLoopLength.value)) == 0);
-    const auto half_loop = static_cast<std::uint64_t>(kLoopLength.value / 2);
-    REQUIRE(playback::detail::note_modifier_pass_index(
-                range, loop, seek_epoch, half_loop) == 0);
-    range.monotonic_start = seek_epoch + TickDuration{kLoopLength.value / 2};
-    REQUIRE(playback::detail::note_modifier_pass_index(
-                range, loop, seek_epoch, half_loop) == 1);
-
-    const LoopRegion after_lead_in{true, {100}, {200}};
-    const MonotonicBeat lead_in_epoch{{0}};
-    range.monotonic_start = {{100}};
-    REQUIRE(playback::detail::note_modifier_pass_index(
-                range, after_lead_in, lead_in_epoch, 200) == 0);
-    range.monotonic_start = {{200}};
-    REQUIRE(playback::detail::note_modifier_pass_index(
-                range, after_lead_in, lead_in_epoch, 200) == 1);
-
-    // Full-width valid tick regions use total unsigned distance arithmetic.
-    const LoopRegion full_width{
-        true, {std::numeric_limits<std::int64_t>::min()},
-        {std::numeric_limits<std::int64_t>::max()}};
-    range.monotonic_start = {{std::numeric_limits<std::int64_t>::max()}};
-    REQUIRE(playback::detail::note_modifier_pass_index(range, full_width) == 1);
+    constexpr std::size_t kPasses = 8;
+    const auto sounded = pitches_per_pass(programs, *map, kPasses, true);
+    for (std::size_t pass = 0; pass < kPasses; ++pass)
+        REQUIRE(count_pitch({sounded[pass]}, 60) == (pass % 3 == 0 ? 1u : 0u));
 }
 
 TEST_CASE("A probabilistic note replays identically for one seed and differs for another",

@@ -265,6 +265,12 @@ runtime::Result<std::vector<OutputEvent>, SmfError> Exporter::build_note_track(c
                 SmfErrorCode::UnsupportedFeature,
                 "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
                     " is anchored to absolute time, which has no musical tick position")));
+        if (!notes->modifiers().empty())
+            return TrackResult(Err(smf_error(
+                SmfErrorCode::UnsupportedFeature,
+                "clip " + decimal(static_cast<std::int64_t>(clip.id().value)) +
+                    " has per-note playback modifiers, which have no standard MIDI file "
+                    "representation")));
 
         for (const auto& note : notes->notes()) {
             const auto velocity = scale_velocity_16_to_7(note.velocity);

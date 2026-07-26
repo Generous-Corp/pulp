@@ -31,7 +31,8 @@ bool ArrangementNoteRenderer::prepare(std::size_t maximum_events_per_block) {
     pending_flush_ = false;
     state_overflow_ = false;
     has_block_index_ = false;
-    has_note_pass_epoch_ = false;
+    has_note_pass_state_ = false;
+    note_pass_index_ = 0;
     active_counts_.fill(0);
     return true;
 }
@@ -80,9 +81,8 @@ void ArrangementNoteRenderer::reset() noexcept {
     state_overflow_ = false;
     has_block_index_ = false;
     last_block_index_ = 0;
-    has_note_pass_epoch_ = false;
-    note_pass_epoch_ = {};
-    note_pass_first_wrap_distance_ = 0;
+    has_note_pass_state_ = false;
+    note_pass_index_ = 0;
     note_pass_loop_ = {};
     dropped_events_ = 0;
 }
@@ -200,7 +200,7 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     has_block_index_ = true;
     const auto pass_loop = transport.scrubbing ? LoopRegion{} : transport.loop;
     const bool note_pass_loop_changed =
-        has_note_pass_epoch_ && pass_loop != note_pass_loop_;
+        has_note_pass_state_ && pass_loop != note_pass_loop_;
     if (pending_flush_ || view.adoption == ShellAdoptionResult::Adopted ||
         block_sequence_reset || note_pass_loop_changed) {
         if (!flush(0)) {
@@ -222,17 +222,13 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     }
 
     const bool reanchor_note_pass =
-        !has_note_pass_epoch_ || block_sequence_reset ||
+        !has_note_pass_state_ || block_sequence_reset ||
         transport.reset_requested || transport.transport_started ||
         note_pass_loop_changed;
     if (reanchor_note_pass && transport.range_count != 0) {
-        const auto& first_range = transport.ranges[0];
-        note_pass_epoch_ = first_range.monotonic_start;
-        note_pass_first_wrap_distance_ =
-            detail::note_modifier_first_wrap_distance(
-                first_range.timeline_tick_start, pass_loop);
+        note_pass_index_ = 0;
         note_pass_loop_ = pass_loop;
-        has_note_pass_epoch_ = true;
+        has_note_pass_state_ = true;
     }
 
     const auto events = view.program->arrangement_note_events();
@@ -246,9 +242,15 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         // wrap always starts a new range. A note's on and its off therefore
         // resolve against the same pass, so the gate can never admit one
         // without the other and leave a note hanging.
-        const auto pass_index = detail::note_modifier_pass_index(
-            range, pass_loop, note_pass_epoch_,
-            note_pass_first_wrap_distance_);
+        // The first range of a re-anchored block is pass zero even when a seek
+        // lands exactly on the loop start. Every later loop-start
+        // discontinuity is a real wrap. Unsigned increment is intentional:
+        // unlike the transport's saturating signed clock, it keeps advancing
+        // across that boundary and only repeats after the full uint64 domain.
+        if (detail::note_modifier_starts_new_pass(range, pass_loop) &&
+            !(reanchor_note_pass && range_index == 0))
+            ++note_pass_index_;
+        const auto pass_index = note_pass_index_;
 
         const auto search_sample =
             range.host_beat_mapping
