@@ -198,27 +198,31 @@ public:
     // ── Controls (real units throughout) ──────────────────────────────────
 
     void set_threshold_db(double db) {
-        threshold_db_ = std::clamp(db, kThresholdDbMin, kThresholdDbMax);
+        threshold_db_ = std::clamp(dynamics::retain_finite(db, threshold_db_),
+                                   kThresholdDbMin, kThresholdDbMax);
         update_makeup();
     }
 
     void set_ratio(double r) {
-        ratio_ = std::clamp(r, kRatioMin, kRatioMax);
+        ratio_ = std::clamp(dynamics::retain_finite(r, ratio_), kRatioMin, kRatioMax);
         update_makeup();
     }
 
     void set_knee_width_db(double w) {
-        knee_db_ = std::clamp(w, kKneeDbMin, kKneeDbMax);
+        knee_db_ = std::clamp(dynamics::retain_finite(w, knee_db_),
+                              kKneeDbMin, kKneeDbMax);
         update_makeup();
     }
 
     void set_attack_ms(double ms) {
-        attack_ms_ = std::clamp(ms, kAttackMsMin, kAttackMsMax);
+        attack_ms_ = std::clamp(dynamics::retain_finite(ms, attack_ms_),
+                                kAttackMsMin, kAttackMsMax);
         update_coefficients();
     }
 
     void set_release_ms(double ms) {
-        release_ms_ = std::clamp(ms, kReleaseMsMin, kReleaseMsMax);
+        release_ms_ = std::clamp(dynamics::retain_finite(ms, release_ms_),
+                                 kReleaseMsMin, kReleaseMsMax);
         update_coefficients();
     }
 
@@ -226,21 +230,24 @@ public:
     Detector detector() const { return detector_; }
 
     void set_rms_window_ms(double ms) {
-        rms_window_ms_ = std::clamp(ms, kRmsWindowMsMin, kRmsWindowMsMax);
+        rms_window_ms_ = std::clamp(dynamics::retain_finite(ms, rms_window_ms_),
+                                    kRmsWindowMsMin, kRmsWindowMsMax);
         update_coefficients();
     }
 
     /// Lookahead in ms, clamped to the ceiling `prepare()` sized for — so this
     /// can never need an allocation.
     void set_lookahead_ms(double ms) {
-        lookahead_ms_ = std::clamp(ms, 0.0, max_lookahead_ms_);
+        lookahead_ms_ = std::clamp(dynamics::retain_finite(ms, lookahead_ms_),
+                                   0.0, max_lookahead_ms_);
         update_lookahead();
     }
 
     void set_program_dependent_release(bool on) { program_dependent_ = on; }
 
     void set_makeup_gain_db(double db) {
-        makeup_db_ = std::clamp(db, -kMakeupDbMax, kMakeupDbMax);
+        makeup_db_ = std::clamp(dynamics::retain_finite(db, makeup_db_),
+                                -kMakeupDbMax, kMakeupDbMax);
         update_makeup();
     }
 
@@ -251,7 +258,9 @@ public:
 
     /// 0 = fully independent per-channel detectors, 1 = one shared detector fed
     /// by the louder channel.
-    void set_stereo_link(double amount) { stereo_link_ = std::clamp(amount, 0.0, 1.0); }
+    void set_stereo_link(double amount) {
+        stereo_link_ = std::clamp(dynamics::retain_finite(amount, stereo_link_), 0.0, 1.0);
+    }
 
     /// The module's entire latency contribution: the lookahead delay, exactly.
     /// The gain computer and detector are zero-latency IIR stages, so this is 0

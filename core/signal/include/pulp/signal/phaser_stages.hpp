@@ -621,7 +621,7 @@ private:
     /// would put a visible staircase on a slow sweep of a high `center_hz`
     /// for no benefit, and the two channels' lockstep depends on their
     /// accumulators being identical.
-    std::array<LfoT<double>, kChannels> lfo_{};
+    std::array<EffectLfoT<double>, kChannels> lfo_{};
 };
 
 using PhaserStages = PhaserStagesT<float>;

@@ -177,4 +177,14 @@ private:
     std::size_t count_ = 0;
 };
 
+/// Migration namespace for the unshipped Round-2 spelling whose template
+/// arity conflicts with the established slot matrix. Code written against the
+/// Round-2 prompt can use `round2::ModMatrixT<Sources, Destinations, T>` while
+/// the shipped `pulp::signal::ModMatrixT<MaxSlots, T>` remains source-compatible.
+namespace round2 {
+template <std::size_t NumSources, std::size_t NumDestinations,
+          typename SampleType = float>
+using ModMatrixT = DenseModMatrixT<NumSources, NumDestinations, SampleType>;
+}  // namespace round2
+
 } // namespace pulp::signal

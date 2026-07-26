@@ -48,7 +48,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <type_traits>
 
 namespace pulp::signal {
 
@@ -66,10 +65,22 @@ enum class LfoWave : std::uint8_t {
     smooth_random,
 };
 
-/// Low-frequency oscillator with the full house option set.
-template <typename SampleType = float>
-class LfoT {
+namespace detail {
+
+/// Selects the waveform/rate convention at the type boundary. The default is
+/// the shipped modulation-toolkit contract; Round-2 effects opt into their
+/// distinct phase and waveform laws through `EffectLfoT` below.
+enum class LfoConvention : std::uint8_t { toolkit, effect };
+
+/// Shared implementation selected by the two explicit public LFO types below.
+/// Keeping the convention in this internal type preserves the one-parameter
+/// public `LfoT` template identity and makes effect behavior impossible to
+/// select through precision or setter history.
+template <typename SampleType, LfoConvention Convention>
+class BasicLfoT {
 public:
+    static constexpr bool kEffectConvention = Convention == LfoConvention::effect;
+
     enum class Wave : std::uint8_t {
         sine,
         triangle,
@@ -78,32 +89,6 @@ public:
         square,
         sh_random,
         smooth_random,
-    };
-
-    /// Read-only bridge for callers compiled against either waveform
-    /// vocabulary.  The stored value remains the toolkit `Wave`; conversion to
-    /// `LfoWave` gives Round-2 effect code its matching public enum without
-    /// making one API spelling replace the other.
-    class WaveValue {
-    public:
-        constexpr operator Wave() const { return wave_; }
-        constexpr operator LfoWave() const {
-            switch (wave_) {
-                case Wave::sine: return LfoWave::sine;
-                case Wave::triangle: return LfoWave::triangle;
-                case Wave::saw_up: return LfoWave::saw_up;
-                case Wave::saw_down: return LfoWave::saw_down;
-                case Wave::square: return LfoWave::square;
-                case Wave::sh_random: return LfoWave::sample_hold;
-                case Wave::smooth_random: return LfoWave::smooth_random;
-            }
-            return LfoWave::sine;
-        }
-
-    private:
-        friend class LfoT;
-        constexpr explicit WaveValue(Wave wave) : wave_(wave) {}
-        Wave wave_;
     };
 
     /// `free` runs from `reset()` and ignores `retrigger()` — that is what
@@ -199,13 +184,11 @@ public:
 
     // ── shape ────────────────────────────────────────────────────────────────
 
-    void set_wave(Wave w) {
+    void set_wave(Wave w) requires (!kEffectConvention) {
         wave_ = w;
-        legacy_effect_wave_ = false;
         update_increment_();
     }
-    void set_wave(LfoWave w) {
-        legacy_effect_wave_ = true;
+    void set_wave(LfoWave w) requires kEffectConvention {
         morph_enabled_ = false;
         switch (w) {
             case LfoWave::sine: wave_ = Wave::sine; break;
@@ -218,7 +201,19 @@ public:
         }
         update_increment_();
     }
-    WaveValue wave() const { return WaveValue{wave_}; }
+    Wave wave() const requires (!kEffectConvention) { return wave_; }
+    LfoWave wave() const requires kEffectConvention {
+        switch (wave_) {
+            case Wave::sine: return LfoWave::sine;
+            case Wave::triangle: return LfoWave::triangle;
+            case Wave::saw_up: return LfoWave::saw_up;
+            case Wave::saw_down: return LfoWave::saw_down;
+            case Wave::square: return LfoWave::square;
+            case Wave::sh_random: return LfoWave::sample_hold;
+            case Wave::smooth_random: return LfoWave::smooth_random;
+        }
+        return LfoWave::sine;
+    }
 
     /// Continuous blend across sine -> triangle -> saw_up -> square as `m`
     /// runs 0 -> 3, by crossfading the adjacent pair. Enables morph mode, which
@@ -254,7 +249,7 @@ public:
     /// `reset()`.
     void set_seed(std::uint32_t s) {
         seed_ = s;
-        if (legacy_effect_wave_) reset();
+        if constexpr (kEffectConvention) reset();
     }
 
     // ── phase & stereo ───────────────────────────────────────────────────────
@@ -265,7 +260,7 @@ public:
     /// Offset of the right output in `next_stereo()`, in cycles. Present a
     /// +/-180 degree control; 0.25 is quadrature.
     void set_stereo_offset(double cycles01) {
-        if (legacy_effect_wave_)
+        if constexpr (kEffectConvention)
             phase_offset_ = wrap01(cycles01);
         else
             stereo_offset_ = wrap01(cycles01);
@@ -309,19 +304,20 @@ public:
     bool finished() const { return stage_ == Stage::done; }
     long long cycles_completed() const { return cycles_; }
     double phase() const {
-        return legacy_effect_wave_ ? wrap01(phase_ + static_cast<double>(phase_offset_))
-                                   : phase_;
+        if constexpr (kEffectConvention)
+            return wrap01(phase_ + static_cast<double>(phase_offset_));
+        return phase_;
     }
 
     // ── output ───────────────────────────────────────────────────────────────
 
     /// Bipolar output in [-1, 1], scaled by the lifecycle depth envelope.
     SampleType next() {
-        if (legacy_effect_wave_) advance_();
+        if constexpr (kEffectConvention) advance_();
         const float env = envelope_();
         const double p = wrap01(phase_ + static_cast<double>(phase_offset_));
         update_chain_(chains_[0], p);
-        if (legacy_effect_wave_)
+        if constexpr (kEffectConvention)
             return static_cast<SampleType>(static_cast<double>(env)
                                            * legacy_effect_shape_(p, chains_[0]));
         const float value = shape_(p, chains_[0]);
@@ -365,12 +361,12 @@ public:
     /// barberpole effects need — a "quadrature" pair built by offsetting a
     /// triangle or a square is not orthogonal and the sidebands do not cancel.
     void next_quadrature(SampleType& sine_out, SampleType& cosine_out) {
-        if (legacy_effect_wave_) advance_();
+        if constexpr (kEffectConvention) advance_();
         const float env = envelope_();
         const double p = wrap01(phase_ + static_cast<double>(phase_offset_));
         update_chain_(chains_[0], p);
         const double angle = 6.283185307179586477 * p;
-        if (legacy_effect_wave_) {
+        if constexpr (kEffectConvention) {
             sine_out = static_cast<SampleType>(static_cast<double>(env) * std::sin(angle));
             cosine_out = static_cast<SampleType>(static_cast<double>(env) * std::cos(angle));
             return;
@@ -401,10 +397,10 @@ private:
     static float wrap01(float x) { return x - std::floor(x); }
 
     void update_increment_() {
-        const double max_rate = legacy_effect_wave_
+        const double max_rate = kEffectConvention
                                     ? kMaxRateHz
                                     : kMaxRateFraction * sample_rate_;
-        const double min_rate = legacy_effect_wave_ ? 0.0 : kMinRateHz;
+        const double min_rate = kEffectConvention ? 0.0 : kMinRateHz;
         rate_hz_ = std::clamp(requested_rate_hz_, min_rate,
                               std::max(min_rate, max_rate));
         increment_ = rate_hz_ / sample_rate_;
@@ -551,7 +547,7 @@ private:
             case Wave::sine:
                 return static_cast<float>(std::sin(6.283185307179586477 * phase));
             case Wave::triangle: {
-                if (legacy_effect_wave_) {
+                if constexpr (kEffectConvention) {
                     if (p < 0.25f) return 4.0f * p;
                     if (p < 0.75f) return 2.0f - 4.0f * p;
                     return 4.0f * p - 4.0f;
@@ -655,10 +651,17 @@ private:
     FadeCurve fade_curve_ = FadeCurve::linear;
     bool morph_enabled_ = false;
     bool fade_out_enabled_ = false;
-    bool legacy_effect_wave_ = std::is_same_v<SampleType, double>;
 };
 
+} // namespace detail
+
+template <typename SampleType = float>
+class LfoT : public detail::BasicLfoT<SampleType, detail::LfoConvention::toolkit> {};
+template <typename SampleType = float>
+class EffectLfoT : public detail::BasicLfoT<SampleType, detail::LfoConvention::effect> {};
 using Lfo = LfoT<float>;
 using Lfo64 = LfoT<double>;
+using EffectLfo = EffectLfoT<float>;
+using EffectLfo64 = EffectLfoT<double>;
 
 } // namespace pulp::signal

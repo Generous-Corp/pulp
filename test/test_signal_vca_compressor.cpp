@@ -831,3 +831,24 @@ TEST_CASE("a NaN sample cannot latch the VCA detector",
         }
     }
 }
+
+TEST_CASE("non-finite VCA controls retain the last valid configuration",
+          "[vca-compressor][nan-recovery]") {
+    Vca c;
+    c.prepare(kSr);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    c.set_threshold_db(nan);
+    c.set_ratio(nan);
+    c.set_neg_ratio_amount(nan);
+    c.set_knee_db(nan);
+    c.set_time_ms(nan);
+    c.set_attack_release_ratio_k(nan);
+    c.set_makeup_db(nan);
+    c.set_lookahead_ms(nan);
+    c.set_mix(nan);
+    c.set_ceiling_db(nan);
+    for (int i = 0; i < 512; ++i) {
+        REQUIRE(std::isfinite(c.process(0.25)));
+        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    }
+}

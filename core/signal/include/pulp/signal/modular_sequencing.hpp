@@ -655,7 +655,7 @@ private:
     double period_ = 0.0;
     bool have_clock_ = false;
     SampleType target_pitch_ = SampleType{0};
-    SlewLimiterT<SampleType> slew_{};
+    ConstantTimeSlewLimiterT<SampleType> slew_{};
     Xorshift32 rng_{kRandomSeed};
 };
 

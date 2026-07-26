@@ -442,13 +442,15 @@ public:
 
     /// The only lever into gain reduction — there is no threshold control.
     void set_input_gain_db(double db) {
-        input_gain_db_ = std::clamp(db, kInputGainDbMin, kInputGainDbMax);
+        input_gain_db_ = std::clamp(dynamics::retain_finite(db, input_gain_db_),
+                                    kInputGainDbMin, kInputGainDbMax);
         input_gain_ = units::db_to_linear(input_gain_db_);
     }
 
     /// Makeup gain, applied after the divider and before the transformer.
     void set_output_gain_db(double db) {
-        output_gain_db_ = std::clamp(db, kOutputGainDbMin, kOutputGainDbMax);
+        output_gain_db_ = std::clamp(dynamics::retain_finite(db, output_gain_db_),
+                                     kOutputGainDbMin, kOutputGainDbMax);
         output_gain_ = units::db_to_linear(output_gain_db_);
     }
 
@@ -461,31 +463,37 @@ public:
     Ratio ratio() const { return ratio_button_; }
 
     void set_attack_us(double us) {
-        attack_us_ = std::clamp(us, kAttackUsMin, kAttackUsMax);
+        attack_us_ = std::clamp(dynamics::retain_finite(us, attack_us_),
+                                kAttackUsMin, kAttackUsMax);
         update_coefficients();
     }
 
     void set_release_ms(double ms) {
-        release_ms_ = std::clamp(ms, kReleaseMsMin, kReleaseMsMax);
+        release_ms_ = std::clamp(dynamics::retain_finite(ms, release_ms_),
+                                 kReleaseMsMin, kReleaseMsMax);
         update_coefficients();
     }
 
     /// Soft-knee width around the fixed reference, in the DETECTOR's domain.
     /// The width a user measures at the input is wider — `measured_knee_db()`.
     void set_knee_db(double db) {
-        knee_request_db_ = std::clamp(db, kKneeDbMin, kKneeDbMax);
+        knee_request_db_ = std::clamp(dynamics::retain_finite(db, knee_request_db_),
+                                      kKneeDbMin, kKneeDbMax);
         update_ratio_dependents();
     }
 
     /// 0..1 depth of the output transformer's low-frequency tilt.
     void set_transformer_amount(double pct01) {
-        transformer_amount_ = std::clamp(pct01, 0.0, 1.0);
+        transformer_amount_ = std::clamp(
+            dynamics::retain_finite(pct01, transformer_amount_), 0.0, 1.0);
         update_transformer();
     }
 
     /// 0..1 parallel blend. The dry path is taken PRE input gain and delayed by
     /// `latency_samples()`, so the blend is not a comb filter.
-    void set_mix(double pct01) { mix_ = std::clamp(pct01, 0.0, 1.0); }
+    void set_mix(double pct01) {
+        mix_ = std::clamp(dynamics::retain_finite(pct01, mix_), 0.0, 1.0);
+    }
 
     // ── Reported quantities ───────────────────────────────────────────────
 

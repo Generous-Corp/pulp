@@ -122,10 +122,9 @@ public:
     void set_mode(Mode mode) { mode_ = mode; }
     Mode mode() const { return mode_; }
 
-    /// Round 2 constant-time spelling: every move, whatever its distance,
-    /// arrives in the requested duration.
+    /// Symmetric spelling for the toolkit's full-scale rate limiter. A 0 -> 1
+    /// move takes `ms`; shorter moves take proportionally less time.
     void set_time_ms(double ms) {
-        constant_time_linear_ = true;
         rise_ms_ = fall_ms_ = finite_time(ms);
         update_coefficients();
     }
@@ -139,10 +138,7 @@ public:
         update_coefficients();
     }
 
-    /// Original toolkit spelling: linear mode is a full-scale rate limiter,
-    /// preserving the established moving-target and long-ramp behaviour.
     void set_times_ms(SampleType rise, SampleType fall) {
-        constant_time_linear_ = false;
         rise_ms_ = finite_time(static_cast<double>(rise));
         fall_ms_ = finite_time(static_cast<double>(fall));
         update_coefficients();
@@ -177,8 +173,7 @@ public:
             if (in != target_) {
                 target_ = in;
                 const double samples = rising ? rise_samples_ : fall_samples_;
-                const double distance = constant_time_linear_ ? std::abs(delta) : 1.0;
-                linear_step_ = samples > 0.0 ? distance / samples : 0.0;
+                linear_step_ = samples > 0.0 ? 1.0 / samples : 0.0;
             }
             if (linear_step_ <= 0.0)
                 value_ = in;
@@ -217,12 +212,124 @@ private:
     double value_ = 0.0;
     double target_ = 0.0;
     double linear_step_ = 0.0;
-    bool constant_time_linear_ = true;
     Mode mode_ = Mode::linear;
 };
 
 using SlewLimiter = SlewLimiterT<float>;
 using SlewLimiter64 = SlewLimiterT<double>;
+
+/// Distance-independent portamento used by the Round-2 effect and sequencing
+/// lane. This is a separate type because its linear law is intentionally
+/// incompatible with `SlewLimiterT`: every target change takes the configured
+/// time, regardless of distance. Selecting that law by setter history made two
+/// identically configured `SlewLimiterT` objects behave differently.
+template <typename SampleType = float>
+class ConstantTimeSlewLimiterT {
+public:
+    using Mode = SlewMode;
+    static constexpr double kSettleEpsilon = 1e-9;
+
+    ConstantTimeSlewLimiterT() { update_coefficients(); }
+
+    void prepare(double sample_rate) {
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) sample_rate_ = sample_rate;
+        update_coefficients();
+    }
+
+    void set_mode(Mode mode) { mode_ = mode; }
+    Mode mode() const { return mode_; }
+
+    void set_time_ms(double ms) {
+        rise_ms_ = fall_ms_ = finite_time(ms);
+        update_coefficients();
+    }
+    void set_rise_ms(double ms) {
+        rise_ms_ = finite_time(ms);
+        update_coefficients();
+    }
+    void set_fall_ms(double ms) {
+        fall_ms_ = finite_time(ms);
+        update_coefficients();
+    }
+    void set_times_ms(SampleType rise, SampleType fall) {
+        rise_ms_ = finite_time(static_cast<double>(rise));
+        fall_ms_ = finite_time(static_cast<double>(fall));
+        update_coefficients();
+    }
+
+    double rise_ms() const { return rise_ms_; }
+    double fall_ms() const { return fall_ms_; }
+
+    void set_immediate(SampleType value) {
+        const double candidate = static_cast<double>(value);
+        value_ = std::isfinite(candidate) ? candidate : 0.0;
+        target_ = value_;
+        linear_step_ = 0.0;
+    }
+    void reset(SampleType value = SampleType{0}) { set_immediate(value); }
+
+    SampleType value() const { return static_cast<SampleType>(value_); }
+    SampleType current() const { return value(); }
+    bool settled() const { return value_ == target_; }
+
+    SampleType process(SampleType input) {
+        const double in = static_cast<double>(input);
+        if (!std::isfinite(in)) {
+            reset();
+            return SampleType{0};
+        }
+        const double delta = in - value_;
+        if (delta == 0.0) return value();
+        const bool rising = delta > 0.0;
+
+        if (mode_ == Mode::linear) {
+            if (in != target_) {
+                target_ = in;
+                const double samples = rising ? rise_samples_ : fall_samples_;
+                linear_step_ = samples > 0.0 ? std::abs(delta) / samples : 0.0;
+            }
+            if (linear_step_ <= 0.0)
+                value_ = in;
+            else if (rising)
+                value_ = std::min(value_ + linear_step_, in);
+            else
+                value_ = std::max(value_ - linear_step_, in);
+        } else {
+            target_ = in;
+            const double coefficient = rising ? rise_coeff_ : fall_coeff_;
+            value_ += coefficient * delta;
+            if (std::abs(in - value_) < kSettleEpsilon) value_ = in;
+        }
+        value_ = snap_to_zero(value_);
+        return value();
+    }
+
+private:
+    static double finite_time(double ms) {
+        return std::isfinite(ms) ? std::max(0.0, ms) : 0.0;
+    }
+    void update_coefficients() {
+        rise_samples_ = units::ms_to_samples(rise_ms_, sample_rate_);
+        fall_samples_ = units::ms_to_samples(fall_ms_, sample_rate_);
+        rise_coeff_ = units::ms_to_onepole_coef(rise_ms_, sample_rate_);
+        fall_coeff_ = units::ms_to_onepole_coef(fall_ms_, sample_rate_);
+    }
+
+    double sample_rate_ = 48000.0;
+    double rise_ms_ = 10.0;
+    double fall_ms_ = 10.0;
+    double rise_samples_ = 480.0;
+    double fall_samples_ = 480.0;
+    double rise_coeff_ = 1.0;
+    double fall_coeff_ = 1.0;
+    double value_ = 0.0;
+    double target_ = 0.0;
+    double linear_step_ = 0.0;
+    Mode mode_ = Mode::linear;
+};
+
+using ConstantTimeSlewLimiter = ConstantTimeSlewLimiterT<float>;
+using ConstantTimeSlewLimiter64 = ConstantTimeSlewLimiterT<double>;
 
 /// Latch a value on a clock's rising edge, with optional glide to the new
 /// value instead of a step.
@@ -273,8 +380,10 @@ public:
         return glide_.process(held_);
     }
 
-    /// Signal-threshold spelling used by the Round 2 sequencing kit.
-    SampleType process(SampleType input, SampleType trigger) {
+    /// Explicit signal-threshold spelling used by the Round-2 sequencing kit.
+    /// Keeping a different name avoids ambiguous calls such as
+    /// `process(input, 1)` between the bool and signal domains.
+    SampleType process_signal(SampleType input, SampleType trigger) {
         return process(input, static_cast<double>(trigger) >= threshold_);
     }
 
@@ -415,6 +524,45 @@ private:
 
 using Comparator = ComparatorT<float>;
 using Comparator64 = ComparatorT<double>;
+
+/// Signal-valued comparator from the Round-2 patching lane. The established
+/// `ComparatorT` above deliberately returns a boolean event-domain gate; this
+/// distinct name preserves configurable output levels without making overload
+/// resolution or return semantics depend on call context.
+template <typename SampleType = float>
+class SignalComparatorT {
+public:
+    void set_thresholds(double high, double low) {
+        high_ = std::isfinite(high) ? high : high_;
+        low_ = std::isfinite(low) ? std::min(low, high_ - 1e-9) : low_;
+    }
+    void set_levels(SampleType low_level, SampleType high_level) {
+        if (std::isfinite(static_cast<double>(low_level))) low_level_ = low_level;
+        if (std::isfinite(static_cast<double>(high_level))) high_level_ = high_level;
+    }
+    void reset() { high_state_ = false; }
+    SampleType process(SampleType input) {
+        const double value = static_cast<double>(input);
+        if (!std::isfinite(value)) {
+            reset();
+            return low_level_;
+        }
+        if (!high_state_ && value >= high_) high_state_ = true;
+        else if (high_state_ && value <= low_) high_state_ = false;
+        return high_state_ ? high_level_ : low_level_;
+    }
+    bool high() const { return high_state_; }
+
+private:
+    double high_ = 0.5;
+    double low_ = 0.25;
+    SampleType low_level_ = SampleType{0};
+    SampleType high_level_ = SampleType{1};
+    bool high_state_ = false;
+};
+
+using SignalComparator = SignalComparatorT<float>;
+using SignalComparator64 = SignalComparatorT<double>;
 
 /// Snap a control value to `N` equally spaced levels across a range.
 ///

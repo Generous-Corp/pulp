@@ -560,7 +560,7 @@ TEST_CASE("PhaseVibrato matches an independent allpass phase model", "[vibrato][
         const auto measured = measure_engine(engine, carrier, kProbeRateHz);
 
         const auto cycle = static_cast<std::size_t>(kFs / kProbeRateHz);
-        LfoT<double> lfo;
+        EffectLfoT<double> lfo;
         lfo.set_wave(LfoWave::sine);
         lfo.prepare(kFs);
         lfo.set_rate_hz(kProbeRateHz);
@@ -746,7 +746,7 @@ TEST_CASE("UniVibe audio matches its staggered corner trajectory", "[vibrato][un
             peak_cents_deviation(instantaneous_phase(output, carrier),
                                  static_cast<int>(cycle), carrier, kRate, 24);
 
-        LfoT<double> lfo;
+        EffectLfoT<double> lfo;
         lfo.set_wave(LfoWave::sine);
         lfo.prepare(kFs);
         lfo.set_rate_hz(kRate);

@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -270,11 +271,13 @@ TEST_CASE("OuWalk and Drift are bit-reproducible across reset", "[rng][mod-utili
 
 TEST_CASE("LFO rate is accurate to far better than the ±0.01 % specs assert",
           "[lfo][mod-utilities]") {
+    static_assert(std::is_same_v<decltype(EffectLfo64{}.wave()),
+                                 LfoWave>);
     // The chorus spec's test 2, run directly: count zero crossings over a long
     // render and compare against the configured rate.
     constexpr double rate_hz = 3.0;
     constexpr double seconds = 100.0;
-    Lfo64 lfo;
+    EffectLfo64 lfo;
     lfo.prepare(kSr);
     lfo.set_rate_hz(rate_hz);
     lfo.set_wave(LfoWave::sine);
@@ -291,7 +294,7 @@ TEST_CASE("LFO shapes stay bipolar and hit their documented landmarks",
           "[lfo][mod-utilities]") {
     for (auto wave : {LfoWave::sine, LfoWave::triangle, LfoWave::saw_up, LfoWave::saw_down,
                       LfoWave::square, LfoWave::sample_hold, LfoWave::smooth_random}) {
-        Lfo64 lfo;
+        EffectLfo64 lfo;
         lfo.prepare(kSr);
         lfo.set_rate_hz(7.0);
         lfo.set_wave(wave);
@@ -305,7 +308,7 @@ TEST_CASE("LFO shapes stay bipolar and hit their documented landmarks",
 
     // The triangle's landmarks: 0 at φ=0, +1 at 0.25, 0 at 0.5, −1 at 0.75.
     // Driven by phase offset so no accumulation is involved.
-    Lfo64 tri;
+    EffectLfo64 tri;
     tri.prepare(kSr);
     tri.set_rate_hz(0.0);  // frozen: phase stays at the offset
     tri.set_wave(LfoWave::triangle);
@@ -323,7 +326,7 @@ TEST_CASE("LFO phase offset of half a cycle is exact inversion", "[lfo][mod-util
     // identical LFOs half a cycle apart are exact negatives of each other, for
     // every odd-symmetric shape.
     for (auto wave : {LfoWave::sine, LfoWave::triangle, LfoWave::square}) {
-        Lfo64 a, b;
+        EffectLfo64 a, b;
         for (auto* l : {&a, &b}) {
             l->prepare(kSr);
             l->set_rate_hz(2.0);
@@ -352,7 +355,7 @@ TEST_CASE("LFO half-cycle offset is NOT inversion for the saw shapes",
     // itself, rather than silently altering what anti-phase means for the
     // chorus/flanger/phaser pair constructions built on set_phase_offset(0.5).
     for (auto wave : {LfoWave::saw_up, LfoWave::saw_down}) {
-        Lfo64 a, b;
+        EffectLfo64 a, b;
         for (auto* l : {&a, &b}) {
             l->prepare(kSr);
             l->set_rate_hz(2.0);
@@ -373,7 +376,7 @@ TEST_CASE("LFO N-voice spacing is even", "[lfo][mod-utilities]") {
     // TriChorus: three voices at 120°. Their instantaneous sine values must sum
     // to zero at every sample, which is the algebraic form of even spacing.
     constexpr int n = 3;
-    Lfo64 voices[n];
+    EffectLfo64 voices[n];
     for (int k = 0; k < n; ++k) {
         voices[k].prepare(kSr);
         voices[k].set_rate_hz(1.5);
@@ -393,7 +396,7 @@ TEST_CASE("LFO quadrature is exact and drift-free over a long render",
     // The frequency-shifter spec forbids a recursive resonator here precisely
     // because its amplitude drifts. Assert the invariant that forbids it:
     // sin² + cos² == 1 forever, not just at the start.
-    Lfo64 lfo;
+    EffectLfo64 lfo;
     lfo.prepare(kSr);
     lfo.set_rate_hz(200.0);
     lfo.reset();
@@ -405,7 +408,7 @@ TEST_CASE("LFO quadrature is exact and drift-free over a long render",
 }
 
 TEST_CASE("LFO random shapes are seeded and reset-repeatable", "[lfo][mod-utilities]") {
-    Lfo64 lfo;
+    EffectLfo64 lfo;
     lfo.prepare(kSr);
     lfo.set_rate_hz(20.0);
     lfo.set_wave(LfoWave::sample_hold);
@@ -425,9 +428,9 @@ TEST_CASE("LFO random shapes are seeded and reset-repeatable", "[lfo][mod-utilit
 }
 
 TEST_CASE("LFO rate is clamped to its documented ceiling", "[lfo][mod-utilities]") {
-    Lfo64 lfo;
+    EffectLfo64 lfo;
     lfo.set_rate_hz(1e6);
-    REQUIRE(lfo.rate_hz() == LfoT<double>::kMaxRateHz);
+    REQUIRE(lfo.rate_hz() == EffectLfoT<double>::kMaxRateHz);
     lfo.set_rate_hz(-5.0);
     REQUIRE(lfo.rate_hz() == 0.0);
 }
@@ -442,7 +445,7 @@ TEST_CASE("SlewLimiter linear mode takes the same time regardless of distance",
     const int expected = static_cast<int>(std::llround(units::ms_to_samples(slide_ms, kSr)));
 
     for (double distance : {1.0, 12.0, 0.25}) {
-        SlewLimiter64 slew;
+        ConstantTimeSlewLimiter64 slew;
         slew.prepare(kSr);
         slew.set_mode(SlewMode::linear);
         slew.set_time_ms(slide_ms);
@@ -465,7 +468,7 @@ TEST_CASE("SlewLimiter linear mode takes the same time regardless of distance",
 TEST_CASE("SlewLimiter exponential mode matches the units time constant",
           "[slew][mod-utilities]") {
     constexpr double tau_ms = 20.0;
-    SlewLimiter64 slew;
+    ConstantTimeSlewLimiter64 slew;
     slew.prepare(kSr);
     slew.set_mode(SlewMode::exponential);
     slew.set_time_ms(tau_ms);
@@ -477,7 +480,7 @@ TEST_CASE("SlewLimiter exponential mode matches the units time constant",
 }
 
 TEST_CASE("SlewLimiter rise and fall are independent", "[slew][mod-utilities]") {
-    SlewLimiter64 slew;
+    ConstantTimeSlewLimiter64 slew;
     slew.prepare(kSr);
     slew.set_mode(SlewMode::linear);
     slew.set_rise_ms(10.0);
@@ -495,7 +498,7 @@ TEST_CASE("SlewLimiter rise and fall are independent", "[slew][mod-utilities]") 
 
 TEST_CASE("SlewLimiter with zero time is a pass-through", "[slew][mod-utilities]") {
     for (auto mode : {SlewMode::linear, SlewMode::exponential}) {
-        SlewLimiter64 slew;
+        ConstantTimeSlewLimiter64 slew;
         slew.prepare(kSr);
         slew.set_mode(mode);
         slew.set_time_ms(0.0);
@@ -508,7 +511,7 @@ TEST_CASE("SlewLimiter with zero time is a pass-through", "[slew][mod-utilities]
 TEST_CASE("SlewLimiter recovers after a non-finite control sample",
           "[slew][mod-utilities][nan-recovery]") {
     for (auto mode : {SlewMode::linear, SlewMode::exponential}) {
-        SlewLimiter64 slew;
+        ConstantTimeSlewLimiter64 slew;
         slew.prepare(kSr);
         slew.set_mode(mode);
         slew.set_time_ms(20.0);
@@ -526,11 +529,23 @@ TEST_CASE("SampleHold latches on the rising edge only", "[slew][mod-utilities]")
     SampleHold64 sh;
     sh.reset();
 
-    REQUIRE_THAT(sh.process(0.5, 0.0), WithinAbs(0.0, 1e-12));  // no edge yet
-    REQUIRE_THAT(sh.process(0.5, 1.0), WithinAbs(0.5, 1e-12));  // rising: latch
-    REQUIRE_THAT(sh.process(0.9, 1.0), WithinAbs(0.5, 1e-12));  // still high: hold
-    REQUIRE_THAT(sh.process(0.9, 0.0), WithinAbs(0.5, 1e-12));  // falling: hold
-    REQUIRE_THAT(sh.process(0.9, 1.0), WithinAbs(0.9, 1e-12));  // rising again: latch
+    REQUIRE_THAT(sh.process_signal(0.5, 0.0), WithinAbs(0.0, 1e-12));  // no edge yet
+    REQUIRE_THAT(sh.process_signal(0.5, 1.0), WithinAbs(0.5, 1e-12));  // rising: latch
+    REQUIRE_THAT(sh.process_signal(0.9, 1.0), WithinAbs(0.5, 1e-12));  // still high: hold
+    REQUIRE_THAT(sh.process_signal(0.9, 0.0), WithinAbs(0.5, 1e-12));  // falling: hold
+    REQUIRE_THAT(sh.process_signal(0.9, 1.0), WithinAbs(0.9, 1e-12));  // rising again: latch
+}
+
+TEST_CASE("SignalComparator preserves the Round-2 level-valued gate API",
+          "[trigger][mod-utilities]") {
+    SignalComparator64 comparator;
+    comparator.set_thresholds(0.6, 0.4);
+    comparator.set_levels(-2.0, 5.0);
+
+    REQUIRE(comparator.process(0.5) == -2.0);
+    REQUIRE(comparator.process(0.7) == 5.0);
+    REQUIRE(comparator.process(0.5) == 5.0);
+    REQUIRE(comparator.process(0.3) == -2.0);
 }
 
 // ── envelopes ─────────────────────────────────────────────────────────────
@@ -574,6 +589,22 @@ TEST_CASE("Envelope curve 0 is exactly linear", "[envelope][mod-utilities]") {
         const double v = env.next();
         REQUIRE_THAT(v, WithinAbs(i / n, 1e-6));
     }
+}
+
+TEST_CASE("Round-2 Ar sample ordering persists through release",
+          "[envelope][mod-utilities][compatibility]") {
+    Ar env;
+    env.prepare(kSr);
+    env.set_attack_ms(0.0);
+    env.set_release_ms(10.0);
+    env.set_curve(0.0);
+    env.reset();
+    env.gate_on();
+    REQUIRE_THAT(env.next(), WithinAbs(1.0, 1e-12));
+
+    env.gate_off();
+    const double release_samples = units::ms_to_samples(10.0, kSr);
+    REQUIRE_THAT(env.next(), WithinAbs(1.0 - 1.0 / release_samples, 1e-6));
 }
 
 TEST_CASE("Envelope releases from any stage without hanging", "[envelope][mod-utilities]") {

@@ -980,6 +980,46 @@ TEST_CASE("Voice budget is never exceeded and stealing is deterministic",
     }
 }
 
+TEST_CASE("A failed live placement cannot mutate or steal an active grain",
+          "[granular][live][pool]") {
+    GranularEngine64 engine;
+    engine.prepare(kFs);
+    engine.set_source(GrainSource::live_ring);
+    engine.set_window_taper(0.0);
+    engine.set_grain_ms(GranularEngine64::kMaxGrainMs);
+    engine.set_density_hz(GranularEngine64::kMaxDensityHz);
+    engine.set_pitch_semitones(0.0);
+    engine.set_pitch_spray_semitones(0.0);
+    engine.set_position(0.0);
+    engine.set_position_spray_ms(0.0);
+    engine.set_max_grains(GranularEngine64::kMinGrainBudget);
+    engine.set_steal_policy(StealPolicy::oldest);
+    engine.set_seed(0x51A7E5u);
+    engine.reset();
+
+    const double input = 1.0;
+    double left = 0.0;
+    double right = 0.0;
+
+    // Ratio-1 grains become legal almost immediately and fill the pool.
+    for (int n = 0; n < 4096 && engine.active_grain_count() < engine.max_grains(); ++n) {
+        engine.process(&input, &left, &right, 1);
+    }
+    REQUIRE(engine.active_grain_count() == engine.max_grains());
+    REQUIRE(engine.steal_count() == 0);
+
+    // A +24 st grain needs 3 * duration more history than a ratio-1 grain. The
+    // next onsets therefore fail placement while every slot is still sounding.
+    engine.set_pitch_semitones(GranularEngine64::kMaxPitchSemitones);
+    const auto steals_before = engine.steal_count();
+    for (int n = 0; n < 128; ++n) engine.process(&input, &left, &right, 1);
+
+    CHECK(engine.steal_count() == steals_before);
+    for (int slot = 0; slot < engine.max_grains(); ++slot) {
+        CHECK(engine.grain(slot).ratio == 1.0);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // T-8 — headroom.
 // ─────────────────────────────────────────────────────────────────────────

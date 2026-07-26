@@ -153,6 +153,7 @@ inline void apply_diode_model(junction::JunctionPair& network, DiodeModel model)
 /// `symmetry` fades the negative leg out entirely. Both are continuous and both
 /// reduce to the matched pair at 0.
 inline void apply_symmetry(junction::JunctionPair& network, double symmetry) {
+    if (!std::isfinite(symmetry)) return;
     const double s = std::clamp(symmetry, -1.0, 1.0);
     network.leg_a = 1.0 / (1.0 + std::max(0.0, s));
     network.leg_b = 1.0 + std::min(0.0, s);
@@ -378,7 +379,8 @@ public:
     }
 
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        sample_rate_ = std::isfinite(sample_rate) && sample_rate > 0.0 ? sample_rate
+                                                                       : sample_rate_;
         timestep_ = 1.0 / sample_rate_;
         reset();
     }
@@ -388,11 +390,15 @@ public:
     /// −1 = single diode (half-wave), 0 = matched pair, +1 = mismatched pair.
     void set_symmetry(double symmetry) { detail::apply_symmetry(network_, symmetry); }
 
-    void set_resistance(double ohms) { resistance_ = std::max(ohms, 1.0); }
+    void set_resistance(double ohms) {
+        if (std::isfinite(ohms)) resistance_ = std::max(ohms, 1.0);
+    }
 
     /// Zero is the degenerate memoryless configuration: a solver limit case for
     /// tests, not a shipped preset.
-    void set_capacitance(double farads) { capacitance_ = std::max(farads, 0.0); }
+    void set_capacitance(double farads) {
+        if (std::isfinite(farads)) capacitance_ = std::max(farads, 0.0);
+    }
 
     /// Antiderivative antialiasing is NOT offered on this class, deliberately.
     ///
@@ -433,8 +439,16 @@ public:
     int last_iteration_count() const { return last_iterations_; }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double vin = static_cast<double>(input);
         const double v = solve(vin);
+        if (!std::isfinite(v)) {
+            reset();
+            return SampleType{0};
+        }
         previous_source_current_ = vin / resistance_;
         previous_voltage_ = v;
         voltage_ = v;
@@ -547,7 +561,8 @@ public:
     }
 
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        sample_rate_ = std::isfinite(sample_rate) && sample_rate > 0.0 ? sample_rate
+                                                                       : sample_rate_;
         timestep_ = 1.0 / sample_rate_;
         ground_stage_.prepare(sample_rate_);
         reset();
@@ -567,13 +582,17 @@ public:
     }
 
     void set_feedback_resistance(double ohms) {
+        if (!std::isfinite(ohms)) return;
         feedback_resistance_ = std::max(ohms, 1.0);
         update_capacitance();
     }
 
-    void set_input_resistance(double ohms) { input_resistance_ = std::max(ohms, 1.0); }
+    void set_input_resistance(double ohms) {
+        if (std::isfinite(ohms)) input_resistance_ = std::max(ohms, 1.0);
+    }
 
     void set_knee_corner_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         knee_corner_hz_ = std::clamp(hz, 1.0, 20000.0);
         update_capacitance();
     }
@@ -598,6 +617,10 @@ public:
     }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double vin = static_cast<double>(input);
         if (topology_ == Topology::to_ground) {
             // A plain linear gain stage with the network shunting its output —
@@ -615,6 +638,10 @@ public:
         // current vin/Rin as an extra forcing term.
         const double forcing = vin / input_resistance_;
         const double v = solve(forcing);
+        if (!std::isfinite(v)) {
+            reset();
+            return SampleType{0};
+        }
         previous_source_current_ = forcing;
         previous_voltage_ = v;
         // v is −vout by the substitution, so the stage's output is its negation
@@ -687,11 +714,13 @@ public:
     }
 
     void set_pre_tone_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         pre_hz_ = std::clamp(hz, 20.0, 20000.0);
         pre_.set_cutoff(static_cast<SampleType>(pre_hz_));
     }
 
     void set_post_tone_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         post_hz_ = std::clamp(hz, 20.0, 20000.0);
         post_.set_cutoff(static_cast<SampleType>(post_hz_));
     }
@@ -699,11 +728,14 @@ public:
     /// Pre-emphasis shelf gain in dB. Positive lifts content above the corner
     /// into the clipper, negative keeps the fundamental dominant.
     void set_pre_gain_db(double db) {
+        if (!std::isfinite(db)) return;
         pre_gain_ = units::db_to_linear(std::clamp(db, -kPreGainDbMax, kPreGainDbMax));
     }
 
     /// Linear crossfade of the shaped stage against its bypass.
-    void set_tone_mix(double mix01) { mix_ = std::clamp(mix01, 0.0, 1.0); }
+    void set_tone_mix(double mix01) {
+        if (std::isfinite(mix01)) mix_ = std::clamp(mix01, 0.0, 1.0);
+    }
 
     void reset() {
         pre_.reset();
@@ -714,18 +746,36 @@ public:
     /// complementary outputs, so a gain of 1 is exactly flat by construction
     /// rather than to within a fitted tolerance.
     SampleType process_pre(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const auto out = pre_.process(input);
         const double shaped =
             static_cast<double>(out.lowpass) + pre_gain_ * static_cast<double>(out.highpass);
-        return static_cast<SampleType>(static_cast<double>(input) +
-                                       mix_ * (shaped - static_cast<double>(input)));
+        const double result = static_cast<double>(input) +
+                              mix_ * (shaped - static_cast<double>(input));
+        if (!std::isfinite(result)) {
+            reset();
+            return SampleType{0};
+        }
+        return static_cast<SampleType>(result);
     }
 
     /// The post stage: a plain one-pole low-pass, the de-fizz.
     SampleType process_post(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double filtered = static_cast<double>(post_.process_lowpass(input));
-        return static_cast<SampleType>(static_cast<double>(input) +
-                                       mix_ * (filtered - static_cast<double>(input)));
+        const double result = static_cast<double>(input) +
+                              mix_ * (filtered - static_cast<double>(input));
+        if (!std::isfinite(result)) {
+            reset();
+            return SampleType{0};
+        }
+        return static_cast<SampleType>(result);
     }
 
 private:

@@ -697,25 +697,34 @@ public:
     // ── Controls (real units throughout) ──────────────────────────────────
 
     void set_threshold_db(double db) {
-        threshold_db_ = std::clamp(db, kThresholdDbMin, kThresholdDbMax);
+        threshold_db_ = std::clamp(dynamics::retain_finite(db, threshold_db_),
+                                   kThresholdDbMin, kThresholdDbMax);
     }
 
-    void set_ratio(double r) { ratio_ = std::clamp(r, kRatioMin, kRatioMax); }
+    void set_ratio(double r) {
+        ratio_ = std::clamp(dynamics::retain_finite(r, ratio_), kRatioMin, kRatioMax);
+    }
 
-    void set_knee_db(double w) { knee_db_ = std::clamp(w, kKneeDbMin, kKneeDbMax); }
+    void set_knee_db(double w) {
+        knee_db_ = std::clamp(dynamics::retain_finite(w, knee_db_),
+                              kKneeDbMin, kKneeDbMax);
+    }
 
     void set_attack_ms(double ms) {
-        attack_ms_ = std::clamp(ms, kAttackMsMin, kAttackMsMax);
+        attack_ms_ = std::clamp(dynamics::retain_finite(ms, attack_ms_),
+                                kAttackMsMin, kAttackMsMax);
         update_ballistics();
     }
 
     void set_release_ms(double ms) {
-        release_ms_ = std::clamp(ms, kReleaseMsMin, kReleaseMsMax);
+        release_ms_ = std::clamp(dynamics::retain_finite(ms, release_ms_),
+                                 kReleaseMsMin, kReleaseMsMax);
         update_ballistics();
     }
 
     void set_makeup_db(double db) {
-        makeup_db_ = std::clamp(db, 0.0, kMakeupDbMax);
+        makeup_db_ = std::clamp(dynamics::retain_finite(db, makeup_db_),
+                                0.0, kMakeupDbMax);
         makeup_linear_ = units::db_to_linear(makeup_db_);
     }
 
@@ -723,17 +732,23 @@ public:
     /// operating amplitude and both brackets' saturation depth together, which
     /// is what makes it one knob rather than three.
     void set_character(double character01) {
-        character_ = std::clamp(character01, 0.0, 1.0);
+        character_ = std::clamp(dynamics::retain_finite(character01, character_),
+                                0.0, 1.0);
         bridge_.set_character(character_);
         input_bracket_.set_character(character_);
         output_bracket_.set_character(character_);
     }
 
     /// Parallel dry/wet as a percentage, matching the catalog table's units.
-    void set_mix_percent(double percent) { mix_ = std::clamp(percent, 0.0, 100.0) / 100.0; }
+    void set_mix_percent(double percent) {
+        const double current_percent = mix_ * 100.0;
+        mix_ = std::clamp(dynamics::retain_finite(percent, current_percent),
+                          0.0, 100.0) / 100.0;
+    }
 
     void set_sc_hpf_hz(double hz) {
-        sc_hpf_hz_ = std::clamp(hz, kScHpfHzMin, kScHpfHzMax);
+        sc_hpf_hz_ = std::clamp(dynamics::retain_finite(hz, sc_hpf_hz_),
+                                kScHpfHzMin, kScHpfHzMax);
         sidechain_hpf_.set_cutoff(static_cast<SampleType>(sc_hpf_hz_));
     }
 

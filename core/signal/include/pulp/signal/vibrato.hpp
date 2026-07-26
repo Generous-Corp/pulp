@@ -293,7 +293,7 @@ private:
     bool lifecycle_active_ = false;
 
     DelayLineT<SampleType> line_{};
-    LfoT<double> lfo_{};
+    EffectLfoT<double> lfo_{};
     DahdsrT<double> lifecycle_{};
 };
 
@@ -430,7 +430,7 @@ private:
     int stage_count_ = kDefaultStageCount;
     double corner_hz_ = kDefaultCenterHz;
 
-    LfoT<double> lfo_{};
+    EffectLfoT<double> lfo_{};
     std::array<TptFilterT<SampleType>, kMaxStages> stages_{};
 };
 
@@ -591,7 +591,7 @@ private:
 
     std::array<double, kStageCount> corners_{};
 
-    LfoT<double> lfo_{};
+    EffectLfoT<double> lfo_{};
     VactrolConditionerT<SampleType> vactrol_{};
     std::array<TptFilterT<SampleType>, kStageCount> stages_{};
 };

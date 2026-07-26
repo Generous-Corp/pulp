@@ -827,8 +827,8 @@ private:
 
     DelayLineT<SampleType> horn_line_{};
     DelayLineT<SampleType> drum_line_{};
-    LfoT<double> horn_phase_{};
-    LfoT<double> drum_phase_{};
+    EffectLfoT<double> horn_phase_{};
+    EffectLfoT<double> drum_phase_{};
     SlewLimiterT<double> horn_inertia_{};
     SlewLimiterT<double> drum_inertia_{};
     DriftT<double> horn_drift_{};
@@ -1100,7 +1100,7 @@ private:
     double dry_mix_ = 1.0;
 
     DelayLineT<SampleType> line_{};
-    LfoT<double> scanner_{};
+    EffectLfoT<double> scanner_{};
     DcBlocker<SampleType> blocker_{};
 };
 

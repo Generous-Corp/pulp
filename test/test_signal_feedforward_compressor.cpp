@@ -663,3 +663,23 @@ TEST_CASE("a NaN sample cannot latch the feedforward detector",
         }
     }
 }
+
+TEST_CASE("non-finite feedforward controls retain the last valid configuration",
+          "[feedforward-compressor][nan-recovery]") {
+    Comp c;
+    c.prepare(kSr);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    c.set_threshold_db(nan);
+    c.set_ratio(nan);
+    c.set_knee_width_db(nan);
+    c.set_attack_ms(nan);
+    c.set_release_ms(nan);
+    c.set_rms_window_ms(nan);
+    c.set_lookahead_ms(nan);
+    c.set_makeup_gain_db(nan);
+    c.set_stereo_link(nan);
+    for (int i = 0; i < 512; ++i) {
+        REQUIRE(std::isfinite(c.process(0.25)));
+        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    }
+}

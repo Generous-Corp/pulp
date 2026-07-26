@@ -787,7 +787,7 @@ private:
     // ── Composed primitives ───────────────────────────────────────────────
     DelayLineT<SampleType> line_{};
     DcBlocker<SampleType> dc_{};
-    SlewLimiterT<double> glide_{};
+    ConstantTimeSlewLimiterT<double> glide_{};
     DriftT<double> drift_{};
 
     // ── Configuration ─────────────────────────────────────────────────────

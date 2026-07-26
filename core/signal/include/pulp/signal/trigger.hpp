@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 
 namespace pulp::signal {
@@ -291,7 +292,7 @@ private:
 using ClockDivider = ClockDividerT<float>;
 using ClockDivider64 = ClockDividerT<double>;
 
-/// Emit N evenly spaced triggers per measured input period.
+/// Emit N evenly spaced event triggers per measured input period.
 ///
 /// The period is measured between consecutive input triggers, so the first
 /// input trigger only starts the measurement — multiplied ticks begin with the
@@ -307,39 +308,12 @@ using ClockDivider64 = ClockDividerT<double>;
 ///
 /// USE: ratchets and rolls from a slow clock; hi-hats derived from a kick
 /// trigger; running a modulation source at 4x the pulse the user is tapping.
-template <typename SampleType = float>
 class ClockMultT {
 public:
-    static constexpr int kMinMultiple = 1;
-    static constexpr int kMaxMultiple = 32;
-    static constexpr int kDefaultMultiple = 2;
-    static constexpr double kMaxPeriodMs = 4000.0;
     static constexpr int kMaxMultiplier = 16;
-
-    void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
-        max_period_samples_ = sample_rate_ * kMaxPeriodMs * 0.001;
-    }
 
     void set_multiplier(int n) { multiplier_ = std::clamp(n, 1, kMaxMultiplier); }
     int multiplier() const { return multiplier_; }
-
-    void set_multiple(int n) {
-        const int next = std::clamp(n, kMinMultiple, kMaxMultiple);
-        if (next == multiple_) return;
-        multiple_ = next;
-        if (!(branch_period_ > 0.0) || branch_since_edge_ >= branch_period_) {
-            branch_pending_ = 0;
-            branch_next_at_ = 0.0;
-            return;
-        }
-        const double spacing = branch_period_ / static_cast<double>(multiple_);
-        const int next_index =
-            static_cast<int>(std::floor(branch_since_edge_ / spacing)) + 1;
-        branch_pending_ = std::max(0, multiple_ - next_index);
-        branch_next_at_ = static_cast<double>(next_index) * spacing;
-    }
-    int multiple() const { return multiple_; }
 
     void reset() {
         period_ = 0;
@@ -347,12 +321,6 @@ public:
         ticks_emitted_ = 0;
         have_period_ = false;
         have_first_ = false;
-        detector_.reset();
-        branch_since_edge_ = 0.0;
-        branch_period_ = 0.0;
-        branch_next_at_ = 0.0;
-        branch_pending_ = 0;
-        branch_have_edge_ = false;
     }
 
     /// @return true on samples where a multiplied tick fires.
@@ -378,27 +346,10 @@ public:
         return true;
     }
 
-    bool process(SampleType clock) {
-        branch_since_edge_ += 1.0;
-        if (detector_.process(clock)) {
-            const bool usable =
-                branch_have_edge_ && branch_since_edge_ <= max_period_samples_;
-            branch_period_ = usable ? branch_since_edge_ : 0.0;
-            branch_have_edge_ = true;
-            branch_since_edge_ = 0.0;
-            branch_pending_ = branch_period_ > 0.0 ? multiple_ - 1 : 0;
-            branch_next_at_ = branch_period_ / static_cast<double>(multiple_);
-            return true;
-        }
-        bool fired = false;
-        while (branch_pending_ > 0 && branch_period_ > 0.0
-               && branch_since_edge_ >= branch_next_at_) {
-            --branch_pending_;
-            branch_next_at_ += branch_period_ / static_cast<double>(multiple_);
-            fired = true;
-        }
-        return fired;
-    }
+    /// Integer literals are not clocks. Require callers to spell event input
+    /// as `bool` so an API split cannot silently redirect their scheduler.
+    template <std::integral Integer>
+    bool process(Integer) = delete;
 
     /// Measured input period in samples; 0 until two triggers have arrived.
     long long period_samples() const { return have_period_ ? period_ : 0; }
@@ -416,19 +367,96 @@ private:
     int ticks_emitted_ = 0;
     bool have_period_ = false;
     bool have_first_ = false;
+};
+
+/// Backward-compatible name for the already-decoded event adapter.
+using ClockMult = ClockMultT;
+using EventClockMult = ClockMultT;
+
+/// Continuous-signal clock multiplier.
+///
+/// Unlike `ClockMultT`, whose input is an already-decoded boolean event, this
+/// adapter owns a hysteretic edge detector and rejects periods longer than
+/// `kMaxPeriodMs` as a stopped clock. Keeping the adapters as separate types is
+/// intentional: their factor ranges, defaults, and stopped-clock policies are
+/// different contracts, not overloads of one state machine.
+template <typename SampleType = float>
+class SignalClockMultT {
+public:
+    static constexpr int kMinMultiple = 1;
+    static constexpr int kMaxMultiple = 32;
+    static constexpr int kDefaultMultiple = 2;
+    static constexpr double kMaxPeriodMs = 4000.0;
+
+    void prepare(double sample_rate) {
+        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        max_period_samples_ = sample_rate_ * kMaxPeriodMs * 0.001;
+    }
+
+    void set_multiple(int n) {
+        const int next = std::clamp(n, kMinMultiple, kMaxMultiple);
+        if (next == multiple_) return;
+        multiple_ = next;
+        if (!(period_ > 0.0) || since_edge_ >= period_) {
+            pending_ = 0;
+            next_at_ = 0.0;
+            return;
+        }
+        const double spacing = period_ / static_cast<double>(multiple_);
+        const int next_index = static_cast<int>(std::floor(since_edge_ / spacing)) + 1;
+        pending_ = std::max(0, multiple_ - next_index);
+        next_at_ = static_cast<double>(next_index) * spacing;
+    }
+    int multiple() const { return multiple_; }
+
+    void reset() {
+        detector_.reset();
+        since_edge_ = 0.0;
+        period_ = 0.0;
+        next_at_ = 0.0;
+        pending_ = 0;
+        have_edge_ = false;
+    }
+
+    bool process(SampleType clock) {
+        since_edge_ += 1.0;
+        if (detector_.process(clock)) {
+            const bool usable = have_edge_ && since_edge_ <= max_period_samples_;
+            period_ = usable ? since_edge_ : 0.0;
+            have_edge_ = true;
+            since_edge_ = 0.0;
+            pending_ = period_ > 0.0 ? multiple_ - 1 : 0;
+            next_at_ = period_ / static_cast<double>(multiple_);
+            return true;
+        }
+        bool fired = false;
+        while (pending_ > 0 && period_ > 0.0 && since_edge_ >= next_at_) {
+            --pending_;
+            next_at_ += period_ / static_cast<double>(multiple_);
+            fired = true;
+        }
+        return fired;
+    }
+
+    /// Reject ambiguous integral clock samples; use `bool` with `ClockMultT`
+    /// or an explicit floating-point sample with this adapter.
+    template <std::integral Integer>
+    bool process(Integer) = delete;
+
+private:
     double sample_rate_ = 44100.0;
     double max_period_samples_ = 44100.0 * 4.0;
     int multiple_ = kDefaultMultiple;
-    double branch_since_edge_ = 0.0;
-    double branch_period_ = 0.0;
-    double branch_next_at_ = 0.0;
-    int branch_pending_ = 0;
-    bool branch_have_edge_ = false;
+    double since_edge_ = 0.0;
+    double period_ = 0.0;
+    double next_at_ = 0.0;
+    int pending_ = 0;
+    bool have_edge_ = false;
     TriggerDetectT<SampleType> detector_{};
 };
 
-using ClockMult = ClockMultT<float>;
-using ClockMult64 = ClockMultT<double>;
+using SignalClockMult = SignalClockMultT<float>;
+using SignalClockMult64 = SignalClockMultT<double>;
 
 /// One trigger in, a burst of N triggers out, with a spacing curve and a level
 /// ramp.

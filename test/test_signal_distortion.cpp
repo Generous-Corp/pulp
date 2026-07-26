@@ -15,6 +15,7 @@
 #include <pulp/signal/units.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -640,6 +641,88 @@ TEST_CASE("the float and double instantiations agree", "[distortion]") {
         const double x = 2.0 * std::sin(w * n);
         REQUIRE_THAT(static_cast<double>(f.process(static_cast<float>(x))),
                      WithinAbs(d.process(x), 1e-4));
+    }
+}
+
+TEST_CASE("The clipper family rejects non-finite controls and audio without poisoning state",
+          "[distortion][nan-recovery][rt-safety]") {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+
+    SECTION("diode-to-ground") {
+        DiodeClipperT<double> poisoned;
+        DiodeClipperT<double> fresh;
+        for (auto* clipper : {&poisoned, &fresh}) {
+            clipper->prepare(kSr);
+            clipper->set_symmetry(0.25);
+            clipper->set_resistance(22000.0);
+            clipper->set_capacitance(100e-12);
+            clipper->reset();
+        }
+
+        poisoned.set_symmetry(nan);
+        poisoned.set_resistance(nan);
+        poisoned.set_capacitance(nan);
+        require_allocates_no_memory([&] { REQUIRE(poisoned.process(nan) == 0.0); });
+
+        for (int n = 0; n < 1024; ++n) {
+            const double x = 0.8 * std::sin(2.0 * M_PI * 997.0 * n / kSr);
+            REQUIRE(poisoned.process(x) == fresh.process(x));
+        }
+    }
+
+    SECTION("feedback clipper") {
+        FeedbackClipperT<double> poisoned;
+        FeedbackClipperT<double> fresh;
+        for (auto* clipper : {&poisoned, &fresh}) {
+            clipper->prepare(kSr);
+            clipper->set_topology(ClipperTopology::in_loop);
+            clipper->set_symmetry(-0.25);
+            clipper->set_feedback_resistance(68000.0);
+            clipper->set_input_resistance(12000.0);
+            clipper->set_knee_corner_hz(900.0);
+            clipper->reset();
+        }
+
+        poisoned.set_symmetry(nan);
+        poisoned.set_feedback_resistance(nan);
+        poisoned.set_input_resistance(nan);
+        poisoned.set_knee_corner_hz(nan);
+        require_allocates_no_memory([&] { REQUIRE(poisoned.process(nan) == 0.0); });
+
+        for (int n = 0; n < 1024; ++n) {
+            const double x = 0.3 * std::sin(2.0 * M_PI * 431.0 * n / kSr);
+            REQUIRE(poisoned.process(x) == fresh.process(x));
+        }
+    }
+
+    SECTION("tone stack") {
+        ToneStackT<double> poisoned;
+        ToneStackT<double> fresh;
+        for (auto* tone : {&poisoned, &fresh}) {
+            tone->prepare(kSr);
+            tone->set_pre_tone_hz(850.0);
+            tone->set_post_tone_hz(4200.0);
+            tone->set_pre_gain_db(6.0);
+            tone->set_tone_mix(0.75);
+            tone->reset();
+        }
+
+        poisoned.set_pre_tone_hz(nan);
+        poisoned.set_post_tone_hz(nan);
+        poisoned.set_pre_gain_db(nan);
+        poisoned.set_tone_mix(nan);
+        require_allocates_no_memory([&] {
+            REQUIRE(poisoned.process_pre(nan) == 0.0);
+            REQUIRE(poisoned.process_post(nan) == 0.0);
+        });
+
+        // The second rejected sample resets the same complete tone-stack state
+        // that the reference starts from.
+        for (int n = 0; n < 1024; ++n) {
+            const double x = 0.4 * std::sin(2.0 * M_PI * 613.0 * n / kSr);
+            REQUIRE(poisoned.process_pre(x) == fresh.process_pre(x));
+            REQUIRE(poisoned.process_post(x) == fresh.process_post(x));
+        }
     }
 }
 

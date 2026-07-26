@@ -221,10 +221,15 @@ public:
 
     // ── Controls (real units throughout) ──────────────────────────────────
 
-    void set_threshold_db(double db) { threshold_db_ = std::clamp(db, kThresholdDbMin, kThresholdDbMax); }
+    void set_threshold_db(double db) {
+        threshold_db_ = std::clamp(dynamics::retain_finite(db, threshold_db_),
+                                   kThresholdDbMin, kThresholdDbMax);
+    }
 
     /// Positive compression ratio, used when negative-ratio mode is off.
-    void set_ratio(double r) { ratio_ = std::clamp(r, kRatioMin, kRatioMax); }
+    void set_ratio(double r) {
+        ratio_ = std::clamp(dynamics::retain_finite(r, ratio_), kRatioMin, kRatioMax);
+    }
 
     /// "Infinity+": lets the static curve run with a NEGATIVE ratio, so output
     /// keeps falling as input rises past the knee.
@@ -236,40 +241,57 @@ public:
     /// The ratio used when negative-ratio mode is on. Kept separate from
     /// `set_ratio()` so flipping the mode does not destroy the positive setting
     /// the user was on, and so neither setter needs a sign-dependent clamp.
-    void set_neg_ratio_amount(double r) { neg_ratio_ = std::clamp(r, kNegRatioMin, kNegRatioMax); }
+    void set_neg_ratio_amount(double r) {
+        neg_ratio_ = std::clamp(dynamics::retain_finite(r, neg_ratio_),
+                                kNegRatioMin, kNegRatioMax);
+    }
 
     /// 0 = hard knee; > 0 = OverEasy-style soft knee, total width in dB
     /// (`±width/2` around threshold).
-    void set_knee_db(double db) { knee_db_ = std::clamp(db, kKneeDbMin, kKneeDbMax); }
+    void set_knee_db(double db) {
+        knee_db_ = std::clamp(dynamics::retain_finite(db, knee_db_),
+                              kKneeDbMin, kKneeDbMax);
+    }
 
     /// THE time control — one knob for both directions. Sets the release time
     /// constant directly; attack is `time_ms / k`.
     void set_time_ms(double ms) {
-        time_ms_ = std::clamp(ms, kTimeMsMin, kTimeMsMax);
+        time_ms_ = std::clamp(dynamics::retain_finite(ms, time_ms_),
+                              kTimeMsMin, kTimeMsMax);
         update_coefficients();
     }
 
     /// The fixed attack/release lock. Advanced: exposed so the house
     /// calibration table can tune the asymmetry, not as a performance control.
     void set_attack_release_ratio_k(double k) {
-        ratio_k_ = std::clamp(k, kRatioKMin, kRatioKMax);
+        ratio_k_ = std::clamp(dynamics::retain_finite(k, ratio_k_),
+                              kRatioKMin, kRatioKMax);
         update_coefficients();
     }
 
-    void set_makeup_db(double db) { makeup_db_ = std::clamp(db, -kMakeupDbMax, kMakeupDbMax); }
+    void set_makeup_db(double db) {
+        makeup_db_ = std::clamp(dynamics::retain_finite(db, makeup_db_),
+                                -kMakeupDbMax, kMakeupDbMax);
+    }
 
     /// Clamped to the ceiling `prepare()` sized for, so this can never need an
     /// allocation.
     void set_lookahead_ms(double ms) {
-        lookahead_ms_ = std::clamp(ms, 0.0, kLookaheadMsMax);
+        lookahead_ms_ = std::clamp(dynamics::retain_finite(ms, lookahead_ms_),
+                                   0.0, kLookaheadMsMax);
         update_lookahead();
     }
 
     /// Dry/wet. 1 = fully compressed (series compression); below 1 blends the
     /// EQUALLY DELAYED dry signal, so the mix cannot comb-filter.
-    void set_mix(double mix01) { mix_ = std::clamp(mix01, 0.0, 1.0); }
+    void set_mix(double mix01) {
+        mix_ = std::clamp(dynamics::retain_finite(mix01, mix_), 0.0, 1.0);
+    }
 
-    void set_ceiling_db(double db) { ceiling_db_ = std::clamp(db, kCeilingDbMin, kCeilingDbMax); }
+    void set_ceiling_db(double db) {
+        ceiling_db_ = std::clamp(dynamics::retain_finite(db, ceiling_db_),
+                                 kCeilingDbMin, kCeilingDbMax);
+    }
 
     // ── Read-only taps ────────────────────────────────────────────────────
 

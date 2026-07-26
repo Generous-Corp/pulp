@@ -621,28 +621,27 @@ private:
     }
 
     void spawn(std::uint64_t k) {
-        const int slot = allocate_slot();
-        if (slot < 0) return;
-        Grain& g = grains_[static_cast<std::size_t>(slot)];
-
         const double u_position = unit_from<double>(mix64(seed_, k, kFieldPositionSpray));
         const double u_pitch = unit_from<double>(mix64(seed_, k, kFieldPitchSpray));
         const double u_pan = unit_from<double>(mix64(seed_, k, kFieldPanSpray));
 
         const double semitones = pitch_st_ + (u_pitch * 2.0 - 1.0) * pitch_spray_st_;
-        g.ratio = units::semitones_to_ratio(semitones);
+        Grain next{};
+        next.ratio = units::semitones_to_ratio(semitones);
 
         const double grain_seconds = grain_ms_ * 0.001;
-        g.phase = 0.0;
-        g.phase_increment = 1.0 / std::max(grain_seconds * sample_rate_, 1.0);
-        g.gain = grain_gain();
+        next.phase = 0.0;
+        next.phase_increment = 1.0 / std::max(grain_seconds * sample_rate_, 1.0);
+        next.gain = grain_gain();
 
         const double spray =
             (u_position * 2.0 - 1.0) * units::ms_to_samples(position_spray_ms_, sample_rate_);
+        const double requested_read = source_ == GrainSource::buffer ? playhead_ + spray
+                                                                     : live_centre_ - spray;
         if (source_ == GrainSource::buffer) {
-            g.read_position = playhead_ + spray;
-        } else if (!place_live_read(live_centre_ - spray, g.ratio, grain_seconds,
-                                    g.read_position)) {
+            next.read_position = requested_read;
+        } else if (!place_live_read(requested_read, next.ratio, grain_seconds,
+                                    next.read_position)) {
             // Nothing valid to read yet — the ring has not captured enough past.
             // The grain is skipped rather than placed on unwritten samples;
             // `grain_index_` still advances, so no draw shifts and determinism
@@ -650,10 +649,18 @@ private:
             return;
         }
 
-        panner_.set_pan(std::clamp((u_pan * 2.0 - 1.0) * pan_spray_, -1.0, 1.0));
-        panner_.compute_gains(g.pan_left, g.pan_right);
+        // Placement is known-good before a sounding slot can be selected. A
+        // failed live birth therefore cannot partially overwrite a victim or
+        // count as a steal.
+        const int slot = allocate_slot();
+        if (slot < 0) return;
+        if (next.read_position != requested_read) ++clamp_count_;
 
-        g.active = true;
+        panner_.set_pan(std::clamp((u_pan * 2.0 - 1.0) * pan_spray_, -1.0, 1.0));
+        panner_.compute_gains(next.pan_left, next.pan_right);
+
+        next.active = true;
+        grains_[static_cast<std::size_t>(slot)] = next;
     }
 
     /// Places a grain's read pointer so its whole span stays inside the region
@@ -690,9 +697,7 @@ private:
                               std::max(0.0, 1.0 - ratio) * duration) +
             2.0;
         if (newest < oldest) return false;
-        const double clamped = std::clamp(start, oldest, newest);
-        if (clamped != start) ++clamp_count_;
-        out = clamped;
+        out = std::clamp(start, oldest, newest);
         return true;
     }
 

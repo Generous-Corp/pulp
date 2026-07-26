@@ -1012,7 +1012,10 @@ TEST_CASE("410 the composite response is symmetric about the reported delay",
     // destroys the symmetry immediately and would make the reported latency
     // wrong by a quarter sample for host delay compensation.
     Comp c = probe(FetRatio::r4_1, 0.0, Comp::kAttackUsMax, Comp::kReleaseMsMax);
-    constexpr int kTail = 40;
+    // There are only `kLatencySamples` samples on the left side of the centre.
+    // Extending this past the delay indexed the vector with a negative value
+    // converted to size_t, making the proof undefined and seed/order flaky.
+    constexpr int kTail = Comp::kLatencySamples;
     std::vector<double> response;
     for (int i = 0; i < Comp::kLatencySamples + kTail + 1; ++i)
         response.push_back(c.process(i == 0 ? 1e-4 : 0.0));
@@ -1201,5 +1204,23 @@ TEST_CASE("a NaN sample cannot latch the FET feedback detector",
             REQUIRE(std::isfinite(c.gain_reduction_db()));
             REQUIRE(std::isfinite(c.control_voltage()));
         }
+    }
+}
+
+TEST_CASE("non-finite FET controls retain the last valid configuration",
+          "[fet-compressor][nan-recovery]") {
+    Comp c;
+    c.prepare(kSr);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    c.set_input_gain_db(nan);
+    c.set_output_gain_db(nan);
+    c.set_attack_us(nan);
+    c.set_release_ms(nan);
+    c.set_knee_db(nan);
+    c.set_transformer_amount(nan);
+    c.set_mix(nan);
+    for (int i = 0; i < Comp::kLatencySamples + 512; ++i) {
+        REQUIRE(std::isfinite(c.process(0.25)));
+        REQUIRE(std::isfinite(c.gain_reduction_db()));
     }
 }

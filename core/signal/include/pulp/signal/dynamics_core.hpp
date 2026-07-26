@@ -111,6 +111,13 @@
 
 namespace pulp::signal::dynamics {
 
+/// Control setters retain their last valid value when automation supplies a
+/// non-finite sample. `std::clamp` alone does not reject NaN because every
+/// comparison with NaN is false.
+inline double retain_finite(double candidate, double current) noexcept {
+    return std::isfinite(candidate) ? candidate : current;
+}
+
 /// Level-conversion floor, guarding `log10(0)`. Any value far below the
 /// quietest representable signal works: this sits ~26 orders above the float32
 /// denormal floor and ~7 orders below −120 dBFS.

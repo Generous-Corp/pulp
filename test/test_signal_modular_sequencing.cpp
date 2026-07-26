@@ -471,8 +471,8 @@ TEST_CASE("Reset matrix: the trigger-kit rows this header composes",
         REQUIRE(d.process(1.0));  // downbeat again, not 2 edges later
     }
 
-    SECTION("ClockMultT reset aborts the in-flight subdivision burst") {
-        ClockMultT<double> m;
+    SECTION("SignalClockMultT reset aborts the in-flight subdivision burst") {
+        SignalClockMultT<double> m;
         m.prepare(kSr);
         m.set_multiple(4);
         // Two edges 400 samples apart establish a period.
@@ -515,7 +515,7 @@ TEST_CASE("Reset matrix: the trigger-kit rows this header composes",
 
     SECTION("SampleHoldT reset zeroes the held value") {
         SampleHold64 sh;
-        REQUIRE_THAT(sh.process(0.75, 1.0), WithinAbs(0.75, 1e-12));
+        REQUIRE_THAT(sh.process_signal(0.75, 1.0), WithinAbs(0.75, 1e-12));
         sh.reset();
         REQUIRE_THAT(sh.value(), WithinAbs(0.0, 1e-12));
     }

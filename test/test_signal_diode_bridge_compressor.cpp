@@ -1373,6 +1373,26 @@ TEST_CASE("a NaN sample cannot latch the diode-bridge feedback detector",
     }
 }
 
+TEST_CASE("non-finite diode-bridge controls retain the last valid configuration",
+          "[diode-bridge][nan-recovery]") {
+    Comp c;
+    c.prepare(kSr);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    c.set_threshold_db(nan);
+    c.set_ratio(nan);
+    c.set_knee_db(nan);
+    c.set_attack_ms(nan);
+    c.set_release_ms(nan);
+    c.set_makeup_db(nan);
+    c.set_character(nan);
+    c.set_mix_percent(nan);
+    c.set_sc_hpf_hz(nan);
+    for (int i = 0; i < 512; ++i) {
+        REQUIRE(std::isfinite(c.process(0.25)));
+        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    }
+}
+
 TEST_CASE("enabling auto release cannot blend against a stale slow follower",
           "[diode-bridge][ballistics]") {
     Comp automatic;

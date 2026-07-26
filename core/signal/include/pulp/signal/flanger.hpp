@@ -721,7 +721,7 @@ private:
     int mode_switch_remaining_ = 0;
 
     std::array<Channel, 2> channels_{};
-    std::array<LfoT<double>, 2> lfos_{};
+    std::array<EffectLfoT<double>, 2> lfos_{};
 };
 
 using Flanger = FlangerT<float>;

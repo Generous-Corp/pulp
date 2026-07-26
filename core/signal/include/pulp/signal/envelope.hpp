@@ -397,7 +397,10 @@ public:
     /// Gate edges drive the envelope; repeated calls with the same state are
     /// no-ops, so this can be called every sample from a gate signal.
     void gate(bool on) {
-        legacy_advanced_next_ = false;
+        // `gate(bool)` selects the shipped level-before-advance contract when
+        // it starts a note. A note-off must not change that note's sample
+        // ordering halfway through its lifecycle.
+        if (on) advance_before_output_ = false;
         if (on == gate_) return;
         gate_ = on;
         if (on) engine_.trigger(SampleType{1});
@@ -406,7 +409,7 @@ public:
 
     void gate_on() {
         gate(true);
-        legacy_advanced_next_ = true;
+        advance_before_output_ = true;
     }
     void gate_off() { gate(false); }
 
@@ -416,7 +419,7 @@ public:
     }
 
     SampleType next() {
-        return legacy_advanced_next_ ? engine_.next_advanced() : engine_.next();
+        return advance_before_output_ ? engine_.next_advanced() : engine_.next();
     }
     SampleType current() const { return engine_.current(); }
     SampleType value() const { return current(); }
@@ -426,7 +429,7 @@ public:
 private:
     detail::EnvelopeEngine<SampleType> engine_{};
     bool gate_ = false;
-    bool legacy_advanced_next_ = false;
+    bool advance_before_output_ = false;
 };
 
 using Ar = ArT<float>;

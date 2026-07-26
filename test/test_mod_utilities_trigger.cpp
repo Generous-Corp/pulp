@@ -54,11 +54,11 @@ TEST_CASE("trigger-kit factor setters enforce their declared ranges",
     div.set_division(ClockDivider::kMaxDivision + 1);
     REQUIRE(div.division() == ClockDivider::kMaxDivision);
 
-    ClockMult mult;
+    SignalClockMult mult;
     mult.set_multiple(-1);
-    REQUIRE(mult.multiple() == ClockMult::kMinMultiple);
-    mult.set_multiple(ClockMult::kMaxMultiple + 1);
-    REQUIRE(mult.multiple() == ClockMult::kMaxMultiple);
+    REQUIRE(mult.multiple() == SignalClockMult::kMinMultiple);
+    mult.set_multiple(SignalClockMult::kMaxMultiple + 1);
+    REQUIRE(mult.multiple() == SignalClockMult::kMaxMultiple);
 }
 
 TEST_CASE("trigger-kit time and count setters enforce declared ranges",
@@ -86,9 +86,9 @@ TEST_CASE("trigger-kit time and count setters enforce declared ranges",
     REQUIRE(burst.interval_ms() == BurstGen::kMaxIntervalMs);
 }
 
-TEST_CASE("ClockMult emits the stated number of triggers per steady period",
+TEST_CASE("SignalClockMult emits the stated number of triggers per steady period",
           "[trigger][mod-utilities]") {
-    ClockMult mult;
+    SignalClockMult mult;
     mult.prepare(kSr);
     mult.set_multiple(4);
     mult.reset();
@@ -104,16 +104,16 @@ TEST_CASE("ClockMult emits the stated number of triggers per steady period",
     REQUIRE(fired == 4 * 4);
 }
 
-TEST_CASE("ClockMult treats a stopped clock as stopped, not as a very slow one",
+TEST_CASE("SignalClockMult treats a stopped clock as stopped, not as a very slow one",
           "[trigger][mod-utilities]") {
-    ClockMult mult;
+    SignalClockMult mult;
     mult.prepare(kSr);
     mult.set_multiple(4);
     mult.reset();
 
     mult.process(1.0f);
     const int gap =
-        static_cast<int>(units::ms_to_samples(ClockMultT<float>::kMaxPeriodMs, kSr)) * 2;
+        static_cast<int>(units::ms_to_samples(SignalClockMult::kMaxPeriodMs, kSr)) * 2;
     int spurious = 0;
     for (int i = 0; i < gap; ++i)
         if (mult.process(0.0f)) ++spurious;
@@ -126,9 +126,9 @@ TEST_CASE("ClockMult treats a stopped clock as stopped, not as a very slow one",
     REQUIRE(after == 0);
 }
 
-TEST_CASE("ClockMult factor changes cannot emit subdivisions from the old grid",
+TEST_CASE("SignalClockMult factor changes cannot emit subdivisions from the old grid",
           "[trigger][mod-utilities]") {
-    ClockMult mult;
+    SignalClockMult mult;
     mult.prepare(kSr);
     mult.set_multiple(8);
     mult.reset();
@@ -144,9 +144,9 @@ TEST_CASE("ClockMult factor changes cannot emit subdivisions from the old grid",
     REQUIRE(mult.process(1.0f));
 }
 
-TEST_CASE("ClockMult factor increases schedule only the future points of the new grid",
+TEST_CASE("SignalClockMult factor increases schedule only future points of the new grid",
           "[trigger][mod-utilities]") {
-    ClockMult mult;
+    SignalClockMult mult;
     mult.prepare(kSr);
     mult.set_multiple(2);
     mult.reset();
@@ -222,7 +222,7 @@ TEST_CASE("trigger-kit utilities allocate nothing on the audio thread",
     Comparator comparator;
     GateGen gate;
     ClockDivider divider;
-    ClockMult multiplier;
+    SignalClockMult multiplier;
     TrigDelay delay;
     BurstGen burst;
 

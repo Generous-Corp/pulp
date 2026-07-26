@@ -14,7 +14,7 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("ModMatrix sums routes and reports its own worst case",
           "[mod-matrix][mod-utilities]") {
-    DenseModMatrixT<4, 3, double> matrix;
+    round2::ModMatrixT<4, 3, double> matrix;
     REQUIRE(matrix.add_route(0, 1, 0.5));
     REQUIRE(matrix.add_route(2, 1, -0.25));
     REQUIRE(matrix.route_count() == 2);

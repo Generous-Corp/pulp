@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -336,6 +338,29 @@ TEST_CASE("Lfo cycle counter is wide enough for a day-long free run",
     // undefined behavior — in under seven hours of playback.
     Lfo lfo;
     REQUIRE(sizeof(decltype(lfo.cycles_completed())) >= 8);
+}
+
+TEST_CASE("Lfo64 keeps the toolkit API and defaults without a waveform setter",
+          "[signal][mod][lfo][compatibility]") {
+    static_assert(std::is_same_v<decltype(std::declval<const Lfo64&>().wave()),
+                                 Lfo64::Wave>);
+
+    Lfo64 lfo;
+    lfo.prepare(48000.0);
+    lfo.set_rate_hz(1000.0);
+    REQUIRE(lfo.rate_hz() == 1000.0);
+
+    lfo.set_stereo_offset(0.25);
+    double left = 0.0;
+    double right = 0.0;
+    lfo.next_stereo(left, right);
+    REQUIRE(left != right);
+
+    // The shipped enum-returning accessor remains usable in enum contexts.
+    switch (lfo.wave()) {
+        case Lfo64::Wave::sine: break;
+        default: FAIL("default LFO waveform changed");
+    }
 }
 
 // ── lfo: shape ───────────────────────────────────────────────────────────────
@@ -712,6 +737,19 @@ TEST_CASE("SlewLimiter linear mode takes exactly the set ramp time",
     for (int i = 0; i < 959; ++i) (void)slew.process(0.0f);
     REQUIRE(slew.current() > 0.0f);
     REQUIRE_THAT(slew.process(0.0f), WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("SlewLimiter individual time setters retain full-scale rate semantics",
+          "[signal][mod][tools]") {
+    SlewLimiter slew;
+    slew.prepare(48000.0f);
+    slew.set_mode(SlewMode::linear);
+    slew.set_rise_ms(10.0);
+    slew.set_fall_ms(10.0);
+    slew.reset(0.0f);
+
+    for (int i = 0; i < 240; ++i) (void)slew.process(0.5f);
+    REQUIRE_THAT(slew.current(), WithinAbs(0.5f, 1e-6f));
 }
 
 TEST_CASE("SlewLimiter exponential mode reaches one time constant",

@@ -1042,8 +1042,8 @@ private:
     PitchShifterT<SampleType> shifter_[kMaxVoices]{};
     DelayLineT<SampleType> align_{};
     DcBlocker<SampleType> dc_{};
-    SlewLimiterT<double> glide_[kMaxVoices]{};
-    SlewLimiterT<double> mute_{};
+    ConstantTimeSlewLimiterT<double> glide_[kMaxVoices]{};
+    ConstantTimeSlewLimiterT<double> mute_{};
     DriftT<double> drift_[kMaxVoices]{};
 
     // ── Configuration ─────────────────────────────────────────────────────

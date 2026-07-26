@@ -675,8 +675,8 @@ private:
     }
 
     std::array<DelayLineT<SampleType>, 2> lines_{};
-    std::array<LfoT<double>, kVoiceSlots> lfo_a_{};
-    std::array<LfoT<double>, kVoiceSlots> lfo_b_{};
+    std::array<EffectLfoT<double>, kVoiceSlots> lfo_a_{};
+    std::array<EffectLfoT<double>, kVoiceSlots> lfo_b_{};
     std::array<chardelay::BbdChannel, kVoiceSlots> bbd_{};
     std::array<TptFilterT<double>, 2> shelf_lowpass_{};
     std::array<TptFilterT<double>, 2> cross_highpass_{};

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <vector>
 
 using namespace pulp::signal;
@@ -28,6 +29,22 @@ std::vector<int> fire_times(int n, Fn&& step) {
         if (step(i)) times.push_back(i);
     return times;
 }
+
+template <typename Multiplier>
+concept AcceptsIntegerClock = requires(Multiplier multiplier) { multiplier.process(1); };
+
+template <typename Multiplier>
+concept HasEventFactor = requires(Multiplier multiplier) { multiplier.set_multiplier(4); };
+
+template <typename Multiplier>
+concept HasSignalFactor = requires(Multiplier multiplier) { multiplier.set_multiple(4); };
+
+static_assert(!AcceptsIntegerClock<ClockMult>);
+static_assert(!AcceptsIntegerClock<SignalClockMult>);
+static_assert(HasEventFactor<ClockMult>);
+static_assert(!HasSignalFactor<ClockMult>);
+static_assert(!HasEventFactor<SignalClockMult>);
+static_assert(HasSignalFactor<SignalClockMult>);
 
 } // namespace
 
@@ -149,6 +166,23 @@ TEST_CASE("ClockMult at 1x passes the input through", "[signal][mod][trigger]") 
     const auto times =
         fire_times(1000, [&](int i) { return multiplier.process(i % 250 == 0); });
     REQUIRE(times == std::vector<int>{0, 250, 500, 750});
+}
+
+TEST_CASE("event and signal clock multipliers expose one scheduler each",
+          "[signal][mod][trigger][regression]") {
+    EventClockMult events;
+    events.set_multiplier(4);
+
+    SignalClockMult signal;
+    signal.prepare(kSampleRate);
+    signal.set_multiple(4);
+
+    // The event adapter consumes a deliberately decoded bool. The signal
+    // adapter consumes a deliberately floating-point CV sample. An integer
+    // call is rejected by the static assertions above instead of selecting an
+    // engine through overload resolution.
+    REQUIRE(events.process(true));
+    REQUIRE(signal.process(1.0f));
 }
 
 // ── BurstGenT ────────────────────────────────────────────────────────────────
