@@ -444,6 +444,18 @@ public:
         update_ratio();
     }
 
+    /// Constant-time counterpart to `reset()` for hostile audio input.
+    void discard_history() noexcept {
+        line_.discard_history();
+        dc_.reset();
+        drift_.reset();
+        phase_ = 0.0;
+        window_a_ = window_b_ = window_samples_;
+        glide_.set_immediate(target_semitones());
+        semitones_ = target_semitones();
+        update_ratio();
+    }
+
     // ── Control surface ───────────────────────────────────────────────────
 
     /// Selects the pedal law or the direct semitone target. Default `pedal`.
@@ -632,7 +644,7 @@ public:
     /// `process_wet` per sample — both write the line and advance the phase.
     SampleType process(SampleType x) {
         if (!std::isfinite(static_cast<double>(x))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
         const double dry = static_cast<double>(x);
@@ -647,7 +659,7 @@ public:
     /// several shifted voices themselves and applying their own balance.
     SampleType process_wet(SampleType x) {
         if (!std::isfinite(static_cast<double>(x))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
         return static_cast<SampleType>(advance(static_cast<double>(x)));

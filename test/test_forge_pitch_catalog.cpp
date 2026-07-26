@@ -883,10 +883,27 @@ TEST_CASE("The baked node allocates nothing while rendering",
 
 TEST_CASE("The harmony factory exposes the complete canonical parameter surface",
           "[host][forge][pitch][harmony]") {
-    auto node=harmony::make_harmony_engine_node();REQUIRE(node.type_id==harmony::kTypeId);REQUIRE(node.num_input_ports==1);REQUIRE(node.num_output_ports==1);REQUIRE(node.baked_params.size()==13);
-    REQUIRE(harmony::worst_case_gain()==float(pulp::signal::HarmonyEngine::kWorstCaseGain));
+    auto node = harmony::make_harmony_engine_node();
+    REQUIRE(node.type_id == harmony::kTypeId);
+    REQUIRE(node.num_input_ports == 1);
+    REQUIRE(node.num_output_ports == 1);
+    REQUIRE(node.baked_params.size() == 13);
+    REQUIRE(harmony::worst_case_gain() ==
+            static_cast<float>(pulp::signal::HarmonyEngine::kWorstCaseGain));
+    REQUIRE(harmony::worst_case_gain() > 9.9f);
     REQUIRE(harmony::latency_samples(kSr)>0);
-    Fixture fixture(std::move(node),kSr,kFrames);auto injector=fixture.claim_injector();injector.inject(immediate(harmony::kKey,2));injector.inject(immediate(harmony::kScale,1));injector.inject(immediate(harmony::kV1Interval,2));injector.inject(immediate(harmony::kV2Enable,1));injector.inject(immediate(harmony::kV2Interval,4));
-    auto input=tone();pulp::test::ReusableRenderer<1> renderer(fixture,{input});for(int i=0;i<64;++i)renderer.render();for(float x:renderer.output())REQUIRE(std::isfinite(x));
-    pulp::test::RtAllocationProbe probe;for(int i=0;i<16;++i)renderer.render();REQUIRE(probe.allocation_count()==0);
+    Fixture fixture(std::move(node), kSr, kFrames);
+    auto injector = fixture.claim_injector();
+    REQUIRE(injector.inject(immediate(harmony::kKey, 2.0f)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(harmony::kScale, 1.0f)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(harmony::kV1Interval, 2.0f)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(harmony::kV2Enable, 1.0f)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(harmony::kV2Interval, 4.0f)) == InjectStatus::Ok);
+    auto input = tone();
+    pulp::test::ReusableRenderer<1> renderer(fixture, {input});
+    for (int i = 0; i < 64; ++i) renderer.render();
+    for (float x : renderer.output()) REQUIRE(std::isfinite(x));
+    pulp::test::RtAllocationProbe probe;
+    for (int i = 0; i < 16; ++i) renderer.render();
+    REQUIRE(probe.allocation_count() == 0);
 }

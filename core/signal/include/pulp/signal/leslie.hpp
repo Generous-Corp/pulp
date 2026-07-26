@@ -349,6 +349,27 @@ public:
         blocker_.reset();
     }
 
+    /// Constant-time audio fault recovery; retains controls and makes all old
+    /// delay samples unreachable without walking the prepared allocations.
+    void discard_history() noexcept {
+        horn_line_.discard_history();
+        drum_line_.discard_history();
+        horn_phase_.reset();
+        drum_phase_.reset();
+        horn_inertia_.set_immediate(target_horn_hz_);
+        drum_inertia_.set_immediate(target_drum_hz_);
+        horn_drift_.set_seed(kDefaultSeed);
+        drum_drift_.set_seed(kDefaultSeed ^ 0x9e3779b9u);
+        horn_drift_.reset();
+        drum_drift_.reset();
+        for (auto& f : horn_shelf_) f.reset();
+        for (auto& f : drum_shelf_) f.reset();
+        horn_refl_lp_.reset();
+        drum_refl_lp_.reset();
+        crossover_.reset();
+        blocker_.reset();
+    }
+
     // ── Controls ──────────────────────────────────────────────────────────
 
     /// The switch, and the most important control on the cabinet.
@@ -564,7 +585,7 @@ public:
                  SampleType& out_right) {
         if (!std::isfinite(static_cast<double>(in_left)) ||
             !std::isfinite(static_cast<double>(in_right))) {
-            reset();
+            discard_history();
             out_left = out_right = SampleType{0};
             return;
         }
@@ -973,6 +994,12 @@ public:
         blocker_.reset();
     }
 
+    void discard_history() noexcept {
+        line_.discard_history();
+        scanner_.reset();
+        blocker_.reset();
+    }
+
     void set_mode(Mode mode) {
         mode_ = mode;
         update();
@@ -1040,7 +1067,7 @@ public:
 
     SampleType process(SampleType input) {
         if (!std::isfinite(static_cast<double>(input))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
         if (mode_ == Mode::off) return input;

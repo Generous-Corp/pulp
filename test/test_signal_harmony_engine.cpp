@@ -1146,7 +1146,8 @@ TEST_CASE("the gain bound is the feed-forward sum", "[signal][harmony-engine]") 
     // the convex crossfade as the whole story and missing the blocker sitting
     // after it.
     REQUIRE(Engine::kWorstCaseGain ==
-            1.0 + Engine::kMaxVoices * PitchShifter64::kDcBlockerPeakGain);
+            Engine::kLevelMaxLinear *
+                (1.0 + Engine::kMaxVoices * PitchShifter64::kDcBlockerPeakGain));
 
     Engine engine;
     engine.prepare(kSr);
@@ -1178,18 +1179,19 @@ TEST_CASE("the gain bound is the feed-forward sum", "[signal][harmony-engine]") 
     // single sample. Inherited from `PitchShifterT` along with the error.
     PitchShifter64 reference;
     reference.prepare(kSr);
-    const double exact_bound =
+    const double unity_bound =
         1.0 + Engine::kMaxVoices * PitchShifter64::kDcBlockerPeakGain;
-    REQUIRE(peak(out) <= exact_bound);
+    REQUIRE(peak(out) <= unity_bound);
 
-    // The registry now ships exactly this bound rather than a nominal figure
-    // sitting under it. It was 3.0 against a true 5.0 — 4.4 dB of headroom a
-    // consumer would not have budgeted.
-    REQUIRE_THAT(Engine::kWorstCaseGain, WithinAbs(exact_bound, 1e-12));
+    // Unity voice levels produce the structural 5x bound.  The registry must
+    // additionally account for the public +6 dB ceiling on every level.
+    const double ceiling_bound = Engine::kLevelMaxLinear * unity_bound;
+    REQUIRE_THAT(Engine::kWorstCaseGain, WithinAbs(ceiling_bound, 1e-12));
 
-    // The +6 dB ceiling on all three raises the arithmetic sum to ~5.98, which
-    // is what a registry consumer must budget for if it exposes those limits.
+    // The +6 dB ceiling raises the full structural bound to ~9.98, which is
+    // what a registry consumer must budget for when it exposes those limits.
     const double ceiling = units::db_to_linear(Engine::kLevelMaxDb);
+    REQUIRE_THAT(Engine::kLevelMaxLinear, WithinAbs(ceiling, 1e-12));
     REQUIRE_THAT((1.0 + Engine::kMaxVoices) * ceiling, WithinRel(5.98, 0.01));
 }
 

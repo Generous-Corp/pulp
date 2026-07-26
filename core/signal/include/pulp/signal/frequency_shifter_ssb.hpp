@@ -440,6 +440,20 @@ public:
         delay_smoother_.set_immediate(delay_target_samples_);
     }
 
+    /// Audio-thread fault recovery: identical running state to `reset()` but
+    /// logically invalidates the delay history instead of clearing its storage.
+    void discard_history() noexcept {
+        for (auto& n : network_) n.reset();
+        for (auto& dc : dc_blocker_) dc.reset();
+        for (auto& line : delay_) line.discard_history();
+        carrier_.reset(0.0);
+        shift_smoother_.set_immediate(shift_hz_);
+        feedback_smoother_.set_immediate(feedback_);
+        mix_smoother_.set_immediate(mix_);
+        spread_smoother_.set_immediate(spread_);
+        delay_smoother_.set_immediate(delay_target_samples_);
+    }
+
     // ── Parameters (real units throughout, series law 3) ──────────────────
 
     /// Signed shift in Hz: positive shifts the retained sideband up, negative
@@ -518,7 +532,7 @@ public:
     /// other one on.
     SampleType process(SampleType x) {
         if (!std::isfinite(static_cast<double>(x))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
         const Controls c = advance_controls();
@@ -533,7 +547,7 @@ public:
     void process_stereo(SampleType& left, SampleType& right) {
         if (!std::isfinite(static_cast<double>(left)) ||
             !std::isfinite(static_cast<double>(right))) {
-            reset();
+            discard_history();
             left = right = SampleType{0};
             return;
         }

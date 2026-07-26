@@ -265,6 +265,7 @@ public:
         for (auto& ch : channels_) {
             ch.line.prepare(modulated_capacity_);
             ch.fixed.assign(fixed_capacity_, 0.0);
+            ch.fixed_valid = 0;
             ch.blocker.set_pole(pole);
             ch.bbd.prepare(sample_rate_);
             // The shifter runs as a pure translator inside this loop: the
@@ -295,9 +296,29 @@ public:
             ch.line.reset();
             std::fill(ch.fixed.begin(), ch.fixed.end(), 0.0);
             ch.fixed_write = 0;
+            ch.fixed_valid = 0;
             ch.blocker.reset();
             ch.bbd.reset();
             ch.shifter.reset();
+            ch.feedback = 0.0;
+            ch.delay_ms = 0.0;
+            ch.delay_smoother.set_immediate(delay_samples_for(mode_, 0.0));
+        }
+        for (auto& lfo : lfos_) lfo.reset();
+        mode_switch_remaining_ = 0;
+        previous_mode_ = mode_;
+    }
+
+    /// Constant-time audio fault recovery. Dynamic delay storage is invalidated
+    /// logically; fixed-capacity DSP state is reset normally.
+    void discard_history() noexcept {
+        for (auto& ch : channels_) {
+            ch.line.discard_history();
+            ch.fixed_write = 0;
+            ch.fixed_valid = 0;
+            ch.blocker.reset();
+            ch.bbd.reset();
+            ch.shifter.discard_history();
             ch.feedback = 0.0;
             ch.delay_ms = 0.0;
             ch.delay_smoother.set_immediate(delay_samples_for(mode_, 0.0));
@@ -403,7 +424,7 @@ public:
     void process(const SampleType* in, SampleType* out, int n) {
         for (int i = 0; i < n; ++i) {
             if (!std::isfinite(static_cast<double>(in[i]))) {
-                reset();
+                discard_history();
                 out[i] = SampleType{0};
                 continue;
             }
@@ -418,7 +439,7 @@ public:
         for (int i = 0; i < n; ++i) {
             if (!std::isfinite(static_cast<double>(in_left[i])) ||
                 !std::isfinite(static_cast<double>(in_right[i]))) {
-                reset();
+                discard_history();
                 out_left[i] = out_right[i] = SampleType{0};
                 continue;
             }
@@ -526,6 +547,7 @@ private:
         chardelay::FractionalDelayLine line{};
         std::vector<double> fixed{};
         std::size_t fixed_write = 0;
+        std::size_t fixed_valid = 0;
         DcBlocker<double> blocker{};
         chardelay::BbdChannel bbd{};
         SsbFrequencyShifterT<double> shifter{};
@@ -707,6 +729,7 @@ private:
         const auto delay = static_cast<std::size_t>(std::max(0, fixed_delay_samples()));
         const std::size_t capacity = ch.fixed.size();
         if (capacity == 0) return 0.0;
+        if (ch.fixed_valid < capacity && delay >= ch.fixed_valid) return 0.0;
         const std::size_t index = (ch.fixed_write + capacity - (delay % capacity)) % capacity;
         return ch.fixed[index];
     }
@@ -715,6 +738,7 @@ private:
         if (ch.fixed.empty()) return;
         ch.fixed[ch.fixed_write] = x;
         ch.fixed_write = (ch.fixed_write + 1u) % ch.fixed.size();
+        ch.fixed_valid = std::min(ch.fixed_valid + 1u, ch.fixed.size());
     }
 
     void apply_lfo_settings() {

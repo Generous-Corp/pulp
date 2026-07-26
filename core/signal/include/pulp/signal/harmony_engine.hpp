@@ -81,9 +81,8 @@
 ///
 /// There is **no feedback path**: the shifters read from a write-only ring and
 /// nothing routes output back into any buffer. The bound is therefore the
-/// closed-form arithmetic sum `dry_gain + n_voices·voice_gain`, which is
-/// `kWorstCaseGain` = 3.0 at unity dry plus two unity voices. Pushing all three
-/// levels to the node's +6 dB ceiling raises the sum to 3·10^(6/20) ≈ 5.98.
+/// closed-form arithmetic sum at the declared +6 dB parameter ceiling,
+/// including each pitch shifter's DC-blocker sample-gain bound.
 /// No invariant test is required because no loop exists — contrast the feedback
 /// designs in this series, where the registry number must cite a tested bound.
 ///
@@ -279,7 +278,21 @@ public:
 
     void reset() {
         std::fill(ring_.begin(), ring_.end(), 0.0);
+        valid_samples_ = 0;
         write_ = 0;
+        hop_counter_ = 0;
+        median_count_ = 0;
+        median_index_ = 0;
+        f0_hz_ = 0.0;
+        tau_ = 0.0;
+        voiced_ = false;
+        min_cmnd_ = 1.0;
+    }
+
+    /// Constant-time logical reset for audio-thread fault recovery.
+    void discard_history() noexcept {
+        write_ = 0;
+        valid_samples_ = 0;
         hop_counter_ = 0;
         median_count_ = 0;
         median_index_ = 0;
@@ -310,11 +323,12 @@ public:
     bool process(SampleType x) {
         if (window_ <= 0) return false;
         if (!std::isfinite(static_cast<double>(x))) {
-            reset();
+            discard_history();
             return false;
         }
         ring_[static_cast<std::size_t>(write_)] = static_cast<double>(x);
         write_ = (write_ + 1) % window_;
+        valid_samples_ = std::min(valid_samples_ + 1, window_);
         if (++hop_counter_ < kHop) return false;
         hop_counter_ = 0;
         analyse();
@@ -358,9 +372,12 @@ private:
     void analyse() {
         // Unroll the ring into a linear window so the difference function is a
         // flat scan rather than `tau_max * integration` modulo operations.
-        for (int i = 0; i < window_; ++i)
+        const int missing = window_ - valid_samples_;
+        for (int i = 0; i < window_; ++i) {
             scratch_[static_cast<std::size_t>(i)] =
-                ring_[static_cast<std::size_t>((write_ + i) % window_)];
+                i < missing ? 0.0
+                            : ring_[static_cast<std::size_t>((write_ + i) % window_)];
+        }
 
         // [1] Eq. 6 — the difference function. Computed from tau = 1, not from
         // tau_min: the CMND denominator below is a running mean over ALL lags
@@ -477,6 +494,7 @@ private:
     std::vector<double> cmnd_{};
 
     int write_ = 0;
+    int valid_samples_ = 0;
     int hop_counter_ = 0;
 
     double median_buffer_[kMaxMedianTaps] = {};
@@ -719,11 +737,11 @@ public:
     /// [design parameter] defaults 0 dB, range −60 .. +6.
     static constexpr double kLevelMinDb = -60.0;
     static constexpr double kLevelMaxDb = 6.0;
+    static constexpr double kLevelMaxLinear = 1.9952623149688795;
 
-    /// The closed-form feed-forward bound: `dry + 2·voice` at unity. There is
-    /// no feedback path, so this is arithmetic rather than an invariant to
-    /// test. At the +6 dB ceiling on all three the sum is 3·10^(6/20) ≈ 5.98.
-    /// `1 + kMaxVoices · kDcBlockerPeakGain` = 5.0, not 3.0.
+    /// The closed-form feed-forward bound at the declared parameter ceiling.
+    /// There is no feedback path, so this is arithmetic rather than an
+    /// invariant to discover: `10^(6/20) · (dry + 2·voice·dc_l1)`.
     ///
     /// This was 3.0, from "unity dry plus two unity voices" — each wet voice
     /// bounded by 1 because the tap crossfade is convex. But each voice's wet
@@ -734,7 +752,8 @@ public:
     /// sample. Understating a registry headroom figure by 4.4 dB is the
     /// expensive direction.
     static constexpr double kWorstCaseGain =
-        1.0 + kMaxVoices * PitchShifterT<double>::kDcBlockerPeakGain;
+        kLevelMaxLinear *
+        (1.0 + kMaxVoices * PitchShifterT<double>::kDcBlockerPeakGain);
 
     /// Below this the mute gate is treated as fully closed, so an unvoiced
     /// passage costs nothing and cannot leak a denormal tail.
@@ -804,6 +823,22 @@ public:
         mute_.set_immediate(0.0);
         for (int v = 0; v < kMaxVoices; ++v) {
             shifter_[static_cast<std::size_t>(v)].reset();
+            drift_[v].reset();
+            shift_semitones_[v] = 0;
+            glide_[v].set_immediate(target_cents(v));
+            apply_ratio(v, glide_[v].value());
+        }
+    }
+
+    /// Constant-time audio fault recovery. Controls are retained while every
+    /// history-bearing component is logically returned to silence.
+    void discard_history() noexcept {
+        tracker_.discard_history();
+        align_.discard_history();
+        dc_.reset();
+        mute_.set_immediate(0.0);
+        for (int v = 0; v < kMaxVoices; ++v) {
+            shifter_[static_cast<std::size_t>(v)].discard_history();
             drift_[v].reset();
             shift_semitones_[v] = 0;
             glide_[v].set_immediate(target_cents(v));
@@ -965,7 +1000,7 @@ public:
         if (latency_ <= 0) return SampleType{0};
 
         if (!std::isfinite(static_cast<double>(x))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
 

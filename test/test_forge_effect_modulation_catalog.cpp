@@ -1368,14 +1368,53 @@ TEST_CASE("Forge modulation: every node in the family has a distinct type id",
 
 TEST_CASE("Forge modulation: flanger, Leslie and scanner factories expose canonical contracts",
           "[host][baked][forge][forge-modulation][catalog]") {
-    auto fl=mod::flanger::make_flanger_node();auto le=mod::leslie::make_leslie_node();auto sc=mod::leslie::make_scanner_vibrato_node();
-    REQUIRE(fl.type_id==mod::flanger::kTypeId);REQUIRE(fl.baked_params.size()==11);REQUIRE(fl.num_input_ports==2);REQUIRE(fl.num_output_ports==2);
-    REQUIRE(le.type_id==mod::leslie::kTypeId);REQUIRE(le.baked_params.size()==24);REQUIRE(le.num_input_ports==2);REQUIRE(le.num_output_ports==2);
-    REQUIRE(sc.type_id==mod::leslie::kScannerTypeId);REQUIRE(sc.baked_params.size()==7);REQUIRE(sc.num_input_ports==1);REQUIRE(sc.num_output_ports==1);
-    REQUIRE(mod::flanger::worst_case_gain()==float(pulp::signal::Flanger::worst_case_gain()));
-    REQUIRE(mod::leslie::leslie_worst_case_gain()==float(pulp::signal::LeslieRotary::kWorstCaseGain));
-    REQUIRE(mod::leslie::scanner_worst_case_gain()==float(pulp::signal::ScannerVibrato::kWorstCaseGain));
-    Fixture flx(std::move(fl),kSr,kFrames);auto block=tone();auto out=flx.render({block,block});for(auto&ch:out)for(float x:ch)REQUIRE(std::isfinite(x));
-    Fixture lex(std::move(le),kSr,kFrames);out=lex.render({block,block});for(auto&ch:out)for(float x:ch)REQUIRE(std::isfinite(x));
-    pulp::test::BakedNodeFixture<1> scx(std::move(sc),kSr,kFrames);auto mono=scx.render({block});for(float x:mono[0])REQUIRE(std::isfinite(x));
+    auto flanger = mod::flanger::make_flanger_node();
+    auto leslie = mod::leslie::make_leslie_node();
+    auto scanner = mod::leslie::make_scanner_vibrato_node();
+    REQUIRE(flanger.type_id == mod::flanger::kTypeId);
+    REQUIRE(flanger.baked_params.size() == 9);
+    REQUIRE(flanger.num_input_ports == 2);
+    REQUIRE(flanger.num_output_ports == 2);
+    REQUIRE(leslie.type_id == mod::leslie::kTypeId);
+    REQUIRE(leslie.baked_params.size() == 24);
+    REQUIRE(leslie.num_input_ports == 2);
+    REQUIRE(leslie.num_output_ports == 2);
+    REQUIRE(scanner.type_id == mod::leslie::kScannerTypeId);
+    REQUIRE(scanner.baked_params.size() == 7);
+    REQUIRE(scanner.num_input_ports == 1);
+    REQUIRE(scanner.num_output_ports == 1);
+    REQUIRE(mod::flanger::worst_case_gain() ==
+            static_cast<float>(pulp::signal::Flanger::worst_case_gain()));
+    REQUIRE(mod::leslie::leslie_worst_case_gain() ==
+            static_cast<float>(pulp::signal::LeslieRotary::kWorstCaseGain));
+    REQUIRE(mod::leslie::scanner_worst_case_gain() ==
+            static_cast<float>(pulp::signal::ScannerVibrato::kWorstCaseGain));
+
+    Fixture flanger_fx(std::move(flanger), kSr, kFrames);
+    const auto block = tone();
+    auto out = flanger_fx.render({block, block});
+    for (const auto& channel : out)
+        for (float x : channel) REQUIRE(std::isfinite(x));
+    Fixture leslie_fx(std::move(leslie), kSr, kFrames);
+    out = leslie_fx.render({block, block});
+    for (const auto& channel : out)
+        for (float x : channel) REQUIRE(std::isfinite(x));
+    pulp::test::BakedNodeFixture<1> scanner_fx(std::move(scanner), kSr, kFrames);
+    const auto mono = scanner_fx.render({block});
+    for (float x : mono[0]) REQUIRE(std::isfinite(x));
+}
+
+TEST_CASE("Forge modulation: flanger latency controls are frozen realizations",
+          "[host][baked][forge][forge-modulation][flanger][latency]") {
+    using Mode = pulp::signal::FlangerMode;
+    const auto classic = mod::flanger::make_flanger_node(Mode::classic, 4.0);
+    const auto through_zero = mod::flanger::make_flanger_node(Mode::through_zero, 4.0);
+    REQUIRE(classic.type_id != through_zero.type_id);
+    REQUIRE(mod::flanger::latency_samples(Mode::classic, 4.0, kSr) == 0);
+    REQUIRE(mod::flanger::latency_samples(Mode::through_zero, 4.0, kSr) == 192);
+
+    for (const auto& row : classic.baked_params) {
+        REQUIRE(row.id != mod::flanger::kMode);
+        REQUIRE(row.id != mod::flanger::kOffset);
+    }
 }

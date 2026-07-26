@@ -419,7 +419,7 @@ public:
             const double in_l = static_cast<double>(left[i]);
             const double in_r = static_cast<double>(right[i]);
             if (!std::isfinite(in_l) || !std::isfinite(in_r)) {
-                reset();
+                discard_history();
                 left[i] = right[i] = SampleType{0};
                 continue;
             }
@@ -484,6 +484,23 @@ public:
 
     void reset() {
         for (auto& line : lines_) line.reset();
+        for (std::size_t k = 0; k < kVoiceSlots; ++k) {
+            lfo_a_[k].reset();
+            lfo_b_[k].reset();
+            bbd_[k].reset();
+            delay_ms_[k] = 0.0;
+        }
+        for (std::size_t c = 0; c < 2; ++c) {
+            shelf_lowpass_[c].reset();
+            cross_highpass_[c].reset();
+        }
+    }
+
+    /// Constant-time audio fault recovery. Public reset still physically clears
+    /// storage; this path makes the old samples unreachable and resumes from
+    /// logical silence without walking the prepared delay allocations.
+    void discard_history() noexcept {
+        for (auto& line : lines_) line.discard_history();
         for (std::size_t k = 0; k < kVoiceSlots; ++k) {
             lfo_a_[k].reset();
             lfo_b_[k].reset();

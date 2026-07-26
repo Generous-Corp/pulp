@@ -230,9 +230,16 @@ public:
         arm();
     }
 
+    void discard_history() noexcept {
+        line_.discard_history();
+        lfo_.reset();
+        depth_env_ = 0.0;
+        arm();
+    }
+
     SampleType process(SampleType input) {
         if (!std::isfinite(static_cast<double>(input))) {
-            reset();
+            discard_history();
             return SampleType{0};
         }
         const double env = lifecycle_active_ ? advance_lifecycle() : 1.0;

@@ -16,34 +16,37 @@ public:
     void prepare(int max_delay_samples) {
         buffer_.assign(max_delay_samples + 1, SampleType{0.0f});
         write_pos_ = 0;
+        valid_samples_ = 0;
     }
 
     // Push a sample into the delay line
     void push(SampleType sample) {
+        if (buffer_.empty()) return;
         buffer_[write_pos_] = sample;
         write_pos_ = (write_pos_ + 1) % static_cast<int>(buffer_.size());
+        valid_samples_ = std::min(valid_samples_ + 1, static_cast<int>(buffer_.size()));
     }
 
     // Read at a fractional delay (in samples) with linear interpolation
     SampleType read(SampleType delay_samples) const {
         int size = static_cast<int>(buffer_.size());
-        if (size == 0) return SampleType{0.0f};
+        if (size == 0 || !std::isfinite(static_cast<double>(delay_samples)) ||
+            delay_samples < SampleType{0})
+            return SampleType{0.0f};
 
-        SampleType read_pos =
-            static_cast<SampleType>(write_pos_) - delay_samples - SampleType{1.0f};
-        while (read_pos < 0) read_pos += size;
-
-        int idx0 = static_cast<int>(read_pos) % size;
-        int idx1 = (idx0 + 1) % size;
-        SampleType frac = read_pos - std::floor(read_pos);
-
-        return buffer_[idx0] * (SampleType{1.0f} - frac) + buffer_[idx1] * frac;
+        const int younger = static_cast<int>(std::floor(delay_samples));
+        const SampleType frac = delay_samples - static_cast<SampleType>(younger);
+        const SampleType a = read(younger);
+        const SampleType b = read(younger + 1);
+        return a * (SampleType{1.0f} - frac) + b * frac;
     }
 
     // Read at integer delay
     SampleType read(int delay_samples) const {
         int size = static_cast<int>(buffer_.size());
-        if (size == 0) return SampleType{0.0f};
+        if (size == 0 || delay_samples < 0 ||
+            (valid_samples_ < size && delay_samples >= valid_samples_))
+            return SampleType{0.0f};
         int idx = (write_pos_ - delay_samples - 1 + size * 2) % size;
         return buffer_[idx];
     }
@@ -57,6 +60,15 @@ public:
     void reset() {
         std::fill(buffer_.begin(), buffer_.end(), SampleType{0.0f});
         write_pos_ = 0;
+        valid_samples_ = 0;
+    }
+
+    /// Logically clears the delay history in constant time. Reads remain zero
+    /// until enough new samples have been pushed to cover the requested delay;
+    /// the old allocation is overwritten naturally as processing resumes.
+    void discard_history() noexcept {
+        write_pos_ = 0;
+        valid_samples_ = 0;
     }
 
     int max_delay() const { return static_cast<int>(buffer_.size()) - 1; }
@@ -64,6 +76,7 @@ public:
 private:
     std::vector<SampleType> buffer_;
     int write_pos_ = 0;
+    int valid_samples_ = 0;
 };
 
 using DelayLine = DelayLineT<float>;
