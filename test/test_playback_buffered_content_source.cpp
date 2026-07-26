@@ -154,9 +154,33 @@ TEST_CASE("a buffered source counts the shortfall of a producer that stops early
     REQUIRE(stats.produced_frames == kAvailable);
     REQUIRE(stats.starved_frames == kDeclaredFrames - kAvailable);
     REQUIRE(stats.starvation_events == (kDeclaredFrames - kAvailable) / kChunkFrames);
-    REQUIRE(stats.producer_errors == 1);
+    REQUIRE(stats.producer_errors > 0);
     REQUIRE(source.position() == kDeclaredFrames);
     REQUIRE(source.exhausted());
+}
+
+TEST_CASE("a buffered producer can recover after returning no frames",
+          "[playback][production]") {
+    playback::BufferedContentSource source;
+    std::uint32_t calls = 0;
+    REQUIRE(source.prepare(
+        buffered_declaration(), default_config(),
+        [&calls](std::uint64_t, audio::BufferView<float> dest,
+                 std::uint64_t frames, audio::FrameReaderStopToken) {
+            if (calls++ == 0)
+                return std::uint64_t{0};
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                dest.channel(0)[static_cast<std::size_t>(frame)] = 0.5f;
+            return frames;
+        }));
+
+    audio::Buffer<float> block(1, static_cast<std::size_t>(kChunkFrames));
+    REQUIRE(source.pull(block.view(), kChunkFrames) == 0);
+    REQUIRE(source.position() == kChunkFrames);
+    REQUIRE(source.pump_background() == kChunkFrames);
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+    REQUIRE(source.position() == 2 * kChunkFrames);
+    REQUIRE(source.stats().producer_errors == 1);
 }
 
 TEST_CASE("a buffered source discards frames that miss their playhead deadline",
@@ -367,4 +391,14 @@ TEST_CASE("a buffered source sizes its ring from the declared wall-clock lookahe
 
     timeline::ProductionDeclaration synchronous;
     REQUIRE(playback::BufferedContentSource::lookahead_frames(synchronous, kSampleRate) == 0);
+
+    declaration.lookahead_ms = 1;
+    auto config = default_config();
+    config.declared_frames = 2 * kChunkFrames;
+    config.produce_chunk_frames = kChunkFrames;
+    playback::BufferedContentSource source;
+    REQUIRE(source.prepare(declaration, config,
+                           bounded_producer(config.declared_frames, 0.5f)));
+    REQUIRE(source.stats().ring_available_frames ==
+            playback::BufferedContentSource::lookahead_frames(declaration, kSampleRate));
 }

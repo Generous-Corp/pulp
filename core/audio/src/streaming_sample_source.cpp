@@ -387,12 +387,19 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     }
     if (reader_stop_requested_.load(std::memory_order_acquire)) return 0;
     if (got == 0) {
+        read_errors_.fetch_add(1, std::memory_order_relaxed);
+        if (advance_on_underrun_) {
+            // Deadline-bound generated content may simply not be ready for
+            // this refill. Keep the reader cursor live so a later pump can
+            // retry at this frame, or seek to a playhead that advanced while
+            // the producer was unavailable.
+            return 0;
+        }
         // EOF or read error before the declared end. All frames [0, rpos) are
         // already available (preload + what's in the ring), so rpos is the true
         // length. Publish it so the audio thread terminates one-shot playback
         // and reports finished() here instead of stalling on never-arriving
         // tail frames. release-store pairs with the acquire-load in pull().
-        read_errors_.fetch_add(1, std::memory_order_relaxed);
         eos_frame_.store(rpos, std::memory_order_release);
         reader_pos_.store(total_frames_, std::memory_order_relaxed);
         return 0;

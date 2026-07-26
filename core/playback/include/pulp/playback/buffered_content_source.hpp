@@ -113,8 +113,8 @@ class BufferedContentSource {
         stream_config.ring_capacity_frames =
             config.ring_capacity_frames != 0
                 ? config.ring_capacity_frames
-                : std::max<std::uint64_t>(lookahead_frames(declaration, config.sample_rate),
-                                          config.produce_chunk_frames);
+                : std::max<std::uint64_t>(
+                      lookahead_frames(declaration, config.sample_rate), 1);
         stream_config.read_chunk_frames = config.produce_chunk_frames;
         stream_config.start_background_thread = config.start_background_thread;
         // Generated content is tied to playhead deadlines. Once a frame has
