@@ -833,6 +833,13 @@ TEST_CASE("straight swing is the identity on every tick") {
         REQUIRE(swing_position(position, grid, kStraightSwing) == position);
         REQUIRE(unswing_position(position, grid, kStraightSwing) == position);
     }
+
+    for (const auto tick : {std::numeric_limits<std::int64_t>::min(),
+                            std::numeric_limits<std::int64_t>::max()}) {
+        const TickPosition position{tick};
+        REQUIRE(swing_position(position, {3}, kStraightSwing) == position);
+        REQUIRE(unswing_position(position, {3}, kStraightSwing) == position);
+    }
 }
 
 TEST_CASE("swing pins the pair boundary and moves the grid point onto the pivot") {

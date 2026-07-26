@@ -55,6 +55,7 @@ TEST_CASE("a groove that states no feel is the identity on timing and velocity",
           "[timeline][groove]") {
     const auto groove = straight_groove();
     REQUIRE(groove.states_no_feel());
+    REQUIRE(groove.is_canonical_default());
     REQUIRE(groove.name().empty());
     REQUIRE(groove.steps().empty());
     REQUIRE(groove.swing_grid() == TickDuration{0});
@@ -148,6 +149,7 @@ TEST_CASE("groove strength attenuates timing and accent symmetrically", "[timeli
     input.velocity_strength = 0;
     const auto silent = groove_of(input);
     REQUIRE_FALSE(silent.states_no_feel());
+    REQUIRE_FALSE(silent.is_canonical_default());
     REQUIRE(silent.apply_timing({0}) == TickPosition{0});
     REQUIRE(silent.velocity_scale_at({0}) == kGrooveUnitScale);
     REQUIRE(silent.steps().size() == 2);

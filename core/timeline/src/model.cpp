@@ -617,6 +617,13 @@ bool GrooveTemplate::states_no_feel() const noexcept {
     return data_->swing_grid.value == 0 && data_->steps.empty();
 }
 
+bool GrooveTemplate::is_canonical_default() const noexcept {
+    return data_->name.empty() && data_->swing_grid.value == 0 &&
+           data_->swing == timebase::kStraightSwing && data_->step.value == 0 &&
+           data_->steps.empty() && data_->timing_strength == kGrooveUnitScale &&
+           data_->velocity_strength == kGrooveUnitScale;
+}
+
 const GrooveStep* GrooveTemplate::step_at(timebase::TickPosition position) const noexcept {
     if (data_->steps.empty() || data_->step.value <= 0)
         return nullptr;

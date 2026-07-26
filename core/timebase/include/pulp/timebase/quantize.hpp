@@ -127,12 +127,14 @@ inline TickPosition swing_position(TickPosition position, TickDuration grid,
     auto local = position.value % pair;
     if (local < 0)
         local += pair;
-    const auto base = detail::saturating_subtract(position.value, local);
     const auto warped =
         local < grid.value
             ? detail::rounded_scale(local, pivot, grid.value)
             : pivot + detail::rounded_scale(local - grid.value, pair - pivot, grid.value);
-    return {detail::saturating_add(base, warped)};
+    // Apply the displacement at the original position. Materializing the pair
+    // boundary first can underflow below INT64_MIN for a negative, non-boundary
+    // tick even though the final displaced position is representable.
+    return {detail::saturating_add(position.value, warped - local)};
 }
 
 // The left inverse of swing_position() under the same grid and ratio, to
@@ -146,11 +148,10 @@ inline TickPosition unswing_position(TickPosition position, TickDuration grid,
     auto local = position.value % pair;
     if (local < 0)
         local += pair;
-    const auto base = detail::saturating_subtract(position.value, local);
     const auto straightened =
         local < pivot ? detail::rounded_scale(local, grid.value, pivot)
                       : grid.value + detail::rounded_scale(local - pivot, grid.value, pair - pivot);
-    return {detail::saturating_add(base, straightened)};
+    return {detail::saturating_add(position.value, straightened - local)};
 }
 
 } // namespace pulp::timebase

@@ -741,6 +741,10 @@ class GrooveTemplate {
     // what a sequence carries when it states no feel, and applying it is the
     // identity on every position and every velocity.
     bool states_no_feel() const noexcept;
+    // True only for the canonical default serialized by a newly created
+    // sequence. Authored metadata and controls count even when they currently
+    // produce no audible displacement.
+    bool is_canonical_default() const noexcept;
 
     // Where material authored at `position` sounds.
     timebase::TickPosition apply_timing(timebase::TickPosition position) const noexcept;
