@@ -622,7 +622,8 @@ inline float granular_worst_case_gain() {
     // At most kMaxGrainBudget grains overlap. Each grain, its window, and its
     // pan gain are individually bounded by one; the shipped four-point cubic
     // interpolator has a peak kernel L1 norm of 1.25.
-    return static_cast<float>(Engine::kMaxGrainBudget) * 1.25f;
+    return static_cast<float>(Engine::kMaxGrainBudget) * 1.25f *
+           static_cast<float>(signal::units::db_to_linear(Engine::kMaxLevelDb));
 }
 inline CustomNodeType make_granular_node() {
     CustomNodeType t;

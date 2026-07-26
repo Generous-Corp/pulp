@@ -1234,15 +1234,22 @@ TEST_CASE("Forge speaker cabinet declares and renders its complete mono node",
     CHECK(type.lowerable);
 
     const auto tone = pulp::test::sine_block(kFrames, 220.0, kSr, 0.35f);
-    auto render = [&](float drive_db) {
+    auto render = [&](float drive_db, float output_trim_db = 0.0f) {
         pulp::test::BakedNodeFixture<1> fx(type, kSr, kFrames);
         auto injector = fx.claim_injector();
         REQUIRE(injector.inject(immediate(cabinet::kDriveDb, drive_db)) == InjectStatus::Ok);
+        REQUIRE(injector.inject(immediate(cabinet::kOutputTrimDb, output_trim_db)) ==
+                InjectStatus::Ok);
         return fx.settle({tone}, 24)[0];
     };
     const auto clean = render(0.0f);
-    const auto driven = render(static_cast<float>(pulp::signal::SpeakerModel::kDriveDbMax));
+    const auto driven = render(static_cast<float>(pulp::signal::SpeakerModel::kDriveDbMax),
+                               static_cast<float>(pulp::signal::SpeakerModel::kOutputTrimDbMax));
     REQUIRE(std::all_of(driven.begin(), driven.end(), [](float v) { return std::isfinite(v); }));
     CHECK(clean != driven);
     CHECK(peak(driven) <= cabinet::speaker_cabinet_worst_case_gain());
+    CHECK(cabinet::speaker_cabinet_worst_case_gain() ==
+          static_cast<float>(pulp::signal::SpeakerModel{}.worst_case_gain() *
+                             pulp::signal::units::db_to_linear(
+                                 pulp::signal::SpeakerModel::kOutputTrimDbMax)));
 }

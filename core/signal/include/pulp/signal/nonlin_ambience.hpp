@@ -463,6 +463,10 @@ inline double pulse_density(double u, double density_pct, double gamma) {
 template <typename SampleType = float>
 class NonlinAmbienceT {
 public:
+    /// Maximum tap-builder iterations charged to one audio frame. Topology
+    /// automation is staged into the inactive bank and therefore has a hard,
+    /// input-independent callback cost instead of rebuilding the room at once.
+    static constexpr int kTopologyWorkPerSample = 4;
     /// One velvet tap: where to read, how much to scale it, and which spectral
     /// segment it belongs to. `segment` is precomputed at rebuild so the audio
     /// path never divides.
@@ -676,7 +680,49 @@ public:
         rebuild_and_swap();
     }
 
+    /// RT-bounded counterpart used by hosted automation. The requested
+    /// snapshot is generated incrementally into the inactive bank; the audible
+    /// topology changes only after the complete, normalized bank is ready.
+    void request_topology(NonlinProgram program, double length_ms, double predelay_ms,
+                          double density_pct, double density_growth,
+                          double gate_hold_pct, double attack_pct) {
+        const double length = std::isfinite(length_ms)
+                                  ? std::clamp(length_ms, nonlin_ambience::kMinLengthMs,
+                                               max_length_ms_)
+                                  : length_ms_;
+        const double predelay = std::isfinite(predelay_ms)
+                                    ? std::clamp(predelay_ms, 0.0, max_predelay_ms_)
+                                    : predelay_ms_;
+        const double density = std::isfinite(density_pct)
+                                   ? std::clamp(density_pct,
+                                                nonlin_ambience::kMinDensityPct, 100.0)
+                                   : density_pct_;
+        const double growth = std::isfinite(density_growth)
+                                  ? std::clamp(density_growth, 0.0, 2.0)
+                                  : density_growth_;
+        const double hold = std::isfinite(gate_hold_pct)
+                                ? std::clamp(gate_hold_pct, 10.0, 95.0)
+                                : gate_hold_pct_;
+        const double attack = std::isfinite(attack_pct)
+                                  ? std::clamp(attack_pct, 5.0, 98.0)
+                                  : attack_pct_;
+        if (program == program_ && length == length_ms_ && predelay == predelay_ms_ &&
+            density == density_pct_ && growth == density_growth_ &&
+            hold == gate_hold_pct_ && attack == attack_pct_)
+            return;
+        program_ = program;
+        length_ms_ = length;
+        predelay_ms_ = predelay;
+        density_pct_ = density;
+        density_growth_ = growth;
+        gate_hold_pct_ = hold;
+        attack_pct_ = attack;
+        topology_dirty_ = true;
+        topology_build_.active = false;  // restart from the newest atomic snapshot
+    }
+
     std::uint64_t topology_rebuild_count() const { return topology_rebuild_count_; }
+    int topology_work_units_last_sample() const { return topology_work_units_last_sample_; }
 
     /// Seed for the L channel; R derives as `seed ⊕ kSeedRodd`. Series law 2 —
     /// a preset choice, never automated.
@@ -811,6 +857,7 @@ public:
         crossfade_gains(mix_.next(), CrossfadeGainLaw::EqualGain, dry_gain, wet_gain);
         left = dry_gain * dry_l + wet_gain * wet_l;
         right = dry_gain * dry_r + wet_gain * wet_r;
+        advance_topology_rebuild();
     }
 
     /// A block of stereo frames, in place.
@@ -919,6 +966,8 @@ private:
     // ── Tap-table construction ────────────────────────────────────────────
 
     void rebuild_immediate() {
+        topology_dirty_ = false;
+        topology_build_.active = false;
         build_bank(front_);
         fading_ = false;
         fade_pos_ = 0;
@@ -926,6 +975,8 @@ private:
 
     void rebuild_and_swap() {
         if (ring_.empty()) return;  // not prepared yet
+        topology_dirty_ = false;
+        topology_build_.active = false;
         if (fading_) {
             // A second topology change inside one fade collapses the first: the
             // pending bank becomes live immediately so the back bank is free to
@@ -1025,6 +1076,130 @@ private:
         }
     }
 
+    struct IncrementalTopologyBuild {
+        bool active = false;
+        int bank = 0;
+        int channel = 0;
+        bool normalizing = false;
+        int window_samples = 1;
+        int predelay_samples = 0;
+        int index = 0;
+        int count = 0;
+        int normalize_index = 0;
+        double t = 0.0;
+        double l1 = 0.0;
+        double norm = 0.0;
+        NonlinProgram program = NonlinProgram::ambience;
+        double density_pct = nonlin_ambience::kDensityRefPct;
+        double density_growth = nonlin_ambience::kGammaDefault;
+        double gate_hold = nonlin_ambience::kGateHold;
+        double attack = nonlin_ambience::kRevRise;
+    };
+
+    void begin_incremental_topology_rebuild() {
+        auto& b = topology_build_;
+        b = {};
+        b.active = true;
+        b.bank = 1 - front_;
+        b.window_samples = std::max(1, static_cast<int>(std::lround(
+            units::ms_to_samples(length_ms_, sample_rate_))));
+        b.predelay_samples = std::max(0, static_cast<int>(std::lround(
+            units::ms_to_samples(predelay_ms_, sample_rate_))));
+        b.program = program_;
+        b.density_pct = density_pct_;
+        b.density_growth = density_growth_;
+        b.gate_hold = gate_hold_pct_ / 100.0;
+        b.attack = attack_pct_ / 100.0;
+        bank_window_[b.bank] = b.window_samples;
+        bank_predelay_[b.bank] = b.predelay_samples;
+    }
+
+    void finish_incremental_channel() {
+        auto& b = topology_build_;
+        tap_count_[b.bank][b.channel] = b.count;
+        tap_norm_[b.bank][b.channel] = b.norm;
+        if (++b.channel < 2) {
+            b.normalizing = false;
+            b.index = 0;
+            b.count = 0;
+            b.normalize_index = 0;
+            b.t = 0.0;
+            b.l1 = 0.0;
+            b.norm = 0.0;
+            return;
+        }
+        seg_state_[b.bank][0].fill(SampleType{0});
+        seg_state_[b.bank][1].fill(SampleType{0});
+        pending_ = b.bank;
+        fade_pos_ = 0;
+        fading_ = true;
+        b.active = false;
+        topology_dirty_ = false;
+        ++topology_rebuild_count_;
+    }
+
+    void advance_incremental_topology_unit() {
+        namespace na = nonlin_ambience;
+        auto& b = topology_build_;
+        Tap* out = taps_[b.bank][b.channel].data();
+        if (b.normalizing) {
+            if (b.normalize_index < b.count) {
+                auto& gain = out[b.normalize_index++].gain;
+                gain = static_cast<float>(static_cast<double>(gain) * b.norm);
+            } else {
+                finish_incremental_channel();
+            }
+            return;
+        }
+        if (b.t >= static_cast<double>(b.window_samples) || b.count >= tap_capacity_) {
+            b.norm = b.l1 > na::kNormFloor ? na::kL1Budget / b.l1 : 0.0;
+            b.normalizing = true;
+            b.normalize_index = 0;
+            return;
+        }
+        const double u = b.t / static_cast<double>(b.window_samples);
+        const double nd = na::pulse_density(u, b.density_pct, b.density_growth);
+        const double grid = sample_rate_ / nd;
+        const std::uint32_t channel_seed =
+            b.channel == 0 ? seed_ : (seed_ ^ na::kSeedRodd);
+        const double jitter = unit_from<double>(
+            mix64(channel_seed, static_cast<std::uint64_t>(b.index), 0u));
+        const int sign =
+            (mix64(channel_seed, static_cast<std::uint64_t>(b.index), 1u) & 1ull) ? 1 : -1;
+        const int delay = std::clamp(
+            static_cast<int>(std::lround(b.t + jitter * std::max(0.0, grid - 1.0))),
+            0, b.window_samples - 1);
+        const double tau = static_cast<double>(delay) / static_cast<double>(b.window_samples);
+        const double env = na::program_envelope(b.program, tau, b.gate_hold, b.attack);
+        if (env > 0.0) {
+            const double magnitude = env * std::sqrt(grid);
+            out[b.count].delay = b.predelay_samples + delay;
+            out[b.count].gain = static_cast<float>(sign * magnitude);
+            int segment = std::clamp(static_cast<int>(tau * na::kSegments), 0,
+                                     na::kSegments - 1);
+            out[b.count].segment = b.program == NonlinProgram::reverse
+                                       ? na::kSegments - 1 - segment
+                                       : segment;
+            b.l1 += magnitude;
+            ++b.count;
+        }
+        b.t += grid;
+        ++b.index;
+    }
+
+    void advance_topology_rebuild() {
+        topology_work_units_last_sample_ = 0;
+        if (fading_) return;
+        if (!topology_build_.active) {
+            if (!topology_dirty_) return;
+            begin_incremental_topology_rebuild();
+        }
+        for (int i = 0; i < kTopologyWorkPerSample && topology_build_.active; ++i) {
+            advance_incremental_topology_unit();
+            ++topology_work_units_last_sample_;
+        }
+    }
+
     // ── Segment tilt ──────────────────────────────────────────────────────
 
     void update_segment_coefficients() {
@@ -1113,6 +1288,9 @@ private:
     bool fading_ = false;
     int fade_pos_ = 0;
     std::uint64_t topology_rebuild_count_ = 0;
+    bool topology_dirty_ = false;
+    IncrementalTopologyBuild topology_build_{};
+    int topology_work_units_last_sample_ = 0;
     int swap_fade_len_ = 1;
 
     SmoothedValue<SampleType> mix_{SampleType{1}};

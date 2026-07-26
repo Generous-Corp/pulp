@@ -1689,6 +1689,44 @@ TEST_CASE("Nonlin ambience rejects non-finite frames and batches topology rebuil
     REQUIRE(a_right == b_right);
 }
 
+TEST_CASE("Nonlin ambience stages automated topology with fixed per-sample work",
+          "[signal][nonlin-ambience][rt][topology]") {
+    NonlinAmbience engine;
+    engine.prepare(kFs, na::kMaxLengthMs);
+    const auto before = engine.topology_rebuild_count();
+    engine.request_topology(NonlinProgram::reverse, na::kMaxLengthMs, 20.0, 100.0,
+                            2.0, 60.0, 70.0);
+
+    float left = 0.0f, right = 0.0f;
+    int frames = 0;
+    while (engine.topology_rebuild_count() == before && frames++ < 20000) {
+        engine.process_sample(left, right);
+        REQUIRE(engine.topology_work_units_last_sample() <=
+                NonlinAmbience::kTopologyWorkPerSample);
+    }
+    REQUIRE(engine.topology_rebuild_count() == before + 1);
+    REQUIRE(frames > 1);  // regression guard: never rebuild the whole bank at once
+
+    NonlinAmbience immediate;
+    immediate.prepare(kFs, na::kMaxLengthMs);
+    immediate.set_topology(NonlinProgram::reverse, na::kMaxLengthMs, 20.0, 100.0,
+                           2.0, 60.0, 70.0);
+    while (engine.swap_in_progress() || immediate.swap_in_progress()) {
+        engine.process_sample(left, right);
+        float ref_left = 0.0f, ref_right = 0.0f;
+        immediate.process_sample(ref_left, ref_right);
+    }
+    for (int channel = 0; channel < 2; ++channel) {
+        REQUIRE(engine.tap_count(channel) == immediate.tap_count(channel));
+        REQUIRE(engine.tap_norm(channel) == immediate.tap_norm(channel));
+        for (int tap = 0; tap < engine.tap_count(channel); ++tap) {
+            REQUIRE(engine.tap(channel, tap).delay == immediate.tap(channel, tap).delay);
+            REQUIRE(engine.tap(channel, tap).gain == immediate.tap(channel, tap).gain);
+            REQUIRE(engine.tap(channel, tap).segment == immediate.tap(channel, tap).segment);
+        }
+    }
+}
+
 TEST_CASE("Nonlin ambience: the engine works at every supported sample rate",
           "[signal][nonlin-ambience][lifecycle]") {
     for (double rate : {44100.0, 48000.0, 88200.0, 96000.0, 192000.0}) {

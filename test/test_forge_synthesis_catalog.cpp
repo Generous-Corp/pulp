@@ -431,6 +431,8 @@ TEST_CASE("granular catalog bakes its 1-to-2 live-ring path",
                {granular::kGrainMs, 50.0f},
                {granular::kPosition, 0.0f},
                {granular::kPanSpray, 1.0f},
+               {granular::kLevelDb,
+                static_cast<float>(signal::GranularEngine::kMaxLevelDb)},
                {granular::kMix, 1.0f}});
     std::uint32_t rng = 0x714ACu;
     double peak = 0.0;
@@ -456,7 +458,9 @@ TEST_CASE("granular catalog bakes its 1-to-2 live-ring path",
     CHECK(stereo_difference > 1e-5);
     CHECK(peak <= granular::granular_worst_case_gain());
     CHECK(granular::granular_worst_case_gain() ==
-          static_cast<float>(signal::GranularEngine::kMaxGrainBudget) * 1.25f);
+          static_cast<float>(signal::GranularEngine::kMaxGrainBudget) * 1.25f *
+              static_cast<float>(signal::units::db_to_linear(
+                  signal::GranularEngine::kMaxLevelDb)));
 }
 
 // ═════════════════════════════════════════════════════════════════════════

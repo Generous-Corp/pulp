@@ -517,7 +517,7 @@ inline CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefau
                                 ? std::clamp(static_cast<int>(std::lround(program_value)), 0,
                                              static_cast<int>(kProgramSteps))
                                 : static_cast<int>(s->engine.program());
-        s->engine.set_topology(
+        s->engine.request_topology(
             static_cast<signal::NonlinProgram>(program), params.value_at(kLengthMs, 0),
             params.value_at(kPredelayMs, 0), params.value_at(kDensityPct, 0),
             params.value_at(kDensityGrowth, 0), params.value_at(kGateHoldPct, 0),
@@ -590,7 +590,8 @@ struct Instance {
 };
 
 inline float speaker_cabinet_worst_case_gain() {
-    return static_cast<float>(Engine{}.worst_case_gain());
+    return static_cast<float>(Engine{}.worst_case_gain() *
+                              signal::units::db_to_linear(Engine::kOutputTrimDbMax));
 }
 
 inline CustomNodeType make_speaker_cabinet_node() {
