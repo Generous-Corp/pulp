@@ -177,6 +177,19 @@ public:
         return corner_hz_;
     }
 
+    // Translate the panel-domain cutoff control into the same requested Hz
+    // value used by the processor. Hosts can use this for a truthful readout
+    // without constructing a processor or duplicating the measured tables.
+    // Modulation is included because it is part of the requested corner, but
+    // callers displaying the cutoff knob normally leave it at zero.
+    static double requested_cutoff_hz_for(Voicing voicing, double knob01,
+                                          double modulation_octaves = 0.0) noexcept {
+        const double cutoff = std::clamp(knob01, 0.0, 1.0);
+        const double modulation = std::clamp(modulation_octaves, -16.0, 16.0);
+        return log_frequency_table(cutoff, calibration_tables(voicing).cutoff) *
+               std::exp2(modulation);
+    }
+
     int oversampling() const noexcept {
         return engine_.oversampling();
     }
@@ -245,8 +258,8 @@ private:
         return knots.back();
     }
 
-    CalibrationTables calibration_tables() const noexcept {
-        switch (voicing_) {
+    static CalibrationTables calibration_tables(Voicing voicing) noexcept {
+        switch (voicing) {
         case Voicing::juno:
             return {{kJunoCutoffKnots, kJunoCutoffHz}, {kJunoResonanceKnots, kJunoResonanceValues}};
         case Voicing::jupiter:
@@ -263,9 +276,9 @@ private:
     }
 
     void update_voicing() noexcept {
-        const CalibrationTables tables = calibration_tables();
-        corner_hz_ = log_frequency_table(cutoff_knob_, tables.cutoff) *
-                     std::exp2(cutoff_modulation_octaves_);
+        const CalibrationTables tables = calibration_tables(voicing_);
+        corner_hz_ = requested_cutoff_hz_for(
+            voicing_, cutoff_knob_, cutoff_modulation_octaves_);
         const double equivalent_knob =
             invert_log_frequency_table(corner_hz_, tables.cutoff);
         const double resonance =
