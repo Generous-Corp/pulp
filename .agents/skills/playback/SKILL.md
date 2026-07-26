@@ -411,9 +411,10 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   counted. Deadline mode treats a zero producer return as “not ready yet,” not
   permanent EOF: later pumps retry at the same frame or seek to a playhead that
   already counted the interval as starved. Count starvation against the
-  *declared* frame count, and keep the implicit ring capacity equal to the
-  declared wall-clock lookahead; `StreamingSampleSource` clamps a larger
-  producer chunk to that capacity rather than silently widening the horizon.
+  *declared* frame count. Size the implicit ring for both the declared
+  wall-clock lookahead and the largest audio callback, while
+  `StreamingSampleSource` independently caps producer read-ahead at the
+  declaration's horizon.
 - A new `core/playback/src/*.cpp` is compiled by
   `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both

@@ -37,6 +37,7 @@ playback::BufferedContentSourceConfig default_config() {
     config.channels = 1;
     config.declared_frames = kDeclaredFrames;
     config.sample_rate = kSampleRate;
+    config.max_pull_frames = kChunkFrames;
     config.produce_chunk_frames = kChunkFrames;
     config.start_background_thread = false;
     return config;
@@ -401,4 +402,9 @@ TEST_CASE("a buffered source sizes its ring from the declared wall-clock lookahe
                            bounded_producer(config.declared_frames, 0.5f)));
     REQUIRE(source.stats().ring_available_frames ==
             playback::BufferedContentSource::lookahead_frames(declaration, kSampleRate));
+
+    config.ring_capacity_frames =
+        playback::BufferedContentSource::lookahead_frames(declaration, kSampleRate);
+    REQUIRE_FALSE(source.prepare(
+        declaration, config, bounded_producer(config.declared_frames, 0.5f)));
 }

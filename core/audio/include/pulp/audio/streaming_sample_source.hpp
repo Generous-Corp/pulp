@@ -124,6 +124,12 @@ struct StreamingSampleSourceConfig {
     /// frames on a later pull. Intended for deadline-bound generated content;
     /// ordinary sample playback leaves this false and preserves every frame.
     bool advance_on_underrun = false;
+
+    /// Maximum distance the reader may produce ahead of the play cursor. Zero
+    /// leaves read-ahead bounded only by ring capacity. Deadline-bound sources
+    /// use this to separate callback-sized storage from their production
+    /// lookahead horizon.
+    std::uint64_t max_read_ahead_frames = 0;
 };
 
 class StreamingSampleSource {
@@ -213,6 +219,7 @@ private:
     bool prepared_ = false;
     bool use_thread_ = false;
     bool advance_on_underrun_ = false;
+    std::uint64_t max_read_ahead_frames_ = 0;
 
     Buffer<float> preload_;          ///< Resident head, frames [0, preload_valid_).
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).

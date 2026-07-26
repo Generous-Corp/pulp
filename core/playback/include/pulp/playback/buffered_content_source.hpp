@@ -56,8 +56,10 @@ struct BufferedContentSourceConfig {
     /// rather than as having finished.
     std::uint64_t declared_frames = 0;
     std::uint32_t sample_rate = 0;
-    /// Ring capacity in frames. Zero derives it from the declaration's
-    /// wall-clock lookahead at @ref sample_rate.
+    /// Largest block the audio thread will request in one pull.
+    std::uint64_t max_pull_frames = 0;
+    /// Ring capacity in frames. Zero derives it from the larger of the
+    /// declaration's wall-clock lookahead and @ref max_pull_frames.
     std::uint64_t ring_capacity_frames = 0;
     /// How much the pump asks the producer for per refill step.
     std::uint64_t produce_chunk_frames = 4096;
@@ -100,7 +102,14 @@ class BufferedContentSource {
             timeline::ProductionDeclarationErrorCode::None)
             return false;
         if (config.channels == 0 || config.declared_frames == 0 || config.sample_rate == 0 ||
-            !producer)
+            config.max_pull_frames == 0 || !producer)
+            return false;
+
+        const std::uint64_t declared_lookahead =
+            std::max<std::uint64_t>(
+                lookahead_frames(declaration, config.sample_rate), 1);
+        if (config.ring_capacity_frames != 0 &&
+            config.ring_capacity_frames < config.max_pull_frames)
             return false;
 
         audio::StreamingSampleSourceConfig stream_config;
@@ -113,14 +122,14 @@ class BufferedContentSource {
         stream_config.ring_capacity_frames =
             config.ring_capacity_frames != 0
                 ? config.ring_capacity_frames
-                : std::max<std::uint64_t>(
-                      lookahead_frames(declaration, config.sample_rate), 1);
+                : std::max(declared_lookahead, config.max_pull_frames);
         stream_config.read_chunk_frames = config.produce_chunk_frames;
         stream_config.start_background_thread = config.start_background_thread;
         // Generated content is tied to playhead deadlines. Once a frame has
         // been emitted as starvation silence, producing it later must not move
         // subsequent content out of time.
         stream_config.advance_on_underrun = true;
+        stream_config.max_read_ahead_frames = declared_lookahead;
 
         audio::FrameReaderBinding binding;
         binding.read = std::move(producer);

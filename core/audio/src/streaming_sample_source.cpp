@@ -50,6 +50,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     total_frames_ = config.total_frames;
     sample_rate_ = config.sample_rate;
     advance_on_underrun_ = config.advance_on_underrun;
+    max_read_ahead_frames_ = config.max_read_ahead_frames;
     reader_ = std::move(reader);
     reader_stop_requested_.store(false, std::memory_order_release);
 
@@ -156,6 +157,7 @@ void StreamingSampleSource::release() noexcept {
     prepared_ = false;
     use_thread_ = false;
     advance_on_underrun_ = false;
+    max_read_ahead_frames_ = 0;
     play_pos_.store(0, std::memory_order_relaxed);
     reader_pos_.store(0, std::memory_order_relaxed);
     ring_start_frame_.store(0, std::memory_order_relaxed);
@@ -370,7 +372,22 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     const std::uint64_t room = ring_.free_frames();
     if (room == 0) return 0;
 
-    std::uint64_t want = std::min({read_chunk_, total_frames_ - rpos, room,
+    std::uint64_t read_ahead_room = total_frames_ - rpos;
+    if (max_read_ahead_frames_ != 0) {
+        const std::uint64_t play_pos =
+            play_pos_.load(std::memory_order_acquire);
+        const std::uint64_t horizon_frames =
+            std::min(total_frames_, max_read_ahead_frames_);
+        const std::uint64_t horizon =
+            play_pos >= total_frames_ - horizon_frames
+                ? total_frames_
+                : play_pos + horizon_frames;
+        if (rpos >= horizon)
+            return 0;
+        read_ahead_room = horizon - rpos;
+    }
+
+    std::uint64_t want = std::min({read_chunk_, read_ahead_room, room,
                                    static_cast<std::uint64_t>(
                                        read_scratch_.num_samples())});
     if (want == 0) return 0;
