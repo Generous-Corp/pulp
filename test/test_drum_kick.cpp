@@ -706,6 +706,52 @@ TEST_CASE("Bypassed clean drum output is sample-exact and deterministic",
     REQUIRE_FALSE(output.has_tail());
 }
 
+TEST_CASE("The post-output AHD has exact attack, hold, and decay regions",
+          "[signal][drum][output][ahd]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+    output.set_ahd_ms(10.0, 5.0, 20.0);
+    output.trigger();
+
+    std::vector<float> y(1800);
+    for (auto& sample : y) sample = output.process(1.0f);
+
+    REQUIRE(y[0] == 0.0f);
+    REQUIRE(y[240] > 0.49f);
+    REQUIRE(y[240] < 0.51f);
+    REQUIRE(y[479] > 0.99f);
+    REQUIRE(y[480] == 1.0f);
+    REQUIRE(y[719] == 1.0f);
+    REQUIRE(y[900] < 0.1f);
+    REQUIRE(y[1680] == 0.0f);
+}
+
+TEST_CASE("The AHD scales saturation output instead of its input",
+          "[signal][drum][output][ahd]") {
+    OutputStage saturated;
+    saturated.prepare(kFs);
+    saturated.set_oversampling(OutputOversampling::bypass);
+    saturated.set_drive(1.0);
+    const double saturated_sample = saturated.process(0.25f);
+
+    OutputStage enveloped;
+    enveloped.prepare(kFs);
+    enveloped.set_oversampling(OutputOversampling::bypass);
+    enveloped.set_drive(1.0);
+    enveloped.set_ahd_ms(10.0, 0.0, 100.0);
+    enveloped.trigger();
+
+    double halfway = 0.0;
+    for (int sample = 0; sample <= 240; ++sample) {
+        halfway = enveloped.process(0.25f);
+    }
+
+    // At 5 ms the linear attack gain is exactly one half. A pre-saturation
+    // envelope would instead change tanh's input and would not equal this.
+    REQUIRE(std::fabs(halfway - saturated_sample * 0.5) < 1e-6);
+}
+
 TEST_CASE("Clean x2 drum output is deterministic and transparent in band",
           "[signal][drum][output][oversampling]") {
     OutputStage first;
@@ -869,6 +915,7 @@ TEST_CASE("Rendering a kick allocates nothing on the audio thread",
         v->output().set_drive(0.5);
         v->output().lofi().set_bits(10.0);
         v->output().lofi().set_hold_rate_hz(24000.0);
+        v->output().set_ahd_ms(2.0, 5.0, 120.0);
     }
 
     std::vector<float> buffer(512, 0.0f);

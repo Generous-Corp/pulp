@@ -23,7 +23,7 @@ enum class OutputOversampling {
 };
 
 /// The output stage every percussion voice ends with: fold, saturate, degrade,
-/// then set the level.
+/// set the level, then apply an optional AHD/VCA.
 ///
 /// The order is not arbitrary and is not left to each voice to remember.
 /// Folding runs before saturation because a folder generates partials and the
@@ -31,9 +31,9 @@ enum class OutputOversampling {
 /// the folder was for. Saturation before quantisation means the quantiser sees
 /// a signal that already fills its range, which is what makes a low bit depth
 /// sound like a drum machine rather than like a fault; the reverse order
-/// quantises a small signal and then amplifies its error. The output level is
-/// applied last so it is a clean gain and does not change how hard the voice
-/// drives its own distortion.
+/// quantises a small signal and then amplifies its error. The output level and
+/// AHD are both clean post-nonlinearity gains, so neither changes how hard the
+/// voice drives its own distortion.
 ///
 /// RT contract: `prepare()` configures FIR storage and may allocate. Setters,
 /// `reset()`, and `process()` allocate nothing and take no locks.
@@ -61,6 +61,8 @@ public:
         stage_b_.reset();
         tail_samples_remaining_ = 0;
         nonlinear_activity_this_sample_ = false;
+        ahd_phase_ = AhdPhase::inactive;
+        ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
 
     /// Changes the output quality outside the audio callback. The filter banks
@@ -103,6 +105,48 @@ public:
     /// Output gain, linear.
     void set_level(double level) { level_ = std::max(level, 0.0); }
 
+    /// Configure and enable the dedicated post-saturation attack/hold/decay
+    /// VCA. All times are milliseconds. `trigger()` starts it; disabling it is
+    /// sample-exact transparent.
+    void set_ahd_ms(double attack_ms, double hold_ms, double decay_ms) {
+        ahd_attack_ms_ = std::max(attack_ms, 0.0);
+        ahd_hold_ms_ = std::max(hold_ms, 0.0);
+        ahd_decay_ms_ = std::max(decay_ms, 0.01);
+        ahd_enabled_ = true;
+        update_ahd_times();
+    }
+
+    void set_ahd_enabled(bool enabled) {
+        ahd_enabled_ = enabled;
+        if (!enabled) {
+            ahd_phase_ = AhdPhase::inactive;
+            ahd_gain_ = 1.0;
+        }
+    }
+
+    bool ahd_enabled() const noexcept { return ahd_enabled_; }
+    double ahd_gain() const noexcept { return ahd_gain_; }
+
+    /// Start the AHD for a new hit. Every drum voice calls this from note-on.
+    void trigger() {
+        if (!ahd_enabled_) {
+            ahd_phase_ = AhdPhase::inactive;
+            ahd_gain_ = 1.0;
+            return;
+        }
+        if (ahd_attack_samples_ > 0) {
+            ahd_phase_ = AhdPhase::attack;
+            ahd_remaining_ = ahd_attack_samples_;
+            ahd_gain_ = 0.0;
+        } else if (ahd_hold_samples_ > 0) {
+            ahd_phase_ = AhdPhase::hold;
+            ahd_remaining_ = ahd_hold_samples_;
+            ahd_gain_ = 1.0;
+        } else {
+            begin_ahd_decay();
+        }
+    }
+
     /// The degradation stages, exposed so a voice can configure bit depth,
     /// hold rate, and dead zone without this class proxying five setters.
     LofiChainT<SampleType>& lofi() { return lofi_; }
@@ -139,7 +183,9 @@ public:
         } else if (tail_samples_remaining_ > 0) {
             --tail_samples_remaining_;
         }
-        return static_cast<SampleType>(static_cast<double>(processed) * level_);
+        const double envelope = process_ahd();
+        return static_cast<SampleType>(
+            static_cast<double>(processed) * level_ * envelope);
     }
 
 private:
@@ -153,6 +199,7 @@ private:
 
     void update_internal_rate() {
         lofi_.set_sample_rate(sample_rate_ * static_cast<double>(factor_value()));
+        update_ahd_times();
     }
 
     SampleType process_inner_x2(SampleType input) {
@@ -176,6 +223,64 @@ private:
         return static_cast<SampleType>(x);
     }
 
+    enum class AhdPhase {
+        inactive,
+        attack,
+        hold,
+        decay,
+    };
+
+    void update_ahd_times() {
+        ahd_attack_samples_ =
+            static_cast<int>(0.001 * ahd_attack_ms_ * sample_rate_);
+        ahd_hold_samples_ =
+            static_cast<int>(0.001 * ahd_hold_ms_ * sample_rate_);
+        ahd_decay_samples_ =
+            std::max(1, static_cast<int>(0.001 * ahd_decay_ms_ * sample_rate_));
+        ahd_attack_step_ =
+            ahd_attack_samples_ > 0 ? 1.0 / ahd_attack_samples_ : 1.0;
+        ahd_decay_multiplier_ =
+            std::pow(1e-6, 1.0 / static_cast<double>(ahd_decay_samples_));
+    }
+
+    void begin_ahd_decay() {
+        ahd_phase_ = AhdPhase::decay;
+        ahd_remaining_ = ahd_decay_samples_;
+        ahd_gain_ = 1.0;
+    }
+
+    double process_ahd() {
+        if (!ahd_enabled_) return 1.0;
+        const double current = ahd_gain_;
+        switch (ahd_phase_) {
+            case AhdPhase::inactive:
+                return 0.0;
+            case AhdPhase::attack:
+                ahd_gain_ = std::min(ahd_gain_ + ahd_attack_step_, 1.0);
+                if (--ahd_remaining_ <= 0) {
+                    ahd_gain_ = 1.0;
+                    if (ahd_hold_samples_ > 0) {
+                        ahd_phase_ = AhdPhase::hold;
+                        ahd_remaining_ = ahd_hold_samples_;
+                    } else {
+                        begin_ahd_decay();
+                    }
+                }
+                break;
+            case AhdPhase::hold:
+                if (--ahd_remaining_ <= 0) begin_ahd_decay();
+                break;
+            case AhdPhase::decay:
+                ahd_gain_ *= ahd_decay_multiplier_;
+                if (--ahd_remaining_ <= 0) {
+                    ahd_gain_ = 0.0;
+                    ahd_phase_ = AhdPhase::inactive;
+                }
+                break;
+        }
+        return current;
+    }
+
     LofiChainT<SampleType> lofi_;
     detail::LinearPhaseOversamplingStage2x<SampleType> stage_a_;
     detail::LinearPhaseOversamplingStage2x<SampleType> stage_b_;
@@ -183,6 +288,18 @@ private:
     double drive_ = 0.0;
     double fold_ = 0.0;
     double level_ = 1.0;
+    double ahd_attack_ms_ = 0.0;
+    double ahd_hold_ms_ = 0.0;
+    double ahd_decay_ms_ = 1000.0;
+    double ahd_gain_ = 1.0;
+    double ahd_attack_step_ = 1.0;
+    double ahd_decay_multiplier_ = 1.0;
+    int ahd_attack_samples_ = 0;
+    int ahd_hold_samples_ = 0;
+    int ahd_decay_samples_ = 1;
+    int ahd_remaining_ = 0;
+    bool ahd_enabled_ = false;
+    AhdPhase ahd_phase_ = AhdPhase::inactive;
     OutputOversampling oversampling_ = OutputOversampling::x2;
     std::size_t tail_samples_remaining_ = 0;
     bool nonlinear_activity_this_sample_ = false;

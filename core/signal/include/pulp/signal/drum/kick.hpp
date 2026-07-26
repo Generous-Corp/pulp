@@ -217,6 +217,7 @@ protected:
 
     void on_note_on(float velocity) override {
         output_.reset();
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         bend_octaves_ = pitch_sweep_oct_ + response.bend(velocity);
