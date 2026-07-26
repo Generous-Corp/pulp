@@ -979,6 +979,33 @@ RT-safely, without re-baking — via the bake-layer injection primitive:
 `test/test_baked_graph_param_injection.cpp` is the executable spec (claims, ramps,
 sample accuracy, RT-allocation-free drain, the accumulate regression).
 
+### Forge DSP catalog families
+
+The Forge-facing baked-node adapters are grouped by behavior, not kept in one
+registry header. Use the family header that owns the DSP you are exposing:
+
+- `forge_saturator_catalog.hpp`, `forge_distortion_catalog.hpp`, and
+  `forge_tape_catalog.hpp` for nonlinear/color processors.
+- `forge_dynamics_catalog.hpp` for feed-forward, VCA, FET, and diode-bridge
+  compressors.
+- `forge_effect_modulation_catalog.hpp`, `forge_pitch_catalog.hpp`,
+  `forge_space_catalog.hpp`, `forge_synthesis_catalog.hpp`, and
+  `forge_sequencing_catalog.hpp` for the remaining Round-2 families.
+
+Each header owns its stable type/parameter IDs, declared ranges, and `make_*_node`
+factory. Consumers should use those constants and factories rather than duplicate
+IDs, limits, or construction policy in an application registry. A catalog range
+must agree with the wrapped DSP's canonical accepted range; otherwise automation
+develops a dead travel region where the host moves but the DSP silently clamps.
+
+Keep construction choices separate from baked parameters. Circuit lineage, delay
+character/tier, channel topology, latency-changing modes, and anything that
+redesigns storage or filters belong in a distinct type ID or factory argument.
+Only controls that are safe to apply at any sample belong in `baked_params`.
+When adding or changing a family, extend its `test/test_forge_*_catalog.cpp` suite
+with ID/default/range parity, finite-output, determinism, gain-bound, parameter
+reachability, and RT-allocation coverage.
+
 #### Not every knob belongs in `baked_params`
 
 `baked_params` is for values a node can accept at ANY sample. A value that
