@@ -393,34 +393,8 @@ inline bool params_text_to_value(const clap_plugin_t* plugin, clap_id param_id,
 }
 
 inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in,
-                          const clap_output_events_t*) {
-    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    if (!in) return;
-    uint32_t count = in->size(in);
-    for (uint32_t i = 0; i < count; ++i) {
-        auto* hdr = in->get(in, i);
-        // CLAP event-space gate: skip third-party-extension namespaces
-        // so their type IDs can't alias core PARAM_VALUE. Mirrors the
-        // guard in clap_adapter.cpp's process() dispatch loops.
-        if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
-        // memcpy into a stack local to avoid UBSan "misaligned address"
-        // when hdr isn't aligned to the struct's alignof (for example,
-        // 8 for clap_event_param_value_t's `double value`).
-        if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-            clap_event_param_value_t ev;
-            std::memcpy(&ev, hdr, sizeof(ev));
-            self->store.set_value(static_cast<state::ParamID>(ev.param_id),
-                                  static_cast<float>(ev.value));
-        } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
-            clap_event_param_gesture_t ev;
-            std::memcpy(&ev, hdr, sizeof(ev));
-            self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
-        } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
-            clap_event_param_gesture_t ev;
-            std::memcpy(&ev, hdr, sizeof(ev));
-            self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
-        }
-    }
+                          const clap_output_events_t* out) {
+    clap_adapter::clap_params_flush(plugin, in, out);
 }
 
 inline const clap_plugin_params_t params_ext = {

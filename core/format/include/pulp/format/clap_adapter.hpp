@@ -11,12 +11,17 @@
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/events/plugin_main_thread.hpp>
 #include <pulp/runtime/alive_token.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <pulp/state/parameter_event_queue.hpp>
 #include <pulp/state/modulation_lane.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <pulp/signal/delay_line.hpp>
 #include <clap/clap.h>
+#include <clap/ext/params.h>
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <thread>
 #include <vector>
 
 // View includes only when building GUI-capable CLAP targets.
@@ -49,6 +54,23 @@ static constexpr int kMaxInputBuses = 2;
 // fallback as before, just with a higher ceiling than one.
 static constexpr int kMaxOutputBuses = 8;
 static constexpr state::ModulationSourceId kClapHostModulationSourceId = 1;
+
+enum class OutboundParamEventKind : std::uint8_t {
+    GestureBegin,
+    Value,
+    GestureEnd,
+};
+
+struct OutboundParamEvent {
+    OutboundParamEventKind kind = OutboundParamEventKind::Value;
+    state::ParamID param_id = 0;
+    float value = 0.0f;
+};
+
+// A UI drag normally contributes a few dozen events. This intentionally leaves
+// enough headroom for several controls to move before a stopped host services
+// request_flush(), while remaining bounded and allocation-free at either drain.
+static constexpr std::size_t kOutboundParamEventCapacity = 1024;
 
 // CLAP plugin instance — wraps a Pulp Processor
 struct PulpClapPlugin {
@@ -97,6 +119,7 @@ struct PulpClapPlugin {
     // flags and calls `clap_host_latency->changed()` /
     // `clap_host_tail->changed()` — never from process() itself.
     const clap_host_t* host = nullptr;
+    const clap_host_params_t* host_params = nullptr;
 
     // Audio working state
     double sample_rate = 48000.0;
@@ -149,6 +172,17 @@ struct PulpClapPlugin {
     // thread at block start so the drain stays allocation-free.
     state::ParameterEventQueue output_param_events;
     std::vector<std::uint8_t> output_param_has_event;
+
+    // UI -> host parameter automation. StateStore gesture callbacks and an
+    // inline value listener preserve exact BEGIN/VALUE/END order in this SPSC
+    // queue. CLAP guarantees params.flush() and process() do not run
+    // concurrently, so the consumer endpoint may safely move between them as
+    // transport starts and stops.
+    runtime::SpscQueue<OutboundParamEvent, kOutboundParamEventCapacity>
+        outbound_param_events;
+    std::optional<OutboundParamEvent> pending_outbound_param_event;
+    state::ListenerToken outbound_param_listener;
+    std::thread::id main_thread_id;
 
     // Reused per-block MIDI buffers. Reserved and capacity-limited during
     // activate() so capacity survives warmup and processors can append
@@ -217,6 +251,9 @@ bool clap_start_processing(const clap_plugin_t* plugin);
 void clap_stop_processing(const clap_plugin_t* plugin);
 void clap_reset(const clap_plugin_t* plugin);
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process);
+void clap_params_flush(const clap_plugin_t* plugin,
+                       const clap_input_events_t* in,
+                       const clap_output_events_t* out);
 bool clap_param_modulation_lane(const PulpClapPlugin& self,
                                 const clap_event_param_mod_t& event,
                                 state::ModulationLane& lane);

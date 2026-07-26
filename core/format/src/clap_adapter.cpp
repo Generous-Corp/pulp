@@ -26,6 +26,99 @@
 namespace pulp::format::clap_adapter {
 
 namespace {
+
+thread_local bool g_clap_process_running = false;
+thread_local bool g_clap_host_writing_param = false;
+
+class ScopedClapProcess final {
+public:
+    ScopedClapProcess() noexcept : previous_(g_clap_process_running) {
+        g_clap_process_running = true;
+    }
+    ~ScopedClapProcess() { g_clap_process_running = previous_; }
+private:
+    bool previous_;
+};
+
+class ScopedClapHostParamWrite final {
+public:
+    ScopedClapHostParamWrite() noexcept : previous_(g_clap_host_writing_param) {
+        g_clap_host_writing_param = true;
+    }
+    ~ScopedClapHostParamWrite() { g_clap_host_writing_param = previous_; }
+private:
+    bool previous_;
+};
+
+void request_param_flush(PulpClapPlugin* self) {
+    if (self->host && self->host_params && self->host_params->request_flush) {
+        self->host_params->request_flush(self->host);
+    }
+}
+
+void queue_outbound_param_event(PulpClapPlugin* self, OutboundParamEvent event) {
+    (void)self->outbound_param_events.try_push(event);
+    // request_flush() is explicitly thread-safe and non-audio-thread in CLAP.
+    // The callbacks below run inline on the editor/main thread. When processing
+    // is active, process() will usually win the race and drain the event first;
+    // the scheduled flush is harmless and hosts are expected to coalesce it.
+    request_param_flush(self);
+}
+
+void mark_queued_value_emitted(PulpClapPlugin* self, state::ParamID id) {
+    const auto params = self->store.all_params();
+    if (self->output_param_has_event.size() != params.size()) return;
+    const auto index = boundary::find_param_index(params, id);
+    if (index != boundary::kParamIndexNotFound) {
+        self->output_param_has_event[index] = 1;
+    }
+}
+
+void drain_outbound_param_events(PulpClapPlugin* self,
+                                 const clap_output_events_t* out) {
+    if (!out || !out->try_push) return;
+
+    OutboundParamEvent queued{};
+    while (self->pending_outbound_param_event ||
+           self->outbound_param_events.try_pop(queued)) {
+        if (self->pending_outbound_param_event) {
+            queued = *self->pending_outbound_param_event;
+        }
+        bool pushed = false;
+        if (queued.kind == OutboundParamEventKind::Value) {
+            clap_event_param_value_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = CLAP_EVENT_PARAM_VALUE;
+            ev.header.time = 0;
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.param_id = queued.param_id;
+            ev.cookie = nullptr;
+            ev.note_id = -1;
+            ev.port_index = -1;
+            ev.channel = -1;
+            ev.key = -1;
+            ev.value = static_cast<double>(queued.value);
+            pushed = out->try_push(out, &ev.header);
+            if (pushed) mark_queued_value_emitted(self, queued.param_id);
+        } else {
+            clap_event_param_gesture_t ev{};
+            ev.header.size = sizeof(ev);
+            ev.header.type = queued.kind == OutboundParamEventKind::GestureBegin
+                ? CLAP_EVENT_PARAM_GESTURE_BEGIN
+                : CLAP_EVENT_PARAM_GESTURE_END;
+            ev.header.time = 0;
+            ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+            ev.param_id = queued.param_id;
+            pushed = out->try_push(out, &ev.header);
+        }
+        if (!pushed) {
+            self->pending_outbound_param_event = queued;
+            return;
+        }
+        self->pending_outbound_param_event.reset();
+    }
+}
+
 constexpr std::size_t kRealtimeMidiEventCapacity = state::ParameterEventQueue::kCapacity;
 constexpr std::size_t kRealtimeMidiSysexCapacity = 128;
 constexpr std::size_t kRealtimeMidiSysexPayloadCapacity = 4096;
@@ -144,11 +237,44 @@ static T load_event(const clap_event_header_t* hdr) {
 
 bool clap_init(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
+    self->main_thread_id = std::this_thread::get_id();
     self->owner_alive.reset();
     self->processor = self->factory();
     if (!self->processor) return false;
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
+
+    if (self->host && self->host->get_extension) {
+        self->host_params = static_cast<const clap_host_params_t*>(
+            self->host->get_extension(self->host, CLAP_EXT_PARAMS));
+    }
+
+    // StateStore callbacks run inline on the writer. Host-originated writes and
+    // Processor writes during process() already have their own adapter paths,
+    // so suppress those and queue only editor/main-thread changes. This yields
+    // the exact BEGIN -> VALUE(s) -> END stream required for host touch/latch
+    // automation and remains available while transport is stopped.
+    self->store.set_gesture_callbacks(
+        [self](state::ParamID id) {
+            if (g_clap_host_writing_param || g_clap_process_running ||
+                std::this_thread::get_id() != self->main_thread_id) return;
+            queue_outbound_param_event(
+                self, {OutboundParamEventKind::GestureBegin, id, 0.0f});
+        },
+        [self](state::ParamID id) {
+            if (g_clap_host_writing_param || g_clap_process_running ||
+                std::this_thread::get_id() != self->main_thread_id) return;
+            queue_outbound_param_event(
+                self, {OutboundParamEventKind::GestureEnd, id, 0.0f});
+        });
+    self->outbound_param_listener = self->store.add_listener(
+        [self](state::ParamID id, float value) {
+            if (g_clap_host_writing_param || g_clap_process_running ||
+                std::this_thread::get_id() != self->main_thread_id) return;
+            queue_outbound_param_event(
+                self, {OutboundParamEventKind::Value, id, value});
+        },
+        state::ListenerThread::Audio);
 
     // Resolve host accommodations once via the runtime policy
     // (PULP_HOST_QUIRKS env / set_host_quirk_policy API).
@@ -207,6 +333,8 @@ bool clap_init(const clap_plugin_t* plugin) {
 void clap_destroy(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
     self->owner_alive.retire();
+    self->store.set_gesture_callbacks({}, {});
+    self->outbound_param_listener.reset();
     // Symmetric teardown of the MainThreadDispatcher backend installed in
     // clap_init().
     if (self->main_thread_token != 0) {
@@ -934,6 +1062,11 @@ static void clap_phase_emit_output(
                 self->output_param_has_event[idx] = 1;
             }
         }
+        // UI events are all at offset 0 and already ordered by the editor's
+        // synchronous StateStore calls. Emit them before the snapshot fallback
+        // and sample-offset merge; queued VALUE events mark the skip-set so the
+        // same change is not reported twice when it raced this process block.
+        drain_outbound_param_events(self, out_events);
         // (1) Snapshot-diff fallback, at time 0, for params WITHOUT explicit
         // events. These are all at offset 0 (the earliest time), so emitting
         // them before the offset-ordered merge below preserves CLAP's global
@@ -1097,6 +1230,7 @@ static void clap_phase_request_callback(PulpClapPlugin* self) {
 
 clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process_t* process) {
     auto* self = get_self(plugin);
+    ScopedClapProcess process_scope;
     if (!self->processor || !process) return CLAP_PROCESS_ERROR;
 
     auto num_samples = process->frames_count;
@@ -1495,6 +1629,34 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     clap_phase_request_callback(self);
 
     return CLAP_PROCESS_CONTINUE;
+}
+
+void clap_params_flush(const clap_plugin_t* plugin,
+                       const clap_input_events_t* in,
+                       const clap_output_events_t* out) {
+    auto* self = get_self(plugin);
+    ScopedClapHostParamWrite host_write;
+
+    if (in && in->size && in->get) {
+        const uint32_t count = in->size(in);
+        for (uint32_t i = 0; i < count; ++i) {
+            const auto* hdr = in->get(in, i);
+            if (!hdr || hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
+            if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
+                const auto ev = load_event<clap_event_param_value_t>(hdr);
+                self->store.set_value(static_cast<state::ParamID>(ev.param_id),
+                                      static_cast<float>(ev.value));
+            } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
+                const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
+            } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
+                const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
+            }
+        }
+    }
+
+    drain_outbound_param_events(self, out);
 }
 
 // ── Preset load extension ─────────────────────────────────────────────────

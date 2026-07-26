@@ -314,6 +314,60 @@ const clap_event_header_t* events_get(const clap_input_events_t* in, uint32_t i)
     return static_cast<const EventList*>(in->ctx)->events[i];
 }
 
+struct CapturedOutputEvents {
+    struct alignas(std::max_align_t) EventBytes {
+        std::array<std::byte, sizeof(clap_event_param_value_t)> data{};
+    };
+    std::vector<EventBytes> events;
+    clap_output_events_t api{};
+    bool fail_next = false;
+
+    CapturedOutputEvents() {
+        api.ctx = this;
+        api.try_push = [](const clap_output_events_t* out,
+                          const clap_event_header_t* event) -> bool {
+            auto* self = static_cast<CapturedOutputEvents*>(out->ctx);
+            if (self->fail_next) {
+                self->fail_next = false;
+                return false;
+            }
+            if (event->size > sizeof(EventBytes::data)) return false;
+            self->events.emplace_back();
+            std::memcpy(self->events.back().data.data(), event, event->size);
+            return true;
+        };
+    }
+
+    const clap_event_header_t* at(std::size_t index) const {
+        return reinterpret_cast<const clap_event_header_t*>(
+            events[index].data.data());
+    }
+};
+
+struct ParamFlushHost {
+    clap_host_t host{};
+    clap_host_params_t params{};
+    int flush_requests = 0;
+
+    ParamFlushHost() {
+        host.clap_version = CLAP_VERSION;
+        host.host_data = this;
+        host.name = "Pulp parameter flush test host";
+        host.vendor = "Pulp";
+        host.url = "https://pulp.audio";
+        host.version = "1";
+        host.get_extension = [](const clap_host_t* host, const char* id)
+            -> const void* {
+            auto* self = static_cast<ParamFlushHost*>(host->host_data);
+            return std::strcmp(id, CLAP_EXT_PARAMS) == 0 ? &self->params : nullptr;
+        };
+        params.request_flush = [](const clap_host_t* host) {
+            auto* self = static_cast<ParamFlushHost*>(host->host_data);
+            ++self->flush_requests;
+        };
+    }
+};
+
 } // namespace
 
 // Generate the CLAP entry
@@ -645,6 +699,7 @@ TEST_CASE("CLAP params extension reports metadata and text conversions",
     auto* params = static_cast<const clap_plugin_params_t*>(
         plugin->get_extension(plugin, CLAP_EXT_PARAMS));
     REQUIRE(params != nullptr);
+
     REQUIRE(params->count(plugin) == 4);
 
     clap_param_info_t info{};
@@ -1044,6 +1099,13 @@ TEST_CASE("CLAP params_flush ignores events outside the core namespace [issue-74
         plugin->get_extension(plugin, CLAP_EXT_PARAMS));
     REQUIRE(params != nullptr);
 
+    // The baseline is a plugin-originated StateStore write and therefore a
+    // legitimate outbound value. Drain it before testing that the subsequent
+    // host-originated write itself is not echoed.
+    CapturedOutputEvents baseline;
+    params->flush(plugin, nullptr, &baseline.api);
+    REQUIRE(baseline.events.size() == 1);
+
     // Construct one PARAM_VALUE event with a non-core namespace. Should be
     // dropped by the flush path.
     clap_event_param_value_t ev{};
@@ -1065,8 +1127,80 @@ TEST_CASE("CLAP params_flush ignores events outside the core namespace [issue-74
     // apply — confirms our guard isn't blocking well-formed core events.
     ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
     ev.value = -6.0;
-    params->flush(plugin, &in, nullptr);
+    CapturedOutputEvents echoed;
+    params->flush(plugin, &in, &echoed.api);
     REQUIRE_THAT(proc->state().get_value(1), WithinAbs(-6.0, 0.01));
+    REQUIRE(echoed.events.empty());
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP params_flush reports stopped-transport editor gestures in order",
+          "[clap][entry][params][gesture][flush]") {
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    ParamFlushHost host;
+    const clap_plugin_t* plugin =
+        factory->create_plugin(factory, &host.host, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(
+        plugin->plugin_data);
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    self->store.begin_gesture(1);
+    self->store.set_value(1, -12.0f);
+    self->store.set_value(1, -6.0f);
+    self->store.end_gesture(1);
+    REQUIRE(host.flush_requests == 4);
+
+    CapturedOutputEvents rejected;
+    rejected.fail_next = true;
+    params->flush(plugin, nullptr, &rejected.api);
+    REQUIRE(rejected.events.empty());
+
+    CapturedOutputEvents out;
+    params->flush(plugin, nullptr, &out.api);
+    REQUIRE(out.events.size() == 4);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_PARAM_GESTURE_BEGIN);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(2)->type == CLAP_EVENT_PARAM_VALUE);
+    REQUIRE(out.at(3)->type == CLAP_EVENT_PARAM_GESTURE_END);
+    for (std::size_t i = 0; i < out.events.size(); ++i) {
+        REQUIRE(out.at(i)->time == 0);
+        if (out.at(i)->type == CLAP_EVENT_PARAM_VALUE) {
+            const auto* value = reinterpret_cast<const clap_event_param_value_t*>(
+                out.at(i));
+            REQUIRE(value->param_id == 1);
+        } else {
+            const auto* gesture =
+                reinterpret_cast<const clap_event_param_gesture_t*>(out.at(i));
+            REQUIRE(gesture->param_id == 1);
+        }
+    }
+    REQUIRE(reinterpret_cast<const clap_event_param_value_t*>(out.at(1))->value
+            == -12.0);
+    REQUIRE(reinterpret_cast<const clap_event_param_value_t*>(out.at(2))->value
+            == -6.0);
+
+    CapturedOutputEvents second;
+    params->flush(plugin, nullptr, &second.api);
+    REQUIRE(second.events.empty());
+
+    // Audio/background StateStore writes are reported by process()'s existing
+    // snapshot/explicit-event paths, not this main-thread SPSC producer.
+    std::thread background([self] { self->store.set_value(1, -3.0f); });
+    background.join();
+    CapturedOutputEvents background_out;
+    params->flush(plugin, nullptr, &background_out.api);
+    REQUIRE(background_out.events.empty());
 
     plugin->destroy(plugin);
     clap_entry.deinit();
