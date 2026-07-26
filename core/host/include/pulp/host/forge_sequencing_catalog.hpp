@@ -440,6 +440,7 @@ inline float rungler_output_bound_v() { return 5.0f; }
 /// sample and the node would emit one frozen level instead of a line.
 inline CustomNodeType make_rungler_node(int reg_bits = Rung::kDefaultBits,
                                         std::uint32_t seed_pattern = Rung::kSeedPattern) {
+    const int normalized_reg_bits = std::clamp(reg_bits, Rung::kMinBits, Rung::kMaxBits);
     CustomNodeType t;
     t.type_id = kTypeId;
     t.version = 1;
@@ -450,11 +451,11 @@ inline CustomNodeType make_rungler_node(int reg_bits = Rung::kDefaultBits,
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [reg_bits, seed_pattern](void* p, double sr, int /*max_block*/) {
+    t.prepare = [normalized_reg_bits, seed_pattern](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<Instance*>(p);
         s->rungler.prepare(sr);
         s->transport.prepare(sr);
-        s->rungler.set_reg_bits(reg_bits);
+        s->rungler.set_reg_bits(normalized_reg_bits);
         s->rungler.set_seed_pattern(seed_pattern);
     };
     t.reset = [](void* p) {
@@ -467,7 +468,8 @@ inline CustomNodeType make_rungler_node(int reg_bits = Rung::kDefaultBits,
     t.baked_params.push_back({kDacBits, static_cast<float>(Rung::kMinDacBits),
                               static_cast<float>(Rung::kMaxDacBits),
                               static_cast<float>(Rung::kDefaultDacBits)});
-    t.baked_params.push_back({kFeedbackTap, 0.0f, static_cast<float>(Rung::kMaxBits - 2),
+    t.baked_params.push_back({kFeedbackTap, 0.0f,
+                              static_cast<float>(normalized_reg_bits - 2),
                               static_cast<float>(Rung::kFeedbackTap)});
     t.baked_params.push_back({kRangeV, 0.5f, 5.0f, static_cast<float>(Rung::kRangeV)});
     t.baked_params.push_back({kExternalData, 0.0f, 1.0f, 0.0f});

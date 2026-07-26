@@ -360,10 +360,10 @@ inline constexpr float kProgramSteps = 3.0f;
 /// Node-level ceilings for the ranges the DSP does not publish as constants.
 /// Each mirrors the module's baked-params table.
 /// [design parameter] defaults as shown; ranges are the DSP's own.
-inline constexpr float kLengthMsMin = 20.0f;
+inline constexpr float kLengthMsMin = static_cast<float>(cal::kMinLengthMs);
 inline constexpr float kLengthMsDefault = 350.0f;
 inline constexpr float kPredelayMsMax = 200.0f;
-inline constexpr float kDensityPctMin = 10.0f;
+inline constexpr float kDensityPctMin = static_cast<float>(cal::kMinDensityPct);
 inline constexpr float kGateHoldPctMin = 10.0f;
 inline constexpr float kGateHoldPctMax = 95.0f;
 inline constexpr float kAttackPctMin = 5.0f;
@@ -439,6 +439,7 @@ inline float nonlin_ambience_worst_case_gain() {
 inline CustomNodeType make_nonlin_ambience_node(
     std::uint32_t seed = cal::kDefaultSeed,
     double max_length_ms = cal::kMaxLengthMs) {
+    const double normalized_max_length_ms = std::max(cal::kMinLengthMs, max_length_ms);
     CustomNodeType t;
     t.type_id = kTypeId;
     t.version = 1;
@@ -449,18 +450,20 @@ inline CustomNodeType make_nonlin_ambience_node(
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [seed, max_length_ms](void* p, double sr, int /*max_block*/) {
+    t.prepare = [seed, normalized_max_length_ms](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<Instance*>(p);
         // Seed before prepare: prepare builds the first tap table, and building
         // it twice to honour a seed set afterwards would be waste.
         s->engine.set_seed(seed);
-        s->engine.prepare(sr, max_length_ms);
+        s->engine.prepare(sr, normalized_max_length_ms);
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
 
     t.baked_params.push_back({kProgram, 0.0f, kProgramSteps, 0.0f});
-    t.baked_params.push_back({kLengthMs, kLengthMsMin, static_cast<float>(max_length_ms),
-                              kLengthMsDefault});
+    t.baked_params.push_back({kLengthMs, kLengthMsMin,
+                              static_cast<float>(normalized_max_length_ms),
+                              std::min(kLengthMsDefault,
+                                       static_cast<float>(normalized_max_length_ms))});
     t.baked_params.push_back({kPredelayMs, 0.0f, kPredelayMsMax, 0.0f});
     t.baked_params.push_back({kDensityPct, kDensityPctMin, 100.0f,
                               static_cast<float>(cal::kDensityRefPct)});

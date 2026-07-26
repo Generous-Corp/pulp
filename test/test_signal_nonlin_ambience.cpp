@@ -1635,8 +1635,20 @@ TEST_CASE("Nonlin ambience: prepare and reset leave a usable engine",
     // Parameters are clamped to their documented ranges rather than trusted.
     engine.set_length_ms(1e9);
     REQUIRE(engine.length_ms() <= na::kMaxLengthMs);
+    engine.set_length_ms(-1e9);
+    REQUIRE_THAT(engine.length_ms(), Catch::Matchers::WithinAbs(na::kMinLengthMs, 1e-9));
     engine.set_tone(50.0);
     REQUIRE_THAT(engine.tone(), Catch::Matchers::WithinAbs(1.0, 1e-9));
+
+    NonlinAmbience minimum_density;
+    minimum_density.prepare(kFs, na::kMaxLengthMs);
+    minimum_density.set_density_pct(na::kMinDensityPct);
+    minimum_density.reset();
+    NonlinAmbience below_minimum_density;
+    below_minimum_density.prepare(kFs, na::kMaxLengthMs);
+    below_minimum_density.set_density_pct(-1e9);
+    below_minimum_density.reset();
+    REQUIRE(below_minimum_density.tap_count(0) == minimum_density.tap_count(0));
 }
 
 TEST_CASE("Nonlin ambience: the engine works at every supported sample rate",

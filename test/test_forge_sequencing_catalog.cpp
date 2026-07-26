@@ -727,6 +727,18 @@ TEST_CASE("Forge sequencing rungler: the node bakes and reproduces the DSP's wor
     REQUIRE(distinct_levels(cv) > 3);
 }
 
+TEST_CASE("Forge sequencing rungler: feedback-tap range follows the registered length",
+          "[host][baked][forge][forge-sequencing][rungler]") {
+    const auto type = seqcat::rungler::make_rungler_node(4);
+    const auto it = std::find_if(type.baked_params.begin(), type.baked_params.end(),
+                                 [](const auto& p) {
+                                     return p.id == seqcat::rungler::kFeedbackTap;
+                                 });
+    REQUIRE(it != type.baked_params.end());
+    REQUIRE(it->min_value == 0.0f);
+    REQUIRE(it->max_value == 2.0f);
+}
+
 TEST_CASE("Forge sequencing rungler: dac_bits sets the number of output levels",
           "[host][baked][forge][forge-sequencing][rungler]") {
     RunglerFixture fx(seqcat::rungler::make_rungler_node(), kSr, kFrames);

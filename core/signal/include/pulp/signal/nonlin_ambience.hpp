@@ -369,8 +369,12 @@ inline constexpr double kConverterDcPole = 0.995;
 /// Largest window and pre-delay `prepare()` sizes storage for, in ms. These are
 /// the maxima of the corresponding parameter-table rows.
 /// [design parameter] defaults 2000 / 200 ms, ranges 100 .. 8000 / 0 .. 1000 ms.
+inline constexpr double kMinLengthMs = 20.0;
 inline constexpr double kMaxLengthMs = 2000.0;
 inline constexpr double kMaxPredelayMs = 200.0;
+
+/// Lower bound of the density control's documented 10 .. 100 % range.
+inline constexpr double kMinDensityPct = 10.0;
 
 /// Floor below which the normalization sum is treated as empty, so a program
 /// whose taps all land in a zeroed region produces silence rather than a
@@ -479,7 +483,7 @@ public:
         namespace na = nonlin_ambience;
 
         sample_rate_ = sample_rate > 0.0 ? sample_rate : 48000.0;
-        max_length_ms_ = std::max(1.0, max_length_ms);
+        max_length_ms_ = std::max(nonlin_ambience::kMinLengthMs, max_length_ms);
         max_predelay_ms_ = std::max(0.0, max_predelay_ms);
 
         const int max_len_samples = static_cast<int>(std::ceil(
@@ -576,7 +580,7 @@ public:
     /// Window length in ms — the absolute time the dimensionless envelope is
     /// stretched across. Clamped to the `prepare()` maximum.
     void set_length_ms(double ms) {
-        const double v = std::clamp(ms, 1.0, max_length_ms_);
+        const double v = std::clamp(ms, nonlin_ambience::kMinLengthMs, max_length_ms_);
         if (v == length_ms_) return;
         length_ms_ = v;
         rebuild_and_swap();
@@ -592,7 +596,7 @@ public:
     /// Scales `Nd_min` only; `Nd_max` is fixed so the late field stays above the
     /// smoothness floor no matter how sparse the early field is made.
     void set_density_pct(double pct) {
-        const double v = std::clamp(pct, 1.0, 100.0);
+        const double v = std::clamp(pct, nonlin_ambience::kMinDensityPct, 100.0);
         if (v == density_pct_) return;
         density_pct_ = v;
         rebuild_and_swap();

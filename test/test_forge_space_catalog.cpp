@@ -634,6 +634,17 @@ TEST_CASE("Forge space ambience: the node bakes and runs true stereo",
     REQUIRE(std::isfinite(out[1][0]));
 }
 
+TEST_CASE("Forge space ambience: registration cannot invert the length range",
+          "[host][baked][forge][forge-space][ambience]") {
+    const auto type = amb::make_nonlin_ambience_node(amb::cal::kDefaultSeed, 1.0);
+    const auto it = std::find_if(type.baked_params.begin(), type.baked_params.end(),
+                                 [](const auto& p) { return p.id == amb::kLengthMs; });
+    REQUIRE(it != type.baked_params.end());
+    REQUIRE(it->min_value == static_cast<float>(amb::cal::kMinLengthMs));
+    REQUIRE(it->max_value == static_cast<float>(amb::cal::kMinLengthMs));
+    REQUIRE(it->default_value == static_cast<float>(amb::cal::kMinLengthMs));
+}
+
 TEST_CASE("Forge space ambience: the program param changes the envelope SHAPE",
           "[host][baked][param-injection][forge][forge-space][ambience][envelope]") {
     // The headline. Not "the output differs" — each program's rendered
