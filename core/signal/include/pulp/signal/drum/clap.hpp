@@ -136,6 +136,7 @@ protected:
         filter_.reset();
         output_.reset();
         burst_output_.reset();
+        stereo_path_active_ = false;
         noise_.reset();
         body_phase_ = 0.0;
         next_burst_ = 0;
@@ -148,10 +149,8 @@ protected:
 
     void on_note_on(float velocity) override {
         output_.reset_nonlinear_state();
-        burst_output_.sync_configuration_from(output_);
-        burst_output_.reset_nonlinear_state();
         output_.trigger();
-        burst_output_.trigger();
+        stereo_path_active_ = false;
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         brightness_ = response.brightness_scale(velocity);
@@ -194,6 +193,9 @@ protected:
     }
 
     void render_add(float* out, int num_samples) override {
+        // A later switch back to stereo must start from fresh side-path state;
+        // the optional processor is deliberately not advanced by mono blocks.
+        stereo_path_active_ = false;
         for (int i = 0; i < num_samples; ++i) {
             out[i] += render_frame(false).mono;
         }
@@ -201,7 +203,12 @@ protected:
 
     void render_add_stereo(float* left, float* right,
                            int num_samples) override {
-        burst_output_.sync_configuration_from(output_);
+        if (!stereo_path_active_) {
+            burst_output_.sync_configuration_from(output_);
+            burst_output_.reset();
+            burst_output_.trigger();
+            stereo_path_active_ = true;
+        }
         for (int i = 0; i < num_samples; ++i) {
             const RenderFrame frame = render_frame(true);
             const double pan = frame.burst_pan * stereo_width_;
@@ -300,6 +307,7 @@ private:
     Svf filter_;
     OutputStage output_;
     OutputStage burst_output_;
+    bool stereo_path_active_ = false;
 
     double velocity_gain_ = 1.0;
     double brightness_ = 1.0;

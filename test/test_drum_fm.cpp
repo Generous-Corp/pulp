@@ -134,6 +134,14 @@ TEST_CASE("FM wave tables omit harmonics above Nyquist",
             FmWaveTable::read(20, phase));
 }
 
+TEST_CASE("FM wave-table Nyquist transitions stay continuous",
+          "[signal][drum][fm][wave][aliasing]") {
+    constexpr double phase = 0.071;
+    const double below = FmWaveTable::read(20, phase, 0.1249);
+    const double above = FmWaveTable::read(20, phase, 0.1251);
+    REQUIRE(std::fabs(below - above) < 1.0e-3);
+}
+
 TEST_CASE("FM2 carrier and modulator wave tables reach emitted audio",
           "[signal][drum][fm][wave]") {
     auto render_wave = [](int carrier, int modulator) {

@@ -53,21 +53,29 @@ struct FmWaveTable {
             static_cast<std::size_t>(std::clamp(wave, 0, wave_count - 1));
         phase -= std::floor(phase);
         const double increment = std::fabs(phase_increment);
-        const int available_harmonics =
-            increment > 0.0
-                ? std::clamp(
-                      static_cast<int>(std::floor(0.5 / increment)), 1,
-                      harmonic_count)
-                : harmonic_count;
         double sample = 0.0;
         double normalization = 0.0;
-        for (int harmonic = 0; harmonic < available_harmonics; ++harmonic) {
+        for (int harmonic = 0; harmonic < harmonic_count; ++harmonic) {
             const double coefficient =
                 harmonics[index][static_cast<std::size_t>(harmonic)];
-            sample += coefficient *
+            double nyquist_gain = 1.0;
+            if (increment > 0.0) {
+                // Fade each partial through the upper tenth of the band. A
+                // hard integer harmonic count clicks whenever a pitch sweep
+                // crosses 0.5 / N, and renormalizing the surviving partials
+                // makes that discontinuity larger.
+                constexpr double kTransitionWidth = 0.05;
+                const double distance =
+                    0.5 - static_cast<double>(harmonic + 1) * increment;
+                const double t =
+                    std::clamp(distance / kTransitionWidth, 0.0, 1.0);
+                nyquist_gain = t * t * (3.0 - 2.0 * t);
+            }
+            const double weighted = coefficient * nyquist_gain;
+            sample += weighted *
                       std::sin(2.0 * 3.14159265358979323846 *
                                static_cast<double>(harmonic + 1) * phase);
-            normalization += std::fabs(coefficient);
+            normalization += std::fabs(weighted);
         }
         return normalization > 0.0 ? sample / normalization : 0.0;
     }
