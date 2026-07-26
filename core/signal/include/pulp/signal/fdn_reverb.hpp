@@ -198,17 +198,22 @@ private:
         tank_.configure(rate);
         ducker_.configure(rate);
         ensemble_.configure(rate);
+        ducker_.reset();
+        ensemble_.reset();
+        duck_gain_ = 1.0;
         for (int c = 0; c < kNumRails; ++c) {
             pre_diffusion_[c].configure(fdn::kPreDiffusionBaseMs, rate,
                                         c == 0 ? 3 : 7);
             pre_diffusion_[c].reset();
             predelay_[c].reset();
             input_lp_[c].reset();
+            output_lp_[c].reset();
         }
         design_input_lp(rate);
         makeup_gain_ = std::pow(
             10.0, fdn::kRateMakeupDb[static_cast<std::size_t>(index)] / 20.0);
         tank_.reset();
+        control_countdown_ = 0;
     }
 
     // Below an 18 kHz tank bandwidth an extra 2-pole lowpass engages INSIDE the
@@ -258,6 +263,9 @@ private:
             smoothed_[static_cast<std::size_t>(Param::diffusion)] *
             fdn::kPreDiffusionG);
         width_ = smoothed_[static_cast<std::size_t>(Param::width)];
+        drive_makeup_gain_ = std::pow(
+            10.0, smoothed_[static_cast<std::size_t>(Param::drive)] *
+                      fdn::kDriveMakeupDb / 20.0);
     }
 
     void tick_controls() {
@@ -304,8 +312,8 @@ private:
             r = static_cast<SampleType>(static_cast<double>(r) * duck);
 
             if (input_lp_active_) {
-                l = static_cast<SampleType>(input_lp_[0].process(static_cast<double>(l)));
-                r = static_cast<SampleType>(input_lp_[1].process(static_cast<double>(r)));
+                l = process_sanitized(input_lp_[0], l);
+                r = process_sanitized(input_lp_[1], r);
             }
 
             // Pre-diffusion with the coefficient's sign alternated between the
@@ -317,8 +325,8 @@ private:
             SampleType wet_r = 0;
             tank_.process(l, r, wet_l, wet_r);
 
-            double dl = static_cast<double>(wet_l);
-            double dr = static_cast<double>(wet_r);
+            double dl = static_cast<double>(wet_l) * drive_makeup_gain_;
+            double dr = static_cast<double>(wet_r) * drive_makeup_gain_;
             fdn::apply_width(dl, dr, width_);
             SampleType el = static_cast<SampleType>(dl);
             SampleType er = static_cast<SampleType>(dr);
@@ -334,10 +342,20 @@ private:
         // gain — the last multiply before the output buffer.
         for (int i = 0; i < n; ++i) {
             out_left[i] = static_cast<SampleType>(
-                output_lp_[0].process(static_cast<double>(out_left[i])) * makeup_gain_);
+                process_sanitized(output_lp_[0], out_left[i]) * makeup_gain_);
             out_right[i] = static_cast<SampleType>(
-                output_lp_[1].process(static_cast<double>(out_right[i])) * makeup_gain_);
+                process_sanitized(output_lp_[1], out_right[i]) * makeup_gain_);
         }
+    }
+
+    static SampleType process_sanitized(BiquadT<double>& filter, SampleType input) {
+        const double in = std::isfinite(static_cast<double>(input))
+                              ? static_cast<double>(input)
+                              : 0.0;
+        const double output = filter.process(in);
+        if (std::isfinite(output)) return static_cast<SampleType>(output);
+        filter.reset();
+        return SampleType{0};
     }
 
     static constexpr int kNumRails = 2;
@@ -359,6 +377,7 @@ private:
     double predelay_samples_ = 2.0;
     double width_ = 1.0;
     double makeup_gain_ = 1.0;
+    double drive_makeup_gain_ = 1.0;
     double duck_gain_ = 1.0;
     double output_lp_hz_ = 14000.0;
     SampleType pre_g_ = 0;

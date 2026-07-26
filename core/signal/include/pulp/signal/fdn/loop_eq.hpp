@@ -117,10 +117,10 @@ public:
         for (int k = 0; k < num_active_; ++k) {
             const auto& c = coeffs_[static_cast<std::size_t>(k)];
             State& s = state_[state_index(k, channel)];
-            const double in = static_cast<double>(x);
-            const double out = c.b0 * in + s.s1;
-            s.s1 = snap_to_zero(c.b1 * in - c.a1 * out + s.s2);
-            s.s2 = snap_to_zero(c.b2 * in - c.a2 * out);
+            const double in = finite_or_zero(static_cast<double>(x));
+            const double out = finite_or_zero(c.b0 * in + s.s1);
+            s.s1 = finite_or_zero(snap_to_zero(c.b1 * in - c.a1 * out + s.s2));
+            s.s2 = finite_or_zero(snap_to_zero(c.b2 * in - c.a2 * out));
             x = static_cast<SampleType>(out);
         }
         return x;
@@ -225,10 +225,10 @@ public:
     SampleType process(int channel, SampleType x) {
         const auto& c = coeffs_[static_cast<std::size_t>(channel)];
         State& s = state_[static_cast<std::size_t>(channel)];
-        const double in = static_cast<double>(x);
-        const double out = c.b0 * in + s.s1;
-        s.s1 = snap_to_zero(c.b1 * in - c.a1 * out + s.s2);
-        s.s2 = snap_to_zero(c.b2 * in - c.a2 * out);
+        const double in = finite_or_zero(static_cast<double>(x));
+        const double out = finite_or_zero(c.b0 * in + s.s1);
+        s.s1 = finite_or_zero(snap_to_zero(c.b1 * in - c.a1 * out + s.s2));
+        s.s2 = finite_or_zero(snap_to_zero(c.b2 * in - c.a2 * out));
         return static_cast<SampleType>(out);
     }
 

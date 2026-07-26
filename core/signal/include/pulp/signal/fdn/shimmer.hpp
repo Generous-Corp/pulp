@@ -111,6 +111,7 @@ public:
 
         double& z = tone_state_[static_cast<std::size_t>(channel)];
         z = snap_to_zero(sum * (1.0 - tone_coeff_) + z * tone_coeff_);
+        z = finite_or_zero(z);
         return static_cast<SampleType>(z);
     }
 
