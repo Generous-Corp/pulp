@@ -33,7 +33,7 @@ def _job_body(text: str, job_name: str) -> str:
     return match.group("body")
 
 
-def _preamble_jobs(text: str) -> list[tuple[str, str]]:
+def _startup_sensitive_jobs(text: str) -> list[tuple[str, str]]:
     jobs = []
     for match in re.finditer(
         r"(?ms)^  (?P<name>[a-zA-Z0-9_-]+):\n"
@@ -41,7 +41,10 @@ def _preamble_jobs(text: str) -> list[tuple[str, str]]:
         text,
     ):
         body = match.group("body")
-        if "PULP_PREAMBLE_RUNS_ON_JSON" in body:
+        if (
+            "PULP_PREAMBLE_RUNS_ON_JSON" in body
+            or "PULP_ALIAS_RUNS_ON_JSON" in body
+        ):
             jobs.append((match.group("name"), body))
     return jobs
 
@@ -53,9 +56,9 @@ def test_all_preamble_inline_python_uses_stable_cwd() -> None:
     )
 
     inline_count = 0
-    preamble_jobs = _preamble_jobs(text)
-    _assert(preamble_jobs, "build.yml has no PULP_PREAMBLE_RUNS_ON_JSON jobs")
-    for job_name, body in preamble_jobs:
+    protected_jobs = _startup_sensitive_jobs(text)
+    _assert(protected_jobs, "build.yml has no startup-sensitive polling jobs")
+    for job_name, body in protected_jobs:
         invocations = re.findall(r"(?m)^\s*python(?:3)? -(?:\s|$|\")", body)
         inline_count += len(invocations)
         protected = protected_invocation.findall(body)

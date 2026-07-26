@@ -113,7 +113,9 @@ public:
     }
 
     void prepare(SampleType sample_rate) {
-        sample_rate_ = sample_rate > SampleType{0} ? sample_rate : SampleType{1};
+        // The filter accepts cutoffs down to 1 Hz, so its Nyquist-derived
+        // upper bound must not fall below that lower bound.
+        sample_rate_ = sample_rate >= SampleType{4} ? sample_rate : SampleType{4};
         filter_.prepare(sample_rate_);
         update_coefficients_();
         reset();
@@ -163,8 +165,8 @@ public:
         gate_ = SampleType{0};
         pulse_level_ = SampleType{0};
         pulse_remaining_ = 0;
-        cutoff_hz_ = static_cast<SampleType>(fc_min_);
         filter_.reset();
+        command_cutoff_();
     }
 
     SampleType process(SampleType input) {
@@ -173,8 +175,6 @@ public:
         // Amplitude and brightness are the same control through two different
         // laws — that coupling is the entire effect.
         const SampleType amplitude = control_ * std::sqrt(control_); // control^1.5
-        const float filter_control =
-            1.0f - colour_ * (1.0f - static_cast<float>(control_));
         // The commanded cutoff is capped at sample_rate / 4. Above that the
         // trapezoidal one-pole's step response exceeds one: near-Nyquist
         // content pumps the integrator state past the input bound, and the
@@ -183,9 +183,7 @@ public:
         // every state update is a convex combination, so peak out <= peak in
         // holds unconditionally, which is the no-boost contract the LPG's
         // consumers (and its own "can only attenuate" gain law) rely on.
-        const auto cutoff = static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control));
-        cutoff_hz_ = std::min(cutoff, SampleType{0.25} * sample_rate_);
-        filter_.set_cutoff(cutoff_hz_);
+        command_cutoff_();
 
         const SampleType filtered = filter_.process_lowpass(input);
         const SampleType gain =
@@ -197,12 +195,23 @@ public:
     /// cutoff are derived from. Useful as a modulation source in its own right.
     SampleType control() const { return control_; }
 
-    /// Effective cutoff commanded on the most recent `process()` call. This is
-    /// read-only telemetry for proving the brightness half of the coupled
-    /// vactrol response; it does not participate in processing.
+    /// Effective cutoff currently commanded to the filter. `reset()` commands
+    /// the cutoff derived from the reset cell state before updating this
+    /// telemetry, so the value never describes a coefficient the filter does
+    /// not hold. This is read-only telemetry for proving the brightness half
+    /// of the coupled vactrol response; it does not participate in processing.
     SampleType cutoff_hz() const { return cutoff_hz_; }
 
 private:
+    void command_cutoff_() {
+        const float filter_control =
+            1.0f - colour_ * (1.0f - static_cast<float>(control_));
+        const auto cutoff =
+            static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control));
+        cutoff_hz_ = std::min(cutoff, SampleType{0.25} * sample_rate_);
+        filter_.set_cutoff(cutoff_hz_);
+    }
+
     void update_coefficients_() {
         rise_coeff_ = coeff_for_(rise_ms_);
         fall_coeff_ = coeff_for_(decay_ms_);
