@@ -35,9 +35,16 @@ bool has_contiguous_migration_path(std::span<const MigrationStep> steps,
 std::optional<PersistenceErrorCode>
 validate_structural_registry(const SchemaRegistry& registry) noexcept {
     struct ExpectedField {
+        constexpr ExpectedField(std::string_view field_name, SchemaValueKind field_kind,
+                                bool is_required = true,
+                                std::string_view reference = {}) noexcept
+            : name(field_name), kind(field_kind), required(is_required),
+              referenced_type(reference) {}
+
         std::string_view name;
         SchemaValueKind kind;
         bool required = true;
+        std::string_view referenced_type;
     };
     struct RequiredSchema {
         SchemaDomain domain;
@@ -75,7 +82,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField sequence_fields[] = {
         {"absolute_duration", SchemaValueKind::Object},
         {"chord_scale_lane", SchemaValueKind::Array},
-        {"groove", SchemaValueKind::Object},
+        {"groove", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
         {"id", SchemaValueKind::U64String},
         {"markers", SchemaValueKind::Array},
         {"musical_duration", SchemaValueKind::I64String},
@@ -93,7 +100,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField groove_template_fields[] = {
         {"name", SchemaValueKind::String},
         {"step", SchemaValueKind::I64String},
-        {"steps", SchemaValueKind::Array},
+        {"steps", SchemaValueKind::Array, true, "pulp.timeline.groove_step"},
         {"swing_denominator", SchemaValueKind::I64String},
         {"swing_grid", SchemaValueKind::I64String},
         {"swing_numerator", SchemaValueKind::I64String},
@@ -209,7 +216,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
             const auto& actual = schema->fields[index];
             const auto& field = expected.fields[index];
             if (actual.name != field.name || actual.kind != field.kind ||
-                actual.required != field.required || !actual.referenced_type.empty())
+                actual.required != field.required ||
+                actual.referenced_type != field.referenced_type)
                 return PersistenceErrorCode::InvalidSchema;
         }
     }

@@ -44,8 +44,9 @@ constexpr std::string_view kShuffleJson =
 Project project_with_groove(GrooveTemplate groove) {
     auto clip = take(Clip::create({4}, {0}, {100}, EmptyContent{}));
     auto track = take(Track::create({3}, "track", {clip}));
-    auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, std::nullopt, {track},
-                                          take(ChordScaleLane::create({})), std::move(groove)));
+    auto sequence = take(Sequence::create(SequenceInput{
+        {2}, "sequence", TickDuration{100}, std::nullopt, {track}, {}, {}, std::nullopt,
+        std::move(groove)}));
     return take(Project::create(ProjectInput{{1}, "project", 5, {2}, {}, {sequence}}));
 }
 
@@ -321,7 +322,7 @@ TEST_CASE("a groove round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":3") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":4") !=
             std::string::npos);
     REQUIRE(first.value().json.find(kShuffleJson) != std::string::npos);
 
@@ -399,39 +400,45 @@ TEST_CASE("a document whose groove is malformed is rejected on load",
     REQUIRE_FALSE(deserialize_project(mutated(R"("timing_strength":750,)", ""), registry));
 }
 
-TEST_CASE("sequence v2 upgrades to a straight groove and downgrades only when straight",
+TEST_CASE("sequence v3 upgrades to a straight groove and downgrades only when straight",
           "[timeline][groove][migration]") {
     const auto registry = builtins();
-    const std::string v2 =
-        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
-    const auto v3 =
-        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 3, v2));
-    REQUIRE(v3 ==
-            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":3})");
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2, v3)) ==
-            v2);
+    const std::string v3 =
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
+    const auto v4 =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 4, v3));
+    REQUIRE(v4 ==
+            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":4})");
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3, v4)) ==
+            v3);
 
-    // The migration is textual, so it must survive a non-canonical member order
-    // in both directions.
-    const std::string reordered_v2 =
-        R"({"version":2,"type_name":"pulp.timeline.sequence","data":{"chord_scale_lane":[],"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]}})";
-    const auto reordered_v3 =
-        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 3, reordered_v2));
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
-                                  reordered_v3)) == reordered_v2);
+    // The splice trusts canonical member order, so it proves that order before
+    // trusting any offset. A reordered payload fails closed rather than
+    // emitting the groove in the wrong slot.
+    const std::string reordered_v3 =
+        R"({"data":{"chord_scale_lane":[],"absolute_duration":null,"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
+    REQUIRE_FALSE(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 4, reordered_v3));
+    const std::string groove_first_v4 =
+        R"({"data":{"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"absolute_duration":null,"chord_scale_lane":[],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":4})";
+    REQUIRE_FALSE(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3, groove_first_v4));
 
-    // The erase must pick the comma that actually separates the removed member,
-    // including when the groove is written first or last.
-    const std::string groove_first =
-        R"({"data":{"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
-                                  groove_first)) ==
-            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})");
-    const std::string groove_last =
-        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000}},"type_name":"pulp.timeline.sequence","version":3})";
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
-                                  groove_last)) ==
-            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})");
+    // A member the version does not define is refused too: an extra key means
+    // the payload carries data this migration was never taught to carry.
+    const std::string extra_member_v4 =
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[],"zzz":1},"type_name":"pulp.timeline.sequence","version":4})";
+    REQUIRE_FALSE(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3, extra_member_v4));
+
+    // The whole chain composes: a v1 document reaches v4 and returns unchanged.
+    const std::string v1 =
+        R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})";
+    const auto climbed =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 4, v1));
+    REQUIRE(climbed == v4);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 1,
+                                  climbed)) == v1);
 }
 
 TEST_CASE("a groove downgrade refuses every field it would have to drop",
@@ -440,10 +447,10 @@ TEST_CASE("a groove downgrade refuses every field it would have to drop",
     auto with_groove = [](std::string_view groove) {
         return std::string(R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"groove":)") +
                std::string(groove) +
-               R"(,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
+               R"(,"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":4})";
     };
     auto refuses = [&](std::string_view groove) {
-        REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
+        REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3,
                                        with_groove(groove)));
     };
 
@@ -458,6 +465,8 @@ TEST_CASE("a groove downgrade refuses every field it would have to drop",
     refuses(
         R"({"name":"","step":"0","steps":[],"swing_denominator":"3","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000})");
     refuses(
+        R"({"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"2","timing_strength":1000,"velocity_strength":1000})");
+    refuses(
         R"({"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":500,"velocity_strength":1000})");
     refuses(
         R"({"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":0})");
@@ -465,12 +474,12 @@ TEST_CASE("a groove downgrade refuses every field it would have to drop",
     // The straight groove itself still downgrades, so the refusals above are
     // discriminating rather than a blanket rejection.
     REQUIRE(registry.migrate(
-        SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
+        SchemaDomain::Document, "pulp.timeline.sequence", 4, 3,
         with_groove(
             R"({"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000})")));
 }
 
-TEST_CASE("a v2 sequence document loads as a sequence with no feel",
+TEST_CASE("a v3 sequence document loads as a sequence with no feel",
           "[timeline][groove][migration]") {
     const auto registry = builtins();
     const auto current = take(serialize_project(project_with_groove(straight_groove()), registry))
@@ -482,11 +491,11 @@ TEST_CASE("a v2 sequence document loads as a sequence with no feel",
     REQUIRE(groove_at != std::string::npos);
     legacy.erase(groove_at, straight_member.size());
     constexpr std::string_view current_version =
-        R"("type_name":"pulp.timeline.sequence","version":3)";
+        R"("type_name":"pulp.timeline.sequence","version":4)";
     const auto version_at = legacy.find(current_version);
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at, current_version.size(),
-                   R"("type_name":"pulp.timeline.sequence","version":2)");
+                   R"("type_name":"pulp.timeline.sequence","version":3)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
     REQUIRE(decoded.find_sequence({2})->groove().states_no_feel());

@@ -184,8 +184,8 @@ export interface PulpTimelineCommandSetClipPlaybackProperties {
 
 /** `pulp.timeline.command.set_groove` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetGroove {
-  expected: Record<string, unknown>;
-  replacement: Record<string, unknown>;
+  expected: PulpTimelineGrooveTemplate;
+  replacement: PulpTimelineGrooveTemplate;
   sequence_id: number | string;
 }
 
@@ -266,7 +266,7 @@ export interface PulpTimelineGrooveStep {
 export interface PulpTimelineGrooveTemplate {
   name: string;
   step: number | string;
-  steps: readonly unknown[];
+  steps: readonly PulpTimelineGrooveStep[];
   swing_denominator: number | string;
   swing_grid: number | string;
   swing_numerator: number | string;
@@ -309,7 +309,7 @@ export interface PulpTimelineRegion {
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
-  groove: Record<string, unknown>;
+  groove: PulpTimelineGrooveTemplate;
   id: number | string;
   markers: readonly unknown[];
   musical_duration: number | string;

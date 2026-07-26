@@ -333,7 +333,7 @@ TEST_CASE("the subscriber index remains valid across provider selection changes"
     // The same index becomes effective again from the current snapshot when
     // playback returns to the arrangement; no selection-state rebuild is
     // required and no live reader can disappear from invalidation.
-    const auto arrangement = make_project(schemas, one_chord());
+    const auto arrangement = make_project(schemas, one_chord(), straight_groove());
     const auto after_unfreeze =
         resolve_dirty_tracks(*arrangement, {2}, context_edit, frozen_index);
     REQUIRE(after_unfreeze.tracks == std::vector<ItemId>{ItemId{10}});

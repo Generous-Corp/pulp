@@ -779,6 +779,7 @@
         {
           "kind": "Object",
           "name": "expected",
+          "ref": "pulp.timeline.groove_template",
           "required": true,
           "schema_field": "expected",
           "value_type": "json"
@@ -786,6 +787,7 @@
         {
           "kind": "Object",
           "name": "replacement",
+          "ref": "pulp.timeline.groove_template",
           "required": true,
           "schema_field": "replacement",
           "value_type": "json"
@@ -1340,6 +1342,7 @@
         {
           "kind": "Object",
           "name": "groove",
+          "ref": "pulp.timeline.groove_template",
           "required": true,
           "schema_field": "groove",
           "value_type": "json"

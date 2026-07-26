@@ -599,8 +599,17 @@ TEST_CASE("Timeline remap allocates first then fixes internal references") {
 TEST_CASE("Timeline remap preserves sequence context and project session origin") {
     const auto lane = take_value(ChordScaleLane::create(
         {{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    GrooveTemplateInput groove_input;
+    groove_input.name = "shuffle";
+    groove_input.swing_grid = TickDuration{kTicksPerQuarter / 2};
+    groove_input.swing = SwingRatio{2, 3};
+    const auto groove = take_value(GrooveTemplate::create(std::move(groove_input)));
     const auto sequence = take_value(Sequence::create(
-        {2}, "context", TickDuration{400}, std::nullopt, {}, {}, {}, lane));
+        SequenceInput{.id = {2},
+                      .name = "context",
+                      .musical_duration = TickDuration{400},
+                      .chord_scale_lane = lane,
+                      .groove = groove}));
     const SessionStart session_start{{172'800'000}, {48'000, 1}};
     const auto project = take_value(Project::create(ProjectInput{.id = {1},
                                                                  .name = "context",
@@ -612,10 +621,12 @@ TEST_CASE("Timeline remap preserves sequence context and project session origin"
     ItemIdAllocator allocator(100);
     const auto remapped_sequence = take_value(remap_ids(sequence, allocator)).sequence;
     REQUIRE(remapped_sequence.chord_scale_lane() == lane);
+    REQUIRE(remapped_sequence.groove() == groove);
 
     const auto remapped_project = take_value(remap_ids(project, 200)).project;
     REQUIRE(remapped_project.session_start() == session_start);
     const auto* rebuilt_sequence = remapped_project.find_sequence({201});
     REQUIRE(rebuilt_sequence != nullptr);
     REQUIRE(rebuilt_sequence->chord_scale_lane() == lane);
+    REQUIRE(rebuilt_sequence->groove() == groove);
 }

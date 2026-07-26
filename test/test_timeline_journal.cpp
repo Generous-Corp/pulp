@@ -472,6 +472,21 @@ TEST_CASE("Timeline replay enforces revision and writer ID continuity across ent
         return journal;
     };
 
+    SECTION("dirty context kinds must match the replayed transaction") {
+        CommandJournal journal({});
+        DirtySet altered_dirty(
+            std::vector<DirtyItem>(first_reduced->dirty.items().begin(),
+                                   first_reduced->dirty.items().end()),
+            {{ItemId{3}, CompileContextKind::Groove}});
+        pulp::timeline::detail::JournalAccess::append(
+            journal, {{}, {1}, first, std::move(altered_dirty), JournalEntryKind::Ordinary},
+            initial);
+
+        const auto replayed = journal.replay(initial, {});
+        REQUIRE_FALSE(replayed);
+        REQUIRE(replayed.error().code == ConflictCode::ModelInvariant);
+    }
+
     SECTION("transaction IDs cannot repeat") {
         auto journal = make_journal();
         auto second =
