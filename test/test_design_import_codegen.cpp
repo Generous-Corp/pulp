@@ -1,4 +1,5 @@
 #include "test_design_import_shared.hpp"
+#include <pulp/view/pointer_dispatch.hpp>
 
 TEST_CASE("parse_v0_tsx normalizes JSON and unsupported-source fallback diagnostics",
           "[view][import][diagnostics]") {
@@ -2209,6 +2210,21 @@ TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
     gain.name = "gain";
     gain.range = {0.0f, 1.0f, 0.5f};
     store.add_parameter(gain);
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](pulp::state::ParamID id) {
+            REQUIRE(id == gain.id);
+            events.push_back("begin");
+        },
+        [&](pulp::state::ParamID id) {
+            REQUIRE(id == gain.id);
+            events.push_back("end");
+        });
+    auto listener = store.add_listener(
+        [&](pulp::state::ParamID id, float) {
+            if (id == gain.id) events.push_back("value");
+        },
+        pulp::state::ListenerThread::Audio);
     WidgetBridge bridge(engine, root, store);
 
     CodeGenOptions opts;
@@ -2229,10 +2245,195 @@ TEST_CASE("web-compat DesignIR knob writes user gestures to its parameter",
     REQUIRE(live_knob != nullptr);
 
     const float before = store.get_normalized(gain.id);
-    live_knob->on_mouse_down({40.0f, 40.0f});
-    live_knob->on_mouse_drag({40.0f, 12.0f});
-    live_knob->on_mouse_up({40.0f, 12.0f});
+    REQUIRE(deliver_mouse_down(root, live_knob, {40.0f, 40.0f}, 0));
+    deliver_mouse_drag(root, live_knob, {40.0f, 12.0f}, 0);
+    deliver_mouse_up(root, live_knob, {40.0f, 12.0f}, 0, 1, {});
     REQUIRE(std::abs(store.get_normalized(gain.id) - before) > 1.0e-6f);
+    REQUIRE(events == std::vector<std::string>{"begin", "value", "end"});
+
+    // The real pointer router delivers Knob::on_mouse_event before
+    // Knob::on_mouse_down. A reset must still write inside the gesture.
+    events.clear();
+    REQUIRE(deliver_mouse_down(
+        root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2));
+    deliver_mouse_up(
+        root, live_knob, {40.0f, 40.0f}, 0, /*click_count=*/2, {});
+    REQUIRE(events == std::vector<std::string>{
+                          "begin", "value", "end", "begin", "end"});
+}
+
+TEST_CASE("web-compat parameter gesture routing survives deferred creation and rebinding",
+          "[view][import][runtime]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 240, 160});
+    std::vector<std::string> events;
+    Knob* live_knob = nullptr;
+
+    {
+        pulp::state::StateStore store;
+        store.add_parameter({
+            .id = 1,
+            .name = "gain",
+            .range = {0.0f, 1.0f, 0.5f},
+        });
+        store.add_parameter({
+            .id = 2,
+            .name = "tone",
+            .range = {0.0f, 1.0f, 0.5f},
+        });
+        store.set_gesture_callbacks(
+            [&](pulp::state::ParamID id) {
+                events.push_back("begin:" + std::to_string(id));
+            },
+            [&](pulp::state::ParamID id) {
+                events.push_back("end:" + std::to_string(id));
+            });
+
+        {
+            WidgetBridge bridge(engine, root, store);
+            bridge.load_script(
+                "bindWidgetToParam('deferred', 'gain');"
+                "createKnob('deferred', '');");
+            live_knob = dynamic_cast<Knob*>(bridge.widget("deferred"));
+            REQUIRE(live_knob != nullptr);
+
+            live_knob->on_mouse_down({40.0f, 40.0f});
+            bridge.load_script("bindWidgetToParam('deferred', 'tone');");
+            live_knob->on_mouse_up({40.0f, 40.0f});
+            REQUIRE(events == std::vector<std::string>{"begin:1", "end:1"});
+
+            live_knob->on_mouse_down({40.0f, 40.0f});
+            live_knob->on_mouse_up({40.0f, 40.0f});
+            REQUIRE(events == std::vector<std::string>{
+                                  "begin:1", "end:1", "begin:2", "end:2"});
+
+            bridge.load_script(
+                "createKnob('second', '');"
+                "bindWidgetToParam('second', 'tone');");
+            auto* second_knob =
+                dynamic_cast<Knob*>(bridge.widget("second"));
+            REQUIRE(second_knob != nullptr);
+            events.clear();
+            live_knob->on_mouse_down({40.0f, 40.0f});
+            second_knob->on_mouse_down({40.0f, 40.0f});
+            second_knob->on_mouse_up({40.0f, 40.0f});
+            REQUIRE(events == std::vector<std::string>{"begin:2"});
+            REQUIRE(store.open_gesture_count() == 1);
+            live_knob->on_mouse_up({40.0f, 40.0f});
+            REQUIRE(events ==
+                    std::vector<std::string>{"begin:2", "end:2"});
+
+            // Teardown while pressed must close the host gesture. The root
+            // remains externally owned and retains the widget after the bridge.
+            live_knob->on_mouse_down({40.0f, 40.0f});
+            REQUIRE(store.open_gesture_count() == 1);
+        }
+        REQUIRE(store.open_gesture_count() == 0);
+        REQUIRE(events.back() == "end:2");
+    }
+
+    // The retained widget callbacks are lifetime-gated after both bridge and
+    // store destruction.
+    REQUIRE(live_knob != nullptr);
+    live_knob->on_mouse_up({40.0f, 40.0f});
+}
+
+TEST_CASE("web-compat parameter gesture teardown tolerates hostile callbacks",
+          "[view][import][runtime]") {
+    ScriptEngine engine;
+    View root;
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "gain",
+        .range = {0.0f, 1.0f, 0.5f},
+    });
+
+    WidgetBridge* live_bridge = nullptr;
+    bool reenter = true;
+    store.set_gesture_callbacks(
+        [](pulp::state::ParamID) {},
+        [&](pulp::state::ParamID) {
+            if (!reenter) return;
+            reenter = false;
+            live_bridge->clear();
+        });
+    WidgetBridge bridge(engine, root, store);
+    live_bridge = &bridge;
+    bridge.load_script(
+        "createKnob('gain', '');"
+        "bindWidgetToParam('gain', 'gain');");
+    auto* knob = dynamic_cast<Knob*>(bridge.widget("gain"));
+    REQUIRE(knob != nullptr);
+    knob->on_mouse_down({40.0f, 40.0f});
+    REQUIRE_NOTHROW(bridge.clear());
+    REQUIRE(store.open_gesture_count() == 0);
+
+    {
+        ScriptEngine throwing_engine;
+        View throwing_root;
+        pulp::state::StateStore throwing_store;
+        throwing_store.add_parameter({
+            .id = 1,
+            .name = "gain",
+            .range = {0.0f, 1.0f, 0.5f},
+        });
+        throwing_store.set_gesture_callbacks(
+            [](pulp::state::ParamID) {},
+            [](pulp::state::ParamID) {
+                throw std::runtime_error("intentional teardown failure");
+            });
+        WidgetBridge throwing_bridge(
+            throwing_engine, throwing_root, throwing_store);
+        throwing_bridge.load_script(
+            "createKnob('gain', '');"
+            "bindWidgetToParam('gain', 'gain');");
+        auto* throwing_knob =
+            dynamic_cast<Knob*>(throwing_bridge.widget("gain"));
+        REQUIRE(throwing_knob != nullptr);
+        throwing_knob->on_mouse_down({40.0f, 40.0f});
+    }
+}
+
+TEST_CASE("web-compat parameter gestures share ownership across bridges",
+          "[view][import][runtime]") {
+    pulp::state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "gain",
+        .range = {0.0f, 1.0f, 0.5f},
+    });
+    std::vector<std::string> events;
+    store.set_gesture_callbacks(
+        [&](pulp::state::ParamID) { events.push_back("begin"); },
+        [&](pulp::state::ParamID) { events.push_back("end"); });
+
+    ScriptEngine first_engine;
+    ScriptEngine second_engine;
+    View first_root;
+    View second_root;
+    WidgetBridge first_bridge(first_engine, first_root, store);
+    WidgetBridge second_bridge(second_engine, second_root, store);
+    first_bridge.load_script(
+        "createKnob('gain', '');"
+        "bindWidgetToParam('gain', 'gain');");
+    second_bridge.load_script(
+        "createKnob('gain', '');"
+        "bindWidgetToParam('gain', 'gain');");
+    auto* first = dynamic_cast<Knob*>(first_bridge.widget("gain"));
+    auto* second = dynamic_cast<Knob*>(second_bridge.widget("gain"));
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+
+    first->on_mouse_down({40.0f, 40.0f});
+    second->on_mouse_down({40.0f, 40.0f});
+    second->on_mouse_up({40.0f, 40.0f});
+    REQUIRE(events == std::vector<std::string>{"begin"});
+    REQUIRE(store.open_gesture_count() == 1);
+    first->on_mouse_up({40.0f, 40.0f});
+    REQUIRE(events == std::vector<std::string>{"begin", "end"});
+    REQUIRE(store.open_gesture_count() == 0);
 }
 
 TEST_CASE("web-compat audio widget escapes an authored label",

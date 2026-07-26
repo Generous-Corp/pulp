@@ -214,6 +214,13 @@ public:
     /// **Main-thread only** — see @c begin_gesture().
     void end_gesture(ParamID id);
 
+    /// Acquire/release a shared gesture lease. Multiple live editors may bind
+    /// controls to the same StateStore parameter; only the first lease emits
+    /// begin_gesture() and only the last release emits end_gesture().
+    /// **Main-thread only** — see @c begin_gesture().
+    void acquire_gesture(ParamID id);
+    void release_gesture(ParamID id);
+
     /// Close every gesture still open and report each end to the host.
     ///
     /// The store tracks which parameters have an open gesture (a
@@ -391,6 +398,11 @@ private:
     // close everything still held on editor teardown. Main-thread-only, like
     // the gesture entry points that mutate it.
     std::unordered_set<ParamID> open_gestures_;
+    // Direct begin/end callers retain the historical duplicate-suppression
+    // contract independently of shared editor leases. open_gestures_ is the
+    // union that is actually open toward the host.
+    std::unordered_set<ParamID> direct_gestures_;
+    std::unordered_map<ParamID, std::size_t> gesture_leases_;
 
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
@@ -413,6 +425,8 @@ public:
         // (e.g. AU clears callbacks on teardown, then re-installs on reopen)
         // does not have a lingering entry suppress a fresh begin_gesture.
         open_gestures_.clear();
+        direct_gestures_.clear();
+        gesture_leases_.clear();
     }
 };
 
