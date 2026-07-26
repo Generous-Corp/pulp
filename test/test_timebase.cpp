@@ -809,3 +809,155 @@ TEST_CASE("timebase strong-position arithmetic saturates at its signed domain") 
     REQUIRE((MonotonicBeat{{minimum}} - TickDuration{1}) == MonotonicBeat{{minimum}});
     REQUIRE((MonotonicBeat{{maximum}} - MonotonicBeat{{minimum}}) == TickDuration{maximum});
 }
+
+namespace {
+
+// The rounding a round trip through swing_position() can accumulate: the
+// forward map rounds once, and the inverse divides that error back out by the
+// slope of whichever half the position landed in.
+double swing_round_trip_bound(TickDuration grid, SwingRatio ratio) {
+    const auto pair = grid.value * 2;
+    const auto pivot = detail::swing_pivot(pair, ratio);
+    const auto slowest = static_cast<double>(std::min(pivot, pair - pivot));
+    return static_cast<double>(grid.value) / (2.0 * slowest) + 0.5;
+}
+
+} // namespace
+
+TEST_CASE("straight swing is the identity on every tick") {
+    const TickDuration grid{kTicksPerQuarter / 2};
+    const auto pair = grid.value * 2;
+
+    for (std::int64_t tick = -pair; tick < 2 * pair; ++tick) {
+        const TickPosition position{tick};
+        REQUIRE(swing_position(position, grid, kStraightSwing) == position);
+        REQUIRE(unswing_position(position, grid, kStraightSwing) == position);
+    }
+}
+
+TEST_CASE("swing pins the pair boundary and moves the grid point onto the pivot") {
+    const TickDuration grid{kTicksPerQuarter / 2};
+    const auto pair = grid.value * 2;
+    const auto pivot = detail::swing_pivot(pair, kTripletSwing);
+    REQUIRE(pivot == (pair * 2) / 3);
+
+    for (std::int64_t index = -3; index <= 3; ++index) {
+        const TickPosition boundary{index * pair};
+        REQUIRE(swing_position(boundary, grid, kTripletSwing) == boundary);
+        REQUIRE(unswing_position(boundary, grid, kTripletSwing) == boundary);
+        REQUIRE(swing_position({boundary.value + grid.value}, grid, kTripletSwing) ==
+                TickPosition{boundary.value + pivot});
+        REQUIRE(unswing_position({boundary.value + pivot}, grid, kTripletSwing) ==
+                TickPosition{boundary.value + grid.value});
+    }
+}
+
+TEST_CASE("swing never reorders two positions and repeats every pair") {
+    const std::array<SwingRatio, 5> ratios{SwingRatio{1, 3}, SwingRatio{7, 16}, kStraightSwing,
+                                           kTripletSwing, SwingRatio{5, 8}};
+    const std::array<TickDuration, 3> grids{TickDuration{kTicksPerQuarter / 4},
+                                            TickDuration{kTicksPerQuarter / 2},
+                                            TickDuration{7}};
+
+    for (const auto grid : grids) {
+        const auto pair = grid.value * 2;
+        for (const auto ratio : ratios) {
+            auto previous = swing_position({-pair}, grid, ratio);
+            for (std::int64_t tick = -pair + 1; tick < 2 * pair; ++tick) {
+                const auto swung = swing_position({tick}, grid, ratio);
+                REQUIRE(swung >= previous);
+                REQUIRE(swing_position({tick + pair}, grid, ratio) ==
+                        TickPosition{swung.value + pair});
+                previous = swung;
+            }
+        }
+    }
+}
+
+TEST_CASE("unswing recovers a swung tick within the compressed half's rounding bound") {
+    const std::array<SwingRatio, 5> ratios{SwingRatio{1, 8}, SwingRatio{1, 3}, kStraightSwing,
+                                           kTripletSwing, SwingRatio{7, 8}};
+    const std::array<TickDuration, 3> grids{TickDuration{kTicksPerQuarter / 4},
+                                            TickDuration{kTicksPerQuarter / 2},
+                                            TickDuration{9}};
+
+    for (const auto grid : grids) {
+        const auto pair = grid.value * 2;
+        for (const auto ratio : ratios) {
+            const auto bound = static_cast<std::int64_t>(swing_round_trip_bound(grid, ratio));
+            std::int64_t worst = 0;
+            for (std::int64_t tick = -pair; tick < 2 * pair; ++tick) {
+                const auto recovered = unswing_position(swing_position({tick}, grid, ratio), grid,
+                                                        ratio);
+                worst = std::max(worst, std::abs(recovered.value - tick));
+            }
+            REQUIRE(worst <= bound);
+        }
+    }
+}
+
+TEST_CASE("swing at musical ratios round-trips to within a single tick") {
+    const TickDuration grid{kTicksPerQuarter / 2};
+    const auto pair = grid.value * 2;
+
+    for (const auto ratio : {kStraightSwing, SwingRatio{4, 7}, SwingRatio{3, 5}, kTripletSwing}) {
+        for (std::int64_t tick = 0; tick < pair; ++tick) {
+            const auto recovered =
+                unswing_position(swing_position({tick}, grid, ratio), grid, ratio);
+            REQUIRE(std::abs(recovered.value - tick) <= 1);
+        }
+    }
+}
+
+TEST_CASE("an out-of-range swing grid or ratio leaves the position untouched") {
+    const TickPosition position{123'457};
+    const TickDuration grid{kTicksPerQuarter / 2};
+
+    REQUIRE_FALSE(valid_swing_grid({0}));
+    REQUIRE_FALSE(valid_swing_grid({-1}));
+    REQUIRE_FALSE(valid_swing_grid({kMaxSwingGridTicks + 1}));
+    REQUIRE(valid_swing_grid({kMaxSwingGridTicks}));
+
+    REQUIRE_FALSE(valid_swing_ratio({0, 2}));
+    REQUIRE_FALSE(valid_swing_ratio({2, 2}));
+    REQUIRE_FALSE(valid_swing_ratio({3, 2}));
+    REQUIRE_FALSE(valid_swing_ratio({-1, 2}));
+    REQUIRE_FALSE(valid_swing_ratio({1, 0}));
+    REQUIRE_FALSE(valid_swing_ratio({1, -2}));
+    REQUIRE_FALSE(valid_swing_ratio({1, kMaxSwingDenominator + 1}));
+
+    REQUIRE(swing_position(position, {0}, kTripletSwing) == position);
+    REQUIRE(swing_position(position, {kMaxSwingGridTicks + 1}, kTripletSwing) == position);
+    REQUIRE(swing_position(position, grid, {0, 2}) == position);
+    REQUIRE(swing_position(position, grid, {2, 2}) == position);
+    REQUIRE(unswing_position(position, {0}, kTripletSwing) == position);
+    REQUIRE(unswing_position(position, grid, {5, 4}) == position);
+}
+
+TEST_CASE("a swing pivot cannot collapse onto a pair boundary") {
+    // A pair of four ticks cannot express a ratio of one part in a thousand;
+    // the pivot clamps inside the pair rather than erasing half the warp.
+    const TickDuration grid{2};
+    const SwingRatio extreme{1, 1000};
+    REQUIRE(valid_swing_ratio(extreme));
+    REQUIRE(detail::swing_pivot(grid.value * 2, extreme) == 1);
+
+    auto previous = swing_position({0}, grid, extreme);
+    for (std::int64_t tick = 1; tick < 8; ++tick) {
+        const auto swung = swing_position({tick}, grid, extreme);
+        REQUIRE(swung >= previous);
+        previous = swung;
+    }
+    REQUIRE(swing_position({4}, grid, extreme) == TickPosition{4});
+}
+
+TEST_CASE("swing saturates rather than wrapping at the signed tick domain") {
+    constexpr auto maximum = std::numeric_limits<std::int64_t>::max();
+    constexpr auto minimum = std::numeric_limits<std::int64_t>::min();
+    const TickDuration grid{kTicksPerQuarter / 2};
+
+    REQUIRE(swing_position({maximum}, grid, kTripletSwing).value <= maximum);
+    REQUIRE(swing_position({minimum}, grid, kTripletSwing).value >= minimum);
+    REQUIRE(unswing_position({maximum}, grid, kTripletSwing).value <= maximum);
+    REQUIRE(unswing_position({minimum}, grid, kTripletSwing).value >= minimum);
+}

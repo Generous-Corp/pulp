@@ -61,6 +61,7 @@ is not a reason to add a model feature.
 | `content.opaque` | yes | Uninterpreted clip content carried in a validated envelope. |
 | `edit-rate.non-audio` | format-only | Positions at a rate that does not convert exactly to the document's rate. |
 | `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
+| `context.groove` | yes | A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling. |
 
 ## DAWproject
 
@@ -112,6 +113,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `content.opaque` | none | not declared |
 | `edit-rate.non-audio` | none | not declared |
 | `context.chord-scale` | none | chord and scale context lanes |
+| `context.groove` | none | groove templates and swing |
 
 ### Export
 
@@ -159,6 +161,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `content.opaque` | roundtrip-only |  |  |  |
 | `edit-rate.non-audio` | drop | | dropped | not declared |
 | `context.chord-scale` | drop | | dropped | not declared |
+| `context.groove` | drop | | dropped | not declared |
 
 ## Adding a format
 

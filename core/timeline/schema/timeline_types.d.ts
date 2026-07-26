@@ -182,6 +182,13 @@ export interface PulpTimelineCommandSetClipPlaybackProperties {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_groove` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetGroove {
+  expected: Record<string, unknown>;
+  replacement: Record<string, unknown>;
+  sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.set_meter_map` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetMeterMap {
   expected: readonly unknown[];
@@ -249,6 +256,24 @@ export interface PulpTimelineDevicePlacement {
   id: number | string;
 }
 
+/** `pulp.timeline.groove_step` — domain Document, schema version 1. */
+export interface PulpTimelineGrooveStep {
+  timing_offset: number | string;
+  velocity_scale: number | string;
+}
+
+/** `pulp.timeline.groove_template` — domain Document, schema version 1. */
+export interface PulpTimelineGrooveTemplate {
+  name: string;
+  step: number | string;
+  steps: readonly unknown[];
+  swing_denominator: number | string;
+  swing_grid: number | string;
+  swing_numerator: number | string;
+  timing_strength: number | string;
+  velocity_strength: number | string;
+}
+
 /** `pulp.timeline.marker` — domain Document, schema version 1. */
 export interface PulpTimelineMarker {
   color?: number | string;
@@ -280,10 +305,11 @@ export interface PulpTimelineRegion {
   position: number | string;
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 3. */
+/** `pulp.timeline.sequence` — domain Document, schema version 4. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
+  groove: Record<string, unknown>;
   id: number | string;
   markers: readonly unknown[];
   musical_duration: number | string;
@@ -349,6 +375,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.set_active_take_lane"
   | "pulp.timeline.command.set_chord_scale_lane"
   | "pulp.timeline.command.set_clip_playback_properties"
+  | "pulp.timeline.command.set_groove"
   | "pulp.timeline.command.set_meter_map"
   | "pulp.timeline.command.set_note_velocity"
   | "pulp.timeline.command.set_record_arm"
@@ -359,6 +386,8 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
   | "pulp.timeline.device_placement"
+  | "pulp.timeline.groove_step"
+  | "pulp.timeline.groove_template"
   | "pulp.timeline.marker"
   | "pulp.timeline.project"
   | "pulp.timeline.region"
@@ -393,6 +422,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
   "pulp.timeline.command.set_chord_scale_lane": PulpTimelineCommandSetChordScaleLane;
   "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;
+  "pulp.timeline.command.set_groove": PulpTimelineCommandSetGroove;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;
   "pulp.timeline.command.set_record_arm": PulpTimelineCommandSetRecordArm;
@@ -403,6 +433,8 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;
   "pulp.timeline.device_placement": PulpTimelineDevicePlacement;
+  "pulp.timeline.groove_step": PulpTimelineGrooveStep;
+  "pulp.timeline.groove_template": PulpTimelineGrooveTemplate;
   "pulp.timeline.marker": PulpTimelineMarker;
   "pulp.timeline.project": PulpTimelineProject;
   "pulp.timeline.region": PulpTimelineRegion;

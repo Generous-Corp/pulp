@@ -29,9 +29,10 @@ namespace pulp::timeline {
 /// compiler; it is never a reason for a consumer to widen an invalidation.
 enum class CompileContextKind : std::uint8_t {
     ChordScale,
+    Groove,
 };
 
-inline constexpr std::size_t kCompileContextKindCount = 1;
+inline constexpr std::size_t kCompileContextKindCount = 2;
 
 /// The declared set of context kinds one content renderer reads.
 ///
@@ -97,6 +98,12 @@ class CompileContextView {
     /// The harmony in force at `position`, or null when ChordScale was not
     /// declared, the lane is empty, or `position` precedes its first event.
     const ChordScaleEvent* chord_scale_at(timebase::TickPosition position) const noexcept;
+
+    /// The sequence's groove, or null when Groove was not declared or the
+    /// sequence is not in this snapshot. A sequence that plays straight still
+    /// returns a groove — one that states no feel — because "plays straight" is
+    /// an answer, not an absence.
+    const GrooveTemplate* groove() const noexcept;
 
   private:
     const Sequence* sequence_ = nullptr;

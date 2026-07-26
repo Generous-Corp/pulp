@@ -263,7 +263,8 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
-            } else if constexpr (std::is_same_v<T, SetChordScaleLane>) {
+            } else if constexpr (std::is_same_v<T, SetChordScaleLane> ||
+                                 std::is_same_v<T, SetGroove>) {
                 return left.sequence_id == right.sequence_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, InsertMarker>) {
@@ -332,6 +333,14 @@ std::size_t retained_size(const Command& command) noexcept {
                     sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
                                                                 value.replacement.events().size()),
                                                   sizeof(ChordScaleEvent)));
+            if constexpr (std::is_same_v<T, SetGroove>)
+                return saturated_add(
+                    sizeof(T),
+                    saturated_add(saturated_multiply(saturated_add(value.expected.steps().size(),
+                                                                   value.replacement.steps().size()),
+                                                     sizeof(GrooveStep)),
+                                  saturated_add(value.expected.name().size(),
+                                                value.replacement.name().size())));
             if constexpr (std::is_same_v<T, SetMeterMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),

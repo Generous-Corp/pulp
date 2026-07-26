@@ -302,6 +302,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
         builtin(std::string(detail::sequence_schema_policy.type_name), SchemaDomain::Document,
                 {{"absolute_duration", SchemaValueKind::Object},
                  {"chord_scale_lane", SchemaValueKind::Array},
+                 {"groove", SchemaValueKind::Object},
                  {"id", SchemaValueKind::U64String},
                  {"markers", SchemaValueKind::Array},
                  {"musical_duration", SchemaValueKind::I64String},
@@ -311,9 +312,23 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                 detail::sequence_schema_policy.current_version);
     sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
     sequence.upgrades.push_back({2, 3, {}, detail::migrate_sequence_v2_to_v3});
-    sequence.downgrades.push_back({3, 2, {}, detail::migrate_sequence_v3_to_v2});
+    sequence.upgrades.push_back({3, 4, {}, detail::migrate_sequence_v3_to_v4});
     sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
+    sequence.downgrades.push_back({3, 2, {}, detail::migrate_sequence_v3_to_v2});
+    sequence.downgrades.push_back({4, 3, {}, detail::migrate_sequence_v4_to_v3});
     schemas.push_back(std::move(sequence));
+    schemas.push_back(builtin("pulp.timeline.groove_template", SchemaDomain::Document,
+                              {{"name", SchemaValueKind::String},
+                               {"step", SchemaValueKind::I64String},
+                               {"steps", SchemaValueKind::Array},
+                               {"swing_denominator", SchemaValueKind::I64String},
+                               {"swing_grid", SchemaValueKind::I64String},
+                               {"swing_numerator", SchemaValueKind::I64String},
+                               {"timing_strength", SchemaValueKind::U32},
+                               {"velocity_strength", SchemaValueKind::U32}}));
+    schemas.push_back(builtin("pulp.timeline.groove_step", SchemaDomain::Document,
+                              {{"timing_offset", SchemaValueKind::I64String},
+                               {"velocity_scale", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.chord_scale_event", SchemaDomain::Document,
                               {{"chord_quality", SchemaValueKind::String},
                                {"chord_root", SchemaValueKind::U32},
@@ -477,6 +492,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin("pulp.timeline.command.set_chord_scale_lane", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Array},
                                {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_groove", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Object},
+                               {"replacement", SchemaValueKind::Object},
                                {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_marker", SchemaDomain::Command,
                               {{"marker", SchemaValueKind::Object, true, "pulp.timeline.marker"},

@@ -258,6 +258,16 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.set_groove": Object.freeze({
+    schemaType: "pulp.timeline.command.set_groove",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "expected", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "replacement", kind: "Object", jsType: "object", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.set_meter_map": Object.freeze({
     schemaType: "pulp.timeline.command.set_meter_map",
     domain: "Command",
@@ -355,6 +365,30 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.groove_step": Object.freeze({
+    schemaType: "pulp.timeline.groove_step",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "timing_offset", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "velocity_scale", kind: "U32", jsType: "number", required: true }),
+    ]),
+  }),
+  "pulp.timeline.groove_template": Object.freeze({
+    schemaType: "pulp.timeline.groove_template",
+    domain: "Document",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "name", kind: "String", jsType: "string", required: true }),
+      Object.freeze({ name: "step", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "steps", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "swing_denominator", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "swing_grid", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "swing_numerator", kind: "I64String", jsType: "string", required: true }),
+      Object.freeze({ name: "timing_strength", kind: "U32", jsType: "number", required: true }),
+      Object.freeze({ name: "velocity_strength", kind: "U32", jsType: "number", required: true }),
+    ]),
+  }),
   "pulp.timeline.marker": Object.freeze({
     schemaType: "pulp.timeline.marker",
     domain: "Document",
@@ -398,10 +432,11 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.sequence": Object.freeze({
     schemaType: "pulp.timeline.sequence",
     domain: "Document",
-    version: 3,
+    version: 4,
     fields: Object.freeze([
       Object.freeze({ name: "absolute_duration", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "chord_scale_lane", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "groove", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "id", kind: "U64String", jsType: "string", required: true }),
       Object.freeze({ name: "markers", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "musical_duration", kind: "I64String", jsType: "string", required: true }),
@@ -478,6 +513,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.set_active_take_lane",
   "pulp.timeline.command.set_chord_scale_lane",
   "pulp.timeline.command.set_clip_playback_properties",
+  "pulp.timeline.command.set_groove",
   "pulp.timeline.command.set_meter_map",
   "pulp.timeline.command.set_note_velocity",
   "pulp.timeline.command.set_record_arm",
@@ -488,6 +524,8 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.content.media",
   "pulp.timeline.content.notes",
   "pulp.timeline.device_placement",
+  "pulp.timeline.groove_step",
+  "pulp.timeline.groove_template",
   "pulp.timeline.marker",
   "pulp.timeline.project",
   "pulp.timeline.region",

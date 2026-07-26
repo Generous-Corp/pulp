@@ -28,6 +28,7 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 }
 
 constexpr std::string_view kFollowsHarmony = "vendor.chord_follower";
+constexpr std::string_view kFollowsGroove = "vendor.groove_follower";
 constexpr std::string_view kIgnoresHarmony = "vendor.plain_generator";
 
 ContentHash hash_of(char digit) {
@@ -51,7 +52,7 @@ std::size_t retained_marker(const std::shared_ptr<const void>&, const void*) noe
 
 SchemaRegistry generator_schema_registry() {
     SchemaRegistryBuilder builder;
-    for (const auto name : {kFollowsHarmony, kIgnoresHarmony}) {
+    for (const auto name : {kFollowsHarmony, kFollowsGroove, kIgnoresHarmony}) {
         TypeSchema schema;
         schema.type_name = std::string(name);
         schema.domain = SchemaDomain::Content;
@@ -68,10 +69,14 @@ ClipContent generator_content(const SchemaRegistry& registry, std::string_view t
 }
 
 // Ids: sequence 2; track 10 holds a chord-following generator, track 20 holds a
-// generator that reads nothing, track 30 holds only ordinary note content.
-// Every track also carries a plain clip so no program is trivially empty.
-std::shared_ptr<const Project> make_project(const SchemaRegistry& registry,
-                                            ChordScaleLane lane) {
+// generator that reads nothing, track 30 holds only ordinary note content, and
+// track 40 holds a groove-following generator. Two kinds with disjoint readers
+// is what makes the exactness claim testable in both directions: a chord edit
+// must leave the groove reader alone and a groove edit must leave the chord
+// reader alone. Every track also carries a plain clip so no program is
+// trivially empty.
+std::shared_ptr<const Project> make_project(const SchemaRegistry& registry, ChordScaleLane lane,
+                                            GrooveTemplate groove) {
     auto notes = [](std::uint64_t clip_id, std::uint64_t note_id) {
         auto content = take(NoteContent::create({NoteEvent{{note_id}, {0}, {240}, 0xffff, 60, 0}}));
         return take(Clip::create({clip_id}, {0}, {480}, std::move(content)));
@@ -86,15 +91,22 @@ std::shared_ptr<const Project> make_project(const SchemaRegistry& registry,
         {notes(200, 201),
          take(Clip::create({210}, {480}, {480}, generator_content(registry, kIgnoresHarmony)))}));
     auto plain = take(Track::create({30}, "plain", {notes(300, 301)}));
+    auto swinger = take(Track::create(
+        {40}, "swinger",
+        {notes(400, 401),
+         take(Clip::create({410}, {480}, {480}, generator_content(registry, kFollowsGroove)))}));
 
-    auto sequence =
-        take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
-                              std::vector<Track>{follower, independent, plain}, {}, {},
-                              std::move(lane)));
+    SequenceInput sequence_input;
+    sequence_input.id = {2};
+    sequence_input.name = "root";
+    sequence_input.tracks = {follower, independent, plain, swinger};
+    sequence_input.chord_scale_lane = std::move(lane);
+    sequence_input.groove = std::move(groove);
+    auto sequence = take(Sequence::create(std::move(sequence_input)));
     ProjectInput input;
     input.id = {1};
     input.name = "context";
-    input.next_item_id = 400;
+    input.next_item_id = 500;
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
@@ -142,10 +154,29 @@ CompileContextRegistry context_registry() {
     CompileContextRegistry registry;
     auto reads_harmony = CompileContextSubscriptions::none();
     reads_harmony.subscribe(CompileContextKind::ChordScale);
+    auto reads_groove = CompileContextSubscriptions::none();
+    reads_groove.subscribe(CompileContextKind::Groove);
     REQUIRE_FALSE(registry.declare({std::string(kFollowsHarmony), reads_harmony}));
+    REQUIRE_FALSE(registry.declare({std::string(kFollowsGroove), reads_groove}));
     REQUIRE_FALSE(
         registry.declare({std::string(kIgnoresHarmony), CompileContextSubscriptions::none()}));
     return registry;
+}
+
+GrooveTemplate groove_of(GrooveTemplateInput input) {
+    return take(GrooveTemplate::create(std::move(input)));
+}
+
+GrooveTemplate straight_groove() {
+    return groove_of({});
+}
+
+GrooveTemplate shuffle() {
+    GrooveTemplateInput input;
+    input.name = "shuffle";
+    input.swing_grid = TickDuration{kTicksPerQuarter / 2};
+    input.swing = kTripletSwing;
+    return groove_of(std::move(input));
 }
 
 ChordScaleLane lane_of(std::vector<ChordScaleEvent> events) {
@@ -218,6 +249,15 @@ DirtySet chord_lane_edit(const Project& before, const Project& after) {
     return take(reduce_transaction(before, transaction)).dirty;
 }
 
+DirtySet groove_edit(const Project& before, const Project& after) {
+    Transaction transaction;
+    transaction.id = {{1}, 1};
+    transaction.commands.push_back({{{1}, 1},
+                                    SetGroove{{2}, before.find_sequence({2})->groove(),
+                                              after.find_sequence({2})->groove()}});
+    return take(reduce_transaction(before, transaction)).dirty;
+}
+
 } // namespace
 
 TEST_CASE("a context registry refuses an empty or duplicate content type",
@@ -248,7 +288,7 @@ TEST_CASE("a context registry refuses an empty or duplicate content type",
 TEST_CASE("the subscriber index names only the tracks that declared the context",
           "[playback][compile-context][subscription]") {
     const auto schemas = generator_schema_registry();
-    const auto project = make_project(schemas, one_chord());
+    const auto project = make_project(schemas, one_chord(), straight_groove());
     const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
 
     const auto subscribers = index.subscribers(CompileContextKind::ChordScale);
@@ -302,8 +342,8 @@ TEST_CASE("the subscriber index remains valid across provider selection changes"
 TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
-    const auto before = make_project(schemas, lane_of({}));
-    const auto after = make_project(schemas, one_chord());
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
+    const auto after = make_project(schemas, one_chord(), straight_groove());
     const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
 
     const auto resolved =
@@ -338,8 +378,8 @@ TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
 TEST_CASE("editing the chord lane recompiles its subscribers and reuses everything else",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
-    const auto before = make_project(schemas, lane_of({}));
-    const auto after = make_project(schemas, one_chord());
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
+    const auto after = make_project(schemas, one_chord(), straight_groove());
     const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
 
     PlaybackProgramStore store;
@@ -380,8 +420,8 @@ TEST_CASE("an undeclared reader is not recompiled by a chord-lane edit",
     // it would go stale here, which is what makes the contract load-bearing
     // rather than advisory.
     const auto schemas = generator_schema_registry();
-    const auto before = make_project(schemas, lane_of({}));
-    const auto after = make_project(schemas, one_chord());
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
+    const auto after = make_project(schemas, one_chord(), straight_groove());
     const auto index = ContextSubscriberIndex::build(*before, {2}, CompileContextRegistry{});
 
     const auto resolved =
@@ -393,7 +433,7 @@ TEST_CASE("an undeclared reader is not recompiled by a chord-lane edit",
 TEST_CASE("a structural edit and a context edit in one transaction dirty both",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
-    const auto before = make_project(schemas, lane_of({}));
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
     const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
 
     Transaction transaction;
@@ -414,12 +454,105 @@ TEST_CASE("a structural edit and a context edit in one transaction dirty both",
 TEST_CASE("marker metadata does not dirty compiled track programs",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
-    const auto project = make_project(schemas, lane_of({}));
+    const auto project = make_project(schemas, lane_of({}), straight_groove());
     const DirtySet marker_edit(
         {{{400}, {}, {2},
           DirtyFlags::Structure | DirtyFlags::Marker | DirtyFlags::Added}});
     const auto resolved =
         resolve_dirty_tracks(*project, {2}, marker_edit, ContextSubscriberIndex{});
+    REQUIRE_FALSE(resolved.all);
+    REQUIRE(resolved.tracks.empty());
+}
+
+TEST_CASE("the subscriber index separates the two context kinds",
+          "[playback][compile-context][subscription]") {
+    const auto schemas = generator_schema_registry();
+    const auto project = make_project(schemas, one_chord(), shuffle());
+    const auto index = ContextSubscriberIndex::build(*project, {2}, context_registry());
+
+    const auto harmony_readers = index.subscribers(CompileContextKind::ChordScale);
+    REQUIRE(harmony_readers.size() == 1);
+    REQUIRE(harmony_readers[0] == ItemId{10});
+
+    // A reader of one kind is not a reader of the other. If the index widened
+    // to "anything that declared any context", these two spans would be equal.
+    const auto groove_readers = index.subscribers(CompileContextKind::Groove);
+    REQUIRE(groove_readers.size() == 1);
+    REQUIRE(groove_readers[0] == ItemId{40});
+}
+
+TEST_CASE("editing the groove recompiles its subscribers and reuses everything else",
+          "[playback][compile-context][dirty-set]") {
+    const auto schemas = generator_schema_registry();
+    const auto before = make_project(schemas, one_chord(), straight_groove());
+    const auto after = make_project(schemas, one_chord(), shuffle());
+    const auto index = ContextSubscriberIndex::build(*before, {2}, context_registry());
+
+    const auto resolved =
+        resolve_dirty_tracks(*after, {2}, groove_edit(*before, *after), index);
+    REQUIRE_FALSE(resolved.all);
+    REQUIRE(resolved.tracks.size() == 1);
+    REQUIRE(resolved.tracks[0] == ItemId{40});
+
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    const auto map = tempo_map();
+
+    REQUIRE(compiler.submit(request(before, map, 1, {.all = true})));
+    REQUIRE_FALSE(compiler.status().busy);
+    const auto* follower_before = track_program(store, {10});
+    const auto* independent_before = track_program(store, {20});
+    const auto* plain_before = track_program(store, {30});
+    const auto* swinger_before = track_program(store, {40});
+    const auto generation_before = published_generation(store);
+
+    REQUIRE(compiler.submit(request(after, map, 2, resolved)));
+    REQUIRE_FALSE(compiler.status().busy);
+    REQUIRE(published_generation(store) != generation_before);
+    REQUIRE(published_revision(store) == 2);
+
+    // The declared groove reader recompiled...
+    REQUIRE(track_program(store, {40}) != swinger_before);
+    // ...and nothing else did — including the track that reads the *other*
+    // context kind, which is the part a per-kind index buys over a per-sequence
+    // one.
+    REQUIRE(track_program(store, {10}) == follower_before);
+    REQUIRE(track_program(store, {20}) == independent_before);
+    REQUIRE(track_program(store, {30}) == plain_before);
+}
+
+TEST_CASE("a chord-lane edit leaves the groove reader alone and the reverse",
+          "[playback][compile-context][dirty-set]") {
+    const auto schemas = generator_schema_registry();
+    const auto plain = make_project(schemas, lane_of({}), straight_groove());
+    const auto harmonised = make_project(schemas, one_chord(), straight_groove());
+    const auto swung = make_project(schemas, lane_of({}), shuffle());
+    const auto index = ContextSubscriberIndex::build(*plain, {2}, context_registry());
+
+    const auto after_chord =
+        resolve_dirty_tracks(*harmonised, {2}, chord_lane_edit(*plain, *harmonised), index);
+    REQUIRE(after_chord.tracks.size() == 1);
+    REQUIRE(after_chord.tracks[0] == ItemId{10});
+
+    const auto after_groove =
+        resolve_dirty_tracks(*swung, {2}, groove_edit(*plain, *swung), index);
+    REQUIRE(after_groove.tracks.size() == 1);
+    REQUIRE(after_groove.tracks[0] == ItemId{40});
+}
+
+TEST_CASE("an undeclared reader is not recompiled by a groove edit",
+          "[playback][compile-context][dirty-set]") {
+    // The mirror of the exactness claim for the second kind: with nothing
+    // registered, the same groove edit recompiles nothing at all, so a renderer
+    // that read the groove without declaring it would render a stale feel.
+    const auto schemas = generator_schema_registry();
+    const auto before = make_project(schemas, lane_of({}), straight_groove());
+    const auto after = make_project(schemas, lane_of({}), shuffle());
+    const auto index = ContextSubscriberIndex::build(*before, {2}, CompileContextRegistry{});
+
+    const auto resolved =
+        resolve_dirty_tracks(*after, {2}, groove_edit(*before, *after), index);
     REQUIRE_FALSE(resolved.all);
     REQUIRE(resolved.tracks.empty());
 }

@@ -51,6 +51,7 @@ DecodeLimits DecodeLimits::web_defaults() noexcept {
     limits.max_markers = 25'000;
     limits.max_regions = 25'000;
     limits.max_chord_scale_events = 250'000;
+    limits.max_groove_steps = 25'000;
     return limits;
 }
 

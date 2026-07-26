@@ -378,6 +378,26 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 SetChordScaleLane{chord->sequence_id, chord->replacement, chord->expected});
             dirty.push_back({chord->sequence_id, {}, chord->sequence_id, DirtyFlags::Context});
             dirty_contexts.push_back({chord->sequence_id, CompileContextKind::ChordScale});
+        } else if (const auto* groove = std::get_if<SetGroove>(&envelope.command)) {
+            if (const auto code = detail::target_error(
+                    project, groove->sequence_id,
+                    expected_location(ItemKind::Sequence, project, groove->sequence_id)))
+                return fail_target(*code, groove->sequence_id);
+            const auto* sequence = project.find_sequence(groove->sequence_id);
+            if (!sequence)
+                return fail_target(ConflictCode::TargetMissing, groove->sequence_id);
+            if (!(sequence->groove() == groove->expected))
+                return fail_target(ConflictCode::ExpectedValueMismatch, groove->sequence_id);
+            auto next_project = ProjectEditAccess::replace_sequence(
+                project, sequence->with_groove(groove->replacement));
+            if (!next_project)
+                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
+                        detail::model_failure(transaction, envelope.id, next_project.error())));
+            project = std::move(next_project).value();
+            inverses.emplace_back(
+                SetGroove{groove->sequence_id, groove->replacement, groove->expected});
+            dirty.push_back({groove->sequence_id, {}, groove->sequence_id, DirtyFlags::Context});
+            dirty_contexts.push_back({groove->sequence_id, CompileContextKind::Groove});
         } else {
             const auto& playback = std::get<SetClipPlaybackProperties>(envelope.command);
             if (const auto code = detail::target_error(
