@@ -133,6 +133,25 @@ TEST_CASE("Forge distortion: injecting the post-tone corner darkens the output",
             harmonic(bright, 5) / harmonic(bright, 1) * 0.5);
 }
 
+TEST_CASE("Forge distortion: pre-tone corner is audible when its shelf is engaged",
+          "[host][baked][param-injection][forge][forge-distortion]") {
+    auto fx = make_fixture(dist::make_distortion_node(dist::Topology::to_ground));
+    ParamInjector inj = fx.claim_injector();
+    const auto tone = sine(0.05f);
+
+    REQUIRE(inj.inject(immediate(dist::kDriveDb, 0.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(dist::kToneMix, 1.0f)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(dist::kPreGainDb, 12.0f)) == InjectStatus::Ok);
+
+    REQUIRE(inj.inject(immediate(dist::kPreToneHz, 200.0f)) == InjectStatus::Ok);
+    const double low_corner = harmonic(settle(fx, tone), 1);
+
+    REQUIRE(inj.inject(immediate(dist::kPreToneHz, 8000.0f)) == InjectStatus::Ok);
+    const double high_corner = harmonic(settle(fx, tone), 1);
+
+    REQUIRE(low_corner > high_corner * 2.0);
+}
+
 // ── 8. Latency, reported exactly per tier ─────────────────────────────────
 
 TEST_CASE("8 the oversampling tiers report their latency exactly",
@@ -212,19 +231,22 @@ TEST_CASE("7 the baked node renders identically after a reset",
 
 TEST_CASE("Forge distortion: the registry's worst-case gain covers the trims",
           "[host][baked][forge][forge-distortion]") {
-    // The clipper itself cannot amplify, so the node's bound is the drive and
-    // output trims either side of it. The drive counts because it sits BEFORE
-    // the clipper, where small signals pass un-clipped — a bound that only
-    // counted the clipper would be wrong for exactly the quiet material a
-    // path-gain lint most needs to reason about.
-    const double expected =
-        std::pow(10.0, (dist::kDriveDbMax + dist::kOutputDbMax) / 20.0);
+    // The clipper itself cannot amplify, so the node's bound is the drive,
+    // pre-emphasis shelf, and output trim. Both gains before the clipper count
+    // because quiet signals pass through unclipped.
+    const double expected = std::pow(
+        10.0,
+        (dist::kDriveDbMax + pulp::signal::ToneStack::kPreGainDbMax + dist::kOutputDbMax) /
+            20.0);
     REQUIRE_THAT(static_cast<double>(dist::distortion_worst_case_gain()),
                  WithinAbs(expected, 1e-3));
 
     auto fx = make_fixture(dist::make_distortion_node(dist::Topology::to_ground));
     ParamInjector inj = fx.claim_injector();
     REQUIRE(inj.inject(immediate(dist::kDriveDb, dist::kDriveDbMax)) == InjectStatus::Ok);
+    REQUIRE(inj.inject(immediate(dist::kPreGainDb,
+                                 static_cast<float>(pulp::signal::ToneStack::kPreGainDbMax))) ==
+            InjectStatus::Ok);
     REQUIRE(inj.inject(immediate(dist::kOutputDb, dist::kOutputDbMax)) == InjectStatus::Ok);
     REQUIRE(inj.inject(immediate(dist::kToneMix, 0.0f)) == InjectStatus::Ok);
 

@@ -65,6 +65,9 @@ inline constexpr state::ParamID kPreToneHz = 4;     // Hz
 inline constexpr state::ParamID kPostToneHz = 5;    // Hz
 inline constexpr state::ParamID kToneMix = 6;       // 0..1
 inline constexpr state::ParamID kOutputDb = 7;      // dB
+// Added after the original seven IDs shipped on the feature branch. Keep it at
+// 8 so saved graphs retain the meaning of every existing parameter ID.
+inline constexpr state::ParamID kPreGainDb = 8;     // dB
 
 /// Drive range. The primary "how hard" control.
 /// [design parameter] default 12 dB, range 0 .. 40 dB.
@@ -135,15 +138,16 @@ inline const char* distortion_default_name(Topology topology) {
 /// feedback current and gain only falls. The module's own suite asserts that
 /// monotonic non-increase across a swept-amplitude sweep. So the node's bound
 /// is the DRIVE and OUTPUT trims either side of it, which are plain gains:
-/// `10^((drive_max + output_max)/20)`.
+/// `10^((drive_max + pre_gain_max + output_max)/20)`.
 ///
 /// The drive is included because it sits BEFORE the clipper, where at small
-/// signals — below the diode knee — it passes through un-clipped. A bound that
-/// only counted the clipper would be wrong for exactly the quiet material a
-/// path-gain lint most needs to reason about.
+/// signals — below the diode knee — it passes through un-clipped. The pre-tone
+/// shelf can add another 12 dB above its corner, so it belongs in the same
+/// composed bound. A bound that omitted either pre-clip gain would be wrong for
+/// exactly the quiet material a path-gain lint most needs to reason about.
 inline float distortion_worst_case_gain() {
     return static_cast<float>(signal::units::db_to_linear(
-        static_cast<double>(kDriveDbMax + kOutputDbMax)));
+        static_cast<double>(kDriveDbMax + signal::ToneStack::kPreGainDbMax + kOutputDbMax)));
 }
 
 /// One factory, eight registered realizations (2 topologies × 4 tiers).
@@ -159,7 +163,7 @@ inline CustomNodeType make_distortion_node(Topology topology,
 
     t.create = []() -> void* { return new DistortionInstance{}; };
     t.destroy = [](void* p) { delete static_cast<DistortionInstance*>(p); };
-    t.prepare = [topology, tier](void* p, double sr, int /*max_block*/) {
+    t.prepare = [tier](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<DistortionInstance*>(p);
         const int factor = oversample_factor(tier);
         const double inner_rate = sr * factor;
@@ -201,6 +205,9 @@ inline CustomNodeType make_distortion_node(Topology topology,
     t.baked_params.push_back({kSymmetry, -1.0f, 1.0f, 0.0f});
     t.baked_params.push_back({kDiodeModel, 0.0f, 2.0f, 0.0f});
     t.baked_params.push_back({kPreToneHz, 200.0f, 8000.0f, 720.0f});
+    t.baked_params.push_back({kPreGainDb,
+                              static_cast<float>(-signal::ToneStack::kPreGainDbMax),
+                              static_cast<float>(signal::ToneStack::kPreGainDbMax), 0.0f});
     t.baked_params.push_back({kPostToneHz, 500.0f, 12000.0f, 4000.0f});
     t.baked_params.push_back({kToneMix, 0.0f, 1.0f, 0.5f});
     t.baked_params.push_back({kOutputDb, kOutputDbMin, kOutputDbMax, 0.0f});
@@ -227,6 +234,7 @@ inline CustomNodeType make_distortion_node(Topology topology,
             s->loop_clipper.set_symmetry(symmetry);
             s->loop_clipper.set_diode_model(model);
             s->tone.set_pre_tone_hz(params.value_at(kPreToneHz, offset));
+            s->tone.set_pre_gain_db(params.value_at(kPreGainDb, offset));
             s->tone.set_post_tone_hz(params.value_at(kPostToneHz, offset));
             s->tone.set_tone_mix(params.value_at(kToneMix, offset));
 
