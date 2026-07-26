@@ -182,8 +182,16 @@ HostTransportProjector::project(const format::ProcessContext& context,
         !first_block_ && use_host_beat_clock != previous_host_beat_mapping_;
     const bool inferred_jump =
         has_expected_sample_ && context.is_playing && host_start != expected_next_sample_;
-    const bool discontinuity = context.reset_requested || context.transport_jump || inferred_jump ||
-                               mapping_transition || pending_discontinuity_;
+    // Format adapters may report transport_jump for a normal loop wrap because
+    // the host sample position moved backwards. The projector already knows
+    // the exact sample expected after its previous wrap; matching that position
+    // is continuation, not a new playback epoch.
+    const bool unexpected_transport_jump =
+        context.transport_jump &&
+        (!has_expected_sample_ || host_start != expected_next_sample_);
+    const bool discontinuity = context.reset_requested || unexpected_transport_jump ||
+                               inferred_jump || mapping_transition ||
+                               pending_discontinuity_;
     const bool has_precise_host_loop = loop.enabled && use_host_beat_clock;
     const bool loop_identity_changed =
         !first_block_ &&
@@ -195,7 +203,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
     const bool transport_started =
         context.transport_started || (context.is_playing && (first_block_ || !previous_playing_));
     if (!context.is_playing || !loop.enabled || context.reset_requested ||
-        context.transport_jump || inferred_jump || mapping_transition ||
+        unexpected_transport_jump || inferred_jump || mapping_transition ||
         transport_started || loop_identity_changed)
         loop_pass_index_ = 0;
     bool next_pending_discontinuity = false;
@@ -215,7 +223,7 @@ HostTransportProjector::project(const format::ProcessContext& context,
     snapshot.is_playing = context.is_playing;
     snapshot.transport_changed = context.transport_changed;
     snapshot.transport_started = transport_started;
-    snapshot.reset_requested = context.reset_requested || context.transport_jump ||
+    snapshot.reset_requested = context.reset_requested || unexpected_transport_jump ||
                                inferred_jump || mapping_transition || loop_identity_changed;
     snapshot.time_sig_changed =
         context.time_sig_changed || (!first_block_ && meter != previous_meter_);

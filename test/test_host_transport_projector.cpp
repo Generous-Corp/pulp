@@ -252,6 +252,10 @@ TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
     context.num_samples = 1'000;
     context.position_beats = 1.0 + 4'000.0 / 48'000.0;
     context.position_samples = 68'000;
+    // Format adapters flag the backwards host playhead movement as a jump.
+    // Because it lands at the projector's expected loop continuation, it must
+    // advance the pass rather than re-anchor the epoch.
+    context.transport_jump = true;
     REQUIRE(projector.project(context, projected) == sequence::HostTransportProjectionError::None);
     REQUIRE_FALSE(projected.reset_requested);
     REQUIRE(projected.ranges[0].loop_pass_index == 1);
@@ -259,6 +263,7 @@ TEST_CASE("host beat-domain loop projection splits and resumes at host tempo") {
             kTicksPerQuarter + kTicksPerQuarter / 12);
 
     const auto rounded_loop = projected.loop;
+    context.transport_jump = false;
     context.position_samples = 69'000;
     context.position_beats += 1'000.0 / 48'000.0;
     context.loop_start_beats += 0.000'000'000'1;
