@@ -860,8 +860,10 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   routing or aggregate poll. `RUNNER_TEMP` may live on that same work volume,
   so wrap each inline invocation with `cd /tmp` first (`/private/tmp` on
   macOS), and use `GITHUB_WORKSPACE` only as an absolute repo-path argument
-  afterward. `test_preamble_python_stable_cwd.py` enumerates all such helpers
-  and fails when a new one lacks the stable-cwd boundary.
+  afterward. `test_preamble_python_stable_cwd.py` enumerates both
+  `PULP_PREAMBLE_RUNS_ON_JSON` jobs and long-lived polling aliases routed by
+  `PULP_ALIAS_RUNS_ON_JSON`; moving a job between those pools must preserve
+  its stable-cwd classification.
 - `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
   build → `package_cli.py` → `pulp ship appcast` chain on a synthetic version
   (`0.0.0-dryrun`) WITHOUT publishing — no GitHub release, no signing/notarize,
