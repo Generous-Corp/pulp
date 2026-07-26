@@ -64,6 +64,57 @@ decode_command_playback_properties(const JsonValue& value, std::string path) {
         decoded_fade_in.value(), decoded_fade_out.value()});
 }
 
+runtime::Result<std::vector<NoteEvent>, PersistenceError>
+decode_command_notes(const JsonValue& value, DecodeContext& context, std::string path) {
+    if (value.kind != JsonValue::Kind::Array)
+        return fail<std::vector<NoteEvent>>(PersistenceErrorCode::UnexpectedType, std::move(path),
+                                            value.begin);
+    auto& count = context.counts.notes;
+    if (count > context.limits.max_notes || value.array.size() > context.limits.max_notes - count)
+        return fail<std::vector<NoteEvent>>(PersistenceErrorCode::LimitExceeded, std::move(path),
+                                            value.begin, count + value.array.size(),
+                                            context.limits.max_notes);
+    std::vector<NoteEvent> notes;
+    notes.reserve(value.array.size());
+    for (std::size_t index = 0; index < value.array.size(); ++index) {
+        const auto item_path = path + "/" + std::to_string(index);
+        const auto& item = value.array[index];
+        auto id = required(item, "id", item_path);
+        auto start = required(item, "start_ticks", item_path);
+        auto duration = required(item, "duration_ticks", item_path);
+        auto velocity = required(item, "velocity", item_path);
+        auto pitch = required(item, "pitch", item_path);
+        auto channel = required(item, "channel", item_path);
+        if (!id || !start || !duration || !velocity || !pitch || !channel)
+            return fail<std::vector<NoteEvent>>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_id = parse_canonical_u64_string(*id.value(), item_path + "/id");
+        auto decoded_start = parse_canonical_i64_string(*start.value(), item_path + "/start_ticks");
+        auto decoded_duration =
+            parse_canonical_i64_string(*duration.value(), item_path + "/duration_ticks");
+        auto decoded_velocity = parse_u32_number(*velocity.value(), item_path + "/velocity");
+        auto decoded_pitch = parse_u32_number(*pitch.value(), item_path + "/pitch");
+        auto decoded_channel = parse_u32_number(*channel.value(), item_path + "/channel");
+        if (!decoded_id || !decoded_start || !decoded_duration || !decoded_velocity ||
+            !decoded_pitch || !decoded_channel ||
+            decoded_velocity.value() > std::numeric_limits<std::uint16_t>::max() ||
+            decoded_pitch.value() > std::numeric_limits<std::uint8_t>::max() ||
+            decoded_channel.value() > std::numeric_limits<std::uint8_t>::max())
+            return fail<std::vector<NoteEvent>>(PersistenceErrorCode::InvalidNumber, item_path);
+        notes.push_back({ItemId{decoded_id.value()},
+                         {decoded_start.value()},
+                         {decoded_duration.value()},
+                         static_cast<std::uint16_t>(decoded_velocity.value()),
+                         static_cast<std::uint8_t>(decoded_pitch.value()),
+                         static_cast<std::uint8_t>(decoded_channel.value())});
+    }
+    count += notes.size();
+    auto validated = NoteContent::create(std::move(notes));
+    if (!validated)
+        return model_fail<std::vector<NoteEvent>>(validated.error(), std::move(path));
+    return runtime::Ok(std::vector<NoteEvent>(validated->notes().begin(),
+                                              validated->notes().end()));
+}
+
 runtime::Result<ClipTimeRange, PersistenceError> decode_command_clip_range(const JsonValue& value,
                                                                            std::string path) {
     auto kind = string_field(value, "kind", path);
@@ -252,6 +303,24 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             SetNoteVelocity{decoded.value()[0], decoded.value()[1], decoded.value()[2],
                             note.value(), static_cast<std::uint16_t>(decoded_expected.value()),
                             static_cast<std::uint16_t>(decoded_replacement.value())}));
+    }
+    if (type.value() == "pulp.timeline.command.replace_note_content") {
+        auto decoded = ids();
+        auto expected = required(command, "expected", data_path);
+        auto replacement = required(command, "replacement", data_path);
+        if (!decoded || !expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded_expected =
+            decode_command_notes(*expected.value(), context, data_path + "/expected");
+        if (!decoded_expected)
+            return runtime::Err(decoded_expected.error());
+        auto decoded_replacement =
+            decode_command_notes(*replacement.value(), context, data_path + "/replacement");
+        if (!decoded_replacement)
+            return runtime::Err(decoded_replacement.error());
+        return runtime::Ok(Command(ReplaceNoteContent{
+            decoded.value()[0], decoded.value()[1], decoded.value()[2],
+            std::move(decoded_expected).value(), std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.set_clip_playback_properties") {
         auto decoded = ids();

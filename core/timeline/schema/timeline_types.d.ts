@@ -186,6 +186,15 @@ export interface PulpTimelineCommandRemoveTakeLane {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.replace_note_content` — domain Command, schema version 1. */
+export interface PulpTimelineCommandReplaceNoteContent {
+  clip_id: number | string;
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+  track_id: number | string;
+}
+
 /** `pulp.timeline.command.set_active_take_lane` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetActiveTakeLane {
   expected_lane_id: number | string;
@@ -420,6 +429,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_slot"
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
+  | "pulp.timeline.command.replace_note_content"
   | "pulp.timeline.command.set_active_take_lane"
   | "pulp.timeline.command.set_chord_scale_lane"
   | "pulp.timeline.command.set_clip_playback_properties"
@@ -473,6 +483,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_slot": PulpTimelineCommandRemoveSlot;
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
+  "pulp.timeline.command.replace_note_content": PulpTimelineCommandReplaceNoteContent;
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
   "pulp.timeline.command.set_chord_scale_lane": PulpTimelineCommandSetChordScaleLane;
   "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;

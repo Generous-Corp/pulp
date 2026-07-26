@@ -93,6 +93,20 @@ struct SetNoteVelocity {
     std::uint16_t replacement_velocity = 0;
 };
 
+/// Replaces the complete note event set of one note clip.
+///
+/// This is the ordinary, durable edit emitted by higher-level note transforms:
+/// the journal never records a callback invocation. The expected value makes
+/// replay conflict-aware, while swapping expected/replacement is the exact
+/// inverse used by undo.
+struct ReplaceNoteContent {
+    ItemId sequence_id;
+    ItemId track_id;
+    ItemId clip_id;
+    std::vector<NoteEvent> expected;
+    std::vector<NoteEvent> replacement;
+};
+
 struct SetClipPlaybackProperties {
     ItemId sequence_id;
     ItemId track_id;
@@ -263,11 +277,11 @@ struct RemoveSlot {
 
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
-                 SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
-                 RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
-                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker,
-                 InsertRegion, RemoveRegion, SetChordScaleLane, SetGroove, InsertScene, RemoveScene,
-                 InsertSlot, RemoveSlot>;
+                 SetNoteVelocity, ReplaceNoteContent, SetClipPlaybackProperties, SetTempoMap,
+                 SetMeterMap, CreateAsset, RemoveAsset, InsertTakeLane, RemoveTakeLane,
+                 SetRecordArm, InsertTake, RemoveTake, SetActiveTakeLane, SetTakeComp,
+                 SetTrackFreeze, InsertMarker, RemoveMarker, InsertRegion, RemoveRegion,
+                 SetChordScaleLane, SetGroove, InsertScene, RemoveScene, InsertSlot, RemoveSlot>;
 
 struct CommandEnvelope {
     CommandId id;

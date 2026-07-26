@@ -224,6 +224,45 @@ installed SDK. Installed embedders should deserialize through
 `pulp::timeline`, compile through `pulp::playback`, and render through the
 public playback program APIs described above.
 
+## Preview and commit pure note transforms
+
+`NoteTransformRegistry` registers control-thread, pure note functions by
+`SchemaIdentity`. A function receives the clip's immutable note span, canonical
+parameter JSON, and an explicit seed, and returns a zero-to-many note array.
+Preparation requires an object parameter payload, parses it under the
+registry's 1 MiB bound, and canonicalizes it before invoking the function.
+Returning an input note's `ItemId` preserves that identity; returning an invalid
+ID asks the engine to allocate a fresh one. Foreign and duplicate output IDs,
+expected plus output note arrays exceeding the five-million-note durable-command
+quota, invalid notes, missing clips, and non-note clips fail closed.
+
+An `ApplyNoteTransform` is a typed preparation request, not a journal entry:
+
+```cpp
+auto preview = transforms.preview(
+    session->current(), writer,
+    pulp::timeline::ApplyNoteTransform{
+        .sequence_id = sequence_id,
+        .track_id = track_id,
+        .clip_id = clip_id,
+        .transform = {"example.note.octave_echo", 1},
+        .canonical_params_json = R"({"interval":12})",
+        .seed = 42,
+    });
+
+// Render or inspect preview.value().snapshot without changing the session.
+auto committed =
+    session->submit(writer, std::move(preview.value().transaction));
+```
+
+Preparation invokes extension code exactly once and lowers its result to an
+ordinary `ReplaceNoteContent` transaction. The preview snapshot is the result
+of reducing that exact transaction without publishing it. If another edit
+lands first, submission rejects the preview as stale; it never reruns the
+transform with a different input. The durable journal therefore contains only
+canonical expected/replacement note arrays, and undo/redo use ordinary inverse
+commands with the identity directory's tombstone rules.
+
 ## Scrubbing the playhead
 
 Dragging the playhead is audible through `MasterTransport` itself, not through a
