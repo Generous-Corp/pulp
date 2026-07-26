@@ -33,8 +33,10 @@ PULP_BENCHMARK_BINARY_SHA256=$(shasum -a 256 build-sampler-bench/test/pulp-sampl
 ```
 
 The source bundle hash covers the interpolation policy, sinc kernel, benchmark
-render support, and benchmark driver. The binary hash binds the artifact to the
-exact executable used for capture. The executable exits nonzero if a measured
+render support, benchmark driver, and its focused CMake owner manifest. It does
+not hash the unrelated application/audio/host test registry. The binary hash
+binds the artifact to the exact executable used for capture. The executable
+exits nonzero if a measured
 P95 exceeds the ratcheted tier budgets. Each of three measurement epochs uses
 31 batches that retain the median of five 8,192-frame repetitions; the report
 keeps the median epoch P95. This is a quiescent evaluator-cost measurement: the

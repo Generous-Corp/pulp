@@ -6,12 +6,9 @@
 # splitting the registrations leaves nowhere that says "this is the reverb's
 # test surface".
 #
-# It also keeps the feature clear of a fragile coupling: app_audio_host_tests
-# .cmake is one of seven paths inside the sampler interpolation benchmark's
-# hashed source bundle (tools/scripts/verify_sampler_interpolation_benchmark
-# .py), so any unrelated target added there invalidates recorded benchmark
-# evidence nobody re-measured. That is a pre-existing hazard, not this
-# feature's, but there is no reason to walk into it.
+# It also keeps feature ownership explicit. Sampler interpolation benchmark
+# registrations likewise live in their own focused manifest so unrelated test
+# changes cannot invalidate its content-addressed performance evidence.
 
 # The engine. Decay/density/bandwidth claims are measured with the reverb
 # metrics in test/support plus the shared spectrum analyzers; the long
