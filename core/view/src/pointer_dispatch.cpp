@@ -94,10 +94,22 @@ bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
 }
 
 bool transfer_input_focus(View& root, View* target) {
-    auto* previous = View::focused_input_;
-    if (previous && !still_in_tree(previous, &root)) previous = nullptr;
+    auto& focus = root.interaction().focused_input;
+    auto* previous = focus;
+    if (previous && !still_in_tree(previous, &root)) {
+        if (focus == previous) focus = nullptr;
+        previous = nullptr;
+    }
 
-    if (!target || !still_in_tree(target, &root)) return false;
+    if (target && !still_in_tree(target, &root)) return false;
+    if (!target) {
+        if (previous) {
+            previous->release_input_focus();
+            previous->on_focus_changed(false);
+        }
+        return false;
+    }
+    if (previous == target) return true;
     if (!target->focusable()) {
         if (previous) {
             previous->release_input_focus();
@@ -110,12 +122,19 @@ bool transfer_input_focus(View& root, View* target) {
         previous->release_input_focus();
         previous->on_focus_changed(false);
         if (!still_in_tree(target, &root)) return false;
+        if (root.interaction().focused_input != nullptr) return true;
     }
 
     target->on_focus_changed(true);
     if (!still_in_tree(target, &root)) return false;
-    target->claim_input_focus();
+    if (root.interaction().focused_input == nullptr)
+        target->claim_input_focus();
     return true;
+}
+
+View* focused_input_under_root(View& root) {
+    View* focused = root.interaction().focused_input;
+    return still_in_tree(focused, &root) ? focused : nullptr;
 }
 
 void deliver_mouse_drag(View& root, View* target, Point root_pt,

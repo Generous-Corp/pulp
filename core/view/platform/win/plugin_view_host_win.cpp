@@ -315,9 +315,14 @@ public:
         LONG_PTR style = GetWindowLongPtrW(hwnd_, GWL_STYLE);
         style = (style & ~static_cast<LONG_PTR>(WS_POPUP)) | WS_CHILD;
         SetWindowLongPtrW(hwnd_, GWL_STYLE, style);
-        if (SetParent(hwnd_, parent_hwnd) == nullptr) {
+        SetLastError(ERROR_SUCCESS);
+        const HWND previous_parent = SetParent(hwnd_, parent_hwnd);
+        const DWORD set_parent_error = GetLastError();
+        // A null return is the previous parent. It is success when this hidden
+        // construction HWND had no parent; only a non-zero last error is fail.
+        if (previous_parent == nullptr && set_parent_error != ERROR_SUCCESS) {
             runtime::log_warn("WinPluginViewHost: SetParent failed (err {})",
-                              static_cast<unsigned>(GetLastError()));
+                              static_cast<unsigned>(set_parent_error));
             // Restore top-level style so we don't leave a parentless WS_CHILD.
             SetWindowLongPtrW(hwnd_, GWL_STYLE,
                               (style & ~static_cast<LONG_PTR>(WS_CHILD)) | WS_POPUP);
@@ -363,6 +368,14 @@ public:
 
     void detach() override {
         if (!hwnd_) return;
+        cancel_pointer_gesture();
+        try {
+            transfer_input_focus(root_, nullptr);
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: detach blur threw: {}", e.what());
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: detach blur threw");
+        }
 #ifdef PULP_HAS_SKIA
         if (surface_lifecycle_.note_detached()) {
             // The presentation surface is tied to the attached native-window
@@ -422,6 +435,11 @@ public:
     void handle_mouse_down(LPARAM lp, WPARAM wp, MouseButton button) {
         if (!hwnd_) return;
         try {
+            // This host owns one capture bracket. Close a prior button before
+            // accepting a chord mate instead of overwriting its target.
+            if (pointer_session_.active())
+                cancel_pointer_gesture();
+            if (!pointer_session_.begin(button)) return;
             const Point pt = mouse_point(lp);
             last_pointer_point_ = pt;
             MouseEvent gesture_event;
@@ -431,23 +449,24 @@ public:
             gesture_event.modifiers = mouse_modifiers(wp);
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
-            if (yield_to_gesture_with_handoff(root_, drag_target_,
-                                              gesture_event)) {
-                drag_button_ = button;
-                gesture_drag_active_ = true;
+            if (yield_to_gesture(gesture_event)) {
                 SetCapture(hwnd_);
                 return;
             }
 
             drag_target_ = root_.hit_test(pt);
-            drag_button_ = button;
             if (button == MouseButton::left)
                 ComboBox::notify_global_click(drag_target_);
-            if (!drag_target_) return;
+            if (!drag_target_) {
+                cancel_pointer_gesture();
+                return;
+            }
             SetFocus(hwnd_);
-            if (!transfer_input_focus(root_, drag_target_))
+            if (!transfer_input_focus(root_, drag_target_)) {
                 drag_target_ = nullptr;
-            if (!drag_target_) return;
+                cancel_pointer_gesture();
+                return;
+            }
             SetCapture(hwnd_);
             if (!deliver_mouse_down(root_, drag_target_, pt,
                                     gesture_event.modifiers, 1, true, button))
@@ -458,12 +477,10 @@ public:
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse down handler threw: {}",
                               e.what());
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         } catch (...) {
             runtime::log_warn("WinPluginViewHost: mouse down handler threw");
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         }
     }
 
@@ -480,10 +497,10 @@ public:
                 tracking_mouse_leave_ = TrackMouseEvent(&track) != FALSE;
             }
             const bool held = win_input::drag_continues(
-                static_cast<uint32_t>(wp), drag_button_);
-            if ((drag_target_ || gesture_drag_active_) && !held)
+                static_cast<uint32_t>(wp), pointer_session_.button());
+            if (pointer_session_.active() && !held)
                 cancel_pointer_gesture();
-            if (!drag_target_ && !gesture_drag_active_) {
+            if (!pointer_session_.active()) {
                 root_.simulate_hover(pt);
                 request_repaint_from_input();
                 return;
@@ -491,33 +508,33 @@ public:
             MouseEvent gesture_event;
             gesture_event.position = pt;
             gesture_event.window_position = pt;
-            gesture_event.button = drag_button_;
+            gesture_event.button = pointer_session_.button();
             gesture_event.modifiers = mouse_modifiers(wp);
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::drag;
-            const bool gesture_yielded = yield_to_gesture_with_handoff(
-                root_, drag_target_, gesture_event);
-            if (gesture_yielded) gesture_drag_active_ = true;
+            const bool gesture_yielded = yield_to_gesture(gesture_event);
             if (!gesture_yielded && drag_target_)
                 deliver_mouse_drag(root_, drag_target_, pt,
                                    gesture_event.modifiers, 1,
-                                   PointerType::mouse, 0.5f, drag_button_);
+                                   PointerType::mouse, 0.5f,
+                                   pointer_session_.button());
             request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse move handler threw: {}",
                               e.what());
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         } catch (...) {
             runtime::log_warn("WinPluginViewHost: mouse move handler threw");
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         }
     }
 
     void handle_mouse_up(LPARAM lp, WPARAM wp, MouseButton button) {
-        if (button != drag_button_) return;
+        if (!pointer_session_.accepts(button)) return;
         try {
+            // Publish terminal before gesture/raw callbacks. Those callbacks
+            // can synchronously pump capture-change or another button-up.
+            const auto terminal = pointer_session_.terminalize();
             const Point pt = mouse_point(lp);
             last_pointer_point_ = pt;
             MouseEvent gesture_event;
@@ -527,9 +544,21 @@ public:
             gesture_event.modifiers = mouse_modifiers(wp);
             gesture_event.is_down = false;
             gesture_event.phase = MousePhase::release;
-            const bool gesture_yielded = yield_to_gesture_with_handoff(
-                root_, drag_target_, gesture_event);
-            if (!gesture_yielded && drag_target_) {
+            const bool gesture_yielded =
+                should_yield_to_gesture(root_, gesture_event);
+            // A callback above may have synchronously cancelled this generation
+            // (and closed drag_target_). Never resume the stale outer release.
+            if (pointer_session_.phase() !=
+                    win_input::PointerSession::Phase::terminal ||
+                pointer_session_.generation() != terminal.generation)
+                return;
+            View* target = drag_target_;
+            drag_target_ = nullptr;
+            if (gesture_yielded) {
+                if (target)
+                    deliver_gesture_handoff(root_, target, pt,
+                                            gesture_event.modifiers, 1);
+            } else if (target) {
                 MouseUpHost up_host;
                 if (button == MouseButton::left) {
                     up_host.fire_click =
@@ -538,21 +567,23 @@ public:
                             if (click_handler) click_handler();
                         };
                 }
-                deliver_mouse_up(root_, drag_target_, pt,
+                deliver_mouse_up(root_, target, pt,
                                  gesture_event.modifiers, 1, up_host, button);
             }
-            clear_pointer_state();
-            release_capture_if_owned();
+            if (pointer_session_.phase() ==
+                    win_input::PointerSession::Phase::terminal &&
+                pointer_session_.generation() == terminal.generation) {
+                release_capture_if_owned();
+                pointer_session_.finish_terminal(terminal.generation);
+            }
             request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse up handler threw: {}",
                               e.what());
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         } catch (...) {
             runtime::log_warn("WinPluginViewHost: mouse up handler threw");
-            clear_pointer_state();
-            release_capture_if_owned();
+            cancel_pointer_gesture();
         }
     }
 
@@ -566,7 +597,7 @@ public:
 
     void handle_mouse_leave() {
         tracking_mouse_leave_ = false;
-        if (drag_target_ || gesture_drag_active_)
+        if (pointer_session_.active())
             return;  // capture keeps a drag alive outside HWND
         root_.simulate_hover({-1000000.0f, -1000000.0f});
         request_repaint_from_input();
@@ -588,7 +619,7 @@ public:
     }
 
     bool handle_key(WPARAM wp, LPARAM lp, bool is_down) {
-        auto* focused = focus_under_root();
+        auto* focused = focused_input_under_root(root_);
         if (!focused) return false;
         KeyEvent event;
         event.key = win_input::key_code_from_virtual_key(
@@ -596,13 +627,14 @@ public:
         event.modifiers = keyboard_modifiers();
         event.is_down = is_down;
         event.is_repeat = is_down && ((static_cast<uintptr_t>(lp) & (1u << 30)) != 0);
-        focused->on_key_event(event);
-        request_repaint_from_input();
-        return true;
+        if (event.key == KeyCode::unknown) return false;
+        const bool consumed = focused->on_key_event(event);
+        if (consumed) request_repaint_from_input();
+        return consumed;
     }
 
     bool handle_text(WPARAM wp) {
-        auto* focused = focus_under_root();
+        auto* focused = focused_input_under_root(root_);
         if (!focused || !focused->accepts_text_input()) return false;
         const wchar_t unit = static_cast<wchar_t>(wp);
         // Editing/navigation controls are already delivered through KeyEvent.
@@ -633,9 +665,8 @@ public:
     void handle_focus_changed(bool gained) {
         if (gained) return;
         pending_high_surrogate_ = 0;
-        if (auto* focused = focus_under_root()) {
-            focused->release_input_focus();
-            focused->on_focus_changed(false);
+        if (focused_input_under_root(root_)) {
+            transfer_input_focus(root_, nullptr);
             request_repaint_from_input();
         }
     }
@@ -832,8 +863,7 @@ private:
     // handle_wm_size() distinguish a host-driven resize from our own echo.
     bool in_set_size_ = false;
     View* drag_target_ = nullptr;
-    MouseButton drag_button_ = MouseButton::none;
-    bool gesture_drag_active_ = false;
+    win_input::PointerSession pointer_session_;
     Point last_pointer_point_{};
     bool tracking_mouse_leave_ = false;
     wchar_t pending_high_surrogate_ = 0;
@@ -850,42 +880,71 @@ private:
             static_cast<uint32_t>(static_cast<uintptr_t>(lp)), scale_));
     }
 
-    void clear_pointer_state() noexcept {
-        drag_target_ = nullptr;
-        drag_button_ = MouseButton::none;
-        gesture_drag_active_ = false;
-    }
-
     void release_capture_if_owned() {
-        // State is cleared before ReleaseCapture because it synchronously sends
-        // WM_CAPTURECHANGED back through this wndproc on Windows.
+        // State is terminal before ReleaseCapture because it synchronously
+        // sends WM_CAPTURECHANGED back through this wndproc on Windows.
         if (GetCapture() == hwnd_) ReleaseCapture();
     }
 
-    void cancel_pointer_gesture() {
-        View* target = drag_target_;
-        const MouseButton button = drag_button_;
-        const bool gesture_active = gesture_drag_active_;
-        if (!target && !gesture_active) return;
+    bool yield_to_gesture(const MouseEvent& event) {
+        if (event.button != MouseButton::left)
+            return false;
+        const uint64_t generation = pointer_session_.generation();
+        const bool yielded = should_yield_to_gesture(root_, event);
+        // Gesture callbacks may pump a nested message. Stop this outer frame
+        // if that message terminalized/replaced the session; never stamp its
+        // result onto the newer generation.
+        if (pointer_session_.generation() != generation ||
+            !pointer_session_.active())
+            return true;
+        if (!yielded) return false;
 
-        // Clear first: either callback can synchronously pump another Windows
-        // message or mutate/unmount the captured subtree.
-        clear_pointer_state();
-        if (gesture_active) {
-            MouseEvent event;
-            event.position = last_pointer_point_;
-            event.window_position = last_pointer_point_;
-            event.button = button;
-            event.is_down = false;
-            event.phase = MousePhase::release;
-            event.is_cancelled = true;
-            root_.dispatch_gesture_pointer_event(event);
+        // Publish claimed and clear raw delivery BEFORE synchronous handoff.
+        pointer_session_.mark_claimed();
+        View* handoff_target = drag_target_;
+        drag_target_ = nullptr;
+        if (event.phase != MousePhase::press)
+            deliver_gesture_handoff(root_, handoff_target,
+                                    event.window_position, event.modifiers, 1);
+        return true;
+    }
+
+    void cancel_pointer_gesture() noexcept {
+        View* target = drag_target_;
+        const auto terminal = pointer_session_.terminalize();
+        if (!target && !terminal.cancel_gesture &&
+            terminal.button == MouseButton::none)
+            return;
+
+        drag_target_ = nullptr;
+        try {
+            if (terminal.cancel_gesture) {
+                MouseEvent event;
+                event.position = last_pointer_point_;
+                event.window_position = last_pointer_point_;
+                event.button = terminal.button;
+                event.is_down = false;
+                event.phase = MousePhase::release;
+                event.is_cancelled = true;
+                root_.dispatch_gesture_pointer_event(event);
+            }
+            if (target) {
+                // Empty fire_click deliberately suppresses click on cancellation,
+                // while still balancing legacy and modern press/release state.
+                deliver_mouse_up(root_, target, last_pointer_point_, 0, 1,
+                                 MouseUpHost{}, terminal.button);
+            }
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: pointer cancellation threw: {}",
+                              e.what());
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: pointer cancellation threw");
         }
-        if (target) {
-            // Empty fire_click deliberately suppresses click on cancellation,
-            // while still balancing legacy and modern press/release state.
-            deliver_mouse_up(root_, target, last_pointer_point_, 0, 1,
-                             MouseUpHost{}, button);
+        if (pointer_session_.phase() ==
+                win_input::PointerSession::Phase::terminal &&
+            pointer_session_.generation() == terminal.generation) {
+            release_capture_if_owned();
+            pointer_session_.finish_terminal(terminal.generation);
         }
         request_repaint_from_input();
     }

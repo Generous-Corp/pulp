@@ -19,6 +19,74 @@
 
 namespace pulp::view::win_input {
 
+/// Host-neutral model of the single Win32 capture bracket owned by an editor.
+/// Win32 can synchronously re-enter the wndproc from capture calls and view
+/// callbacks, so transitions must be visible before those calls happen.
+class PointerSession {
+public:
+    enum class Phase { idle, raw, gesture_candidate, gesture_claimed, terminal };
+    struct Terminal {
+        uint64_t generation = 0;
+        MouseButton button = MouseButton::none;
+        bool cancel_gesture = false;
+        bool was_claimed = false;
+    };
+
+    bool begin(MouseButton button) noexcept {
+        if (active()) return false;
+        ++generation_;
+        button_ = button;
+        terminal_cancel_gesture_ = false;
+        terminal_was_claimed_ = false;
+        phase_ = button == MouseButton::left ? Phase::gesture_candidate
+                                             : Phase::raw;
+        return true;
+    }
+    bool active() const noexcept {
+        return phase_ != Phase::idle && phase_ != Phase::terminal;
+    }
+    bool accepts(MouseButton button) const noexcept {
+        return active() && button_ == button;
+    }
+    bool gesture_in_flight() const noexcept {
+        return phase_ == Phase::gesture_candidate ||
+               phase_ == Phase::gesture_claimed;
+    }
+    bool claimed() const noexcept { return phase_ == Phase::gesture_claimed; }
+    MouseButton button() const noexcept { return button_; }
+    Phase phase() const noexcept { return phase_; }
+    uint64_t generation() const noexcept { return generation_; }
+    void mark_claimed() noexcept {
+        if (phase_ == Phase::gesture_candidate)
+            phase_ = Phase::gesture_claimed;
+    }
+    Terminal terminalize() noexcept {
+        if (active()) {
+            terminal_cancel_gesture_ = gesture_in_flight();
+            terminal_was_claimed_ = claimed();
+            phase_ = Phase::terminal;
+        }
+        Terminal result{generation_, button_, terminal_cancel_gesture_,
+                        terminal_was_claimed_};
+        return result;
+    }
+    void finish_terminal(uint64_t generation) noexcept {
+        if (phase_ == Phase::terminal && generation_ == generation) {
+            phase_ = Phase::idle;
+            button_ = MouseButton::none;
+            terminal_cancel_gesture_ = false;
+            terminal_was_claimed_ = false;
+        }
+    }
+
+private:
+    Phase phase_ = Phase::idle;
+    MouseButton button_ = MouseButton::none;
+    uint64_t generation_ = 0;
+    bool terminal_cancel_gesture_ = false;
+    bool terminal_was_claimed_ = false;
+};
+
 // ── Mouse-message WPARAM key-state flags ─────────────────────────────────
 // Mirrors the MK_* constants from <winuser.h>. Duplicated as plain constants
 // so this header stays parseable off Windows; static_assert'd against the

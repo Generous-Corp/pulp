@@ -131,6 +131,64 @@ TEST_CASE("Windows button messages and capture masks preserve button identity",
     REQUIRE(drag_continues(kMkMButton | kMkShift, MouseButton::middle));
 }
 
+TEST_CASE("Windows capture loss terminalizes an unclaimed gesture candidate",
+          "[view][windows][pointer][gesture]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    REQUIRE(session.phase() == PointerSession::Phase::gesture_candidate);
+
+    const auto terminal = session.terminalize();
+    CHECK(terminal.cancel_gesture);
+    CHECK_FALSE(terminal.was_claimed);
+    CHECK(terminal.button == MouseButton::left);
+    CHECK(session.phase() == PointerSession::Phase::terminal);
+
+    session.finish_terminal(terminal.generation);
+    CHECK_FALSE(session.active());
+}
+
+TEST_CASE("Windows gesture claim is reentrancy-visible before handoff callbacks",
+          "[view][windows][pointer][gesture]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    session.mark_claimed();  // host publishes this before raw release callbacks
+
+    CHECK(session.claimed());
+    const auto nested_cancel = session.terminalize();
+    CHECK(nested_cancel.cancel_gesture);
+    CHECK(nested_cancel.was_claimed);
+    CHECK(session.phase() == PointerSession::Phase::terminal);
+}
+
+TEST_CASE("Windows button chord cannot overwrite an open capture bracket",
+          "[view][windows][pointer][buttons]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    CHECK_FALSE(session.begin(MouseButton::right));
+    CHECK(session.button() == MouseButton::left);
+
+    const auto left = session.terminalize();
+    session.finish_terminal(left.generation);
+    REQUIRE(session.begin(MouseButton::right));
+    CHECK(session.button() == MouseButton::right);
+    CHECK(session.phase() == PointerSession::Phase::raw);
+}
+
+TEST_CASE("Windows stale terminal cleanup cannot erase a reentrant session",
+          "[view][windows][pointer][reentrancy]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    const auto first = session.terminalize();
+    session.finish_terminal(first.generation);
+    REQUIRE(session.begin(MouseButton::middle));
+
+    // An outer callback frame finishing generation 1 after nested generation 2
+    // began must leave the nested bracket intact.
+    session.finish_terminal(first.generation);
+    CHECK(session.active());
+    CHECK(session.button() == MouseButton::middle);
+}
+
 TEST_CASE("Windows wheel deltas use Pulp axis conventions",
           "[view][windows][pointer]") {
     const auto pack_wheel = [](int16_t delta) {

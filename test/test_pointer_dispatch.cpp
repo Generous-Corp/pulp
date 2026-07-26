@@ -191,6 +191,56 @@ TEST_CASE("focus transfer does not claim a target that unmounts while gaining fo
     REQUIRE(View::focused_input_ == nullptr);
 }
 
+TEST_CASE("focus transfer reads and mutates only the requested root slot",
+          "[view][input][focus][multi-root]") {
+    View root_a;
+    View root_b;
+    auto a = std::make_unique<FocusCallbackSpy>();
+    auto b = std::make_unique<FocusCallbackSpy>();
+    auto* a_ptr = a.get();
+    auto* b_ptr = b.get();
+    a->set_focusable(true);
+    b->set_focusable(true);
+    root_a.add_child(std::move(a));
+    root_b.add_child(std::move(b));
+
+    a_ptr->claim_input_focus();
+    b_ptr->claim_input_focus();  // process-global shim now points at B
+    REQUIRE(root_a.interaction().focused_input == a_ptr);
+    REQUIRE(root_b.interaction().focused_input == b_ptr);
+    REQUIRE(focused_input_under_root(root_a) == a_ptr);
+
+    transfer_input_focus(root_a, nullptr);
+    CHECK(root_a.interaction().focused_input == nullptr);
+    CHECK(root_b.interaction().focused_input == b_ptr);
+    CHECK(focused_input_under_root(root_b) == b_ptr);
+}
+
+TEST_CASE("focus transfer respects focus selected by a blur callback",
+          "[view][input][focus][reentrancy]") {
+    View root;
+    auto previous = std::make_unique<FocusCallbackSpy>();
+    auto requested = std::make_unique<FocusCallbackSpy>();
+    auto replacement = std::make_unique<FocusCallbackSpy>();
+    auto* previous_ptr = previous.get();
+    auto* requested_ptr = requested.get();
+    auto* replacement_ptr = replacement.get();
+    previous->set_focusable(true);
+    requested->set_focusable(true);
+    replacement->set_focusable(true);
+    root.add_child(std::move(previous));
+    root.add_child(std::move(requested));
+    root.add_child(std::move(replacement));
+    previous_ptr->claim_input_focus();
+    previous_ptr->callback = [&](bool gained) {
+        if (!gained) replacement_ptr->claim_input_focus();
+    };
+
+    REQUIRE(transfer_input_focus(root, requested_ptr));
+    CHECK(root.interaction().focused_input == replacement_ptr);
+    CHECK(focused_input_under_root(root) == replacement_ptr);
+}
+
 TEST_CASE("point_to_local peels ancestor offsets", "[view][input]") {
     View root;
     root.set_bounds({0, 0, 400, 400});
@@ -1047,6 +1097,35 @@ TEST_CASE("host gesture gate closes and clears a raw drag on mid-drag claim",
     auto release = phase_event({100, 40}, MousePhase::release);
     (void)yield_to_gesture_with_handoff(root, drag_target, release);
     CHECK(spy->ups == 1);
+}
+
+TEST_CASE("cancelled release terminates a time-driven gesture claim",
+          "[view][input][gesture][cancel]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto long_press = std::make_unique<LongPressRecognizer>();
+    long_press->set_min_duration(0.25);
+    int began = 0;
+    int cancelled = 0;
+    long_press->on_began = [&](GestureRecognizer&) { ++began; };
+    long_press->on_cancelled = [&](GestureRecognizer&) { ++cancelled; };
+    spy->add_gesture_recognizer(std::move(long_press));
+
+    auto press = phase_event({40, 40}, MousePhase::press);
+    REQUIRE(root.dispatch_gesture_pointer_event(press, 1.0));
+    root.advance_gesture_recognizers(1.5);  // claim without WM_MOUSEMOVE
+    REQUIRE(began == 1);
+
+    auto cancel = phase_event({40, 40}, MousePhase::release);
+    cancel.is_cancelled = true;
+    REQUIRE(root.dispatch_gesture_pointer_event(cancel, 1.6));
+    CHECK(cancelled == 1);
+    CHECK_FALSE(root.has_time_driven_gestures());
 }
 
 // ── simulate_drag yields mid-loop ────────────────────────────────────────

@@ -64,10 +64,16 @@ bool yield_to_gesture_with_handoff(View& root, View*& drag_target,
 
 /// Move input focus within one hosted root while tolerating callbacks that
 /// synchronously unmount either the previous or requested focus target.
-/// Returns true when `target` remains live after the focus protocol. A live
+/// Returns true when non-null `target` remains live after the focus protocol.
+/// A null target explicitly blurs this root and returns false. A live
 /// non-focusable target is still a valid pointer target; it simply clears any
-/// previous focus in this root.
+/// previous focus in this root. The root-owned interaction slot is the source
+/// of truth; the process-global focus shim is never consulted.
 bool transfer_input_focus(View& root, View* target);
+
+/// Return this root's live focused input. Uses RootInteractionState rather than
+/// the process-global compatibility shim.
+View* focused_input_under_root(View& root);
 
 /// Deliver one drag tick of an in-flight gesture to the captured `target`.
 ///
