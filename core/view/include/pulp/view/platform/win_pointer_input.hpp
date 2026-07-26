@@ -52,6 +52,9 @@ public:
     bool accepts(MouseButton button) const noexcept {
         return active() && button_ == button;
     }
+    bool accepts(uint64_t generation, MouseButton button) const noexcept {
+        return generation_ == generation && accepts(button);
+    }
     bool gesture_in_flight() const noexcept {
         return phase_ == Phase::gesture_candidate ||
                phase_ == Phase::gesture_claimed;

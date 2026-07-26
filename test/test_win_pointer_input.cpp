@@ -161,6 +161,26 @@ TEST_CASE("Windows gesture claim is reentrancy-visible before handoff callbacks"
     CHECK(session.phase() == PointerSession::Phase::terminal);
 }
 
+TEST_CASE("Windows continuation eligibility is bound to one pointer generation",
+          "[view][windows][pointer][gesture][reentrancy]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    const uint64_t original = session.generation();
+
+    session.mark_claimed();
+    CHECK(session.accepts(original, MouseButton::left));
+
+    const auto terminal = session.terminalize();
+    CHECK_FALSE(session.accepts(original, MouseButton::left));
+    session.finish_terminal(terminal);
+    REQUIRE(session.begin(MouseButton::left));
+
+    // A later same-button bracket must not authorize capture or other writes
+    // by the stale caller frame.
+    CHECK_FALSE(session.accepts(original, MouseButton::left));
+    CHECK(session.accepts(session.generation(), MouseButton::left));
+}
+
 TEST_CASE("Windows terminal session rejects a nested button down",
           "[view][windows][pointer][reentrancy]") {
     PointerSession session;

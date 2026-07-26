@@ -434,12 +434,17 @@ public:
 
     void handle_mouse_down(LPARAM lp, WPARAM wp, MouseButton button) {
         if (!hwnd_) return;
+        uint64_t generation = 0;
         try {
             // This host owns one capture bracket. Close a prior button before
             // accepting a chord mate instead of overwriting its target.
             if (pointer_session_.active())
                 cancel_pointer_gesture();
             if (!pointer_session_.begin(button)) return;
+            generation = pointer_session_.generation();
+            const auto accepts_original = [this, generation, button] {
+                return pointer_session_.accepts(generation, button);
+            };
             const Point pt = mouse_point(lp);
             last_pointer_point_ = pt;
             MouseEvent gesture_event;
@@ -450,48 +455,56 @@ public:
             gesture_event.is_down = true;
             gesture_event.phase = MousePhase::press;
             if (yield_to_gesture(gesture_event)) {
-                SetCapture(hwnd_);
+                // A synchronous gesture callback may have terminalized this
+                // bracket. Capture only for the still-current claimed session.
+                if (accepts_original()) SetCapture(hwnd_);
                 return;
             }
+            if (!accepts_original()) return;
 
             drag_target_ = root_.hit_test(pt);
             if (button == MouseButton::left)
                 ComboBox::notify_global_click(drag_target_);
+            if (!accepts_original()) return;
             if (!drag_target_) {
                 cancel_pointer_gesture();
                 return;
             }
             SetFocus(hwnd_);
+            if (!accepts_original()) return;
             if (!transfer_input_focus(root_, drag_target_)) {
-                drag_target_ = nullptr;
-                cancel_pointer_gesture();
+                if (accepts_original()) {
+                    drag_target_ = nullptr;
+                    cancel_pointer_gesture();
+                }
                 return;
             }
+            if (!accepts_original()) return;
             SetCapture(hwnd_);
-            const uint64_t generation = pointer_session_.generation();
+            if (!accepts_original()) return;
             MouseDownHost down_host;
-            down_host.should_continue = [this, generation, button] {
-                return pointer_session_.generation() == generation &&
-                       pointer_session_.accepts(button);
-            };
+            down_host.should_continue = accepts_original;
             const bool target_alive = deliver_mouse_down(
                 root_, drag_target_, pt, gesture_event.modifiers, 1, true,
                 button, down_host);
             // Only this generation may mutate its captured target. A modern
             // callback may have synchronously cancelled/replaced the session.
-            if (!target_alive &&
-                pointer_session_.generation() == generation)
+            if (!accepts_original()) return;
+            if (!target_alive)
                 drag_target_ = nullptr;
             if (button == MouseButton::right)
                 dispatch_context_menu(root_, pt);
+            if (!accepts_original()) return;
             request_repaint_from_input();
         } catch (const std::exception& e) {
             runtime::log_warn("WinPluginViewHost: mouse down handler threw: {}",
                               e.what());
-            cancel_pointer_gesture();
+            if (pointer_session_.accepts(generation, button))
+                cancel_pointer_gesture();
         } catch (...) {
             runtime::log_warn("WinPluginViewHost: mouse down handler threw");
-            cancel_pointer_gesture();
+            if (pointer_session_.accepts(generation, button))
+                cancel_pointer_gesture();
         }
     }
 

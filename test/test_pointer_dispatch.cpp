@@ -665,6 +665,32 @@ TEST_CASE("guarded mouse down stops stale channels after reentrant cancellation"
     CHECK(wrapper_ptr->child_count() == 1);
 }
 
+TEST_CASE("guarded right press suppresses stale context-menu continuation",
+          "[view][input][press][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* spy = child.get();
+    spy->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    uint64_t generation = 1;
+    const uint64_t original = generation;
+    int context_menu_dispatches = 0;
+    spy->modern_callback = [&](const MouseEvent&) { ++generation; };
+    MouseDownHost host;
+    host.should_continue = [&] { return generation == original; };
+
+    const bool alive = deliver_mouse_down(root, spy, {20, 20}, kModNone, 1,
+                                          true, MouseButton::right, host);
+    if (generation == original)
+        ++context_menu_dispatches;  // mirrors the Windows host continuation
+
+    CHECK_FALSE(alive);
+    CHECK(spy->modern_buttons.size() == 1);
+    CHECK(context_menu_dispatches == 0);
+}
+
 TEST_CASE("deliver_mouse_down bubbles pointerdown to registerPointer ancestors",
           "[view][input][press]") {
     View root;
