@@ -679,6 +679,33 @@ TEST_CASE("The circuit body preserves its ring across a retrigger",
     REQUIRE(third == first);
 }
 
+TEST_CASE("A preserved circuit retrigger keeps the output-stage history",
+          "[signal][drum][kick][circuit][life]") {
+    KickVoice uninterrupted;
+    KickVoice retriggered;
+    for (KickVoice* voice : {&uninterrupted, &retriggered}) {
+        init(*voice, KickBody::circuit);
+        voice->set_circuit_feedback(0.98);
+        voice->set_click_level(0.0);
+        voice->set_noise_level(0.0);
+        voice->set_circuit_hit_life(
+            pulp::signal::drum::HitLifeMode::preserved_state);
+        voice->note_on(1.0f);
+    }
+
+    (void)render(uninterrupted, 6000);
+    (void)render(retriggered, 6000);
+    retriggered.note_on(1.0f);
+
+    const auto control = render(uninterrupted, 32);
+    const auto after_retrigger = render(retriggered, 32);
+    INFO("uninterrupted energy=" << rms(control)
+                                  << " retrigger energy="
+                                  << rms(after_retrigger));
+    REQUIRE(rms(control) > 1.0e-5);
+    REQUIRE(rms(after_retrigger) > rms(control) * 0.1);
+}
+
 TEST_CASE("The circuit anti-machine-gun policy is selectable",
           "[signal][drum][kick][circuit][life]") {
     using pulp::signal::drum::HitLifeMode;
@@ -775,6 +802,28 @@ TEST_CASE("The post-output AHD has exact attack, hold, and decay regions",
     REQUIRE(y[719] == 1.0f);
     REQUIRE(y[900] < 0.1f);
     REQUIRE(y[1680] == 0.0f);
+}
+
+TEST_CASE("A short output AHD survives the house FIR latency",
+          "[signal][drum][output][ahd][latency]") {
+    auto impulse_peak = [](OutputOversampling quality) {
+        OutputStage output;
+        output.prepare(kFs);
+        output.set_oversampling(quality);
+        output.set_ahd_ms(0.0, 0.0, 0.01);
+        output.trigger();
+
+        std::vector<float> y(160, 0.0f);
+        for (std::size_t i = 0; i < y.size(); ++i)
+            y[i] = output.process(i == 0 ? 1.0f : 0.0f);
+        return peak(y);
+    };
+
+    const double bypass = impulse_peak(OutputOversampling::bypass);
+    const double house = impulse_peak(OutputOversampling::x2);
+    INFO("bypass peak=" << bypass << " house peak=" << house);
+    REQUIRE(bypass > 0.5);
+    REQUIRE(house > 0.1);
 }
 
 TEST_CASE("The AHD scales saturation output instead of its input",

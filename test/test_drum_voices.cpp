@@ -750,6 +750,40 @@ TEST_CASE("Clap stereo keeps its room tail centred",
     REQUIRE(difference < level * 1.0e-4);
 }
 
+TEST_CASE("Centered clap layers do not alter the burst side signal",
+          "[signal][drum][clap][stereo]") {
+    auto render_with_centre = [](double tail, double body) {
+        ClapVoice voice;
+        voice.prepare(kFs);
+        voice.set_burst_count(1);
+        voice.set_burst_decay_ms(20.0);
+        voice.set_tail_level(tail);
+        voice.set_tail_decay_ms(100.0);
+        voice.set_body_level(body);
+        voice.set_body_hz(271.0);
+        voice.set_stereo_width(1.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        return stereo_hit(voice, 1.0f, 4000);
+    };
+
+    const auto burst_only = render_with_centre(0.0, 0.0);
+    const auto layered = render_with_centre(1.0, 0.8);
+    double side_error = 0.0;
+    double side_level = 0.0;
+    for (std::size_t i = 0; i < burst_only.left.size(); ++i) {
+        const double expected =
+            static_cast<double>(burst_only.left[i] - burst_only.right[i]);
+        const double actual =
+            static_cast<double>(layered.left[i] - layered.right[i]);
+        side_error += std::fabs(actual - expected);
+        side_level += std::fabs(expected);
+    }
+    INFO("side error=" << side_error << " side level=" << side_level);
+    REQUIRE(side_level > 1.0e-3);
+    REQUIRE(side_error < side_level * 1.0e-5);
+}
+
 TEST_CASE("A clap renders identically for the same parameters",
           "[signal][drum][clap]") {
     ClapVoice voice;

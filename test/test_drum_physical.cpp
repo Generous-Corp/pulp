@@ -601,6 +601,29 @@ TEST_CASE("The membrane's sub, air, and click layers reach emitted audio",
     REQUIRE(peak(click_attack) > peak(body_attack) * 1.5);
 }
 
+TEST_CASE("Membrane velocity tension moves the body and sub together",
+          "[signal][drum][membrane][velocity]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(100.0);
+    voice.set_structure(0.0);
+    voice.set_spread(0.0);
+    voice.set_position(0.5);
+    voice.set_brightness(0.0);
+    voice.set_sub_level(8.0);
+    voice.set_air_level(0.0);
+    voice.set_click_level(0.0);
+    voice.set_velocity_response(
+        VelocityResponse{0.0f, 0.25f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 48000);
+    const double tension = std::exp2(0.25);
+    const double moved_sub = tone_amplitude(y, 50.0 * tension);
+    const double stale_sub = tone_amplitude(y, 50.0);
+    INFO("moved sub=" << moved_sub << " stale sub=" << stale_sub);
+    REQUIRE(moved_sub > stale_sub * 4.0);
+}
+
 // -- Cymbal ------------------------------------------------------------------
 
 TEST_CASE("The cymbal's shifter is what removes the pitch",

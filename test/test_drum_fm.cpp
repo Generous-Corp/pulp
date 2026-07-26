@@ -257,6 +257,32 @@ TEST_CASE("FM2 remains active for the full shared noise transient",
     REQUIRE(noise_is_still_active(voice));
 }
 
+TEST_CASE("Muting an FM noise transient does not freeze its lifecycle",
+          "[signal][drum][fm][transient][lifecycle]") {
+    auto muted_noise_finishes = [](auto& voice) {
+        voice.prepare(kFs);
+        voice.set_noise_level(1.0);
+        voice.set_noise_decay_ms(10.0);
+        voice.set_click_level(0.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        voice.note_on(1.0f);
+        (void)render(voice, 32);
+        voice.set_noise_level(0.0);
+        (void)render(voice, 48000);
+        return voice.is_active();
+    };
+
+    FmDrumVoice two;
+    two.set_decay_ms(1.0);
+    REQUIRE_FALSE(muted_noise_finishes(two));
+
+    Fm8DrumVoice eight;
+    for (int op = 0; op < Fm8DrumVoice::operator_count; ++op)
+        eight.set_operator_level(op, 0.0);
+    REQUIRE_FALSE(muted_noise_finishes(eight));
+}
+
 TEST_CASE("Sidebands land at the carrier plus and minus the modulator",
           "[signal][drum][fm]") {
     // The defining property. With a carrier at 200 and a ratio of 2 the

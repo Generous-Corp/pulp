@@ -6,6 +6,7 @@
 #include <pulp/signal/svf.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -132,6 +133,8 @@ protected:
         burst_sign_ = 1.0;
         burst_pan_ = -1.0;
         jitter_state_ = kJitterSeed;
+        burst_route_delay_.fill(0.0);
+        burst_route_write_ = 0;
     }
 
     void on_note_on(float velocity) override {
@@ -143,6 +146,8 @@ protected:
 
         noise_.reset();
         body_phase_ = 0.0;
+        burst_route_delay_.fill(0.0);
+        burst_route_write_ = 0;
         // The band filter shapes the strike rather than modelling a body, so
         // it starts clean on every hit. Voices whose filter *is* a body -- the
         // kick's resonator and circuit network, the snare's shell, the hat's
@@ -189,22 +194,17 @@ protected:
         for (int i = 0; i < num_samples; ++i) {
             const RenderFrame frame = render_frame();
             const double pan = frame.burst_pan * stereo_width_;
-            const double burst_left = 0.5 * (1.0 - pan);
-            const double burst_right = 0.5 * (1.0 + pan);
-            const double centre_share = 1.0 - frame.burst_share;
             left[i] += static_cast<float>(
-                frame.mono *
-                (frame.burst_share * burst_left + 0.5 * centre_share));
+                0.5 * frame.mono - 0.5 * pan * frame.burst);
             right[i] += static_cast<float>(
-                frame.mono *
-                (frame.burst_share * burst_right + 0.5 * centre_share));
+                0.5 * frame.mono + 0.5 * pan * frame.burst);
         }
     }
 
 private:
     struct RenderFrame {
         float mono = 0.0f;
-        double burst_share = 0.0;
+        double burst = 0.0;
         double burst_pan = 0.0;
     };
 
@@ -233,12 +233,25 @@ private:
         }
 
         const double centre = room + body;
-        const double magnitude = std::fabs(train) + std::fabs(centre);
+        burst_route_delay_[burst_route_write_] = train;
+        const std::size_t delay = static_cast<std::size_t>(
+            output_.latency_samples());
+        const std::size_t read =
+            (burst_route_write_ + burst_route_delay_.size() - delay) %
+            burst_route_delay_.size();
+        const double routed_burst = burst_route_delay_[read];
+        burst_route_write_ =
+            (burst_route_write_ + 1) % burst_route_delay_.size();
+
         RenderFrame frame;
         frame.mono = static_cast<float>(
             output_.process(static_cast<float>(train + centre)) * velocity_gain_);
-        frame.burst_share =
-            magnitude > 1.0e-12 ? std::fabs(train) / magnitude : 0.0;
+        // The side channel carries only the burst train. Any nonlinear
+        // interaction between the train and centred layers remains in the
+        // mid channel, which preserves the canonical mono sum exactly without
+        // allowing room or body energy to leak into stereo width.
+        frame.burst =
+            routed_burst * output_.last_post_gain() * velocity_gain_;
         frame.burst_pan = burst_pan_;
         return frame;
     }
@@ -294,6 +307,8 @@ private:
     double burst_sign_ = 1.0;
     double burst_pan_ = -1.0;
     std::uint32_t jitter_state_ = kJitterSeed;
+    std::array<double, 49> burst_route_delay_{};
+    std::size_t burst_route_write_ = 0;
 };
 
 }  // namespace pulp::signal::drum

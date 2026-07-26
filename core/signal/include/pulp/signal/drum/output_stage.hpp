@@ -61,6 +61,8 @@ public:
         stage_b_.reset();
         tail_samples_remaining_ = 0;
         nonlinear_activity_this_sample_ = false;
+        ahd_delay_remaining_ = 0;
+        last_post_gain_ = level_;
         ahd_phase_ = AhdPhase::inactive;
         ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
@@ -135,9 +137,11 @@ public:
 
     bool ahd_enabled() const noexcept { return ahd_enabled_; }
     double ahd_gain() const noexcept { return ahd_gain_; }
+    double last_post_gain() const noexcept { return last_post_gain_; }
 
     /// Start the AHD for a new hit. Every drum voice calls this from note-on.
     void trigger() {
+        ahd_delay_remaining_ = latency_samples();
         if (!ahd_enabled_) {
             ahd_phase_ = AhdPhase::inactive;
             ahd_gain_ = 1.0;
@@ -193,8 +197,9 @@ public:
             --tail_samples_remaining_;
         }
         const double envelope = process_ahd();
+        last_post_gain_ = level_ * envelope;
         return static_cast<SampleType>(
-            static_cast<double>(processed) * level_ * envelope);
+            static_cast<double>(processed) * last_post_gain_);
     }
 
 private:
@@ -260,6 +265,10 @@ private:
 
     double process_ahd() {
         if (!ahd_enabled_) return 1.0;
+        if (ahd_delay_remaining_ > 0) {
+            --ahd_delay_remaining_;
+            return 0.0;
+        }
         const double current = ahd_gain_;
         switch (ahd_phase_) {
             case AhdPhase::inactive:
@@ -307,6 +316,8 @@ private:
     int ahd_hold_samples_ = 0;
     int ahd_decay_samples_ = 1;
     int ahd_remaining_ = 0;
+    int ahd_delay_remaining_ = 0;
+    double last_post_gain_ = 1.0;
     bool ahd_enabled_ = false;
     AhdPhase ahd_phase_ = AhdPhase::inactive;
     OutputOversampling oversampling_ = OutputOversampling::x2;

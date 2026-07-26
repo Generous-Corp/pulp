@@ -225,16 +225,25 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        HitLifeDecision circuit_life;
+        if (body_mode_ == KickBody::circuit)
+            circuit_life =
+                circuit_life_.trigger(NoiseSource::default_seed);
+
+        if (body_mode_ != KickBody::circuit ||
+            circuit_life.reset_dsp_state)
+            output_.reset();
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         bend_octaves_ = pitch_sweep_oct_ + response.bend(velocity);
         brightness_ = response.brightness_scale(velocity);
 
-        // Reseeding here is what makes a hit reproducible: the same parameters
-        // and velocity render the same samples every time.
-        noise_.reset();
+        if (body_mode_ != KickBody::circuit) {
+            // Non-circuit bodies intentionally restart their procedural
+            // excitation on every hit.
+            noise_.reset();
+        }
 
         pitch_env_.set_decay_time_constant_ms(pitch_sweep_ms_);
         pitch_env_.set_attack_ms(0.0);
@@ -269,12 +278,10 @@ protected:
                 // The authentic default does not reset the network: a trigger
                 // adds energy to a body that may still be ringing. Fixed and
                 // advancing modes explicitly restart it.
-                if (const auto life =
-                        circuit_life_.trigger(NoiseSource::default_seed);
-                    life.reset_dsp_state) {
+                if (circuit_life.reset_dsp_state) {
                     reset_circuit_memory();
-                    if (life.reseed_excitation) {
-                        noise_.set_seed(life.seed);
+                    if (circuit_life.reseed_excitation) {
+                        noise_.set_seed(circuit_life.seed);
                         noise_.reset();
                     }
                 }

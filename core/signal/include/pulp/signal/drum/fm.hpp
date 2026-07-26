@@ -310,10 +310,12 @@ protected:
 
             const double body = filter_.process(static_cast<float>(carrier)) * amplitude;
             const double strike = click_.process(static_cast<double>(noise_.white()));
+            const double noise_envelope =
+                noise_env_.is_active() ? noise_env_.process() : 0.0;
             const double noise =
-                noise_level_ > 0.0 && noise_env_.is_active()
+                noise_level_ > 0.0
                     ? static_cast<double>(noise_.process()) *
-                          noise_env_.process() * noise_level_
+                          noise_envelope * noise_level_
                     : 0.0;
 
             out[i] += static_cast<float>(
@@ -629,10 +631,12 @@ protected:
             previous_ = current;
 
             const double shaped = formant_.process(static_cast<float>(summed));
+            const double noise_envelope =
+                noise_env_.is_active() ? noise_env_.process() : 0.0;
             const double noise =
-                noise_level_ > 0.0 && noise_env_.is_active()
+                noise_level_ > 0.0
                     ? static_cast<double>(noise_.process()) *
-                          noise_env_.process() * noise_level_
+                          noise_envelope * noise_level_
                     : 0.0;
             const double click =
                 click_.process(static_cast<double>(noise_.white()));

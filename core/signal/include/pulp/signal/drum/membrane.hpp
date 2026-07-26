@@ -174,6 +174,7 @@ protected:
         click_noise_.reset();
         pluck_pending_ = false;
         sub_phase_ = 0.0;
+        applied_fundamental_hz_ = tune_hz_;
         level_ = 0.0;
     }
 
@@ -183,6 +184,7 @@ protected:
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         const double tension = std::exp2(response.bend(velocity));
+        applied_fundamental_hz_ = tune_hz_ * tension;
         const double exciter_scale = response.brightness_scale(velocity);
 
         noise_.reset();
@@ -271,7 +273,8 @@ protected:
                                                    gate_env_.process());
                 double layers = 0.0;
                 if (sub_level_ > 0.0 && sub_env_.is_active()) {
-                    sub_phase_ += 0.5 * tune_hz_ / sample_rate();
+                    sub_phase_ +=
+                        0.5 * applied_fundamental_hz_ / sample_rate();
                     if (sub_phase_ >= 1.0) sub_phase_ -= std::floor(sub_phase_);
                     layers += std::sin(2.0 * 3.14159265358979323846 * sub_phase_) *
                               sub_env_.process() * sub_level_;
@@ -387,6 +390,7 @@ private:
     double velocity_gain_ = 1.0;
     double mode_gain_energy_ = 0.0;
     double sub_phase_ = 0.0;
+    double applied_fundamental_hz_ = 100.0;
     bool pluck_pending_ = false;
     double level_ = 0.0;
 };
