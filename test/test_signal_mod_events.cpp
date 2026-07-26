@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -70,6 +72,166 @@ static_assert(AcceptsExplicitSignalTrigger<TriggerDetect>);
 static_assert(AcceptsExplicitHystereticCv<TriggerDetect>);
 
 } // namespace
+
+TEST_CASE("event and envelope aliases start fresh and track their double forms",
+          "[signal][mod][parity][zero-init]") {
+    STATIC_REQUIRE(std::is_same_v<TriggerDetect64, TriggerDetectT<double>>);
+    STATIC_REQUIRE(std::is_same_v<GateGen64, GateGenT<double>>);
+    STATIC_REQUIRE(std::is_same_v<ClockDivider64, ClockDividerT<double>>);
+    STATIC_REQUIRE(std::is_same_v<ClockMult64, ClockMultT>);
+    STATIC_REQUIRE(std::is_same_v<BurstGen64, BurstGenT<double>>);
+    STATIC_REQUIRE(std::is_same_v<TrigDelay64, TrigDelayT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Ar64, ArT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Ad64, AdT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Ahd64, AhdT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Dahdsr64, DahdsrT<double>>);
+    STATIC_REQUIRE(std::is_same_v<ModEnv64, ModEnvT<double>>);
+    STATIC_REQUIRE(std::is_same_v<TransientDetector64, TransientDetectorT<double>>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<BurstGen64&>().process(false).level), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Ar64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Ad64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Ahd64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Dahdsr64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<ModEnv64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<TransientDetector64&>().process(0.0)), double>);
+    TriggerDetect detect; TriggerDetect64 detect64;
+    detect.prepare(kSampleRate); detect64.prepare(kSampleRate);
+    REQUIRE(detect.process(true) == detect64.process(true));
+    REQUIRE(detect.process(true) == detect64.process(true));
+
+    GateGen gate; GateGen64 gate64;
+    gate.prepare(kSampleRate); gate64.prepare(kSampleRate);
+    gate.set_length_samples(3); gate64.set_length_samples(3);
+    for (int i = 0; i < 5; ++i)
+        REQUIRE(gate.process(i == 0) == gate64.process(i == 0));
+
+    ClockDivider divider; ClockDivider64 divider64;
+    ClockMult multiplier; ClockMult64 multiplier64;
+    TrigDelay delay; TrigDelay64 delay64;
+    divider.set_division(3); divider64.set_division(3);
+    for (int i = 0; i < 7; ++i)
+        REQUIRE(divider.process(true) == divider64.process(true));
+    multiplier.set_multiplier(2); multiplier64.set_multiplier(2);
+    for (int i = 0; i < 20; ++i)
+        REQUIRE(multiplier.process(i == 0 || i == 8) ==
+                multiplier64.process(i == 0 || i == 8));
+    delay.set_delay_samples(3); delay64.set_delay_samples(3);
+    for (int i = 0; i < 6; ++i)
+        REQUIRE(delay.process(i == 0) == delay64.process(i == 0));
+
+    BurstGen burst; BurstGen64 burst64;
+    burst.prepare(kSampleRate); burst64.prepare(kSampleRate);
+    burst.set_count(3); burst64.set_count(3);
+    burst.set_spacing_ms(0.1); burst64.set_spacing_ms(0.1);
+    burst.set_levels(0.9f, 0.3f); burst64.set_levels(0.9, 0.3);
+    for (int i = 0; i < 20; ++i) {
+        const auto hit = burst.process(i == 0);
+        const auto hit64 = burst64.process(i == 0);
+        REQUIRE(hit.fired == hit64.fired);
+        REQUIRE_THAT(static_cast<double>(hit.level), WithinAbs(hit64.level, 1.0e-6));
+    }
+
+    Ar ar; Ar64 ar64;
+    Ad ad; Ad64 ad64;
+    Ahd ahd; Ahd64 ahd64;
+    Dahdsr dahdsr; Dahdsr64 dahdsr64;
+    ModEnv mod_env; ModEnv64 mod_env64;
+    ar.prepare(kSampleRate); ar64.prepare(kSampleRate);
+    ad.prepare(kSampleRate); ad64.prepare(kSampleRate);
+    ahd.prepare(kSampleRate); ahd64.prepare(kSampleRate);
+    dahdsr.prepare(kSampleRate); dahdsr64.prepare(kSampleRate);
+    mod_env.prepare(kSampleRate); mod_env64.prepare(kSampleRate);
+    ar.set_attack_ms(1.0); ar64.set_attack_ms(1.0); ar.gate(true); ar64.gate(true);
+    ad.set_attack_ms(1.0); ad64.set_attack_ms(1.0); ad.trigger(0.8f); ad64.trigger(0.8);
+    ahd.set_attack_ms(1.0); ahd64.set_attack_ms(1.0); ahd.trigger(0.7f); ahd64.trigger(0.7);
+    dahdsr.set_attack_ms(1.0); dahdsr64.set_attack_ms(1.0);
+    dahdsr.note_on(0.6f); dahdsr64.note_on(0.6);
+    mod_env.set_attack_ms(1.0); mod_env64.set_attack_ms(1.0);
+    mod_env.trigger(0.5f); mod_env64.trigger(0.5);
+    for (int i = 0; i < 64; ++i) {
+        REQUIRE_THAT(static_cast<double>(ar.next()), WithinAbs(ar64.next(), 1.0e-6));
+        REQUIRE_THAT(static_cast<double>(ad.next()), WithinAbs(ad64.next(), 1.0e-6));
+        REQUIRE_THAT(static_cast<double>(ahd.next()), WithinAbs(ahd64.next(), 1.0e-6));
+        REQUIRE_THAT(static_cast<double>(dahdsr.next()), WithinAbs(dahdsr64.next(), 1.0e-6));
+        REQUIRE_THAT(static_cast<double>(mod_env.next()), WithinAbs(mod_env64.next(), 1.0e-6));
+    }
+
+    TransientDetector transient; TransientDetector64 transient64;
+    transient.prepare(kSampleRate); transient64.prepare(kSampleRate);
+    for (int i = 0; i < 64; ++i)
+        REQUIRE_THAT(static_cast<double>(transient.process(i < 8 ? 1.0f : 0.0f)),
+                     WithinAbs(transient64.process(i < 8 ? 1.0 : 0.0), 5.0e-5));
+
+    gate.reset(); gate64.reset();
+    divider.reset(); divider64.reset();
+    delay.reset(); delay64.reset();
+    ar.reset(); ar64.reset();
+    REQUIRE(gate.process(false) == gate64.process(false));
+    REQUIRE(divider.process(true) == divider64.process(true));
+    REQUIRE(delay.process(false) == delay64.process(false));
+    REQUIRE_THAT(static_cast<double>(ar.next()), WithinAbs(ar64.next(), 1.0e-6));
+}
+
+TEST_CASE("event and envelope raw value-initialized state replays after reset",
+          "[signal][mod][zero-init]") {
+    TriggerDetect detect; TriggerDetect64 detect64;
+    REQUIRE(detect.process(true)); REQUIRE(detect64.process(true));
+    detect.reset(); detect64.reset();
+    REQUIRE(detect.process(true)); REQUIRE(detect64.process(true));
+
+    GateGen gate; GateGen64 gate64;
+    REQUIRE(gate.process(true)); REQUIRE(gate64.process(true));
+    gate.reset(); gate64.reset();
+    REQUIRE(gate.process(true)); REQUIRE(gate64.process(true));
+
+    ClockDivider divider; ClockDivider64 divider64;
+    REQUIRE(divider.process(true)); REQUIRE(divider64.process(true));
+    divider.reset(); divider64.reset();
+    REQUIRE(divider.process(true)); REQUIRE(divider64.process(true));
+
+    ClockMult multiplier; ClockMult64 multiplier64;
+    (void)multiplier.process(true); (void)multiplier64.process(true);
+    multiplier.reset(); multiplier64.reset();
+    REQUIRE(multiplier.process(true) == multiplier64.process(true));
+
+    BurstGen burst; BurstGen64 burst64;
+    const auto burst_first = burst.process(true);
+    const auto burst64_first = burst64.process(true);
+    burst.reset(); burst64.reset();
+    REQUIRE(burst.process(true).fired == burst_first.fired);
+    REQUIRE(burst64.process(true).fired == burst64_first.fired);
+
+    TrigDelay delay; TrigDelay64 delay64;
+    const bool delay_first = delay.process(true);
+    const bool delay64_first = delay64.process(true);
+    delay.reset(); delay64.reset();
+    REQUIRE(delay.process(true) == delay_first);
+    REQUIRE(delay64.process(true) == delay64_first);
+
+    Ar ar; Ar64 ar64; Ad ad; Ad64 ad64; Ahd ahd; Ahd64 ahd64;
+    Dahdsr dahdsr; Dahdsr64 dahdsr64; ModEnv mod_env; ModEnv64 mod_env64;
+    REQUIRE(std::isfinite(ar.next())); REQUIRE(std::isfinite(ar64.next()));
+    REQUIRE(std::isfinite(ad.next())); REQUIRE(std::isfinite(ad64.next()));
+    REQUIRE(std::isfinite(ahd.next())); REQUIRE(std::isfinite(ahd64.next()));
+    REQUIRE(std::isfinite(dahdsr.next())); REQUIRE(std::isfinite(dahdsr64.next()));
+    REQUIRE(std::isfinite(mod_env.next())); REQUIRE(std::isfinite(mod_env64.next()));
+    ar.reset(); ar64.reset(); ad.reset(); ad64.reset(); ahd.reset(); ahd64.reset();
+    dahdsr.reset(); dahdsr64.reset(); mod_env.reset(); mod_env64.reset();
+    REQUIRE(ar.next() == 0.0f); REQUIRE(ar64.next() == 0.0);
+    REQUIRE(ad.next() == 0.0f); REQUIRE(ad64.next() == 0.0);
+    REQUIRE(ahd.next() == 0.0f); REQUIRE(ahd64.next() == 0.0);
+    REQUIRE(dahdsr.next() == 0.0f); REQUIRE(dahdsr64.next() == 0.0);
+    REQUIRE(mod_env.next() == 0.0f); REQUIRE(mod_env64.next() == 0.0);
+
+    TransientDetector transient; TransientDetector64 transient64;
+    REQUIRE(std::isfinite(transient.process(1.0f)));
+    REQUIRE(std::isfinite(transient64.process(1.0)));
+    transient.reset(); transient64.reset();
+    REQUIRE(std::isfinite(transient.process(1.0f)));
+    REQUIRE(std::isfinite(transient64.process(1.0)));
+}
 
 // ── TriggerDetectT ───────────────────────────────────────────────────────────
 

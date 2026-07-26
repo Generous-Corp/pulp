@@ -370,6 +370,17 @@ Three pieces, and the boundaries between them matter:
   trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
   structural sequence edit and also sets `all`.
 
+**Adding a `CompileContextKind` is a data change, with one trap.** Both
+`ContextSubscriberIndex::build()` and the `CompileContextSubscriptions` bitset
+loop over `[0, kCompileContextKindCount)`, so a new kind needs no new case in
+either — but it does need `kCompileContextKindCount` bumped in lockstep with the
+enum. Forget that and the new kind is never indexed, never dirtied, and every
+test that only checks "my subscriber recompiled" still passes because the
+subscriber recompiles for some other reason. The `static_assert` on the bitset
+width catches only the ninth kind, not a stale count. Write the exactness test
+so it names the readers of *each* kind separately: a per-sequence index and a
+per-kind index are indistinguishable until two kinds have disjoint readers.
+
 **Proving invalidation exactness.** `PlaybackProgram::find_track()` returns the
 compiled `TrackProgram` the published program holds. The compiler reuses an
 untouched track's program object outright, so an unchanged **pointer** is a

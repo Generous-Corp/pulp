@@ -602,6 +602,72 @@ TEST_CASE("AutoUi generated controls write changes back to the store",
     REQUIRE_THAT(store.get_value(2), WithinAbs(1.0f, 0.001f));
 }
 
+TEST_CASE("AutoUi knob drags open and close a host automation gesture",
+          "[view][auto_ui][parameters][gesture]") {
+    // A knob that writes the store WITHOUT a gesture leaves the host with no
+    // beginEdit/endEdit, so the format adapter never reports the edit: the DSP
+    // moves while the host's own parameter, automation write and undo stay
+    // frozen. Observed in REAPER on Windows — the arc turned, the host value
+    // did not.
+    StateStore store;
+    store.add_parameter(make_param(1, "Frequency", "Hz", {55.0f, 1760.0f, 440.0f}));
+
+    std::vector<ParamID> begins;
+    std::vector<ParamID> ends;
+    store.set_gesture_callbacks([&](ParamID id) { begins.push_back(id); },
+                                [&](ParamID id) { ends.push_back(id); });
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    auto* frequency = find_widget<Knob>(*root, "Frequency");
+    REQUIRE(frequency != nullptr);
+
+    // The widget must expose both ends of the gesture, not just on_change.
+    REQUIRE(frequency->on_gesture_begin != nullptr);
+    REQUIRE(frequency->on_gesture_end != nullptr);
+
+    frequency->on_gesture_begin();
+    frequency->on_change(0.75f);
+    frequency->on_change(0.80f);
+    frequency->on_gesture_end();
+
+    REQUIRE(begins.size() == 1);
+    REQUIRE(ends.size() == 1);
+    CHECK(begins[0] == 1);
+    CHECK(ends[0] == 1);
+    // Every write inside the gesture still lands in the store.
+    REQUIRE_THAT(store.get_normalized(1), WithinAbs(0.80f, 0.001f));
+    // Balanced 1:1 — nothing left open for the host to keep recording.
+    CHECK(store.open_gesture_count() == 0);
+}
+
+TEST_CASE("AutoUi toggle clicks report a complete gesture",
+          "[view][auto_ui][parameters][gesture]") {
+    // A toggle is instantaneous rather than a drag, so the begin/end bracket
+    // has to be emitted around the single write instead of by drag handlers.
+    StateStore store;
+    store.add_parameter(make_param(2, "Bypass", "", {0.0f, 1.0f, 0.0f, 1.0f}));
+
+    std::vector<ParamID> begins;
+    std::vector<ParamID> ends;
+    store.set_gesture_callbacks([&](ParamID id) { begins.push_back(id); },
+                                [&](ParamID id) { ends.push_back(id); });
+
+    auto root = AutoUi::build(store);
+    REQUIRE(root != nullptr);
+    auto* bypass = find_widget<Toggle>(*root, "Bypass");
+    REQUIRE(bypass != nullptr);
+
+    bypass->on_toggle(true);
+
+    REQUIRE(begins.size() == 1);
+    REQUIRE(ends.size() == 1);
+    CHECK(begins[0] == 2);
+    CHECK(ends[0] == 2);
+    REQUIRE_THAT(store.get_normalized(2), WithinAbs(1.0f, 0.001f));
+    CHECK(store.open_gesture_count() == 0);
+}
+
 TEST_CASE("AutoUi generated controls expose toggle state and formatted values",
           "[view][auto_ui][issue-493]") {
     StateStore store;

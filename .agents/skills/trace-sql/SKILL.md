@@ -267,6 +267,14 @@ of writing). Query with the **same** version — `pulp trace fetch`, or
 `curl -sSL -o trace_processor https://get.perfetto.dev/trace_processor` which
 self-reports its version on `--version`.
 
+The capture producer and query tool are separate compatibility surfaces. An
+SDK-built plug-in must link the installed SDK's exported Perfetto support from
+the same `PULP_TRACING=ON` configuration; a consumer-side define cannot add
+targets or headers omitted at SDK install time. Once a capture exists, query it
+with the trace processor matching that SDK pin. When diagnosis starts with “no
+rows,” first establish whether a `.pftrace` was actually flushed; do not debug
+SQL against a missing producer.
+
 ## Cost that lives BETWEEN slices
 
 `pulp_layout_vs_paint` and friends aggregate slice durations, so they cannot see

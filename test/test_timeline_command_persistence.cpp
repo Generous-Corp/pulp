@@ -71,6 +71,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     const auto& freeze = member(track_data, "freeze");
     const auto& marker = member(member(sequence, "data"), "markers").array[0];
     const auto& region = member(member(sequence, "data"), "regions").array[0];
+    const auto& groove = member(member(sequence, "data"), "groove");
     const auto& tempo_map = member(project_data, "tempo_map");
     const auto& meter_map = member(project_data, "meter_map");
 
@@ -147,6 +148,10 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope(
             "pulp.timeline.command.set_chord_scale_lane",
             R"({"expected":[],"replacement":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"sequence_id":"5"})"),
+        envelope("pulp.timeline.command.set_groove",
+                 "{\"expected\":" + std::string(parsed->raw(groove)) +
+                     ",\"replacement\":" + std::string(parsed->raw(groove)) +
+                     R"(,"sequence_id":"5"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -182,6 +187,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<InsertRegion>(commands[21]));
     REQUIRE(std::holds_alternative<RemoveRegion>(commands[22]));
     REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[23]));
+    REQUIRE(std::holds_alternative<SetGroove>(commands[24]));
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {

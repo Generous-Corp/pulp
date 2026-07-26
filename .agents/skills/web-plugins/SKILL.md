@@ -227,7 +227,11 @@ Both live in the `skia-gpu-build` skill's wasm section; know they exist:
   an empty panel, which reads as a render bug.
 - **WebGL context loss is a normal event.** Lost → the surface reports
   unavailable and the rAF loop keeps pumping; restored → Ganesh is rebuilt and
-  repaints. Any GPU resource cached above the surface must survive that cycle.
+  repaints. Ganesh cacheable `LayerHandle`s are retired on loss because their
+  textures belong to the dead context; retained-layer callers must recheck
+  `layer_valid()` and record a replacement. Any GPU resource cached above the
+  surface must either survive that cycle independently or follow the same
+  explicit invalidation/rebuild rule.
 - The render loop is `requestAnimationFrame`-driven
   (`core/render/src/render_loop_emscripten.cpp`); DOM pointer/key events are
   translated in `core/view/include/pulp/view/web/web_event_translate.hpp`.
@@ -360,6 +364,16 @@ per-ABI entry point for it.** Go through the plugin's own state:
   governs the same array independently, before any model object exists, and that
   is the check a hostile input hits first.
 
+- Timeline schema references are also a generated web API contract. Nested
+  objects and arrays must carry `$ref` metadata through the canonical schema;
+  arrays need the reference under `items.$ref`, not only on the container. The
+  TypeScript facade projection consumes those references to emit concrete
+  nested types. If a timeline field such as `Sequence::groove()` or
+  `GrooveTemplate::steps` is added without the reference, native persistence can
+  remain green while the generated browser API silently degrades the value to
+  `unknown`. Regenerate the JSON Schema and TypeScript facade together and keep
+  the schema/codegen drift gates in the same change.
+
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
   alternative count (and an overload set with no generic fallback) precisely so
@@ -440,6 +454,28 @@ drags. VERIFY IN WEBKIT, not just Chromium: `playwright-core`'s `webkit` IS Safa
 engine (`Version/…Safari/605`), and `page.mouse.wheel(0, 600)` over the canvas must move
 `window.scrollY` (measured 0→209 on the SuperConvolver editor). Chromium-only "it scrolls"
 is not proof for the browser the user is actually on.
+
+## Landmine: scripted controls need the browser host's `on_drag` channel
+
+A scripted gesture uses two distinct `View` callbacks:
+
+- `on_pointer_event` carries the press/release/cancel edges. A drag tick must not
+  become another `pointerdown` merely because its `is_down` field is true.
+- `on_drag` carries the JS `pointermove` stream. The legacy `on_mouse_drag`
+  virtual reaches stock C++ widgets, but it cannot reach a canvas-drawn control
+  whose handler was installed by `WidgetBridge`.
+
+Every browser drag tick must therefore deliver, to the target captured for that
+raw browser pointer ID, the modern event and legacy virtual, then `on_drag` for
+mouse or identity-bearing `on_pointer_move` for touch/pen. Do not redispatch
+that scripted move on native ancestors: the bridge event already bubbles
+through the JS element tree, so doing both double-fires ancestor and document
+listeners.
+Revalidate the captured target between callbacks because a handler may rebuild
+and destroy its own subtree synchronously. Missing the scripted channel produces
+a deceptive failure: the control renders and receives press/release, but it
+never moves. The router tests pin exact-target delivery, capture teardown, and
+the rule that release/uncaptured hover emit no extra move.
 
 ## Landmine: a WebCLAP host must READ parameters back, not mirror them
 
@@ -694,7 +730,9 @@ Every full-canvas editor MUST handle these, all learned the hard way on SuperCon
   `ResizeObserver`, so the backing store stays stale and the canvas goes blurry/mis-scaled.
   The shared web layer (`web_input.cpp`) arms a re-arming `matchMedia("(resolution: Ndppx)")`
   listener that re-runs the resize (which re-reads dpr) on each DPR change. Browser text-zoom
-  DOES change the CSS size, so it is already covered by the ResizeObserver.
+  DOES change the CSS size, so it is already covered by the ResizeObserver. The Ganesh surface
+  also retires rasterized cacheable `LayerHandle`s when DPR changes; callers rebuild them after
+  `layer_valid()` turns false rather than scaling an old-density texture.
 - **iOS file picker:** the page's `<input type=file>` must NOT be `display:none`/`hidden`
   (iOS Safari drops `.click()` on it) — hide it visually instead. See its own landmine above.
 - **Page scroll over the canvas:** opt into `touch-action: pan-y` after mount so a vertical

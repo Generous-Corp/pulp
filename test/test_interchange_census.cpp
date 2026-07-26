@@ -163,3 +163,25 @@ TEST_CASE("a chord/scale context lane is recorded by the census", "[interchange]
         take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {std::move(without)}}));
     REQUIRE_FALSE(census(plain).contains(Concept::ContextChordScale));
 }
+
+TEST_CASE("a census records authored groove state even when it currently sounds straight",
+          "[interchange][census]") {
+    GrooveTemplateInput authored;
+    authored.name = "saved for later";
+    authored.swing = kTripletSwing;
+    authored.timing_strength = 500;
+    auto groove = take_value(GrooveTemplate::create(std::move(authored)));
+    REQUIRE(groove.states_no_feel());
+    REQUIRE_FALSE(groove.is_canonical_default());
+
+    auto sequence = take_value(Sequence::create(
+        SequenceInput{.id = {2}, .name = "root", .musical_duration = TickDuration{100},
+                      .groove = std::move(groove)}));
+    auto project = take_value(
+        Project::create(ProjectInput{{1}, "project", 3, {2}, {}, {std::move(sequence)}}));
+
+    const auto recorded = census(project);
+    REQUIRE(recorded.contains(Concept::ContextGroove));
+    REQUIRE(recorded.count(Concept::ContextGroove) == 1);
+    REQUIRE(recorded.owners(Concept::ContextGroove)[0] == ItemId{2});
+}

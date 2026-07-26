@@ -274,14 +274,6 @@ static sk_sp<SkColorSpace> sk_color_space_from_webgpu_format(const std::string& 
     return SkColorSpace::MakeSRGB();
 }
 
-SkiaCanvas::SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder)
-    : canvas_(canvas), recorder_(recorder) {}
-SkiaCanvas::~SkiaCanvas() = default;
-
-void SkiaCanvas::set_gpu_upload_context(GrDirectContext* context) {
-    gr_context_ = context;
-}
-
 // ── Scene recording (subtree cache, FU-3) ────────────────────────────────
 namespace {
 // Backend-specific SceneRecording payload: the recorded SkPicture. draw_scene

@@ -144,7 +144,7 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":3") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":4") !=
             std::string::npos);
     REQUIRE(first.value().json.find(
                 R"("chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9})") !=
@@ -273,15 +273,22 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto lane_at = legacy.find(R"("chord_scale_lane":[],)");
     REQUIRE(lane_at != std::string::npos);
     legacy.erase(lane_at, std::string_view(R"("chord_scale_lane":[],)").size());
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":3)");
+    constexpr std::string_view straight_groove =
+        R"("groove":{"name":"","step":"0","steps":[],"swing_denominator":"2","swing_grid":"0","swing_numerator":"1","timing_strength":1000,"velocity_strength":1000},)";
+    const auto groove_at = legacy.find(straight_groove);
+    REQUIRE(groove_at != std::string::npos);
+    legacy.erase(groove_at, straight_groove.size());
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":4)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at, std::string_view(
-                                   R"("type_name":"pulp.timeline.sequence","version":3)").size(),
+                                   R"("type_name":"pulp.timeline.sequence","version":4)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
     REQUIRE(decoded.find_sequence({2})->chord_scale_lane().empty());
-    // Re-saving lands on the current version with the lane materialized empty.
+    REQUIRE(decoded.find_sequence({2})->groove().is_canonical_default());
+    // Re-saving lands on the current version with both later context fields
+    // materialized at their canonical defaults.
     REQUIRE(take(serialize_project(decoded, registry)).json == current);
 }
 

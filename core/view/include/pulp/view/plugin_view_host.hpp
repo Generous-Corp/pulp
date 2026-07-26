@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/view/pending_damage.hpp>
 #include <pulp/view/view.hpp>
 #include <memory>
 #include <cstdint>
@@ -113,6 +114,34 @@ public:
 
     // Request a repaint (call when parameters change)
     virtual void repaint() = 0;
+
+    // ── Bounded repaint damage ──────────────────────────────────────────
+    //
+    // Mirrors WindowHost's pending-damage surface so `View::request_repaint(Rect)`
+    // has somewhere to put a bounded rect on the PLUG-IN path. Without this the
+    // producer discarded the rect and fell back to a full repaint, which made
+    // partial repaint unreachable for every plug-in editor on every platform.
+    //
+    // Damage only ever SHRINKS a repaint (see PendingDamage), so a host that
+    // ignores these is still correct — it just always repaints in full.
+    void mark_dirty_region(const Rect& root_rect) {
+        damage_.mark(root_rect);
+        repaint();
+    }
+    void mark_dirty_full() {
+        damage_.mark_full();
+        repaint();
+    }
+    bool pending_repaint_is_full() const { return damage_.is_full(); }
+    bool has_pending_dirty_bounds() const { return damage_.has_bounds(); }
+    Rect pending_dirty_bounds() const { return damage_.bounds(); }
+    /// Host calls this once the frame is painted and submitted.
+    void clear_pending_dirty() { damage_.clear(); }
+
+protected:
+    PendingDamage damage_;
+
+public:
 
     // Resize
     virtual void set_size(uint32_t width, uint32_t height) = 0;

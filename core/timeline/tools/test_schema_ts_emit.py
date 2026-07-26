@@ -129,7 +129,7 @@ def main() -> int:
                     "ref_arr": {
                         "type": "array",
                         "x-pulp-kind": "Array",
-                        "$ref": "#/$defs/pulp.test.target",
+                        "items": {"$ref": "#/$defs/pulp.test.target"},
                     },
                 },
                 "required": ["b", "u32"],

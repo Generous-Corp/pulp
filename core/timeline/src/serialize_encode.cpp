@@ -597,6 +597,34 @@ bool write_region(EncodeContext& context, const SequenceRegion& region) {
     });
 }
 
+bool write_groove(EncodeContext& context, const GrooveTemplate& groove) {
+    if (!context.writer.append("{\"name\":") || !context.writer.quoted(groove.name()) ||
+        !context.writer.append(",\"step\":") || !context.writer.i64(groove.step().value, true) ||
+        !context.writer.append(",\"steps\":["))
+        return false;
+    for (std::size_t index = 0; index < groove.steps().size(); ++index) {
+        const auto& step = groove.steps()[index];
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"timing_offset\":") ||
+            !context.writer.i64(step.timing_offset.value, true) ||
+            !context.writer.append(",\"velocity_scale\":") ||
+            !context.writer.u64(static_cast<std::uint64_t>(step.velocity_scale)) ||
+            !context.writer.character('}'))
+            return false;
+    }
+    return context.writer.append("],\"swing_denominator\":") &&
+           context.writer.i64(groove.swing().denominator, true) &&
+           context.writer.append(",\"swing_grid\":") &&
+           context.writer.i64(groove.swing_grid().value, true) &&
+           context.writer.append(",\"swing_numerator\":") &&
+           context.writer.i64(groove.swing().numerator, true) &&
+           context.writer.append(",\"timing_strength\":") &&
+           context.writer.u64(static_cast<std::uint64_t>(groove.timing_strength())) &&
+           context.writer.append(",\"velocity_strength\":") &&
+           context.writer.u64(static_cast<std::uint64_t>(groove.velocity_strength())) &&
+           context.writer.character('}');
+}
+
 bool write_sequence(EncodeContext& context, const Sequence& sequence) {
     return write_envelope(
         context, detail::sequence_schema_policy.type_name,
@@ -613,7 +641,9 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
             } else if (!context.writer.append("null"))
                 return false;
             if (!context.writer.append(",\"chord_scale_lane\":") ||
-                !write_chord_scale_lane(context, sequence.chord_scale_lane()))
+                !write_chord_scale_lane(context, sequence.chord_scale_lane()) ||
+                !context.writer.append(",\"groove\":") ||
+                !write_groove(context, sequence.groove()))
                 return false;
             if (!context.writer.append(",\"id\":") ||
                 !context.writer.u64(sequence.id().value, true) ||
@@ -689,6 +719,9 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
+        if (!is_valid_utf8(sequence.groove().name()))
+            return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                            sequence_path + "/groove/name");
         for (std::size_t index = 0; index < sequence.markers().size(); ++index)
             if (!is_valid_utf8(sequence.markers()[index].name))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,

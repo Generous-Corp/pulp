@@ -38,6 +38,7 @@
 #include <pulp/runtime/alive_token.hpp>
 
 #include <array>
+#include <set>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -73,6 +74,7 @@ class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                           public Steinberg::Vst::INoteExpressionController {
 public:
     PulpVst3Processor(ProcessorFactory factory);
+    ~PulpVst3Processor() override;
 
     // FUnknown — expose IMidiMapping alongside the SingleComponentEffect
     // interfaces. Refcounting is inherited from EditControllerEx1 via the
@@ -232,6 +234,14 @@ private:
     // add() on any block carrying MIDI allocated.
     midi::MidiBuffer midi_in_;
     midi::MidiBuffer midi_out_;
+
+    // Parameters the EDITOR currently has an open gesture on. The store's
+    // gesture callbacks maintain this; editor_param_listener_ consults it so
+    // only editor-driven writes are reported to the host with performEdit().
+    // A host-driven change arrives on the audio thread with no open gesture, so
+    // it can never be echoed straight back at the host.
+    std::set<state::ParamID> editing_params_;
+    state::ListenerToken editor_param_listener_;
 
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;

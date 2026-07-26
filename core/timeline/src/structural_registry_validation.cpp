@@ -35,9 +35,16 @@ bool has_contiguous_migration_path(std::span<const MigrationStep> steps,
 std::optional<PersistenceErrorCode>
 validate_structural_registry(const SchemaRegistry& registry) noexcept {
     struct ExpectedField {
+        constexpr ExpectedField(std::string_view field_name, SchemaValueKind field_kind,
+                                bool is_required = true,
+                                std::string_view reference = {}) noexcept
+            : name(field_name), kind(field_kind), required(is_required),
+              referenced_type(reference) {}
+
         std::string_view name;
         SchemaValueKind kind;
         bool required = true;
+        std::string_view referenced_type;
     };
     struct RequiredSchema {
         SchemaDomain domain;
@@ -75,6 +82,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField sequence_fields[] = {
         {"absolute_duration", SchemaValueKind::Object},
         {"chord_scale_lane", SchemaValueKind::Array},
+        {"groove", SchemaValueKind::Object, true, "pulp.timeline.groove_template"},
         {"id", SchemaValueKind::U64String},
         {"markers", SchemaValueKind::Array},
         {"musical_duration", SchemaValueKind::I64String},
@@ -88,6 +96,20 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {"position", SchemaValueKind::I64String},
         {"scale_mode", SchemaValueKind::String},
         {"scale_root", SchemaValueKind::U32},
+    };
+    static constexpr ExpectedField groove_template_fields[] = {
+        {"name", SchemaValueKind::String},
+        {"step", SchemaValueKind::I64String},
+        {"steps", SchemaValueKind::Array, true, "pulp.timeline.groove_step"},
+        {"swing_denominator", SchemaValueKind::I64String},
+        {"swing_grid", SchemaValueKind::I64String},
+        {"swing_numerator", SchemaValueKind::I64String},
+        {"timing_strength", SchemaValueKind::U32},
+        {"velocity_strength", SchemaValueKind::U32},
+    };
+    static constexpr ExpectedField groove_step_fields[] = {
+        {"timing_offset", SchemaValueKind::I64String},
+        {"velocity_scale", SchemaValueKind::U32},
     };
     static constexpr ExpectedField marker_fields[] = {
         {"color", SchemaValueKind::U32, false},
@@ -160,6 +182,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Document, sequence_schema_policy.type_name, sequence_fields,
          sequence_schema_policy.current_version, sequence_schema_policy.oldest_readable_version},
         {SchemaDomain::Document, "pulp.timeline.chord_scale_event", chord_scale_event_fields},
+        {SchemaDomain::Document, "pulp.timeline.groove_template", groove_template_fields},
+        {SchemaDomain::Document, "pulp.timeline.groove_step", groove_step_fields},
         {SchemaDomain::Document, "pulp.timeline.marker", marker_fields},
         {SchemaDomain::Document, "pulp.timeline.region", region_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
@@ -192,7 +216,8 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
             const auto& actual = schema->fields[index];
             const auto& field = expected.fields[index];
             if (actual.name != field.name || actual.kind != field.kind ||
-                actual.required != field.required || !actual.referenced_type.empty())
+                actual.required != field.required ||
+                actual.referenced_type != field.referenced_type)
                 return PersistenceErrorCode::InvalidSchema;
         }
     }

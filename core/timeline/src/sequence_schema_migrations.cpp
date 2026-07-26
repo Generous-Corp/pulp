@@ -1,9 +1,12 @@
 #include "sequence_schema_migrations.hpp"
 
+#include "sequence_schema_policy.hpp"
+
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace pulp::timeline::detail {
@@ -83,6 +86,34 @@ constexpr std::string_view v2_members[] = {
 constexpr std::string_view v3_members[] = {"absolute_duration", "chord_scale_lane", "id",
                                            "markers",           "musical_duration", "name",
                                            "regions",           "tracks"};
+constexpr std::string_view v4_members[] = {
+    "absolute_duration", "chord_scale_lane", "groove", "id",    "markers",
+    "musical_duration",  "name",             "regions", "tracks"};
+constexpr std::string_view groove_members[] = {
+    "name",            "step",            "steps",           "swing_denominator", "swing_grid",
+    "swing_numerator", "timing_strength", "velocity_strength"};
+
+bool scalar_is(const JsonValue& value, JsonValue::Kind kind, std::string_view expected) noexcept {
+    return value.kind == kind && value.scalar == expected;
+}
+
+// Whether the groove is the straight feel and nothing else. Every member is
+// checked, including the strengths that are inert without a feel to attenuate:
+// they are still data the user authored, and a downgrade may not drop authored
+// data quietly just because dropping it is inaudible.
+bool states_no_feel(const JsonValue& groove) noexcept {
+    if (!has_exact_members(groove, groove_members))
+        return false;
+    const auto& steps = groove.object[2].second;
+    return scalar_is(groove.object[0].second, JsonValue::Kind::String, "") &&
+           scalar_is(groove.object[1].second, JsonValue::Kind::String, "0") &&
+           steps.kind == JsonValue::Kind::Array && steps.array.empty() &&
+           scalar_is(groove.object[3].second, JsonValue::Kind::String, "2") &&
+           scalar_is(groove.object[4].second, JsonValue::Kind::String, "0") &&
+           scalar_is(groove.object[5].second, JsonValue::Kind::String, "1") &&
+           scalar_is(groove.object[6].second, JsonValue::Kind::Number, "1000") &&
+           scalar_is(groove.object[7].second, JsonValue::Kind::Number, "1000");
+}
 
 } // namespace
 
@@ -180,6 +211,55 @@ migrate_sequence_v3_to_v2(std::string_view source, BoundedJsonSink& output, cons
         return fail();
     std::array edits{RawEdit{lane_comma, lane.end, {}},
                      RawEdit{version->begin, version->end, "2"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v3_to_v4(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 3) || !has_exact_members(*data, v3_members) ||
+        version->begin >= version->end)
+        return fail();
+    // The groove sorts immediately after chord_scale_lane in canonical order,
+    // and has_exact_members already proved that order, so this offset is
+    // trustworthy.
+    const auto& lane_value = data->object[1].second;
+    if (lane_value.begin >= lane_value.end)
+        return fail();
+    std::string inserted = ",\"groove\":";
+    inserted += kStraightGrooveJson;
+    std::array edits{RawEdit{lane_value.end, lane_value.end, inserted},
+                     RawEdit{version->begin, version->end, "4"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v4_to_v3(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 4) || !has_exact_members(*data, v4_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& groove = data->object[2].second;
+    // A v3 reader has nowhere to put a feel. Writing the document without it
+    // would move every note in the sequence while reporting success, so only the
+    // straight groove a v3 reader would have produced can be dropped.
+    if (!states_no_feel(groove))
+        return fail();
+    const auto groove_comma = source.find(',', data->object[1].second.end);
+    if (groove_comma == std::string_view::npos || groove_comma >= groove.begin)
+        return fail();
+    std::array edits{RawEdit{groove_comma, groove.end, {}},
+                     RawEdit{version->begin, version->end, "3"}};
     return finish(output, apply_edits(source, edits, output));
 }
 

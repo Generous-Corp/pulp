@@ -30,6 +30,148 @@ std::vector<float> run_lfo(Lfo& lfo, int n) {
 
 } // namespace
 
+TEST_CASE("modulation scalar aliases start fresh and track their double forms",
+          "[signal][mod][parity][zero-init]") {
+    STATIC_REQUIRE(std::is_same_v<OuWalk64, OuWalkT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Drift64, DriftT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Lfo64, LfoT<double>>);
+    STATIC_REQUIRE(std::is_same_v<SlewLimiter64, SlewLimiterT<double>>);
+    STATIC_REQUIRE(std::is_same_v<SampleHold64, SampleHoldT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Attenuverter64, AttenuverterT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Rectifier64, RectifierT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Comparator64, ComparatorT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Quantizer64, QuantizerT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Curve64, CurveT<double>>);
+    STATIC_REQUIRE(std::is_same_v<LogisticMap64, LogisticMapT<double>>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<OuWalk64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Drift64&>().fraction()), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<Lfo64&>().next()), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<SlewLimiter64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<SampleHold64&>().process(0.0, false)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Attenuverter64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Rectifier64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Quantizer64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Curve64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<decltype(std::declval<LogisticMap64&>().next()), double>);
+    OuWalk walk; OuWalk64 walk64;
+    walk.prepare(1500.0); walk64.prepare(1500.0);
+    REQUIRE_THAT(static_cast<double>(walk.next()), WithinAbs(walk64.next(), 1.0e-6));
+
+    Drift drift; Drift64 drift64;
+    drift.prepare(48000.0); drift64.prepare(48000.0);
+    drift.next(); drift64.next();
+    REQUIRE_THAT(static_cast<double>(drift.pitch_factor()),
+                 WithinAbs(drift64.pitch_factor(), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(drift.fraction()),
+                 WithinAbs(drift64.fraction(), 1.0e-6));
+
+    Lfo lfo; Lfo64 lfo64;
+    lfo.prepare(48000.0); lfo64.prepare(48000.0);
+    lfo.set_rate_hz(7.25); lfo64.set_rate_hz(7.25);
+    lfo.set_wave(Lfo::Wave::triangle); lfo64.set_wave(Lfo64::Wave::triangle);
+    for (int i = 0; i < 64; ++i)
+        REQUIRE_THAT(static_cast<double>(lfo.next()), WithinAbs(lfo64.next(), 1.0e-6));
+
+    SlewLimiter slew; SlewLimiter64 slew64;
+    slew.prepare(48000.0f); slew64.prepare(48000.0);
+    REQUIRE_THAT(static_cast<double>(slew.process(1.0f)),
+                 WithinAbs(slew64.process(1.0), 1.0e-6));
+
+    SampleHold hold; SampleHold64 hold64;
+    hold.prepare(48000.0f); hold64.prepare(48000.0);
+    REQUIRE_THAT(static_cast<double>(hold.process(0.75f, true)),
+                 WithinAbs(hold64.process(0.75, true), 1.0e-6));
+
+    Attenuverter attenuverter; Attenuverter64 attenuverter64;
+    Rectifier rectifier; Rectifier64 rectifier64;
+    Comparator comparator; Comparator64 comparator64;
+    Quantizer quantizer; Quantizer64 quantizer64;
+    Curve curve; Curve64 curve64;
+    REQUIRE_THAT(static_cast<double>(attenuverter.process(0.25f)),
+                 WithinAbs(attenuverter64.process(0.25), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(rectifier.process(-0.25f)),
+                 WithinAbs(rectifier64.process(-0.25), 1.0e-6));
+    REQUIRE(comparator.process(0.75f) == comparator64.process(0.75));
+    REQUIRE_THAT(static_cast<double>(quantizer.process(0.37f)),
+                 WithinAbs(quantizer64.process(0.37), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(curve.process(0.37f)),
+                 WithinAbs(curve64.process(0.37), 1.0e-6));
+
+    LogisticMap chaos; LogisticMap64 chaos64;
+    REQUIRE_THAT(static_cast<double>(chaos.next()), WithinAbs(chaos64.next(), 1.0e-6));
+
+    lfo.reset(); lfo64.reset();
+    slew.reset(); slew64.reset();
+    hold.reset(); hold64.reset();
+    chaos.reset(); chaos64.reset();
+    REQUIRE_THAT(static_cast<double>(lfo.next()), WithinAbs(lfo64.next(), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(slew.process(0.5f)),
+                 WithinAbs(slew64.process(0.5), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(hold.process(0.5f, true)),
+                 WithinAbs(hold64.process(0.5, true), 1.0e-6));
+    REQUIRE_THAT(static_cast<double>(chaos.next()), WithinAbs(chaos64.next(), 1.0e-6));
+}
+
+TEST_CASE("modulation scalar raw value-initialized state replays after reset",
+          "[signal][mod][zero-init]") {
+    OuWalk walk; OuWalk64 walk64;
+    const auto walk_first = walk.next();
+    const auto walk64_first = walk64.next();
+    walk.reset(); walk64.reset();
+    REQUIRE(walk.next() == walk_first);
+    REQUIRE(walk64.next() == walk64_first);
+
+    Drift drift; Drift64 drift64;
+    drift.next(); drift64.next();
+    const auto drift_first = drift.fraction();
+    const auto drift64_first = drift64.fraction();
+    drift.reset(); drift64.reset();
+    drift.next(); drift64.next();
+    REQUIRE(drift.fraction() == drift_first);
+    REQUIRE(drift64.fraction() == drift64_first);
+
+    Lfo lfo; Lfo64 lfo64;
+    const auto lfo_first = lfo.next();
+    const auto lfo64_first = lfo64.next();
+    lfo.reset(); lfo64.reset();
+    REQUIRE(lfo.next() == lfo_first);
+    REQUIRE(lfo64.next() == lfo64_first);
+
+    SlewLimiter slew; SlewLimiter64 slew64;
+    const auto slew_first = slew.process(0.75f);
+    const auto slew64_first = slew64.process(0.75);
+    slew.reset(); slew64.reset();
+    REQUIRE(slew.process(0.75f) == slew_first);
+    REQUIRE(slew64.process(0.75) == slew64_first);
+
+    SampleHold hold; SampleHold64 hold64;
+    const auto hold_first = hold.process(0.75f, true);
+    const auto hold64_first = hold64.process(0.75, true);
+    hold.reset(); hold64.reset();
+    REQUIRE(hold.process(0.75f, true) == hold_first);
+    REQUIRE(hold64.process(0.75, true) == hold64_first);
+
+    Comparator comparator; Comparator64 comparator64;
+    const bool comparator_first = comparator.process(0.75f);
+    const bool comparator64_first = comparator64.process(0.75);
+    comparator.reset(); comparator64.reset();
+    REQUIRE(comparator.process(0.75f) == comparator_first);
+    REQUIRE(comparator64.process(0.75) == comparator64_first);
+
+    LogisticMap chaos; LogisticMap64 chaos64;
+    const auto chaos_first = chaos.next();
+    const auto chaos64_first = chaos64.next();
+    chaos.reset(); chaos64.reset();
+    REQUIRE(chaos.next() == chaos_first);
+    REQUIRE(chaos64.next() == chaos64_first);
+}
+
 // ── rng ──────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Xorshift32 is bit-deterministic per seed", "[signal][mod][rng]") {

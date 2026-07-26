@@ -30,11 +30,41 @@
 #include "include/gpu/graphite/Surface.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <limits>
 
 namespace pulp::canvas {
 
+class SkiaCanvas::RetainedLayerStore {
+public:
+    std::vector<std::pair<uint64_t, SkiaLayer>> layers;
+    const void* owner = nullptr;
+    uint8_t backend_kind = 0;
+};
+
+std::shared_ptr<SkiaCanvas::RetainedLayerStore>
+SkiaCanvas::create_retained_layer_store() {
+    return std::make_shared<RetainedLayerStore>();
+}
+
 namespace {
+
+uint64_t next_layer_id() {
+    static std::atomic<uint64_t> next{1};
+    uint64_t candidate = next.load(std::memory_order_relaxed);
+    while (candidate != 0 &&
+           candidate != std::numeric_limits<uint64_t>::max()) {
+        if (next.compare_exchange_weak(candidate,
+                                       candidate + 1,
+                                       std::memory_order_relaxed,
+                                       std::memory_order_relaxed)) {
+            return candidate;
+        }
+    }
+    // Never recycle an ID: a stale handle must not resolve to new content.
+    return 0;
+}
 
 /// Largest offscreen layer we will allocate, per axis. A layer bounds fed in
 /// from a broken layout pass (or a hostile design import) can otherwise ask
@@ -89,6 +119,53 @@ SkPaint::Join to_sk_join(LineJoin join) {
 }
 
 }  // namespace
+
+void SkiaCanvas::bind_retained_layer_store(const void* owner,
+                                           uint8_t backend_kind) {
+    if (!owner || backend_kind == 0) return;
+    if (retained_layers_->owner &&
+        (retained_layers_->owner != owner ||
+         retained_layers_->backend_kind != backend_kind)) {
+        // GPU images cannot cross the recorder/context that created them.
+        retained_layers_->layers.clear();
+    }
+    retained_layers_->owner = owner;
+    retained_layers_->backend_kind = backend_kind;
+}
+
+SkiaCanvas::SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder)
+    : SkiaCanvas(canvas, recorder, create_retained_layer_store()) {
+    // A private per-instance store cannot promise persistence when a host
+    // replaces this canvas on the next frame.
+    retained_layer_cache_supported_ = false;
+}
+
+SkiaCanvas::SkiaCanvas(
+    SkCanvas* canvas,
+    skgpu::graphite::Recorder* recorder,
+    std::shared_ptr<RetainedLayerStore> retained_layers)
+    : canvas_(canvas),
+      recorder_(recorder),
+      retained_layers_(retained_layers
+                           ? retained_layers
+                           : create_retained_layer_store()),
+      retained_layer_cache_supported_(retained_layers != nullptr) {
+    if (recorder_) bind_retained_layer_store(recorder_, 1);
+}
+
+SkiaCanvas::~SkiaCanvas() {
+    // Unbalanced layers are canvas-local. Unwind the redirects before their
+    // temporary surfaces are released.
+    while (!open_layers_.empty()) {
+        canvas_ = open_layers_.back().previous_canvas;
+        open_layers_.pop_back();
+    }
+}
+
+void SkiaCanvas::set_gpu_upload_context(GrDirectContext* context) {
+    gr_context_ = context;
+    if (context) bind_retained_layer_store(context, 2);
+}
 
 // ── Retained path draws ──────────────────────────────────────────────────
 
@@ -197,14 +274,14 @@ void SkiaCanvas::draw_path_shadow(const Path& path, float dx, float dy,
 
 SkiaCanvas::SkiaLayer* SkiaCanvas::find_layer(uint64_t id) {
     if (id == 0) return nullptr;
-    for (auto& [lid, rec] : layers_)
+    for (auto& [lid, rec] : retained_layers_->layers)
         if (lid == id) return &rec;
     return nullptr;
 }
 
 const SkiaCanvas::SkiaLayer* SkiaCanvas::find_layer(uint64_t id) const {
     if (id == 0) return nullptr;
-    for (const auto& [lid, rec] : layers_)
+    for (const auto& [lid, rec] : retained_layers_->layers)
         if (lid == id) return &rec;
     return nullptr;
 }
@@ -249,16 +326,15 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
     lc->scale(sx, sy);
     lc->translate(-bounds.x, -bounds.y);
 
-    const uint64_t id = next_layer_id_++;
+    const uint64_t id = next_layer_id();
+    if (id == 0) return LayerHandle{};
     SkiaLayer rec;
     rec.surface = surface;
     rec.bounds = bounds;
     rec.scale_x = sx;
     rec.scale_y = sy;
     rec.cacheable = cacheable;
-    layers_.emplace_back(id, std::move(rec));
-
-    open_layers_.push_back(OpenLayer{id, canvas_});
+    open_layers_.push_back(OpenLayer{id, canvas_, std::move(rec), false});
     canvas_ = lc;  // redirect every subsequent draw into the layer
     return LayerHandle{id};
 }
@@ -266,23 +342,23 @@ Canvas::LayerHandle SkiaCanvas::begin_layer(Rect2D bounds, bool cacheable) {
 Canvas::LayerHandle SkiaCanvas::end_layer() {
     if (open_layers_.empty()) return LayerHandle{};  // unbalanced — ignore
 
-    const OpenLayer open = open_layers_.back();
+    OpenLayer open = std::move(open_layers_.back());
     open_layers_.pop_back();
     canvas_ = open.previous_canvas;  // stop drawing into the layer
 
-    SkiaLayer* rec = find_layer(open.id);
-    if (rec == nullptr) return LayerHandle{};
+    if (open.cancelled) return LayerHandle{};
 
-    if (rec->surface) {
+    if (open.layer.surface) {
         // Seal it. The snapshot is what OUTLIVES the frame — this is the step
         // a scoped save_layer/restore pair can never hand back to a caller.
-        rec->image = rec->surface->makeImageSnapshot();
-        rec->surface.reset();  // the surface's job is done; free it
+        open.layer.image = open.layer.surface->makeImageSnapshot();
+        open.layer.surface.reset();  // the surface's job is done; free it
     }
-    if (!rec->image) {
-        invalidate_layer(LayerHandle{open.id});
-        return LayerHandle{};
-    }
+    if (!open.layer.image) return LayerHandle{};
+
+    // Only sealed images enter the renderer-owned cross-frame store. An open
+    // surface stays local, so invalidation cannot leave a dangling SkCanvas.
+    retained_layers_->layers.emplace_back(open.id, std::move(open.layer));
     return LayerHandle{open.id};
 }
 
@@ -353,9 +429,16 @@ bool SkiaCanvas::layer_valid(LayerHandle layer) const {
 
 void SkiaCanvas::invalidate_layer(LayerHandle layer) {
     if (layer.id == 0) return;
-    for (auto it = layers_.begin(); it != layers_.end(); ++it) {
+    for (auto& open : open_layers_) {
+        if (open.id == layer.id) {
+            open.cancelled = true;
+            return;
+        }
+    }
+    auto& layers = retained_layers_->layers;
+    for (auto it = layers.begin(); it != layers.end(); ++it) {
         if (it->first == layer.id) {
-            layers_.erase(it);
+            layers.erase(it);
             return;
         }
     }

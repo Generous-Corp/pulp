@@ -11,6 +11,11 @@ for anything that computes coefficients, and an explicit RT contract in every
 header. All of it is allocation-free after `prepare()` and covered by the
 allocation-probe roster.
 
+The three event-only counters (`ClockDividerT`, `ClockMultT`, and `TrigDelayT`)
+contain no sample-valued state. Their `Foo64` spellings therefore alias the same
+precision-independent implementation instead of adding a dummy template
+parameter.
+
 ```cpp
 #include <pulp/signal/lfo.hpp>       // or the umbrella <pulp/signal/signal.hpp>
 #include <pulp/signal/envelope.hpp>
@@ -214,13 +219,24 @@ analog-life layer, with one knob (`sigma`) from subtle to seasick.
 
 ## Where this replaces existing code
 
-Three private LFOs predate `LfoT` and should migrate onto it: the ones inside
-`chorus.hpp` and `phaser.hpp`, and the four-shape oscillator inside the Forge
-lo-fi catalog's `lfo` node. Several xorshift PRNGs open-coded across the tree
-should migrate onto `Xorshift32`. Those migrations carry their own compatibility
-questions — the catalog node's triangle runs in the opposite phase to `LfoT`'s,
-so swapping it would change artifacts already baked against it — and are
-deliberately not part of adding this library.
+The exact follow-up migration inventory is:
+
+- private LFOs in `chorus.hpp` and `phaser.hpp`, plus the four-shape oscillator
+  in the Forge lo-fi catalog's `lfo` node;
+- xorshift32 implementations in `lofi_chain.hpp`, `noise_source.hpp`,
+  `character_delay/primitives.hpp`, `drum/clap.hpp`, and
+  `fdn/modulation.hpp`; spectral processors also carry a separate xorshift64
+  family whose sequence compatibility must be handled independently;
+- walk/drift implementations in `character_delay/primitives.hpp` and
+  `fdn/modulation.hpp`;
+- the drum low-pass gate implemented in `lowpass_gate.hpp` and used directly
+  by `drum/membrane.hpp`;
+- the FDN transient ducker in `fdn/stages.hpp`.
+
+These are named migration targets, not permission for silent swaps. The Forge
+catalog node's triangle runs in the opposite phase to `LfoT`'s, PRNG migrations
+can change deterministic renders, and character primitives can change baked
+sound. Each migration needs its own compatibility proof.
 
 ## In Forge
 

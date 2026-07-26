@@ -185,7 +185,17 @@ endif()
 # propagates PULP_TRACING_ENABLED to in-build consumers. Wrapped in
 # BUILD_INTERFACE (same pattern as pulp-cpp-httplib above) so this dev-only
 # target is not required by the installed PulpTargets export set.
-target_link_libraries(pulp-runtime PUBLIC $<BUILD_INTERFACE:pulp-tracing>)
+# With tracing OFF (the default and only shippable config) pulp-tracing is an
+# empty INTERFACE target that must NOT appear in the installed export, so it is
+# wrapped in BUILD_INTERFACE. With tracing ON the dependency is real — every TU
+# is compiled with PULP_TRACING_ENABLED=1 and pulls in Perfetto symbols — so the
+# export MUST carry it, or consumers of the installed SDK fail to link. The
+# install rules add pulp-tracing/pulp-perfetto to PulpTargets in that case.
+if(PULP_TRACING)
+    target_link_libraries(pulp-runtime PUBLIC pulp-tracing)
+else()
+    target_link_libraries(pulp-runtime PUBLIC $<BUILD_INTERFACE:pulp-tracing>)
+endif()
 
 # Mbed TLS for cryptographic operations (SHA-256, RSA, AES — used directly by
 # crypto.cpp, independent of HTTP).

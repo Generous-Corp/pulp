@@ -572,6 +572,12 @@ public:
     /// rect, not `local_bounds()`, or the overspill is left stale.
     void request_repaint(const Rect& local_dirty);
 
+    /// Invalidate only THIS view's own rect, overscanned by `halo` so a glow,
+    /// focus ring or modulation arc painting outside local_bounds() is covered.
+    /// Use on hot value paths; the rect-less form dirties the whole surface and
+    /// is for structural changes. See view.cpp for the correctness rationale.
+    void request_repaint_self(float halo = 4.0f);
+
     /// Drag existing on-disk files out of this view to another app (e.g. drop a
     /// rendered .wav onto a DAW timeline). Routes through the attached host's
     /// native view to the platform backend; call from a pointer handler. False

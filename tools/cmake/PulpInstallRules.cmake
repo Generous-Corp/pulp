@@ -156,6 +156,32 @@ if(TARGET yogacore)
         )
     endif()
 endif()
+# Perfetto tracing (PULP_TRACING=ON only; the OFF default defines an empty
+# INTERFACE target and installs nothing).
+#
+# Without this, an SDK built with tracing ON is UNUSABLE by consumers: every
+# Pulp library is compiled with PULP_TRACING_ENABLED=1 and therefore contains
+# Perfetto symbols, but the export said nothing about Perfetto, so linking a
+# plug-in against the installed SDK failed with unresolved perfetto:: symbols.
+# That is why tracing could be used inside the Pulp build tree but never from a
+# plug-in project — including the Windows plug-in editors we most wanted to
+# profile. Ship the static lib, the amalgamated header, and the interface target
+# so `pulp::tracing` resolves in the install tree exactly as it does in-build.
+if(TARGET pulp-perfetto)
+    set_target_properties(pulp-perfetto PROPERTIES EXPORT_NAME perfetto)
+    set_target_properties(pulp-tracing PROPERTIES EXPORT_NAME tracing)
+    install(TARGETS pulp-perfetto pulp-tracing
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    )
+    if(PULP_PERFETTO_SOURCE_DIR AND EXISTS "${PULP_PERFETTO_SOURCE_DIR}/perfetto.h")
+        install(FILES "${PULP_PERFETTO_SOURCE_DIR}/perfetto.h"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
+endif()
 if(TARGET hwy)
     install(TARGETS hwy
         EXPORT PulpTargets

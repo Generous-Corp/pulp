@@ -41,6 +41,7 @@ public:
     void on_mouse_drag(Point pos) override {
         ++drags;
         last_drag = pos;
+        if (after_mouse_drag) after_mouse_drag();
     }
     void on_mouse_up(Point pos) override {
         ++ups;
@@ -49,6 +50,7 @@ public:
     void on_mouse_event(const MouseEvent& event) override {
         last_event = event;
         ++events;
+        if (after_mouse_event) after_mouse_event(event);
     }
     bool on_key_event(const KeyEvent& event) override {
         last_key = event;
@@ -64,6 +66,8 @@ public:
     MouseEvent last_event{};
     KeyEvent last_key{};
     std::string text;
+    std::function<void()> after_mouse_drag;
+    std::function<void(const MouseEvent&)> after_mouse_event;
 };
 
 }  // namespace
@@ -388,6 +392,15 @@ TEST_CASE("WebInputRouter routes a press/drag/release gesture", "[view][web][inp
     CHECK(router.focused_view() == spy);
     CHECK(dirty > 0);
 
+    // Scripted controls subscribe to on_drag for their JS pointermove stream.
+    // The legacy on_mouse_drag override above is a separate channel.
+    int scripted_moves = 0;
+    Point last_scripted_move{};
+    spy->on_drag = [&](Point move) {
+        ++scripted_moves;
+        last_scripted_move = move;
+    };
+
     BrowserPointerEvent drag = down;
     drag.phase = BrowserPointerPhase::move;
     drag.css_x = 140;
@@ -396,6 +409,8 @@ TEST_CASE("WebInputRouter routes a press/drag/release gesture", "[view][web][inp
     CHECK(spy->drags == 1);
     CHECK(spy->last_event.phase == MousePhase::drag);
     CHECK_THAT(spy->last_drag.y, WithinAbs(40.0, 1e-4));
+    CHECK(scripted_moves == 1);
+    CHECK_THAT(last_scripted_move.y, WithinAbs(40.0, 1e-4));
 
     BrowserPointerEvent up = drag;
     up.phase = BrowserPointerPhase::up;
@@ -403,10 +418,154 @@ TEST_CASE("WebInputRouter routes a press/drag/release gesture", "[view][web][inp
     REQUIRE(router.handle_pointer(up));
     CHECK(spy->ups == 1);
     CHECK(router.drag_target() == nullptr);
+    CHECK(scripted_moves == 1);  // release is an edge, never another move
 
     // A drag that leaves the child still tracks it (pointer capture), and a
     // release outside it still lands on the captured view.
     CHECK(spy->downs == 1);
+
+    BrowserPointerEvent hover = up;
+    hover.phase = BrowserPointerPhase::move;
+    hover.css_x = 135;
+    hover.css_y = 75;
+    REQUIRE(router.handle_pointer(hover));
+    CHECK(scripted_moves == 1);  // hover without capture is not a drag
+
+}
+
+TEST_CASE("WebInputRouter drops capture when a drag handler unmounts its target",
+          "[view][web][input]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto child = std::make_unique<InputSpy>();
+    InputSpy* spy = child.get();
+    spy->set_bounds({100, 50, 120, 80});
+    root.add_child(std::move(child));
+
+    std::unique_ptr<View> detached;
+    spy->after_mouse_drag = [&] { detached = root.remove_child(spy); };
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 300, 0, 0));
+
+    BrowserPointerEvent down;
+    down.css_x = 130;
+    down.css_y = 70;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    REQUIRE(router.handle_pointer(down));
+    REQUIRE(router.drag_target() == spy);
+
+    BrowserPointerEvent drag = down;
+    drag.phase = BrowserPointerPhase::move;
+    drag.css_y = 90;
+    REQUIRE(router.handle_pointer(drag));
+    CHECK(spy->drags == 1);
+    CHECK(router.drag_target() == nullptr);
+    CHECK(router.focused_view() == nullptr);
+    CHECK_FALSE(spy->has_focus());
+    CHECK(View::focused_input_ == nullptr);
+
+    // A later release cannot dereference the detached target or reach it again.
+    BrowserPointerEvent up = drag;
+    up.phase = BrowserPointerPhase::up;
+    up.buttons = 0;
+    CHECK_FALSE(router.handle_pointer(up));
+    CHECK(spy->ups == 0);
+}
+
+TEST_CASE("WebInputRouter keeps concurrent touch captures separated",
+          "[view][web][input]") {
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    auto left_child = std::make_unique<InputSpy>();
+    auto right_child = std::make_unique<InputSpy>();
+    InputSpy* left = left_child.get();
+    InputSpy* right = right_child.get();
+    left->set_bounds({0, 0, 190, 200});
+    right->set_bounds({210, 0, 190, 200});
+    root.add_child(std::move(left_child));
+    root.add_child(std::move(right_child));
+
+    int left_moves = 0;
+    int right_moves = 0;
+    int left_id = 0;
+    int right_id = 0;
+    left->on_pointer_move = [&](const MouseEvent& e) {
+        ++left_moves;
+        left_id = e.pointer_id;
+    };
+    right->on_pointer_move = [&](const MouseEvent& e) {
+        ++right_moves;
+        right_id = e.pointer_id;
+    };
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(400, 200, 0, 0));
+    BrowserPointerEvent a;
+    a.css_x = 50;
+    a.css_y = 50;
+    a.buttons = 1;
+    a.pointer_id = 11;
+    a.is_primary = false;
+    a.pointer_type = BrowserPointerType::touch;
+    a.phase = BrowserPointerPhase::down;
+    BrowserPointerEvent b = a;
+    b.css_x = 250;
+    b.pointer_id = 22;
+    REQUIRE(router.handle_pointer(a));
+    REQUIRE(router.handle_pointer(b));
+
+    a.phase = BrowserPointerPhase::move;
+    b.phase = BrowserPointerPhase::move;
+    REQUIRE(router.handle_pointer(a));
+    REQUIRE(router.handle_pointer(b));
+    CHECK(left_moves == 1);
+    CHECK(right_moves == 1);
+    CHECK(left_id == 11);
+    CHECK(right_id == 22);
+
+    a.phase = BrowserPointerPhase::up;
+    a.buttons = 0;
+    REQUIRE(router.handle_pointer(a));
+    b.css_y = 60;
+    REQUIRE(router.handle_pointer(b));
+    CHECK(right_moves == 2);
+}
+
+TEST_CASE("WebInputRouter survives scripted release teardown",
+          "[view][web][input]") {
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    auto child = std::make_unique<InputSpy>();
+    InputSpy* spy = child.get();
+    spy->set_bounds({0, 0, 200, 100});
+    root.add_child(std::move(child));
+
+    std::unique_ptr<View> detached;
+    spy->after_mouse_event = [&](const MouseEvent& event) {
+        if (event.phase == MousePhase::release)
+            detached = root.remove_child(spy);
+    };
+
+    WebInputRouter router(root);
+    router.set_mapping(make_mapping(200, 100, 0, 0));
+    BrowserPointerEvent down;
+    down.css_x = 20;
+    down.css_y = 20;
+    down.buttons = 1;
+    down.phase = BrowserPointerPhase::down;
+    REQUIRE(router.handle_pointer(down));
+
+    BrowserPointerEvent up = down;
+    up.buttons = 0;
+    up.phase = BrowserPointerPhase::up;
+    REQUIRE(router.handle_pointer(up));
+    CHECK(spy->ups == 0);
+    CHECK(router.drag_target() == nullptr);
+    CHECK(router.focused_view() == nullptr);
+    CHECK_FALSE(spy->has_focus());
 }
 
 TEST_CASE("WebInputRouter delivers keys and text to the focused view",
