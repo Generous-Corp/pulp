@@ -181,12 +181,17 @@ public:
         capacity_ = std::max<std::size_t>(capacity_samples, 8u);
         buffer_.assign(capacity_, 0.0f);
         write_ = 0;
+        valid_ = 0;
     }
 
     void reset() noexcept {
         std::fill(buffer_.begin(), buffer_.end(), 0.0f);
         write_ = 0;
+        valid_ = 0;
     }
+
+    /// Logically clear history without walking the allocation.
+    void discard_history() noexcept { write_ = valid_ = 0; }
 
     std::size_t capacity() const noexcept { return capacity_; }
 
@@ -199,10 +204,12 @@ public:
     void push(double x) noexcept {
         buffer_[write_] = static_cast<float>(x);
         if (++write_ >= capacity_) write_ = 0;
+        if (valid_ < capacity_) ++valid_;
     }
 
     /// Sample `m` samples in the past; m = 0 is the most recent push().
     double tap(std::size_t m) const noexcept {
+        if (m >= valid_) return 0.0;
         const std::size_t index = (write_ + capacity_ - 1u - m) % capacity_;
         return static_cast<double>(buffer_[index]);
     }
@@ -243,6 +250,7 @@ private:
     std::vector<float> buffer_;
     std::size_t capacity_ = 8;
     std::size_t write_ = 0;
+    std::size_t valid_ = 0;
 };
 
 // ── 1-pole TPT filter ─────────────────────────────────────────────────────
@@ -412,20 +420,26 @@ public:
         capacity_ = std::max<std::size_t>(max_taps, 1u);
         history_.assign(capacity_, 0.0);
         write_ = 0;
+        valid_ = 0;
     }
 
     void reset() noexcept {
         std::fill(history_.begin(), history_.end(), 0.0);
         write_ = 0;
+        valid_ = 0;
     }
+
+    /// Logically clear history without walking the allocation.
+    void discard_history() noexcept { write_ = valid_ = 0; }
 
     void push(double x) noexcept {
         history_[write_] = x;
         if (++write_ >= capacity_) write_ = 0;
+        if (valid_ < capacity_) ++valid_;
     }
 
     double convolve(const double* coefficients, std::size_t taps) const noexcept {
-        const std::size_t n = std::min(taps, capacity_);
+        const std::size_t n = std::min({taps, capacity_, valid_});
         double sum = 0.0;
         std::size_t index = write_;
         for (std::size_t i = 0; i < n; ++i) {
@@ -439,6 +453,7 @@ private:
     std::vector<double> history_;
     std::size_t capacity_ = 1;
     std::size_t write_ = 0;
+    std::size_t valid_ = 0;
 };
 
 // ── Attack/release envelope follower ──────────────────────────────────────

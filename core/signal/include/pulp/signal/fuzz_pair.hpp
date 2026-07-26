@@ -344,6 +344,7 @@ public:
     /// Feedback-network engagement, 0..1. At 1 the loop gain approaches the
     /// tested ceiling.
     void set_fuzz(double amount01) {
+        if (!std::isfinite(amount01)) return;
         fuzz_ = std::clamp(amount01, 0.0, 1.0);
         update();
     }
@@ -351,6 +352,7 @@ public:
     /// 0 = healthy supply, 1 = fully starved. Lowers the quiescent bias toward
     /// cutoff, which is what makes the stage gate rather than go quiet.
     void set_bias_starve(double starve01) {
+        if (!std::isfinite(starve01)) return;
         starve_ = std::clamp(starve01, 0.0, 1.0);
         update();
     }
@@ -362,15 +364,20 @@ public:
     /// toward cleaner, which is why this circuit family cleans up so much more
     /// dramatically than a plain gain stage.
     void set_source_impedance_kohm(double kohm) {
+        if (!std::isfinite(kohm)) return;
         source_kohm_ = std::clamp(kohm, 0.1, 1000.0);
         update();
     }
 
     void set_output_level_db(double db) {
+        if (!std::isfinite(db)) return;
         output_gain_ = units::db_to_linear(std::clamp(db, -24.0, 24.0));
     }
 
-    void set_mix(double mix01) { mix_ = std::clamp(mix01, 0.0, 1.0); }
+    void set_mix(double mix01) {
+        if (!std::isfinite(mix01)) return;
+        mix_ = std::clamp(mix01, 0.0, 1.0);
+    }
 
     /// Test-only escape hatch: runs the nonlinearity at the base rate so the
     /// aliasing the oversampler removes can be measured.

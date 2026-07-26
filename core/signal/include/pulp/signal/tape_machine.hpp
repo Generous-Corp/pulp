@@ -926,7 +926,7 @@ public:
             // non-finite frame as a recovery boundary before it can latch
             // those states; reset is allocation-free by contract.
             if (!std::isfinite(dry_l) || !std::isfinite(dry_r)) {
-                reset();
+                recover_audio_fault();
                 out_l[n] = SampleType{0};
                 out_r[n] = SampleType{0};
                 continue;
@@ -968,7 +968,7 @@ public:
             const double output_l = dry_l + mix_ * (left - dry_l);
             const double output_r = dry_r + mix_ * (right - dry_r);
             if (!std::isfinite(output_l) || !std::isfinite(output_r)) {
-                reset();
+                recover_audio_fault();
                 out_l[n] = SampleType{0};
                 out_r[n] = SampleType{0};
                 continue;
@@ -1087,6 +1087,12 @@ public:
     double sample_rate() const noexcept { return sample_rate_; }
 
 private:
+    void recover_audio_fault() noexcept {
+        for (auto& channel : channels_) channel.recover_audio_fault();
+        compander_l_.reset();
+        compander_r_.reset();
+    }
+
     /// Where a print-through read lands, in samples. Two integers rather than a
     /// millisecond value so `process()` never converts.
     struct PrintTaps {
@@ -1111,6 +1117,7 @@ private:
         std::vector<double> gap_taps{};
         std::vector<float> print_line{};
         std::size_t print_write = 0;
+        std::size_t print_valid = 0;
 
         double wow_depth_ms = 0.0;
         double flutter_depth_ms = 0.0;
@@ -1167,6 +1174,7 @@ private:
                 2.0 * units::ms_to_samples(kPrintThroughOffsetMsMax, fs))) + 4u;
             print_line.assign(print_capacity, 0.0f);
             print_write = 0;
+            print_valid = 0;
         }
 
         void reset() {
@@ -1180,6 +1188,20 @@ private:
             playback_eq.reset();
             std::fill(print_line.begin(), print_line.end(), 0.0f);
             print_write = 0;
+            print_valid = 0;
+        }
+
+        void recover_audio_fault() noexcept {
+            physical.recover_audio_fault();
+            instability.reset();
+            instability_line.discard_history();
+            gap_fir.discard_history();
+            bias_shelf.reset();
+            crosstalk_tilt.reset();
+            record_eq.reset();
+            playback_eq.reset();
+            print_write = 0;
+            print_valid = 0;
         }
 
         void set_gap_taps(std::vector<double> taps) {
@@ -1227,6 +1249,7 @@ private:
 
             print_line[print_write] = static_cast<float>(x);
             const auto at = [&](std::size_t back) {
+                if (back >= print_valid + 1u) return 0.0;
                 return static_cast<double>(print_line[(print_write + size - back) % size]);
             };
 
@@ -1239,6 +1262,7 @@ private:
                 y = at(0) + taps.post_gain * at(offset);
             }
             print_write = (print_write + 1u) % size;
+            if (print_valid < size) ++print_valid;
             return y;
         }
     };

@@ -193,6 +193,8 @@ public:
         for (auto& ring : lookahead_) std::fill(ring.begin(), ring.end(), SampleType{0});
         write_index_[0] = 0;
         write_index_[1] = 0;
+        lookahead_valid_[0] = 0;
+        lookahead_valid_[1] = 0;
     }
 
     // ── Controls (real units throughout) ──────────────────────────────────
@@ -298,7 +300,7 @@ public:
         // lookahead history. Clear the owned recursive state so the very next
         // finite sample is processed from a valid, deterministic state.
         if (!std::isfinite(static_cast<double>(input))) {
-            reset();
+            recover_audio_fault();
             return SampleType{0};
         }
         const double level_db = detect_level_db(0, static_cast<double>(input));
@@ -311,7 +313,7 @@ public:
     void process_stereo(SampleType& left, SampleType& right) {
         if (!std::isfinite(static_cast<double>(left)) ||
             !std::isfinite(static_cast<double>(right))) {
-            reset();
+            recover_audio_fault();
             left = SampleType{0};
             right = SampleType{0};
             return;
@@ -343,6 +345,12 @@ public:
     }
 
 private:
+    void recover_audio_fault() noexcept {
+        for (auto& ch : channels_) ch = ChannelState{};
+        write_index_[0] = write_index_[1] = 0;
+        lookahead_valid_[0] = lookahead_valid_[1] = 0;
+    }
+
     struct ChannelState {
         double mean_square = 0.0;      ///< RMS detector integrator.
         double release_stage = 0.0;    ///< Decoupled detector, stage 1.
@@ -406,9 +414,12 @@ private:
         std::size_t& write = write_index_[index];
         const std::size_t read =
             (write + size - static_cast<std::size_t>(lookahead_samples_)) % size;
-        const SampleType out = ring[read];
+        const SampleType out = lookahead_valid_[index] >= static_cast<std::size_t>(lookahead_samples_)
+                                   ? ring[read]
+                                   : SampleType{0};
         ring[write] = input;
         write = (write + 1) % size;
+        if (lookahead_valid_[index] < size) ++lookahead_valid_[index];
         return out;
     }
 
@@ -471,6 +482,7 @@ private:
     ChannelState channels_[2]{};
     std::vector<SampleType> lookahead_[2]{};
     std::size_t write_index_[2]{0, 0};
+    std::size_t lookahead_valid_[2]{0, 0};
 };
 
 using FeedforwardCompressor = FeedforwardCompressorT<float>;

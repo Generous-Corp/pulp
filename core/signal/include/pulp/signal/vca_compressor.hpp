@@ -217,6 +217,7 @@ public:
         gain_linear_ = units::db_to_linear(makeup_db_);
         std::fill(lookahead_.begin(), lookahead_.end(), SampleType{0});
         write_index_ = 0;
+        lookahead_valid_ = 0;
     }
 
     // ── Controls (real units throughout) ──────────────────────────────────
@@ -349,7 +350,7 @@ public:
         // detector or the lookahead ring: both are recursive state and would
         // otherwise remain poisoned after the bad sample has passed.
         if (!std::isfinite(static_cast<double>(input))) {
-            reset();
+            recover_audio_fault();
             return SampleType{0};
         }
         level_db_ = detect_level_db(static_cast<double>(input));
@@ -368,6 +369,15 @@ public:
     }
 
 private:
+    void recover_audio_fault() noexcept {
+        mean_square_ = 0.0;
+        level_db_ = 10.0 * std::log10(kFloorLinear);
+        gain_reduction_db_ = 0.0;
+        gain_linear_ = units::db_to_linear(makeup_db_);
+        write_index_ = 0;
+        lookahead_valid_ = 0;
+    }
+
     /// Instantaneous mean square through one direction-switched pole, read out
     /// as power dB. `10·log10`, not 20, because the integrator already holds a
     /// squared quantity.
@@ -385,9 +395,12 @@ private:
         const std::size_t size = lookahead_.size();
         const std::size_t read =
             (write_index_ + size - static_cast<std::size_t>(lookahead_samples_)) % size;
-        const SampleType out = lookahead_[read];
+        const SampleType out = lookahead_valid_ >= static_cast<std::size_t>(lookahead_samples_)
+                                   ? lookahead_[read]
+                                   : SampleType{0};
         lookahead_[write_index_] = input;
         write_index_ = (write_index_ + 1) % size;
+        if (lookahead_valid_ < size) ++lookahead_valid_;
         return out;
     }
 
@@ -435,6 +448,7 @@ private:
 
     std::vector<SampleType> lookahead_{};
     std::size_t write_index_ = 0;
+    std::size_t lookahead_valid_ = 0;
 };
 
 using VcaCompressor = VcaCompressorT<float>;

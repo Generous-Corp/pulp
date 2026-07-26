@@ -24,6 +24,7 @@
 #include <pulp/signal/units.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -679,4 +680,51 @@ TEST_CASE("A10 the saturator allocates nothing on the audio thread",
         }
         sat.reset();
     });
+}
+
+TEST_CASE("non-finite saturator controls retain every finite setting",
+          "[saturator][nan-recovery]") {
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        SaturatorT<double> poisoned, reference;
+        for (auto* sat : {&poisoned, &reference}) {
+            sat->prepare(kSr);
+            sat->set_shape(SaturatorShape::cubic_soft);
+            sat->set_alias_policy(SaturatorAliasPolicy::oversample_2x);
+            sat->set_drive_db(17.0); sat->set_bias(-0.37);
+            sat->set_tone_tracking(false); sat->set_tone_pre_hz(2100.0);
+            sat->set_tone_de_hz(4700.0); sat->set_pre_boost_db(7.5);
+            sat->set_mix(0.63); sat->set_output_trim_db(-4.0);
+        }
+        poisoned.set_drive_db(bad); poisoned.set_bias(bad);
+        poisoned.set_tone_pre_hz(bad); poisoned.set_tone_de_hz(bad);
+        poisoned.set_pre_boost_db(bad); poisoned.set_mix(bad);
+        poisoned.set_output_trim_db(bad);
+        for (int i = 0; i < 512; ++i) {
+            const double x = 0.31 * std::sin(0.071 * i);
+            REQUIRE(poisoned.process(x) == reference.process(x));
+        }
+    }
+}
+
+TEST_CASE("non-finite saturator audio has exact bounded fresh recovery",
+          "[saturator][nan-recovery][rt-safety]") {
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        SaturatorT<double> poisoned, fresh;
+        for (auto* sat : {&poisoned, &fresh}) {
+            sat->prepare(kSr); sat->set_alias_policy(SaturatorAliasPolicy::oversample_2x);
+            sat->set_drive_db(22.0); sat->set_bias(0.41);
+            sat->set_tone_pre_hz(3300.0); sat->set_pre_boost_db(8.0); sat->set_mix(0.57);
+        }
+        for (int i = 0; i < 300; ++i) (void)poisoned.process(0.4 * std::sin(0.11 * i));
+        require_allocates_no_memory([&] { REQUIRE(poisoned.process(bad) == 0.0); });
+        fresh.reset();
+        for (int i = 0; i < 512; ++i) {
+            const double x = 0.27 * std::sin(0.037 * i);
+            REQUIRE(poisoned.process(x) == fresh.process(x));
+        }
+    }
 }

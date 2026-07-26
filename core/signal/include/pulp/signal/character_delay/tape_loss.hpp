@@ -616,6 +616,11 @@ public:
         iir_.reset();
     }
 
+    void discard_history() noexcept {
+        fir_.discard_history();
+        iir_.reset();
+    }
+
     /// Reset only the recursive half. Used when a stage adopts a new design: the
     /// FIR's history is just delayed input and stays meaningful, but IIR state
     /// belongs to the coefficients that produced it.

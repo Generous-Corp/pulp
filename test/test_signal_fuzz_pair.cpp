@@ -705,3 +705,25 @@ TEST_CASE("11 the fuzz pair allocates nothing on the audio thread",
         dbl.reset();
     });
 }
+
+TEST_CASE("non-finite fuzz controls retain the complete non-default configuration",
+          "[fuzz][nan-recovery]") {
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Fuzz poisoned, reference;
+        for (auto* fuzz : {&poisoned, &reference}) {
+            fuzz->prepare(kSr); fuzz->set_device(FuzzDevice::silicon);
+            fuzz->set_fuzz(0.83); fuzz->set_bias_starve(0.42);
+            fuzz->set_source_impedance_kohm(137.0);
+            fuzz->set_output_level_db(-7.0); fuzz->set_mix(0.61);
+        }
+        poisoned.set_fuzz(bad); poisoned.set_bias_starve(bad);
+        poisoned.set_source_impedance_kohm(bad);
+        poisoned.set_output_level_db(bad); poisoned.set_mix(bad);
+        for (int i = 0; i < 512; ++i) {
+            const double x = 0.29 * std::sin(0.063 * i);
+            REQUIRE(poisoned.process(x) == reference.process(x));
+        }
+    }
+}

@@ -99,6 +99,8 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-character-delay-catalog
 # precisely so it never perturbs someone else's provenance.
 pulp_dsp_series_catalog_suite(pulp-test-forge-saturator-catalog
                               test_forge_saturator_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-fuzz-catalog
+                              test_forge_fuzz_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-dynamics-catalog
                               test_forge_dynamics_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-distortion-catalog

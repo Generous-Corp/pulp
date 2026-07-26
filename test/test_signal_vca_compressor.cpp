@@ -834,21 +834,42 @@ TEST_CASE("a NaN sample cannot latch the VCA detector",
 
 TEST_CASE("non-finite VCA controls retain the last valid configuration",
           "[vca-compressor][nan-recovery]") {
-    Vca c;
-    c.prepare(kSr);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    c.set_threshold_db(nan);
-    c.set_ratio(nan);
-    c.set_neg_ratio_amount(nan);
-    c.set_knee_db(nan);
-    c.set_time_ms(nan);
-    c.set_attack_release_ratio_k(nan);
-    c.set_makeup_db(nan);
-    c.set_lookahead_ms(nan);
-    c.set_mix(nan);
-    c.set_ceiling_db(nan);
-    for (int i = 0; i < 512; ++i) {
-        REQUIRE(std::isfinite(c.process(0.25)));
-        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Vca c, reference;
+        for (auto* x : {&c, &reference}) {
+            x->prepare(kSr); x->set_threshold_db(-31.0); x->set_ratio(9.0);
+            x->set_neg_ratio_amount(0.4); x->set_knee_db(4.0); x->set_time_ms(41.0);
+            x->set_attack_release_ratio_k(13.0); x->set_makeup_db(-3.0);
+            x->set_lookahead_ms(7.0); x->set_mix(0.72); x->set_ceiling_db(-11.0);
+        }
+        c.set_threshold_db(bad); c.set_ratio(bad); c.set_neg_ratio_amount(bad);
+        c.set_knee_db(bad); c.set_time_ms(bad); c.set_attack_release_ratio_k(bad);
+        c.set_makeup_db(bad); c.set_lookahead_ms(bad); c.set_mix(bad); c.set_ceiling_db(bad);
+        for (int i = 0; i < 512; ++i) {
+            const double sample = 0.25 * std::sin(0.031 * i);
+            REQUIRE(c.process(sample) == reference.process(sample));
+        }
+    }
+}
+
+TEST_CASE("VCA audio faults logically clear lookahead and recover exactly",
+          "[vca-compressor][nan-recovery][rt-safety]") {
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Vca poisoned, fresh;
+        for (auto* x : {&poisoned, &fresh}) {
+            x->prepare(kSr); x->set_threshold_db(-28.0); x->set_ratio(7.0);
+            x->set_lookahead_ms(8.0); x->set_mix(0.71);
+        }
+        for (int i = 0; i < 600; ++i) (void)poisoned.process(0.4);
+        require_allocates_no_memory([&] { REQUIRE(poisoned.process(bad) == 0.0); });
+        fresh.reset();
+        for (int i = 0; i < 768; ++i) {
+            const double sample = 0.2 * std::sin(0.023 * i);
+            REQUIRE(poisoned.process(sample) == fresh.process(sample));
+        }
     }
 }

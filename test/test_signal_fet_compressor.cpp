@@ -1209,18 +1209,20 @@ TEST_CASE("a NaN sample cannot latch the FET feedback detector",
 
 TEST_CASE("non-finite FET controls retain the last valid configuration",
           "[fet-compressor][nan-recovery]") {
-    Comp c;
-    c.prepare(kSr);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    c.set_input_gain_db(nan);
-    c.set_output_gain_db(nan);
-    c.set_attack_us(nan);
-    c.set_release_ms(nan);
-    c.set_knee_db(nan);
-    c.set_transformer_amount(nan);
-    c.set_mix(nan);
-    for (int i = 0; i < Comp::kLatencySamples + 512; ++i) {
-        REQUIRE(std::isfinite(c.process(0.25)));
-        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Comp c, reference;
+        for (auto* x : {&c, &reference}) {
+            x->prepare(kSr); x->set_input_gain_db(11.0); x->set_output_gain_db(-7.0);
+            x->set_attack_us(137.0); x->set_release_ms(777.0); x->set_knee_db(2.5);
+            x->set_transformer_amount(0.68); x->set_mix(0.43);
+        }
+        c.set_input_gain_db(bad); c.set_output_gain_db(bad); c.set_attack_us(bad);
+        c.set_release_ms(bad); c.set_knee_db(bad); c.set_transformer_amount(bad); c.set_mix(bad);
+        for (int i = 0; i < Comp::kLatencySamples + 512; ++i) {
+            const double sample = 0.25 * std::sin(0.031 * i);
+            REQUIRE(c.process(sample) == reference.process(sample));
+        }
     }
 }

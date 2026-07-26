@@ -308,6 +308,7 @@ public:
     Shape shape() const { return shape_; }
 
     void set_drive_db(double db) {
+        if (!std::isfinite(db)) return;
         drive_db_ = std::clamp(db, kDriveDbMin, kDriveDbMax);
         update_shaper();
     }
@@ -317,6 +318,7 @@ public:
     /// Bias as a normalised `[-1, +1]`. Clamped tighter for `cubic_soft`, whose
     /// slope reaches zero at `|b| = 1`.
     void set_bias(double normalized) {
+        if (!std::isfinite(normalized)) return;
         bias_request_ = std::clamp(normalized, -kBiasMax, kBiasMax);
         update_shaper();
     }
@@ -327,6 +329,7 @@ public:
 
     /// Pre-emphasis corner in Hz. 0 disables the pre/de pair.
     void set_tone_pre_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         tone_pre_hz_ = std::clamp(hz, 0.0, kTonePreHzMax);
         update_tone();
     }
@@ -341,11 +344,13 @@ public:
 
     /// De-emphasis corner, used only when tracking is off.
     void set_tone_de_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         tone_de_hz_ = std::clamp(hz, 0.0, kTonePreHzMax);
         update_tone();
     }
 
     void set_pre_boost_db(double db) {
+        if (!std::isfinite(db)) return;
         pre_boost_db_ = std::clamp(db, 0.0, kPreBoostDbMax);
         update_tone();
     }
@@ -353,9 +358,13 @@ public:
     void set_alias_policy(AliasPolicy policy) { alias_policy_ = policy; }
     AliasPolicy alias_policy() const { return alias_policy_; }
 
-    void set_mix(double wet01) { mix_ = std::clamp(wet01, 0.0, 1.0); }
+    void set_mix(double wet01) {
+        if (!std::isfinite(wet01)) return;
+        mix_ = std::clamp(wet01, 0.0, 1.0);
+    }
 
     void set_output_trim_db(double db) {
+        if (!std::isfinite(db)) return;
         output_trim_ = units::db_to_linear(std::clamp(db, -kOutputTrimDbMax, kOutputTrimDbMax));
     }
 
@@ -375,11 +384,16 @@ public:
         oversampler_.reset();
         std::fill(dry_delay_.begin(), dry_delay_.end(), SampleType{0});
         dry_write_ = 0;
+        dry_valid_ = 0;
     }
 
     /// One sample through the full chain: pre-emphasis, alias-safe shaping,
     /// de-emphasis, latency-aligned dry/wet, trim.
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            recover_audio_fault();
+            return SampleType{0};
+        }
         const double dry = delayed_dry(static_cast<double>(input));
 
         double x = static_cast<double>(input);
@@ -403,7 +417,12 @@ public:
         if (tone_active_) wet = de_filter_.process(static_cast<SampleType>(wet));
 
         const double mixed = dry + mix_ * (wet - dry);
-        return static_cast<SampleType>(snap_to_zero(mixed * output_trim_));
+        const double output = snap_to_zero(mixed * output_trim_);
+        if (!std::isfinite(output)) {
+            recover_audio_fault();
+            return SampleType{0};
+        }
+        return static_cast<SampleType>(output);
     }
 
     /// The supremum of `|shaped(x) / x|` over every input, at the current
@@ -426,6 +445,15 @@ public:
     }
 
 private:
+    void recover_audio_fault() noexcept {
+        adaa_previous_ = 0.0;
+        pre_filter_.reset();
+        de_filter_.reset();
+        oversampler_.reset();
+        dry_write_ = 0;
+        dry_valid_ = 0;
+    }
+
     /// `Φ(x)`, the antiderivative of `shaped(x)` with respect to `x`.
     ///
     /// For the unbiased case the chain rule gives `Φ(x) = F1(d·x)/d²`. The
@@ -458,9 +486,12 @@ private:
         if (latency <= 0 || dry_delay_.empty()) return input;
         const std::size_t size = dry_delay_.size();
         const std::size_t read = (dry_write_ + size - static_cast<std::size_t>(latency)) % size;
-        const double out = static_cast<double>(dry_delay_[read]);
+        const double out = dry_valid_ >= static_cast<std::size_t>(latency)
+                               ? static_cast<double>(dry_delay_[read])
+                               : 0.0;
         dry_delay_[dry_write_] = static_cast<SampleType>(input);
         dry_write_ = (dry_write_ + 1) % size;
+        if (dry_valid_ < size) ++dry_valid_;
         return out;
     }
 
@@ -537,6 +568,7 @@ private:
     int oversample_latency_ = 0;
     std::vector<SampleType> dry_delay_{};
     std::size_t dry_write_ = 0;
+    std::size_t dry_valid_ = 0;
 };
 
 using Saturator = SaturatorT<float>;

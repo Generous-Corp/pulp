@@ -666,20 +666,42 @@ TEST_CASE("a NaN sample cannot latch the feedforward detector",
 
 TEST_CASE("non-finite feedforward controls retain the last valid configuration",
           "[feedforward-compressor][nan-recovery]") {
-    Comp c;
-    c.prepare(kSr);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    c.set_threshold_db(nan);
-    c.set_ratio(nan);
-    c.set_knee_width_db(nan);
-    c.set_attack_ms(nan);
-    c.set_release_ms(nan);
-    c.set_rms_window_ms(nan);
-    c.set_lookahead_ms(nan);
-    c.set_makeup_gain_db(nan);
-    c.set_stereo_link(nan);
-    for (int i = 0; i < 512; ++i) {
-        REQUIRE(std::isfinite(c.process(0.25)));
-        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Comp c, reference;
+        for (auto* x : {&c, &reference}) {
+            x->prepare(kSr); x->set_threshold_db(-27.0); x->set_ratio(7.0);
+            x->set_knee_width_db(3.0); x->set_attack_ms(2.5); x->set_release_ms(333.0);
+            x->set_rms_window_ms(17.0); x->set_lookahead_ms(6.0);
+            x->set_makeup_gain_db(-4.0); x->set_stereo_link(0.37);
+        }
+        c.set_threshold_db(bad); c.set_ratio(bad); c.set_knee_width_db(bad);
+        c.set_attack_ms(bad); c.set_release_ms(bad); c.set_rms_window_ms(bad);
+        c.set_lookahead_ms(bad); c.set_makeup_gain_db(bad); c.set_stereo_link(bad);
+        for (int i = 0; i < 512; ++i) {
+            const double sample = 0.25 * std::sin(0.031 * i);
+            REQUIRE(c.process(sample) == reference.process(sample));
+        }
+    }
+}
+
+TEST_CASE("feedforward audio faults logically clear lookahead and recover exactly",
+          "[feedforward-compressor][nan-recovery][rt-safety]") {
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Comp poisoned, fresh;
+        for (auto* x : {&poisoned, &fresh}) {
+            x->prepare(kSr); x->set_threshold_db(-24.0); x->set_ratio(6.0);
+            x->set_detector(CompressorDetector::rms); x->set_lookahead_ms(8.0);
+        }
+        for (int i = 0; i < 600; ++i) (void)poisoned.process(0.4);
+        require_allocates_no_memory([&] { REQUIRE(poisoned.process(bad) == 0.0); });
+        fresh.reset();
+        for (int i = 0; i < 768; ++i) {
+            const double sample = 0.2 * std::sin(0.023 * i);
+            REQUIRE(poisoned.process(sample) == fresh.process(sample));
+        }
     }
 }
