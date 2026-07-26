@@ -12,7 +12,9 @@
 #
 # Also exposes `target_copy_webgpu_binaries(<target>)` so consumer
 # plugins/apps can copy the runtime DLL/dylib next to their binary
-# at build time.
+# at build time. On Windows, the same helper owns Skia's `icudtl.dat`
+# sidecar: SkParagraph's ICU-backed `SkUnicode` returns null without it,
+# and its first text layout otherwise terminates the host process.
 
 set(_pulp_webgpu_runtime
     "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native${PULP_SDK_SHARED_LIBRARY_SUFFIX}")
@@ -107,6 +109,28 @@ if(NOT COMMAND target_copy_webgpu_binaries)
                 )
                 _pulp_target_append_unique_property(${target} INSTALL_RPATH "@loader_path")
             endif()
+        endif()
+
+        # The Windows Skia slice keeps ICU's data outside the static archives.
+        # Every plug-in/app target that consumes Pulp's view stack must carry
+        # the file beside its module. Missing it is not a degraded text path:
+        # SkUnicodes::ICU::Make() returns null and SkParagraph deliberately
+        # traps on its `fUnicode` check during the first label render.
+        if(WIN32 AND SKIA_FOUND)
+            if(NOT SKIA_ICUDTL_FILE OR NOT EXISTS "${SKIA_ICUDTL_FILE}")
+                message(FATAL_ERROR
+                    "Pulp's Windows Skia runtime requires icudtl.dat beside "
+                    "each plug-in/app module, but the resolved Skia SDK did "
+                    "not provide it. Reinstall the matching Pulp/Skia SDK.")
+            endif()
+            add_custom_command(
+                TARGET ${target}
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${SKIA_ICUDTL_FILE}"
+                    $<TARGET_FILE_DIR:${target}>
+                COMMENT "Copying Skia ICU runtime data next to ${target}"
+            )
         endif()
     endfunction()
 endif()
