@@ -171,7 +171,8 @@ struct SignalGraphExecutorRouting {
 //     because its delay compensation is replicated on the routed path. A Plugin
 //     node with no live slot (unresolved/placeholder) routes as
 //     pass-through-or-zero, exactly as SignalGraph's walk does for a slot-less
-//     plugin node. A Custom node is audio-only (no MIDI/automation/latency);
+//     plugin node. A Custom node is audio-only (no MIDI/automation), and may
+//     carry prepare-stable intrinsic latency through its registered type;
 //     its binding invokes the resolved process callback, or — for an unresolved
 //     type / shape mismatch — pass-through-or-zero, so it matches the walk either
 //     way;
@@ -255,6 +256,9 @@ struct ExecutorSnapshotBinders {
     // parameter-event mailbox. Empty means this snapshot has no injected
     // parameter events (for example baked/external routing callers).
     std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
+    // Cached Custom-node intrinsic latency, resolved from CustomNodeType once at
+    // compile/prepare. Empty means zero.
+    std::function<int(NodeId)> custom_latency_for;
 };
 
 // Build the executor snapshot (plan + bindings) for an eligible topology,

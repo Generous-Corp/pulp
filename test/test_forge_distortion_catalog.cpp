@@ -159,11 +159,16 @@ TEST_CASE("8 the oversampling tiers report their latency exactly",
     // Zero at ×1, since the ADAA path has no filter at all; the composed
     // oversampler's own exact integer group delay above that.
     REQUIRE(dist::distortion_latency_samples(dist::OversampleTier::x1, kSr) == 0);
+    REQUIRE(dist::make_distortion_node(dist::Topology::to_ground,
+                                       dist::OversampleTier::x1)
+                .latency_samples(kSr) == 0);
 
     int previous = 0;
     for (auto tier : {dist::OversampleTier::x2, dist::OversampleTier::x4,
                       dist::OversampleTier::x8}) {
         const int latency = dist::distortion_latency_samples(tier, kSr);
+        REQUIRE(dist::make_distortion_node(dist::Topology::to_ground, tier)
+                    .latency_samples(kSr) == latency);
         REQUIRE(latency > 0);
         // More cascaded stages can only add delay, never remove it.
         REQUIRE(latency >= previous);

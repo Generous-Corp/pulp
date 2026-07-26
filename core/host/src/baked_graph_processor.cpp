@@ -77,6 +77,32 @@ struct BakedParamNodeState {
 }  // namespace detail
 
 namespace {
+
+int routed_plan_output_latency(const graph::GraphRuntimePlan& plan) {
+    std::vector<std::uint32_t> input_latency(plan.nodes.size(), 0);
+    std::vector<std::uint32_t> output_latency(plan.nodes.size(), 0);
+    for (const auto node_index : plan.processing_order_indices) {
+        const auto& node = plan.nodes[node_index];
+        std::uint32_t max_upstream = 0;
+        for (std::uint32_t c = 0; c < node.inbound_connection_count; ++c) {
+            const auto ci = plan.inbound_connection_indices[
+                node.first_inbound_connection + c];
+            const auto& conn = plan.connections[ci];
+            if (conn.feedback || graph::is_event(conn) ||
+                (graph::is_automation_conn(conn) && !conn.automation.audio_rate))
+                continue;
+            max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
+        }
+        input_latency[node_index] = max_upstream;
+        output_latency[node_index] = max_upstream + node.latency_samples;
+    }
+    std::uint32_t total = 0;
+    for (std::size_t i = 0; i < plan.nodes.size(); ++i)
+        if (plan.nodes[i].kind == graph::GraphRuntimeNodeKind::AudioOutput)
+            total = std::max(total, input_latency[i]);
+    return static_cast<int>(std::min<std::uint32_t>(
+        total, static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
+}
 namespace fmt = pulp::format;
 
 // Concrete BakedParamView over a block-local ParamCursor. value_at advances the
@@ -289,6 +315,7 @@ static LowerResult bake_impl(const SignalGraph& graph,
     // callback captured the instance keepalive (self-contained), and the declared
     // params come from the registered type — never from the graph node.
     std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings;
+    std::unordered_map<NodeId, std::function<int(double)>> custom_latencies;
     const auto [input_channels, output_channels] = derive_bus_arity(graph);
     for (const auto& src : graph.nodes()) {
         GraphNode n;
@@ -300,6 +327,11 @@ static LowerResult bake_impl(const SignalGraph& graph,
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
         } else if (src.type == NodeType::Custom) {
+            if (const CustomNodeType* type = graph.custom_node_type(
+                    src.custom_type_id, src.custom_type_version);
+                type != nullptr && type->latency_samples) {
+                custom_latencies[src.id] = type->latency_samples;
+            }
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
                 custom_processors[src.id] = *fn;
             }
@@ -354,7 +386,8 @@ static LowerResult bake_impl(const SignalGraph& graph,
         input_channels > 0 ? input_channels : 2,
         output_channels > 0 ? output_channels : 2,
         "Baked Graph", "com.pulp.baked-graph", std::move(custom_processors),
-        std::move(custom_lifecycles), std::move(param_bindings));
+        std::move(custom_lifecycles), std::move(param_bindings),
+        std::move(custom_latencies));
     result.accepted = true;
     result.reason = LowerRejectReason::None;
     return result;
@@ -580,11 +613,13 @@ BakedGraphProcessor::BakedGraphProcessor(
     std::string bundle_id,
     std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors,
     std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles,
-    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings)
+    std::unordered_map<NodeId, BakedCustomParamBinding> param_bindings,
+    std::unordered_map<NodeId, std::function<int(double)>> custom_latencies)
     : nodes_(std::move(nodes)),
       conns_(std::move(connections)),
       custom_processors_(std::move(custom_processors)),
       custom_lifecycles_(std::move(custom_lifecycles)),
+      custom_latencies_(std::move(custom_latencies)),
       param_bindings_(std::move(param_bindings)),
       name_(std::move(name)),
       bundle_id_(std::move(bundle_id)),
@@ -619,6 +654,7 @@ void BakedGraphProcessor::define_parameters(pulp::state::StateStore& /*store*/) 
 
 void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     prepared_ = false;
+    prepared_latency_samples_.store(0, std::memory_order_relaxed);
     snapshot_.clear();
     pool_.clear();
     gains_.clear();
@@ -666,19 +702,29 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     // plan, resolving each Gain node to its owned atomic and each lowerable Custom
     // node to its captured process callback. No Plugin nodes exist in the lowerable
     // subset, so plugin_for always yields nullptr.
-    if (!build_executor_snapshot(
-            nodes_, conns_,
+    const ExecutorSnapshotBinders binders{
+        .gain_for =
             [this](NodeId id) -> std::atomic<float>* {
                 auto it = gain_index_.find(id);
                 return it == gain_index_.end() ? nullptr : gains_[it->second].get();
             },
-            [](NodeId) -> PluginSlot* { return nullptr; },
-            plugin_ctx_, plugin_scratch_, snapshot_, /*parallel_safe=*/false,
-            /*load_for=*/{}, &custom_ctx_,
+        .plugin_for = [](NodeId) -> PluginSlot* { return nullptr; },
+        .custom_for =
             [this](NodeId id) -> const CustomNodeProcessFn* {
                 auto it = custom_processors_.find(id);
                 return it == custom_processors_.end() ? nullptr : &it->second;
-            })) {
+            },
+        .custom_latency_for =
+            [this, sample_rate = context.sample_rate](NodeId id) {
+                auto it = custom_latencies_.find(id);
+                return it == custom_latencies_.end()
+                           ? 0
+                           : std::max(0, it->second(sample_rate));
+            },
+    };
+    if (!build_executor_snapshot(nodes_, conns_, binders, plugin_ctx_,
+                                 plugin_scratch_, snapshot_,
+                                 /*parallel_safe=*/false, &custom_ctx_)) {
         return;
     }
 
@@ -690,7 +736,6 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
                      snapshot_.buffer_assignment().connection_delay_samples)) {
         return;
     }
-
     // Size the in-place-host input scratch (one contiguous block, per-channel
     // pointers into it) so process() can rescue an aliased input with only a
     // copy_n on the audio thread. Sized for the descriptor's input bus — the
@@ -706,6 +751,8 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     }
 
     prepared_max_block_ = max_block;
+    prepared_latency_samples_.store(
+        routed_plan_output_latency(snapshot_.plan()), std::memory_order_relaxed);
     prepared_ = true;
 }
 

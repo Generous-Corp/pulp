@@ -270,6 +270,13 @@ TEST_CASE("The crossfade window is a realization and not an injectable param",
     //
     // Half one — it really does move the latency, so the rule really does bite.
     REQUIRE(whammy::whammy_latency_samples(kSr, 40.0) == 960);
+    REQUIRE(whammy::make_whammy_node(40.0).latency_samples(kSr) == 960);
+    REQUIRE(whammy::make_whammy_node(40.0).type_id == whammy::kTypeId);
+    REQUIRE(whammy::make_whammy_node(80.0).type_id != whammy::kTypeId);
+    REQUIRE(whammy::make_whammy_node(80.0).type_id ==
+            whammy::make_whammy_node(80.0).type_id);
+    REQUIRE(whammy::make_whammy_node(1.0).type_id ==
+            whammy::make_whammy_node(Shifter::kWindowMsMin).type_id);
     REQUIRE(whammy::whammy_latency_samples(kSr, 80.0) == 1920);
     REQUIRE(whammy::whammy_latency_samples(kSr, Shifter::kWindowMsMin) !=
             whammy::whammy_latency_samples(kSr, Shifter::kWindowMsMax));
@@ -892,6 +899,7 @@ TEST_CASE("The harmony factory exposes the complete canonical parameter surface"
             static_cast<float>(pulp::signal::HarmonyEngine::kWorstCaseGain));
     REQUIRE(harmony::worst_case_gain() > 9.9f);
     REQUIRE(harmony::latency_samples(kSr)>0);
+    REQUIRE(node.latency_samples(kSr) == harmony::latency_samples(kSr));
     Fixture fixture(std::move(node), kSr, kFrames);
     auto injector = fixture.claim_injector();
     REQUIRE(injector.inject(immediate(harmony::kKey, 2.0f)) == InjectStatus::Ok);

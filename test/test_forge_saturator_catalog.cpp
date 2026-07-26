@@ -76,6 +76,19 @@ TEST_CASE("Forge saturator: injecting drive changes harmonic content",
     REQUIRE(high > low * 3.0);
 }
 
+TEST_CASE("Forge saturator alias identities are stable and distinct",
+          "[host][forge][forge-saturator][identity]") {
+    const auto adaa = sat::make_saturator_node(sat::Shape::tanh_soft, sat::AliasPolicy::adaa);
+    const auto x2 = sat::make_saturator_node(sat::Shape::tanh_soft, sat::AliasPolicy::oversample_2x);
+    const auto off = sat::make_saturator_node(sat::Shape::tanh_soft, sat::AliasPolicy::off);
+    REQUIRE(adaa.type_id == sat::kTanhTypeId);
+    REQUIRE(x2.type_id != adaa.type_id);
+    REQUIRE(off.type_id != adaa.type_id);
+    REQUIRE(off.type_id != x2.type_id);
+    REQUIRE(sat::make_saturator_node(sat::Shape::tanh_soft,
+                                     sat::AliasPolicy::oversample_2x).type_id == x2.type_id);
+}
+
 TEST_CASE("Forge saturator: the drive floor is transparent through the graph",
           "[host][baked][param-injection][forge][forge-saturator]") {
     // The registry's unity-gain claim, measured over the production path rather

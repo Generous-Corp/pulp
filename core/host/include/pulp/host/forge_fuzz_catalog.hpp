@@ -44,6 +44,12 @@ inline CustomNodeType make_fuzz_node(Device device, bool oversampled = true) {
     t.num_input_ports = t.num_output_ports = 1;
     t.default_name = device == Device::silicon ? "Fuzz (Silicon)" : "Fuzz (Germanium)";
     t.lowerable = true;
+    t.latency_samples = [oversampled](double sample_rate) {
+        signal::FuzzPair probe;
+        probe.set_oversampling_enabled(oversampled);
+        probe.prepare(sample_rate);
+        return probe.latency_samples();
+    };
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
     t.prepare = [device, oversampled](void* p, double sr, int) {

@@ -170,7 +170,8 @@ bool plugin_binding(fmt::ProcessBlock& block,
 // Custom binding: invoke the node's resolved process callback exactly as
 // SignalGraph's Custom node does — over the node's mono input/output slots
 // (ctx.node_inputs gathered from upstream, ctx.node_outputs the assigned
-// scratch). Custom nodes are audio-only (no MIDI/automation/latency), so unlike
+// scratch). Custom nodes are audio-only (no MIDI/automation); their intrinsic
+// latency is carried separately in plan metadata, so unlike
 // plugin_binding there is no bus/MIDI/parameter marshaling. When the context's
 // process callback is empty (an unresolved custom type or a shape mismatch — the
 // same condition SignalGraph checks with custom_type_matches_node_shape), this
@@ -432,6 +433,7 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
     const auto& plugin_latency_for = binders.plugin_latency_for;
     const auto& plugin_params_for = binders.plugin_params_for;
     const auto& parameter_events_for = binders.parameter_events_for;
+    const auto& custom_latency_for = binders.custom_latency_for;
 
     out.clear();
     plugin_ctx.clear();
@@ -473,6 +475,9 @@ bool build_executor_snapshot(std::span<const GraphNode> nodes,
                                                     : slot->latency_samples();
                 spec.latency_samples = static_cast<std::uint32_t>(std::max(0, lat));
             }
+        } else if (node.type == NodeType::Custom && custom_latency_for) {
+            spec.latency_samples = static_cast<std::uint32_t>(
+                std::max(0, custom_latency_for(node.id)));
         }
     }
 
@@ -666,6 +671,8 @@ bool build_signal_graph_executor_routing(const SignalGraph& graph,
         .custom_for = [&graph](NodeId id) { return graph.live_custom_processor(id); },
         .custom_transport_for =
             [&graph](NodeId id) { return graph.live_custom_transport_processor(id); },
+        .custom_latency_for =
+            [&graph](NodeId id) { return graph.live_custom_latency_samples(id); },
     };
     if (!build_executor_snapshot(graph.nodes(), graph.connections(), binders,
                                  out.plugin_ctx, out.plugin_scratch, out.snapshot,

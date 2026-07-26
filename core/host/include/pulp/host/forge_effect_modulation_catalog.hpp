@@ -603,33 +603,10 @@ struct Instance {
 };
 
 inline std::string delay_vibrato_type_id(float min_rate_hz) {
-    // The floor is part of the identity because it IS the reported latency.
+    // The floor changes the injectable rate range, so it remains part of the
+    // stable realization identity even though vibrato declares no PDC latency.
     return "modulation.vibrato.delay." +
            std::to_string(static_cast<int>(std::lround(min_rate_hz * 10.0f)));
-}
-
-/// This node's reported latency, in samples — a CONSTANT, evaluated at the
-/// worst case its registered ranges allow.
-///
-/// The DSP's own `latency_samples()` is `ceil(base_delay + amplitude)` where the
-/// modulation amplitude is `(2^(cents/1200) − 1) / (2π · rate)` seconds. Both of
-/// its inputs are knobs, and across the DSP's full declared ranges the result
-/// spans roughly 49 samples to 13600 — a factor of 280 that would re-trigger the
-/// host's delay compensation on every turn of the depth or rate control.
-///
-/// So the node freezes the RATE FLOOR at registration and quotes the latency at
-/// (floor rate, maximum depth). Depth stays a knob because a vibrato without one
-/// is not a vibrato, and no depth setting can exceed a bound taken at the
-/// maximum. The reported figure is therefore an upper bound on the true delay
-/// rather than an equality — which is the safe direction, and the only one
-/// available without a DSP setter that pins the base delay independently of the
-/// modulation amplitude.
-inline int delay_vibrato_latency_samples(float min_rate_hz, double sample_rate) {
-    Engine engine;
-    engine.prepare(sample_rate);
-    engine.set_rate_hz(min_rate_hz);
-    engine.set_depth_cents(Engine::kMaxDepthCents);
-    return static_cast<int>(engine.latency_samples());
 }
 
 /// Worst-case linear gain for the Forge registry (series law 8).
@@ -646,11 +623,11 @@ inline float delay_vibrato_worst_case_gain() {
 /// stereo coupling, so a stereo source is two instances rather than a pretend
 /// stereo image.
 ///
-/// `min_rate_hz` is a REGISTRATION-TIME REALIZATION and it is the one case in
-/// this file that the latency rule forces directly — see
-/// `delay_vibrato_latency_samples`. It is the same shape as the VCA
-/// compressor's `lookahead_ms`: the argument that determines latency is frozen,
-/// and the coefficients inject.
+/// The delay tap moves with the injectable rate and depth controls, so it is an
+/// intentional modulation delay rather than a fixed processing latency. The
+/// node therefore leaves CustomNodeType::latency_samples empty: publishing a
+/// worst-case bound would make PDC delay parallel dry paths by the wrong amount
+/// for every setting except that single extreme.
 inline CustomNodeType make_delay_vibrato_node(float min_rate_hz = 4.0f) {
     const float floor_hz = std::clamp(min_rate_hz, static_cast<float>(Engine::kMinRateHz),
                                       static_cast<float>(Engine::kMaxRateHz));

@@ -56,6 +56,7 @@
 // something this node should own.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/diode_bridge_compressor.hpp>
 #include <pulp/signal/feedforward_compressor.hpp>
@@ -81,7 +82,8 @@ inline constexpr state::ParamID kAttackMs = 4;         // ms
 inline constexpr state::ParamID kReleaseMs = 5;        // ms
 inline constexpr state::ParamID kDetectorMode = 6;     // stepped 0 = peak, 1 = RMS
 inline constexpr state::ParamID kRmsWindowMs = 7;      // ms
-inline constexpr state::ParamID kLookaheadMs = 8;      // ms
+// Param id 8 is intentionally reserved. Lookahead changes the node's latency,
+// so this zero-latency realization does not expose it as injectable automation.
 inline constexpr state::ParamID kProgramDependent = 9; // stepped 0/1
 inline constexpr state::ParamID kMakeupDb = 10;        // dB
 inline constexpr state::ParamID kAutoMakeup = 11;      // stepped 0/1
@@ -112,6 +114,11 @@ inline float feedforward_compressor_worst_case_gain() {
 }
 
 /// The transparent/modern compressor as a lowerable custom node.
+///
+/// This catalog realization is deliberately zero-lookahead. Lookahead changes
+/// intrinsic latency, so supporting non-zero variants would require distinct,
+/// stable custom-node identities rather than an injectable control or an
+/// unencoded factory argument.
 inline CustomNodeType make_feedforward_compressor_node() {
     CustomNodeType t;
     t.type_id = kFeedforwardCompressorTypeId;
@@ -126,6 +133,7 @@ inline CustomNodeType make_feedforward_compressor_node() {
     t.prepare = [](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<FeedforwardCompressorInstance*>(p);
         s->compressor.prepare(sr, kNodeMaxLookaheadMs);
+        s->compressor.set_lookahead_ms(0.0);
     };
     t.reset = [](void* p) {
         static_cast<FeedforwardCompressorInstance*>(p)->compressor.reset();
@@ -149,7 +157,6 @@ inline CustomNodeType make_feedforward_compressor_node() {
     t.baked_params.push_back({kDetectorMode, 0.0f, 1.0f, 0.0f});
     t.baked_params.push_back({kRmsWindowMs, static_cast<float>(Comp::kRmsWindowMsMin),
                               static_cast<float>(Comp::kRmsWindowMsMax), 10.0f});
-    t.baked_params.push_back({kLookaheadMs, 0.0f, kNodeMaxLookaheadMs, 0.0f});
     t.baked_params.push_back({kProgramDependent, 0.0f, 1.0f, 1.0f});
     t.baked_params.push_back({kMakeupDb, -static_cast<float>(Comp::kMakeupDbMax),
                               static_cast<float>(Comp::kMakeupDbMax), 0.0f});
@@ -181,7 +188,6 @@ inline CustomNodeType make_feedforward_compressor_node() {
                                            ? signal::CompressorDetector::rms
                                            : signal::CompressorDetector::peak);
             s->compressor.set_rms_window_ms(params.value_at(kRmsWindowMs, offset));
-            s->compressor.set_lookahead_ms(params.value_at(kLookaheadMs, offset));
             s->compressor.set_program_dependent_release(
                 params.value_at(kProgramDependent, offset) >= 0.5f);
             s->compressor.set_makeup_gain_db(params.value_at(kMakeupDb, offset));
@@ -240,23 +246,41 @@ inline float vca_compressor_worst_case_gain() {
 /// here for the host's sake, not the allocator's.
 inline CustomNodeType make_vca_compressor_node(float lookahead_ms = 0.0f,
                                                double attack_release_k = Comp::kRatioKDefault) {
+    const double fixed_lookahead_ms = std::clamp(
+        std::isfinite(static_cast<double>(lookahead_ms))
+            ? static_cast<double>(lookahead_ms)
+            : 0.0,
+        0.0, Comp::kLookaheadMsMax);
+    const double fixed_attack_release_k = std::clamp(
+        std::isfinite(attack_release_k) ? attack_release_k : Comp::kRatioKDefault,
+        Comp::kRatioKMin, Comp::kRatioKMax);
     CustomNodeType t;
     t.type_id = kTypeId;
+    if (fixed_lookahead_ms != 0.0 || fixed_attack_release_k != Comp::kRatioKDefault) {
+        t.type_id += ".la_" + detail::realization_real_token(fixed_lookahead_ms)
+                   + ".ark_" + detail::realization_real_token(fixed_attack_release_k);
+    }
     t.version = 1;
     t.num_input_ports = 1;
     t.num_output_ports = 1;
     t.default_name = "VCA Compressor";
     t.lowerable = true;
+    t.latency_samples = [fixed_lookahead_ms](double sample_rate) {
+        Comp probe;
+        probe.prepare(sample_rate);
+        probe.set_lookahead_ms(fixed_lookahead_ms);
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [lookahead_ms, attack_release_k](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_lookahead_ms, fixed_attack_release_k](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<Instance*>(p);
         s->compressor.prepare(sr);
         // After `prepare()`, which is what sized the ring and would otherwise
         // reset these to their defaults.
-        s->compressor.set_attack_release_ratio_k(attack_release_k);
-        s->compressor.set_lookahead_ms(lookahead_ms);
+        s->compressor.set_attack_release_ratio_k(fixed_attack_release_k);
+        s->compressor.set_lookahead_ms(fixed_lookahead_ms);
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->compressor.reset(); };
 
@@ -360,6 +384,7 @@ inline CustomNodeType make_fet_compressor_node() {
     t.num_output_ports = 1;
     t.default_name = "FET Compressor";
     t.lowerable = true;
+    t.latency_samples = [](double) { return Comp::kLatencySamples; };
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };

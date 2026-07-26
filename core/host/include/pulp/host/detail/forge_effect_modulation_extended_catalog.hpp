@@ -69,6 +69,9 @@ inline CustomNodeType make_flanger_node(Mode mode = Mode::classic,
     t.num_output_ports = 2;
     t.default_name = "Flanger";
     t.lowerable = true;
+    t.latency_samples = [mode, frozen_offset](double sample_rate) {
+        return latency_samples(mode, frozen_offset, sample_rate);
+    };
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
     t.prepare = [mode, frozen_offset](void* p, double sr, int /*max_block*/) {

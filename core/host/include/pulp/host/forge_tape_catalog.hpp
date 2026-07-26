@@ -69,6 +69,7 @@
 // suite rather than estimated.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/tape_machine.hpp>
 
@@ -141,6 +142,15 @@ inline const char* tape_default_name(Archetype archetype) noexcept {
     }
 }
 
+inline Archetype normalized_archetype(Archetype archetype) noexcept {
+    switch (archetype) {
+        case Archetype::ampex_350_440:
+        case Archetype::studer_a800:
+        case Archetype::cassette_deck: return archetype;
+        default: return Archetype::ampex_350_440;
+    }
+}
+
 /// The largest gain any single stage of this insert can present, at the
 /// realization's own speed and the given sample rate.
 ///
@@ -199,23 +209,42 @@ struct TapeMachineInstance {
 inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_ips = 0.0,
                                              bool pre_echo_enabled = false) {
     using Machine = signal::TapeMachine;
-    const signal::tape::ArchetypePreset preset = signal::tape::archetype_preset(archetype);
-    const double speed = speed_ips > 0.0 ? speed_ips : preset.default_speed_ips;
-    const CurveRange curves = curve_range(archetype);
+    const Archetype fixed_archetype = normalized_archetype(archetype);
+    const signal::tape::ArchetypePreset preset =
+        signal::tape::archetype_preset(fixed_archetype);
+    const double requested_speed =
+        std::isfinite(speed_ips) && speed_ips > 0.0 ? speed_ips : preset.default_speed_ips;
+    const double speed = signal::tape::snap_speed_ips(fixed_archetype, requested_speed);
+    const CurveRange curves = curve_range(fixed_archetype);
 
     CustomNodeType t;
-    t.type_id = tape_type_id(archetype);
+    t.type_id = tape_type_id(fixed_archetype);
+    if (speed != preset.default_speed_ips || pre_echo_enabled) {
+        t.type_id += ".speed_" + detail::realization_real_token(speed);
+        if (pre_echo_enabled) t.type_id += ".pre_echo";
+    }
     t.version = 1;
     t.num_input_ports = 2;
     t.num_output_ports = 2;
-    t.default_name = tape_default_name(archetype);
+    t.default_name = tape_default_name(fixed_archetype);
     t.lowerable = true;
+    t.latency_samples = [fixed_archetype, speed, pre_echo_enabled](double sample_rate) {
+        signal::TapeMachine probe;
+        probe.set_archetype(fixed_archetype);
+        probe.set_speed_ips(speed);
+        probe.prepare(sample_rate);
+        probe.set_print_through(static_cast<float>(probe.print_through_db()),
+                                static_cast<float>(probe.print_offset_ms()),
+                                pre_echo_enabled);
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new TapeMachineInstance{}; };
     t.destroy = [](void* p) { delete static_cast<TapeMachineInstance*>(p); };
-    t.prepare = [archetype, speed, pre_echo_enabled](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_archetype, speed, pre_echo_enabled](void* p, double sr,
+                                                           int /*max_block*/) {
         auto* instance = static_cast<TapeMachineInstance*>(p);
-        instance->machine.set_archetype(archetype);
+        instance->machine.set_archetype(fixed_archetype);
         instance->machine.set_speed_ips(speed);
         instance->machine.prepare(sr);
         // Pre-echo is a realization, so it is set once here and never touched
@@ -247,10 +276,18 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
         {kPrintThroughDb, static_cast<float>(Machine::kPrintThroughDbMin),
          static_cast<float>(Machine::kPrintThroughDbMax),
          static_cast<float>(signal::tape::age_print_through_db(preset.age01))});
+    // With pre-echo disabled the offset is latency-neutral. The pre-echo
+    // realization keeps the row for catalog/state compatibility but freezes
+    // the DSP at this default below so injected changes cannot move PDC.
+    const float print_offset_default =
+        static_cast<float>(Machine::kPrintThroughOffsetMsDefault);
     t.baked_params.push_back(
-        {kPrintOffsetMs, static_cast<float>(Machine::kPrintThroughOffsetMsMin),
-         static_cast<float>(Machine::kPrintThroughOffsetMsMax),
-         static_cast<float>(Machine::kPrintThroughOffsetMsDefault)});
+        {kPrintOffsetMs,
+         pre_echo_enabled ? print_offset_default
+                          : static_cast<float>(Machine::kPrintThroughOffsetMsMin),
+         pre_echo_enabled ? print_offset_default
+                          : static_cast<float>(Machine::kPrintThroughOffsetMsMax),
+         print_offset_default});
     t.baked_params.push_back({kMix, 0.0f, 1.0f, 1.0f});
 
     t.process_instance_baked_param = [pre_echo_enabled](
@@ -292,8 +329,12 @@ inline CustomNodeType make_tape_machine_node(Archetype archetype, double speed_i
 
         const bool print_moved =
             changed(instance->print_db, params.value_at(kPrintThroughDb, 0));
+        const float print_offset_ms =
+            pre_echo_enabled
+                ? static_cast<float>(Machine::kPrintThroughOffsetMsDefault)
+                : params.value_at(kPrintOffsetMs, 0);
         const bool offset_moved =
-            changed(instance->print_offset_ms, params.value_at(kPrintOffsetMs, 0));
+            changed(instance->print_offset_ms, print_offset_ms);
         if (print_moved || offset_moved || age_moved)
             machine.set_print_through(instance->print_db, instance->print_offset_ms,
                                       pre_echo_enabled);

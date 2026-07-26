@@ -145,20 +145,22 @@ TEST_CASE("Forge dynamics: the stereo link survives the graph",
     REQUIRE(linked_right < unlinked_right - 6.0);       // the loud channel pulled it down
 }
 
-TEST_CASE("Forge dynamics: injecting lookahead changes reported latency",
-          "[host][baked][param-injection][forge][forge-dynamics]") {
-    // The node's ceiling is what `prepare()` sized the ring for, so a value
-    // beyond it clamps rather than allocating.
-    auto fx = make_fixture(dyn::make_feedforward_compressor_node());
+TEST_CASE("Forge dynamics: feedforward lookahead is retired from the node contract",
+          "[host][baked][forge][forge-dynamics][latency]") {
+    // The sole stable realization is zero-lookahead. Param id 8 remains retired,
+    // and no custom latency callback is needed for the historical zero-latency
+    // contract. At ratio 1 with no makeup an impulse must pass at sample zero.
+    const auto type = dyn::make_feedforward_compressor_node();
+    REQUIRE(std::none_of(type.baked_params.begin(), type.baked_params.end(),
+                         [](const CustomNodeBakedParam& p) { return p.id == 8; }));
+    REQUIRE_FALSE(type.latency_samples);
+    auto fx = make_fixture(type);
     ParamInjector inj = fx.claim_injector();
 
     REQUIRE(inj.inject(immediate(dyn::kAutoMakeup, 0.0f)) == InjectStatus::Ok);
     REQUIRE(inj.inject(immediate(dyn::kThresholdDb, 0.0f)) == InjectStatus::Ok);
     REQUIRE(inj.inject(immediate(dyn::kRatio, 1.0f)) == InjectStatus::Ok);
 
-    // At ratio 1 with no makeup the node is a pure delay, so an impulse's
-    // arrival index IS the latency.
-    REQUIRE(inj.inject(immediate(dyn::kLookaheadMs, 2.0f)) == InjectStatus::Ok);
     fx.settle({silence(), silence()}, 4);
 
     auto impulse = silence();
@@ -166,7 +168,6 @@ TEST_CASE("Forge dynamics: injecting lookahead changes reported latency",
     const auto first = fx.render({impulse, impulse});
     const auto second = fx.render({silence(), silence()});
 
-    const int expected = static_cast<int>(std::llround(2.0 * kSr / 1000.0));
     std::vector<float> joined = first[0];
     joined.insert(joined.end(), second[0].begin(), second[0].end());
     int index = -1;
@@ -177,7 +178,7 @@ TEST_CASE("Forge dynamics: injecting lookahead changes reported latency",
             index = i;
         }
     }
-    REQUIRE(index == expected);
+    REQUIRE(index == 0);
 }
 
 TEST_CASE("Forge dynamics: auto-makeup restores level through the graph",
@@ -225,9 +226,29 @@ TEST_CASE("Forge dynamics: the node's process path allocates nothing",
     pulp::test::RtAllocationProbe probe;
     for (int b = 0; b < 32; ++b) {
         inj.inject(immediate(dyn::kThresholdDb, static_cast<float>(-40 + b)));
-        inj.inject(immediate(dyn::kLookaheadMs, 0.25f * static_cast<float>(b % 40)));
         inj.inject(immediate(dyn::kDetectorMode, (b % 2) ? 1.0f : 0.0f));
         renderer.render();
     }
     REQUIRE(probe.allocation_count() == 0);
+}
+TEST_CASE("Forge VCA realization identity is normalized and collision-free",
+          "[host][forge][forge-dynamics][identity]") {
+    const auto base = dyn::vca::make_vca_compressor_node();
+    REQUIRE(base.type_id == dyn::vca::kTypeId);
+    REQUIRE(dyn::vca::make_vca_compressor_node().type_id == base.type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(2.0f).type_id != base.type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(2.0f).type_id ==
+            dyn::vca::make_vca_compressor_node(2.0f).type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(2.0f, 3.0).type_id !=
+            dyn::vca::make_vca_compressor_node(2.0f, 4.0).type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(-1.0f).type_id == base.type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(99.0f).type_id ==
+            dyn::vca::make_vca_compressor_node(
+                static_cast<float>(dyn::vca::Comp::kLookaheadMsMax)).type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(2.0f, -99.0).type_id ==
+            dyn::vca::make_vca_compressor_node(
+                2.0f, dyn::vca::Comp::kRatioKMin).type_id);
+    REQUIRE(dyn::vca::make_vca_compressor_node(2.0f, 99.0).type_id ==
+            dyn::vca::make_vca_compressor_node(
+                2.0f, dyn::vca::Comp::kRatioKMax).type_id);
 }

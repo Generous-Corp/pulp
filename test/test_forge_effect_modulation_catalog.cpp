@@ -1074,37 +1074,18 @@ TEST_CASE("Forge modulation: the delay vibrato's onset controls do not stall the
     REQUIRE(early < 0.5 * late);     // ...and it opened gradually, so the fade ran
 }
 
-TEST_CASE("Forge modulation: the delay vibrato's reported latency is a constant",
+TEST_CASE("Forge modulation: delay vibrato does not claim fixed PDC latency",
           "[host][baked][forge][forge-modulation][vibrato]") {
-    // The realization argument's whole purpose. The DSP's own latency is
-    // `ceil(base + amplitude)` with the amplitude scaling as depth/rate, so it
-    // moves under two knobs; the node freezes the rate FLOOR and publishes the
-    // figure at the worst case its registered ranges allow.
-    using Engine = vib_delay::Engine;
-    const int published = vib_delay::delay_vibrato_latency_samples(4.0f, kSr);
-    REQUIRE(published > 0);  // a modulated tap is never free
+    // Rate and depth move the tap continuously, so a worst-case upper bound is
+    // not an exact intrinsic latency and must not feed graph PDC.
+    const auto type = vib_delay::make_delay_vibrato_node(4.0f);
+    REQUIRE_FALSE(type.latency_samples);
 
-    // No setting inside the registered ranges exceeds the published figure —
-    // which is what makes a constant safe to hand a host.
-    for (float rate : {4.0f, 8.0f, 20.0f}) {
-        for (float cents : {0.0f, 50.0f, static_cast<float>(Engine::kMaxDepthCents)}) {
-            Engine engine;
-            engine.prepare(kSr);
-            engine.set_rate_hz(rate);
-            engine.set_depth_cents(cents);
-            REQUIRE(static_cast<int>(engine.latency_samples()) <= published);
-        }
-    }
-
-    // And the number really does move with the floor, which is why the floor is
-    // part of the type id rather than a silent default.
-    REQUIRE(vib_delay::delay_vibrato_latency_samples(1.0f, kSr) > 3 * published);
+    // The floor still changes the registered parameter contract and therefore
+    // remains a stable realization identity.
     REQUIRE(vib_delay::make_delay_vibrato_node(4.0f).type_id !=
             vib_delay::make_delay_vibrato_node(8.0f).type_id);
 
-    // The registered rate range starts at the floor, so no injected value can
-    // reach a latency above the published one.
-    const auto type = vib_delay::make_delay_vibrato_node(4.0f);
     for (const auto& p : type.baked_params)
         if (p.id == vib_delay::kRateHz) REQUIRE_THAT(p.min_value, WithinAbs(4.0f, 1e-6f));
 }
@@ -1412,6 +1393,8 @@ TEST_CASE("Forge modulation: flanger latency controls are frozen realizations",
     REQUIRE(classic.type_id != through_zero.type_id);
     REQUIRE(mod::flanger::latency_samples(Mode::classic, 4.0, kSr) == 0);
     REQUIRE(mod::flanger::latency_samples(Mode::through_zero, 4.0, kSr) == 192);
+    REQUIRE(classic.latency_samples(kSr) == 0);
+    REQUIRE(through_zero.latency_samples(kSr) == 192);
 
     for (const auto& row : classic.baked_params) {
         REQUIRE(row.id != mod::flanger::kMode);

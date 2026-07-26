@@ -93,6 +93,7 @@
 // load time, and the registry rows below quote them per mode.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/pitch_shifter.hpp>
 #include <pulp/signal/harmony_engine.hpp>
@@ -217,24 +218,35 @@ inline float whammy_default_mix_for_mode(signal::PedalMode mode) {
 /// line for the whole declared range at `prepare()`, so any value in range is
 /// allocation-free — it is frozen here for the host's sake.
 inline CustomNodeType make_whammy_node(double window_ms = Shifter::kWindowMsDefault) {
+    const double fixed_window_ms = std::clamp(
+        std::isfinite(window_ms) ? window_ms : Shifter::kWindowMsDefault,
+        Shifter::kWindowMsMin, Shifter::kWindowMsMax);
     CustomNodeType t;
     t.type_id = kTypeId;
+    if (fixed_window_ms != Shifter::kWindowMsDefault)
+        t.type_id += ".window_" + detail::realization_real_token(fixed_window_ms);
     t.version = 1;
     t.num_input_ports = 1;
     t.num_output_ports = 1;
     t.default_name = "Whammy";
     t.lowerable = true;
+    t.latency_samples = [fixed_window_ms](double sample_rate) {
+        Shifter probe;
+        probe.prepare(sample_rate);
+        probe.set_window_ms(fixed_window_ms);
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
-    t.prepare = [window_ms](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_window_ms](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<Instance*>(p);
         s->shifter.prepare(sr);
         // After `prepare()`, which is what sized the line for the whole window
         // range. Setting it here rather than before also means the value
         // survives a re-prepare at a new sample rate, which is where a
         // construction-time realization would otherwise quietly revert.
-        s->shifter.set_window_ms(window_ms);
+        s->shifter.set_window_ms(fixed_window_ms);
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->shifter.reset(); };
 
@@ -364,6 +376,11 @@ inline CustomNodeType make_harmony_engine_node() {
     t.num_output_ports = 1;
     t.default_name = "Harmony Engine";
     t.lowerable = true;
+    t.latency_samples = [](double sample_rate) {
+        Engine probe;
+        probe.prepare(sample_rate);
+        return probe.latency_samples();
+    };
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
     t.prepare = [](void* p, double sr, int /*max_block*/) {

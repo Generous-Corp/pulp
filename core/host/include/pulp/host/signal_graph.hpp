@@ -266,6 +266,14 @@ struct CustomNodeType {
                        const audio::BufferView<const float>& /*input*/,
                        int /*num_samples*/, const BakedParamView& /*params*/)>
         process_instance_baked_param;
+
+    // Prepare-stable intrinsic latency metadata. Evaluated once, off the audio
+    // thread, at the graph's sample rate during compilation; the non-negative
+    // result feeds both the legacy and routed PDC plans. The callback must depend
+    // only on registration-time realization choices and `sample_rate` — a
+    // control that can change it requires a new type / re-prepare. Empty
+    // preserves the historical zero-latency custom-node contract.
+    std::function<int(double /*sample_rate*/)> latency_samples;
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -761,6 +769,9 @@ public:
     // GraphNode::transport_sensitive was resolved true.
     const CustomNodeTransportProcessFn* live_custom_transport_processor(
         NodeId id) const noexcept;
+    // Prepare-stable intrinsic latency cached in the live compiled snapshot.
+    // Returns zero for an unresolved/zero-latency node or without a snapshot.
+    int live_custom_latency_samples(NodeId id) const noexcept;
     // The live compiled snapshot's bound param-aware custom callback for a Custom
     // node whose type declared baked_params + process_instance_baked_param, or
     // nullptr otherwise. The pointee captured the stateful instance shared_ptr by
@@ -1131,8 +1142,8 @@ private:
 
         // PDC: cumulative samples of latency from AudioInput to this node's
         // input ports (input_latency) and output ports (output_latency).
-        // output_latency = input_latency + (plugin->latency_samples() for
-        // Plugin nodes, 0 otherwise).
+        // output_latency = input_latency + the node's prepare-stable intrinsic
+        // latency (Plugin metadata or CustomNodeType::latency_samples).
         int64_t input_latency = 0;
         int64_t output_latency = 0;
 
@@ -1272,6 +1283,9 @@ private:
         // that node (both resolved from the same compile-time condition), so the
         // routed binding and the anticipation analysis stay consistent.
         std::unordered_map<NodeId, CustomNodeTransportProcessFn> custom_transport_processors;
+        // Custom intrinsic latencies resolved once from the registered type at
+        // this snapshot's sample rate. Shared by legacy and routed PDC.
+        std::unordered_map<NodeId, int> custom_latency_samples;
         struct NodeShape {
             NodeType type;
             int num_input_ports;

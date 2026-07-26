@@ -1118,6 +1118,14 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
     return &it->second;
 }
 
+int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
+    auto read_guard = live_slot_.read();
+    const auto* cg = read_guard.get();
+    if (cg == nullptr) return 0;
+    auto it = cg->custom_latency_samples.find(id);
+    return it == cg->custom_latency_samples.end() ? 0 : it->second;
+}
+
 const CustomNodeParamProcessFn* SignalGraph::live_custom_param_processor(
     NodeId id) const noexcept {
     if (!live_slot_.live()) return nullptr;
@@ -1377,6 +1385,9 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         auto mit = plugin_meta.find(id);
         if (mit != plugin_meta.end()) {
             added = std::max<int64_t>(0, mit->second.latency_samples);
+        } else if (auto cit = cg.custom_latency_samples.find(id);
+                   cit != cg.custom_latency_samples.end()) {
+            added = std::max<int64_t>(0, cit->second);
         }
         rt.output_latency = rt.input_latency + added;
     }
@@ -1493,6 +1504,11 @@ bool SignalGraph::build_routing_snapshot_locked_(
                             ? &it->second.exact_parameter_input_mailbox->sequence_seen
                             : nullptr,
                 };
+            },
+        .custom_latency_for =
+            [&cg](NodeId id) -> int {
+                auto it = cg.custom_latency_samples.find(id);
+                return it == cg.custom_latency_samples.end() ? 0 : it->second;
             },
     };
     return build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
@@ -1666,6 +1682,10 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
+                if (type->latency_samples) {
+                    cg->custom_latency_samples[n.id] =
+                        std::max(0, type->latency_samples(sample_rate));
+                }
                 if (n.custom_instance && type->process_instance) {
                     // Bind the stateful processor. The lambda captures the
                     // instance shared_ptr BY VALUE, so this snapshot keeps the

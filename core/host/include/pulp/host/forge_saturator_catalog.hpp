@@ -83,6 +83,34 @@ inline const char* saturator_default_name(Shape shape) {
     }
 }
 
+inline const char* alias_policy_id(AliasPolicy policy) noexcept {
+    switch (policy) {
+        case AliasPolicy::oversample_2x: return "x2";
+        case AliasPolicy::off: return "off";
+        case AliasPolicy::adaa:
+        default: return "adaa";
+    }
+}
+
+inline Shape normalized_shape(Shape shape) noexcept {
+    switch (shape) {
+        case Shape::tanh_soft:
+        case Shape::atan_soft:
+        case Shape::cubic_soft:
+        case Shape::sinh_arc: return shape;
+        default: return Shape::tanh_soft;
+    }
+}
+
+inline AliasPolicy normalized_alias_policy(AliasPolicy policy) noexcept {
+    switch (policy) {
+        case AliasPolicy::adaa:
+        case AliasPolicy::oversample_2x:
+        case AliasPolicy::off: return policy;
+        default: return AliasPolicy::adaa;
+    }
+}
+
 /// The largest gain this realization can present, for the Forge registry's
 /// `worst_case_gain` row (series law 8).
 ///
@@ -104,20 +132,31 @@ inline float saturator_worst_case_gain(Shape shape) {
 /// `latency_samples()`; see the header note.
 inline CustomNodeType make_saturator_node(Shape shape,
                                           AliasPolicy alias_policy = AliasPolicy::adaa) {
+    const Shape fixed_shape = normalized_shape(shape);
+    const AliasPolicy fixed_alias_policy = normalized_alias_policy(alias_policy);
     CustomNodeType t;
-    t.type_id = saturator_type_id(shape);
+    t.type_id = saturator_type_id(fixed_shape);
+    if (fixed_alias_policy != AliasPolicy::adaa)
+        t.type_id += std::string{"."} + alias_policy_id(fixed_alias_policy);
     t.version = 1;
     t.num_input_ports = 1;
     t.num_output_ports = 1;
-    t.default_name = saturator_default_name(shape);
+    t.default_name = saturator_default_name(fixed_shape);
     t.lowerable = true;
+    t.latency_samples = [fixed_shape, fixed_alias_policy](double sample_rate) {
+        signal::Saturator probe;
+        probe.set_shape(fixed_shape);
+        probe.set_alias_policy(fixed_alias_policy);
+        probe.prepare(sample_rate);
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new SaturatorInstance{}; };
     t.destroy = [](void* p) { delete static_cast<SaturatorInstance*>(p); };
-    t.prepare = [shape, alias_policy](void* p, double sr, int /*max_block*/) {
+    t.prepare = [fixed_shape, fixed_alias_policy](void* p, double sr, int /*max_block*/) {
         auto* s = static_cast<SaturatorInstance*>(p);
-        s->saturator.set_shape(shape);
-        s->saturator.set_alias_policy(alias_policy);
+        s->saturator.set_shape(fixed_shape);
+        s->saturator.set_alias_policy(fixed_alias_policy);
         s->saturator.prepare(sr);
     };
     t.reset = [](void* p) { static_cast<SaturatorInstance*>(p)->saturator.reset(); };

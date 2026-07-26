@@ -228,6 +228,20 @@ TEST_CASE("Forge tape: speed is a realization, and it snaps to the legal set",
     for (const float v : out.front()) REQUIRE(std::isfinite(v));
 }
 
+TEST_CASE("Forge tape speed and pre-echo identities are stable and distinct",
+          "[host][forge][forge-tape][identity]") {
+    using A = TapeArchetype;
+    const auto base = tape_node::make_tape_machine_node(A::studer_a800);
+    REQUIRE(base.type_id == tape_node::kStuderTypeId);
+    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800).type_id == base.type_id);
+    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 30.0).type_id != base.type_id);
+    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 29.9).type_id ==
+            tape_node::make_tape_machine_node(A::studer_a800, 30.0).type_id);
+    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id != base.type_id);
+    REQUIRE(tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id ==
+            tape_node::make_tape_machine_node(A::studer_a800, 15.0, true).type_id);
+}
+
 TEST_CASE("Forge tape: injecting drive changes harmonic content",
           "[host][baked][param-injection][forge][forge-tape]") {
     Fixture fixture(tape_node::make_tape_machine_node(TapeArchetype::studer_a800), kSr,

@@ -160,6 +160,19 @@ inline CustomNodeType make_distortion_node(Topology topology,
     t.num_output_ports = 1;
     t.default_name = distortion_default_name(topology);
     t.lowerable = true;
+    t.latency_samples = [tier](double sample_rate) {
+        if (tier == OversampleTier::x1) return 0;
+        using Os = signal::OversamplerT<float>;
+        Os probe;
+        probe.set_kind(Os::Kind::linear_phase_fir);
+        probe.set_quality(Os::Quality::standard);
+        const int factor = oversample_factor(tier);
+        probe.set_factor(factor == 2 ? Os::Factor::x2
+                         : factor == 4 ? Os::Factor::x4
+                                       : Os::Factor::x8);
+        probe.set_sample_rate(static_cast<float>(sample_rate));
+        return probe.latency_samples();
+    };
 
     t.create = []() -> void* { return new DistortionInstance{}; };
     t.destroy = [](void* p) { delete static_cast<DistortionInstance*>(p); };

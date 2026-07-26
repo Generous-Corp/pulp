@@ -566,6 +566,12 @@ inline CustomNodeType make_cyclic_stretch_node(Regime regime = Regime::short_fra
     t.default_name =
         regime == Regime::short_frame ? "Cyclic Stretch (Short)" : "Cyclic Stretch (Long)";
     t.lowerable = true;
+    t.latency_samples = [settings](double sample_rate) {
+        Engine probe;
+        probe.prepare(sample_rate);
+        probe.set_regime(settings);
+        return probe.latency_samples();
+    };
     t.create = []() -> void* { return new Instance{}; };
     t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
     t.prepare = [settings](void* p, double sr, int) {

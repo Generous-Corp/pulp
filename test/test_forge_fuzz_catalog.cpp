@@ -29,6 +29,10 @@ TEST_CASE("Forge fuzz: every realization bakes, runs, and declares the contract"
     }
     REQUIRE(fuzz::latency_samples(false) == 0);
     REQUIRE(fuzz::latency_samples(true) > 0);
+    REQUIRE(fuzz::make_fuzz_node(fuzz::Device::silicon, false).latency_samples(48000.0) ==
+            fuzz::latency_samples(false));
+    REQUIRE(fuzz::make_fuzz_node(fuzz::Device::silicon, true).latency_samples(48000.0) ==
+            fuzz::latency_samples(true));
 }
 
 TEST_CASE("Forge fuzz: injection changes the realized circuit and remains RT safe",

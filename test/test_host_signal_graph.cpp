@@ -1677,6 +1677,43 @@ private:
     int wp_ = 0;
 };
 
+struct MockLatencyCustomState {
+    explicit MockLatencyCustomState(int delay) : ring(static_cast<std::size_t>(delay + 1), 0.0f) {}
+    std::vector<float> ring;
+    std::size_t write = 0;
+};
+
+CustomNodeType make_mock_latency_custom_type(int latency) {
+    CustomNodeType type;
+    type.type_id = "pulp.test.latency-custom." + std::to_string(latency);
+    type.version = 1;
+    type.num_input_ports = 1;
+    type.num_output_ports = 1;
+    type.default_name = "Latency Custom";
+    type.latency_samples = [latency](double) { return latency; };
+    type.create = [latency]() -> void* { return new MockLatencyCustomState(latency); };
+    type.destroy = [](void* ptr) { delete static_cast<MockLatencyCustomState*>(ptr); };
+    type.reset = [](void* ptr) {
+        auto& state = *static_cast<MockLatencyCustomState*>(ptr);
+        std::fill(state.ring.begin(), state.ring.end(), 0.0f);
+        state.write = 0;
+    };
+    type.process_instance = [latency](void* ptr, pulp::audio::BufferView<float>& out,
+                                      const pulp::audio::BufferView<const float>& in,
+                                      int frames) {
+        auto& state = *static_cast<MockLatencyCustomState*>(ptr);
+        for (int i = 0; i < frames; ++i) {
+            state.ring[state.write] = in.channel_ptr(0)[i];
+            const auto read = (state.write + state.ring.size()
+                               - static_cast<std::size_t>(latency))
+                            % state.ring.size();
+            out.channel_ptr(0)[i] = state.ring[read];
+            state.write = (state.write + 1) % state.ring.size();
+        }
+    };
+    return type;
+}
+
 class PrepareFailPlugin final : public PluginSlot {
 public:
     PrepareFailPlugin() {
@@ -1900,6 +1937,37 @@ TEST_CASE("SignalGraph PDC aligns parallel branches", "[host][graph][pdc]") {
     REQUIRE(out_buf[32] == 2.0f);
     for (int i = 33; i < 64; ++i) REQUIRE(out_buf[i] == 0.0f);
     graph.release();
+}
+
+TEST_CASE("SignalGraph PDC aligns a latent custom node with a parallel dry path",
+          "[host][graph][node-abi][pdc][custom]") {
+    constexpr int latency = 7;
+    SignalGraph graph;
+    REQUIRE(graph.register_custom_node_type(make_mock_latency_custom_type(latency)));
+    const auto input = graph.add_input_node(1, "input");
+    const auto custom = graph.add_custom_node("pulp.test.latency-custom.7", "latent");
+    const auto output = graph.add_output_node(1, "output");
+    REQUIRE(custom != 0);
+    REQUIRE(graph.connect(input, 0, custom, 0));
+    REQUIRE(graph.connect(custom, 0, output, 0));
+    REQUIRE(graph.connect(input, 0, output, 0));
+
+    REQUIRE(graph.prepare(48000.0, 16));
+    REQUIRE(graph.latency_samples() == latency);
+    REQUIRE(graph.node_latency_samples(output) == latency);
+
+    std::array<float, 16> source{};
+    std::array<float, 16> rendered{};
+    source[0] = 1.0f;
+    const float* source_channels[] = {source.data()};
+    float* rendered_channels[] = {rendered.data()};
+    pulp::audio::BufferView<const float> in(source_channels, 1, source.size());
+    pulp::audio::BufferView<float> out(rendered_channels, 1, rendered.size());
+    graph.process(out, in, static_cast<int>(source.size()));
+
+    for (int i = 0; i < latency; ++i) REQUIRE(rendered[static_cast<std::size_t>(i)] == 0.0f);
+    REQUIRE(rendered[latency] == 2.0f);
+    for (std::size_t i = latency + 1; i < rendered.size(); ++i) REQUIRE(rendered[i] == 0.0f);
 }
 
 TEST_CASE("SignalGraph serial plugin latencies accumulate", "[host][graph][pdc]") {

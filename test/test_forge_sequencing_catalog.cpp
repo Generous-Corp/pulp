@@ -199,6 +199,34 @@ TEST_CASE("Forge sequencing stage_seq: the node bakes with two CV ports each way
     REQUIRE_THAT(pitches[7], WithinAbs(12.0 / 12.0, 1e-6));  // the octave
 }
 
+TEST_CASE("Forge sequencing stage_seq: non-finite stepped injections use declared defaults",
+          "[host][baked][forge][forge-sequencing][stageseq][nan][security]") {
+    for (const float bad : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity()}) {
+        StageFixture fx(seqcat::stage_seq::make_stage_seq_node(ladder_pattern()), kSr,
+                        kFrames);
+        auto inj = fx.claim_injector();
+        REQUIRE(inj.valid());
+        REQUIRE(inj.inject(immediate(seqcat::stage_seq::kRun, 1.0f)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(seqcat::stage_seq::kNumStages, bad)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(seqcat::stage_seq::kDirection, bad)) == InjectStatus::Ok);
+
+        const auto out = fx.render({clock_line(32), flat(0.0f)});
+        require_finite(out[0]);
+        require_finite(out[1]);
+
+        // Both controls are decoded with lround in the catalog. Their declared
+        // defaults are eight stages and forward, so the ladder must walk 0..7
+        // and wrap for every form of non-finite host input.
+        const auto pitches = at_clocks(out[0], 32);
+        for (std::size_t i = 0; i < pitches.size(); ++i) {
+            REQUIRE_THAT(static_cast<double>(pitches[i]),
+                         WithinAbs(static_cast<double>(i % 8), 1e-6));
+        }
+    }
+}
+
 TEST_CASE("Forge sequencing stage_seq: run gates the transport",
           "[host][baked][forge][forge-sequencing][stageseq]") {
     StageFixture fx(seqcat::stage_seq::make_stage_seq_node(ladder_pattern()), kSr, kFrames);

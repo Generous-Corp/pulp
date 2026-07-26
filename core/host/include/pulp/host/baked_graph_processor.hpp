@@ -231,11 +231,19 @@ public:
                         // param-aware process + declared params). Empty for a
                         // graph with no param-declaring custom nodes.
                         std::unordered_map<NodeId, BakedCustomParamBinding>
-                            param_bindings = {});
+                            param_bindings = {},
+                        // Prepare-stable Custom latency callbacks captured from
+                        // registered types. Re-evaluated at the baked host's
+                        // real sample rate before its routed PDC plan is built.
+                        std::unordered_map<NodeId, std::function<int(double)>>
+                            custom_latencies = {});
 
     ~BakedGraphProcessor() override;
 
     pulp::format::PluginDescriptor descriptor() const override;
+    int latency_samples() const override {
+        return prepared_latency_samples_.load(std::memory_order_relaxed);
+    }
     void define_parameters(pulp::state::StateStore& store) override;
     void prepare(const pulp::format::PrepareContext& context) override;
     void process(pulp::audio::BufferView<float>& audio_output,
@@ -287,6 +295,7 @@ private:
     // instance state — e.g. a delay line's contents — never survives a
     // re-prepare. Control-thread only, like the graph's own instance prepare.
     std::unordered_map<NodeId, CustomNodeLifecycle> custom_lifecycles_;
+    std::unordered_map<NodeId, std::function<int(double)>> custom_latencies_;
 
     // In-place-host guard scratch: when the host's input channels alias its
     // output channels, process() copies the input here BEFORE process_routed
@@ -317,6 +326,7 @@ private:
     int input_channels_ = 2;
     int output_channels_ = 2;
     int prepared_max_block_ = 0;
+    std::atomic<int> prepared_latency_samples_{0};
     bool prepared_ = false;
 };
 
