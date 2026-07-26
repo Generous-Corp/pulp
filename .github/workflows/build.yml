@@ -148,7 +148,13 @@ jobs:
         # build.yml parity cases.
         run: |
           set -euo pipefail
-          python3 - <<'PY'
+          (
+            # Python stdin mode resolves cwd while computing sys.path[0].
+            # Do that from the system temp volume, not RUNNER_TEMP (which may
+            # live beside the checkout under /Volumes/Workshop): a wedged work
+            # volume must not freeze required-gate routing before this executes.
+            cd /tmp
+            python3 - <<'PY'
           import json
           import os
           import subprocess
@@ -163,7 +169,13 @@ jobs:
           # those Macs keep their caches on local disk — so a macOS leg here
           # would occupy the required gate's runners to save nothing.
           PUSH_ONLY_CACHE_EVENTS = ("push",)
-          RESOLVER = ["python3", "tools/scripts/resolve_runs_on.py"]
+          WORKSPACE = Path(os.environ["GITHUB_WORKSPACE"])
+          RESOLVER = [
+              "python3",
+              str(
+                  WORKSPACE / "tools" / "scripts" / "resolve_runs_on.py"
+              ),
+          ]
           REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")
 
           def run(args):
@@ -539,6 +551,7 @@ jobs:
               handle.write(f"provider={REQUESTED}\n")
               handle.write(f"matrix_json={json.dumps(matrix)}\n")
           PY
+          )
 
   # ── Change classifier ────────────────────────────────────────────────────
   # Decides whether this PR needs the native build matrix at all. A PR that
@@ -1383,7 +1396,13 @@ jobs:
             jobs_json="$(mktemp)"
             jobs_err="$(mktemp)"
             if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" >"$jobs_json" 2>"$jobs_err"; then
-              if ! conclusion=$(python3 - "$jobs_json" <<'PY'
+              if ! conclusion=$(
+                # The checkout may live on /Volumes/Workshop. Python stdin
+                # mode resolves cwd before executing this parser. RUNNER_TEMP
+                # may share /Volumes/Workshop with the checkout, so use the
+                # system temp volume to keep this aggregate responsive.
+                cd /tmp
+                python3 - "$jobs_json" <<'PY'
           import json
           import sys
 

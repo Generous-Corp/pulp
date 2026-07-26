@@ -853,6 +853,15 @@ tools/scripts/host_vitals.sh --json     # machine-readable
   macOS matrix leg by polling the Actions jobs API. Keep that poll retry-safe:
   API failures or malformed JSON must log and continue the loop, not trip
   `set -euo pipefail` before the macOS leg has a chance to report.
+- **Inline Python in preamble jobs must start from system `/tmp`.** The
+  `PULP_PREAMBLE_RUNS_ON_JSON` lane can execute below `/Volumes/Workshop`.
+  `python3 -` resolves cwd while computing `sys.path[0]`, before it executes
+  the supplied script; a wedged volume therefore freezes an otherwise healthy
+  routing or aggregate poll. `RUNNER_TEMP` may live on that same work volume,
+  so wrap each inline invocation with `cd /tmp` first (`/private/tmp` on
+  macOS), and use `GITHUB_WORKSPACE` only as an absolute repo-path argument
+  afterward. `test_preamble_python_stable_cwd.py` enumerates all such helpers
+  and fails when a new one lacks the stable-cwd boundary.
 - `.github/workflows/release-dry-run.yml` (P9-2, #2576) exercises the release
   build → `package_cli.py` → `pulp ship appcast` chain on a synthetic version
   (`0.0.0-dryrun`) WITHOUT publishing — no GitHub release, no signing/notarize,

@@ -119,6 +119,10 @@ class WorkflowLintWorkflowTests(unittest.TestCase):
             "python3 tools/scripts/test_fetch_skia_for_release.py",
             step,
         )
+        self.assertIn(
+            "python3 tools/scripts/test_preamble_python_stable_cwd.py",
+            step,
+        )
 
     def test_actionlint_step_keeps_core_actionlint_enabled(self) -> None:
         step = _find_step(self.text, "actionlint")
