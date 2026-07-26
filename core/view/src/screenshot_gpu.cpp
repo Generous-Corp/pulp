@@ -15,6 +15,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pulp/runtime/trace.hpp>
 
 #ifdef PULP_VIEW_HAS_GPU_CAPTURE
@@ -85,6 +86,7 @@ void paint_root(canvas::Canvas& c, View& root, uint32_t w, uint32_t h) {
     root.layout_children();  // emits the "layout" span (View::layout_children)
     {
         PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+        pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
         root.paint_all(c);
         View::paint_overlays(c, &root);
     }

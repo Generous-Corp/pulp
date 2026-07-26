@@ -47,25 +47,18 @@ public:
 /// current thread while alive, even when one or more @c ScopedNoAlloc
 /// guards are still on the stack.
 ///
-/// This exists for exactly ONE caller: the subtree-cache MISS record
-/// (@c View::set_subtree_cached, FU-3). Recording a subtree into a
-/// replayable scene walks the whole subtree once and legitimately
-/// allocates (the picture's command buffer, per-view corner-path
-/// strings, gradient marshalling). That record is a NON-real-time event
-/// by definition — it happens once and REPLACES the N allocating frames
-/// that would otherwise re-walk the tree — so treating its allocations
-/// as an RT-safety violation would be wrong. While an instance is alive,
+/// Use this only around a bounded operation that is known not to run on a
+/// real-time thread but calls code shared with a no-allocation path. Current
+/// examples are a subtree-cache miss record and an offscreen screenshot paint
+/// pass. Both legitimately allocate while preparing a one-shot result; neither
+/// is a live frame or audio callback. While an instance is alive,
 /// @c is_in_no_alloc_scope() reports @c false regardless of the
-/// @c ScopedNoAlloc depth, so a debug allocator hook does not flag the
-/// one-time record (and any @c ScopedNoAlloc a child's paint re-enters
-/// during that record stays suspended too — the whole record subtree is
-/// the exempt unit).
+/// @c ScopedNoAlloc depth, and nested @c ScopedNoAlloc guards remain suspended
+/// until the outer allowance ends.
 ///
-/// It does NOT widen the guarantee for anything else: it is scoped to a
-/// single @c record_scene invocation and nested no-alloc counting still
-/// tracks underneath (so the contract snaps back the instant this guard
-/// destructs). Like @c ScopedNoAlloc, the ctor/dtor symbols are always
-/// defined out-of-line and the body is a no-op under @c NDEBUG, so the
+/// Keep each allowance at the narrowest call-site scope so the contract snaps
+/// back immediately afterward. Like @c ScopedNoAlloc, the ctor/dtor symbols are
+/// always defined out-of-line and the body is a no-op under @c NDEBUG, so the
 /// ABI is identical across mixed-mode links.
 class ScopedAllocAllowed {
 public:
