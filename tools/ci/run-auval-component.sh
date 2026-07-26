@@ -32,10 +32,17 @@ fi
 
 components_dir="$HOME/Library/Audio/Plug-Ins/Components"
 test_component="$components_dir/${component_name%.component}.auvaltest.component"
+inventory_log=$(mktemp -t pulp-auval-inventory.XXXXXX)
 auval_log=$(mktemp -t pulp-auval.XXXXXX)
+inventory_pid=0
 
 cleanup() {
+  if (( inventory_pid > 0 )); then
+    kill -TERM "$inventory_pid" 2>/dev/null || true
+    wait "$inventory_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$test_component"
+  rm -f -- "$inventory_log"
   rm -f -- "$auval_log"
 }
 trap cleanup EXIT
@@ -52,19 +59,54 @@ codesign --verify --deep --strict "$test_component"
 killall -KILL AudioComponentRegistrar 2>/dev/null || true
 
 deadline=$((SECONDS + 30))
-while true; do
-  auval -v "$component_type" "$component_subtype" "$component_manufacturer" \
-    >"$auval_log" 2>&1 || true
 
-  if grep -q 'AU VALIDATION SUCCEEDED' "$auval_log"; then
-    cat "$auval_log"
-    exit 0
+scan_inventory() {
+  : >"$inventory_log"
+  auval -a >"$inventory_log" 2>&1 &
+  inventory_pid=$!
+  local attempt_deadline=$((SECONDS + 15))
+  if (( attempt_deadline > deadline )); then
+    attempt_deadline=$deadline
+  fi
+
+  while kill -0 "$inventory_pid" 2>/dev/null; do
+    if (( SECONDS >= attempt_deadline )); then
+      kill -TERM "$inventory_pid" 2>/dev/null || true
+      wait "$inventory_pid" 2>/dev/null || true
+      inventory_pid=0
+      return 124
+    fi
+    sleep 1
+  done
+
+  local rc=0
+  wait "$inventory_pid" || rc=$?
+  inventory_pid=0
+  return "$rc"
+}
+
+while true; do
+  scan_inventory || true
+  if awk -v type="$component_type" \
+         -v subtype="$component_subtype" \
+         -v manufacturer="$component_manufacturer" \
+         '$1 == type && $2 == subtype && $3 == manufacturer { found = 1 }
+          END { exit(found ? 0 : 1) }' "$inventory_log"; then
+    break
   fi
 
   if (( SECONDS >= deadline )); then
-    cat "$auval_log" >&2
-    echo "AU discovery/validation deadline expired for: ${component_type} ${component_subtype} ${component_manufacturer}" >&2
+    cat "$inventory_log" >&2
+    echo "AU discovery deadline expired for: ${component_type} ${component_subtype} ${component_manufacturer}" >&2
     exit 1
   fi
   sleep 1
 done
+
+auval -v "$component_type" "$component_subtype" "$component_manufacturer" \
+  >"$auval_log" 2>&1 || true
+cat "$auval_log"
+if ! grep -q 'AU VALIDATION SUCCEEDED' "$auval_log"; then
+  echo "AU validation did not reach its terminal success marker" >&2
+  exit 1
+fi
