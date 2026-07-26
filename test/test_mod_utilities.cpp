@@ -888,6 +888,21 @@ TEST_CASE("ClockDivider passes the first edge after reset", "[trigger][mod-utili
     REQUIRE(passes == 4);
 }
 
+TEST_CASE("trigger-kit factor setters enforce their declared ranges",
+          "[trigger][mod-utilities][contract]") {
+    ClockDivider div;
+    div.set_division(-1);
+    REQUIRE(div.division() == ClockDivider::kMinDivision);
+    div.set_division(ClockDivider::kMaxDivision + 1);
+    REQUIRE(div.division() == ClockDivider::kMaxDivision);
+
+    ClockMult mult;
+    mult.set_multiple(-1);
+    REQUIRE(mult.multiple() == ClockMult::kMinMultiple);
+    mult.set_multiple(ClockMult::kMaxMultiple + 1);
+    REQUIRE(mult.multiple() == ClockMult::kMaxMultiple);
+}
+
 TEST_CASE("ClockMult emits the stated number of triggers per steady period",
           "[trigger][mod-utilities]") {
     ClockMult mult;
@@ -929,6 +944,52 @@ TEST_CASE("ClockMult treats a stopped clock as stopped, not as a very slow one",
     for (int i = 0; i < 48000; ++i)
         if (mult.process(0.0f)) ++after;
     REQUIRE(after == 0);  // period was rejected as "clock restarted"
+}
+
+TEST_CASE("ClockMult factor changes cannot emit subdivisions from the old grid",
+          "[trigger][mod-utilities]") {
+    ClockMult mult;
+    mult.prepare(kSr);
+    mult.set_multiple(8);
+    mult.reset();
+
+    constexpr int period = 800;
+    REQUIRE(mult.process(1.0f));
+    for (int i = 1; i < period; ++i) REQUIRE_FALSE(mult.process(0.0f));
+    REQUIRE(mult.process(1.0f));  // establishes the 8x schedule
+
+    for (int i = 1; i < period / 3; ++i) (void)mult.process(0.0f);
+    mult.set_multiple(1);
+
+    // x1 means only source edges. No ticks from the abandoned x8 grid may
+    // leak through before the next source edge.
+    for (int i = period / 3; i < period; ++i) REQUIRE_FALSE(mult.process(0.0f));
+    REQUIRE(mult.process(1.0f));
+}
+
+TEST_CASE("ClockMult factor increases schedule only the future points of the new grid",
+          "[trigger][mod-utilities]") {
+    ClockMult mult;
+    mult.prepare(kSr);
+    mult.set_multiple(2);
+    mult.reset();
+
+    constexpr int period = 800;
+    REQUIRE(mult.process(1.0f));
+    for (int i = 1; i < period; ++i) (void)mult.process(0.0f);
+    REQUIRE(mult.process(1.0f));
+
+    constexpr int change_at = 250;
+    for (int i = 1; i <= change_at; ++i) REQUIRE_FALSE(mult.process(0.0f));
+    mult.set_multiple(8);
+
+    int future_subdivisions = 0;
+    for (int i = change_at + 1; i < period; ++i)
+        if (mult.process(0.0f)) ++future_subdivisions;
+    // The x8 grid is at 100-sample multiples. 100 and 200 are behind the
+    // change; 300..700 are the five realizable future subdivisions.
+    REQUIRE(future_subdivisions == 5);
+    REQUIRE(mult.process(1.0f));
 }
 
 TEST_CASE("GateGen opens for its stated length and retrigger restarts it",

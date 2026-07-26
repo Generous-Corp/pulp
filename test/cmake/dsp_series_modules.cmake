@@ -84,6 +84,8 @@ pulp_dsp_series_catalog_suite(pulp-test-forge-synthesis-catalog
 pulp_dsp_series_catalog_suite(pulp-test-forge-space-catalog  test_forge_space_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-sequencing-catalog
                               test_forge_sequencing_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-character-delay-catalog
+                              test_forge_character_delay_catalog.cpp)
 
 # The three catalog suites written before this file existed, plus the fixture
 # smoke. They were hand-registered in app_audio_host_tests.cmake; they belong

@@ -204,9 +204,11 @@ class ClockDividerT {
 public:
     /// Division factor. 1 passes everything.
     /// [design parameter] default 2, range 1 .. 64.
+    static constexpr int kMinDivision = 1;
+    static constexpr int kMaxDivision = 64;
     static constexpr int kDefaultDivision = 2;
 
-    void set_division(int n) { division_ = std::clamp(n, 1, 1024); }
+    void set_division(int n) { division_ = std::clamp(n, kMinDivision, kMaxDivision); }
     int division() const { return division_; }
 
     void reset() {
@@ -245,6 +247,8 @@ class ClockMultT {
 public:
     /// Multiplication factor. 1 passes the input clock through.
     /// [design parameter] default 2, range 1 .. 32.
+    static constexpr int kMinMultiple = 1;
+    static constexpr int kMaxMultiple = 32;
     static constexpr int kDefaultMultiple = 2;
 
     /// Longest input period the multiplier will track, in ms. Beyond this the
@@ -258,7 +262,26 @@ public:
         max_period_samples_ = units::ms_to_samples(kMaxPeriodMs, sample_rate_);
     }
 
-    void set_multiple(int n) { multiple_ = std::clamp(n, 1, 64); }
+    void set_multiple(int n) {
+        const int next = std::clamp(n, kMinMultiple, kMaxMultiple);
+        if (next == multiple_) return;
+        multiple_ = next;
+
+        // A factor change abandons the old subdivision grid immediately. Build
+        // only the FUTURE points of the new grid; replaying points that are now
+        // behind `since_edge_` would collapse them into a spurious burst, while
+        // retaining `pending_` from the old grid emits ticks even after x1 is
+        // selected.
+        if (!(period_ > 0.0) || since_edge_ >= period_) {
+            pending_ = 0;
+            next_at_ = 0.0;
+            return;
+        }
+        const double spacing = period_ / static_cast<double>(multiple_);
+        const int next_index = static_cast<int>(std::floor(since_edge_ / spacing)) + 1;
+        pending_ = std::max(0, multiple_ - next_index);
+        next_at_ = static_cast<double>(next_index) * spacing;
+    }
     int multiple() const { return multiple_; }
 
     void reset() {
