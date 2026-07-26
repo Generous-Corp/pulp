@@ -29,15 +29,6 @@ constexpr bool note_event_offset_in_range(timebase::SamplePosition event,
     return true;
 }
 
-/// A discontinuous range at the loop start is the transport's explicit wrap
-/// marker. Counting those markers avoids deriving an epoch from MonotonicBeat,
-/// whose signed tick storage deliberately saturates at the domain boundary.
-constexpr bool note_modifier_starts_new_pass(const TransportRange& range,
-                                             const LoopRegion& loop) noexcept {
-    return loop.enabled && loop.end > loop.start && range.discontinuity &&
-           range.timeline_tick_start == loop.start;
-}
-
 } // namespace detail
 
 enum class NoteRenderCode : std::uint8_t {
@@ -109,12 +100,6 @@ class ArrangementNoteRenderer {
     bool state_overflow_ = false;
     bool has_block_index_ = false;
     std::uint64_t last_block_index_ = 0;
-    bool has_note_pass_state_ = false;
-    std::uint64_t note_pass_index_ = 0;
-    LoopRegion note_pass_loop_{};
-    bool note_pass_has_precise_host_loop_ = false;
-    double note_pass_host_loop_start_beats_ = 0.0;
-    double note_pass_host_loop_end_beats_ = 0.0;
     std::uint32_t dropped_events_ = 0;
 };
 

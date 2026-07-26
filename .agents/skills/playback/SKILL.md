@@ -294,11 +294,14 @@ exist:
   decided at compile time without freezing every pass to one answer, so they are
   evaluated in `ArrangementNoteRenderer::process()` against a pass index.
 
-The pass index is **derived, never counted**: `(monotonic_start - loop.start) /
-loop_length`. `MonotonicBeat` does not wrap while the timeline tick returns to
-the loop start, so their difference grows by exactly one loop length per wrap.
-A stored counter would need resetting on seek, adoption, and stop, and would get
-one of them wrong.
+The pass index is **transport-owned, never renderer-local**. Each
+`TransportRange` carries `loop_pass_index`; the master transport and host
+projector advance it at a wrap and re-anchor it on start, seek/jump, or loop
+identity changes (including precise fractional host bounds). A renderer may be
+created mid-playback, skip a callback, or fail a bounded output flush and still
+observes the authoritative pass on its next range. Do not reconstruct the pass
+from `MonotonicBeat`: its signed tick storage intentionally saturates at the
+domain boundary.
 
 Two properties make the gate safe to apply per event. The pass index is constant
 across a range, because a wrap always starts a new range — so a note's on and its

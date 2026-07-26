@@ -146,23 +146,6 @@ std::size_t count_pitch(const std::vector<std::vector<std::uint8_t>>& passes, st
 
 } // namespace
 
-TEST_CASE("Loop-start discontinuities identify note modifier pass boundaries",
-          "[playback][note-modifier][determinism]") {
-    const LoopRegion loop{true, {0}, TickPosition{kLoopLength.value}};
-    TransportRange range;
-    range.timeline_tick_start = loop.start;
-    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(range, loop));
-    range.discontinuity = true;
-    REQUIRE(playback::detail::note_modifier_starts_new_pass(range, loop));
-    range.timeline_tick_start = {1};
-    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(range, loop));
-    range.timeline_tick_start = loop.start;
-    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(
-        range, LoopRegion{false, loop.start, loop.end}));
-    REQUIRE_FALSE(playback::detail::note_modifier_starts_new_pass(
-        range, LoopRegion{true, loop.start, loop.start}));
-}
-
 TEST_CASE("Conditional passes keep advancing after the monotonic clock saturates",
           "[playback][note-modifier][determinism][transport]") {
     const auto map = modifier_tempo_map();
@@ -328,8 +311,8 @@ TEST_CASE("Program adoption preserves the current conditional note pass",
         REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
 }
 
-TEST_CASE("A fractional host loop edit re-anchors conditional note passes",
-          "[playback][note-modifier][transport][host-loop]") {
+TEST_CASE("A renderer attached mid-loop uses the transport's current conditional pass",
+          "[playback][note-modifier][transport]") {
     const auto map = modifier_tempo_map();
     NoteModifier first_only = chance(30, note_probability_certain);
     first_only.condition = NoteConditionKind::First;
@@ -342,8 +325,6 @@ TEST_CASE("A fractional host loop edit re-anchors conditional note passes",
     REQUIRE(loop_samples <= std::numeric_limits<std::uint32_t>::max());
     const auto block_frames = static_cast<std::uint32_t>(loop_samples);
 
-    ArrangementNoteRenderer renderer({10});
-    REQUIRE(renderer.prepare(64));
     PlaybackProgramBlockLatch latch;
     MasterTransport transport;
     MasterTransportConfig config;
@@ -352,26 +333,19 @@ TEST_CASE("A fractional host loop edit re-anchors conditional note passes",
     config.loop = {true, {0}, TickPosition{kLoopLength.value}};
     REQUIRE(transport.prepare(*map, config) == TransportError::None);
 
-    TransportSnapshot first_pass;
-    REQUIRE(transport.begin_block(block_frames, first_pass) == TransportError::None);
-    first_pass.has_precise_host_loop = true;
-    first_pass.host_loop_start_beats = 0.0;
-    first_pass.host_loop_end_beats = 4.0;
-    REQUIRE(renderer.process(latch.begin_block(programs.store), first_pass).code ==
-            NoteRenderCode::Ok);
+    TransportSnapshot skipped_first_pass;
+    REQUIRE(transport.begin_block(block_frames, skipped_first_pass) == TransportError::None);
+    REQUIRE(skipped_first_pass.ranges[0].loop_pass_index == 0);
 
-    TransportSnapshot edited_loop;
-    REQUIRE(transport.begin_block(block_frames, edited_loop) == TransportError::None);
-    edited_loop.has_precise_host_loop = true;
-    edited_loop.host_loop_start_beats = 0.000'000'1;
-    edited_loop.host_loop_end_beats = 4.0;
-    REQUIRE(edited_loop.loop == first_pass.loop);
-    REQUIRE(renderer.process(latch.begin_block(programs.store), edited_loop).code ==
+    TransportSnapshot current_pass;
+    REQUIRE(transport.begin_block(block_frames, current_pass) == TransportError::None);
+    REQUIRE(current_pass.ranges[0].loop_pass_index == 1);
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    REQUIRE(renderer.process(latch.begin_block(programs.store), current_pass).code ==
             NoteRenderCode::Ok);
-    bool first_note_sounded = false;
     for (const auto& event : renderer.events())
-        first_note_sounded |= event.is_note_on() && event.data()[1] == 60;
-    REQUIRE(first_note_sounded);
+        REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
 }
 
 TEST_CASE("Non-musical transport metadata preserves the conditional note pass",
