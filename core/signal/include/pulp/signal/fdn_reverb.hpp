@@ -31,6 +31,7 @@
 #include <pulp/signal/denormal.hpp>
 #include <pulp/signal/fdn/config.hpp>
 #include <pulp/signal/fdn/diffusion.hpp>
+#include <pulp/signal/fdn/filter_state.hpp>
 #include <pulp/signal/fdn/frac_delay.hpp>
 #include <pulp/signal/fdn/multirate.hpp>
 #include <pulp/signal/fdn/stages.hpp>
@@ -100,8 +101,12 @@ public:
     // 5 ms glide from the previous patch is an artifact, not a feature.
     void snap_parameters() {
         for (int p = 0; p < fdn::kNumParams; ++p) smoothed_[p] = target_[p];
-        apply_tank_rate(rate_index());
+        const bool rate_changed = apply_tank_rate(rate_index());
         push_controls();
+        // apply_tank_rate() must configure before controls can be derived at
+        // the new rate. Clear once more after that derivation so a snapped rate
+        // change starts from the same stochastic/control phase as a cold reset.
+        if (rate_changed) reset_rate_domain_state();
     }
 
     // Authored EQ. Not a baked param: the in-loop EQ is a voicing decision
@@ -121,16 +126,8 @@ public:
     void set_flutter(bool on) { controls_.flutter = on; }
 
     void reset() {
-        bridge_.reset();
-        for (auto& line : predelay_) line.reset();
-        for (auto& cascade : pre_diffusion_) cascade.reset();
-        tank_.reset();
-        ensemble_.reset();
-        ducker_.reset();
-        for (auto& f : input_lp_) f.reset();
-        for (auto& f : output_lp_) f.reset();
-        control_countdown_ = 0;
         snap_parameters();
+        reset_rate_domain_state();
     }
 
     // Zero. The engine introduces no block-scale buffering; what it does have
@@ -176,6 +173,19 @@ private:
         return std::clamp(raw, 0, fdn::kNumTankRates - 1);
     }
 
+    void reset_rate_domain_state() {
+        bridge_.reset();
+        for (auto& line : predelay_) line.reset();
+        for (auto& cascade : pre_diffusion_) cascade.reset();
+        tank_.reset();
+        ensemble_.reset();
+        ducker_.reset();
+        for (auto& f : input_lp_) f.reset();
+        for (auto& f : output_lp_) f.reset();
+        duck_gain_ = 1.0;
+        control_countdown_ = 0;
+    }
+
     // A live tank-rate change is a hard, clean flush — never a crossfade. The
     // running tail is dropped rather than reinterpreted at the new rate, so no
     // pitch-shifted tail artifact is possible, and every resampler phase and
@@ -190,30 +200,23 @@ private:
     // wet output for good rather than flushing it. process_chunk() applies any
     // pending change before either leg runs, which is what keeps the two in
     // step.
-    void apply_tank_rate(int index) {
-        if (index == active_rate_index_) return;
+    bool apply_tank_rate(int index) {
+        if (index == active_rate_index_) return false;
         active_rate_index_ = index;
         const double rate = fdn::kTankRates[static_cast<std::size_t>(index)];
         bridge_.configure(rate);
         tank_.configure(rate);
         ducker_.configure(rate);
         ensemble_.configure(rate);
-        ducker_.reset();
-        ensemble_.reset();
-        duck_gain_ = 1.0;
         for (int c = 0; c < kNumRails; ++c) {
             pre_diffusion_[c].configure(fdn::kPreDiffusionBaseMs, rate,
                                         c == 0 ? 3 : 7);
-            pre_diffusion_[c].reset();
-            predelay_[c].reset();
-            input_lp_[c].reset();
-            output_lp_[c].reset();
         }
         design_input_lp(rate);
         makeup_gain_ = std::pow(
             10.0, fdn::kRateMakeupDb[static_cast<std::size_t>(index)] / 20.0);
-        tank_.reset();
-        control_countdown_ = 0;
+        reset_rate_domain_state();
+        return true;
     }
 
     // Below an 18 kHz tank bandwidth an extra 2-pole lowpass engages INSIDE the
@@ -228,7 +231,7 @@ private:
                                   fdn::kTankInputLpFraction * tank_rate,
                                   0.7071067811865476, tank_rate);
         const auto c = designer.coefficients();
-        for (auto& f : input_lp_) f.set_coefficients(c);
+        input_lp_coefficients_.fill(c);
     }
 
     // The per-mode wet lowpass runs at the HOST rate, after reconstruction: it
@@ -240,7 +243,7 @@ private:
                                   std::min(output_lp_hz_, 0.45 * host_rate_),
                                   0.7071067811865476, host_rate_);
         const auto c = designer.coefficients();
-        for (auto& f : output_lp_) f.set_coefficients(c);
+        output_lp_coefficients_.fill(c);
     }
 
     void push_controls() {
@@ -312,8 +315,10 @@ private:
             r = static_cast<SampleType>(static_cast<double>(r) * duck);
 
             if (input_lp_active_) {
-                l = process_sanitized(input_lp_[0], l);
-                r = process_sanitized(input_lp_[1], r);
+                l = static_cast<SampleType>(
+                    input_lp_[0].process(input_lp_coefficients_[0], l));
+                r = static_cast<SampleType>(
+                    input_lp_[1].process(input_lp_coefficients_[1], r));
             }
 
             // Pre-diffusion with the coefficient's sign alternated between the
@@ -342,20 +347,12 @@ private:
         // gain — the last multiply before the output buffer.
         for (int i = 0; i < n; ++i) {
             out_left[i] = static_cast<SampleType>(
-                process_sanitized(output_lp_[0], out_left[i]) * makeup_gain_);
+                output_lp_[0].process(output_lp_coefficients_[0], out_left[i]) *
+                makeup_gain_);
             out_right[i] = static_cast<SampleType>(
-                process_sanitized(output_lp_[1], out_right[i]) * makeup_gain_);
+                output_lp_[1].process(output_lp_coefficients_[1], out_right[i]) *
+                makeup_gain_);
         }
-    }
-
-    static SampleType process_sanitized(BiquadT<double>& filter, SampleType input) {
-        const double in = std::isfinite(static_cast<double>(input))
-                              ? static_cast<double>(input)
-                              : 0.0;
-        const double output = filter.process(in);
-        if (std::isfinite(output)) return static_cast<SampleType>(output);
-        filter.reset();
-        return SampleType{0};
     }
 
     static constexpr int kNumRails = 2;
@@ -366,8 +363,10 @@ private:
     fdn::FdnTank<SampleType> tank_{};
     fdn::TransientDucker ducker_{};
     fdn::EnsembleChorus<SampleType> ensemble_{};
-    std::array<BiquadT<double>, kNumRails> input_lp_{};
-    std::array<BiquadT<double>, kNumRails> output_lp_{};
+    std::array<fdn::SanitizedBiquadState, kNumRails> input_lp_{};
+    std::array<fdn::SanitizedBiquadState, kNumRails> output_lp_{};
+    std::array<BiquadCoefficientsT<double>, kNumRails> input_lp_coefficients_{};
+    std::array<BiquadCoefficientsT<double>, kNumRails> output_lp_coefficients_{};
 
     std::array<double, fdn::kNumParams> target_{};
     std::array<double, fdn::kNumParams> smoothed_{};
