@@ -699,8 +699,8 @@ public:
             feedback_ = y;
 
             os_history_[os_write_] = y;
-            // Phase 0 of this base sample is the decimator's output grid point;
-            // taking it here is what keeps the composite delay an exact integer.
+            // The first oversample is the decimator's output grid point; taking
+            // it here keeps the composite delay an exact integer.
             if (phase == 0) decimated = decimate();
             os_write_ = os_write_ + 1 < kResamplerTaps ? os_write_ + 1 : 0;
         }

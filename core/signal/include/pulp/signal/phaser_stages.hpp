@@ -242,7 +242,7 @@
 /// | `kSweepFloorHz` | 20.0 | 5 .. 50 Hz | keeps `tan(π·fc/fs)` away from 0 |
 /// | `kSweepCeilingRatio` | 0.45 × fs | 0.30 .. 0.49 | keeps the prewarp away from Nyquist |
 /// | `kStaggerRatio` | 1.0 (off) | 0.85 .. 1.15 | undocumented catalog extension |
-/// | `kStageCountDefault` | 4 | 4 .. 12, even | Small Stone / Phase 90 class |
+/// | `kStageCountDefault` | 4 | 4 .. 12, even | compact four-stage phaser class |
 /// | `kMixDefault` | 0.5 | 0 .. 1 | the full-notch point, above |
 ///
 /// The two Color values are original engineering choices reproducing documented
@@ -311,7 +311,7 @@ public:
     static constexpr int kMinStages = 4;
     /// Most stages. The DP/4's documented stage count, used as the anchor.
     static constexpr int kMaxStages = 12;
-    /// Small Stone / Phase 90 class: two notches.
+    /// Compact four-stage phaser class: two notches.
     static constexpr int kStageCountDefault = 4;
 
     /// Feedback magnitude ceiling. The worst-case-gain proof is

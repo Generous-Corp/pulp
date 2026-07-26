@@ -53,7 +53,7 @@
 /// control current at the audio tap as a balanced COMMON-MODE term that cancels
 /// to first order, while the audio — injected differentially — sees a matched
 /// pair of variable resistances. Matching sets the residual control
-/// feedthrough; this clean-room model assumes ideal matching, so feedthrough is
+/// feedthrough; this model assumes ideal matching, so feedthrough is
 /// zero and the only surviving artefact is the intended audio-path curvature.
 /// The audio therefore sees an ANTIPARALLEL MATCHED PAIR, which is why the
 /// curvature below is odd-symmetric (third harmonic) rather than rectifying.
@@ -89,16 +89,15 @@
 /// If a later revision wants it, it must use seeded `Xorshift32`/`OuWalkT` from
 /// `rng.hpp`, seeded at `reset()`, never macro-exposed.
 ///
-/// ## Clean-room
+/// ## Model scope
 ///
-/// Topology and documented behaviour only, from public schematic analyses and
-/// manufacturer documentation: four-diode bridge, common-mode cancellation of
-/// the control current, large input attenuation ahead of the bridge with makeup
-/// after, feedback detection, transformer brackets, a slow-attack low-frequency
-/// de-sensitisation, and a smooth-at-rest → overdriven-when-driven slope. No
-/// netlists, no component values, no measured constants. Every time constant,
-/// curvature and saturation coefficient below is `[design parameter]` with a
-/// default and a range, tuned to reproduce the documented BEHAVIOUR.
+/// The model implements the publicly documented topology and behaviour:
+/// four-diode bridge, common-mode cancellation of the control current, large
+/// input attenuation ahead of the bridge with makeup after, feedback detection,
+/// transformer brackets, slow-attack low-frequency de-sensitisation, and a
+/// smooth-at-rest to overdriven-when-driven slope. Every time constant, curvature,
+/// and saturation coefficient below is a `[design parameter]` with a default and
+/// range chosen for that behavior.
 ///
 /// RT contract: `prepare()` sets sample rate and coefficients; nothing in this
 /// header allocates, at any point, including `prepare()` — all state is POD and

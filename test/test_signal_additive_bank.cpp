@@ -1398,7 +1398,7 @@ TEST_CASE("Latency is zero and output begins at sample zero",
     REQUIRE(Bank::latency_samples() == 0);
     REQUIRE(AdditiveBank::latency_samples() == 0);
 
-    // Phase 0.25 puts the partial at its crest on the very first sample, so a
+    // A quarter-cycle offset puts the partial at its crest on the first sample, so a
     // group delay of even one sample would show as a zero at index 0.
     Bank bank;
     configure_steady(bank, harmonic_voice(1, 1.0, 0.25), 1, 440.0);

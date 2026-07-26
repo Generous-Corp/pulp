@@ -446,9 +446,8 @@ using PhaseVibrato64 = PhaseVibratoT<double>;
 ///     sitting in a region of strong phase shift no matter where the sweep
 ///     currently is. The stagger is documented topology; the actual four
 ///     frequencies below are design parameters, because no standardised
-///     capacitor set exists across published teardowns of the circuit and
-///     adopting any one clone's values would be a clean-room violation dressed
-///     up as accuracy.
+///     capacitor set exists across published circuit descriptions, so the model
+///     uses its own explicit calibration rather than any one clone's values.
 ///   - The control passes through a vactrol, not straight from the LFO. The
 ///     photoresistor's conductance rises in under a millisecond and decays over
 ///     tens, so the sweep is late arriving and later leaving. That asymmetry is

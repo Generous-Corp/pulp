@@ -144,9 +144,8 @@
 /// **design parameter** carrying a default and a range on its own constant.
 /// HONEST GAP: no citable literature exists for the crossfade-window length,
 /// detent table, glide defaults, or dive floor of a pedal-style shifter;
-/// commercial products do not publish them and clean-room forbids
-/// reverse-engineering them. The topology is Dattorro's; the calibration is
-/// original engineering.
+/// commercial products do not publish them. The topology is Dattorro's; the
+/// calibration consists of explicit original design choices.
 
 #include <pulp/signal/crossfade.hpp>
 #include <pulp/signal/dc_blocker.hpp>

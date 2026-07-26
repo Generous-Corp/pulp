@@ -33,8 +33,8 @@
 /// The four program names above are documented product history of the AMS
 /// RMX16. **No academic paper documents that machine**, and nothing here is
 /// measured from it, reverse-engineered from it, or derived from any
-/// proprietary constant. The topology in this file is a clean-room
-/// reconstruction from two published lineages, and every number is either cited
+/// proprietary constant. The topology combines two published algorithm
+/// lineages, and every number is either cited
 /// to one of them or carries an explicit `[design parameter]` default and
 /// range:
 ///
@@ -237,7 +237,7 @@
 namespace pulp::signal {
 
 /// The four programs. The names are documented RMX16 product history; the
-/// shapes below are this module's own clean-room designs (see the file note).
+/// shapes below are this module's own designs derived from the cited lineages.
 enum class NonlinProgram {
     ambience = 0,  ///< Short falling cloud — the "natural" one.
     gated = 1,     ///< Flat body, hard cut.

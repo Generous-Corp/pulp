@@ -22,8 +22,8 @@
 ///
 /// So: the topology and the OLA math are grounded in published theory; the
 /// splice scheduler, every frame and crossfade constant, and the √2 gain bound
-/// are ORIGINAL CLEAN-ROOM ENGINEERING, defensible from the control surface and
-/// the family but transcribed from nobody's product. Where this file says
+/// are original design choices derived from the documented control surface and
+/// the algorithm family, not from a product implementation. Where this file says
 /// "faithful", it means faithful to a documented control surface and a
 /// documented artefact description — never to an algorithm anyone published.
 ///

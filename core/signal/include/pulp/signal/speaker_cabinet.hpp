@@ -112,8 +112,8 @@
 ///   * H. F. Olson, "Direct Radiator Loudspeaker Enclosures", J. Audio Eng.
 ///     Soc. 17(1):22-29, 1969 — baffle step and edge-diffraction concepts.
 ///
-/// Clean-room: the citations above are used for CONCEPTS AND TOPOLOGY only.
-/// The driver archetype table is engineered `[design parameter]` starting
+/// The citations above ground concepts and topology. The driver archetype table
+/// contains engineered `[design parameter]` starting
 /// points inside the ranges published guitar/bass driver datasheets occupy —
 /// not a transcription of any one product.
 
@@ -139,8 +139,8 @@ enum class SpeakerBoxType { sealed, open_back };
 /// the cabinet and breakup stages need.
 ///
 /// `[design parameter]` rows — engineered starting points inside the ranges
-/// real guitar/bass driver datasheets occupy, per the clean-room note in the
-/// file doc block. Ranges are given in `kArchetypeRanges` so a caller (or a
+/// real guitar/bass driver datasheets occupy, as described in the file doc
+/// block. Ranges are given in `kArchetypeRanges` so a caller (or a
 /// test) can see the envelope each figure is drawn from.
 struct SpeakerDriverArchetype {
     const char* name;
@@ -231,8 +231,8 @@ public:
 
     static constexpr int kArchetypeCount = 5;
 
-    /// `[design parameter]` table; see `SpeakerDriverArchetype` and the
-    /// clean-room note. Ranges below each figure are the datasheet envelope the
+    /// `[design parameter]` table; see `SpeakerDriverArchetype` and the model
+    /// scope above. Ranges below each figure are the datasheet envelope the
     /// value is drawn from.
     static const SpeakerDriverArchetype& archetype(int index) {
         static constexpr SpeakerDriverArchetype kTable[kArchetypeCount] = {
