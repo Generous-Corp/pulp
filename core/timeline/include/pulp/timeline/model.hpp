@@ -29,7 +29,8 @@ namespace pulp::timeline {
 
 namespace detail {
 class ProjectStateAccess;
-}
+class LauncherStore;
+} // namespace detail
 class SchemaRegistry;
 
 enum class ModelErrorCode : std::uint8_t {
@@ -331,6 +332,11 @@ class Clip {
 struct ClipIndexNode;
 
 struct TrackIndexStats {
+    std::uint64_t live_nodes = 0;
+    std::uint64_t nodes_created = 0;
+};
+
+struct LauncherIndexStats {
     std::uint64_t live_nodes = 0;
     std::uint64_t nodes_created = 0;
 };
@@ -808,6 +814,49 @@ struct SequenceInput {
 
 class Sequence {
   public:
+    class SceneView {
+      public:
+        class Iterator {
+          public:
+            using value_type = Scene;
+            using difference_type = std::ptrdiff_t;
+            using pointer = const Scene*;
+            using reference = const Scene&;
+            using iterator_category = std::forward_iterator_tag;
+
+            const Scene& operator*() const noexcept;
+            const Scene* operator->() const noexcept;
+            Iterator& operator++() noexcept;
+            Iterator operator++(int) noexcept {
+                auto copy = *this;
+                ++*this;
+                return copy;
+            }
+            bool operator==(const Iterator&) const noexcept = default;
+
+          private:
+            friend class SceneView;
+            Iterator(std::shared_ptr<const detail::LauncherStore> store, ItemId current) noexcept
+                : store_(std::move(store)), current_(current) {}
+            std::shared_ptr<const detail::LauncherStore> store_;
+            ItemId current_;
+        };
+
+        std::size_t size() const noexcept;
+        bool empty() const noexcept {
+            return size() == 0;
+        }
+        const Scene& operator[](std::size_t index) const noexcept;
+        Iterator begin() const noexcept;
+        Iterator end() const noexcept;
+
+      private:
+        friend class Sequence;
+        explicit SceneView(std::shared_ptr<const detail::LauncherStore> store) noexcept
+            : store_(std::move(store)) {}
+        std::shared_ptr<const detail::LauncherStore> store_;
+    };
+
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> duration,
            std::vector<Track> tracks);
@@ -845,7 +894,7 @@ class Sequence {
     std::span<const SequenceMarker> markers() const noexcept;
     // Ordered by (position, duration, id). Overlap is permitted.
     std::span<const SequenceRegion> regions() const noexcept;
-    std::span<const Scene> scenes() const noexcept;
+    SceneView scenes() const noexcept;
     const SequenceMarker* find_marker(ItemId id) const noexcept;
     const SequenceRegion* find_region(ItemId id) const noexcept;
     const Scene* find_scene(ItemId id) const noexcept;
@@ -864,7 +913,10 @@ class Sequence {
     runtime::Result<Sequence, ModelError> erase_slot(ItemId scene_id, ItemId slot_id) const;
     Sequence with_chord_scale_lane(ChordScaleLane lane) const;
     Sequence with_groove(GrooveTemplate groove) const;
+    std::size_t shared_launcher_nodes_with(const Sequence& other) const;
+    bool shares_launcher_storage_with(const Sequence& other) const noexcept;
     bool shares_storage_with(const Sequence& other) const noexcept;
+    static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
     struct Data;
@@ -873,7 +925,6 @@ class Sequence {
     runtime::Result<Sequence, ModelError>
     with_annotations(std::vector<SequenceMarker> markers,
                      std::vector<SequenceRegion> regions) const;
-    runtime::Result<Sequence, ModelError> with_scenes(std::vector<Scene> scenes) const;
     explicit Sequence(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
 };

@@ -23,8 +23,7 @@ TEST_CASE("Timeline private identity equality is semantic across insertion histo
     for (const std::uint64_t id : {4, 2, 6, 1, 3, 5, 7})
         REQUIRE(interleaved.insert({id}, location(id)));
     REQUIRE(ascending.equivalent(interleaved));
-    REQUIRE(interleaved.replace({7},
-                                {ItemKind::Clip, {11}, {10}, {11}, {7}, false}));
+    REQUIRE(interleaved.replace({7}, {ItemKind::Clip, {11}, {10}, {11}, {7}, false}));
     REQUIRE_FALSE(ascending.equivalent(interleaved));
 }
 
@@ -155,25 +154,23 @@ TEST_CASE("Timeline track replacement preserves launcher references without a se
     REQUIRE(first_track.shares_clip_membership_with(first_track.with_record_armed(true)));
     REQUIRE_FALSE(first_track.shares_clip_membership_with(
         take_value(first_track.insert_clip(clip({10}, 200, 100)))));
-    REQUIRE_FALSE(first_track.shares_clip_membership_with(
-        take_value(first_track.erase_clip({5}))));
-    const auto* original_scene_storage = sequence.scenes().data();
+    REQUIRE_FALSE(first_track.shares_clip_membership_with(take_value(first_track.erase_clip({5}))));
     auto replaced = sequence.replace_track(std::move(timing_only));
     REQUIRE(replaced);
-    REQUIRE(replaced->scenes().data() == original_scene_storage);
+    REQUIRE(replaced->shares_launcher_storage_with(sequence));
     REQUIRE(replaced->find_scene({20})->slots[0].clip_id == ItemId{4});
     REQUIRE(replaced->find_scene({20})->slots[1].clip_id == ItemId{9});
 
     auto annotated = take_value(sequence.insert_marker({{24}, "start", {0}, {}}));
-    REQUIRE(annotated.scenes().data() == original_scene_storage);
+    REQUIRE(annotated.shares_launcher_storage_with(sequence));
     auto with_lane = sequence.with_chord_scale_lane(take_value(ChordScaleLane::create({})));
-    REQUIRE(with_lane.scenes().data() == original_scene_storage);
+    REQUIRE(with_lane.shares_launcher_storage_with(sequence));
     auto with_groove = sequence.with_groove(take_value(GrooveTemplate::create({})));
-    REQUIRE(with_groove.scenes().data() == original_scene_storage);
+    REQUIRE(with_groove.shares_launcher_storage_with(sequence));
 
     auto with_extra_scene = replaced->insert_scene(Scene{{23}, "other", {}});
     REQUIRE(with_extra_scene);
-    REQUIRE(with_extra_scene->scenes().data() != original_scene_storage);
+    REQUIRE_FALSE(with_extra_scene->shares_launcher_storage_with(sequence));
 
     auto removes_referenced_clip = take_value(Track::create({6}, "first", {clip({5}, 200, 100)}));
     auto rejected = sequence.replace_track(std::move(removes_referenced_clip));
@@ -181,6 +178,107 @@ TEST_CASE("Timeline track replacement preserves launcher references without a se
     REQUIRE(rejected.error().code == ModelErrorCode::MissingItem);
     REQUIRE(rejected.error().item == ItemId{4});
     REQUIRE(rejected.error().related_item == ItemId{21});
+}
+
+TEST_CASE("Timeline launcher edits path-copy bounded persistent index paths at scale") {
+    constexpr std::size_t scene_count = 4096;
+    constexpr std::size_t slots_per_scene = 4;
+    std::vector<Scene> scenes;
+    scenes.reserve(scene_count);
+    for (std::size_t scene_index = 0; scene_index < scene_count; ++scene_index) {
+        std::vector<Slot> slots;
+        slots.reserve(slots_per_scene);
+        for (std::size_t slot_index = 0; slot_index < slots_per_scene; ++slot_index)
+            slots.push_back(Slot{{1'000'000 + scene_index * slots_per_scene + slot_index},
+                                 {},
+                                 launch_immediate(),
+                                 {}});
+        scenes.push_back(Scene{{100'000 + scene_index}, "scene", SlotList(std::move(slots))});
+    }
+    const auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {1},
+        .name = "large launcher",
+        .scenes = std::move(scenes),
+    }));
+
+    const auto before = Sequence::launcher_index_stats();
+    const ItemId edited_scene{100'000 + scene_count / 2};
+    const ItemId inserted_slot{2'000'000};
+    const ItemId before_slot{1'000'000 + (scene_count / 2) * slots_per_scene + 2};
+    const auto edited = take_value(sequence.insert_slot(
+        edited_scene, Slot{inserted_slot, {}, launch_immediate(), {}}, before_slot));
+    const auto after = Sequence::launcher_index_stats();
+
+    REQUIRE(after.nodes_created - before.nodes_created < 256);
+    REQUIRE(edited.shared_launcher_nodes_with(sequence) > 30'000);
+    REQUIRE(sequence.find_slot(inserted_slot) == nullptr);
+    REQUIRE(edited.find_slot(inserted_slot) != nullptr);
+    REQUIRE(edited.find_scene(edited_scene)->slots[2].id == inserted_slot);
+
+    const auto before_annotation = Sequence::launcher_index_stats();
+    const auto annotated = take_value(sequence.insert_marker({{3'000'000}, "marker", {0}, {}}));
+    const auto after_annotation = Sequence::launcher_index_stats();
+    REQUIRE(annotated.shares_launcher_storage_with(sequence));
+    REQUIRE(after_annotation.nodes_created == before_annotation.nodes_created);
+
+    std::vector<Scene> separate_scenes(sequence.scenes().begin(), sequence.scenes().end());
+    const auto separately_built = take_value(Sequence::create(SequenceInput{
+        .id = {2},
+        .name = "equal but independent launcher",
+        .scenes = std::move(separate_scenes),
+    }));
+    REQUIRE(separately_built.shared_launcher_nodes_with(sequence) == 0);
+}
+
+TEST_CASE("Timeline launcher persistent nodes reclaim with their snapshots") {
+    const auto baseline = Sequence::launcher_index_stats();
+    {
+        std::vector<Scene> scenes;
+        for (std::uint64_t index = 0; index < 512; ++index)
+            scenes.push_back(Scene{
+                {10'000 + index}, "scene", {Slot{{20'000 + index}, {}, launch_immediate(), {}}}});
+        const auto sequence = take_value(Sequence::create(SequenceInput{
+            .id = {1},
+            .name = "reclamation",
+            .scenes = std::move(scenes),
+        }));
+        const auto edited =
+            take_value(sequence.insert_slot({10'256}, Slot{{30'000}, {}, launch_immediate(), {}}));
+        REQUIRE(edited.find_slot({30'000}) != nullptr);
+        REQUIRE(Sequence::launcher_index_stats().live_nodes > baseline.live_nodes);
+    }
+    REQUIRE(Sequence::launcher_index_stats().live_nodes == baseline.live_nodes);
+}
+
+TEST_CASE("Timeline launcher reverse indexes protect jump targets without scans") {
+    auto jump = follow_action(FollowActionKind::Jump, TickDuration{1});
+    jump.choices[0].target = ItemId{21};
+    const auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {1},
+        .name = "jump references",
+        .scenes =
+            {
+                Scene{{10}, "target", {Slot{{21}, {}, launch_immediate(), {}}}},
+                Scene{{11}, "source", {Slot{{22}, {}, launch_immediate(), jump}}},
+            },
+    }));
+
+    auto rejected_slot = sequence.erase_slot({10}, {21});
+    REQUIRE_FALSE(rejected_slot);
+    REQUIRE(rejected_slot.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(rejected_slot.error().item == ItemId{21});
+    REQUIRE(rejected_slot.error().related_item == ItemId{22});
+
+    auto rejected_scene = sequence.erase_scene({10});
+    REQUIRE_FALSE(rejected_scene);
+    REQUIRE(rejected_scene.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(rejected_scene.error().item == ItemId{21});
+    REQUIRE(rejected_scene.error().related_item == ItemId{22});
+
+    const auto without_source = take_value(sequence.erase_scene({11}));
+    const auto without_target = take_value(without_source.erase_slot({10}, {21}));
+    REQUIRE(without_target.scenes().size() == 1);
+    REQUIRE(without_target.find_slot({21}) == nullptr);
 }
 
 TEST_CASE("Timeline reactivation policy refreshes ancestor navigation caches") {
@@ -325,8 +423,7 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
     auto bad_representation_policy = Project::create(
         ProjectInput{{1}, "project", 4, {3}, {invalid_representation_policy}, {sequence}});
     REQUIRE_FALSE(bad_representation_policy);
-    REQUIRE(bad_representation_policy.error().code ==
-            ModelErrorCode::InvalidAssetStoragePolicy);
+    REQUIRE(bad_representation_policy.error().code == ModelErrorCode::InvalidAssetStoragePolicy);
 
     auto invalid_locator = valid_asset;
     invalid_locator.locators[0].kind = static_cast<AssetLocatorKind>(0xff);
@@ -344,13 +441,11 @@ TEST_CASE("Timeline assets separate content identity from resolution hints") {
     REQUIRE(bad_representation_locator.error().code == ModelErrorCode::InvalidAssetLocator);
 
     auto primary_hash_reused = valid_asset;
-    primary_hash_reused.representations[0].content_hash =
-        primary_hash_reused.content_hash;
-    auto duplicate_primary_hash = Project::create(
-        ProjectInput{{1}, "project", 4, {3}, {primary_hash_reused}, {sequence}});
+    primary_hash_reused.representations[0].content_hash = primary_hash_reused.content_hash;
+    auto duplicate_primary_hash =
+        Project::create(ProjectInput{{1}, "project", 4, {3}, {primary_hash_reused}, {sequence}});
     REQUIRE_FALSE(duplicate_primary_hash);
-    REQUIRE(duplicate_primary_hash.error().code ==
-            ModelErrorCode::DuplicateAssetRepresentation);
+    REQUIRE(duplicate_primary_hash.error().code == ModelErrorCode::DuplicateAssetRepresentation);
 
     auto representation_hash_reused = valid_asset;
     representation_hash_reused.representations.push_back(
@@ -645,19 +740,19 @@ TEST_CASE("Timeline remap allocates first then fixes internal references") {
 }
 
 TEST_CASE("Timeline remap preserves sequence context and project session origin") {
-    const auto lane = take_value(ChordScaleLane::create(
-        {{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    const auto lane =
+        take_value(ChordScaleLane::create({{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
     GrooveTemplateInput groove_input;
     groove_input.name = "shuffle";
     groove_input.swing_grid = TickDuration{kTicksPerQuarter / 2};
     groove_input.swing = SwingRatio{2, 3};
     const auto groove = take_value(GrooveTemplate::create(std::move(groove_input)));
-    const auto sequence = take_value(Sequence::create(
-        SequenceInput{.id = {2},
-                      .name = "context",
-                      .musical_duration = TickDuration{400},
-                      .chord_scale_lane = lane,
-                      .groove = groove}));
+    const auto sequence =
+        take_value(Sequence::create(SequenceInput{.id = {2},
+                                                  .name = "context",
+                                                  .musical_duration = TickDuration{400},
+                                                  .chord_scale_lane = lane,
+                                                  .groove = groove}));
     const SessionStart session_start{{172'800'000}, {48'000, 1}};
     const auto project = take_value(Project::create(ProjectInput{.id = {1},
                                                                  .name = "context",

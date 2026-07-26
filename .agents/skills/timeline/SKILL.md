@@ -134,6 +134,12 @@ artifact is needed. Never modify canonical project JSON text directly.
 - Scenes are sequence-owned in authored order, and each scene owns its ordered
   slots. A non-empty slot must name a clip in that sequence; a Jump follow
   action must name an existing slot, while other kinds carry no target.
+  Sequence-owned launcher state is an immutable persistent store: scene and
+  slot identity indexes, authored-order links, and reverse clip/Jump references
+  live together in `sequence_scene_internal.cpp`. Ordinary scene/slot edits
+  path-copy only affected AVL paths; unrelated Sequence edits must retain the
+  launcher store unchanged. Never replace this with scene-vector rebuilding or
+  validate deletions by scanning every scene.
   `InsertScene` / `RemoveScene` and `InsertSlot` / `RemoveSlot` reduce through
   `transaction_scene_internal` with exact inverse and tombstone ownership.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
@@ -739,6 +745,9 @@ the commands, transactions, journal, and undo suites, plus
 `pulp-test-timeline-persistence` in Release and UBSan configurations.
 Keep the 10k-clip edit test proving bounded node creation, subtree sharing, and
 reclamation; a vector rebuild is not an acceptable persistent-index substitute.
+Keep the 4k-scene/16k-slot launcher test proving bounded node creation, high
+structural sharing, zero launcher allocation for annotation/context edits, and
+zero sharing for an independently built equal launcher.
 Keep `pulp-test-timeline-replay-golden` green: it applies real journaled gain,
 fade, and note edits, replays from the checkpoint, and compares the resulting
 audio/MIDI byte stream with both the committed snapshot and pinned fixture.

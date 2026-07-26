@@ -188,7 +188,9 @@ TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
     auto project = session_project();
     const auto* sequence = project.find_sequence({2});
     auto scenes = std::vector<Scene>(sequence->scenes().begin(), sequence->scenes().end());
-    scenes[0].slots[0].clip_id = ItemId{99};
+    auto slots = std::vector<Slot>(scenes[0].slots.begin(), scenes[0].slots.end());
+    slots[0].clip_id = ItemId{99};
+    scenes[0].slots = std::move(slots);
     auto rejected = Sequence::create(SequenceInput{
         .id = sequence->id(),
         .name = sequence->name(),
@@ -204,7 +206,9 @@ TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
 
     const ItemId exhausted{std::numeric_limits<std::uint64_t>::max()};
     scenes = std::vector<Scene>(sequence->scenes().begin(), sequence->scenes().end());
-    scenes[0].slots[0].clip_id = exhausted;
+    slots = std::vector<Slot>(scenes[0].slots.begin(), scenes[0].slots.end());
+    slots[0].clip_id = exhausted;
+    scenes[0].slots = std::move(slots);
     auto invalid_clip_sentinel = Sequence::create(SequenceInput{
         .id = sequence->id(),
         .name = sequence->name(),
@@ -219,7 +223,9 @@ TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
     REQUIRE(invalid_clip_sentinel.error().item == exhausted);
 
     scenes = std::vector<Scene>(sequence->scenes().begin(), sequence->scenes().end());
-    scenes[0].slots[0].follow.choices[0] = FollowAction{FollowActionKind::Next, exhausted, 3};
+    slots = std::vector<Slot>(scenes[0].slots.begin(), scenes[0].slots.end());
+    slots[0].follow.choices[0] = FollowAction{FollowActionKind::Next, exhausted, 3};
+    scenes[0].slots = std::move(slots);
     auto invalid_target_sentinel = Sequence::create(SequenceInput{
         .id = sequence->id(),
         .name = sequence->name(),
@@ -234,7 +240,9 @@ TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
     REQUIRE(invalid_target_sentinel.error().item == exhausted);
 
     scenes = std::vector<Scene>(sequence->scenes().begin(), sequence->scenes().end());
-    scenes[0].slots[0].follow.choices[0].kind = static_cast<FollowActionKind>(255);
+    slots = std::vector<Slot>(scenes[0].slots.begin(), scenes[0].slots.end());
+    slots[0].follow.choices[0].kind = static_cast<FollowActionKind>(255);
+    scenes[0].slots = std::move(slots);
     auto invalid_follow = Sequence::create(SequenceInput{
         .id = sequence->id(),
         .name = sequence->name(),
@@ -248,7 +256,9 @@ TEST_CASE("Timeline session model rejects a slot that names a missing clip") {
     REQUIRE(invalid_follow.error().code == ModelErrorCode::InvalidSchemaIdentity);
 
     scenes = std::vector<Scene>(sequence->scenes().begin(), sequence->scenes().end());
-    scenes[0].slots[0].follow.choices[1] = FollowAction{FollowActionKind::Stop, {}, 2};
+    slots = std::vector<Slot>(scenes[0].slots.begin(), scenes[0].slots.end());
+    slots[0].follow.choices[1] = FollowAction{FollowActionKind::Stop, {}, 2};
+    scenes[0].slots = std::move(slots);
     auto noncanonical_inactive_choice = Sequence::create(SequenceInput{
         .id = sequence->id(),
         .name = sequence->name(),

@@ -8,6 +8,9 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <iterator>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -20,6 +23,11 @@
 // (pulp/playback/clip_launch.hpp). Sequence scenes persist these authored values;
 // transport launch progress remains runtime state.
 namespace pulp::timeline {
+
+namespace detail {
+class SlotListStore;
+class SlotListAccess;
+} // namespace detail
 
 // How a launch snaps to a musical boundary. The boundary set is
 // { phase + k * grid : k in Z } measured on the transport's monotonic clock.
@@ -51,8 +59,8 @@ constexpr LaunchQuantize launch_every_quarters(std::int64_t count) noexcept {
 // canonical ticks (kTicksPerQuarter is divisible by every supported denominator).
 constexpr LaunchQuantize launch_every_bars(std::int64_t count,
                                            timebase::MeterSignature meter) noexcept {
-    const std::int64_t ticks_per_bar = timebase::kTicksPerQuarter * meter.numerator * 4 /
-                                       meter.denominator;
+    const std::int64_t ticks_per_bar =
+        timebase::kTicksPerQuarter * meter.numerator * 4 / meter.denominator;
     return {timebase::TickDuration{count * ticks_per_bar}, timebase::TickPosition{0}};
 }
 
@@ -141,13 +149,79 @@ struct Slot {
     constexpr bool operator==(const Slot&) const = default;
 };
 
+// Immutable authored slot order. Fresh Scene values may be assembled from a
+// vector, while a Scene owned by a Sequence uses a persistent AVL-backed store:
+// inserting or removing one slot path-copies only the affected index paths and
+// shares every untouched node with prior snapshots.
+class SlotList {
+  public:
+    class Iterator {
+      public:
+        using value_type = Slot;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const Slot*;
+        using reference = const Slot&;
+        using iterator_category = std::forward_iterator_tag;
+
+        const Slot& operator*() const noexcept;
+        const Slot* operator->() const noexcept;
+        Iterator& operator++() noexcept;
+        Iterator operator++(int) noexcept {
+            auto copy = *this;
+            ++*this;
+            return copy;
+        }
+        bool operator==(const Iterator&) const noexcept = default;
+
+      private:
+        friend class SlotList;
+        Iterator(std::shared_ptr<const std::vector<Slot>> raw,
+                 std::shared_ptr<const detail::SlotListStore> store, std::size_t raw_index,
+                 ItemId current) noexcept
+            : raw_(std::move(raw)), store_(std::move(store)), raw_index_(raw_index),
+              current_(current) {}
+        std::shared_ptr<const std::vector<Slot>> raw_;
+        std::shared_ptr<const detail::SlotListStore> store_;
+        std::size_t raw_index_ = 0;
+        ItemId current_;
+    };
+
+    SlotList();
+    SlotList(std::vector<Slot> slots);
+    SlotList(std::initializer_list<Slot> slots);
+
+    std::size_t size() const noexcept;
+    bool empty() const noexcept {
+        return size() == 0;
+    }
+    const Slot& operator[](std::size_t index) const noexcept;
+    const Slot& front() const noexcept {
+        return (*this)[0];
+    }
+    const Slot& back() const noexcept {
+        return (*this)[size() - 1];
+    }
+    const Slot* find(ItemId id) const noexcept;
+    Iterator begin() const noexcept;
+    Iterator end() const noexcept;
+    bool shares_storage_with(const SlotList& other) const noexcept;
+    bool operator==(const SlotList& other) const noexcept;
+
+  private:
+    friend class detail::SlotListAccess;
+    explicit SlotList(std::shared_ptr<const detail::SlotListStore> store) noexcept
+        : store_(std::move(store)) {}
+    std::shared_ptr<const std::vector<Slot>> raw_;
+    std::shared_ptr<const detail::SlotListStore> store_;
+};
+
 // A column of slots launched as a unit. The linear model reserves "scene" for no
 // other concept, so the name is safe here. Track-to-slot arbitration when a whole
 // scene is launched is a later slice; a Scene is just the grouping at this stage.
 struct Scene {
     ItemId id;
     std::string name;
-    std::vector<Slot> slots;
+    SlotList slots;
 
     bool operator==(const Scene&) const = default;
 };

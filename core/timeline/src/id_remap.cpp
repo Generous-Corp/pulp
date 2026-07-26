@@ -376,10 +376,11 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
     std::vector<SequenceRegion> regions(sequence.regions().begin(), sequence.regions().end());
     for (auto& region : regions)
         region.id = *table.find(region.id);
-    std::vector<Scene> scenes(sequence.scenes().begin(), sequence.scenes().end());
-    for (auto& scene : scenes) {
-        scene.id = *table.find(scene.id);
-        for (auto& slot : scene.slots) {
+    std::vector<Scene> scenes;
+    scenes.reserve(sequence.scenes().size());
+    for (const auto& scene : sequence.scenes()) {
+        std::vector<Slot> slots(scene.slots.begin(), scene.slots.end());
+        for (auto& slot : slots) {
             slot.id = *table.find(slot.id);
             if (slot.clip_id.valid())
                 slot.clip_id = *table.find(slot.clip_id);
@@ -387,6 +388,7 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
                 if (action.kind == FollowActionKind::Jump && action.target.valid())
                     action.target = *table.find(action.target);
         }
+        scenes.push_back(Scene{*table.find(scene.id), scene.name, std::move(slots)});
     }
     return Sequence::create(SequenceInput{
         .id = *table.find(sequence.id()),

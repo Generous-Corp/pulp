@@ -685,10 +685,11 @@ bool write_scene(EncodeContext& context, const Scene& scene) {
             !context.writer.append(",\"name\":") || !context.writer.quoted(scene.name) ||
             !context.writer.append(",\"slots\":["))
             return false;
-        for (std::size_t index = 0; index < scene.slots.size(); ++index)
-            if ((index && !context.writer.character(',')) ||
-                !write_slot(context, scene.slots[index]))
+        std::size_t index = 0;
+        for (const auto& slot : scene.slots) {
+            if ((index++ && !context.writer.character(',')) || !write_slot(context, slot))
                 return false;
+        }
         return context.writer.append("]}");
     });
 }
@@ -736,10 +737,12 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                     return false;
             if (!context.writer.append("],\"scenes\":["))
                 return false;
-            for (std::size_t index = 0; index < sequence.scenes().size(); ++index)
-                if ((index && !context.writer.character(',')) ||
-                    !write_scene(context, sequence.scenes()[index]))
+            std::size_t scene_index = 0;
+            for (const auto& scene : sequence.scenes()) {
+                if ((scene_index++ && !context.writer.character(',')) ||
+                    !write_scene(context, scene))
                     return false;
+            }
             if (!context.writer.append("],\"tracks\":["))
                 return false;
             for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
@@ -805,11 +808,14 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                                 sequence_path + "/regions/" +
                                                     std::to_string(index) + "/data/name");
-        for (std::size_t index = 0; index < sequence.scenes().size(); ++index)
-            if (!is_valid_utf8(sequence.scenes()[index].name))
+        std::size_t scene_index = 0;
+        for (const auto& scene : sequence.scenes()) {
+            if (!is_valid_utf8(scene.name))
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
-                                                sequence_path + "/scenes/" + std::to_string(index) +
-                                                    "/data/name");
+                                                sequence_path + "/scenes/" +
+                                                    std::to_string(scene_index) + "/data/name");
+            ++scene_index;
+        }
         for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index) {
             const auto& track = sequence.tracks()[track_index];
             const auto track_path =
