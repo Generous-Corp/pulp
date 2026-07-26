@@ -383,7 +383,10 @@
         case NT.BIQUAD:  words = [{ k: "f32", init: 0 }, { k: "f32", init: 0 }]; break; // s1, s2
         case NT.LADDER:  words = [{ k: "f32", init: 0 }, { k: "f32", init: 0 }, { k: "f32", init: 0 }, { k: "f32", init: 0 }]; break;
         case NT.ADSR:    words = [{ k: "f32", init: 0 }, { k: "i32", init: c.stage0 }]; break; // level, stage
-        case NT.DELAY:   words = [{ k: "i32", init: 0 }]; break; // write_pos
+        case NT.DELAY:   words = [
+          { k: "i32", init: 0 }, // write_pos
+          { k: "i32", init: 0 }, // valid_samples (DelayLineT startup history)
+        ]; break;
         case NT.SVF:     words = [{ k: "f32", init: 0 }, { k: "f32", init: 0 }]; break; // ic1, ic2
         case NT.DCBLOCK: words = [{ k: "f32", init: 0 }, { k: "f32", init: 0 }]; break; // last_in, last_out
         case NT.NOISE:   words = [{ k: "i32", init: 0x1234567 }, { k: "f32", init: 0 }]; break; // s, pink
@@ -549,31 +552,47 @@
           break;
         }
         case NT.DELAY: { // registry: wet=read(ds); push(in + fb*wet); out=in*(1-mix)+wet*mix
-          const [wp] = sL[k];
+          const [wp, valid] = sL[k];
           const ring = ringOff[k];
-          const rp = t0, frac = t2, wet = t3;
-          const j0 = C.local(T_I32), j1 = C.local(T_I32); // per-delay index scratch
-          // rp = (f32)wp - ds - 1
-          C.ld(wp).op(OP.F32CONVERTI32S).f(c.ds).op(OP.F32SUB).f(1).op(OP.F32SUB).st(rp);
-          // while (rp < 0) rp += RING_SIZE
-          C.blk().loop();
-          C.ld(rp).f(0).op(OP.F32LT).op(OP.I32EQZ).brif(1);
-          C.ld(rp).f(RING_SIZE).op(OP.F32ADD).st(rp);
-          C.br(0).end().end();
-          // idx0 = (int)rp % size; idx1 = (idx0+1) % size; frac = rp - floor(rp)
-          C.ld(rp).op(OP.I32TRUNCSATF32S).i(RING_SIZE).op(OP.I32REMS).st(j0);
-          C.ld(j0).i(1).op(OP.I32ADD).i(RING_SIZE).op(OP.I32REMS).st(j1);
-          C.ld(rp).ld(rp).op(OP.F32FLOOR).op(OP.F32SUB).st(frac);
-          // wet = ring[idx0]*(1-frac) + ring[idx1]*frac
-          C.ld(j0).i(2).op(OP.I32SHL).f32load(ring)
-            .f(1).ld(frac).op(OP.F32SUB).op(OP.F32MUL);
-          C.ld(j1).i(2).op(OP.I32SHL).f32load(ring).ld(frac).op(OP.F32MUL)
-            .op(OP.F32ADD).st(wet);
+          const a = t0, b = t1, wet = t3;
+          const idx = C.local(T_I32);
+          const younger = Math.floor(c.ds);
+          const frac = fr(c.ds - younger);
+          const oneMinusFrac = fr(1 - frac);
+          // DelayLineT::read(int) returns zero while the requested startup
+          // history is not valid. Once valid (or after the ring fills), read
+          // exactly (write_pos - delay - 1) modulo the ring size.
+          const emitIntegerRead = (delay, dst) => {
+            const emitRingRead = () => {
+              C.ld(wp).i(delay).op(OP.I32SUB).i(1).op(OP.I32SUB)
+                .i(RING_SIZE * 2).op(OP.I32ADD)
+                .i(RING_SIZE).op(OP.I32REMS).st(idx);
+              C.ld(idx).i(2).op(OP.I32SHL).f32load(ring).st(dst);
+            };
+            C.ld(valid).i(RING_SIZE).op(OP.I32GES).if0();
+              emitRingRead();
+            C.else0();
+              C.i(delay).ld(valid).op(OP.I32GES).if0();
+                C.f(0).st(dst);
+              C.else0();
+                emitRingRead();
+              C.end();
+            C.end();
+          };
+          emitIntegerRead(younger, a);
+          emitIntegerRead(younger + 1, b);
+          // Match DelayLineT's new fractional-read operation order exactly.
+          C.ld(a).f(oneMinusFrac).op(OP.F32MUL)
+            .ld(b).f(frac).op(OP.F32MUL).op(OP.F32ADD).st(wet);
           // ring[wp] = in + fb*wet; wp = (wp+1) % size
           C.ld(wp).i(2).op(OP.I32SHL)
             .ld(in0).f(c.fb).ld(wet).op(OP.F32MUL).op(OP.F32ADD)
             .f32store(ring);
           C.ld(wp).i(1).op(OP.I32ADD).i(RING_SIZE).op(OP.I32REMS).st(wp);
+          C.ld(valid).i(1).op(OP.I32ADD).st(valid);
+          C.ld(valid).i(RING_SIZE).op(OP.I32GES).if0();
+            C.i(RING_SIZE).st(valid);
+          C.end();
           // out = in*(1-mix) + wet*mix
           C.ld(in0).f(c.cm).op(OP.F32MUL).ld(wet).f(c.mix).op(OP.F32MUL).op(OP.F32ADD).st(out);
           break;
