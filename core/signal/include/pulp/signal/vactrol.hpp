@@ -91,6 +91,14 @@ public:
     /// Advances one sample toward `target` (clamped to `[0, 1]`) and returns
     /// the conditioned control.
     double process(double target) {
+        // Do not admit a non-finite control into the recursive photoresistor
+        // state: std::clamp intentionally passes NaN through because every
+        // comparison is false. Resetting makes the following finite sample
+        // recover deterministically instead of keeping NaN forever.
+        if (!std::isfinite(target)) {
+            reset();
+            return 0.0;
+        }
         const double clamped = std::clamp(target, 0.0, 1.0);
         const double coefficient = clamped > control_ ? rise_a_ : fall_a_;
         control_ = snap_to_zero(control_ + coefficient * (clamped - control_));

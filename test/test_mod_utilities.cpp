@@ -28,6 +28,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -496,6 +497,23 @@ TEST_CASE("SlewLimiter with zero time is a pass-through", "[slew][mod-utilities]
     }
 }
 
+TEST_CASE("SlewLimiter recovers after a non-finite control sample",
+          "[slew][mod-utilities][nan-recovery]") {
+    for (auto mode : {SlewMode::linear, SlewMode::exponential}) {
+        SlewLimiter64 slew;
+        slew.prepare(kSr);
+        slew.set_mode(mode);
+        slew.set_time_ms(20.0);
+        for (int i = 0; i < 256; ++i) (void)slew.process(1.0);
+
+        REQUIRE(slew.process(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+        for (int i = 0; i < 64; ++i) {
+            REQUIRE(std::isfinite(slew.process(0.25)));
+            REQUIRE(std::isfinite(slew.value()));
+        }
+    }
+}
+
 TEST_CASE("SampleHold latches on the rising edge only", "[slew][mod-utilities]") {
     SampleHold64 sh;
     sh.reset();
@@ -798,6 +816,19 @@ TEST_CASE("Vactrol rise is fast and fall is slow, as the component is",
     REQUIRE_THAT(static_cast<double>(down), WithinRel(units::ms_to_samples(200.0, kSr), 0.05));
 
     REQUIRE(down > up * 50);
+}
+
+TEST_CASE("Vactrol conditioner recovers after a non-finite control sample",
+          "[vactrol][mod-utilities][nan-recovery]") {
+    VactrolConditioner64 v;
+    v.prepare(kSr);
+    for (int i = 0; i < 256; ++i) (void)v.process(1.0);
+
+    REQUIRE(v.process(std::numeric_limits<double>::quiet_NaN()) == 0.0);
+    for (int i = 0; i < 64; ++i) {
+        REQUIRE(std::isfinite(v.process(0.25)));
+        REQUIRE(std::isfinite(v.control()));
+    }
 }
 
 TEST_CASE("LowpassGate still behaves identically after composing the conditioner",

@@ -122,6 +122,13 @@ public:
     /// Advances one sample toward `input` and returns the new value.
     SampleType process(SampleType input) {
         const double in = static_cast<double>(input);
+        // A non-finite control value is not a meaningful target. Reject it
+        // before it can poison the recursive value/target state, and restart
+        // from the documented zero-init state for the next finite sample.
+        if (!std::isfinite(in)) {
+            reset();
+            return SampleType{0};
+        }
         const bool rising = in > value_;
 
         if (mode_ == Mode::linear) {
