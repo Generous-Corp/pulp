@@ -1,4 +1,5 @@
 #include <pulp/render/gpu_surface.hpp>
+#include <array>
 #include <vector>
 #include <string>
 
@@ -19,6 +20,16 @@
 namespace pulp::render {
 
 namespace {
+
+const char* dawn_present_mode_name(wgpu::PresentMode m) {
+    switch (m) {
+        case wgpu::PresentMode::Fifo:      return "Fifo(vsync-blocking)";
+        case wgpu::PresentMode::FifoRelaxed: return "FifoRelaxed";
+        case wgpu::PresentMode::Immediate: return "Immediate";
+        case wgpu::PresentMode::Mailbox:   return "Mailbox";
+        default:                           return "unknown";
+    }
+}
 
 std::string dawn_backend_type_name(wgpu::BackendType type) {
     switch (type) {
@@ -465,20 +476,44 @@ private:
             }
         }
 
-        // Select present mode (Fifo/vsync if available, else first supported)
-        wgpu::PresentMode preferred_mode = config.vsync
-            ? wgpu::PresentMode::Fifo : wgpu::PresentMode::Immediate;
+        // Select the present mode.
+        //
+        // vsync=true wants Fifo (block until the next refresh). vsync=false is
+        // asking NOT to block — which matters for an embedded plug-in editor
+        // that renders synchronously on the host's UI thread, where a blocking
+        // acquire stalls the message pump that delivers further input.
+        //
+        // Order matters when the request cannot be honoured exactly. Mailbox is
+        // preferred over Immediate for the non-blocking case: both return a
+        // texture without waiting, but Mailbox does not tear. Falling back to
+        // caps.presentModes[0] is the LAST resort, because on this adapter that
+        // first entry is Fifo — i.e. the naive fallback silently reinstates the
+        // very blocking the caller asked to avoid.
+        const std::array<wgpu::PresentMode, 3> wanted =
+            config.vsync
+                ? std::array<wgpu::PresentMode, 3>{wgpu::PresentMode::Fifo,
+                                                   wgpu::PresentMode::Mailbox,
+                                                   wgpu::PresentMode::Immediate}
+                : std::array<wgpu::PresentMode, 3>{wgpu::PresentMode::Mailbox,
+                                                   wgpu::PresentMode::Immediate,
+                                                   wgpu::PresentMode::Fifo};
+        wgpu::PresentMode preferred_mode = wanted[0];
         bool mode_found = false;
-        for (size_t i = 0; i < caps.presentModeCount; ++i) {
-            if (caps.presentModes[i] == preferred_mode) {
-                mode_found = true;
-                break;
+        for (auto want : wanted) {
+            for (size_t i = 0; i < caps.presentModeCount && !mode_found; ++i) {
+                if (caps.presentModes[i] == want) {
+                    preferred_mode = want;
+                    mode_found = true;
+                }
             }
+            if (mode_found) break;
         }
         if (!mode_found && caps.presentModeCount > 0) {
             preferred_mode = caps.presentModes[0];
         }
         preferred_mode_ = preferred_mode;
+        runtime::log_info("GpuSurface: present mode {} (vsync requested: {})",
+                          dawn_present_mode_name(preferred_mode), config.vsync);
 
         wgpu::SurfaceConfiguration surface_config{};
         surface_config.device = device_;

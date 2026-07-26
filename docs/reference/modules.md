@@ -1518,6 +1518,37 @@ sender.send(bundle);
 
 Supports bundles with timetags, the optional OSC RGBA colour tag (`r`), raw datagram sends, and address pattern matching (`*`, `?`, `[...]`, `{a,b}`) through receiver routes.
 
+### Binding OSC addresses to parameters
+
+`OscParameterMap` binds incoming OSC addresses to plugin parameters, with a
+learn mode — the OSC counterpart of `pulp::state::MidiParameterMap`. A mapping
+targets a `pulp::state::ParamID`, the same id a timeline `DeviceParameterTarget`
+carries, so OSC, MIDI, and authored automation address one parameter space.
+
+```cpp
+#include <pulp/osc/osc_parameter_map.hpp>
+
+pulp::osc::OscParameterMap map;
+map.set_mapping("/track/1/fader", kGain);                       // literal address
+map.set_mapping("/track/*/mix", kMix, {0.0f, 1.0f, 0.25f, 0.75f});  // pattern + window
+map.arm_learn(kCutoff);   // the next incoming address binds to kCutoff
+
+// On the thread dispatching OSC messages:
+map.pump();
+map.handle_message(store, msg);
+```
+
+An `OscMapScale` declares both the range the surface sends (`in_min`..`in_max`)
+and the normalized [0, 1] window it drives (`out_min`..`out_max`); input is
+clamped to the incoming range and `out_min > out_max` inverts. Mappings live in
+fixed-capacity storage, and a literal address dispatches by byte compare without
+touching the heap — wildcard patterns route through `address_matches`, which
+carries no such guarantee and must not be driven from the audio thread.
+
+Because the binding lives in the interface of `pulp::osc`, the module links
+`pulp::state` publicly. The dependency runs protocol → parameter model, keeping
+`pulp::state` free of socket code.
+
 ---
 
 ## native-components

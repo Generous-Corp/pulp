@@ -598,6 +598,20 @@ private:
         cfg.width = pixel_w();
         cfg.height = pixel_h();
         cfg.native_surface_handle = static_cast<void*>(hwnd_);  // HWND
+        // Do NOT vsync-block a plug-in editor.
+        //
+        // The default (vsync = true) selects a Fifo present mode, so the next
+        // GetCurrentTexture() blocks until the display's next refresh. That is
+        // right for a standalone app that owns its frame loop, and wrong here:
+        // this host renders synchronously from the DAW's WM_PAINT, on the DAW's
+        // UI thread, and the DAW already composites at its own cadence. Blocking
+        // there stalls the message pump that delivers further input.
+        //
+        // Measured on the REAPER VM during a knob drag (Perfetto): the frame's
+        // own work is ~2 ms (paint ~1 ms, submit ~1 ms, present ~0.1 ms) while
+        // whole frames took 19-45 ms; the difference was all acquire. Only 7
+        // frames were produced across 8 drag sweeps.
+        cfg.vsync = false;
         if (!gpu_surface_->initialize(cfg)) {
             runtime::log_warn("WinPluginViewHost: gpu initialize failed; cpu-capture only");
             gpu_surface_.reset();
@@ -648,7 +662,17 @@ private:
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
         if (!gpu_surface_ || !skia_surface_) return false;
         if (idle_callback_) idle_callback_();
-        if (!gpu_surface_->begin_frame()) return false;
+        // Swapchain acquire, instrumented because it is the one part of the
+        // frame that BLOCKS: under a Fifo (vsync) present mode
+        // GetCurrentTexture() waits for the next refresh. Without this span a
+        // trace shows a frame whose children sum to ~2 ms but whose total is
+        // 20-45 ms, and the missing time has nowhere to be attributed.
+        bool acquired = false;
+        {
+            PULP_TRACE_SCOPE_NAMED("gpu", "gpu_acquire");
+            acquired = gpu_surface_->begin_frame();
+        }
+        if (!acquired) return false;
         auto* canvas = skia_surface_->begin_frame();
         if (!canvas) {
             gpu_surface_->end_frame();
