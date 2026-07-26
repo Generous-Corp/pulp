@@ -18,8 +18,15 @@
 
          sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
              -e "s|\$TARTCI_GOLDENS|$HOME/VMs/goldens|g" \
+             -e "s|\$PULP_HOST_TAG|m5|g" \
            tools/launchd/pulp-qemu-runner-windows.plist.template \
            > ~/Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist
+
+       $PULP_HOST_TAG names WHICH machine this is, and the supervisor turns it
+       into the `pulp-host-<tag>` label the Windows lanes route to. The declared
+       tags live in tools/scripts/runner_topology.json (`macstudio`, `m5`).
+       Leaving it unsubstituted is refused at startup rather than producing a
+       runner that is online, idle, and selectable by nothing.
 
     3. Load:   launchctl load ~/Library/LaunchAgents/com.danielraffel.pulp.qemu-runner-windows.plist
        Verify: launchctl list | grep qemu-runner-windows ; tail -F ~/Library/Logs/pulp/qemu-runner-windows.log
@@ -45,8 +52,8 @@
         <string>/bin/bash</string>
         <string>$PULP_REPO/tools/ci/qemu-runner-windows.sh</string>
         <string>--loop</string>
-        <string>--labels</string>
-        <string>self-hosted,Windows,ARM64,pulp-build-windows</string>
+        <string>--host-tag</string>
+        <string>$PULP_HOST_TAG</string>
     </array>
 
     <key>WorkingDirectory</key>

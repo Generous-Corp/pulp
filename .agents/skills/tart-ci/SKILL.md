@@ -99,8 +99,8 @@ runner supervisor — the analog of `tart-runner.sh` for macOS:
 |---|---|---|---|---|
 | `tools/ci/tart-runner.sh` | Tart macOS | `pulp-build-runner` | `…,pulp-build` | `com.danielraffel.pulp.tart-runner` |
 | `tools/ci/tart-runner.sh --workflow-name Coverage` | Tart macOS | `pulp-build-runner` | `…,pulp-coverage-vm-macos` | `com.danielraffel.pulp.tart-runner-coverage-macos` |
-| `tools/ci/tart-runner-linux.sh` | Tart Linux | `pulp-linux-build` | `…,Linux,ARM64,pulp-build-linux` | `com.danielraffel.pulp.tart-runner-linux` |
-| `tools/ci/qemu-runner-windows.sh` | QEMU Windows | `pulp-windows-build-*.qcow2` | `…,Windows,ARM64,pulp-build-windows` | `com.danielraffel.pulp.qemu-runner-windows` |
+| `tools/ci/tart-runner-linux.sh` | Tart Linux | `pulp-linux-build` | `…,Linux,ARM64,pulp-build-linux,pulp-host-<tag>` | `com.danielraffel.pulp.tart-runner-linux` |
+| `tools/ci/qemu-runner-windows.sh` | QEMU Windows | `pulp-windows-build-*.qcow2` | `…,Windows,ARM64,pulp-build-windows,pulp-host-<tag>` | `com.danielraffel.pulp.qemu-runner-windows` |
 
 All three: mint a JIT (single-job) runner config → boot a throwaway clone
 (Tart CoW for Linux, qcow2 overlay on a dynamic SSH port for Windows) → run the
@@ -121,9 +121,31 @@ dispatch, with a dedicated ephemeral label such as `pulp-coverage-vm-macos`.
 this Mac" switch: each lane is a `CIServingLane` toggled by `launchctl
 load/unload` of its LaunchAgent (the labels above). Install a lane on a host by
 sed-templating its `tools/launchd/*.plist.template` into `~/Library/LaunchAgents`
-(replace `$PULP_REPO`, `$HOME`, and `$TART_HOME`/`$TARTCI_GOLDENS` — launchd
-doesn't expand shell vars). Pulp CI routes to these via `build.yml`'s opt-in
+(replace `$PULP_REPO`, `$HOME`, `$TART_HOME`/`$TARTCI_GOLDENS`, and — for the
+Linux/Windows lanes — `$PULP_HOST_TAG`; launchd doesn't expand shell vars).
+Pulp CI routes to these via `build.yml`'s opt-in
 `PULP_LOCAL_{LINUX,WINDOWS}_RUNS_ON_JSON` repo vars (default off → github-hosted).
+
+**The Linux/Windows lanes MUST declare which machine they are.** Every declared
+Linux and Windows lane pins a host (`pulp-host-macstudio` / `pulp-host-m5`), and
+GitHub selects a runner only when it carries EVERY requested label — so a
+supervisor that registers without one produces a runner that is **online, idle,
+and selectable by nothing**, while jobs queue against the lane it cannot serve.
+Nothing reports an error: not the agent, not the job, not the API, and the
+operator reads free capacity that does not exist. (Observed with 3 free Linux
+runners and 8 queued Linux jobs.) So the supervisors **refuse to register**
+unless a host label can be resolved — `--host-tag` / `PULP_RUNNER_HOST_TAG`, or
+a `shipyard runner tag` that exactly names a declared label. Two neighbouring
+vocabularies make the exact-match rule load-bearing: `shipyard runner tag`
+answers **`studio`** on the Mac Studio (it names runners, `<repo>-studio-NN`)
+whereas the routing label is **`pulp-host-macstudio`**; they agree on `m1`/`m5`
+and disagree there, and no `studio` → `macstudio` mapping is stated anywhere, so
+none is assumed. The declared tags come from `tools/scripts/runner_topology.json`
+(the same contract the live-fleet checker reconciles against) via
+`tools/scripts/runner_labels.py`; adding a machine is a lane edit, never a second
+table. `test_runner_topology_check.py` pins it end to end — bare defaults must
+die before minting a JIT config, since minting is the irreversible step that puts
+a phantom runner in the fleet.
 
 **Hard-won Windows-runner gotchas:**
 - The multi-KB JIT blob must NEVER ride a command line — through the

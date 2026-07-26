@@ -4450,6 +4450,19 @@ what happens. Both are documented below, in that order.
 So macOS overflow lands on **local JIT VMs**, not the cloud. Namespace vars are
 deliberately UNSET for cost control — do not treat them as an available lane.
 
+**A Linux/Windows runner without a `pulp-host-*` label is invisible to every
+lane.** Those lanes pin a machine, and GitHub selects a runner only when it
+carries EVERY requested label — so a supervisor registering just
+`self-hosted,Linux,ARM64,pulp-build-linux` yields a runner that is online, idle,
+and unselectable, with no error anywhere. **Do not diagnose that as runner
+saturation**: `runner list` shows free runners, the queue shows waiting jobs, and
+both are true at once. The tell is a free runner whose label set is a strict
+subset of the lane's. Seen live as 3 free Linux runners against 8 queued Linux
+jobs. `tools/ci/tart-runner-linux.sh` and `qemu-runner-windows.sh` now refuse to
+register unless a host tag is declared (`--host-tag` / `PULP_RUNNER_HOST_TAG`, in
+the LaunchAgent); see the `tart-ci` skill for the tag vocabulary and why
+`shipyard runner tag` (`studio`) is not the routing label (`pulp-host-macstudio`).
+
 If `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` is unset, `build.yml`'s default
 takes over and overflow goes to GitHub-hosted `["macos-15"]`. That default is
 the safety net, not the design.

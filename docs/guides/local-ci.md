@@ -1356,8 +1356,17 @@ label such as `pulp-coverage-vm-macos`; do not point coverage at `pulp-build`,
 | `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
 | `PULP_LOCAL_MACOS_RUNS_ON_JSON` | Local macOS ARM64 primary pool (bare-metal Studios; see the live table under "macOS overflow routing") | `gh variable set PULP_LOCAL_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-studio"]'` |
 | `PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON` | Local macOS ARM64 JIT VM overflow pool. Unset → `build.yml` falls back to GitHub-hosted `["macos-15"]`; `local-only` disables overflow. | `gh variable set PULP_OVERFLOW_BUILD_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-build","pulp-build-vm"]'` |
-| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux"]'` |
-| `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local Linux ARM64 VM pool | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","Linux","ARM64","pulp-build-linux","pulp-host-macstudio"]'` |
+| `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local Windows ARM64 QEMU pool | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","Windows","ARM64","pulp-build-windows","pulp-host-macstudio"]'` |
+
+The Linux and Windows label sets include a `pulp-host-*` label that pins the
+lane to one machine, so the supervisor serving them must carry it too — GitHub
+selects a runner only when it carries every requested label. Declare the machine
+once, in the LaunchAgent, via `--host-tag` / `PULP_RUNNER_HOST_TAG`
+(`tools/launchd/pulp-{tart-runner-linux,qemu-runner-windows}.plist.template`).
+A supervisor that cannot resolve one refuses to register rather than contribute
+a runner that is online, idle, and selectable by nothing. Declared tags live in
+`tools/scripts/runner_topology.json`.
 
 `.shipyard/ci-profiles/normal-local-fast.toml` is the repo-local, read-only
 policy mirror. Its PR-only `github.windows-x64-runtime` target records the
