@@ -108,6 +108,16 @@ public:
     void set_body_hz(double hz) { body_hz_ = std::clamp(hz, 40.0, 2000.0); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {

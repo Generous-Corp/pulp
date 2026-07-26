@@ -115,6 +115,16 @@ public:
 
     /// The saturation and degradation stage the voice ends with.
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
     // -- Oscillator-body controls -------------------------------------------
 

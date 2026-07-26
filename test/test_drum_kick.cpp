@@ -826,6 +826,22 @@ TEST_CASE("A short output AHD survives the house FIR latency",
     REQUIRE(house > 0.1);
 }
 
+TEST_CASE("A delayed AHD retrigger preserves the preceding output tail",
+          "[signal][drum][output][ahd][latency][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_ahd_ms(0.0, 1000.0, 1.0);
+    output.trigger();
+
+    for (int i = 0; i < 128; ++i) (void)output.process(1.0f);
+    output.trigger();
+
+    for (int i = 0; i < output.latency_samples(); ++i) {
+        INFO("sample " << i);
+        REQUIRE(output.process(1.0f) > 0.5f);
+    }
+}
+
 TEST_CASE("The AHD scales saturation output instead of its input",
           "[signal][drum][output][ahd]") {
     OutputStage saturated;

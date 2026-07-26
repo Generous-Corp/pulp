@@ -52,16 +52,41 @@ public:
         // a voice in response to a preset load -- and without this the new
         // voice would run at whatever rate it was constructed with, which is
         // audible as a wrongly-pitched drum rather than as an error.
-        if (voice != nullptr) voice->prepare(sample_rate_);
+        if (voice != nullptr) {
+            voice->set_output_oversampling(oversampling_);
+            voice->prepare(sample_rate_);
+        }
         return slots_.size() - 1;
     }
 
     std::size_t voice_count() const { return slots_.size(); }
 
+    /// One latency for the whole summed kit. Individual voice quality changes
+    /// are normalized back to this choice before triggering or rendering, so
+    /// simultaneous layers remain sample-aligned.
+    int latency_samples() const noexcept {
+        return OutputStage::latency_samples_for(oversampling_);
+    }
+
+    OutputOversampling output_oversampling() const noexcept {
+        return oversampling_;
+    }
+
+    void set_output_oversampling(OutputOversampling factor) {
+        oversampling_ = factor;
+        for (auto& slot : slots_) {
+            if (slot.voice != nullptr)
+                slot.voice->set_output_oversampling(oversampling_);
+        }
+    }
+
     void prepare(double sample_rate) {
         sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
         for (auto& slot : slots_) {
-            if (slot.voice != nullptr) slot.voice->prepare(sample_rate_);
+            if (slot.voice != nullptr) {
+                slot.voice->set_output_oversampling(oversampling_);
+                slot.voice->prepare(sample_rate_);
+            }
         }
     }
 
@@ -92,6 +117,7 @@ public:
     void trigger_slot(std::size_t index, float velocity) {
         if (index >= slots_.size() || slots_[index].voice == nullptr) return;
 
+        slots_[index].voice->set_output_oversampling(oversampling_);
         const int group = slots_[index].choke_group;
         if (group != 0) {
             for (std::size_t other = 0; other < slots_.size(); ++other) {
@@ -129,6 +155,7 @@ public:
         if (out == nullptr || num_samples <= 0) return;
         for (auto& slot : slots_) {
             if (slot.voice != nullptr && slot.voice->is_active()) {
+                slot.voice->set_output_oversampling(oversampling_);
                 slot.voice->process(out, num_samples);
             }
         }
@@ -144,6 +171,7 @@ private:
     std::vector<Slot> slots_;
     double sample_rate_ = 44100.0;
     float choke_fade_ms_ = 4.0f;
+    OutputOversampling oversampling_ = OutputOversampling::x2;
 };
 
 }  // namespace pulp::signal::drum

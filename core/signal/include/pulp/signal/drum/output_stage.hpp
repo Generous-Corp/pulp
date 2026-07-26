@@ -62,6 +62,7 @@ public:
         tail_samples_remaining_ = 0;
         nonlinear_activity_this_sample_ = false;
         ahd_delay_remaining_ = 0;
+        ahd_trigger_pending_ = false;
         ahd_phase_ = AhdPhase::inactive;
         ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
@@ -129,6 +130,7 @@ public:
     void set_ahd_enabled(bool enabled) {
         ahd_enabled_ = enabled;
         if (!enabled) {
+            ahd_trigger_pending_ = false;
             ahd_phase_ = AhdPhase::inactive;
             ahd_gain_ = 1.0;
         }
@@ -164,23 +166,21 @@ public:
 
     /// Start the AHD for a new hit. Every drum voice calls this from note-on.
     void trigger() {
-        ahd_delay_remaining_ = latency_samples();
         if (!ahd_enabled_) {
+            ahd_trigger_pending_ = false;
             ahd_phase_ = AhdPhase::inactive;
             ahd_gain_ = 1.0;
             return;
         }
-        if (ahd_attack_samples_ > 0) {
-            ahd_phase_ = AhdPhase::attack;
-            ahd_remaining_ = ahd_attack_samples_;
-            ahd_gain_ = 0.0;
-        } else if (ahd_hold_samples_ > 0) {
-            ahd_phase_ = AhdPhase::hold;
-            ahd_remaining_ = ahd_hold_samples_;
-            ahd_gain_ = 1.0;
-        } else {
-            begin_ahd_decay();
+        ahd_delay_remaining_ = latency_samples();
+        if (ahd_delay_remaining_ > 0) {
+            // Keep the preceding hit's envelope audible while its delayed
+            // samples leave the FIR. The replacement contour begins exactly
+            // when the new hit reaches the output.
+            ahd_trigger_pending_ = true;
+            return;
         }
+        start_ahd();
     }
 
     /// The degradation stages, exposed so a voice can configure bit depth,
@@ -285,11 +285,27 @@ private:
         ahd_gain_ = 1.0;
     }
 
+    void start_ahd() {
+        ahd_trigger_pending_ = false;
+        if (ahd_attack_samples_ > 0) {
+            ahd_phase_ = AhdPhase::attack;
+            ahd_remaining_ = ahd_attack_samples_;
+            ahd_gain_ = 0.0;
+        } else if (ahd_hold_samples_ > 0) {
+            ahd_phase_ = AhdPhase::hold;
+            ahd_remaining_ = ahd_hold_samples_;
+            ahd_gain_ = 1.0;
+        } else {
+            begin_ahd_decay();
+        }
+    }
+
     double process_ahd() {
         if (!ahd_enabled_) return 1.0;
-        if (ahd_delay_remaining_ > 0) {
+        if (ahd_trigger_pending_ && ahd_delay_remaining_ > 0) {
             --ahd_delay_remaining_;
-            return 0.0;
+        } else if (ahd_trigger_pending_) {
+            start_ahd();
         }
         const double current = ahd_gain_;
         switch (ahd_phase_) {
@@ -340,6 +356,7 @@ private:
     int ahd_remaining_ = 0;
     int ahd_delay_remaining_ = 0;
     bool ahd_enabled_ = false;
+    bool ahd_trigger_pending_ = false;
     AhdPhase ahd_phase_ = AhdPhase::inactive;
     OutputOversampling oversampling_ = OutputOversampling::x2;
     std::size_t tail_samples_remaining_ = 0;

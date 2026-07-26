@@ -122,6 +122,16 @@ public:
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {

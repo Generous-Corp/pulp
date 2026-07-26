@@ -104,6 +104,16 @@ public:
     float velocity() const { return velocity_; }
     double sample_rate() const { return sample_rate_; }
 
+    /// Fixed host-rate delay introduced by this voice's selected output
+    /// quality. Generic registry consumers can report it without recovering
+    /// the concrete voice type.
+    virtual int latency_samples() const noexcept = 0;
+
+    /// Output quality at the generic voice boundary. Kits use this surface to
+    /// keep every registered path on one latency contract.
+    virtual OutputOversampling output_oversampling() const noexcept = 0;
+    virtual void set_output_oversampling(OutputOversampling factor) = 0;
+
     void set_velocity_response(const VelocityResponse& r) { velocity_response_ = r; }
     const VelocityResponse& velocity_response() const { return velocity_response_; }
 

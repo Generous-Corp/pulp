@@ -36,6 +36,7 @@ using pulp::signal::drum::EngineId;
 using pulp::signal::drum::EngineProvenance;
 using pulp::signal::drum::HatVoice;
 using pulp::signal::drum::Kit;
+using pulp::signal::drum::OutputOversampling;
 using pulp::signal::drum::ShellLayer;
 using pulp::signal::drum::SnareVoice;
 using pulp::signal::drum::TomVoice;
@@ -1171,6 +1172,31 @@ TEST_CASE("Tom preset application allocates nothing on the audio thread",
 
 // -- Kit ---------------------------------------------------------------------
 
+TEST_CASE("A kit publishes and enforces one output latency",
+          "[signal][drum][kit][latency]") {
+    SnareVoice snare;
+    HatVoice hat;
+    snare.output().set_oversampling(OutputOversampling::bypass);
+
+    Kit kit;
+    kit.add_voice(&snare, 38);
+    kit.add_voice(&hat, 42);
+    REQUIRE(kit.latency_samples() == 32);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+    REQUIRE(hat.latency_samples() == kit.latency_samples());
+
+    kit.set_output_oversampling(OutputOversampling::x4);
+    REQUIRE(kit.latency_samples() == 48);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+    REQUIRE(hat.latency_samples() == kit.latency_samples());
+
+    // A caller retaining the concrete voice can still reach its output stage,
+    // but the kit restores its own summed-path contract before the next hit.
+    snare.output().set_oversampling(OutputOversampling::bypass);
+    kit.trigger(38, 1.0f);
+    REQUIRE(snare.latency_samples() == kit.latency_samples());
+}
+
 TEST_CASE("A voice registered after the kit was prepared still runs at the "
           "kit's rate",
           "[signal][drum][kit]") {
@@ -1535,6 +1561,7 @@ TEST_CASE("Every available registry entry constructs a finite audible voice",
         }
 
         REQUIRE(voice != nullptr);
+        REQUIRE(voice->latency_samples() == 32);
         voice->prepare(kFs);
         const auto y = hit(*voice, 0.8f, 4096);
         for (float sample : y) REQUIRE(std::isfinite(sample));
