@@ -150,19 +150,19 @@ TEST_CASE("Timeline session persistence pins every follow kind and weighted choi
     REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
 }
 
-TEST_CASE("Timeline sequence v3 scene migration is lossless only for an empty scene list") {
+TEST_CASE("Timeline sequence v4 scene migration is lossless only for an empty scene list") {
     const auto registry = builtins();
     DecodeLimits limits;
-    const auto legacy_fixture = fixture("v3/sequence-before-scenes.json");
+    const auto legacy_fixture = fixture("v4/sequence-before-scenes.json");
     const auto fixture_upgrade = take(registry.migrate(
-        SchemaDomain::Document, "pulp.timeline.sequence", 3, 4, legacy_fixture, limits));
+        SchemaDomain::Document, "pulp.timeline.sequence", 4, 5, legacy_fixture, limits));
     REQUIRE(fixture_upgrade.find(R"("regions":[],"scenes":[],"tracks":[])") != std::string::npos);
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3,
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4,
                                   fixture_upgrade, limits)) == legacy_fixture);
 
     const auto current = only_sequence(take(serialize_project(session_project(), registry)).json);
     auto refused =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3, current, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4, current, limits);
     REQUIRE_FALSE(refused);
     REQUIRE(refused.error().code == PersistenceErrorCode::MigrationFailed);
 
@@ -173,12 +173,12 @@ TEST_CASE("Timeline sequence v3 scene migration is lossless only for an empty sc
     REQUIRE(end != std::string::npos);
     empty.erase(begin + 10, end - (begin + 10));
     auto legacy_result =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 3, empty, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 5, 4, empty, limits);
     REQUIRE(legacy_result);
     const auto legacy = std::move(legacy_result).value();
     REQUIRE(legacy.find("\"scenes\"") == std::string::npos);
     auto restored_result =
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 4, legacy, limits);
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 5, legacy, limits);
     REQUIRE(restored_result);
     const auto restored = std::move(restored_result).value();
     REQUIRE(restored == empty);

@@ -482,7 +482,7 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.sequence": Object.freeze({
     schemaType: "pulp.timeline.sequence",
     domain: "Document",
-    version: 4,
+    version: 5,
     fields: Object.freeze([
       Object.freeze({ name: "absolute_duration", kind: "Object", jsType: "object", required: true }),
       Object.freeze({ name: "chord_scale_lane", kind: "Array", jsType: "array", required: true }),

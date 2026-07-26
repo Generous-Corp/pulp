@@ -143,7 +143,7 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":4") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":5") !=
             std::string::npos);
     REQUIRE(
         first.value().json.find(
@@ -286,10 +286,10 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto scenes_at = legacy.find(R"("scenes":[],)");
     REQUIRE(scenes_at != std::string::npos);
     legacy.erase(scenes_at, std::string_view(R"("scenes":[],)").size());
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":4)");
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":5)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at,
-                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":4)").size(),
+                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":5)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));

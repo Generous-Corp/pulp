@@ -1546,7 +1546,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 4
+      "version": 5
     },
     {
       "domain": "Document",

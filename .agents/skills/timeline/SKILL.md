@@ -701,11 +701,11 @@ opportunistically.
 
 `Slot`, `Scene`, and `FollowAction*` in `clip_launch.hpp` are durable authored
 values owned by `Sequence`; both structural types are registered schemas and
-their IDs live in the Project identity directory. Sequence schema v4 introduced
-the required `scenes` array. The v3→v4 migration inserts an empty array, while
-v4→v3 refuses to discard a non-empty one. Quantization and follow-action choices
-round-trip canonically, but sample-accurate launch progress remains runtime state
-in `core/playback/clip_launch.*`.
+their IDs live in the Project identity directory. Sequence schema v5 introduced
+the required `scenes` array after v4 introduced groove. The v4→v5 migration
+inserts an empty array, while v5→v4 refuses to discard a non-empty one.
+Quantization and follow-action choices round-trip canonically, but sample-accurate
+launch progress remains runtime state in `core/playback/clip_launch.*`.
 `core/interchange` treats `clip.launch` as model-detectable and records each
 authored scene in the canonical census, so export loss manifests cannot omit
 launcher state silently.

@@ -34,7 +34,7 @@ struct SequenceSchemaVersionPolicy {
 };
 
 inline constexpr SequenceSchemaVersionPolicy sequence_schema_policy{
-    "pulp.timeline.sequence", 1, 4, 2, 3, 4, 4,
+    "pulp.timeline.sequence", 1, 5, 2, 3, 4, 5,
 };
 static_assert(sequence_schema_policy.oldest_readable_version > 0 &&
               sequence_schema_policy.oldest_readable_version <=
@@ -61,7 +61,8 @@ static_assert(sequence_schema_policy.groove_introduced_version >
                   sequence_schema_policy.groove_introduced_version - 1) &&
               sequence_schema_policy.requires_groove(
                   sequence_schema_policy.groove_introduced_version) &&
-              sequence_schema_policy.scenes_introduced_version > 0 &&
+              sequence_schema_policy.scenes_introduced_version >
+                  sequence_schema_policy.groove_introduced_version &&
               sequence_schema_policy.scenes_introduced_version <=
                   sequence_schema_policy.current_version &&
               !sequence_schema_policy.requires_scenes(
