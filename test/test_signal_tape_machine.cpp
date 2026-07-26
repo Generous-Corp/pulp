@@ -1391,3 +1391,64 @@ TEST_CASE("Tape machine rejects non-finite controls and audio without latching r
     REQUIRE(recovered_l == reference_l);
     REQUIRE(recovered_r == reference_r);
 }
+
+TEST_CASE("Tape machine audio-fault recovery discards populated dynamic histories",
+          "[signal][tape-machine][nan-recovery][rt-safety]") {
+    TapeMachine poisoned;
+    TapeMachine fresh;
+    for (TapeMachine* machine : {&poisoned, &fresh}) {
+        machine->set_archetype(TapeArchetype::studer_a800);
+        machine->prepare(kSr);
+        machine->set_bias(0.2f);
+        machine->set_drive(0.4f);
+        machine->set_age(0.5f);
+        machine->set_crosstalk_db(-35.0f);
+        machine->set_print_through(-55.0f, 600.0f, true);
+    }
+
+    // Fill the entire dynamically sized print-through history. Recovery resets
+    // its cursor to zero, so every stale slot must be populated for a missing
+    // logical invalidation to be observable immediately at the configured taps.
+    const int kWarmupSamples = static_cast<int>(2.0 * pulp::signal::units::ms_to_samples(
+                                   TapeMachine::kPrintThroughOffsetMsMax, kSr)) +
+                               8;
+    std::vector<float> warm_l(kWarmupSamples), warm_r(kWarmupSamples),
+        scratch_l(kWarmupSamples), scratch_r(kWarmupSamples);
+    for (int i = 0; i < kWarmupSamples; ++i) {
+        warm_l[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.31 * std::sin(2.0 * M_PI * 613.0 * i / kSr));
+        warm_r[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.27 * std::sin(2.0 * M_PI * 887.0 * i / kSr));
+    }
+    poisoned.process(warm_l.data(), warm_r.data(), scratch_l.data(), scratch_r.data(),
+                     kWarmupSamples);
+
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    float finite = 0.0f;
+    float fault_l = 1.0f;
+    float fault_r = 1.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        poisoned.process(&nan, &finite, &fault_l, &fault_r, 1);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(fault_l == 0.0f);
+    REQUIRE(fault_r == 0.0f);
+
+    constexpr int kRecoverySamples = 4096;
+    std::vector<float> in_l(kRecoverySamples), in_r(kRecoverySamples),
+        recovered_l(kRecoverySamples), recovered_r(kRecoverySamples),
+        reference_l(kRecoverySamples), reference_r(kRecoverySamples);
+    for (int i = 0; i < kRecoverySamples; ++i) {
+        in_l[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 997.0 * i / kSr));
+        in_r[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+    }
+    poisoned.process(in_l.data(), in_r.data(), recovered_l.data(), recovered_r.data(),
+                     kRecoverySamples);
+    fresh.process(in_l.data(), in_r.data(), reference_l.data(), reference_r.data(),
+                  kRecoverySamples);
+    REQUIRE(recovered_l == reference_l);
+    REQUIRE(recovered_r == reference_r);
+}
