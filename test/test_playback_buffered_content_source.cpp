@@ -243,6 +243,56 @@ TEST_CASE("a concurrent producer cannot publish a missed block into the next dea
     source.release();
 }
 
+TEST_CASE("a partial underrun cannot retag a concurrent producer block",
+          "[playback][production]") {
+    auto config = default_config();
+    config.ring_capacity_frames = kChunkFrames;
+    config.start_background_thread = true;
+
+    std::atomic<std::uint32_t> calls{0};
+    std::atomic<bool> refill_started{false};
+    std::atomic<bool> release_refill{false};
+    playback::BufferedContentSource source;
+    REQUIRE(source.prepare(
+        buffered_declaration(), config,
+        [&](std::uint64_t start_frame, audio::BufferView<float> dest,
+            std::uint64_t frames, audio::FrameReaderStopToken stop) {
+            if (calls.fetch_add(1, std::memory_order_relaxed) == 1) {
+                refill_started.store(true, std::memory_order_release);
+                while (!release_refill.load(std::memory_order_acquire) &&
+                       !stop.stop_requested())
+                    std::this_thread::yield();
+            }
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                dest.channel(0)[static_cast<std::size_t>(frame)] =
+                    static_cast<float>(start_frame + frame);
+            return frames;
+        }));
+
+    audio::Buffer<float> half_block(1, static_cast<std::size_t>(kChunkFrames / 2));
+    REQUIRE(source.pull(half_block.view(), kChunkFrames / 2) == kChunkFrames / 2);
+    for (std::uint32_t spins = 0;
+         spins < 1'000'000 && !refill_started.load(std::memory_order_acquire);
+         ++spins)
+        std::this_thread::yield();
+    REQUIRE(refill_started.load(std::memory_order_acquire));
+
+    audio::Buffer<float> block(1, static_cast<std::size_t>(kChunkFrames));
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames / 2);
+    REQUIRE(source.position() == kChunkFrames + kChunkFrames / 2);
+    release_refill.store(true, std::memory_order_release);
+
+    for (std::uint32_t spins = 0;
+         spins < 1'000'000 && source.stats().ring_available_frames == 0;
+         ++spins)
+        std::this_thread::yield();
+    REQUIRE(source.stats().ring_available_frames != 0);
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+    REQUIRE(block.view().channel(0).front() ==
+            static_cast<float>(kChunkFrames + kChunkFrames / 2));
+    source.release();
+}
+
 TEST_CASE("the audio-thread pull path allocates nothing", "[playback][production][rt-safety]") {
     playback::BufferedContentSource source;
     REQUIRE(source.prepare(buffered_declaration(), default_config(),

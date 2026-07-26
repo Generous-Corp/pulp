@@ -308,10 +308,12 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             BufferView<float> sub =
                 dest.slice(static_cast<std::size_t>(produced),
                            static_cast<std::size_t>(avail));
+            const std::uint64_t ring_start =
+                advance_on_underrun_
+                    ? ring_start_frame_.load(std::memory_order_acquire)
+                    : 0;
             ring_.read(sub, avail);
             if (advance_on_underrun_) {
-                const std::uint64_t ring_start =
-                    ring_start_frame_.load(std::memory_order_acquire);
                 std::uint64_t expected_start = ring_start;
                 ring_start_frame_.compare_exchange_strong(
                     expected_start, ring_start + avail,
@@ -424,8 +426,11 @@ bool StreamingSampleSource::finished() const noexcept {
     // Compare against the effective end so a stream that ended early (reader
     // returned 0 mid-tail) still reports finished once its realized frames have
     // played out — not only when play_pos_ reaches the optimistic declared total.
-    return play_pos_.load(std::memory_order_relaxed) >=
-           eos_frame_.load(std::memory_order_acquire);
+    const std::uint64_t end =
+        advance_on_underrun_
+            ? total_frames_
+            : eos_frame_.load(std::memory_order_acquire);
+    return play_pos_.load(std::memory_order_relaxed) >= end;
 }
 
 StreamingSampleSource::Stats StreamingSampleSource::stats() const noexcept {
