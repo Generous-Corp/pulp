@@ -464,8 +464,12 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
         auto before = decode_optional_command_item_id(command, "before_scene_id", data_path);
         auto scene = required(command, "scene", data_path);
-        if (!sequence || !before || !scene)
-            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        if (!sequence)
+            return runtime::Err(sequence.error());
+        if (!before)
+            return runtime::Err(before.error());
+        if (!scene)
+            return runtime::Err(scene.error());
         auto decoded = decode_scene(*scene.value(), context, data_path + "/scene");
         if (!decoded)
             return runtime::Err(decoded.error());
@@ -484,8 +488,14 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
         auto scene = decode_command_item_id(command, "scene_id", data_path);
         auto before = decode_optional_command_item_id(command, "before_slot_id", data_path);
         auto slot = required(command, "slot", data_path);
-        if (!sequence || !scene || !before || !slot)
-            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        if (!sequence)
+            return runtime::Err(sequence.error());
+        if (!scene)
+            return runtime::Err(scene.error());
+        if (!before)
+            return runtime::Err(before.error());
+        if (!slot)
+            return runtime::Err(slot.error());
         auto decoded = decode_slot(*slot.value(), context, data_path + "/slot");
         if (!decoded)
             return runtime::Err(decoded.error());

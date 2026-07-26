@@ -270,6 +270,20 @@ TEST_CASE("Typed scene commands preserve exact nested field diagnostics") {
     REQUIRE_FALSE(missing_slots);
     REQUIRE(missing_slots.error().code == PersistenceErrorCode::MissingField);
     REQUIRE(missing_slots.error().path == "/0/data/scene/data/slots");
+
+    auto invalid_scene_anchor = deserialize_commands(
+        R"([{"data":{"before_scene_id":"01","scene":{"data":{"id":"30","name":"launch","slots":[]},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"},"type_name":"pulp.timeline.command.insert_scene","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_scene_anchor);
+    REQUIRE(invalid_scene_anchor.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(invalid_scene_anchor.error().path == "/0/data/before_scene_id");
+
+    auto invalid_slot_anchor = deserialize_commands(
+        R"([{"data":{"before_slot_id":"01","scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":{"choices":[],"grid":"0","repetitions":1},"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}},"type_name":"pulp.timeline.command.insert_slot","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_slot_anchor);
+    REQUIRE(invalid_slot_anchor.error().code == PersistenceErrorCode::InvalidNumber);
+    REQUIRE(invalid_slot_anchor.error().path == "/0/data/before_slot_id");
 }
 
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {
