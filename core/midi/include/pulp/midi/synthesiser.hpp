@@ -88,9 +88,9 @@ struct SynthesiserRuntimeBudgetReport {
 };
 
 /// Abstract base for one synth voice. Subclasses implement `render`
-/// and may override `on_pitch_bend` / `on_aftertouch` / `on_cc` /
-/// `peak_level` to participate in channel-level controllers and
-/// voice-stealing. The owning `Synthesiser` handles sustain/sostenuto pedal
+/// and may override `on_choke` / `on_pitch_bend` / `on_aftertouch` / `on_cc`
+/// / `peak_level` to participate in voice groups, channel-level controllers,
+/// and voice-stealing. The owning `Synthesiser` handles sustain/sostenuto pedal
 /// state before calling `on_note_off()`: note-off is deferred while CC64 is
 /// down or the note is captured by CC66, then delivered through the normal
 /// note-off hook when the relevant pedal state clears.
@@ -120,6 +120,14 @@ public:
         note_.releasing = true;
         note_.sustained = false;
         note_.sostenuto = false;
+    }
+
+    /// Choke this voice with the caller's requested fade time. The default
+    /// preserves ordinary synth behavior by entering the normal release path;
+    /// one-shot voices can override this to apply a short, click-free fade.
+    virtual void on_choke(float fade_ms) {
+        (void)fade_ms;
+        on_note_off();
     }
 
     /// Channel-level pitch bend (semitones, already scaled by the
@@ -205,6 +213,15 @@ protected:
     bool releasing_ = false;
 };
 
+/// Constant note-on metadata for MIDI-buffer dispatch. This lets callers assign
+/// generated events to a channel-scoped voice group without rebuilding the
+/// buffer or giving up sample-accurate event offsets.
+struct SynthesiserNoteOnPolicy {
+    uint8_t voice_group = 0;
+    bool choke_group = false;
+    float choke_fade_ms = 0.0f;
+};
+
 /// Polyphonic synth that routes plain-MIDI events into a pool of
 /// `Voice` instances. `Voice` must derive from `SynthesiserVoice`.
 template <typename Voice>
@@ -234,12 +251,12 @@ public:
     /// build a Synthesiser pipeline without a full MidiBuffer.
     void note_on(uint8_t channel, uint8_t note, uint8_t velocity,
                  int8_t priority = 0, uint8_t voice_group = 0,
-                 bool choke_group = false) {
+                 bool choke_group = false, float choke_fade_ms = 0.0f) {
         if (velocity == 0) { note_off(channel, note); return; }
         const auto masked_channel = static_cast<uint8_t>(channel & 0x0F);
         const auto masked_group = static_cast<uint8_t>(voice_group & 0x7F);
         if (choke_group && masked_group != 0) {
-            choke_voice_group(masked_channel, masked_group);
+            choke_voice_group(masked_channel, masked_group, choke_fade_ms);
         }
         Voice* v = find_free_voice();
         if (!v) v = steal_voice();
@@ -330,6 +347,13 @@ public:
     /// — voices render additively, so the caller must clear it (or
     /// pass a buffer that already holds the desired pre-mix).
     void process(const MidiBuffer& events, float* out, int num_samples) {
+        process(events, out, num_samples, {});
+    }
+
+    /// Drive the synth with constant metadata applied to every note-on in the
+    /// buffer. Event offsets and all non-note messages retain normal behavior.
+    void process(const MidiBuffer& events, float* out, int num_samples,
+                 const SynthesiserNoteOnPolicy& note_on_policy) {
         if (num_samples <= 0) return;
         int sample_index = 0;
         for (std::size_t i = 0; i < events.size(); ++i) {
@@ -341,7 +365,7 @@ public:
                 render_active(out + sample_index, target - sample_index);
                 sample_index = target;
             }
-            dispatch_event(e);
+            dispatch_event(e, note_on_policy);
         }
         if (sample_index < num_samples) {
             render_active(out + sample_index, num_samples - sample_index);
@@ -524,11 +548,14 @@ private:
         return chosen;
     }
 
-    void dispatch_event(const MidiEvent& e) {
+    void dispatch_event(const MidiEvent& e,
+                        const SynthesiserNoteOnPolicy& note_on_policy) {
         const uint8_t status_top = static_cast<uint8_t>(e.data()[0] & 0xF0);
         const uint8_t channel = e.channel();
         if (e.is_note_on() && e.velocity() > 0) {
-            note_on(channel, e.note(), e.velocity());
+            note_on(channel, e.note(), e.velocity(), /*priority=*/0,
+                    note_on_policy.voice_group, note_on_policy.choke_group,
+                    note_on_policy.choke_fade_ms);
             return;
         }
         if (e.is_note_off() || (e.is_note_on() && e.velocity() == 0)) {
@@ -597,12 +624,12 @@ private:
         }
     }
 
-    void choke_voice_group(uint8_t channel, uint8_t voice_group) {
+    void choke_voice_group(uint8_t channel, uint8_t voice_group,
+                           float fade_ms) {
         for (auto& v : voices_) {
-            if (v.active() && !v.releasing()
-                && v.note().channel == channel
+            if (v.active() && v.note().channel == channel
                 && v.note().voice_group == voice_group) {
-                v.on_note_off();
+                v.on_choke(fade_ms);
             }
         }
     }
