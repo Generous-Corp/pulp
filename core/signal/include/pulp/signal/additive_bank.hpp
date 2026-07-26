@@ -825,10 +825,15 @@ private:
 
     /// The shared onset is an attack that HOLDS at unity while gated, then
     /// releases — a shape none of the named envelope types provides directly.
-    /// `ArT` is the right core (attack, no decay, no hold), but with a held
-    /// gate it parks at `sustain_`, which defaults to 0.7. Setting sustain to
-    /// exactly 1 is therefore load-bearing, not decorative: without it every
-    /// voice would quietly sit 3 dB down after its attack.
+    /// `ArT` is the right core: attack, no decay, no hold.
+    ///
+    /// The explicit `set_sustain(1.0)` below is now belt-and-braces rather than
+    /// load-bearing. It used to be the latter: `ArT` with a held gate parked at
+    /// the unrelated `sustain_` member (default 0.7), so without this every
+    /// voice sat 3 dB down after its attack. That was a defect in
+    /// `EnvelopeCore`, not a property to work around — a no-sustain shape now
+    /// holds at its peak, and the call is kept only because this type's
+    /// contract genuinely is "hold at unity" and saying so costs nothing.
     void refresh_onset() {
         onset_.set_attack_ms(attack_ms_);
         onset_.set_release_ms(release_ms_);

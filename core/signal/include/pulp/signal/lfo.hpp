@@ -17,8 +17,18 @@
 ///   - **Output is bipolar `[-1, +1]`** for every shape. A module that wants
 ///     unipolar `[0, 1]` asks for `next_unipolar()`; it does not scale by hand.
 ///   - **Phase is in CYCLES**, `[0, 1)`. `set_phase_offset(0.25)` is a quarter
-///     cycle; `set_phase_offset(0.5)` is exact inversion for any shape that is
-///     odd-symmetric about its half-cycle (triangle, sine, saw).
+///     cycle; `set_phase_offset(0.5)` is exact inversion for `sine`,
+///     `triangle`, and `square` — the shapes that are odd-symmetric about
+///     their half-cycle.
+///
+///     It is NOT inversion for `saw_up` or `saw_down`, and that is inherent
+///     rather than a defect: a sawtooth's discontinuity means a half-cycle
+///     shift is a shift, not a negation. `saw(φ + 0.5) = −saw(φ)` holds only at
+///     φ = 0.5; everywhere else the two differ by a full unit. Anti-phase pair
+///     construction (`chorus_family`, `flanger`, `phaser_stages`) is therefore
+///     only anti-phase on the three shapes named above. This list previously
+///     named saw and omitted square — exactly backwards, and the suite had
+///     been narrowed to the passing shapes without the claim being corrected.
 ///   - **Rate accuracy is exact to the phase accumulator**, which counts in
 ///     `double`. Zero-crossing count over 100 s matches the configured rate to
 ///     far better than the ±0.01 % the chorus/flanger specs assert.

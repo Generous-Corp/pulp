@@ -327,6 +327,39 @@ TEST_CASE("LFO phase offset of half a cycle is exact inversion", "[lfo][mod-util
     }
 }
 
+TEST_CASE("LFO half-cycle offset is NOT inversion for the saw shapes",
+          "[lfo][mod-utilities]") {
+    // The negative half of the case above, pinned deliberately.
+    //
+    // The header used to claim half-cycle inversion for "triangle, sine, saw"
+    // while the test above iterated {sine, triangle, square} — the set had been
+    // narrowed to the shapes that pass without the claim being corrected, so
+    // the false half was load-bearing documentation that nothing measured.
+    //
+    // A sawtooth's discontinuity makes this inherent: a half-cycle shift is a
+    // shift, not a negation. saw(φ + 0.5) = −saw(φ) holds only at φ = 0.5, and
+    // everywhere else the two differ by a full unit. Asserting that here means
+    // a future change that "fixes" saw to invert has to come here and explain
+    // itself, rather than silently altering what anti-phase means for the
+    // chorus/flanger/phaser pair constructions built on set_phase_offset(0.5).
+    for (auto wave : {LfoWave::saw_up, LfoWave::saw_down}) {
+        Lfo64 a, b;
+        for (auto* l : {&a, &b}) {
+            l->prepare(kSr);
+            l->set_rate_hz(2.0);
+            l->set_wave(wave);
+        }
+        b.set_stereo_offset(0.5);
+        a.reset();
+        b.reset();
+
+        double worst = 0.0;
+        for (int i = 0; i < 20000; ++i) worst = std::max(worst, std::abs(a.next() + b.next()));
+        // Not merely "imperfect" — the sum reaches a full unit.
+        REQUIRE_THAT(worst, WithinAbs(1.0, 1e-9));
+    }
+}
+
 TEST_CASE("LFO N-voice spacing is even", "[lfo][mod-utilities]") {
     // TriChorus: three voices at 120°. Their instantaneous sine values must sum
     // to zero at every sample, which is the algebraic form of even spacing.
@@ -560,6 +593,66 @@ TEST_CASE("Envelope retrigger continues from the current level", "[envelope][mod
     REQUIRE_THAT(after, WithinAbs(before, 0.02));
 }
 
+TEST_CASE("Retrigger is click-free on the delay-capable shapes too",
+          "[envelope][mod-utilities]") {
+    // The case above uses `Ar` — the ONE shape with the delay stage disabled —
+    // so it could not see this. Every delay-capable shape punched a full-scale
+    // one-sample notch to zero on retrigger, because `stage_samples()` floors
+    // every stage at `kMinStageMs`: `delay_samples_` was nonzero even when the
+    // caller asked for no delay, so `gate_on()` always routed through the delay
+    // stage, which forces the level to zero.
+    //
+    // Measured against the signal's own slew rather than an absolute epsilon,
+    // because "no click" means "no step the surrounding waveform would not
+    // itself have produced".
+    Dahdsr env;
+    env.prepare(kSr);
+    env.set_delay_ms(0.0);
+    env.set_attack_ms(5.0);
+    env.set_hold_ms(1.0);
+    env.set_decay_ms(5.0);
+    env.set_sustain(0.5);
+    env.set_release_ms(10.0);
+    env.reset();
+    env.gate_on();
+    for (int i = 0; i < 2000; ++i) env.next();
+
+    double previous = env.next();
+    double worst_drop = 0.0;
+    for (int r = 0; r < 5; ++r) {
+        env.gate_on();
+        for (int i = 0; i < 64; ++i) {
+            const double v = env.next();
+            worst_drop = std::max(worst_drop, previous - v);
+            previous = v;
+        }
+    }
+    // The attack from sustain is a RISE; a retrigger must never step downward
+    // at all. Before the fix this was a drop of the full sustain level.
+    REQUIRE(worst_drop < 1e-6);
+}
+
+TEST_CASE("A delay-capable shape still delays when a delay is asked for",
+          "[envelope][mod-utilities]") {
+    // The guard on the fix above: making `delay_ms = 0` mean "no delay" must
+    // not turn a real delay into no delay either.
+    Dahdsr env;
+    env.prepare(kSr);
+    env.set_delay_ms(10.0);
+    env.set_attack_ms(5.0);
+    env.reset();
+    env.gate_on();
+
+    int first_nonzero = -1;
+    for (int i = 0; i < 4000 && first_nonzero < 0; ++i)
+        if (env.next() > 1e-9) first_nonzero = i;
+
+    // 10 ms at the suite's rate, within a sample of the accumulator's rounding.
+    const int expected = static_cast<int>(0.010 * kSr);
+    REQUIRE(first_nonzero >= expected - 1);
+    REQUIRE(first_nonzero <= expected + 1);
+}
+
 TEST_CASE("Envelope shapes enable the stages their names promise",
           "[envelope][mod-utilities]") {
     // AhdT holds at peak; ArT does not have a hold stage at all.
@@ -582,10 +675,30 @@ TEST_CASE("Envelope shapes enable the stages their names promise",
     ar.set_attack_ms(1.0);
     ar.reset();
     ar.gate_on();
+    double peak = 0.0;
+    double previous = 0.0;
+    double worst_drop = 0.0;
     for (int i = 0; i < 20000; ++i) {
-        ar.next();
+        const double v = ar.next();
         REQUIRE(ar.stage() != EnvelopeStage::hold);
+        peak = std::max(peak, v);
+        if (i > 0) worst_drop = std::max(worst_drop, previous - v);
+        previous = v;
     }
+
+    // Reading the LEVEL, not just the stage. Asserting only `stage() != hold`
+    // passes for ANY level the shape settles at, which is how this went unseen:
+    // with a held gate `ArT` parked at the unrelated `sustain_` member (default
+    // 0.7) and stepped down 3.1 dB in a single sample the moment attack
+    // finished. `additive_bank.hpp` had already met this and worked around it
+    // locally by setting sustain to exactly 1, leaving the trap armed for every
+    // other caller.
+    //
+    // The shape has no decay and no sustain segment, so a held gate holds at
+    // the peak — and holding means no downward step at all.
+    REQUIRE_THAT(peak, WithinAbs(1.0, 1e-9));
+    REQUIRE_THAT(previous, WithinAbs(1.0, 1e-9));
+    REQUIRE(worst_drop < 1e-9);
 }
 
 TEST_CASE("ModEnv rests at exactly zero and peaks at its depth",

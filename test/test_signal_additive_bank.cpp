@@ -1468,11 +1468,20 @@ TEST_CASE("Per-partial decay follows each partial's own time constant",
 TEST_CASE("The shared onset holds at unity while gated",
           "[signal][additive][envelope]") {
     // A dependency on `envelope.hpp` worth pinning, because getting it wrong is
-    // silent and costs exactly 3.1 dB. `ArT` is the right core for an
-    // attack-that-holds shape, but with a held gate it parks at its `sustain_`
-    // member — which defaults to 0.7, not to the peak its own comment
-    // describes. This engine sets sustain to 1 explicitly; the assertion below
-    // fails loudly if that ever stops being necessary or stops being done.
+    // silent and costs exactly 3.1 dB.
+    //
+    // This test previously asserted the OPPOSITE of what it does now, and the
+    // history is the point. `ArT` with a held gate used to park at its unrelated
+    // `sustain_` member (default 0.7) rather than at the peak its own doc block
+    // described. This engine worked around it with an explicit
+    // `set_sustain(1.0)`, and this test then pinned the workaround by asserting
+    // a DEFAULTED `ArT` settles below 0.99 — locking the defect in as expected
+    // behaviour and guaranteeing that fixing it would look like a regression.
+    //
+    // It was a defect in `EnvelopeCore` and is now fixed there: a shape with no
+    // decay and no sustain segment holds at its peak. So both instances hold at
+    // unity, and the explicit `set_sustain(1.0)` is belt-and-braces rather than
+    // load-bearing.
     ArT<double> onset;
     onset.prepare(kSr);
     onset.set_attack_ms(1.0);
@@ -1481,12 +1490,14 @@ TEST_CASE("The shared onset holds at unity while gated",
     for (int i = 0; i < 4800; ++i) onset.next();
     REQUIRE_THAT(onset.next(), WithinAbs(1.0, 1e-12));
 
+    // The one that matters: a caller who never touches sustain must get the
+    // peak too, because that is what the shape promises.
     ArT<double> defaulted;
     defaulted.prepare(kSr);
     defaulted.set_attack_ms(1.0);
     defaulted.gate_on();
     for (int i = 0; i < 4800; ++i) defaulted.next();
-    REQUIRE(defaulted.next() < 0.99);
+    REQUIRE_THAT(defaulted.next(), WithinAbs(1.0, 1e-12));
 
     // Which the bank does not inherit: a sustained partial holds its full
     // table amplitude for as long as the gate is up.

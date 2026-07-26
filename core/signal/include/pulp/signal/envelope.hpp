@@ -183,7 +183,15 @@ public:
                 break;
 
             case Stage::sustain:
-                level_ = sustain_;
+                // `segment_start_` is the level this stage was entered at. For
+                // a shape with no sustain segment — `ArT`, or `AhdT` with hold
+                // disabled — that is the PEAK, and holding there is the whole
+                // meaning of "the shape ends at the peak and a held gate holds
+                // it". Reading `sustain_` unconditionally instead parked those
+                // shapes at an unrelated member (default 0.7), stepping the
+                // output down 3.1 dB in a single sample the moment attack
+                // finished.
+                level_ = has_sustain_ ? sustain_ : segment_start_;
                 break;
 
             case Stage::release:
@@ -266,7 +274,17 @@ private:
     }
 
     void update() {
-        delay_samples_ = stage_samples(delay_ms_);
+        // NOT `stage_samples()`. That floors every stage at `kMinStageMs` so a
+        // ramp can never divide by zero — but a delay is a WAIT, not a ramp,
+        // and zero is a meaningful, safe value for it (`advance()` completes a
+        // zero-length stage immediately). Flooring it meant `delay_samples_`
+        // was nonzero even when the caller asked for no delay, so `gate_on()`
+        // always routed through the delay stage, which forces the level to
+        // zero. A retrigger therefore punched a full-scale one-sample notch —
+        // a broadband click — into every delay-capable shape, contradicting
+        // this class's own promise that retrigger continues from the current
+        // level.
+        delay_samples_ = units::ms_to_samples(std::max(delay_ms_, 0.0), sample_rate_);
         attack_samples_ = stage_samples(attack_ms_);
         hold_samples_ = stage_samples(hold_ms_);
         decay_samples_ = stage_samples(decay_ms_);
