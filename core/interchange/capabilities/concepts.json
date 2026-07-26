@@ -33,7 +33,7 @@
     { "id": "clip.fades", "detect": "model", "summary": "Per-clip fade in and fade out durations." },
     { "id": "clip.crossfade", "detect": "format", "summary": "An overlap between two adjacent clips authored as one transition item." },
     { "id": "clip.warp", "detect": "format", "summary": "A time-warp map deforming clip content against timeline time." },
-    { "id": "clip.launch", "detect": "format", "summary": "Non-arrangement clip playback (scenes, launcher grids)." },
+    { "id": "clip.launch", "detect": "model", "summary": "Non-arrangement clip playback (scenes, launcher grids)." },
     { "id": "gap.explicit", "detect": "format", "summary": "A gap between clips authored as a first-class item rather than absence." },
 
     { "id": "tempo.single", "detect": "model", "summary": "One tempo governing the whole document." },

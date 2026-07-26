@@ -78,7 +78,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"clip.fades", "Per-clip fade in and fade out durations.", true},
     {"clip.crossfade", "An overlap between two adjacent clips authored as one transition item.", false},
     {"clip.warp", "A time-warp map deforming clip content against timeline time.", false},
-    {"clip.launch", "Non-arrangement clip playback (scenes, launcher grids).", false},
+    {"clip.launch", "Non-arrangement clip playback (scenes, launcher grids).", true},
     {"gap.explicit", "A gap between clips authored as a first-class item rather than absence.", false},
     {"tempo.single", "One tempo governing the whole document.", true},
     {"tempo.map", "Tempo changing over the document at more than one point.", true},

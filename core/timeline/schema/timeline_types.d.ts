@@ -88,6 +88,21 @@ export interface PulpTimelineCommandInsertRegion {
   sequence_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_scene` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertScene {
+  before_scene_id?: number | string;
+  scene: PulpTimelineScene;
+  sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_slot` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertSlot {
+  before_slot_id?: number | string;
+  scene_id: number | string;
+  sequence_id: number | string;
+  slot: PulpTimelineSlot;
+}
+
 /** `pulp.timeline.command.insert_take` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertTake {
   lane_id: number | string;
@@ -141,6 +156,19 @@ export interface PulpTimelineCommandRemoveMarker {
 export interface PulpTimelineCommandRemoveRegion {
   region_id: number | string;
   sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_scene` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveScene {
+  scene_id: number | string;
+  sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_slot` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveSlot {
+  scene_id: number | string;
+  sequence_id: number | string;
+  slot_id: number | string;
 }
 
 /** `pulp.timeline.command.remove_take` — domain Command, schema version 1. */
@@ -305,7 +333,14 @@ export interface PulpTimelineRegion {
   position: number | string;
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 4. */
+/** `pulp.timeline.scene` — domain Document, schema version 1. */
+export interface PulpTimelineScene {
+  id: number | string;
+  name: string;
+  slots: readonly unknown[];
+}
+
+/** `pulp.timeline.sequence` — domain Document, schema version 5. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
@@ -315,7 +350,16 @@ export interface PulpTimelineSequence {
   musical_duration: number | string;
   name: string;
   regions: readonly unknown[];
+  scenes: readonly unknown[];
   tracks: readonly unknown[];
+}
+
+/** `pulp.timeline.slot` — domain Document, schema version 1. */
+export interface PulpTimelineSlot {
+  clip_id: number | string;
+  follow: Record<string, unknown>;
+  id: number | string;
+  launch_quantize: Record<string, unknown>;
 }
 
 /** `pulp.timeline.take` — domain Document, schema version 1. */
@@ -362,6 +406,8 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.insert_clip"
   | "pulp.timeline.command.insert_marker"
   | "pulp.timeline.command.insert_region"
+  | "pulp.timeline.command.insert_scene"
+  | "pulp.timeline.command.insert_slot"
   | "pulp.timeline.command.insert_take"
   | "pulp.timeline.command.insert_take_lane"
   | "pulp.timeline.command.move_clip"
@@ -370,6 +416,8 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_clip"
   | "pulp.timeline.command.remove_marker"
   | "pulp.timeline.command.remove_region"
+  | "pulp.timeline.command.remove_scene"
+  | "pulp.timeline.command.remove_slot"
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
   | "pulp.timeline.command.set_active_take_lane"
@@ -391,7 +439,9 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.marker"
   | "pulp.timeline.project"
   | "pulp.timeline.region"
+  | "pulp.timeline.scene"
   | "pulp.timeline.sequence"
+  | "pulp.timeline.slot"
   | "pulp.timeline.take"
   | "pulp.timeline.take_lane"
   | "pulp.timeline.track";
@@ -409,6 +459,8 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
   "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
   "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
+  "pulp.timeline.command.insert_scene": PulpTimelineCommandInsertScene;
+  "pulp.timeline.command.insert_slot": PulpTimelineCommandInsertSlot;
   "pulp.timeline.command.insert_take": PulpTimelineCommandInsertTake;
   "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
   "pulp.timeline.command.move_clip": PulpTimelineCommandMoveClip;
@@ -417,6 +469,8 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
   "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
   "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
+  "pulp.timeline.command.remove_scene": PulpTimelineCommandRemoveScene;
+  "pulp.timeline.command.remove_slot": PulpTimelineCommandRemoveSlot;
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
@@ -438,7 +492,9 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.marker": PulpTimelineMarker;
   "pulp.timeline.project": PulpTimelineProject;
   "pulp.timeline.region": PulpTimelineRegion;
+  "pulp.timeline.scene": PulpTimelineScene;
   "pulp.timeline.sequence": PulpTimelineSequence;
+  "pulp.timeline.slot": PulpTimelineSlot;
   "pulp.timeline.take": PulpTimelineTake;
   "pulp.timeline.take_lane": PulpTimelineTakeLane;
   "pulp.timeline.track": PulpTimelineTrack;

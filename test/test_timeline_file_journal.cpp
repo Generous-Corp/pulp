@@ -147,6 +147,91 @@ TEST_CASE("Timeline file journal recovers the last durable revision and continue
     REQUIRE(velocity(recovered.checkpoint) == 3000);
 }
 
+TEST_CASE("Timeline file journal recovers scene and slot commands with tombstones") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    {
+        auto opened = open_journal(temporary.path, fallback);
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {}, {InsertScene{{3}, Scene{{7}, "launch", {}}}})));
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {1},
+                                        {InsertSlot{{3}, {7}, Slot{{8}, {5},
+                                                                   launch_every_quarters(2), {}}}})));
+    }
+
+    {
+        auto recovered = open_journal(temporary.path, fallback);
+        REQUIRE(recovered.revision == DocumentRevision{2});
+        const auto* scene = recovered.checkpoint.find_sequence({3})->find_scene({7});
+        REQUIRE(scene);
+        REQUIRE(scene->name == "launch");
+        REQUIRE(scene->slots.size() == 1);
+        REQUIRE(scene->slots[0].launch_quantize == launch_every_quarters(2));
+        REQUIRE(recovered.checkpoint.locate({7})->active);
+        REQUIRE(recovered.checkpoint.locate({8})->active);
+        REQUIRE(recovered.checkpoint.locate({8})->parent_id == ItemId{7});
+
+        auto session = std::move(DocumentSession::restore(
+                            recovered.checkpoint, recovered.revision, {}, recovered.sink))
+                           .value();
+        auto writer = std::move(session->register_writer()).value();
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {2}, {RemoveSlot{{3}, {7}, {8}}})));
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {3}, {RemoveScene{{3}, {7}}})));
+    }
+
+    const auto recovered = open_journal(temporary.path, fallback);
+    REQUIRE(recovered.revision == DocumentRevision{4});
+    REQUIRE_FALSE(recovered.checkpoint.find_sequence({3})->find_scene({7}));
+    REQUIRE_FALSE(recovered.checkpoint.locate({7})->active);
+    REQUIRE(recovered.checkpoint.locate({7})->kind == ItemKind::Scene);
+    REQUIRE_FALSE(recovered.checkpoint.locate({8})->active);
+    REQUIRE(recovered.checkpoint.locate({8})->kind == ItemKind::Slot);
+    REQUIRE(recovered.checkpoint.locate({8})->parent_id == ItemId{7});
+}
+
+TEST_CASE("Timeline file journal preserves explicit scene and slot insertion order") {
+    TemporaryJournal temporary;
+    const auto fallback = make_project();
+    {
+        auto opened = open_journal(temporary.path, fallback);
+        auto session =
+            std::move(DocumentSession::create(opened.checkpoint, {}, opened.sink)).value();
+        auto writer = std::move(session->register_writer()).value();
+        REQUIRE(session->submit(
+            writer, session_transaction(writer, {},
+                                        {InsertScene{{3}, Scene{{7}, "first", {}}},
+                                         InsertScene{{3}, Scene{{8}, "last", {}}},
+                                         InsertScene{{3}, Scene{{9}, "middle", {}}, ItemId{8}}})));
+        REQUIRE(session->submit(
+            writer,
+            session_transaction(
+                writer, {1},
+                {InsertSlot{{3}, {7}, Slot{{10}, {5}, launch_immediate(), {}}},
+                 InsertSlot{{3}, {7}, Slot{{11}, {5}, launch_immediate(), {}}},
+                 InsertSlot{{3}, {7}, Slot{{12}, {5}, launch_immediate(), {}}, ItemId{11}}})));
+    }
+
+    const auto recovered = open_journal(temporary.path, fallback);
+    const auto* sequence = recovered.checkpoint.find_sequence({3});
+    REQUIRE(sequence);
+    REQUIRE(sequence->scenes().size() == 3);
+    REQUIRE(sequence->scenes()[0].id == ItemId{7});
+    REQUIRE(sequence->scenes()[1].id == ItemId{9});
+    REQUIRE(sequence->scenes()[2].id == ItemId{8});
+    const auto* scene = sequence->find_scene({7});
+    REQUIRE(scene);
+    REQUIRE(scene->slots.size() == 3);
+    REQUIRE(scene->slots[0].id == ItemId{10});
+    REQUIRE(scene->slots[1].id == ItemId{12});
+    REQUIRE(scene->slots[2].id == ItemId{11});
+}
+
 TEST_CASE("Timeline file journal creates a missing parent directory chain") {
     TemporaryJournal temporary;
     const auto nested_path = temporary.directory / "nested" / "session" / "journal.ptlj";

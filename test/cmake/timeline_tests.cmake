@@ -100,6 +100,28 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME timeline-transaction-launcher-complexity
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_transaction_launcher_complexity.py
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp)
+    add_test(NAME timeline-transaction-launcher-complexity-mutation-control
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_transaction_launcher_complexity.py
+            --self-test)
+    add_test(NAME timeline-launcher-bulk-build-contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --launcher-source
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_scene_internal.cpp)
+    add_test(NAME timeline-launcher-retained-size-contract
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --command-source
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp)
+    add_test(NAME timeline-launcher-resource-contract-mutation-control
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_launcher_resource_contract.py
+            --self-test)
     add_test(NAME timeline-live-capture-verifier-self-test
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py
@@ -162,6 +184,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_marker_persistence.cpp
+        test_timeline_session_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
         test_timeline_release_serialization.cpp
@@ -312,6 +335,9 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_context.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_scene_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/project_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_codegen.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
@@ -328,6 +354,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_release.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_sequence_annotations_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
@@ -337,6 +364,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_marker_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp

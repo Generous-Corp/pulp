@@ -335,6 +335,7 @@ struct Track::Data {
     std::string name;
     NodePtr clips_by_start;
     NodePtr clips_by_id;
+    std::shared_ptr<const std::uint8_t> clip_membership;
     std::shared_ptr<const std::vector<DevicePlacement>> device_chain;
     std::shared_ptr<const std::vector<AutomationLane>> automation_lanes;
     std::shared_ptr<const std::vector<ItemId>> automation_owned_ids;
@@ -443,6 +444,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
                                           .name = std::move(input.name),
                                           .clips_by_start = std::move(by_start),
                                           .clips_by_id = std::move(by_id),
+                                          .clip_membership =
+                                              std::make_shared<const std::uint8_t>(0),
                                           .device_chain = std::move(device_chain),
                                           .automation_lanes = std::move(automation_lanes),
                                           .automation_owned_ids = std::move(automation_owned_ids),
@@ -522,6 +525,7 @@ runtime::Result<Track, ModelError> Track::insert_clip(Clip clip) const {
     auto next_data = *data_;
     next_data.clips_by_start = std::move(by_start);
     next_data.clips_by_id = std::move(by_id);
+    next_data.clip_membership = std::make_shared<const std::uint8_t>(0);
     return runtime::Result<Track, ModelError>(
         runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -535,6 +539,7 @@ runtime::Result<Track, ModelError> Track::erase_clip(ItemId id) const {
     auto next_data = *data_;
     next_data.clips_by_start = std::move(by_start);
     next_data.clips_by_id = std::move(by_id);
+    next_data.clip_membership = std::make_shared<const std::uint8_t>(0);
     return runtime::Result<Track, ModelError>(
         runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data)))));
 }
@@ -775,6 +780,9 @@ std::size_t Track::shared_index_nodes_with(const Track& other) const {
 }
 bool Track::shares_storage_with(const Track& other) const noexcept {
     return data_.get() == other.data_.get();
+}
+bool Track::shares_clip_membership_with(const Track& other) const noexcept {
+    return data_->clip_membership == other.data_->clip_membership;
 }
 TrackIndexStats Track::index_stats() noexcept {
     return {g_live_index_nodes.load(), g_created_index_nodes.load()};
