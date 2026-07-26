@@ -277,6 +277,10 @@ flags:
     paths:
       - core/signal/
     carryforward: true
+  smf:
+    paths:
+      - core/smf/
+    carryforward: true
   state:
     paths:
       - core/state/
@@ -492,6 +496,9 @@ component_management:
     - component_id: signal
       name: signal
       paths: ["core/signal/**"]
+    - component_id: smf
+      name: smf
+      paths: ["core/smf/**"]
     - component_id: state
       name: state
       paths: ["core/state/**"]

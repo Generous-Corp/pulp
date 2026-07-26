@@ -14,7 +14,11 @@ target_sources(pulp-osc PRIVATE
     src/osc_channel.cpp
 )
 
-target_link_libraries(pulp-osc PUBLIC pulp::runtime)
+# pulp::state is public because osc_parameter_map.hpp binds OSC addresses to
+# StateStore parameters in its interface. The dependency points this way — the
+# control protocol onto the parameter model — so pulp::state stays free of
+# socket code and keeps its lightweight link surface for audio-thread consumers.
+target_link_libraries(pulp-osc PUBLIC pulp::runtime pulp::state)
 
 if(WIN32)
     target_link_libraries(pulp-osc PRIVATE ws2_32)

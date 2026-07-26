@@ -321,6 +321,14 @@ per-ABI entry point for it.** Go through the plugin's own state:
   function and the no-exceptions library like any other timeline TU, even though
   they never run in a render path.
 
+- Only translation units under `core/timeline/src` join those lists. A public
+  header added under `core/timeline/include` for a foreign-format interop
+  target — `dawproject_import.hpp`, `smf.hpp` — stays out of every web source
+  list, because its implementation lives in its own target
+  (`core/dawproject`, `core/smf`) that the browser lanes deliberately do not
+  build. The closure checker scans sources, so adding such a header is
+  correct even though it touches `core/timeline`.
+
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked
   example: `MasterTransport::begin_scrub()` emits repeated windows whose restarts
@@ -332,6 +340,25 @@ per-ABI entry point for it.** Go through the plugin's own state:
   unchanged web source closure, so a green `web-timeline-source-closure` is not
   evidence that the wasm lanes are unaffected — check what the transport now
   publishes per block, not just which files moved.
+
+- A new portable engine TU is **one** edit, not three. `PulpWam.cmake` and
+  `PulpWclap.cmake` both resolve their timeline/playback sources through
+  `pulp_resolve_timeline_sources()` / `pulp_resolve_playback_sources()`, so
+  adding a file to `core/timeline/PulpTimelineSources.cmake` (or the playback
+  equivalent) puts it in both wasm lanes automatically. Do not hand-add it to
+  the WAM/WebCLAP lists — `web-timeline-source-closure` counts production TUs
+  per lane and a duplicate is drift, not belt-and-braces.
+
+- **A new bounded document array needs a web ceiling of its own.** Every
+  unbounded array the decoder walks is quota-governed by a `DecodeLimits` field,
+  and `DecodeLimits::web_defaults()` deliberately tightens the ones that can grow
+  large (notes, automation points, takes, comp segments) because a browser tab
+  has far less headroom than a desktop host. Adding a field and forgetting
+  `web_defaults()` is silent: the desktop ceiling applies, nothing fails, and the
+  tab is one hostile document away from an OOM the native tests will never see.
+  The decoder is not the only place to wire it either — `schema_json_preflight.cpp`
+  governs the same array independently, before any model object exists, and that
+  is the check a hostile input hits first.
 
 - A compile-time guard in a portable timeline header fires in the browser lanes
   too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its

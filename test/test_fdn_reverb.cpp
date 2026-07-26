@@ -46,12 +46,14 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/signal/fdn_reverb.hpp>
 
+#include "support/fdn_reverb_fixture.hpp"
 #include "support/reverb_metrics.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 using pulp::signal::FdnReverb;
@@ -63,102 +65,7 @@ using pulp::test::audio::band_t60;
 using pulp::test::audio::mixing_time_seconds;
 using pulp::test::audio::range_rms;
 using pulp::test::audio::t60_schroeder;
-
-namespace {
-// The reference decay measurement: T60 in a band at 1 kHz.
-constexpr double kDecayProbeHz = 1000.0;
-}  // namespace
-
-namespace {
-
-constexpr double kHostRate = 48000.0;
-constexpr int kBlock = 512;
-
-struct Stereo {
-    std::vector<float> left;
-    std::vector<float> right;
-};
-
-// Deterministic white noise. No random_device anywhere in this suite: a
-// stability fuzz that cannot be replayed is a rumour, not a test.
-class Rng {
-public:
-    explicit Rng(std::uint32_t seed) : state_(seed ? seed : 1u) {}
-    std::uint32_t next_u32() {
-        state_ ^= state_ << 13;
-        state_ ^= state_ >> 17;
-        state_ ^= state_ << 5;
-        return state_;
-    }
-    double unit() { return static_cast<double>(next_u32() >> 8) * (1.0 / 16777216.0); }
-    float noise() { return static_cast<float>(unit() * 2.0 - 1.0); }
-
-private:
-    std::uint32_t state_;
-};
-
-Stereo render(FdnReverb& reverb, const std::vector<float>& in, int block = kBlock) {
-    Stereo out;
-    out.left.assign(in.size(), 0.0f);
-    out.right.assign(in.size(), 0.0f);
-    for (std::size_t i = 0; i < in.size(); i += static_cast<std::size_t>(block)) {
-        const int n = static_cast<int>(
-            std::min<std::size_t>(static_cast<std::size_t>(block), in.size() - i));
-        reverb.process_block(in.data() + i, in.data() + i, out.left.data() + i,
-                             out.right.data() + i, n);
-    }
-    return out;
-}
-
-std::vector<float> impulse(std::size_t n, float amplitude = 1.0f) {
-    std::vector<float> v(n, 0.0f);
-    v[0] = amplitude;
-    return v;
-}
-
-std::vector<float> noise(std::size_t n, float amplitude, std::uint32_t seed = 1234u) {
-    Rng rng(seed);
-    std::vector<float> v(n);
-    for (auto& s : v) s = amplitude * rng.noise();
-    return v;
-}
-
-// The engine at its neutral settings: no damping, no modulation, no shimmer,
-// no drive, no bloom, no predelay. Everything the decay law does NOT describe
-// is switched off so a T60 measurement pins one claim.
-void configure_neutral(FdnReverb& reverb, double decay, int rate_index) {
-    reverb.set_parameter(Param::decay, decay);
-    reverb.set_parameter(Param::size, 0.5);
-    reverb.set_parameter(Param::predelay, 0.0);
-    reverb.set_parameter(Param::damp_hi, 0.0);
-    reverb.set_parameter(Param::damp_lo, 0.0);
-    reverb.set_parameter(Param::diffusion, 0.7);
-    reverb.set_parameter(Param::mod, 0.0);
-    reverb.set_parameter(Param::shimmer, 0.0);
-    reverb.set_parameter(Param::drive, 0.0);
-    reverb.set_parameter(Param::bloom, 0.0);
-    reverb.set_parameter(Param::width, 1.0);
-    reverb.set_parameter(Param::tank_rate, static_cast<double>(rate_index));
-    reverb.snap_parameters();
-    reverb.reset();
-}
-
-bool all_finite(const Stereo& s) {
-    for (std::size_t i = 0; i < s.left.size(); ++i)
-        if (!std::isfinite(s.left[i]) || !std::isfinite(s.right[i])) return false;
-    return true;
-}
-
-double peak(const Stereo& s) {
-    double p = 0.0;
-    for (std::size_t i = 0; i < s.left.size(); ++i) {
-        p = std::max(p, std::abs(static_cast<double>(s.left[i])));
-        p = std::max(p, std::abs(static_cast<double>(s.right[i])));
-    }
-    return p;
-}
-
-}  // namespace
+using namespace pulp::test::fdn_reverb;
 
 // ── 1. The Jot decay law ─────────────────────────────────────────────────────
 
@@ -408,14 +315,30 @@ TEST_CASE("fdn reverb stays bounded and decaying for every parameter vector",
         check_fuzz(run_fuzz_vector(rng, rate_index, 60.0, 5.0), index, rate_index);
 }
 
-TEST_CASE("fdn reverb survives the full 200-vector 60-second sweep",
-          "[.][fdn][reverb][fdn-fuzz-full]") {
-    Rng rng(0xF00D5EEDu);
-    int index = 0;
-    for (int rate_index = 0; rate_index < fdn::kNumTankRates; ++rate_index)
-        for (int i = 0; i < 200; ++i, ++index)
-            check_fuzz(run_fuzz_vector(rng, rate_index, 60.0, 5.0), index, rate_index);
-}
+#define PULP_FDN_FULL_FUZZ_CASE(rate_index, rate_label)                    \
+    TEST_CASE("fdn reverb survives the full 200-vector 60-second sweep at " \
+                  rate_label,                                               \
+              "[.][fdn][reverb][fdn-fuzz-full]") {                          \
+        Rng rng(0xF00D5EEDu ^                                               \
+                (0x9E3779B9u * static_cast<std::uint32_t>(rate_index + 1))); \
+        for (int i = 0; i < 200; ++i)                                       \
+            check_fuzz(run_fuzz_vector(rng, rate_index, 60.0, 5.0), i,       \
+                       rate_index);                                          \
+    }
+
+// Separate cases preserve the exact 200-vector contract at every rate while
+// allowing the opt-in proof to use process-level parallelism. Catch assertions
+// remain on each process's test thread rather than moving into worker threads.
+PULP_FDN_FULL_FUZZ_CASE(0, "16 kHz")
+PULP_FDN_FULL_FUZZ_CASE(1, "20 kHz")
+PULP_FDN_FULL_FUZZ_CASE(2, "24 kHz")
+PULP_FDN_FULL_FUZZ_CASE(3, "32 kHz")
+PULP_FDN_FULL_FUZZ_CASE(4, "44.1 kHz")
+PULP_FDN_FULL_FUZZ_CASE(5, "48 kHz")
+PULP_FDN_FULL_FUZZ_CASE(6, "64 kHz")
+PULP_FDN_FULL_FUZZ_CASE(7, "96 kHz")
+
+#undef PULP_FDN_FULL_FUZZ_CASE
 
 // ── 6. Bloom ─────────────────────────────────────────────────────────────────
 
@@ -485,6 +408,12 @@ TEST_CASE("fdn reverb wet bandwidth tracks the tank rate", "[fdn][reverb][tank-r
         FdnReverb reverb;
         reverb.prepare(kHostRate, kBlock);
         configure_neutral(reverb, 1.5, rate_index);
+        // Isolate tank-rate bandwidth from the independently specified flux
+        // voicing. Its moving absorptive peak is intentionally not flat and
+        // would make the measured crossing depend on which channel happened
+        // to be cutting which band during this render.
+        reverb.set_flux_depth_db(0.0);
+        reverb.reset();
         // The per-mode output lowpass would confound a bandwidth measurement,
         // so this case measures the engine at its neutral (unstamped) voicing.
         const auto n = static_cast<std::size_t>(kHostRate * 3.0);
@@ -493,6 +422,38 @@ TEST_CASE("fdn reverb wet bandwidth tracks the tank rate", "[fdn][reverb][tank-r
         const auto from = static_cast<std::size_t>(kHostRate);
         const double reference = band_energy(out.left, from, n, 400.0, kHostRate, 0.2, 10.0);
         REQUIRE(reference > 0.0);
+
+        if (rate_index <= 2) {
+            std::vector<double> fractions;
+            std::vector<double> levels_db;
+            for (double fraction = 0.20; fraction <= 0.55; fraction += 0.01) {
+                const double magnitude = band_energy(
+                    out.left, from, n, fraction * tank, kHostRate, 0.08, 10.0);
+                const double db =
+                    20.0 * std::log10(std::max(magnitude, 1e-15) / reference);
+                fractions.push_back(fraction);
+                levels_db.push_back(db);
+            }
+            // An FDN has narrow residual modes even after proportional-band
+            // averaging. Bandwidth is the LAST -3 dB crossing (the start of
+            // sustained rolloff), not the first isolated modal notch.
+            std::size_t last_above = 0;
+            for (std::size_t i = 0; i < levels_db.size(); ++i)
+                if (levels_db[i] > -3.0) last_above = i;
+            REQUIRE(last_above + 1 < levels_db.size());
+            const double t = (-3.0 - levels_db[last_above]) /
+                             (levels_db[last_above + 1] - levels_db[last_above]);
+            const double cutoff_fraction =
+                fractions[last_above] +
+                (fractions[last_above + 1] - fractions[last_above]) * t;
+            INFO("tank " << tank << " Hz: measured -3 dB edge "
+                         << cutoff_fraction * tank << " Hz ("
+                         << cutoff_fraction << " x tank rate)");
+            REQUIRE(cutoff_fraction > 0.0);
+            REQUIRE(std::abs(cutoff_fraction - fdn::kTankInputLpFraction) /
+                        fdn::kTankInputLpFraction <=
+                    0.15);
+        }
 
         // Above a 57 kHz tank the HOST's Nyquist, not the tank's, is the
         // bottleneck, so the passband claim is capped there: asserting a level
@@ -503,6 +464,17 @@ TEST_CASE("fdn reverb wet bandwidth tracks the tank rate", "[fdn][reverb][tank-r
         INFO("tank " << tank << " Hz: level at " << edge_hz << " Hz is " << edge_db << " dB");
         // The passband must still be there at 0.42 x the tank rate.
         REQUIRE(edge_db > -12.0);
+
+        if (tank == 96000.0) {
+            const double host_claim_hz = 0.45 * kHostRate * 0.5;
+            const double host_claim = band_energy(
+                out.left, from, n, host_claim_hz, kHostRate, 0.04, 10.0);
+            const double host_claim_db =
+                20.0 * std::log10(std::max(host_claim, 1e-15) / reference);
+            INFO("96 kHz tank: level at 0.45 x host Nyquist ("
+                 << host_claim_hz << " Hz) is " << host_claim_db << " dB");
+            REQUIRE(host_claim_db > -6.0);
+        }
 
         // The stop-band half of the claim only means something where the tank
         // IS the bottleneck. At 44.1 and 48 kHz against a 48 kHz host the
@@ -676,7 +648,7 @@ TEST_CASE("fdn reverb loop saturation adds no energy at any drive",
 // ── 13. Determinism, timing, and block partition ─────────────────────────────
 
 TEST_CASE("fdn reverb renders are bit-reproducible", "[fdn][reverb][determinism]") {
-    const auto n = static_cast<std::size_t>(kHostRate * 4.0);
+    const auto n = static_cast<std::size_t>(kHostRate * 30.0);
     auto input = noise(n, 0.3f, 31337u);
     std::fill(input.begin() + static_cast<std::ptrdiff_t>(kHostRate * 0.1), input.end(), 0.0f);
 
@@ -705,15 +677,13 @@ TEST_CASE("fdn reverb renders are bit-reproducible", "[fdn][reverb][determinism]
     // 4096-sample block, to the bit.
     const auto chunked = render(c, input, 512);
 
-    for (std::size_t i = 0; i < n; ++i) {
-        REQUIRE(first.left[i] == again.left[i]);
-        REQUIRE(first.left[i] == after_reset.left[i]);
-        REQUIRE(first.left[i] == chunked.left[i]);
-        REQUIRE(first.right[i] == chunked.right[i]);
-    }
+    REQUIRE(first.left == again.left);
+    REQUIRE(first.left == after_reset.left);
+    REQUIRE(first.left == chunked.left);
+    REQUIRE(first.right == chunked.right);
 }
 
-TEST_CASE("fdn reverb reports zero latency and lands wet audio sample-exactly",
+TEST_CASE("fdn reverb reports zero latency and bounds its interpolation skew",
           "[fdn][reverb][latency]") {
     for (int rate_index = 0; rate_index < fdn::kNumTankRates; ++rate_index) {
         auto arrival = [&](double predelay_ms) {
@@ -743,6 +713,39 @@ TEST_CASE("fdn reverb reports zero latency and lands wet audio sample-exactly",
                      << " Hz: 100 ms of predelay measured as " << (late - early)
                      << " samples");
         REQUIRE(std::abs((late - early) - expected) <= 1.0);
+
+        // Isolate the bridge from the tank and measure its actual causal
+        // arrival. The prompt's universal <=4-host-sample number is impossible
+        // for its mandated four-point Hermite read at the low ratios: the two
+        // future tank samples alone are six host samples at 16/48 kHz. The API
+        // therefore exposes the honest ratio-dependent bound, and this pins
+        // the implementation to that bound rather than cancelling it through
+        // a predelay difference.
+        fdn::MultirateBridge<float> bridge;
+        bridge.prepare(kHostRate, kBlock);
+        bridge.configure(fdn::kTankRates[static_cast<std::size_t>(rate_index)]);
+        std::vector<float> bridge_in(static_cast<std::size_t>(kBlock * 4), 0.0f);
+        std::vector<float> bridge_out(bridge_in.size(), 0.0f);
+        bridge_in[0] = 1.0f;
+        for (std::size_t offset = 0; offset < bridge_in.size();
+             offset += static_cast<std::size_t>(kBlock)) {
+            const int tank_n =
+                bridge.host_to_tank(bridge_in.data() + offset,
+                                    bridge_in.data() + offset, kBlock);
+            std::copy_n(bridge.tank_input(0), tank_n, bridge.tank_output(0));
+            std::copy_n(bridge.tank_input(1), tank_n, bridge.tank_output(1));
+            bridge.tank_to_host(tank_n, bridge_out.data() + offset,
+                                bridge_out.data() + offset, kBlock);
+        }
+        const auto found = std::find_if(
+            bridge_out.begin(), bridge_out.end(),
+            [](float x) { return std::abs(x) > 1.0e-12f; });
+        REQUIRE(found != bridge_out.end());
+        const double measured_skew =
+            static_cast<double>(std::distance(bridge_out.begin(), found));
+        INFO("measured bridge skew " << measured_skew << ", reported bound "
+                                     << bridge.interpolation_skew_samples());
+        REQUIRE(measured_skew <= std::ceil(bridge.interpolation_skew_samples()));
     }
 }
 
@@ -873,7 +876,12 @@ TEST_CASE("fdn reverb recovers fully after a tank-rate change in either directio
         std::vector<float> right(n, 0.0f);
         bool switched = false;
         for (std::size_t i = 0; i + kBlock <= n; i += kBlock) {
-            if (!switched && i >= static_cast<std::size_t>(kHostRate)) {
+            // 38,400 is both a block boundary (75 * 512) and an integer-cycle
+            // boundary for 440 Hz at 48 kHz (352 cycles). The cold comparison
+            // therefore starts at the same sine phase relative to the reset
+            // ensemble LFOs; a mismatched phase measures the chorus, not
+            // recovery from the rate switch.
+            if (!switched && i >= 38400u) {
                 reverb.set_parameter(Param::tank_rate, static_cast<double>(to_rate));
                 switched = true;
             }
@@ -888,8 +896,11 @@ TEST_CASE("fdn reverb recovers fully after a tank-rate change in either directio
         FdnReverb reverb;
         reverb.prepare(kHostRate, kBlock);
         configure_neutral(reverb, 2.0, rate);
-        const auto out = render(reverb, input);
-        return range_rms(out.left, n - static_cast<std::size_t>(kHostRate), n);
+        const auto cold_n = n - 38400u;
+        const auto cold_input = sine_input(cold_n);
+        const auto out = render(reverb, cold_input);
+        return range_rms(out.left, cold_n - static_cast<std::size_t>(kHostRate),
+                         cold_n);
     };
 
     for (const auto [from_rate, to_rate] : {std::pair{0, 7}, std::pair{5, 7},

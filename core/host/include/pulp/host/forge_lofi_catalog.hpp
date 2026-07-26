@@ -16,12 +16,17 @@
 // pulp-host library — only a consumer (test/tool) that includes it needs the
 // pulp::signal include path.
 //
-// Macro-knob mapping:
+// Macro-knob mapping (the adapter names are intentionally host-facing; the
+// analog VCF implementation and calibration remain public pulp::signal code):
 //   * Delay (feedback echo)  → "Time"  = time_ms + "Feedback" = feedback
 //                                                     (time_ms per-sample, interpolated)
 //   * Filter (Svf)           → "Tone"  = cutoff_hz + "Resonance" = resonance
 //                                                     (sample-accurate; mode is
 //                                                      fixed per registered type)
+//   * Analog VCF             → cutoff + cutoff_mod + resonance + drive
+//                                                     (sample-accurate; lives in
+//                                                      forge_analog_vcf_catalog.hpp,
+//                                                      include it directly)
 //   * Waveshaper (tanh)      → "Drive" = drive       (sample-accurate)
 //   * Dry/Wet (DryWetMixer)  → "Mix"   = mix         (BLOCK-rate; see note below)
 //   * Noise                  → "Hiss"  = level       (sample-accurate)

@@ -392,3 +392,24 @@ TEST_CASE("binding an unknown param is a no-op that returns false",
     REQUIRE_FALSE(ok);
     REQUIRE(bridge.param_binding_count() == 0);
 }
+
+TEST_CASE("declarative bindings reject widgets the native push cannot write",
+          "[view][bridge][state-binding]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    add_params(store);
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createCanvas('custom-face');");
+    const bool value_ok =
+        engine.evaluate("bindWidgetToParam('custom-face', 'gain')")
+            .getWithDefault<bool>(true);
+    const bool meter_ok =
+        engine.evaluate("bindMeter('custom-face', 'gain')")
+            .getWithDefault<bool>(true);
+
+    REQUIRE_FALSE(value_ok);
+    REQUIRE_FALSE(meter_ok);
+    REQUIRE(bridge.param_binding_count() == 0);
+}

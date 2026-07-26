@@ -13,6 +13,12 @@ pulp_add_test_suite(pulp-test-timeline-dawproject-import
     LIBRARIES pulp::playback pulp::dawproject-import)
 target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
     PULP_TIMELINE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/timeline")
+# pulp::midi supplies the shared MIDI 2.0 velocity scaling the SMF interop
+# module reimplements under its -fno-exceptions contract; linking it here keeps
+# the two provably in agreement.
+pulp_add_test_suite(pulp-test-timeline-smf
+    SOURCES test_timeline_smf.cpp
+    LIBRARIES pulp::smf-interop pulp::midi)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -132,6 +138,17 @@ pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-agent
     SOURCES test_timeline_agent.cpp
     LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+# The chord/scale context lane plus the compile-context subscription contract
+# it carries: the document type, its schema migrations, and the read side that
+# only resolves context a renderer declared.
+pulp_add_test_suite(pulp-test-timeline-context-lane
+    SOURCES test_timeline_context_lane.cpp
+    LIBRARIES pulp::timeline)
+# The invalidation side of the same contract, driven through the real program
+# compiler so "did not recompile" is observed rather than assumed.
+pulp_add_test_suite(pulp-test-playback-compile-context
+    SOURCES test_playback_compile_context.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
@@ -172,6 +189,15 @@ pulp_add_test_suite(pulp-test-timeline-graph-binding
 pulp_add_test_suite(pulp-test-midi-parameter-map-scaling
     SOURCES test_midi_parameter_map_scaling.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::state pulp::timeline)
+
+# The OSC counterpart of the same surface: an OSC address (literal or OSC 1.0
+# wildcard pattern) binds to the same ParamID space, so a tablet control surface
+# reaches the engine's DeviceParameterTarget parameters with zero driver code.
+# The binding lives in core/osc (pulp::osc) because it needs the OSC address
+# matcher; pulp::timeline is linked to drive the engine's own parameter identity.
+pulp_add_test_suite(pulp-test-osc-parameter-map
+    SOURCES test_osc_parameter_map.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::osc pulp::state pulp::timeline)
 
 # The multitrack/PDC proof is also registered separately from the aggregate
 # example suite. That keeps the Phase-2 gate independent of standalone-editor
@@ -274,6 +300,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/compile_context.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp

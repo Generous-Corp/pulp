@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260725-windows-plugin-editor-present-mode",
+  "kind": "change",
+  "created_at": "2026-07-25T12:54:43Z",
+  "slices": [
+    "render-skia-dawn"
+  ],
+  "rationale": "Plug-in-host integration: a Windows plug-in editor renders synchronously on the DAW's UI thread, so a Fifo (vsync) swapchain blocks GetCurrentTexture on the display refresh while the DAW already composites, stalling the message pump that delivers input. Measured in REAPER: 7 frames across 8 knob sweeps, 22.9ms mean frame, ~17-43ms unaccounted acquire. The surface now requests a non-blocking present mode and the fallback follows an explicit preference order instead of taking presentModes[0], which on this adapter is Fifo and silently reinstated the block. After: 319 frames, 2.73ms mean, 0.053ms acquire. Scope is the plug-in editor surface; standalone window hosts still request vsync.",
+  "tests": [
+    "macos",
+    "pulp-test-win-pointer-input"
+  ],
+  "disposition": "pulp-only"
+}

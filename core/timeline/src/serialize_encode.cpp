@@ -1,6 +1,7 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "chord_scale_names.hpp"
 #include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
@@ -546,6 +547,26 @@ bool write_track(EncodeContext& context, const Track& track) {
         });
 }
 
+bool write_chord_scale_lane(EncodeContext& context, const ChordScaleLane& lane) {
+    if (!context.writer.character('['))
+        return false;
+    for (std::size_t index = 0; index < lane.events().size(); ++index) {
+        const auto& event = lane.events()[index];
+        if ((index != 0 && !context.writer.character(',')) ||
+            !context.writer.append("{\"chord_quality\":") ||
+            !context.writer.quoted(detail::chord_quality_name(event.chord_quality)) ||
+            !context.writer.append(",\"chord_root\":") || !context.writer.u64(event.chord_root) ||
+            !context.writer.append(",\"position\":") ||
+            !context.writer.i64(event.position.value, true) ||
+            !context.writer.append(",\"scale_mode\":") ||
+            !context.writer.quoted(detail::scale_mode_name(event.scale_mode)) ||
+            !context.writer.append(",\"scale_root\":") || !context.writer.u64(event.scale_root) ||
+            !context.writer.character('}'))
+            return false;
+    }
+    return context.writer.character(']');
+}
+
 bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
     return write_envelope(context, "pulp.timeline.marker", 1, [&] {
         if (!context.writer.character('{'))
@@ -590,6 +611,9 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                     !context.writer.character('}'))
                     return false;
             } else if (!context.writer.append("null"))
+                return false;
+            if (!context.writer.append(",\"chord_scale_lane\":") ||
+                !write_chord_scale_lane(context, sequence.chord_scale_lane()))
                 return false;
             if (!context.writer.append(",\"id\":") ||
                 !context.writer.u64(sequence.id().value, true) ||

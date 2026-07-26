@@ -44,7 +44,17 @@ PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 // package a traced binary without `--allow-tracing`, so a dev build with
 // Perfetto compiled in can never silently reach a customer. `used` + default
 // visibility keep it past dead-strip; `volatile` reads block whole-program DCE.
-extern "C" __attribute__((used, visibility("default")))
+// `used` + default visibility is GCC/Clang syntax; MSVC rejects it outright,
+// which meant PULP_TRACING=ON had never compiled on Windows at all. dllexport
+// is the MSVC equivalent for "this symbol must survive to the final binary":
+// it keeps the bytes past dead-strip so `pulp ship`'s scanner can still find
+// them, which is the entire point of the sentinel.
+#if defined(_MSC_VER)
+#  define PULP_TRACING_KEEP_SYMBOL __declspec(dllexport)
+#else
+#  define PULP_TRACING_KEEP_SYMBOL __attribute__((used, visibility("default")))
+#endif
+extern "C" PULP_TRACING_KEEP_SYMBOL
 const char pulp_tracing_ship_sentinel[] = "PULP_TRACING_COMPILED_IN__DO_NOT_SHIP";
 
 namespace pulp::runtime {

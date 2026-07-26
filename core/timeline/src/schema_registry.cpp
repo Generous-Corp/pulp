@@ -301,6 +301,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     auto sequence =
         builtin(std::string(detail::sequence_schema_policy.type_name), SchemaDomain::Document,
                 {{"absolute_duration", SchemaValueKind::Object},
+                 {"chord_scale_lane", SchemaValueKind::Array},
                  {"id", SchemaValueKind::U64String},
                  {"markers", SchemaValueKind::Array},
                  {"musical_duration", SchemaValueKind::I64String},
@@ -309,8 +310,16 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                  {"tracks", SchemaValueKind::Array}},
                 detail::sequence_schema_policy.current_version);
     sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
+    sequence.upgrades.push_back({2, 3, {}, detail::migrate_sequence_v2_to_v3});
+    sequence.downgrades.push_back({3, 2, {}, detail::migrate_sequence_v3_to_v2});
     sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
     schemas.push_back(std::move(sequence));
+    schemas.push_back(builtin("pulp.timeline.chord_scale_event", SchemaDomain::Document,
+                              {{"chord_quality", SchemaValueKind::String},
+                               {"chord_root", SchemaValueKind::U32},
+                               {"position", SchemaValueKind::I64String},
+                               {"scale_mode", SchemaValueKind::String},
+                               {"scale_root", SchemaValueKind::U32}}));
     schemas.push_back(builtin("pulp.timeline.marker", SchemaDomain::Document,
                               {{"color", SchemaValueKind::U32, false},
                                {"id", SchemaValueKind::U64String},
@@ -465,6 +474,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_chord_scale_lane", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Array},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.insert_marker", SchemaDomain::Command,
                               {{"marker", SchemaValueKind::Object, true, "pulp.timeline.marker"},
                                {"sequence_id", SchemaValueKind::U64String}}));

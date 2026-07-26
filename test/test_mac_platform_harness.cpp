@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/design_import.hpp>
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/design_sources.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/theme.hpp>
@@ -970,4 +971,180 @@ TEST_CASE("mac harness right-click reaches PulpView::rightMouseDown: not mouseDo
 
     REQUIRE(context_menus == 1);
     REQUIRE(left_clicks == 0);
+}
+
+// ── Gesture-vs-delivery gating in the standalone host ────────────────────
+//
+// A recognizer that is merely a CANDIDATE must not stop the widget under it
+// from receiving press / drag / release. `-[PulpView mouseDown:]` and friends
+// early-return on `mac_should_yield_to_gesture`, which yields only on a real
+// claim; yielding on the raw dispatch return instead makes every control that
+// carries a recognizer permanently undraggable in a standalone app, because
+// normal delivery never runs. The plugin-view host had the same defect and was
+// fixed separately, so this pins the standalone side against re-drift.
+//
+// Driven through real AppKit events on the real content view: the gating lives
+// inside the Obj-C mouse handlers, so a portable View-level test cannot reach
+// it. The decision itself is unit-tested in test_pointer_dispatch.cpp.
+TEST_CASE("mac harness: a non-claiming recognizer still lets the widget drag",
+          "[mac][platform-harness][gesture]") {
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<Probe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    // A double-tap recognizer: present on the whole drag, recognizing nothing.
+    // Every per-event dispatch still reports "consumed" (a candidate exists),
+    // which is exactly the value the host must NOT gate on.
+    probe->add_gesture_recognizer(std::make_unique<pulp::view::TapRecognizer>(2));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 100.0f, .y = 100.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 140.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 180.0f, .y = 140.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 180.0f, .y = 140.0f}));
+
+    CHECK(probe->downs == 1);
+    CHECK(probe->drags == 2);   // nothing claimed, so the widget kept the drag
+    CHECK(probe->ups == 1);     // ...and the bracket closed
+}
+
+// The bracket the case above opens. Once a non-claiming press is delivered to
+// `_dragTarget`, a recognizer can still claim on a LATER drag or on the
+// release — at which point the host must hand the pointer over AND close the
+// press it already delivered. A Knob opens on_gesture_begin plus relative-mouse
+// mode on press and clears both only on on_mouse_up, so bailing bare strands
+// beginEdit with no endEdit: a stuck automation touch and a hidden cursor.
+TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket",
+          "[mac][platform-harness][gesture]") {
+    // Counts BOTH channels. The legacy `ups` counter alone cannot see the
+    // defect this pins: the press also reached on_mouse_event and bubbled
+    // pointerdown, so a close that fires only the legacy callback leaves the
+    // modern channel and the bubble unmatched — and a modern-only consumer
+    // (VirtualList clears dragging_scrollbar_ on is_down == false) stays stuck.
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        int modern_press = 0, modern_release = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+        void on_mouse_event(const MouseEvent& e) override {
+            if (e.is_wheel) return;
+            if (e.phase == pulp::view::MousePhase::press) ++modern_press;
+            if (e.phase == pulp::view::MousePhase::release) ++modern_release;
+        }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<Probe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    // An ancestor that registered a pointer handler must see the pointerup
+    // bubble matching the pointerdown the press delivered.
+    int bubbled_press = 0, bubbled_release = 0;
+    root.on_pointer_event = [&](const MouseEvent& e) {
+        if (e.is_wheel) return;
+        if (e.phase == pulp::view::MousePhase::press) ++bubbled_press;
+        if (e.phase == pulp::view::MousePhase::release) ++bubbled_release;
+    };
+
+    // A pan with a wide slop: the press and the first short drag stay
+    // candidates (so the widget receives them), and the long drag claims.
+    auto pan = std::make_unique<pulp::view::PanRecognizer>();
+    pan->set_min_distance(60.0f);
+    probe->add_gesture_recognizer(std::move(pan));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 40.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 60.0f, .y = 120.0f}));
+    REQUIRE(probe->downs == 1);
+    REQUIRE(probe->drags == 1);   // still only a candidate here
+    REQUIRE(probe->ups == 0);
+    REQUIRE(probe->modern_press == 1);
+    REQUIRE(bubbled_press == 1);
+
+    // Crosses the slop: the pan claims, and the host must close the bracket.
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->drags == 1);   // the claiming move is NOT delivered
+    CHECK(probe->ups == 1);     // ...but the press bracket closed
+    // ...on EVERY channel the press opened, not just the legacy one.
+    CHECK(probe->modern_release == 1);
+    CHECK(bubbled_release == 1);
+
+    // The release is now owned by the gesture; the widget must not see a
+    // second up (that would double-close and fire a spurious endEdit).
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
+    CHECK(probe->modern_release == 1);
+    CHECK(bubbled_release == 1);
+}
+
+TEST_CASE("mac harness: a throwing gesture handoff still drops pointer capture",
+          "[mac][platform-harness][gesture]") {
+    struct ThrowingProbe final : View {
+        int ups = 0;
+        void on_mouse_up(Point) override {
+            ++ups;
+            throw 42;
+        }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<ThrowingProbe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    auto pan = std::make_unique<pulp::view::PanRecognizer>();
+    pan->set_min_distance(60.0f);
+    probe->add_gesture_recognizer(std::move(pan));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 40.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
+
+    // The host catches the callback exception, but capture must already be
+    // gone: the recognizer-owned release cannot retry the handoff.
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
 }

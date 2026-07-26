@@ -192,6 +192,16 @@ struct SetTrackFreeze {
     std::optional<TrackFreeze> replacement;
 };
 
+// Replaces a sequence's whole chord/scale lane under an exact optimistic gate,
+// the same shape SetTempoMap uses for the project's tempo. The lane carries no
+// ItemIds, so a whole-value swap needs no identity plan and its inverse is the
+// pair read back the other way.
+struct SetChordScaleLane {
+    ItemId sequence_id;
+    ChordScaleLane expected;
+    ChordScaleLane replacement;
+};
+
 // A marker or region enters (or leaves) a sequence as one owned identity. Both
 // are sequence-level annotations, so neither command names a track: the marker
 // or region carries its own position on the sequence timeline.
@@ -220,7 +230,7 @@ using Command =
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
                  RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
                  SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker,
-                 InsertRegion, RemoveRegion>;
+                 InsertRegion, RemoveRegion, SetChordScaleLane>;
 
 struct CommandEnvelope {
     CommandId id;

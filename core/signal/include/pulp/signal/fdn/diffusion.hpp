@@ -38,19 +38,23 @@ public:
     int delay() const { return delay_; }
 
     SampleType process(SampleType x, SampleType g) {
-        const SampleType delayed = line_.read(delay_);
-        const SampleType w = snap_to_zero(static_cast<SampleType>(x + g * delayed));
+        x = finite_or_zero(x);
+        const SampleType delayed = finite_or_zero(line_.read(delay_));
+        const SampleType w =
+            finite_or_zero(snap_to_zero(static_cast<SampleType>(x + g * delayed)));
         line_.push(w);
-        return static_cast<SampleType>(delayed - g * w);
+        return finite_or_zero(static_cast<SampleType>(delayed - g * w));
     }
 
     // Fractional-delay path, used only when flutter is engaged. Kept separate
     // from process() so the common case stays on the integer read.
     SampleType process(SampleType x, SampleType g, double fractional_delay) {
-        const SampleType delayed = line_.read(fractional_delay);
-        const SampleType w = snap_to_zero(static_cast<SampleType>(x + g * delayed));
+        x = finite_or_zero(x);
+        const SampleType delayed = finite_or_zero(line_.read(fractional_delay));
+        const SampleType w =
+            finite_or_zero(snap_to_zero(static_cast<SampleType>(x + g * delayed)));
         line_.push(w);
-        return static_cast<SampleType>(delayed - g * w);
+        return finite_or_zero(static_cast<SampleType>(delayed - g * w));
     }
 
 private:

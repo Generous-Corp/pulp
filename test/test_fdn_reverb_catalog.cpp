@@ -353,7 +353,40 @@ TEST_CASE("fdn reverb catalog does not allocate on the audio thread",
             CHECK(count == 0);
             CHECK(bytes == 0);
         }
+
+        const auto type = catalog::make_fdn_reverb_node(mode);
+        void* instance = type.create();
+        REQUIRE(instance != nullptr);
+        type.prepare(instance, kSr, kFrames);
+        {
+            pulp::test::RtAllocationProbe probe;
+            type.reset(instance);
+            CHECK(probe.allocation_count() == 0);
+            CHECK(probe.allocated_bytes() == 0);
+        }
+        type.destroy(instance);
     }
+}
+
+TEST_CASE("fdn reverb allocation probe detects a planted allocation",
+          "[fdn][catalog][reverb][rt-safety]") {
+    std::size_t count = 0;
+    std::size_t bytes = 0;
+    void* planted = nullptr;
+    {
+        pulp::test::RtAllocationProbe probe;
+        // Call the replaceable allocation function directly. A new-expression
+        // whose storage never escapes may legally be elided by the optimizer,
+        // which would test allocation elision instead of the probe.
+        planted = ::operator new(sizeof(int) * 17);
+        static_cast<int*>(planted)[0] = 42;
+        count = probe.allocation_count();
+        bytes = probe.allocated_bytes();
+    }
+    REQUIRE(static_cast<int*>(planted)[0] == 42);
+    ::operator delete(planted);
+    REQUIRE(count > 0);
+    REQUIRE(bytes >= sizeof(int) * 17);
 }
 
 TEST_CASE("fdn reverb catalog flushes cleanly on a live tank-rate change",

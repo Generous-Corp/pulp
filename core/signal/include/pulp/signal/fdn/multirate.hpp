@@ -120,12 +120,16 @@ public:
 
     double process(const std::array<BiquadCoefficientsT<double>, 2>& sections,
                    double x) {
+        x = finite_or_zero(x);
         for (int k = 0; k < 2; ++k) {
             const auto& c = sections[static_cast<std::size_t>(k)];
-            const double out = c.b0 * x + s_[static_cast<std::size_t>(k)].s1;
+            const double out =
+                finite_or_zero(c.b0 * x + s_[static_cast<std::size_t>(k)].s1);
             s_[static_cast<std::size_t>(k)].s1 =
-                c.b1 * x - c.a1 * out + s_[static_cast<std::size_t>(k)].s2;
-            s_[static_cast<std::size_t>(k)].s2 = c.b2 * x - c.a2 * out;
+                finite_or_zero(c.b1 * x - c.a1 * out +
+                               s_[static_cast<std::size_t>(k)].s2);
+            s_[static_cast<std::size_t>(k)].s2 =
+                finite_or_zero(c.b2 * x - c.a2 * out);
             x = out;
         }
         return x;
