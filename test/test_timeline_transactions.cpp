@@ -349,6 +349,71 @@ TEST_CASE("Scene and slot removal inverses restore exact authored order") {
     REQUIRE(scenes[2].id == ItemId{9});
 }
 
+TEST_CASE("Scene and slot removals stay path-copy bounded through session transactions") {
+    constexpr std::size_t scene_count = 4096;
+    constexpr std::size_t slots_per_scene = 4;
+    std::vector<Scene> scenes;
+    scenes.reserve(scene_count);
+    for (std::size_t scene_index = 0; scene_index < scene_count; ++scene_index) {
+        std::vector<Slot> slots;
+        slots.reserve(slots_per_scene);
+        for (std::size_t slot_index = 0; slot_index < slots_per_scene; ++slot_index)
+            slots.push_back(Slot{{1'000'000 + scene_index * slots_per_scene + slot_index},
+                                 {},
+                                 launch_immediate(),
+                                 {}});
+        scenes.push_back(Scene{{100'000 + scene_index}, "scene", SlotList(std::move(slots))});
+    }
+    auto sequence = Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "large launcher",
+        .scenes = std::move(scenes),
+    });
+    REQUIRE(sequence);
+    auto project = Project::create(ProjectInput{
+        .id = {1},
+        .name = "project",
+        .next_item_id = 3'000'000,
+        .root_sequence_id = {3},
+        .sequences = {std::move(sequence).value()},
+    });
+    REQUIRE(project);
+    auto session = std::move(DocumentSession::create(std::move(project).value())).value();
+    auto writer = std::move(session->register_writer()).value();
+    const auto original = session->snapshot();
+
+    const ItemId removed_scene{100'000 + scene_count / 2};
+    const auto before_scene = Sequence::launcher_index_stats();
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, {}, {RemoveScene{{3}, removed_scene}})));
+    const auto after_scene = Sequence::launcher_index_stats();
+    const auto scene_snapshot = session->snapshot();
+    const auto* scene_edited = scene_snapshot->find_sequence({3});
+    REQUIRE(after_scene.nodes_created - before_scene.nodes_created < 512);
+    REQUIRE(scene_edited->shared_launcher_nodes_with(*original->find_sequence({3})) > 30'000);
+    REQUIRE(scene_edited->find_scene(removed_scene) == nullptr);
+    REQUIRE(session->journal().entries().size() == 1);
+
+    const ItemId retained_scene{100'000 + scene_count / 2 + 1};
+    const ItemId removed_slot{1'000'000 + (scene_count / 2 + 1) * slots_per_scene + 2};
+    const auto before_slot = Sequence::launcher_index_stats();
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {RemoveSlot{{3}, retained_scene, removed_slot}})));
+    const auto after_slot = Sequence::launcher_index_stats();
+    const auto slot_snapshot = session->snapshot();
+    const auto* slot_edited = slot_snapshot->find_sequence({3});
+    REQUIRE(after_slot.nodes_created - before_slot.nodes_created < 256);
+    REQUIRE(slot_edited->shared_launcher_nodes_with(*scene_edited) > 30'000);
+    REQUIRE(slot_edited->find_slot(removed_slot) == nullptr);
+    REQUIRE(session->journal().entries().size() == 2);
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_slot(removed_slot));
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_scene(removed_scene));
+}
+
 TEST_CASE("CreateAsset rejects an id that is already live") {
     auto session = std::move(DocumentSession::create(make_project())).value();
     auto writer = std::move(session->register_writer()).value();

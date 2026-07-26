@@ -1,10 +1,9 @@
 #include "transaction_scene_internal.hpp"
 
+#include "sequence_scene_internal.hpp"
 #include "transaction_reduction_support.hpp"
 
-#include <algorithm>
 #include <array>
-#include <iterator>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -75,30 +74,21 @@ remove_scene(const Project& project, const RemoveScene& remove, const Transactio
                          expected(ItemKind::Scene, project, remove.sequence_id)))
         return reject_reduction<SceneCommandReduction>(*code, transaction, command, remove.scene_id);
     const auto* sequence = project.find_sequence(remove.sequence_id);
-    const auto* scene = sequence ? sequence->find_scene(remove.scene_id) : nullptr;
-    if (!scene)
+    if (!sequence)
         return reject_reduction<SceneCommandReduction>(ConflictCode::TargetMissing, transaction,
                                                        command, remove.scene_id);
-    const Scene removed = *scene;
-    const auto scene_position =
-        std::find_if(sequence->scenes().begin(), sequence->scenes().end(),
-                     [&](const Scene& candidate) { return candidate.id == remove.scene_id; });
-    const auto following_scene = std::next(scene_position);
-    const auto before_scene_id =
-        following_scene == sequence->scenes().end()
-            ? std::optional<ItemId>{}
-            : std::optional<ItemId>{following_scene->id};
+    auto erased = SequenceEditAccess::erase_scene(*sequence, remove.scene_id);
+    if (!erased)
+        return runtime::Err(model_failure(transaction, command, erased.error()));
+    auto result = std::move(erased).value();
     std::vector<OwnedIdentity> items;
-    items.reserve(1 + removed.slots.size());
-    items.push_back(owned(ItemKind::Scene, removed.id, remove.sequence_id));
-    for (const auto& slot : removed.slots)
-        items.push_back(owned(ItemKind::Slot, slot.id, remove.sequence_id, removed.id));
-    auto next = sequence->erase_scene(remove.scene_id);
-    if (!next)
-        return runtime::Err(model_failure(transaction, command, next.error()));
+    items.reserve(1 + result.removed.slots.size());
+    items.push_back(owned(ItemKind::Scene, result.removed.id, remove.sequence_id));
+    for (const auto& slot : result.removed.slots)
+        items.push_back(owned(ItemKind::Slot, slot.id, remove.sequence_id, result.removed.id));
     const auto identities = plan_identity_deactivate(items);
-    return finish(project, next.value(),
-                  InsertScene{remove.sequence_id, removed, before_scene_id}, remove.scene_id,
+    return finish(project, result.sequence,
+                  InsertScene{remove.sequence_id, result.removed, result.following}, remove.scene_id,
                   DirtyFlags::Structure | DirtyFlags::Removed, identities, std::nullopt,
                   transaction, command);
 }
@@ -139,35 +129,18 @@ remove_slot(const Project& project, const RemoveSlot& remove, const Transaction&
                          expected(ItemKind::Slot, project, remove.sequence_id, remove.scene_id)))
         return reject_reduction<SceneCommandReduction>(*code, transaction, command, remove.slot_id);
     const auto* sequence = project.find_sequence(remove.sequence_id);
-    const auto* scene = sequence ? sequence->find_scene(remove.scene_id) : nullptr;
-    const Slot* slot = nullptr;
-    if (scene) {
-        const auto found = std::find_if(scene->slots.begin(), scene->slots.end(),
-                                       [&](const Slot& value) {
-                                           return value.id == remove.slot_id;
-                                       });
-        if (found != scene->slots.end())
-            slot = &*found;
-    }
-    if (!slot)
+    if (!sequence)
         return reject_reduction<SceneCommandReduction>(ConflictCode::TargetMissing, transaction,
                                                        command, remove.slot_id);
-    const Slot removed = *slot;
-    const auto slot_position =
-        std::find_if(scene->slots.begin(), scene->slots.end(),
-                     [&](const Slot& candidate) { return candidate.id == remove.slot_id; });
-    const auto following_slot = std::next(slot_position);
-    const auto before_slot_id =
-        following_slot == scene->slots.end() ? std::optional<ItemId>{}
-                                             : std::optional<ItemId>{following_slot->id};
-    auto next = sequence->erase_slot(remove.scene_id, remove.slot_id);
-    if (!next)
-        return runtime::Err(model_failure(transaction, command, next.error()));
+    auto erased = SequenceEditAccess::erase_slot(*sequence, remove.scene_id, remove.slot_id);
+    if (!erased)
+        return runtime::Err(model_failure(transaction, command, erased.error()));
+    auto result = std::move(erased).value();
     const std::array item{owned(ItemKind::Slot, remove.slot_id, remove.sequence_id,
                                 remove.scene_id)};
     const auto identities = plan_identity_deactivate(item);
-    return finish(project, next.value(),
-                  InsertSlot{remove.sequence_id, remove.scene_id, removed, before_slot_id},
+    return finish(project, result.sequence,
+                  InsertSlot{remove.sequence_id, remove.scene_id, result.removed, result.following},
                   remove.slot_id,
                   DirtyFlags::Structure | DirtyFlags::Removed, identities, std::nullopt,
                   transaction, command);

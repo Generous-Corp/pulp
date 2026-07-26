@@ -338,15 +338,10 @@ Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const
              data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
-    if (!find_scene(id))
-        return fail<Sequence>(ModelErrorCode::MissingItem, id, data_->id);
-    auto launcher = detail::erase_scene_store(data_->launcher, id);
-    if (!launcher)
-        return runtime::Err(launcher.error());
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
+    auto erased = detail::SequenceEditAccess::erase_scene(*this, id);
+    if (!erased)
+        return runtime::Err(erased.error());
+    return runtime::Ok(std::move(erased).value().sequence);
 }
 runtime::Result<Sequence, ModelError>
 Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_slot_id) const {
@@ -365,15 +360,52 @@ Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_s
              data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
 }
 runtime::Result<Sequence, ModelError> Sequence::erase_slot(ItemId scene_id, ItemId slot_id) const {
-    if (!find_scene(scene_id))
-        return fail<Sequence>(ModelErrorCode::MissingItem, scene_id, data_->id);
-    auto launcher = detail::erase_slot_store(data_->launcher, scene_id, slot_id);
-    if (!launcher)
-        return runtime::Err(launcher.error());
-    return runtime::Ok(Sequence(std::make_shared<const Data>(
-        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(launcher).value()})));
+    auto erased = detail::SequenceEditAccess::erase_slot(*this, scene_id, slot_id);
+    if (!erased)
+        return runtime::Err(erased.error());
+    return runtime::Ok(std::move(erased).value().sequence);
+}
+
+runtime::Result<detail::SequenceSceneEraseResult, ModelError>
+detail::SequenceEditAccess::erase_scene(const Sequence& source, ItemId id) {
+    const auto* scene = source.find_scene(id);
+    if (!scene)
+        return fail<SequenceSceneEraseResult>(ModelErrorCode::MissingItem, id, source.id());
+    const Scene removed = *scene;
+    auto erased = erase_scene_store(source.data_->launcher, id);
+    if (!erased)
+        return runtime::Err(erased.error());
+    auto result = std::move(erased).value();
+    auto sequence = Sequence(std::make_shared<const Sequence::Data>(Sequence::Data{
+        source.data_->id, source.data_->name, source.data_->musical_duration,
+        source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
+        source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
+        source.data_->groove, std::move(result.store)}));
+    return runtime::Ok(SequenceSceneEraseResult{
+        std::move(sequence), removed,
+        result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
+}
+
+runtime::Result<detail::SequenceSlotEraseResult, ModelError>
+detail::SequenceEditAccess::erase_slot(const Sequence& source, ItemId scene_id, ItemId slot_id) {
+    if (!source.find_scene(scene_id))
+        return fail<SequenceSlotEraseResult>(ModelErrorCode::MissingItem, scene_id, source.id());
+    const auto* slot = source.find_slot(slot_id);
+    if (!slot)
+        return fail<SequenceSlotEraseResult>(ModelErrorCode::MissingItem, slot_id, scene_id);
+    const Slot removed = *slot;
+    auto erased = erase_slot_store(source.data_->launcher, scene_id, slot_id);
+    if (!erased)
+        return runtime::Err(erased.error());
+    auto result = std::move(erased).value();
+    auto sequence = Sequence(std::make_shared<const Sequence::Data>(Sequence::Data{
+        source.data_->id, source.data_->name, source.data_->musical_duration,
+        source.data_->absolute_duration, source.data_->tracks, source.data_->track_id_index,
+        source.data_->markers, source.data_->regions, source.data_->chord_scale_lane,
+        source.data_->groove, std::move(result.store)}));
+    return runtime::Ok(SequenceSlotEraseResult{
+        std::move(sequence), removed,
+        result.following.valid() ? std::optional<ItemId>{result.following} : std::nullopt});
 }
 
 runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const {

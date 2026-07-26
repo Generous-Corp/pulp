@@ -30,6 +30,7 @@ namespace pulp::timeline {
 namespace detail {
 class ProjectStateAccess;
 class LauncherStore;
+struct SequenceEditAccess;
 } // namespace detail
 class SchemaRegistry;
 
@@ -919,6 +920,7 @@ class Sequence {
     static LauncherIndexStats launcher_index_stats() noexcept;
 
   private:
+    friend struct detail::SequenceEditAccess;
     struct Data;
     // Annotation edits validate only the annotation lists and share the existing
     // track storage and identity index; they never re-walk the arrangement.

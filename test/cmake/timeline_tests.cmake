@@ -100,6 +100,14 @@ pulp_add_test_suite(pulp-test-playback-clip-launch
     COMPILE_DEFINITIONS $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>)
 
 if(Python3_Interpreter_FOUND)
+    add_test(NAME timeline-transaction-launcher-complexity
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_transaction_launcher_complexity.py
+            ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp)
+    add_test(NAME timeline-transaction-launcher-complexity-mutation-control
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_transaction_launcher_complexity.py
+            --self-test)
     add_test(NAME timeline-live-capture-verifier-self-test
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_timeline_live_capture.py

@@ -374,12 +374,18 @@ class SlotListAccess {
         return runtime::Ok(SlotList(std::shared_ptr<const SlotListStore>(std::move(updated))));
     }
 
-    static runtime::Result<SlotList, ModelError> erase(const SlotList& source, ItemId id,
-                                                       ItemId scene) {
+    struct EraseResult {
+        SlotList slots;
+        ItemId following;
+    };
+
+    static runtime::Result<EraseResult, ModelError> erase(const SlotList& source, ItemId id,
+                                                          ItemId scene) {
         const auto store = source.store_;
         const auto* removed = store ? find_record(store->slots, id) : nullptr;
         if (!removed)
-            return fail<SlotList>(ModelErrorCode::MissingItem, id, scene);
+            return fail<EraseResult>(ModelErrorCode::MissingItem, id, scene);
+        const auto following = removed->next;
         auto updated = std::make_shared<SlotListStore>(*store);
         if (removed->previous.valid()) {
             auto previous = *find_record(updated->slots, removed->previous);
@@ -400,7 +406,8 @@ class SlotListAccess {
         bool erased = false;
         updated->slots = erase_record(std::move(updated->slots), id, erased);
         --updated->size;
-        return runtime::Ok(SlotList(std::shared_ptr<const SlotListStore>(std::move(updated))));
+        return runtime::Ok(EraseResult{
+            SlotList(std::shared_ptr<const SlotListStore>(std::move(updated))), following});
     }
 
     static const SlotListStore* store(const SlotList& list) noexcept {
@@ -680,15 +687,15 @@ std::optional<ItemId> external_reference_source(const NodePtr<SetRecord>& source
     return external_reference_source(sources->right, ignored);
 }
 
-runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
+runtime::Result<LauncherEraseResult, ModelError>
 erase_scene_store(const std::shared_ptr<const LauncherStore>& source, ItemId id) {
     const auto* removed = source->find_scene(id);
     if (!removed)
-        return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem, id);
+        return fail<LauncherEraseResult>(ModelErrorCode::MissingItem, id);
     for (const auto& slot : removed->scene.slots)
         if (const auto external = external_jump_source(*source, removed->scene, slot.id))
-            return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem, slot.id,
-                                                              *external);
+            return fail<LauncherEraseResult>(ModelErrorCode::MissingItem, slot.id, *external);
+    const auto following = removed->next;
 
     auto updated = std::make_shared<LauncherStore>(*source);
     if (removed->previous.valid()) {
@@ -722,7 +729,8 @@ erase_scene_store(const std::shared_ptr<const LauncherStore>& source, ItemId id)
     bool erased = false;
     updated->scenes = erase_record(std::move(updated->scenes), id, erased);
     --updated->scene_count;
-    return runtime::Ok(std::shared_ptr<const LauncherStore>(std::move(updated)));
+    return runtime::Ok(LauncherEraseResult{
+        std::shared_ptr<const LauncherStore>(std::move(updated)), following});
 }
 
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
@@ -763,24 +771,23 @@ insert_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId sce
     return runtime::Ok(std::shared_ptr<const LauncherStore>(std::move(updated)));
 }
 
-runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
+runtime::Result<LauncherEraseResult, ModelError>
 erase_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scene_id,
                  ItemId slot_id) {
     const auto* scene_record = source->find_scene(scene_id);
     const auto* slot = scene_record ? scene_record->scene.slots.find(slot_id) : nullptr;
     if (!slot)
-        return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem, slot_id,
-                                                          scene_id);
+        return fail<LauncherEraseResult>(ModelErrorCode::MissingItem, slot_id, scene_id);
     if (const auto* references = source->jump_sources(slot_id))
         if (const auto source_id = external_reference_source(references->sources, slot_id))
-            return fail<std::shared_ptr<const LauncherStore>>(ModelErrorCode::MissingItem, slot_id,
-                                                              *source_id);
+            return fail<LauncherEraseResult>(ModelErrorCode::MissingItem, slot_id, *source_id);
     auto slots = detail::SlotListAccess::erase(scene_record->scene.slots, slot_id, scene_id);
     if (!slots)
         return runtime::Err(slots.error());
     auto updated = std::make_shared<LauncherStore>(*source);
     auto replacement = *scene_record;
-    replacement.scene.slots = std::move(slots).value();
+    const auto following = slots->following;
+    replacement.scene.slots = std::move(slots).value().slots;
     bool inserted = false;
     updated->scenes = put(std::move(updated->scenes), std::move(replacement), inserted);
     if (slot->clip_id.valid())
@@ -793,7 +800,8 @@ erase_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scen
     bool erased = false;
     updated->slot_owners = erase_record(std::move(updated->slot_owners), slot_id, erased);
     --updated->slot_count;
-    return runtime::Ok(std::shared_ptr<const LauncherStore>(std::move(updated)));
+    return runtime::Ok(LauncherEraseResult{
+        std::shared_ptr<const LauncherStore>(std::move(updated)), following});
 }
 
 std::size_t launcher_scene_count(const LauncherStore& store) noexcept {

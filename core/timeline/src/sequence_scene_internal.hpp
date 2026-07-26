@@ -9,17 +9,41 @@
 
 namespace pulp::timeline::detail {
 
+struct LauncherEraseResult {
+    std::shared_ptr<const LauncherStore> store;
+    ItemId following;
+};
+
+struct SequenceSceneEraseResult {
+    Sequence sequence;
+    Scene removed;
+    std::optional<ItemId> following;
+};
+
+struct SequenceSlotEraseResult {
+    Sequence sequence;
+    Slot removed;
+    std::optional<ItemId> following;
+};
+
+struct SequenceEditAccess {
+    static runtime::Result<SequenceSceneEraseResult, ModelError>
+    erase_scene(const Sequence& source, ItemId id);
+    static runtime::Result<SequenceSlotEraseResult, ModelError>
+    erase_slot(const Sequence& source, ItemId scene_id, ItemId slot_id);
+};
+
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
 build_launcher(std::vector<Scene> scenes, std::span<const Track> tracks);
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
 insert_scene_store(const std::shared_ptr<const LauncherStore>& source, Scene scene,
                    std::optional<ItemId> before, std::span<const Track> tracks);
-runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
+runtime::Result<LauncherEraseResult, ModelError>
 erase_scene_store(const std::shared_ptr<const LauncherStore>& source, ItemId id);
 runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
 insert_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scene_id, Slot slot,
                   std::optional<ItemId> before, std::span<const Track> tracks);
-runtime::Result<std::shared_ptr<const LauncherStore>, ModelError>
+runtime::Result<LauncherEraseResult, ModelError>
 erase_slot_store(const std::shared_ptr<const LauncherStore>& source, ItemId scene_id,
                  ItemId slot_id);
 
