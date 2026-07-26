@@ -22,6 +22,21 @@ inline const char* type_id(Device device, bool oversampled) noexcept {
     return oversampled ? "fuzz.germanium.x4" : "fuzz.germanium.x1";
 }
 
+/// Tested small-signal feedback bound for the Forge registry.
+///
+/// The DSP suite sweeps the complete parameter grid and proves that the binding
+/// point is silicon, maximum fuzz, healthy bias, and minimum source impedance.
+/// Evaluate that realized endpoint instead of restating the 0.94 design ceiling:
+/// the accepted 0.1 kohm source floor makes the measured maximum slightly lower.
+inline float worst_case_gain() {
+    signal::FuzzPair probe;
+    probe.set_device(Device::silicon);
+    probe.set_fuzz(1.0);
+    probe.set_bias_starve(0.0);
+    probe.set_source_impedance_kohm(0.1);
+    return static_cast<float>(probe.loop_gain());
+}
+
 inline CustomNodeType make_fuzz_node(Device device, bool oversampled = true) {
     CustomNodeType t;
     t.type_id = type_id(device, oversampled);

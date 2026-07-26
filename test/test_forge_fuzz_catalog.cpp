@@ -1,14 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "harness/baked_node_fixture.hpp"
 #include "harness/rt_allocation_probe.hpp"
 #include <pulp/host/forge_fuzz_catalog.hpp>
+#include <pulp/signal/units.hpp>
 
 #include <cmath>
 #include <vector>
 
 namespace fuzz = pulp::host::fuzz;
 using Fixture = pulp::test::BakedNodeFixture<1>;
+using Catch::Matchers::WithinRel;
 
 TEST_CASE("Forge fuzz: every realization bakes, runs, and declares the contract",
           "[host][baked][forge][forge-fuzz]") {
@@ -43,4 +46,30 @@ TEST_CASE("Forge fuzz: injection changes the realized circuit and remains RT saf
     pulp::test::RtAllocationProbe probe;
     renderer.render();
     REQUIRE(probe.allocation_count() == 0);
+}
+
+TEST_CASE("Forge fuzz: registry gain is the measured full-grid maximum",
+          "[host][baked][forge][forge-fuzz][gain]") {
+    constexpr int kPointsPerAxis = 33;
+    double measured_max = 0.0;
+
+    for (auto device : {fuzz::Device::germanium, fuzz::Device::silicon}) {
+        for (int fi = 0; fi < kPointsPerAxis; ++fi) {
+            for (int si = 0; si < kPointsPerAxis; ++si) {
+                for (int zi = 0; zi < kPointsPerAxis; ++zi) {
+                    pulp::signal::FuzzPair probe;
+                    probe.set_device(device);
+                    probe.set_fuzz(static_cast<double>(fi) / (kPointsPerAxis - 1));
+                    probe.set_bias_starve(static_cast<double>(si) / (kPointsPerAxis - 1));
+                    probe.set_source_impedance_kohm(pulp::signal::units::taper_log(
+                        static_cast<double>(zi) / (kPointsPerAxis - 1), 0.1, 1000.0));
+                    measured_max = std::max(measured_max, probe.loop_gain());
+                }
+            }
+        }
+    }
+
+    REQUIRE_THAT(static_cast<double>(fuzz::worst_case_gain()),
+                 WithinRel(measured_max, 1e-6));
+    REQUIRE(measured_max <= pulp::signal::FuzzPair::kLoopGainCeiling);
 }
