@@ -471,6 +471,8 @@ install(FILES
 # alongside because the .mm include them by relative path.
 if(APPLE)
     install(FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/app_menu_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/pulp_mac_objc_names.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac.mm"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/view/platform/mac/window_host_mac_capture.mm"

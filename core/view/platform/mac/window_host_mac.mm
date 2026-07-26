@@ -14,6 +14,7 @@
 #include <pulp/view/script_event_dispatch.hpp>
 #include <pulp/events/main_thread_dispatcher.hpp>
 
+#include "app_menu_mac.hpp"
 #include "window_host_mac_capture.h"
 #include "window_host_mac_internal.hpp"
 #include "window_host_mac_view.h"
@@ -172,7 +173,9 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
     };
 }
 
-static void install_app_menu(NSString* appName) {
+static void install_app_menu(
+    NSString* appName,
+    const std::vector<pulp::view::WindowOptions::MenuCommand>& commands) {
     NSMenu* menuBar = [[NSMenu alloc] init];
     NSMenuItem* appItem = [[NSMenuItem alloc] init];
     [menuBar addItem:appItem];
@@ -186,6 +189,7 @@ static void install_app_menu(NSString* appName) {
     [quitItem setTarget:[PulpAppTerminationHandler sharedHandler]];
     [appMenu addItem:quitItem];
     [appItem setSubmenu:appMenu];
+    pulp::view::mac_menu::append_commands(commands);
 }
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
@@ -1450,7 +1454,7 @@ std::vector<WindowHost::MonitorInfo> mac_enumerate_monitors() {
 class MacWindowHost : public WindowHost {
 public:
     MacWindowHost(View& root, const WindowOptions& options)
-        : root_(root) {
+        : root_(root), menu_commands_(options.menu_commands) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
             NSRect frame = NSMakeRect(100, 100, options.width, options.height);
@@ -1668,7 +1672,7 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title]);
+                install_app_menu([window_ title], menu_commands_);
                 show();
                 [NSApp activateIgnoringOtherApps:YES];
             }
@@ -1691,6 +1695,7 @@ private:
     std::function<void()> idle_callback_;
     ResizeCallback resize_callback_;
     bool options_initially_hidden_ = false;
+    std::vector<WindowOptions::MenuCommand> menu_commands_;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -1700,7 +1705,7 @@ private:
 class MacGpuWindowHost : public WindowHost {
 public:
     MacGpuWindowHost(View& root, const WindowOptions& options)
-        : root_(root) {
+        : root_(root), menu_commands_(options.menu_commands) {
         @autoreleasepool {
             root_.set_frame_clock(&frame_clock_);
 
@@ -1753,6 +1758,10 @@ public:
             // Initialize GPU render stack
             init_gpu(options.width, options.height);
         }
+    }
+
+    bool is_gpu_backed() const override {
+        return gpu_surface_ && skia_surface_ && skia_surface_->is_available();
     }
 
     ~MacGpuWindowHost() override {
@@ -2035,7 +2044,7 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title]);
+                install_app_menu([window_ title], menu_commands_);
             }
 
             // Start display-linked render loop
@@ -2172,6 +2181,7 @@ private:
     id key_monitor_ = nil;                                       // NSEvent app key monitor
     std::function<bool(const pulp::view::KeyEvent&)> app_key_handler_;
     bool options_initially_hidden_ = false;
+    std::vector<WindowOptions::MenuCommand> menu_commands_;
 
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;

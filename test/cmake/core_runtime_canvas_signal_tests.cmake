@@ -321,6 +321,7 @@ pulp_add_test_suite(pulp-test-standalone-audio-capture-wav LIBRARIES pulp::stand
 pulp_add_test_suite(pulp-test-standalone-audio-capture-rolling-wav LIBRARIES pulp::standalone pulp::audio PROPERTIES PROCESSORS 8)
 pulp_add_test_suite(pulp-test-standalone-transport-midi LIBRARIES pulp::standalone
     PROPERTIES PROCESSORS 8)
+pulp_add_test_suite(pulp-test-standalone-musical-typing LIBRARIES pulp::standalone)
 pulp_add_test_suite(pulp-test-standalone-audio-inspector
     LIBRARIES pulp::standalone pulp::view PROPERTIES PROCESSORS 8)
 # Headless screenshot capture state machine

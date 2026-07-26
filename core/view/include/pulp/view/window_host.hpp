@@ -24,6 +24,14 @@ class NativeViewHost;
 enum class WindowType;  // Forward-declared from window_manager.hpp
 
 struct WindowOptions {
+    struct MenuCommand {
+        std::string menu;
+        std::string title;
+        KeyCode key = KeyCode::unknown;
+        std::uint16_t modifiers = kModNone;
+        std::function<void()> action;
+    };
+
     std::string title = "Pulp";
     float width = 400;
     float height = 300;
@@ -52,6 +60,11 @@ struct WindowOptions {
     /// remains" heuristic, which left the app alive with only the inspector
     /// after the main window closed.
     bool secondary_window = false;
+
+    /// Commands exposed through the platform's native application menu bar.
+    /// Backends that do not provide a native menu may ignore this list; the
+    /// command's keyboard route remains the caller's responsibility.
+    std::vector<MenuCommand> menu_commands;
 
     // ── Multi-window hints ──────────────────────────────────────────────
     // These are used by WindowManager to configure platform-specific
@@ -103,6 +116,7 @@ public:
     virtual void show() = 0;
     virtual void hide() = 0;
     virtual bool is_visible() const = 0;
+    virtual bool is_gpu_backed() const { return gpu_surface() != nullptr; }
 
     // Request a repaint immediately. Platform impls translate this to the
     // native invalidation call (setNeedsDisplay, InvalidateRect, …).
