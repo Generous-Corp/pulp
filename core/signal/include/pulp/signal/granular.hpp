@@ -298,6 +298,9 @@ public:
     /// independent.
     void write_live(const SampleType* in, int n) {
         if (ring_length_ <= 0) return;
+        // Live freeze holds the captured material, not merely its nominal
+        // centre while the ring overwrites it underneath us.
+        if (source_ == GrainSource::live_ring && stretch_ == 0.0) return;
         for (int i = 0; i < n; ++i) write_one(in[i]);
     }
 
@@ -662,8 +665,13 @@ private:
     ///     (This is why the live causality guarantee assumes input keeps
     ///     arriving at the render rate, which is what a live granulator's
     ///     caller does.)
-    ///   - The write head must never lap the read from behind, which is what
-    ///     the derived guard covers.
+    ///   - The write head must never lap the read from behind. For `ratio < 1`
+    ///     the separation grows during the grain, so the start moves forward
+    ///     by `(1 − ratio)·duration`. The public derived guard is the
+    ///     worst-case capacity calculation (spray plus pitched source span),
+    ///     not an additional exclusion zone: applying it here as well would
+    ///     count the grain span twice and make legal long, pitched grains
+    ///     impossible to place.
     ///   - **The ring is not full at the start.** Only `write_head` samples have
     ///     ever been written, so the oldest valid index is `0`, not
     ///     `write_head − ring_length`. Bounding only relative to the head lets a
@@ -674,7 +682,9 @@ private:
         const double head = static_cast<double>(write_head_);
         const double newest = head - std::max(0.0, ratio - 1.0) * duration - 2.0;
         const double oldest =
-            std::max(0.0, head - static_cast<double>(ring_length_ - guard_samples_)) + 2.0;
+            std::max(0.0, head - static_cast<double>(ring_length_) +
+                              std::max(0.0, 1.0 - ratio) * duration) +
+            2.0;
         if (newest < oldest) return false;
         const double clamped = std::clamp(start, oldest, newest);
         if (clamped != start) ++clamp_count_;
@@ -747,7 +757,10 @@ private:
     void render(const SampleType* in, SampleType* out_left, SampleType* out_right, int n) {
         const double buffer_span = static_cast<double>(std::max(buffer_length_, 1));
         for (int i = 0; i < n; ++i) {
-            if (in != nullptr) write_one(in[i]);
+            if (in != nullptr &&
+                !(source_ == GrainSource::live_ring && stretch_ == 0.0)) {
+                write_one(in[i]);
+            }
 
             if (source_ == GrainSource::live_ring && stretch_ > 0.0) {
                 live_centre_ = static_cast<double>(write_head_) -

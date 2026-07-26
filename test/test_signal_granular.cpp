@@ -1153,6 +1153,37 @@ TEST_CASE("The causality guard is derived from the declared ranges",
     CHECK(static_cast<double>(valid) >= GranularEngine64::kMaxGrainMs * 0.001 * kFs);
 }
 
+TEST_CASE("Live mode can spawn grains at the declared duration and pitch maxima",
+          "[granular][live][ranges]") {
+    GranularEngine64 engine;
+    engine.prepare(kFs);
+    engine.set_source(GrainSource::live_ring);
+    engine.set_window_taper(0.0);
+    engine.set_grain_ms(GranularEngine64::kMaxGrainMs);
+    engine.set_density_hz(20.0);
+    engine.set_position(0.5);
+    engine.set_position_spray_ms(GranularEngine64::kMaxPositionSprayMs);
+    engine.set_pitch_semitones(GranularEngine64::kMaxPitchSemitones);
+    engine.set_max_grains(GranularEngine64::kMaxGrainBudget);
+    engine.set_seed(0x51A7E5u);
+    engine.reset();
+
+    // Run long enough to fill and wrap the live ring. The previous placement
+    // bounds left no valid interval at this legal corner, so every spawn was
+    // silently discarded forever even after all source history was available.
+    const auto input = noise_buffer(static_cast<int>(6.0 * kFs), 0xBADC0DEu);
+    std::vector<double> left(input.size());
+    std::vector<double> right(input.size());
+    int max_active = 0;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        engine.process(&input[i], &left[i], &right[i], 1);
+        max_active = std::max(max_active, engine.active_grain_count());
+    }
+
+    CHECK(max_active > 0);
+    CHECK(rms(left, static_cast<int>(4.0 * kFs)) > 1e-6);
+}
+
 TEST_CASE("Freeze holds a stationary texture while input continues",
           "[granular][live]") {
     GranularEngine64 engine;
