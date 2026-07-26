@@ -70,6 +70,16 @@ its callbacks on close and re-installs them on reopen starts each session
 clean. When you add a new format's editor lifecycle, wire this release call
 in its teardown or the same latch bug reappears per-format.
 
+For CLAP, the gesture callbacks do not call the host directly. They enqueue
+`CLAP_EVENT_PARAM_GESTURE_BEGIN` / value / `..._END` records on the adapter's
+bounded main-thread-to-host SPSC queue. The adapter drains it from both
+`process()` and `params.flush()` and requests a host flush for every editor
+record, which is what preserves automation while transport is stopped. Keep
+the producer main-thread-confined, suppress host-originated writes, and retry a
+record rejected by `out_events->try_push()` before advancing; otherwise a
+multi-threaded writer or a dropped boundary can corrupt host automation. See
+the `clap` skill's Parameters section for the complete transport contract.
+
 ### Per-format attach point
 
 | Format | `open()` is called here | `notify_attached()` is called here |
