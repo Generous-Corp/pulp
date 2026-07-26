@@ -162,8 +162,9 @@ void deliver_mouse_wheel(View& root, Point root_pt,
 /// Liveness is re-checked between every hop: a modern handler can unmount the
 /// tree (a React state flip that frees `target`), so no later channel derefs a
 /// freed view. Returns true when `target` is still in the tree after delivery,
-/// false when it was null on entry or unmounted during delivery — the caller
-/// clears its captured drag-target slot on false.
+/// false when it was null on entry, unmounted during delivery, or a guarded
+/// overload's host continuation check stopped the stale frame. A guarded caller
+/// must clear its captured slot only if it still owns the same generation.
 ///
 /// `bubble` defaults to true (the normal press path and the plugin host).
 /// The standalone host's overlay-click path passes false to preserve its
@@ -176,6 +177,20 @@ bool deliver_mouse_down(View& root, View* target, Point root_pt,
 bool deliver_mouse_down(View& root, View* target, Point root_pt,
                         uint16_t modifiers, int click_count, bool bubble,
                         MouseButton button);
+
+/// Optional host-owned continuation check for re-entrant press delivery. The
+/// Windows host binds this to its pointer-session generation so a modern press
+/// callback that synchronously cancels/replaces the session stops before the
+/// legacy channel or ancestor bubble. Empty means always continue.
+struct MouseDownHost {
+    std::function<bool()> should_continue;
+};
+
+/// Guarded button-aware overload. Existing overloads remain ABI-compatible
+/// wrappers with an empty host.
+bool deliver_mouse_down(View& root, View* target, Point root_pt,
+                        uint16_t modifiers, int click_count, bool bubble,
+                        MouseButton button, const MouseDownHost& host);
 
 /// Host hooks the portable mouse-up router calls back into. Like WheelHost,
 /// kept as a struct so the click-firing seam can gain hooks without re-touching

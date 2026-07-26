@@ -468,8 +468,19 @@ public:
                 return;
             }
             SetCapture(hwnd_);
-            if (!deliver_mouse_down(root_, drag_target_, pt,
-                                    gesture_event.modifiers, 1, true, button))
+            const uint64_t generation = pointer_session_.generation();
+            MouseDownHost down_host;
+            down_host.should_continue = [this, generation, button] {
+                return pointer_session_.generation() == generation &&
+                       pointer_session_.accepts(button);
+            };
+            const bool target_alive = deliver_mouse_down(
+                root_, drag_target_, pt, gesture_event.modifiers, 1, true,
+                button, down_host);
+            // Only this generation may mutate its captured target. A modern
+            // callback may have synchronously cancelled/replaced the session.
+            if (!target_alive &&
+                pointer_session_.generation() == generation)
                 drag_target_ = nullptr;
             if (button == MouseButton::right)
                 dispatch_context_menu(root_, pt);
@@ -574,7 +585,7 @@ public:
                     win_input::PointerSession::Phase::terminal &&
                 pointer_session_.generation() == terminal.generation) {
                 release_capture_if_owned();
-                pointer_session_.finish_terminal(terminal.generation);
+                pointer_session_.finish_terminal(terminal);
             }
             request_repaint_from_input();
         } catch (const std::exception& e) {
@@ -912,8 +923,7 @@ private:
     void cancel_pointer_gesture() noexcept {
         View* target = drag_target_;
         const auto terminal = pointer_session_.terminalize();
-        if (!target && !terminal.cancel_gesture &&
-            terminal.button == MouseButton::none)
+        if (!target && !terminal.cancel_gesture && !terminal.owns_terminal)
             return;
 
         drag_target_ = nullptr;
@@ -940,11 +950,12 @@ private:
         } catch (...) {
             runtime::log_warn("WinPluginViewHost: pointer cancellation threw");
         }
-        if (pointer_session_.phase() ==
+        if (terminal.owns_terminal &&
+            pointer_session_.phase() ==
                 win_input::PointerSession::Phase::terminal &&
             pointer_session_.generation() == terminal.generation) {
             release_capture_if_owned();
-            pointer_session_.finish_terminal(terminal.generation);
+            pointer_session_.finish_terminal(terminal);
         }
         request_repaint_from_input();
     }

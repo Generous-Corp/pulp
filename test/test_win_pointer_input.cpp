@@ -138,12 +138,13 @@ TEST_CASE("Windows capture loss terminalizes an unclaimed gesture candidate",
     REQUIRE(session.phase() == PointerSession::Phase::gesture_candidate);
 
     const auto terminal = session.terminalize();
+    CHECK(terminal.owns_terminal);
     CHECK(terminal.cancel_gesture);
     CHECK_FALSE(terminal.was_claimed);
     CHECK(terminal.button == MouseButton::left);
     CHECK(session.phase() == PointerSession::Phase::terminal);
 
-    session.finish_terminal(terminal.generation);
+    session.finish_terminal(terminal);
     CHECK_FALSE(session.active());
 }
 
@@ -160,6 +161,40 @@ TEST_CASE("Windows gesture claim is reentrancy-visible before handoff callbacks"
     CHECK(session.phase() == PointerSession::Phase::terminal);
 }
 
+TEST_CASE("Windows terminal session rejects a nested button down",
+          "[view][windows][pointer][reentrancy]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    const auto terminal = session.terminalize();
+    REQUIRE(session.phase() == PointerSession::Phase::terminal);
+
+    CHECK_FALSE(session.begin(MouseButton::right));
+    CHECK(session.generation() == terminal.generation);
+    CHECK(session.button() == MouseButton::left);
+
+    session.finish_terminal(terminal);
+    CHECK(session.begin(MouseButton::right));
+}
+
+TEST_CASE("Windows terminal cancellation dispatch is idempotent",
+          "[view][windows][pointer][gesture][reentrancy]") {
+    PointerSession session;
+    REQUIRE(session.begin(MouseButton::left));
+    session.mark_claimed();
+
+    const auto first = session.terminalize();
+    const auto nested = session.terminalize();
+    CHECK(first.owns_terminal);
+    CHECK(first.cancel_gesture);
+    CHECK(first.was_claimed);
+    CHECK_FALSE(nested.cancel_gesture);
+    CHECK_FALSE(nested.owns_terminal);
+    CHECK(nested.was_claimed);
+    CHECK(nested.generation == first.generation);
+    session.finish_terminal(nested);
+    CHECK(session.phase() == PointerSession::Phase::terminal);
+}
+
 TEST_CASE("Windows button chord cannot overwrite an open capture bracket",
           "[view][windows][pointer][buttons]") {
     PointerSession session;
@@ -168,7 +203,7 @@ TEST_CASE("Windows button chord cannot overwrite an open capture bracket",
     CHECK(session.button() == MouseButton::left);
 
     const auto left = session.terminalize();
-    session.finish_terminal(left.generation);
+    session.finish_terminal(left);
     REQUIRE(session.begin(MouseButton::right));
     CHECK(session.button() == MouseButton::right);
     CHECK(session.phase() == PointerSession::Phase::raw);
@@ -179,12 +214,12 @@ TEST_CASE("Windows stale terminal cleanup cannot erase a reentrant session",
     PointerSession session;
     REQUIRE(session.begin(MouseButton::left));
     const auto first = session.terminalize();
-    session.finish_terminal(first.generation);
+    session.finish_terminal(first);
     REQUIRE(session.begin(MouseButton::middle));
 
     // An outer callback frame finishing generation 1 after nested generation 2
     // began must leave the nested bracket intact.
-    session.finish_terminal(first.generation);
+    session.finish_terminal(first);
     CHECK(session.active());
     CHECK(session.button() == MouseButton::middle);
 }

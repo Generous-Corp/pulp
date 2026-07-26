@@ -30,10 +30,14 @@ public:
         MouseButton button = MouseButton::none;
         bool cancel_gesture = false;
         bool was_claimed = false;
+        bool owns_terminal = false;
     };
 
     bool begin(MouseButton button) noexcept {
-        if (active()) return false;
+        // Terminal is still owned by the outer callback frame. It becomes
+        // reusable only after finish_terminal(), so nested button-down cannot
+        // overwrite that frame's shared drag target.
+        if (phase_ != Phase::idle) return false;
         ++generation_;
         button_ = button;
         terminal_cancel_gesture_ = false;
@@ -61,17 +65,26 @@ public:
             phase_ = Phase::gesture_claimed;
     }
     Terminal terminalize() noexcept {
+        if (phase_ == Phase::terminal) {
+            // Cancellation dispatch is edge-triggered. A re-entrant
+            // WM_CAPTURECHANGED/CANCELMODE must not feed a second cancellation
+            // into the GestureArbiter while the first dispatch still holds its
+            // session reference.
+            return {generation_, button_, false, terminal_was_claimed_, false};
+        }
         if (active()) {
             terminal_cancel_gesture_ = gesture_in_flight();
             terminal_was_claimed_ = claimed();
             phase_ = Phase::terminal;
         }
         Terminal result{generation_, button_, terminal_cancel_gesture_,
-                        terminal_was_claimed_};
+                        terminal_was_claimed_, phase_ == Phase::terminal};
         return result;
     }
-    void finish_terminal(uint64_t generation) noexcept {
-        if (phase_ == Phase::terminal && generation_ == generation) {
+    void finish_terminal(const Terminal& terminal) noexcept {
+        if (!terminal.owns_terminal) return;
+        if (phase_ == Phase::terminal &&
+            generation_ == terminal.generation) {
             phase_ = Phase::idle;
             button_ = MouseButton::none;
             terminal_cancel_gesture_ = false;

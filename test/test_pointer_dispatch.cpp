@@ -37,6 +37,7 @@ class ButtonIdentitySpy : public View {
 public:
     void on_mouse_event(const MouseEvent& event) override {
         modern_buttons.push_back(event.button);
+        if (modern_callback) modern_callback(event);
     }
     void on_mouse_down(Point) override { ++legacy_down; }
     void on_mouse_drag(Point) override { ++legacy_drag; }
@@ -46,6 +47,7 @@ public:
     int legacy_down = 0;
     int legacy_drag = 0;
     int legacy_up = 0;
+    std::function<void(const MouseEvent&)> modern_callback;
 };
 
 class FocusCallbackSpy : public View {
@@ -216,7 +218,7 @@ TEST_CASE("focus transfer reads and mutates only the requested root slot",
     CHECK(focused_input_under_root(root_b) == b_ptr);
 }
 
-TEST_CASE("focus transfer respects focus selected by a blur callback",
+TEST_CASE("explicit focus target wins over focus selected by a blur callback",
           "[view][input][focus][reentrancy]") {
     View root;
     auto previous = std::make_unique<FocusCallbackSpy>();
@@ -233,12 +235,76 @@ TEST_CASE("focus transfer respects focus selected by a blur callback",
     root.add_child(std::move(replacement));
     previous_ptr->claim_input_focus();
     previous_ptr->callback = [&](bool gained) {
-        if (!gained) replacement_ptr->claim_input_focus();
+        if (!gained) {
+            replacement_ptr->on_focus_changed(true);
+            replacement_ptr->claim_input_focus();
+        }
     };
 
     REQUIRE(transfer_input_focus(root, requested_ptr));
-    CHECK(root.interaction().focused_input == replacement_ptr);
-    CHECK(focused_input_under_root(root) == replacement_ptr);
+    CHECK(root.interaction().focused_input == requested_ptr);
+    CHECK(focused_input_under_root(root) == requested_ptr);
+    CHECK(requested_ptr->has_focus());
+    CHECK_FALSE(replacement_ptr->has_focus());
+}
+
+TEST_CASE("explicit blur clears focus selected by a blur callback",
+          "[view][input][focus][reentrancy]") {
+    View root;
+    auto previous = std::make_unique<FocusCallbackSpy>();
+    auto replacement = std::make_unique<FocusCallbackSpy>();
+    auto* previous_ptr = previous.get();
+    auto* replacement_ptr = replacement.get();
+    previous->set_focusable(true);
+    replacement->set_focusable(true);
+    root.add_child(std::move(previous));
+    root.add_child(std::move(replacement));
+    previous_ptr->on_focus_changed(true);
+    previous_ptr->claim_input_focus();
+    previous_ptr->callback = [&](bool gained) {
+        if (!gained) {
+            replacement_ptr->on_focus_changed(true);
+            replacement_ptr->claim_input_focus();
+        }
+    };
+
+    REQUIRE_FALSE(transfer_input_focus(root, nullptr));
+    CHECK(root.interaction().focused_input == nullptr);
+    CHECK(focused_input_under_root(root) == nullptr);
+    CHECK_FALSE(previous_ptr->has_focus());
+    CHECK_FALSE(replacement_ptr->has_focus());
+}
+
+TEST_CASE("explicit blur terminates a cyclic focus callback chain",
+          "[view][input][focus][reentrancy]") {
+    View root;
+    auto a = std::make_unique<FocusCallbackSpy>();
+    auto b = std::make_unique<FocusCallbackSpy>();
+    auto* a_ptr = a.get();
+    auto* b_ptr = b.get();
+    a->set_focusable(true);
+    b->set_focusable(true);
+    root.add_child(std::move(a));
+    root.add_child(std::move(b));
+    a_ptr->on_focus_changed(true);
+    a_ptr->claim_input_focus();
+    a_ptr->callback = [&](bool gained) {
+        if (!gained) {
+            b_ptr->on_focus_changed(true);
+            b_ptr->claim_input_focus();
+        }
+    };
+    b_ptr->callback = [&](bool gained) {
+        if (!gained) {
+            a_ptr->on_focus_changed(true);
+            a_ptr->claim_input_focus();
+        }
+    };
+
+    REQUIRE_FALSE(transfer_input_focus(root, nullptr));
+    CHECK(root.interaction().focused_input == nullptr);
+    CHECK_FALSE(a_ptr->has_focus());
+    CHECK_FALSE(b_ptr->has_focus());
 }
 
 TEST_CASE("point_to_local peels ancestor offsets", "[view][input]") {
@@ -551,6 +617,52 @@ TEST_CASE("deliver_mouse_down fires modern press then legacy down, in order",
     CHECK_THAT(e.position.x, WithinAbs(30.0f, 0.01f));   // 130 - 100
     CHECK_THAT(e.window_position.x, WithinAbs(130.0f, 0.01f));
     CHECK_THAT(spy->last_down.y, WithinAbs(20.0f, 0.01f));  // 70 - 50
+}
+
+TEST_CASE("guarded mouse down stops stale channels after reentrant cancellation",
+          "[view][input][press][reentrancy]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    auto wrapper = std::make_unique<View>();
+    auto* wrapper_ptr = wrapper.get();
+    wrapper->set_bounds({0, 0, 200, 300});
+    int bubbled = 0;
+    wrapper->on_pointer_event = [&](const MouseEvent&) { ++bubbled; };
+
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 300});
+    wrapper->add_child(std::move(child));
+    root.add_child(std::move(wrapper));
+
+    auto nested = std::make_unique<View>();
+    auto* nested_target = nested.get();
+    nested->set_bounds({200, 0, 200, 300});
+    root.add_child(std::move(nested));
+
+    uint64_t generation = 1;
+    const uint64_t outer_generation = generation;
+    View* captured_target = spy;
+    spy->modern_callback = [&](const MouseEvent&) {
+        // Model a synchronous cancel followed by a later generation becoming
+        // current before the stale outer press frame resumes.
+        ++generation;
+        captured_target = nested_target;
+    };
+    MouseDownHost host;
+    host.should_continue = [&] { return generation == outer_generation; };
+
+    const bool alive = deliver_mouse_down(root, spy, {20, 20}, kModNone, 1,
+                                          true, MouseButton::left, host);
+    if (!alive && generation == outer_generation)
+        captured_target = nullptr;  // mirrors the Windows host ownership check
+
+    CHECK_FALSE(alive);
+    CHECK(spy->modern_buttons.size() == 1);
+    CHECK(spy->legacy_down == 0);
+    CHECK(bubbled == 0);
+    CHECK(captured_target == nested_target);
+    CHECK(wrapper_ptr->child_count() == 1);
 }
 
 TEST_CASE("deliver_mouse_down bubbles pointerdown to registerPointer ancestors",
