@@ -478,3 +478,32 @@ TEST_CASE("TextEditor caret is sized by the text line, not by the field",
     CHECK(std::abs(tall - snug) < 0.01f);  // ten-fold taller field, same caret
     CHECK(tall < 60.0f);             // a box-sized caret here would be ~232
 }
+
+TEST_CASE("TextEditor selection is sized by the text line, not by the field",
+          "[view][text_editor][paint][selection]") {
+    const auto selection_rect = [](float box_height) {
+        TextEditor editor;
+        editor.set_bounds({0, 0, 400, box_height});
+        editor.set_text("Select me");
+        editor.select_all();
+
+        RecordingCanvas canvas;
+        editor.paint(canvas);
+
+        std::vector<DrawCommand> fills;
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type == DrawCommand::Type::fill_rect) fills.push_back(cmd);
+        }
+        REQUIRE(fills.size() == 1);
+        return fills.front();
+    };
+
+    const auto snug = selection_rect(24.0f);
+    const auto tall = selection_rect(240.0f);
+
+    REQUIRE(snug.f[3] > 0.0f);
+    CHECK(std::abs(tall.f[3] - snug.f[3]) < 0.01f);
+    CHECK(tall.f[3] < 60.0f);
+    CHECK(tall.f[1] > 80.0f);
+    CHECK(tall.f[1] + tall.f[3] < 160.0f);
+}
