@@ -90,7 +90,6 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", "tempo changing after bar 1"}, // tempo.map
         {ImportLevel::Full, "", ""}, // meter.single
         {ImportLevel::None, "", "time signature changing after bar 1"}, // meter.map
-        {ImportLevel::None, "", "chord and scale context lanes"}, // context.chord-scale
         {ImportLevel::None, "", "arrangement markers"}, // marker
         {ImportLevel::None, "", ""}, // timecode.origin
         {ImportLevel::None, "", ""}, // media.provenance
@@ -114,6 +113,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // content.registered
         {ImportLevel::None, "", ""}, // content.opaque
         {ImportLevel::None, "", ""}, // edit-rate.non-audio
+        {ImportLevel::None, "", "chord and scale context lanes"}, // context.chord-scale
     },
 };
 
@@ -138,7 +138,6 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for tempo.map"}, // tempo.map
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // meter.single
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for meter.map"}, // meter.map
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.chord-scale"}, // context.chord-scale
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for marker"}, // marker
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for timecode.origin"}, // timecode.origin
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for media.provenance"}, // media.provenance
@@ -162,6 +161,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::RoundtripOnly, Concept::Unknown, LossClass::Dropped, ""}, // content.registered
         {ExportLevel::RoundtripOnly, Concept::Unknown, LossClass::Dropped, ""}, // content.opaque
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for edit-rate.non-audio"}, // edit-rate.non-audio
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.chord-scale"}, // context.chord-scale
     },
 };
 } // namespace detail

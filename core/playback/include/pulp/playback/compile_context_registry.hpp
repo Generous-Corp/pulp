@@ -75,6 +75,9 @@ class CompileContextRegistry {
 /// into an exact track set instead of a full recompile. It is rebuilt when the
 /// document's structure changes; a context edit alone does not invalidate it,
 /// because editing a lane's contents does not change who reads it.
+/// Only arrangement clips selected by the program compiler are indexed:
+/// frozen tracks and tracks selecting a take lane have no live arrangement
+/// renderer to invalidate.
 class ContextSubscriberIndex {
   public:
     static ContextSubscriberIndex build(const timeline::Project& project,
@@ -101,7 +104,8 @@ class ContextSubscriberIndex {
 ///     asset table) and requests a full recompile, matching what the compiler
 ///     already does for a tempo-map swap;
 ///   * an item owning this sequence but no track, other than a context entry's
-///     companion, is a structural sequence edit and requests a full recompile.
+///     companion or non-playback marker metadata, is a structural sequence
+///     edit and requests a full recompile.
 /// Items belonging to another sequence are ignored.
 DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
                                    const ContextSubscriberIndex& index);

@@ -53,6 +53,11 @@ ContextSubscriberIndex ContextSubscriberIndex::build(const timeline::Project& pr
     if (!sequence)
         return index;
     for (const timeline::Track& track : sequence->tracks()) {
+        // The program compiler replaces the arrangement wholesale when a
+        // freeze or take comp is selected. Arrangement clips on those tracks
+        // therefore have no live renderer program to invalidate.
+        if (track.freeze().has_value() || track.active_take_lane_id().valid())
+            continue;
         for (const timeline::Clip& clip : track.clips()) {
             const auto subscriptions = std::visit(
                 timeline::ClipContentCases{
@@ -124,10 +129,13 @@ DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline:
             result.tracks.push_back(item.owner_track);
             continue;
         }
-        // A context companion names no track on purpose: its readers come from
-        // the reverse index, not from the item. Any other trackless item is a
-        // structural edit to the sequence itself.
-        if ((flags & static_cast<std::uint16_t>(timeline::DirtyFlags::Context)) == 0)
+        // Context companions name no track on purpose: their readers come from
+        // the reverse index. Markers are sequence metadata and do not
+        // contribute to any compiled track program. Any other trackless item
+        // is a structural edit to the sequence itself.
+        const auto ignored = static_cast<std::uint16_t>(timeline::DirtyFlags::Context) |
+                             static_cast<std::uint16_t>(timeline::DirtyFlags::Marker);
+        if ((flags & ignored) == 0)
             result.all = true;
     }
     for (const timeline::DirtyContext& context : dirty.contexts()) {

@@ -30,6 +30,10 @@ template <typename T, typename E> T take(runtime::Result<T, E> result) {
 constexpr std::string_view kFollowsHarmony = "vendor.chord_follower";
 constexpr std::string_view kIgnoresHarmony = "vendor.plain_generator";
 
+ContentHash hash_of(char digit) {
+    return *ContentHash::from_hex(std::string(64, digit));
+}
+
 runtime::Result<std::shared_ptr<const void>, PersistenceError>
 decode_marker(const JsonValue&, const void*) noexcept {
     return runtime::Ok(std::shared_ptr<const void>(std::make_shared<const int>(1)));
@@ -94,6 +98,44 @@ std::shared_ptr<const Project> make_project(const SchemaRegistry& registry,
     input.root_sequence_id = {2};
     input.sequences.push_back(std::move(sequence));
     return std::make_shared<const Project>(take(Project::create(std::move(input))));
+}
+
+std::shared_ptr<const Project> make_project_with_inactive_arrangement(
+    const SchemaRegistry& registry, bool frozen) {
+    auto clip = take(Clip::create(
+        {110}, {0}, {480}, generator_content(registry, kFollowsHarmony)));
+    std::vector<MediaAsset> assets{
+        {{500}, "selected.wav", 480, {48'000, 1}, hash_of('a'),
+         AssetStoragePolicy::External, {}, {}, {}}};
+
+    TrackInput track_input{
+        .id = {10},
+        .name = frozen ? "frozen" : "take-selected",
+        .clips = {std::move(clip)},
+    };
+    if (frozen) {
+        track_input.freeze =
+            TrackFreeze{MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}, hash_of('b')};
+    } else {
+        auto recorded_take =
+            take(Take::create({501}, MediaRef{{500}, {0}, 480}, {0}, {48'000, 1}));
+        track_input.take_lanes = {
+            take(TakeLane::create({502}, "selected", {std::move(recorded_take)}))};
+        track_input.active_take_lane_id = {502};
+    }
+
+    auto track = take(Track::create(std::move(track_input)));
+    auto sequence =
+        take(Sequence::create({2}, "root", std::nullopt, std::nullopt, {std::move(track)}));
+    ProjectInput project_input;
+    project_input.id = {1};
+    project_input.name = "inactive arrangement";
+    project_input.next_item_id = 600;
+    project_input.root_sequence_id = {2};
+    project_input.assets = std::move(assets);
+    project_input.sequences = {std::move(sequence)};
+    return std::make_shared<const Project>(
+        take(Project::create(std::move(project_input))));
 }
 
 CompileContextRegistry context_registry() {
@@ -219,6 +261,18 @@ TEST_CASE("the subscriber index names only the tracks that declared the context"
     REQUIRE(ContextSubscriberIndex::build(*project, {99}, context_registry()).empty());
 }
 
+TEST_CASE("the subscriber index excludes arrangement clips replaced in playback",
+          "[playback][compile-context][subscription]") {
+    const auto schemas = generator_schema_registry();
+    const auto registry = context_registry();
+
+    const auto frozen = make_project_with_inactive_arrangement(schemas, true);
+    REQUIRE(ContextSubscriberIndex::build(*frozen, {2}, registry).empty());
+
+    const auto take_selected = make_project_with_inactive_arrangement(schemas, false);
+    REQUIRE(ContextSubscriberIndex::build(*take_selected, {2}, registry).empty());
+}
+
 TEST_CASE("a chord-lane edit resolves to exactly its declared readers",
           "[playback][compile-context][dirty-set]") {
     const auto schemas = generator_schema_registry();
@@ -324,4 +378,15 @@ TEST_CASE("a structural edit and a context edit in one transaction dirty both",
     REQUIRE(resolved.tracks.size() == 2);
     REQUIRE(resolved.tracks[0] == ItemId{10});
     REQUIRE(resolved.tracks[1] == ItemId{30});
+}
+
+TEST_CASE("marker metadata does not dirty compiled track programs",
+          "[playback][compile-context][dirty-set]") {
+    const DirtySet marker_edit(
+        {{{400}, {}, {2},
+          DirtyFlags::Structure | DirtyFlags::Marker | DirtyFlags::Added}});
+    const auto resolved =
+        resolve_dirty_tracks({2}, marker_edit, ContextSubscriberIndex{});
+    REQUIRE_FALSE(resolved.all);
+    REQUIRE(resolved.tracks.empty());
 }
