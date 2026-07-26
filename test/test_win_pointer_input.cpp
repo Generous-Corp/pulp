@@ -119,6 +119,46 @@ TEST_CASE("Windows drag continues only while the left button is held",
     REQUIRE_FALSE(drag_continues(kMkRButton));
 }
 
+TEST_CASE("Windows button messages and capture masks preserve button identity",
+          "[view][windows][pointer]") {
+    REQUIRE(mouse_button_from_message(kWmLButtonDown) == MouseButton::left);
+    REQUIRE(mouse_button_from_message(kWmRButtonUp) == MouseButton::right);
+    REQUIRE(mouse_button_from_message(kWmMButtonDown) == MouseButton::middle);
+    REQUIRE(mouse_button_from_message(0) == MouseButton::none);
+
+    REQUIRE(drag_continues(kMkRButton, MouseButton::right));
+    REQUIRE_FALSE(drag_continues(kMkLButton, MouseButton::right));
+    REQUIRE(drag_continues(kMkMButton | kMkShift, MouseButton::middle));
+}
+
+TEST_CASE("Windows wheel deltas use Pulp axis conventions",
+          "[view][windows][pointer]") {
+    const auto pack_wheel = [](int16_t delta) {
+        return static_cast<uint32_t>(static_cast<uint16_t>(delta)) << 16;
+    };
+    REQUIRE(wheel_steps(pack_wheel(120), false) == -1.0f);
+    REQUIRE(wheel_steps(pack_wheel(-240), false) == 2.0f);
+    REQUIRE(wheel_steps(pack_wheel(120), true) == 1.0f);
+}
+
+TEST_CASE("Windows virtual keys map to Pulp key codes",
+          "[view][windows][keyboard]") {
+    REQUIRE(key_code_from_virtual_key('A') == KeyCode::a);
+    REQUIRE(key_code_from_virtual_key('9') == KeyCode::num9);
+    REQUIRE(key_code_from_virtual_key(kVkLeft) == KeyCode::left);
+    REQUIRE(key_code_from_virtual_key(kVkDelete) == KeyCode::delete_);
+    REQUIRE(key_code_from_virtual_key(kVkF12) == KeyCode::f12);
+    REQUIRE(key_code_from_virtual_key(kVkOem1) == KeyCode::semicolon);
+    REQUIRE(key_code_from_virtual_key(kVkOem7) == KeyCode::apostrophe);
+    REQUIRE(key_code_from_virtual_key(0xFF) == KeyCode::unknown);
+
+    const auto mods = key_modifiers(true, true, true, true);
+    REQUIRE((mods & kModShift) != 0);
+    REQUIRE((mods & kModCtrl) != 0);
+    REQUIRE((mods & kModAlt) != 0);
+    REQUIRE((mods & kModMeta) != 0);
+}
+
 TEST_CASE("Windows editor surfaces are not created before attach",
           "[view][windows][lifecycle]") {
     // Creating the Dawn surface in the host constructor configures it for the

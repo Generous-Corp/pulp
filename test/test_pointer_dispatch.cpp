@@ -33,6 +33,31 @@ public:
     Point last{};
 };
 
+class ButtonIdentitySpy : public View {
+public:
+    void on_mouse_event(const MouseEvent& event) override {
+        modern_buttons.push_back(event.button);
+    }
+    void on_mouse_down(Point) override { ++legacy_down; }
+    void on_mouse_drag(Point) override { ++legacy_drag; }
+    void on_mouse_up(Point) override { ++legacy_up; }
+
+    std::vector<MouseButton> modern_buttons;
+    int legacy_down = 0;
+    int legacy_drag = 0;
+    int legacy_up = 0;
+};
+
+class FocusCallbackSpy : public View {
+public:
+    void on_focus_changed(bool gained) override {
+        View::on_focus_changed(gained);
+        if (callback) callback(gained);
+    }
+
+    std::function<void(bool)> callback;
+};
+
 }  // namespace
 
 TEST_CASE("dispatch_context_menu routes a right-click to the view under it", "[view][input]") {
@@ -66,6 +91,104 @@ TEST_CASE("dispatch_context_menu reports not-consumed without a handler", "[view
 
     // No on_context_menu anywhere: the host must fall through to its own menu.
     REQUIRE_FALSE(dispatch_context_menu(root, {50, 50}));
+}
+
+TEST_CASE("auxiliary buttons retain identity without entering left-only legacy callbacks",
+          "[view][input]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<ButtonIdentitySpy>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    REQUIRE(deliver_mouse_down(root, spy, {20, 20}, kModNone, 1, true,
+                               MouseButton::right));
+    deliver_mouse_drag(root, spy, {30, 30}, kModNone, 1,
+                       PointerType::mouse, 0.5f, MouseButton::right);
+    deliver_mouse_up(root, spy, {30, 30}, kModNone, 1, MouseUpHost{},
+                     MouseButton::right);
+
+    const std::vector<MouseButton> expected{
+        MouseButton::right, MouseButton::right, MouseButton::right};
+    REQUIRE(spy->modern_buttons == expected);
+    REQUIRE(spy->legacy_down == 0);
+    REQUIRE(spy->legacy_drag == 0);
+    REQUIRE(spy->legacy_up == 0);
+}
+
+TEST_CASE("focus transfer stops when a callback unmounts the requested target",
+          "[view][input][focus]") {
+    View::focused_input_ = nullptr;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto previous = std::make_unique<FocusCallbackSpy>();
+    auto* previous_ptr = previous.get();
+    previous->set_focusable(true);
+    root.add_child(std::move(previous));
+
+    auto requested = std::make_unique<FocusCallbackSpy>();
+    auto* requested_ptr = requested.get();
+    requested->set_focusable(true);
+    root.add_child(std::move(requested));
+
+    previous_ptr->claim_input_focus();
+    std::unique_ptr<View> detached;
+    previous_ptr->callback = [&](bool gained) {
+        if (!gained) detached = root.remove_child(requested_ptr);
+    };
+
+    REQUIRE_FALSE(transfer_input_focus(root, requested_ptr));
+    REQUIRE(detached.get() == requested_ptr);
+    REQUIRE(View::focused_input_ == nullptr);
+}
+
+TEST_CASE("focus transfer keeps a live non-focusable pointer target",
+          "[view][input][focus]") {
+    View::focused_input_ = nullptr;
+    View root;
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    REQUIRE(transfer_input_focus(root, child_ptr));
+    REQUIRE(View::focused_input_ == nullptr);
+}
+
+TEST_CASE("focus transfer rejects a target unmounted before focus starts",
+          "[view][input][focus]") {
+    View::focused_input_ = nullptr;
+    View root;
+    auto child = std::make_unique<View>();
+    auto* stale_identity = child.get();
+    root.add_child(std::move(child));
+    auto detached = root.remove_child(stale_identity);
+
+    REQUIRE_FALSE(transfer_input_focus(root, stale_identity));
+    REQUIRE(detached.get() == stale_identity);
+    REQUIRE(View::focused_input_ == nullptr);
+}
+
+TEST_CASE("focus transfer does not claim a target that unmounts while gaining focus",
+          "[view][input][focus]") {
+    View::focused_input_ = nullptr;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto requested = std::make_unique<FocusCallbackSpy>();
+    auto* requested_ptr = requested.get();
+    requested->set_focusable(true);
+    root.add_child(std::move(requested));
+
+    std::unique_ptr<View> detached;
+    requested_ptr->callback = [&](bool gained) {
+        if (gained) detached = root.remove_child(requested_ptr);
+    };
+
+    REQUIRE_FALSE(transfer_input_focus(root, requested_ptr));
+    REQUIRE(detached.get() == requested_ptr);
+    REQUIRE(View::focused_input_ == nullptr);
 }
 
 TEST_CASE("point_to_local peels ancestor offsets", "[view][input]") {
@@ -855,6 +978,75 @@ TEST_CASE("should_yield_to_gesture dispatches even when it does not yield",
 
     CHECK(should_yield_to_gesture(root, phase_event({100, 40}, MousePhase::drag)));
     CHECK(began == 1);
+}
+
+TEST_CASE("host gesture gate keeps raw delivery for an unclaimed candidate",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+    spy->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    View* drag_target = spy;
+    auto press = phase_event({40, 40}, MousePhase::press);
+    REQUIRE_FALSE(yield_to_gesture_with_handoff(root, drag_target, press));
+    REQUIRE(drag_target == spy);
+    REQUIRE(deliver_mouse_down(root, drag_target, press.window_position,
+                               kModNone));
+
+    auto drag = phase_event({80, 80}, MousePhase::drag);
+    REQUIRE_FALSE(yield_to_gesture_with_handoff(root, drag_target, drag));
+    REQUIRE(drag_target == spy);
+    deliver_mouse_drag(root, drag_target, drag.window_position, kModNone);
+
+    auto release = phase_event({80, 80}, MousePhase::release);
+    REQUIRE_FALSE(yield_to_gesture_with_handoff(root, drag_target, release));
+    REQUIRE(drag_target == spy);
+    deliver_mouse_up(root, drag_target, release.window_position, kModNone, 1,
+                     MouseUpHost{});
+
+    CHECK(spy->downs == 1);
+    CHECK(spy->drags == 1);
+    CHECK(spy->ups == 1);
+}
+
+TEST_CASE("host gesture gate closes and clears a raw drag on mid-drag claim",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->set_min_distance(40.0f);
+    spy->add_gesture_recognizer(std::move(pan));
+
+    View* drag_target = spy;
+    auto press = phase_event({40, 40}, MousePhase::press);
+    REQUIRE_FALSE(yield_to_gesture_with_handoff(root, drag_target, press));
+    REQUIRE(deliver_mouse_down(root, drag_target, press.window_position,
+                               kModNone));
+
+    auto short_drag = phase_event({50, 40}, MousePhase::drag);
+    REQUIRE_FALSE(yield_to_gesture_with_handoff(root, drag_target,
+                                                short_drag));
+    deliver_mouse_drag(root, drag_target, short_drag.window_position, kModNone);
+
+    auto claim = phase_event({100, 40}, MousePhase::drag);
+    REQUIRE(yield_to_gesture_with_handoff(root, drag_target, claim));
+    REQUIRE(drag_target == nullptr);
+    CHECK(spy->downs == 1);
+    CHECK(spy->drags == 1);
+    CHECK(spy->ups == 1);
+
+    auto release = phase_event({100, 40}, MousePhase::release);
+    (void)yield_to_gesture_with_handoff(root, drag_target, release);
+    CHECK(spy->ups == 1);
 }
 
 // ── simulate_drag yields mid-loop ────────────────────────────────────────

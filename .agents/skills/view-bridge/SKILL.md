@@ -1072,6 +1072,23 @@ Rules when touching an adapter's editor-attach path:
   drag-target liveness, reusing the standalone window host's `mac_geometry`
   helpers. Without these the editor paints but swallows every click. They also
   set flexible `autoresizingMask` so they follow host editor-container resizes.
+- **The Windows HWND host honors the same full input contract.**
+  `plugin_view_host_win.cpp` routes left/right/middle press-drag-release with
+  capture, vertical/horizontal wheel, hover/leave, focus loss, key down/up, and
+  UTF-16 `WM_CHAR` text into the shared `View` handlers. Keep Win32 packing and
+  key/button/wheel decisions in the HWND-free
+  `platform/win_pointer_input.hpp`; `pulp-test-win-pointer-input` deliberately
+  runs them on macOS CI. Auxiliary buttons use the modern `MouseEvent` channel
+  only because the legacy callbacks have no button identity. Scope
+  `View::focused_input_` to the current root before routing keys, or one open
+  editor can steal another editor's typing.
+- **Windows must not discard `Options::use_gpu`.** Requested GPU editors create
+  Dawn/Skia after the HWND is attached; CPU editors (and failed GPU creation)
+  raster through Skia and present the resulting top-down DIB in `WM_PAINT`.
+  Always pass the adapter's `decide_gpu_host` result through the factory. If
+  `use_gpu=false` still initializes Dawn, the runtime opt-out is fictional; if
+  the CPU path only supports capture and not live presentation, ordinary
+  AutoUi editors paint black.
 - **AU specifically also needs the Cocoa view advertised** (`kAudioUnitProperty_CocoaUI`)
   or the host shows its own generic param view regardless of the host wiring —
   see the `auv2` skill's "AU v2 MUST advertise its Cocoa view" gotcha.
