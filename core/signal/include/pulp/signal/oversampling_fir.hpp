@@ -6,10 +6,99 @@
 #include <pulp/signal/fir_filter.hpp>
 #include <pulp/signal/windowed_sinc_design.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
 namespace pulp::signal::detail {
+
+// Fixed-storage linear-phase half-band stage for nonlinear processors whose
+// configuration and processing paths must both remain allocation-free. The
+// general LinearPhaseOversamplingStage2x below supports selectable quality and
+// tap counts; this stage deliberately fixes the 65-tap prototype so its state
+// can live entirely inline.
+class FixedHalfBandFir65 {
+  public:
+    FixedHalfBandFir65() noexcept {
+        // Force the shared coefficient table to initialize off the audio path.
+        static_cast<void>(coefficients());
+    }
+
+    double process(double input) noexcept {
+        history_[write_] = input;
+        const auto& taps = coefficients();
+
+        // A 65-tap half-band prototype has only the centre and odd-indexed
+        // coefficients non-zero (the centre index is 32).
+        double output = taps[kCentre] * history_at(kCentre);
+        for (std::size_t tap = 1; tap < kTaps; tap += 2)
+            output += taps[tap] * history_at(tap);
+
+        if (++write_ == kTaps)
+            write_ = 0;
+        return output;
+    }
+
+    void reset() noexcept {
+        history_.fill(0.0);
+        write_ = 0;
+    }
+
+  private:
+    static constexpr std::size_t kTaps = 65;
+    static constexpr std::size_t kCentre = (kTaps - 1) / 2;
+    static constexpr double kBeta = 8.0;
+
+    static double sinc(double x) noexcept {
+        if (std::abs(x) < 1.0e-15)
+            return 1.0;
+        constexpr double kPi = 3.141592653589793238462643383279502884;
+        const double pix = kPi * x;
+        return std::sin(pix) / pix;
+    }
+
+    static std::array<double, kTaps> design() noexcept {
+        std::array<double, kTaps> result{};
+        const double denominator = bessel_i0(kBeta);
+        double sum = 0.0;
+        for (std::size_t tap = 0; tap < kTaps; ++tap) {
+            const int offset =
+                static_cast<int>(tap) - static_cast<int>(kCentre);
+            if (offset != 0 && (offset & 1) == 0) {
+                result[tap] = 0.0;
+                continue;
+            }
+            const double position =
+                static_cast<double>(offset) / static_cast<double>(kCentre);
+            const double window =
+                bessel_i0(kBeta * std::sqrt(
+                                      std::max(0.0, 1.0 - position * position))) /
+                denominator;
+            result[tap] =
+                0.5 * sinc(0.5 * static_cast<double>(offset)) * window;
+            sum += result[tap];
+        }
+        for (double& coefficient : result)
+            coefficient /= sum;
+        return result;
+    }
+
+    static const std::array<double, kTaps>& coefficients() noexcept {
+        static const std::array<double, kTaps> result = design();
+        return result;
+    }
+
+    double history_at(std::size_t delay) const noexcept {
+        const std::size_t index =
+            write_ >= delay ? write_ - delay : write_ + kTaps - delay;
+        return history_[index];
+    }
+
+    std::array<double, kTaps> history_{};
+    std::size_t write_ = 0;
+};
 
 template <typename SampleType> class LinearPhaseOversamplingStage2x {
   public:

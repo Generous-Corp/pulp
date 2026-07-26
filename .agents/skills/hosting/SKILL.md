@@ -307,6 +307,32 @@ tool must own a configurable warm-up and post-write/render-settle policy. Put
 the entire instantiate/process probe in a child process; isolated scanning alone
 does not contain crashes in deeper plug-in code.
 
+## Catalog headers: the analog VCF is not part of the lo-fi catalog
+
+`forge_analog_vcf_catalog.hpp` is a sibling of `forge_lofi_catalog.hpp`, not
+something it re-exports. Both put their symbols in `pulp::host::forge_lofi`, so
+a translation unit that includes only the lo-fi header and reaches for
+`make_analog_vcf_node()` will fail to compile in a way that looks like a
+namespace problem. **Include the analog header directly.**
+
+The separation is deliberate: the lo-fi catalog is a grab-bag of small macro-knob
+effects, while the analog VCF carries measured per-voicing calibration tables.
+Letting lo-fi own that would make it the owner of analog DSP policy, and would
+force every lo-fi consumer to compile the VCF.
+
+Two things that bite when baking analog VCF nodes:
+
+- **`cutoff` is a 0..1 panel knob, not Hz.** Every calibration law — the corner
+  table, resonance taper, headroom and cross-mod laws — is indexed by
+  front-panel position, so the knob domain is what keeps the node faithful to
+  the measurements. If a UI needs Hz, invert the table in the display layer.
+  `AnalogVcfT::cutoff_hz()` gives the *requested* corner for that purpose, and
+  is not necessarily the realised one (the pole is clamped to 0.45·fs).
+- **Voicing and oversampling factor are construction/prepare-time, not baked
+  params.** There is one `type_id` per voicing (`vcf.juno`, `vcf.jupiter`,
+  `vcf.prophet5`, `vcf.minimoog`); you pick the voicing by picking the node
+  type, the same way the registry's `svf` row realizes per-mode type ids.
+
 ## Signal graph gotchas
 
 - `SignalGraph` dispatches plugin nodes through the additive
