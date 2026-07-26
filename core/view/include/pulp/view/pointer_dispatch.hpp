@@ -187,4 +187,35 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
                       uint16_t modifiers, int click_count,
                       const MouseUpHost& host);
 
+/// Close the press bracket when a recognizer CLAIMS the pointer mid-gesture,
+/// after a press was already delivered to `target`.
+///
+/// The host stops its own delivery at that point (see `should_yield_to_gesture`)
+/// but the press it already delivered is still outstanding: a Knob opens
+/// `on_gesture_begin` and relative-mouse mode on press and clears them only on
+/// release, so bailing bare strands beginEdit with no endEdit — a stuck
+/// automation touch and a hidden cursor. Callers clear their captured
+/// drag-target slot after this returns, so a gesture that later goes terminal
+/// cannot silently resume the raw drag with a position jump.
+///
+/// Runs the FULL release pipeline rather than a bare `on_mouse_up`, because the
+/// press ran the full press pipeline: a legacy-only close leaves the modern
+/// channel and the pointerdown bubble unmatched, and modern-only consumers
+/// stay stuck (`VirtualList` clears `dragging_scrollbar_` solely on an event
+/// with `is_down == false`). No click is fired — a handoff is not a click.
+///
+/// Delivered as a RELEASE, not a cancellation. A takeover is arguably
+/// `pointercancel` (`MouseEvent::is_cancelled` and `View::on_mouse_cancel`
+/// exist for it), which would let a cancellation-aware control roll its partial
+/// drag back instead of committing it. It stays a release because that is what
+/// every path does today — `View::simulate_drag` closes its own mid-loop claim
+/// the same way — and splitting the hosts off from the portable simulation
+/// would reintroduce the host-vs-headless divergence this seam removes.
+/// Changing it means teaching the release pipeline a cancel mode and moving
+/// all three call paths together.
+///
+/// No-op when `target` is null or no longer in the tree.
+void deliver_gesture_handoff(View& root, View* target, Point root_pt,
+                             uint16_t modifiers, int click_count);
+
 }  // namespace pulp::view

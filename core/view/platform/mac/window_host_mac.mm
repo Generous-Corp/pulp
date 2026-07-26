@@ -587,39 +587,12 @@ static void install_app_menu(NSString* appName) {
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) {
-                // A claim can land mid-drag, AFTER the press was delivered to
-                // _dragTarget. Hand the pointer to the gesture, but close the
-                // bracket that press opened and drop the target so the widget
-                // cannot silently resume dragging (with a position jump) if the
-                // gesture later goes terminal. A Knob opens on_gesture_begin and
-                // relative-mouse mode on press and clears both only on
-                // on_mouse_up, so bailing bare strands beginEdit with no
-                // endEdit — a stuck automation touch and a hidden cursor.
-                // Full release pipeline, not a bare on_mouse_up: the press
-                // reached the modern channel and bubbled pointerdown to
-                // registerPointer ancestors, so a legacy-only close leaves both
-                // unmatched. VirtualList clears dragging_scrollbar_ only on a
-                // modern event with is_down == false, so a legacy-only close
-                // sticks its scrollbar to the mouse. Empty MouseUpHost — a
-                // gesture handoff is not a click.
-                //
-                // A takeover is arguably a CANCELLATION (W3C fires
-                // pointercancel, and `MouseEvent::is_cancelled` /
-                // `View::on_mouse_cancel` exist for it), which would let a
-                // cancellation-aware control roll its partial drag back rather
-                // than commit it. It stays a release because that is what every
-                // path does today — `View::simulate_drag` closes its own
-                // mid-loop claim with this same verb — and splitting the hosts
-                // off from the portable simulation would reintroduce the
-                // host-vs-headless divergence this seam exists to remove.
-                // Changing it means teaching `deliver_mouse_up` a cancel mode
-                // and moving all three call paths together.
-                if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
-                    pulp::view::deliver_mouse_up(
-                        *self.rootView, _dragTarget, pt,
-                        modifiers_from_ns_flags(event.modifierFlags),
-                        static_cast<int>(event.clickCount),
-                        pulp::view::MouseUpHost{});
+                // Claim landed after the press was delivered — close that
+                // bracket (contract in pointer_dispatch.hpp) and drop it.
+                pulp::view::deliver_gesture_handoff(
+                    *self.rootView, _dragTarget, pt,
+                    modifiers_from_ns_flags(event.modifierFlags),
+                    static_cast<int>(event.clickCount));
                 _dragTarget = nullptr;
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
@@ -675,23 +648,12 @@ static void install_app_menu(NSString* appName) {
             }
             auto pt = [self localPoint:event];
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) {
-                // Same bracket-closing rule as the drag phase: a recognizer can
-                // claim on THIS release (a double-tap reaches `ended` on the
-                // second one), by which point the press was already delivered.
-                // Dropping the up here would leave the widget mid-gesture.
-                // Full release pipeline, not a bare on_mouse_up: the press
-                // reached the modern channel and bubbled pointerdown to
-                // registerPointer ancestors, so a legacy-only close leaves both
-                // unmatched. VirtualList clears dragging_scrollbar_ only on a
-                // modern event with is_down == false, so a legacy-only close
-                // sticks its scrollbar to the mouse. Empty MouseUpHost — a
-                // gesture handoff is not a click.
-                if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
-                    pulp::view::deliver_mouse_up(
-                        *self.rootView, _dragTarget, pt,
-                        modifiers_from_ns_flags(event.modifierFlags),
-                        static_cast<int>(event.clickCount),
-                        pulp::view::MouseUpHost{});
+                // A double-tap claims on its SECOND release, by which point
+                // the press was delivered; same bracket rule as the drag.
+                pulp::view::deliver_gesture_handoff(
+                    *self.rootView, _dragTarget, pt,
+                    modifiers_from_ns_flags(event.modifierFlags),
+                    static_cast<int>(event.clickCount));
                 _dragTarget = nullptr;
                 [self setNeedsDisplay:YES];
                 return;

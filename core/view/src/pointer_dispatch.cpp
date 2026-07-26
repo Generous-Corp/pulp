@@ -300,4 +300,12 @@ void deliver_mouse_wheel(View& root, Point root_pt,
     repaint();
 }
 
+void deliver_gesture_handoff(View& root, View* target, Point root_pt,
+                             uint16_t modifiers, int click_count) {
+    // Liveness is deliver_mouse_up's own precondition, so no separate guard is
+    // needed here. Empty MouseUpHost: a handoff must not synthesize a click.
+    deliver_mouse_up(root, target, root_pt, modifiers, click_count,
+                     MouseUpHost{});
+}
+
 }  // namespace pulp::view

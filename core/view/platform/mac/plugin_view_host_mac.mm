@@ -326,16 +326,8 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
         // cannot silently resume dragging (with a position jump) if the gesture
         // later goes terminal.
         //
-        // Closing runs the FULL release pipeline, not a bare on_mouse_up: the
-        // press reached the modern channel and bubbled pointerdown to
-        // registerPointer ancestors, so a legacy-only close leaves both
-        // unmatched. VirtualList clears dragging_scrollbar_ only on a modern
-        // event with is_down == false, so a legacy-only close sticks its
-        // scrollbar to the mouse. Empty MouseUpHost — a handoff is not a click.
-        if (*drag_target && view_is_in_tree(*drag_target, root))
-            pulp::view::deliver_mouse_up(*root, *drag_target, pt, mods,
-                                         static_cast<int>(event.clickCount),
-                                         pulp::view::MouseUpHost{});
+        pulp::view::deliver_gesture_handoff(*root, *drag_target, pt, mods,
+                                            static_cast<int>(event.clickCount));
         *drag_target = nullptr;
         return;
     }
@@ -371,13 +363,9 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
         // enabled relative-mouse mode, and only on_mouse_up clears them, so the
         // host keeps beginEdit open with no endEdit and the DAW holds an
         // automation touch. Close it before bailing.
-        // Full release pipeline (modern + bubble), no click — see the
-        // mid-drag handoff above.
-        if (*drag_target && view_is_in_tree(*drag_target, root))
-            pulp::view::deliver_mouse_up(
-                *root, *drag_target, pt,
-                modifiers_from_ns_flags(event.modifierFlags),
-                static_cast<int>(event.clickCount), pulp::view::MouseUpHost{});
+        pulp::view::deliver_gesture_handoff(
+            *root, *drag_target, pt, modifiers_from_ns_flags(event.modifierFlags),
+            static_cast<int>(event.clickCount));
         *drag_target = nullptr;
         return;
     }
