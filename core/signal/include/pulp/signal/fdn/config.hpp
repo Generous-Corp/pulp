@@ -10,9 +10,19 @@
 // so all five catalog reverbs run byte-identical DSP.
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 
 namespace pulp::signal::fdn {
+
+// Canonical non-finite recovery primitive for the recursive FDN stages. Keep
+// this deliberately narrower than the magnitude ceiling: most stage-local
+// guards only need to stop NaN/Inf propagation, while the tank write boundary
+// separately owns the emergency amplitude clamp.
+template <typename T>
+inline T finite_or_zero(T value) {
+    return std::isfinite(static_cast<double>(value)) ? value : T{0};
+}
 
 // ── Structural constants (topology, not taste) ───────────────────────────
 inline constexpr int kNumChannels = 16;        // FDN lines; Hadamard needs 2^k
@@ -157,6 +167,10 @@ inline constexpr double kEnsembleDepthMs = 1.6;
 inline constexpr double kEnsembleRateMinHz = 0.11;
 inline constexpr double kEnsembleRateMaxHz = 0.83;
 inline constexpr double kEnsembleWetMix = 0.35;
+// The loop saturator is deliberately contractive. Restore a modest amount of
+// its perceived level at the output tap, outside the recursion, so the drive
+// control changes colour rather than reading mainly as a level loss.
+inline constexpr double kDriveMakeupDb = 3.0;
 inline constexpr double kWetLimiterHeadroom = 2.0;  // soft-tanh knee (~ +6 dB)
 
 // Resampling / anti-alias.
@@ -172,9 +186,10 @@ inline constexpr double kTankInputLpFraction = 0.42;
 
 // Sanitization (defense in depth). A 16-line recursive structure needs more
 // than one guard at the output: a single corrupted channel is invisible at the
-// sum until it has already poisoned every line through the matrix, so the
-// non-finite kill and the magnitude ceiling are applied both after the matrix
-// and at the delay-line write.
+// sum until it has already poisoned every line through the matrix. The matrix
+// boundary gets the prompt's narrower overflow clamp; the delay-line write
+// retains the wider emergency ceiling.
+inline constexpr double kPostHadamardCeil = 4.0;
 inline constexpr double kSanityCeil = 10.0;
 
 // Parameter smoothing and control-rate cadence.

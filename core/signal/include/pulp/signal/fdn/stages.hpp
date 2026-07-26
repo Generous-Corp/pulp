@@ -47,8 +47,11 @@ public:
 
     // Returns the input gain to apply, in (0, 1].
     double process(double magnitude) {
+        magnitude = finite_or_zero(magnitude);
         fast_ = snap_to_zero(fast_ + (magnitude - fast_) * fast_coeff_);
         slow_ = snap_to_zero(slow_ + (magnitude - slow_) * slow_coeff_);
+        fast_ = finite_or_zero(fast_);
+        slow_ = finite_or_zero(slow_);
         const double ratio = (fast_ - slow_) / std::max(slow_, 1e-9);
         if (ratio <= 0.0) return 1.0;
         const double t = std::min(ratio / kDuckKnee, 1.0);
