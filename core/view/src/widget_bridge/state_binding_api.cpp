@@ -152,6 +152,28 @@ bool WidgetBridge::add_param_binding(const std::string& widget_id,
                                      ParamBinding::Target target,
                                      const choc::value::Value* transform) {
     if (widget_id.empty() || param_name.empty()) return false;
+    const auto widget = widgets_.find(widget_id);
+    if (widget != widgets_.end()) {
+        if (widget->second == nullptr) return false;
+
+        // Record only bindings the native per-frame service can actually
+        // apply. A custom Canvas may still use getParam/setParam from its own
+        // pointer handlers, but counting it here would claim a declarative
+        // control exists while apply_param_binding() silently has no
+        // compatible value surface. A missing widget remains valid because
+        // scripts may intentionally register bindings before creating views.
+        View* const view = widget->second;
+        const bool supported =
+            target == ParamBinding::Target::meter
+                ? dynamic_cast<Meter*>(view) != nullptr
+                : dynamic_cast<Knob*>(view) != nullptr ||
+                      dynamic_cast<Fader*>(view) != nullptr ||
+                      dynamic_cast<RangeSlider*>(view) != nullptr ||
+                      dynamic_cast<Toggle*>(view) != nullptr ||
+                      dynamic_cast<ProgressBar*>(view) != nullptr;
+        if (!supported) return false;
+    }
+
     state::ParamID id = 0;
     if (!resolve_param_id(param_name, id)) return false;
 
