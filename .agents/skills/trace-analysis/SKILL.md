@@ -298,6 +298,14 @@ PULP_TRACE_SECONDS=45      # timed flush; see below
 the `.pftrace` is written by `stop()`, which otherwise means unloading the
 plug-in you are profiling. The timed flush makes a capture self-completing.
 
+For an SDK-built plug-in, prove that the installed package was configured with
+`PULP_TRACING=ON`; enabling the option only in the plug-in's consumer build
+cannot reconstruct omitted Perfetto targets or headers. A valid traced SDK
+exports the tracing support targets transitively, and the host process—not the
+build shell—must receive `PULP_TRACE_PATH` and `PULP_TRACE_SECONDS`. If the
+plug-in loads but produces no file, distinguish an untraced installed SDK from
+a session that merely has not flushed before changing instrumentation.
+
 ### Always instrument the blocking call
 
 A frame span whose children sum to ~2 ms while the frame itself takes 45 ms
