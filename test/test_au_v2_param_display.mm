@@ -21,15 +21,24 @@
 #include <Foundation/Foundation.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <csignal>
 #include <memory>
+#include <spawn.h>
+#include <stdexcept>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
 #include <tuple>
+#include <unistd.h>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
+
+extern char** environ;
 
 namespace {
 
@@ -180,6 +189,24 @@ void pump_main_run_loop_for(double seconds) {
             beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     }
 }
+
+struct ThrowWhenArmedOnCopy {
+    explicit ThrowWhenArmedOnCopy(std::shared_ptr<bool> armed)
+        : armed(std::move(armed))
+    {
+    }
+
+    ThrowWhenArmedOnCopy(const ThrowWhenArmedOnCopy& other)
+        : armed(other.armed)
+    {
+        if (*armed)
+            throw std::runtime_error("intentional notify copy failure");
+    }
+
+    void operator()(pulp::state::ParamID) const {}
+
+    std::shared_ptr<bool> armed;
+};
 
 }  // namespace
 
@@ -401,6 +428,73 @@ TEST_CASE("AU v2 display-name publisher tolerates reentrant teardown",
     publisher.poll_main_thread();
 
     CHECK(changed == std::vector<pulp::state::ParamID>{kFreqId});
+}
+
+TEST_CASE("AU v2 display-name publisher releases a drain after snapshot failure",
+          "[au][au-v2][params][metadata][main-thread]") {
+    constexpr const char* kChildEnvironment =
+        "PULP_AU_DISPLAY_DRAIN_EXCEPTION_CHILD";
+    if (std::getenv(kChildEnvironment)) {
+        pulp::state::StateStore store;
+        store.add_parameter({.id = kFreqId, .name = "Freq"});
+
+        auto armed = std::make_shared<bool>(false);
+        pulp::format::au::ParameterDisplayNamePublisher::Notify notify{
+            ThrowWhenArmedOnCopy{armed}};
+        pulp::format::au::ParameterDisplayNamePublisher publisher;
+        publisher.start(store, std::move(notify));
+
+        REQUIRE(store.set_parameter_display_name(kFreqId, "Cutoff"));
+        *armed = true;
+        REQUIRE_THROWS_AS(publisher.poll_main_thread(), std::runtime_error);
+
+        // Before the drain's lifetime was guarded from its increment, the
+        // throwing std::function copy leaked drains_in_flight and this
+        // teardown waited forever.
+        publisher.stop();
+        return;
+    }
+
+    const char* executable =
+        [[[NSBundle mainBundle] executablePath] fileSystemRepresentation];
+    REQUIRE(executable != nullptr);
+    std::string executable_path(executable);
+    std::string test_name(
+        "AU v2 display-name publisher releases a drain after snapshot failure");
+    char* child_argv[] = {
+        executable_path.data(),
+        test_name.data(),
+        nullptr,
+    };
+
+    REQUIRE(::setenv(kChildEnvironment, "1", 1) == 0);
+    pid_t child = -1;
+    const int spawn_result = ::posix_spawn(
+        &child, executable_path.c_str(), nullptr, nullptr, child_argv, environ);
+    REQUIRE(::unsetenv(kChildEnvironment) == 0);
+    REQUIRE(spawn_result == 0);
+
+    int status = 0;
+    bool exited = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const pid_t waited = ::waitpid(child, &status, WNOHANG);
+        REQUIRE(waited >= 0);
+        if (waited == child) {
+            exited = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!exited) {
+        (void)::kill(child, SIGKILL);
+        (void)::waitpid(child, &status, 0);
+    }
+
+    REQUIRE(exited);
+    REQUIRE(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
 }
 
 TEST_CASE("AU v2 delayed display-name task is inert after adapter destruction",

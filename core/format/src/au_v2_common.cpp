@@ -295,6 +295,25 @@ struct ParameterDisplayNamePublisher::Impl {
         static thread_local DrainScope* current;
     };
 
+    struct InFlightDrain {
+        explicit InFlightDrain(std::shared_ptr<SharedState> shared_state)
+            : shared(std::move(shared_state))
+        {
+        }
+
+        InFlightDrain(const InFlightDrain&) = delete;
+        InFlightDrain& operator=(const InFlightDrain&) = delete;
+
+        ~InFlightDrain() noexcept {
+            std::lock_guard lock(shared->mutex);
+            --shared->drains_in_flight;
+            if (shared->drains_in_flight == 0)
+                shared->idle.notify_all();
+        }
+
+        std::shared_ptr<SharedState> shared;
+    };
+
     std::shared_ptr<SharedState> state;
     events::MainThreadDispatcher::Token main_thread_token = 0;
 
@@ -319,6 +338,7 @@ struct ParameterDisplayNamePublisher::Impl {
             published_revision = shared->revision;
             ++shared->drains_in_flight;
         }
+        InFlightDrain in_flight(shared);
         DrainScope drain_scope(shared.get());
 
         const std::uint64_t current_revision =
@@ -360,27 +380,15 @@ struct ParameterDisplayNamePublisher::Impl {
             }
         }
 
-        auto release_drain = [&] {
-            std::lock_guard lock(shared->mutex);
-            --shared->drains_in_flight;
-            if (shared->drains_in_flight == 0)
-                shared->idle.notify_all();
-        };
-        try {
-            if (notify) {
-                for (state::ParamID id : changed_ids) {
-                    {
-                        std::lock_guard lock(shared->mutex);
-                        if (!shared->active) break;
-                    }
-                    notify(id);
+        if (notify) {
+            for (state::ParamID id : changed_ids) {
+                {
+                    std::lock_guard lock(shared->mutex);
+                    if (!shared->active) break;
                 }
+                notify(id);
             }
-        } catch (...) {
-            release_drain();
-            throw;
         }
-        release_drain();
         return revision_advanced;
     }
 
