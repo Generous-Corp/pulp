@@ -17,10 +17,16 @@
 # so jobs only land here when a workflow explicitly routes to it. Promote to the
 # pooled label once a pilot is clean.
 #
+# HOST LABEL: every declared Linux lane pins a machine (`pulp-host-macstudio` /
+# `pulp-host-m5`), so this box must say which one it is — via --host-tag or
+# PULP_RUNNER_HOST_TAG. Registration is refused when it cannot be determined,
+# because a runner missing that label is selectable by nothing and silent about
+# it. Declare it once in the LaunchAgent plist.
+#
 # Usage:
-#   tart-runner-linux.sh                 # one ephemeral job then exit (pilot default)
-#   tart-runner-linux.sh --loop          # keep serving jobs (LaunchAgent uses this)
-#   tart-runner-linux.sh --labels self-hosted,Linux,ARM64,pulp-build
+#   tart-runner-linux.sh --host-tag m5           # one ephemeral job then exit
+#   tart-runner-linux.sh --host-tag m5 --loop    # keep serving (LaunchAgent uses this)
+#   tart-runner-linux.sh --labels self-hosted,Linux,ARM64,pulp-build-linux,pulp-host-m5
 set -euo pipefail
 
 # TART_HOME comes from the host, not from this repo — see tools/ci/lib/tart-home.sh.
@@ -50,14 +56,29 @@ pulp_require_tart_home
 command -v tart >/dev/null 2>&1 || die "tart not installed"
 command -v gh   >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT config)"
 
+HOST_TAG="${PULP_RUNNER_HOST_TAG:-}"
+
 while [ $# -gt 0 ]; do case "$1" in
   --loop) LOOP=1; shift;;
   --once) LOOP=0; shift;;
+  --host-tag) HOST_TAG="$2"; shift 2;;
   --golden) GOLDEN="$2"; shift 2;;
   --labels) LABELS="$2"; shift 2;;
   --repo) REPO="$2"; shift 2;;
   *) die "unknown arg: $1";;
 esac; done
+
+# Refuse to register a runner no lane can select. Every declared Linux lane pins
+# a host (`pulp-host-*`), and GitHub requires a runner to carry EVERY requested
+# label — so a set without one yields a runner that reports online and idle
+# forever while Linux jobs queue against a lane it cannot serve. Nothing errors:
+# not the agent, not the job, not the API, which is why this is checked here
+# rather than left to be noticed. Resolves the host label from an explicit
+# declaration (--host-tag / PULP_RUNNER_HOST_TAG) or an exactly-matching
+# `shipyard runner tag`; see tools/scripts/runner_labels.py.
+LABELS="$("$(dirname "${BASH_SOURCE[0]}")/../scripts/runner_labels.py" \
+  --platform linux --labels "$LABELS" ${HOST_TAG:+--host-tag "$HOST_TAG"})" \
+  || die "refusing to register an unselectable runner (see above)"
 
 # Coarse "is there work waiting?" gate for --loop: count queued Build-and-Test
 # runs. 0 on any gh failure (treat as "no work" so a flaky API doesn't spin VMs).

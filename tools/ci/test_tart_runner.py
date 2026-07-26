@@ -290,6 +290,10 @@ class SupervisorSurvivesTransientFailureTests(unittest.TestCase):
                 # Windows supervisor preconditions (fatal, checked before the
                 # loop) — satisfy them so the loop itself is what's under test.
                 "TARTCI_WIN_GOLDEN": str(Path(td, "golden.qcow2")),
+                # Same reason: the Linux/Windows lanes pin a host, so their
+                # supervisors refuse to register without a declared host tag.
+                # Loop resilience is what these tests are about, not routing.
+                "PULP_RUNNER_HOST_TAG": "m5",
             }
             Path(td, "golden.qcow2").write_text("stub", encoding="utf-8")
             proc = subprocess.Popen(

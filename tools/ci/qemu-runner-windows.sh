@@ -11,10 +11,16 @@
 #
 # Pilot-safe by default: label `pulp-build-windows` (NOT a required check).
 #
+# HOST LABEL: every declared Windows lane pins a machine (`pulp-host-macstudio` /
+# `pulp-host-m5`), so this box must say which one it is — via --host-tag or
+# PULP_RUNNER_HOST_TAG. Registration is refused when it cannot be determined,
+# because a runner missing that label is selectable by nothing and silent about
+# it. Declare it once in the LaunchAgent plist.
+#
 # Usage:
-#   qemu-runner-windows.sh                 # one ephemeral job then exit (pilot)
-#   qemu-runner-windows.sh --loop          # keep serving (LaunchAgent uses this)
-#   qemu-runner-windows.sh --labels self-hosted,Windows,ARM64,pulp-build
+#   qemu-runner-windows.sh --host-tag m5           # one ephemeral job then exit
+#   qemu-runner-windows.sh --host-tag m5 --loop    # keep serving (LaunchAgent uses this)
+#   qemu-runner-windows.sh --labels self-hosted,Windows,ARM64,pulp-build-windows,pulp-host-m5
 set -euo pipefail
 
 GOLDEN="${TARTCI_WIN_GOLDEN:-${TARTCI_GOLDENS:-$HOME/VMs/goldens}/pulp-windows-build-24h2-arm64-2026-06-02.qcow2}"
@@ -40,14 +46,26 @@ soft_fail(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; return 1; }
 command -v qemu-system-aarch64 >/dev/null 2>&1 || die "qemu not installed"
 command -v gh >/dev/null 2>&1 || die "gh not installed / authed (need admin to mint JIT)"
 
+HOST_TAG="${PULP_RUNNER_HOST_TAG:-}"
+
 while [ $# -gt 0 ]; do case "$1" in
   --loop) LOOP=1; shift;;
   --once) LOOP=0; shift;;
+  --host-tag) HOST_TAG="$2"; shift 2;;
   --golden) GOLDEN="$2"; shift 2;;
   --labels) LABELS="$2"; shift 2;;
   --repo) REPO="$2"; shift 2;;
   *) die "unknown arg: $1";;
 esac; done
+
+# Refuse to register a runner no lane can select — see the HOST LABEL note above
+# and tools/scripts/runner_labels.py. GitHub requires a runner to carry EVERY
+# requested label, so a set without the host label yields a runner that reports
+# online and idle forever while Windows jobs queue against a lane it cannot
+# serve, with nothing anywhere reporting an error.
+LABELS="$("$(dirname "${BASH_SOURCE[0]}")/../scripts/runner_labels.py" \
+  --platform windows --labels "$LABELS" ${HOST_TAG:+--host-tag "$HOST_TAG"})" \
+  || die "refusing to register an unselectable runner (see above)"
 
 [ -f "$GOLDEN" ] || die "golden not found: $GOLDEN (set TARTCI_WIN_GOLDEN)"
 FW=""; for c in /opt/homebrew/share/qemu/edk2-aarch64-code.fd /Applications/UTM.app/Contents/Resources/qemu/edk2-aarch64-code.fd; do [ -f "$c" ] && FW="$c" && break; done
