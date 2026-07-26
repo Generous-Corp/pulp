@@ -1108,3 +1108,43 @@ TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket"
     CHECK(probe->modern_release == 1);
     CHECK(bubbled_release == 1);
 }
+
+TEST_CASE("mac harness: a throwing gesture handoff still drops pointer capture",
+          "[mac][platform-harness][gesture]") {
+    struct ThrowingProbe final : View {
+        int ups = 0;
+        void on_mouse_up(Point) override {
+            ++ups;
+            throw 42;
+        }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<ThrowingProbe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    auto pan = std::make_unique<pulp::view::PanRecognizer>();
+    pan->set_min_distance(60.0f);
+    probe->add_gesture_recognizer(std::move(pan));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 40.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
+
+    // The host catches the callback exception, but capture must already be
+    // gone: the recognizer-owned release cannot retry the handoff.
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
+}

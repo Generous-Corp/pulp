@@ -589,11 +589,12 @@ static void install_app_menu(NSString* appName) {
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) {
                 // Claim landed after the press was delivered — close that
                 // bracket (contract in pointer_dispatch.hpp) and drop it.
+                auto* handoff_target = _dragTarget;
+                _dragTarget = nullptr;
                 pulp::view::deliver_gesture_handoff(
-                    *self.rootView, _dragTarget, pt,
+                    *self.rootView, handoff_target, pt,
                     modifiers_from_ns_flags(event.modifierFlags),
                     static_cast<int>(event.clickCount));
-                _dragTarget = nullptr;
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
                 return;
@@ -650,11 +651,12 @@ static void install_app_menu(NSString* appName) {
             if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) {
                 // A double-tap claims on its SECOND release, by which point
                 // the press was delivered; same bracket rule as the drag.
+                auto* handoff_target = _dragTarget;
+                _dragTarget = nullptr;
                 pulp::view::deliver_gesture_handoff(
-                    *self.rootView, _dragTarget, pt,
+                    *self.rootView, handoff_target, pt,
                     modifiers_from_ns_flags(event.modifierFlags),
                     static_cast<int>(event.clickCount));
-                _dragTarget = nullptr;
                 [self setNeedsDisplay:YES];
                 return;
             }

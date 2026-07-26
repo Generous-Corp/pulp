@@ -326,9 +326,10 @@ void pulp_plugin_mouse_drag(pulp::view::View* root, NSEvent* event,
         // cannot silently resume dragging (with a position jump) if the gesture
         // later goes terminal.
         //
-        pulp::view::deliver_gesture_handoff(*root, *drag_target, pt, mods,
-                                            static_cast<int>(event.clickCount));
+        auto* handoff_target = *drag_target;
         *drag_target = nullptr;
+        pulp::view::deliver_gesture_handoff(*root, handoff_target, pt, mods,
+                                            static_cast<int>(event.clickCount));
         return;
     }
     if (!*drag_target) return;
@@ -363,10 +364,11 @@ void pulp_plugin_mouse_up(pulp::view::View* root, NSEvent* event,
         // enabled relative-mouse mode, and only on_mouse_up clears them, so the
         // host keeps beginEdit open with no endEdit and the DAW holds an
         // automation touch. Close it before bailing.
-        pulp::view::deliver_gesture_handoff(
-            *root, *drag_target, pt, modifiers_from_ns_flags(event.modifierFlags),
-            static_cast<int>(event.clickCount));
+        auto* handoff_target = *drag_target;
         *drag_target = nullptr;
+        pulp::view::deliver_gesture_handoff(
+            *root, handoff_target, pt, modifiers_from_ns_flags(event.modifierFlags),
+            static_cast<int>(event.clickCount));
         return;
     }
     if (!*drag_target) return;
