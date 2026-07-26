@@ -534,6 +534,9 @@ class Track {
     ItemId active_take_lane_id() const noexcept;
     const std::optional<TrackFreeze>& freeze() const noexcept;
     std::size_t shared_index_nodes_with(const Track& other) const;
+    // True when both snapshots are proven to contain exactly the same clip
+    // identities. Clip content/timing may differ.
+    bool shares_clip_membership_with(const Track& other) const noexcept;
     bool shares_storage_with(const Track& other) const noexcept;
     static TrackIndexStats index_stats() noexcept;
 

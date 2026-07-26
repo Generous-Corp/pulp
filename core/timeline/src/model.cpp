@@ -754,7 +754,7 @@ struct Sequence::Data {
     std::vector<SequenceRegion> regions;
     ChordScaleLane chord_scale_lane;
     GrooveTemplate groove;
-    std::vector<Scene> scenes;
+    std::shared_ptr<const std::vector<Scene>> scenes;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -864,7 +864,8 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{id, std::move(input.name), musical_duration, absolute_duration, std::move(tracks),
              std::move(by_id), std::move(markers), std::move(regions),
-             std::move(*input.chord_scale_lane), std::move(*input.groove), std::move(scenes)}))));
+             std::move(*input.chord_scale_lane), std::move(*input.groove),
+             std::make_shared<const std::vector<Scene>>(std::move(scenes))}))));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -897,7 +898,7 @@ std::span<const SequenceRegion> Sequence::regions() const noexcept {
     return data_->regions;
 }
 std::span<const Scene> Sequence::scenes() const noexcept {
-    return data_->scenes;
+    return *data_->scenes;
 }
 const SequenceMarker* Sequence::find_marker(ItemId id) const noexcept {
     const auto found = std::find_if(data_->markers.begin(), data_->markers.end(),
@@ -910,12 +911,12 @@ const SequenceRegion* Sequence::find_region(ItemId id) const noexcept {
     return found == data_->regions.end() ? nullptr : &*found;
 }
 const Scene* Sequence::find_scene(ItemId id) const noexcept {
-    const auto found = std::find_if(data_->scenes.begin(), data_->scenes.end(),
+    const auto found = std::find_if(data_->scenes->begin(), data_->scenes->end(),
                                     [id](const Scene& scene) { return scene.id == id; });
-    return found == data_->scenes.end() ? nullptr : &*found;
+    return found == data_->scenes->end() ? nullptr : &*found;
 }
 const Slot* Sequence::find_slot(ItemId id) const noexcept {
-    for (const auto& scene : data_->scenes)
+    for (const auto& scene : *data_->scenes)
         if (const auto found = std::find_if(scene.slots.begin(), scene.slots.end(),
                                             [id](const Slot& slot) { return slot.id == id; });
             found != scene.slots.end())
@@ -978,12 +979,13 @@ runtime::Result<Sequence, ModelError> Sequence::with_scenes(std::vector<Scene> s
     return runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove, std::move(scenes)})));
+             data_->chord_scale_lane, data_->groove,
+             std::make_shared<const std::vector<Scene>>(std::move(scenes))})));
 }
 
 runtime::Result<Sequence, ModelError>
 Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const {
-    auto scenes = data_->scenes;
+    auto scenes = *data_->scenes;
     auto position = scenes.end();
     if (before_scene_id) {
         position = std::find_if(scenes.begin(), scenes.end(), [&](const Scene& candidate) {
@@ -997,7 +999,7 @@ Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const
 }
 
 runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
-    auto scenes = data_->scenes;
+    auto scenes = *data_->scenes;
     const auto found = std::find_if(scenes.begin(), scenes.end(),
                                     [id](const Scene& scene) { return scene.id == id; });
     if (found == scenes.end())
@@ -1008,7 +1010,7 @@ runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
 
 runtime::Result<Sequence, ModelError>
 Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_slot_id) const {
-    auto scenes = data_->scenes;
+    auto scenes = *data_->scenes;
     const auto found = std::find_if(scenes.begin(), scenes.end(), [scene_id](const Scene& scene) {
         return scene.id == scene_id;
     });
@@ -1027,7 +1029,7 @@ Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_s
 }
 
 runtime::Result<Sequence, ModelError> Sequence::erase_slot(ItemId scene_id, ItemId slot_id) const {
-    auto scenes = data_->scenes;
+    auto scenes = *data_->scenes;
     const auto scene = std::find_if(scenes.begin(), scenes.end(), [scene_id](const Scene& value) {
         return value.id == scene_id;
     });
@@ -1064,11 +1066,13 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     // the invariant without rebuilding and sorting the whole sequence's clip
     // ID set for edits that do not change clip membership.
     const auto& previous_track = data_->tracks[found->second];
-    for (const auto& scene : data_->scenes) {
-        for (const auto& slot : scene.slots) {
-            if (slot.clip_id.valid() && previous_track.find_clip(slot.clip_id) &&
-                !track.find_clip(slot.clip_id))
-                return fail<Sequence>(ModelErrorCode::MissingItem, slot.clip_id, slot.id);
+    if (!previous_track.shares_clip_membership_with(track)) {
+        for (const auto& scene : *data_->scenes) {
+            for (const auto& slot : scene.slots) {
+                if (slot.clip_id.valid() && previous_track.find_clip(slot.clip_id) &&
+                    !track.find_clip(slot.clip_id))
+                    return fail<Sequence>(ModelErrorCode::MissingItem, slot.clip_id, slot.id);
+            }
         }
     }
     auto tracks = data_->tracks;

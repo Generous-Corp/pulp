@@ -150,12 +150,30 @@ TEST_CASE("Timeline track replacement preserves launcher references without a se
         .scenes = {scene},
     }));
 
-    auto timing_only =
-        take_value(Track::create({6}, "first", {clip({4}, 50, 100), clip({5}, 200, 100)}));
+    auto timing_only = take_value(first_track.replace_clip(clip({5}, 200, 100)));
+    REQUIRE(first_track.shares_clip_membership_with(timing_only));
+    REQUIRE(first_track.shares_clip_membership_with(first_track.with_record_armed(true)));
+    REQUIRE_FALSE(first_track.shares_clip_membership_with(
+        take_value(first_track.insert_clip(clip({10}, 200, 100)))));
+    REQUIRE_FALSE(first_track.shares_clip_membership_with(
+        take_value(first_track.erase_clip({5}))));
+    const auto* original_scene_storage = sequence.scenes().data();
     auto replaced = sequence.replace_track(std::move(timing_only));
     REQUIRE(replaced);
+    REQUIRE(replaced->scenes().data() == original_scene_storage);
     REQUIRE(replaced->find_scene({20})->slots[0].clip_id == ItemId{4});
     REQUIRE(replaced->find_scene({20})->slots[1].clip_id == ItemId{9});
+
+    auto annotated = take_value(sequence.insert_marker({{24}, "start", {0}, {}}));
+    REQUIRE(annotated.scenes().data() == original_scene_storage);
+    auto with_lane = sequence.with_chord_scale_lane(take_value(ChordScaleLane::create({})));
+    REQUIRE(with_lane.scenes().data() == original_scene_storage);
+    auto with_groove = sequence.with_groove(take_value(GrooveTemplate::create({})));
+    REQUIRE(with_groove.scenes().data() == original_scene_storage);
+
+    auto with_extra_scene = replaced->insert_scene(Scene{{23}, "other", {}});
+    REQUIRE(with_extra_scene);
+    REQUIRE(with_extra_scene->scenes().data() != original_scene_storage);
 
     auto removes_referenced_clip = take_value(Track::create({6}, "first", {clip({5}, 200, 100)}));
     auto rejected = sequence.replace_track(std::move(removes_referenced_clip));
