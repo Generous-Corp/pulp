@@ -602,6 +602,18 @@ static void install_app_menu(NSString* appName) {
                 // modern event with is_down == false, so a legacy-only close
                 // sticks its scrollbar to the mouse. Empty MouseUpHost — a
                 // gesture handoff is not a click.
+                //
+                // A takeover is arguably a CANCELLATION (W3C fires
+                // pointercancel, and `MouseEvent::is_cancelled` /
+                // `View::on_mouse_cancel` exist for it), which would let a
+                // cancellation-aware control roll its partial drag back rather
+                // than commit it. It stays a release because that is what every
+                // path does today — `View::simulate_drag` closes its own
+                // mid-loop claim with this same verb — and splitting the hosts
+                // off from the portable simulation would reintroduce the
+                // host-vs-headless divergence this seam exists to remove.
+                // Changing it means teaching `deliver_mouse_up` a cancel mode
+                // and moving all three call paths together.
                 if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
                     pulp::view::deliver_mouse_up(
                         *self.rootView, _dragTarget, pt,
