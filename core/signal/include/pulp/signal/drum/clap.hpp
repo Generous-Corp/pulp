@@ -29,10 +29,11 @@ namespace pulp::signal::drum {
 /// The schedule is computed at `note_on` and is deterministic, so a clap
 /// renders identically for a given parameter set.
 ///
-/// This voice is mono. The alternating left-right placement some hardware
-/// claps use is width gloss rather than part of the clap's identity -- the
-/// burst timing and the tail fusion are what make it a clap, and both survive
-/// a mono sum -- so panning belongs to whatever places the voice.
+/// `process()` is the canonical mono realization. `process_stereo()` places
+/// successive bursts on alternating sides while keeping the tail and optional
+/// body in the centre. The two stereo channels sum to the canonical mono
+/// signal sample for sample, so a host can collapse the result without a level
+/// or timbre change.
 ///
 /// What a mono sum does cost is decorrelation. Identically spaced, identically
 /// signed bursts are coherent with each other, so summing them combs: the train
@@ -82,6 +83,12 @@ public:
     /// other's comb even at exactly even spacing.
     void set_alternate_polarity(bool alternate) { alternate_polarity_ = alternate; }
 
+    /// Alternating burst width, 0 for mono through 1 for hard left/right. The
+    /// room tail and optional tonal body remain centred at every setting.
+    void set_stereo_width(double width) {
+        stereo_width_ = std::clamp(width, 0.0, 1.0);
+    }
+
     /// Level and decay of the tail that fuses the train.
     void set_tail_level(double level) { tail_level_ = std::max(level, 0.0); }
     void set_tail_decay_ms(double ms) { tail_decay_ms_ = std::clamp(ms, 10.0, 3000.0); }
@@ -123,6 +130,7 @@ protected:
         samples_until_burst_ = 0;
         burst_gain_ = 1.0;
         burst_sign_ = 1.0;
+        burst_pan_ = -1.0;
         jitter_state_ = kJitterSeed;
     }
 
@@ -157,6 +165,7 @@ protected:
         // from the same instant so it is already present under burst one.
         burst_gain_ = 1.0;
         burst_sign_ = 1.0;
+        burst_pan_ = -1.0;
         jitter_state_ = kJitterSeed;
         burst_env_.trigger();
         tail_env_.trigger();
@@ -171,36 +180,69 @@ protected:
 
     void render_add(float* out, int num_samples) override {
         for (int i = 0; i < num_samples; ++i) {
-            if (next_burst_ < burst_count_) {
-                if (--samples_until_burst_ <= 0) {
-                    burst_gain_ *= falloff_;
-                    if (alternate_polarity_) burst_sign_ = -burst_sign_;
-                    burst_env_.trigger();
-                    ++next_burst_;
-                    samples_until_burst_ = next_gap();
-                }
-            }
+            out[i] += render_frame().mono;
+        }
+    }
 
-            const double filtered = filter_.process(noise_.process());
-            const double train =
-                filtered * burst_env_.process() * burst_gain_ * burst_sign_;
-            const double tail_env = tail_env_.process();
-            const double room = filtered * tail_env * tail_level_;
-
-            double body = 0.0;
-            if (body_level_ > 0.0) {
-                body_phase_ += body_hz_ / sample_rate();
-                if (body_phase_ >= 1.0) body_phase_ -= std::floor(body_phase_);
-                body = std::sin(2.0 * 3.14159265358979323846 * body_phase_) * tail_env *
-                       body_level_;
-            }
-
-            out[i] += static_cast<float>(
-                output_.process(static_cast<float>(train + room + body)) * velocity_gain_);
+    void render_add_stereo(float* left, float* right,
+                           int num_samples) override {
+        for (int i = 0; i < num_samples; ++i) {
+            const RenderFrame frame = render_frame();
+            const double pan = frame.burst_pan * stereo_width_;
+            const double burst_left = 0.5 * (1.0 - pan);
+            const double burst_right = 0.5 * (1.0 + pan);
+            const double centre_share = 1.0 - frame.burst_share;
+            left[i] += static_cast<float>(
+                frame.mono *
+                (frame.burst_share * burst_left + 0.5 * centre_share));
+            right[i] += static_cast<float>(
+                frame.mono *
+                (frame.burst_share * burst_right + 0.5 * centre_share));
         }
     }
 
 private:
+    struct RenderFrame {
+        float mono = 0.0f;
+        double burst_share = 0.0;
+        double burst_pan = 0.0;
+    };
+
+    RenderFrame render_frame() {
+        if (next_burst_ < burst_count_ && --samples_until_burst_ <= 0) {
+            burst_gain_ *= falloff_;
+            if (alternate_polarity_) burst_sign_ = -burst_sign_;
+            burst_pan_ = (next_burst_ & 1) != 0 ? 1.0 : -1.0;
+            burst_env_.trigger();
+            ++next_burst_;
+            samples_until_burst_ = next_gap();
+        }
+
+        const double filtered = filter_.process(noise_.process());
+        const double train =
+            filtered * burst_env_.process() * burst_gain_ * burst_sign_;
+        const double tail_env = tail_env_.process();
+        const double room = filtered * tail_env * tail_level_;
+
+        double body = 0.0;
+        if (body_level_ > 0.0) {
+            body_phase_ += body_hz_ / sample_rate();
+            if (body_phase_ >= 1.0) body_phase_ -= std::floor(body_phase_);
+            body = std::sin(2.0 * 3.14159265358979323846 * body_phase_) *
+                   tail_env * body_level_;
+        }
+
+        const double centre = room + body;
+        const double magnitude = std::fabs(train) + std::fabs(centre);
+        RenderFrame frame;
+        frame.mono = static_cast<float>(
+            output_.process(static_cast<float>(train + centre)) * velocity_gain_);
+        frame.burst_share =
+            magnitude > 1.0e-12 ? std::fabs(train) / magnitude : 0.0;
+        frame.burst_pan = burst_pan_;
+        return frame;
+    }
+
     // A fixed seed for the gap sequence, kept separate from the voice's audio
     // noise so that changing the jitter does not also change the noise the
     // bursts are made of.
@@ -227,6 +269,7 @@ private:
     // a control turned on to stop sounding wrong is a clap with a bad default.
     double gap_jitter_ = 0.35;
     bool alternate_polarity_ = false;
+    double stereo_width_ = 1.0;
     double tail_level_ = 0.35;
     double tail_decay_ms_ = 180.0;
     double cutoff_hz_ = 1400.0;
@@ -249,6 +292,7 @@ private:
     int samples_until_burst_ = 0;
     double burst_gain_ = 1.0;
     double burst_sign_ = 1.0;
+    double burst_pan_ = -1.0;
     std::uint32_t jitter_state_ = kJitterSeed;
 };
 

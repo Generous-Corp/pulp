@@ -136,6 +136,40 @@ public:
         if (choke_gain_ <= 0.0f) reset();
     }
 
+    /// Adds a stereo rendering to `left` and `right`.
+    ///
+    /// Voices that do not provide a stereo realization are placed in the
+    /// centre with half their mono signal in each channel, so summing the two
+    /// channels reproduces `process()` exactly. A stereo-capable voice may
+    /// override `render_add_stereo`, but the shared choke fade remains here.
+    void process_stereo(float* left, float* right, int num_samples) {
+        if (left == nullptr || right == nullptr || num_samples <= 0 ||
+            !is_active())
+            return;
+
+        if (!choking_) {
+            render_add_stereo(left, right, num_samples);
+            return;
+        }
+
+        int done = 0;
+        while (done < num_samples) {
+            const int n = std::min(kScratchSamples, num_samples - done);
+            std::fill(stereo_left_scratch_, stereo_left_scratch_ + n, 0.0f);
+            std::fill(stereo_right_scratch_, stereo_right_scratch_ + n, 0.0f);
+            render_add_stereo(stereo_left_scratch_, stereo_right_scratch_, n);
+            for (int i = 0; i < n; ++i) {
+                left[done + i] += stereo_left_scratch_[i] * choke_gain_;
+                right[done + i] += stereo_right_scratch_[i] * choke_gain_;
+                choke_gain_ = std::max(choke_gain_ - choke_step_, 0.0f);
+            }
+            done += n;
+            if (choke_gain_ <= 0.0f) break;
+        }
+
+        if (choke_gain_ <= 0.0f) reset();
+    }
+
 protected:
     /// Sizes buffers and fixes coefficients. The only hook allowed to
     /// allocate.
@@ -153,6 +187,24 @@ protected:
     /// Adds the voice's output into `out`. Must add, never assign.
     virtual void render_add(float* out, int num_samples) = 0;
 
+    /// Optional stereo realization. The default is centre-panned and preserves
+    /// exact mono-sum equivalence.
+    virtual void render_add_stereo(float* left, float* right,
+                                   int num_samples) {
+        int done = 0;
+        while (done < num_samples) {
+            const int n = std::min(kScratchSamples, num_samples - done);
+            std::fill(mono_stereo_scratch_, mono_stereo_scratch_ + n, 0.0f);
+            render_add(mono_stereo_scratch_, n);
+            for (int i = 0; i < n; ++i) {
+                const float centred = 0.5f * mono_stereo_scratch_[i];
+                left[done + i] += centred;
+                right[done + i] += centred;
+            }
+            done += n;
+        }
+    }
+
 private:
     // 256 samples is longer than any block a plugin host is likely to ask for
     // in the low-latency configurations where choking matters, and small
@@ -167,6 +219,9 @@ private:
     float choke_gain_ = 1.0f;
     float choke_step_ = 1.0f;
     float scratch_[kScratchSamples]{};
+    float mono_stereo_scratch_[kScratchSamples]{};
+    float stereo_left_scratch_[kScratchSamples]{};
+    float stereo_right_scratch_[kScratchSamples]{};
 };
 
 }  // namespace pulp::signal::drum

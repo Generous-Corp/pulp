@@ -11,6 +11,7 @@
 // The lifecycle rules the base class enforces are covered once, in
 // test_drum_kick.cpp, against the kick; the suites here assume them.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "harness/rt_allocation_probe.hpp"
@@ -58,6 +59,24 @@ std::vector<float> render(Voice& voice, int num_samples, int block = 64) {
 std::vector<float> hit(Voice& voice, float velocity, int num_samples) {
     voice.note_on(velocity);
     return render(voice, num_samples);
+}
+
+struct StereoRender {
+    std::vector<float> left;
+    std::vector<float> right;
+};
+
+StereoRender stereo_hit(Voice& voice, float velocity, int num_samples,
+                        int block = 64) {
+    StereoRender result{
+        std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f),
+        std::vector<float>(static_cast<std::size_t>(num_samples), 0.0f)};
+    voice.note_on(velocity);
+    for (int i = 0; i < num_samples; i += block) {
+        voice.process_stereo(result.left.data() + i, result.right.data() + i,
+                             std::min(block, num_samples - i));
+    }
+    return result;
 }
 
 double peak(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0) {
@@ -659,6 +678,78 @@ TEST_CASE("Alternating polarity flips every other burst",
     REQUIRE(correlation < 0.0);
 }
 
+TEST_CASE("Clap stereo alternates bursts and preserves the mono sum",
+          "[signal][drum][clap][stereo]") {
+    auto configure = [](ClapVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_burst_count(4);
+        voice.set_burst_spacing_ms(12.0);
+        voice.set_burst_decay_ms(3.0);
+        voice.set_burst_falloff(1.0);
+        voice.set_tail_level(0.0);
+        voice.set_gap_jitter(0.0);
+        voice.set_stereo_width(1.0);
+    };
+
+    ClapVoice mono_voice;
+    configure(mono_voice);
+    const auto mono = hit(mono_voice, 1.0f, 6000);
+
+    ClapVoice stereo_voice;
+    configure(stereo_voice);
+    const auto stereo = stereo_hit(stereo_voice, 1.0f, 6000);
+
+    REQUIRE(mono.size() == stereo.left.size());
+    for (std::size_t i = 0; i < mono.size(); ++i) {
+        REQUIRE(stereo.left[i] + stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+    }
+
+    const std::size_t spacing = static_cast<std::size_t>(0.012 * kFs);
+    auto channel_energy = [](const std::vector<float>& channel,
+                             std::size_t burst) {
+        double energy = 0.0;
+        const std::size_t begin = burst * spacing;
+        const std::size_t end = std::min(begin + spacing, channel.size());
+        for (std::size_t i = begin; i < end; ++i)
+            energy += static_cast<double>(channel[i]) * channel[i];
+        return energy;
+    };
+    for (std::size_t burst = 0; burst < 4; ++burst) {
+        const double left = channel_energy(stereo.left, burst);
+        const double right = channel_energy(stereo.right, burst);
+        INFO("burst " << burst);
+        if ((burst & 1u) == 0)
+            REQUIRE(left > right * 100.0);
+        else
+            REQUIRE(right > left * 100.0);
+    }
+}
+
+TEST_CASE("Clap stereo keeps its room tail centred",
+          "[signal][drum][clap][stereo]") {
+    ClapVoice voice;
+    voice.prepare(kFs);
+    voice.set_burst_count(1);
+    voice.set_burst_decay_ms(1.0);
+    voice.set_tail_level(1.0);
+    voice.set_tail_decay_ms(300.0);
+    voice.set_stereo_width(1.0);
+
+    const auto stereo = stereo_hit(voice, 1.0f, 12000);
+    const std::size_t tail_begin = static_cast<std::size_t>(0.050 * kFs);
+    double difference = 0.0;
+    double level = 0.0;
+    for (std::size_t i = tail_begin; i < stereo.left.size(); ++i) {
+        difference += std::fabs(static_cast<double>(stereo.left[i]) -
+                                stereo.right[i]);
+        level += std::fabs(static_cast<double>(stereo.left[i])) +
+                 std::fabs(static_cast<double>(stereo.right[i]));
+    }
+    REQUIRE(level > 1.0e-3);
+    REQUIRE(difference < level * 1.0e-4);
+}
+
 TEST_CASE("A clap renders identically for the same parameters",
           "[signal][drum][clap]") {
     ClapVoice voice;
@@ -1181,6 +1272,28 @@ TEST_CASE("The voices and the kit allocate nothing on the audio thread",
         allocations = probe.allocation_count();
     }
 
+    REQUIRE(allocations == 0);
+}
+
+TEST_CASE("Stereo drum rendering and choking allocate nothing",
+          "[signal][drum][stereo][rt-safety]") {
+    ClapVoice clap;
+    clap.prepare(kFs);
+    clap.set_burst_count(ClapVoice::max_bursts);
+    std::vector<float> left(1024, 0.0f);
+    std::vector<float> right(1024, 0.0f);
+
+    std::size_t allocations = 0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        clap.note_on(1.0f);
+        clap.process_stereo(left.data(), right.data(),
+                            static_cast<int>(left.size()));
+        clap.choke(4.0f);
+        clap.process_stereo(left.data(), right.data(),
+                            static_cast<int>(left.size()));
+        allocations = probe.allocation_count();
+    }
     REQUIRE(allocations == 0);
 }
 

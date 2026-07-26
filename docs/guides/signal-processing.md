@@ -768,6 +768,13 @@ cut. `prepare()` creates the FIR storage; quality changes and the audio path
 are allocation-free, but a quality change resets the filter and lo-fi clock
 and therefore belongs outside the audio callback.
 
+Drum voices expose additive mono `process()` and additive
+`process_stereo()`. The default stereo realization is centered and its two
+channels sum exactly to the mono render. `ClapVoice` specializes that hook:
+successive bursts alternate left and right according to `set_stereo_width()`,
+while its room tail and optional tonal body remain centered. Both paths retain
+the base voice's allocation-free choke fade.
+
 ### Resampling Helpers
 
 `Resampler` is the arbitrary-ratio polyphase FIR sample-rate converter.
