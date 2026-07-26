@@ -96,6 +96,20 @@ public:
 
     void set_seed(std::uint32_t seed) { seed_ = seed == 0 ? default_seed : seed; }
 
+    /// Mirror another reducer's parameter configuration without copying its
+    /// held sample, clock phase, filter history, or RNG position.
+    void sync_configuration_from(const SampleRateReducerT& other) {
+        if (sample_rate_ != other.sample_rate_)
+            set_sample_rate(other.sample_rate_);
+        if (hold_rate_ != other.hold_rate_)
+            set_hold_rate_hz(other.hold_rate_);
+        if (jitter_ != other.jitter_)
+            set_jitter(other.jitter_);
+        if (smoothing_ != other.smoothing_)
+            set_smoothing(other.smoothing_);
+        seed_ = other.seed_;
+    }
+
     void reset() {
         phase_ = 1.0;  // latch on the first sample rather than emitting a zero
         held_ = 0.0;
@@ -190,6 +204,14 @@ public:
     void set_dead_zone(double amount) { dead_zone_ = std::clamp(amount, 0.0, 0.9); }
 
     void set_seed(std::uint32_t seed) { reducer_.set_seed(seed); }
+
+    /// Mirror parameter configuration while preserving this chain's
+    /// independent reducer/filter state.
+    void sync_configuration_from(const LofiChainT& other) {
+        bits_ = other.bits_;
+        dead_zone_ = other.dead_zone_;
+        reducer_.sync_configuration_from(other.reducer_);
+    }
 
     void reset() { reducer_.reset(); }
 

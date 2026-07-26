@@ -120,6 +120,7 @@ public:
     void set_transient(int index) {
         transient_ = std::clamp(index, -1,
                                 static_cast<int>(kFmTransients.size()) - 1);
+        if (transient_ >= 0) apply_transient();
     }
     void set_noise_level(double level) {
         transient_ = -1;
@@ -132,6 +133,7 @@ public:
     void set_noise_color(NoiseColor color) {
         transient_ = -1;
         noise_color_ = color;
+        if (noise_.color() != color) noise_.set_color(color);
     }
 
     /// A bandpass on the output, for picking one formant out of the sidebands.
@@ -226,17 +228,6 @@ protected:
         amp_env_.set_decay_t60_ms(decay_ms_);
         amp_env_.trigger();
 
-        if (transient_ >= 0) {
-            const auto& recipe =
-                kFmTransients[static_cast<std::size_t>(transient_)];
-            noise_color_ = recipe.color;
-            noise_level_ = recipe.noise_level;
-            noise_decay_ms_ = recipe.noise_decay_ms;
-            click_.set_level(recipe.click_level);
-            click_.set_cutoff_hz(recipe.click_cutoff_hz);
-            click_.set_decay_ms(recipe.click_decay_ms);
-        }
-        noise_.set_color(noise_color_);
         noise_env_.set_attack_ms(0.0);
         noise_env_.set_decay_time_constant_ms(noise_decay_ms_);
         if (noise_level_ > 0.0) noise_env_.trigger();
@@ -325,6 +316,19 @@ protected:
     }
 
 private:
+    void apply_transient() {
+        const auto& recipe =
+            kFmTransients[static_cast<std::size_t>(transient_)];
+        noise_color_ = recipe.color;
+        noise_level_ = recipe.noise_level;
+        noise_decay_ms_ = recipe.noise_decay_ms;
+        click_.set_level(recipe.click_level);
+        click_.set_cutoff_hz(recipe.click_cutoff_hz);
+        click_.set_decay_ms(recipe.click_decay_ms);
+        if (noise_.color() != noise_color_)
+            noise_.set_color(noise_color_);
+    }
+
     // How far full feedback drives the modulator. Beyond roughly this the
     // operator is already producing noise, so more range would only add
     // settings that all sound the same.
@@ -499,6 +503,7 @@ public:
     void set_transient(int index) {
         transient_ = std::clamp(index, -1,
                                 static_cast<int>(kFmTransients.size()) - 1);
+        if (transient_ >= 0) apply_transient();
     }
     void set_noise_level(double level) {
         transient_ = -1;
@@ -511,6 +516,7 @@ public:
     void set_noise_color(NoiseColor color) {
         transient_ = -1;
         noise_color_ = color;
+        if (noise_.color() != color) noise_.set_color(color);
     }
     void set_click_level(double level) {
         transient_ = -1;
@@ -562,17 +568,6 @@ protected:
             envelopes_[op].trigger();
         }
 
-        if (transient_ >= 0) {
-            const auto& recipe =
-                kFmTransients[static_cast<std::size_t>(transient_)];
-            noise_color_ = recipe.color;
-            noise_level_ = recipe.noise_level;
-            noise_decay_ms_ = recipe.noise_decay_ms;
-            click_.set_level(recipe.click_level);
-            click_.set_cutoff_hz(recipe.click_cutoff_hz);
-            click_.set_decay_ms(recipe.click_decay_ms);
-        }
-        noise_.set_color(noise_color_);
         noise_env_.set_attack_ms(0.0);
         noise_env_.set_decay_time_constant_ms(noise_decay_ms_);
         if (noise_level_ > 0.0) noise_env_.trigger();
@@ -647,6 +642,19 @@ protected:
     }
 
 private:
+    void apply_transient() {
+        const auto& recipe =
+            kFmTransients[static_cast<std::size_t>(transient_)];
+        noise_color_ = recipe.color;
+        noise_level_ = recipe.noise_level;
+        noise_decay_ms_ = recipe.noise_decay_ms;
+        click_.set_level(recipe.click_level);
+        click_.set_cutoff_hz(recipe.click_cutoff_hz);
+        click_.set_decay_ms(recipe.click_decay_ms);
+        if (noise_.color() != noise_color_)
+            noise_.set_color(noise_color_);
+    }
+
     static constexpr double kFeedbackDepth = 6.0;
 
     int algorithm_ = 9;

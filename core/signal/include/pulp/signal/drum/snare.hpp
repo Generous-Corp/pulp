@@ -159,7 +159,8 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        // The shell keeps ringing across hits; preserve the shared output
+        // history with it so a retrigger cannot truncate the pending FIR.
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);

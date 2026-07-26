@@ -361,28 +361,32 @@ TEST_CASE("The snare's tone and wire lo-fi chains are independent",
     voice.set_noise_level(0.0);
     voice.set_snap_level(0.0);
     voice.set_tone_level(1.0);
-    const auto tone_before = hit(voice, 1.0f, 12000);
+    auto reset_hit = [&voice] {
+        voice.reset();
+        return hit(voice, 1.0f, 12000);
+    };
+    const auto tone_before = reset_hit();
 
     voice.noise_lofi().set_bits(3.0);
-    const auto tone_after = hit(voice, 1.0f, 12000);
+    const auto tone_after = reset_hit();
     REQUIRE(tone_before == tone_after);
 
     voice.tone_lofi().set_bits(3.0);
-    const auto tone_crushed = hit(voice, 1.0f, 12000);
+    const auto tone_crushed = reset_hit();
     REQUIRE_FALSE(tone_before == tone_crushed);
 
     voice.set_tone_level(0.0);
     voice.set_noise_level(1.0);
     voice.tone_lofi().set_bits(24.0);
     voice.noise_lofi().set_bits(24.0);
-    const auto wires_clean = hit(voice, 1.0f, 12000);
+    const auto wires_clean = reset_hit();
 
     voice.tone_lofi().set_bits(3.0);
-    const auto wires_after_tone_change = hit(voice, 1.0f, 12000);
+    const auto wires_after_tone_change = reset_hit();
     REQUIRE(wires_clean == wires_after_tone_change);
 
     voice.noise_lofi().set_bits(3.0);
-    const auto wires_crushed = hit(voice, 1.0f, 12000);
+    const auto wires_crushed = reset_hit();
     REQUIRE_FALSE(wires_clean == wires_crushed);
 }
 
@@ -499,6 +503,36 @@ TEST_CASE("Successive hat hits are not identical", "[signal][drum][hat]") {
     voice.reset();
     const auto fourth = hit(voice, 1.0f, 12000);
     REQUIRE(third == fourth);
+}
+
+TEST_CASE("Physical drum retriggers preserve shared output history",
+          "[signal][drum][retrigger][output]") {
+    auto retrigger_ratio = [](auto& uninterrupted, auto& retriggered,
+                              int lead_samples) {
+        uninterrupted.prepare(kFs);
+        retriggered.prepare(kFs);
+        uninterrupted.note_on(1.0f);
+        retriggered.note_on(1.0f);
+        (void)render(uninterrupted, lead_samples);
+        (void)render(retriggered, lead_samples);
+        retriggered.note_on(1.0f);
+        const auto control = render(uninterrupted, 32);
+        const auto after_retrigger = render(retriggered, 32);
+        const double control_energy = rms(control);
+        INFO("control energy=" << control_energy
+                                << " retrigger energy="
+                                << rms(after_retrigger));
+        REQUIRE(control_energy > 1.0e-6);
+        return rms(after_retrigger) / control_energy;
+    };
+
+    HatVoice hat_control;
+    HatVoice hat_retrigger;
+    REQUIRE(retrigger_ratio(hat_control, hat_retrigger, 1000) > 0.1);
+
+    SnareVoice snare_control;
+    SnareVoice snare_retrigger;
+    REQUIRE(retrigger_ratio(snare_control, snare_retrigger, 1000) > 0.1);
 }
 
 // -- Clap --------------------------------------------------------------------
@@ -782,6 +816,41 @@ TEST_CASE("Centered clap layers do not alter the burst side signal",
     INFO("side error=" << side_error << " side level=" << side_level);
     REQUIRE(side_level > 1.0e-3);
     REQUIRE(side_error < side_level * 1.0e-5);
+}
+
+TEST_CASE("Clap burst width carries the fully processed output",
+          "[signal][drum][clap][stereo][output]") {
+    auto configure = [](ClapVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_burst_count(1);
+        voice.set_burst_decay_ms(20.0);
+        voice.set_tail_level(0.0);
+        voice.set_body_level(0.0);
+        voice.set_stereo_width(1.0);
+        voice.output().set_drive(0.8);
+        voice.output().set_fold(0.4);
+        voice.output().lofi().set_bits(5.0);
+        voice.output().lofi().set_hold_rate_hz(12000.0);
+        voice.output().lofi().set_dead_zone(0.05);
+    };
+
+    ClapVoice mono_voice;
+    configure(mono_voice);
+    const auto mono = hit(mono_voice, 1.0f, 4000);
+
+    ClapVoice stereo_voice;
+    configure(stereo_voice);
+    const auto stereo = stereo_hit(stereo_voice, 1.0f, 4000);
+
+    const double processed_peak = peak(mono);
+    for (std::size_t i = 0; i < mono.size(); ++i) {
+        REQUIRE(stereo.left[i] - stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+        REQUIRE(stereo.left[i] + stereo.right[i] ==
+                Catch::Approx(mono[i]).margin(1.0e-6));
+        REQUIRE(std::fabs(stereo.left[i]) <= processed_peak + 1.0e-6);
+        REQUIRE(std::fabs(stereo.right[i]) <= processed_peak + 1.0e-6);
+    }
 }
 
 TEST_CASE("A clap renders identically for the same parameters",

@@ -117,7 +117,8 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        // The oscillator bank survives a retrigger, so its pending output FIR
+        // and lo-fi history are part of the same continuing physical state.
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);

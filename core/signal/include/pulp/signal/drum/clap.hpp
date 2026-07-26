@@ -6,7 +6,6 @@
 #include <pulp/signal/svf.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -118,6 +117,7 @@ protected:
         filter_.set_sample_rate(static_cast<float>(sample_rate));
         filter_.set_mode(Svf::Mode::bandpass);
         output_.prepare(sample_rate);
+        burst_output_.prepare(sample_rate);
     }
 
     void on_reset() override {
@@ -125,6 +125,7 @@ protected:
         tail_env_.reset();
         filter_.reset();
         output_.reset();
+        burst_output_.reset();
         noise_.reset();
         body_phase_ = 0.0;
         next_burst_ = 0;
@@ -133,21 +134,20 @@ protected:
         burst_sign_ = 1.0;
         burst_pan_ = -1.0;
         jitter_state_ = kJitterSeed;
-        burst_route_delay_.fill(0.0);
-        burst_route_write_ = 0;
     }
 
     void on_note_on(float velocity) override {
         output_.reset();
+        burst_output_.sync_configuration_from(output_);
+        burst_output_.reset();
         output_.trigger();
+        burst_output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         brightness_ = response.brightness_scale(velocity);
 
         noise_.reset();
         body_phase_ = 0.0;
-        burst_route_delay_.fill(0.0);
-        burst_route_write_ = 0;
         // The band filter shapes the strike rather than modelling a body, so
         // it starts clean on every hit. Voices whose filter *is* a body -- the
         // kick's resonator and circuit network, the snare's shell, the hat's
@@ -184,6 +184,7 @@ protected:
     }
 
     void render_add(float* out, int num_samples) override {
+        burst_output_.sync_configuration_from(output_);
         for (int i = 0; i < num_samples; ++i) {
             out[i] += render_frame().mono;
         }
@@ -191,6 +192,7 @@ protected:
 
     void render_add_stereo(float* left, float* right,
                            int num_samples) override {
+        burst_output_.sync_configuration_from(output_);
         for (int i = 0; i < num_samples; ++i) {
             const RenderFrame frame = render_frame();
             const double pan = frame.burst_pan * stereo_width_;
@@ -233,15 +235,6 @@ private:
         }
 
         const double centre = room + body;
-        burst_route_delay_[burst_route_write_] = train;
-        const std::size_t delay = static_cast<std::size_t>(
-            output_.latency_samples());
-        const std::size_t read =
-            (burst_route_write_ + burst_route_delay_.size() - delay) %
-            burst_route_delay_.size();
-        const double routed_burst = burst_route_delay_[read];
-        burst_route_write_ =
-            (burst_route_write_ + 1) % burst_route_delay_.size();
 
         RenderFrame frame;
         frame.mono = static_cast<float>(
@@ -251,7 +244,7 @@ private:
         // mid channel, which preserves the canonical mono sum exactly without
         // allowing room or body energy to leak into stereo width.
         frame.burst =
-            routed_burst * output_.last_post_gain() * velocity_gain_;
+            burst_output_.process(static_cast<float>(train)) * velocity_gain_;
         frame.burst_pan = burst_pan_;
         return frame;
     }
@@ -295,6 +288,7 @@ private:
     DecayEnvelope64 tail_env_;
     Svf filter_;
     OutputStage output_;
+    OutputStage burst_output_;
 
     double velocity_gain_ = 1.0;
     double brightness_ = 1.0;
@@ -307,8 +301,6 @@ private:
     double burst_sign_ = 1.0;
     double burst_pan_ = -1.0;
     std::uint32_t jitter_state_ = kJitterSeed;
-    std::array<double, 49> burst_route_delay_{};
-    std::size_t burst_route_write_ = 0;
 };
 
 }  // namespace pulp::signal::drum

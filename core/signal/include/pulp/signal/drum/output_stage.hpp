@@ -62,7 +62,6 @@ public:
         tail_samples_remaining_ = 0;
         nonlinear_activity_this_sample_ = false;
         ahd_delay_remaining_ = 0;
-        last_post_gain_ = level_;
         ahd_phase_ = AhdPhase::inactive;
         ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
@@ -137,7 +136,31 @@ public:
 
     bool ahd_enabled() const noexcept { return ahd_enabled_; }
     double ahd_gain() const noexcept { return ahd_gain_; }
-    double last_post_gain() const noexcept { return last_post_gain_; }
+
+    /// Mirror another stage's controls without copying its FIR, lo-fi, tail,
+    /// or envelope history. Parallel render paths use this to stay under one
+    /// public set of controls while retaining independent DSP state.
+    void sync_configuration_from(const OutputStageT& other) {
+        if (oversampling_ != other.oversampling_) {
+            oversampling_ = other.oversampling_;
+            update_internal_rate();
+            reset();
+        }
+        drive_ = other.drive_;
+        fold_ = other.fold_;
+        level_ = other.level_;
+        lofi_.sync_configuration_from(other.lofi_);
+        if (ahd_attack_ms_ != other.ahd_attack_ms_ ||
+            ahd_hold_ms_ != other.ahd_hold_ms_ ||
+            ahd_decay_ms_ != other.ahd_decay_ms_) {
+            ahd_attack_ms_ = other.ahd_attack_ms_;
+            ahd_hold_ms_ = other.ahd_hold_ms_;
+            ahd_decay_ms_ = other.ahd_decay_ms_;
+            update_ahd_times();
+        }
+        if (ahd_enabled_ != other.ahd_enabled_)
+            set_ahd_enabled(other.ahd_enabled_);
+    }
 
     /// Start the AHD for a new hit. Every drum voice calls this from note-on.
     void trigger() {
@@ -197,9 +220,8 @@ public:
             --tail_samples_remaining_;
         }
         const double envelope = process_ahd();
-        last_post_gain_ = level_ * envelope;
         return static_cast<SampleType>(
-            static_cast<double>(processed) * last_post_gain_);
+            static_cast<double>(processed) * level_ * envelope);
     }
 
 private:
@@ -317,7 +339,6 @@ private:
     int ahd_decay_samples_ = 1;
     int ahd_remaining_ = 0;
     int ahd_delay_remaining_ = 0;
-    double last_post_gain_ = 1.0;
     bool ahd_enabled_ = false;
     AhdPhase ahd_phase_ = AhdPhase::inactive;
     OutputOversampling oversampling_ = OutputOversampling::x2;
