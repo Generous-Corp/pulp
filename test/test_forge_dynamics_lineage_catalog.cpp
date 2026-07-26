@@ -259,9 +259,12 @@ TEST_CASE("Forge dynamics VCA: makeup and mix move the level the way they say",
     const float amp = 0.5f;
     const auto tone = sine(amp);
 
-    const double unity = gain_db(fx.settle({tone})[0], amp);
+    // The VCA's single-tau RMS detector is not converged after the fixture's
+    // generic 16-block default. Use an explicit 48 blocks here so the 0.2 dB
+    // makeup budget measures the gain control, not residual detector settling.
+    const double unity = gain_db(fx.settle({tone}, 48)[0], amp);
     REQUIRE(inj.inject(immediate(dyn::vca::kMakeupDb, 12.0f)) == InjectStatus::Ok);
-    const double lifted = gain_db(fx.settle({tone})[0], amp);
+    const double lifted = gain_db(fx.settle({tone}, 48)[0], amp);
     REQUIRE_THAT(lifted - unity, WithinAbs(12.0, 0.2));  // makeup is exactly makeup
 
     // Mix 0 is the dry signal: this node's dry path is EQUALLY DELAYED, so at
