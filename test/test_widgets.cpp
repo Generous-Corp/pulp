@@ -1080,6 +1080,34 @@ TEST_CASE("RangeSlider vertical orientation maps y correctly",
     REQUIRE_THAT(rs.value(), WithinAbs(0.5, 0.001));
 }
 
+TEST_CASE("RangeSlider release safely completes after synchronous unmount",
+          "[view][widget][interaction]") {
+    View root;
+    auto owned_slider = std::make_unique<RangeSlider>();
+    auto* slider = owned_slider.get();
+    slider->set_bounds({0, 0, 200, 24});
+    root.add_child(std::move(owned_slider));
+
+    int ends = 0;
+    slider->on_gesture_end = [&] {
+        ++ends;
+        auto removed = root.remove_child(slider);
+        REQUIRE(removed != nullptr);
+    };
+
+    MouseEvent down;
+    down.is_down = true;
+    down.position = {100, 12};
+    slider->on_mouse_event(down);
+
+    MouseEvent up = down;
+    up.is_down = false;
+    slider->on_mouse_event(up);
+
+    REQUIRE(root.child_count() == 0);
+    REQUIRE(ends == 1);
+}
+
 TEST_CASE("RangeSlider renders track + fill + handle",
           "[view][widget][issue-966]") {
     RangeSlider rs;
@@ -1426,6 +1454,42 @@ TEST_CASE("Knob mouse paths update value, hover animation, and default reset",
     knob.on_mouse_event(reset);
     REQUIRE_THAT(knob.value(), WithinAbs(0.75, 0.001));
     REQUIRE_THAT(changes.back(), WithinAbs(0.75, 0.001));
+}
+
+TEST_CASE("Knob double-click safely completes after synchronous unmount",
+          "[view][widget][interaction]") {
+    for (const bool remove_on_begin : {true, false}) {
+        View root;
+        auto owned_knob = std::make_unique<Knob>();
+        auto* knob = owned_knob.get();
+        knob->set_value(0.25f);
+        knob->set_default_value(0.75f);
+        root.add_child(std::move(owned_knob));
+
+        std::vector<std::string> gestures;
+        knob->on_gesture_begin = [&] {
+            gestures.push_back("begin");
+            if (remove_on_begin) {
+                auto removed = root.remove_child(knob);
+                REQUIRE(removed != nullptr);
+            }
+        };
+        knob->on_gesture_end = [&] { gestures.push_back("end"); };
+        knob->on_change = [&](float) {
+            if (!remove_on_begin) {
+                auto removed = root.remove_child(knob);
+                REQUIRE(removed != nullptr);
+            }
+        };
+
+        MouseEvent reset;
+        reset.is_down = true;
+        reset.click_count = 2;
+        knob->on_mouse_event(reset);
+
+        REQUIRE(root.child_count() == 0);
+        REQUIRE(gestures == std::vector<std::string>{"begin", "end"});
+    }
 }
 
 TEST_CASE("Fader and toggle mouse paths dispatch clamped interactive values",

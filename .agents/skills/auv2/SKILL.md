@@ -914,6 +914,17 @@ Two host-conformance surfaces beyond the display-string path above:
   Boolean, else Generic). A wrong range/unit silently mis-scales every host
   automation lane — assert the numeric metadata, not just the
   ValuesHaveStrings flag. Test: `test/test_au_v2_param_display.mm`.
+- Generated or repurposed macro slots may update only their host-facing name
+  through `StateStore::set_parameter_display_name()`. AUv2 observes the
+  presentation names from an adaptive host-main-thread publisher and republishes
+  `kAudioUnitProperty_ParameterInfo` once per changed stable ID. The poll stays
+  fast while revisions advance, then backs off to a bounded idle cadence.
+  Render must neither call `PropertyChanged` nor schedule the main-thread work:
+  both can allocate, lock, or re-enter the host. Never signal a parameter-list
+  change or replace IDs just to refresh names, because that would detach Logic
+  automation. Test safe callback/teardown behavior, deduplicated changed IDs,
+  and the unchanged ID/list/value contract in
+  `test/test_au_v2_param_display.mm`.
 - When the processor flags a latency/tail change during `process()`,
   `ProcessBufferLists` republishes it via
   `PropertyChanged(kAudioUnitProperty_Latency / kAudioUnitProperty_TailTime)`

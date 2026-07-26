@@ -232,6 +232,15 @@ pulp_validate_bundle_relocatable(MyPlugin_CLAP)  # POST_BUILD: FAILS the build i
 standalone validator (reads Mach-O rpaths + `@rpath` deps — stronger than the
 string-based `check_portable_binary.py`). Wire it into `pulp ship` / CI too.
 
+`pulp_add_plugin(... FORMATS AU)` now adds `@loader_path` to the AU target
+without replacing any engine-specific build rpaths, then runs the strict
+relocatability validator after linking. Sanitizer builds are the one deliberate
+exception: their compiler-injected `libclang_rt.*_dynamic.dylib` remains in the
+Xcode toolchain and is accepted only when CMake detects `PULP_SANITIZER` and
+passes `--allow-toolchain-runtime`. Do not pass that flag to release/package
+validation; the validator's default must continue to reject the same external
+runtime.
+
 **Definitive manual proof** that a bundle is self-contained — hide the build
 cache and confirm it still loads (this is what a string/auval check can't tell
 you):

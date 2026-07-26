@@ -806,6 +806,86 @@ TEST_CASE("StateStore duplicate parameter ids resolve to latest registration",
     REQUIRE_THAT(store.get_value(7), WithinAbs(100.0f, 1e-6f));
 }
 
+TEST_CASE("StateStore overlays a host display name without changing its contract",
+          "[state][store][parameter-display]") {
+    StateStore store;
+    store.add_parameter(
+        make_param_info(7, "param_1", "", {0.0f, 1.0f, 0.25f}));
+    store.set_value(7, 0.61f);
+
+    const auto initial_revision = store.parameter_display_revision();
+    REQUIRE(store.parameter_display_name(7) == "param_1");
+    REQUIRE(store.info(7)->name == "param_1");
+
+    REQUIRE(store.set_parameter_display_name(7, "Cutoff"));
+    CHECK(store.parameter_display_name(7) == "Cutoff");
+    CHECK(store.info(7)->name == "param_1");
+    CHECK(store.all_params()[0].id == 7);
+    CHECK(store.param_count() == 1);
+    CHECK_THAT(store.get_value(7), WithinAbs(0.61f, 1e-6f));
+    CHECK(store.parameter_display_revision() == initial_revision + 1);
+
+    CHECK_FALSE(store.set_parameter_display_name(7, "Cutoff"));
+    CHECK(store.parameter_display_revision() == initial_revision + 1);
+    CHECK_FALSE(store.set_parameter_display_name(99, "Unknown"));
+
+    REQUIRE(store.set_parameter_display_name(7, {}));
+    CHECK(store.parameter_display_name(7) == "param_1");
+    CHECK(store.parameter_display_revision() == initial_revision + 2);
+}
+
+TEST_CASE("StateStore display-name snapshots tolerate concurrent publication",
+          "[state][store][parameter-display][concurrency]") {
+    StateStore store;
+    store.add_parameter(
+        make_param_info(7, "param_1", "", {0.0f, 1.0f, 0.25f}));
+
+    constexpr int kIterations = 20000;
+    std::atomic<int> ready{0};
+    std::atomic<bool> start{false};
+    std::atomic<bool> done{false};
+    std::atomic<bool> invalid_snapshot{false};
+
+    auto reader = [&] {
+        ready.fetch_add(1, std::memory_order_release);
+        while (!start.load(std::memory_order_acquire))
+            std::this_thread::yield();
+
+        std::uint64_t previous_revision = 0;
+        while (!done.load(std::memory_order_acquire)) {
+            const std::string name = store.parameter_display_name(7);
+            if (name != "param_1" && name != "Cutoff" &&
+                name != "Resonance") {
+                invalid_snapshot.store(true, std::memory_order_release);
+            }
+            const std::uint64_t revision =
+                store.parameter_display_revision();
+            if (revision < previous_revision)
+                invalid_snapshot.store(true, std::memory_order_release);
+            previous_revision = revision;
+        }
+    };
+
+    std::thread first_reader(reader);
+    std::thread second_reader(reader);
+    while (ready.load(std::memory_order_acquire) != 2)
+        std::this_thread::yield();
+    start.store(true, std::memory_order_release);
+
+    for (int i = 0; i < kIterations; ++i) {
+        const char* name = (i % 2 == 0) ? "Cutoff" : "Resonance";
+        store.set_parameter_display_name(7, name);
+    }
+    done.store(true, std::memory_order_release);
+    first_reader.join();
+    second_reader.join();
+
+    CHECK_FALSE(invalid_snapshot.load(std::memory_order_acquire));
+    CHECK(store.parameter_display_revision() ==
+          static_cast<std::uint64_t>(kIterations));
+    CHECK(store.parameter_display_name(7) == "Resonance");
+}
+
 TEST_CASE("StateStore serialization", "[state][serialize]") {
     StateStore store;
 

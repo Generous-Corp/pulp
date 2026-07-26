@@ -282,6 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
+          node --test examples/web-demos/super-convolver-ui/browser-test/fixture-assets.test.mjs
           node examples/web-demos/super-convolver-ui/browser-test/validate.mjs \
             --build "$GITHUB_WORKSPACE/build-webui" \
             --artifact /tmp/pulp-ui-browser.png
@@ -326,7 +327,8 @@ jobs:
         run: |
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
-          node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
+          python3 tools/ci/run-with-deadline.py --timeout 180 -- \
+            node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
             --gpu-wasm examples/web-demos/wclap-build/build/SuperConvolverGpu.wasm \
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
             --screenshot /tmp/gpu-audio-browser.png
@@ -361,6 +363,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Set up Chrome
+        id: chrome-macos
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
 
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -401,11 +409,12 @@ jobs:
       - name: GPU-audio browser proof (WebGPU REQUIRED)
         env:
           PULP_REQUIRE_WEBGPU: "1"
-          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+          CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}
         run: |
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
-          node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
+          python3 tools/ci/run-with-deadline.py --timeout 180 -- \
+            node examples/web-demos/gpu-audio/browser-test/validate-gpu.mjs \
             --gpu-wasm build-wclap/SuperConvolverGpu.wasm \
             --gpu-build "$GITHUB_WORKSPACE/build-gpu-dsp" \
             --screenshot /tmp/gpu-audio-macos.png
@@ -497,7 +506,7 @@ jobs:
       - name: The shipped page runs its GPU engine (WebGPU REQUIRED)
         env:
           PULP_REQUIRE_WEBGPU: "1"
-          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+          CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}
         run: |
           set -euo pipefail
           node examples/web-demos/gpu-audio/browser-test/page-gpu.mjs \

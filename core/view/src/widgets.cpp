@@ -83,8 +83,30 @@ void Knob::on_mouse_leave() {
 
 void Knob::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) return;
-    // Double-click returns the knob to its default position.
-    if (event.click_count >= 2) store_normalized(default_value_, Notify::sync);
+    if (event.click_count < 2) return;
+
+    // Direct modern-event callers historically receive the reset immediately.
+    // When no drag is already active, bracket that one-shot write here; the
+    // portable pointer router invokes this before the legacy on_mouse_down.
+    const bool one_shot = !gesture_active_;
+    const auto lifetime = import_binding_lifetime_token();
+    const float reset_value = default_value_;
+    auto one_shot_begin = on_gesture_begin;
+    std::function<void()> one_shot_end;
+    if (one_shot) {
+        gesture_active_ = true;
+        one_shot_end = on_gesture_end;
+        gesture_active_ = false;
+        if (one_shot_begin) one_shot_begin();
+        if (lifetime.expired()) {
+            if (one_shot_end) one_shot_end();
+            return;
+        }
+    }
+    store_normalized(reset_value, Notify::sync);
+    // A synchronous change handler may unmount and destroy this Knob. Finish
+    // through the retained callback without dereferencing the widget again.
+    if (one_shot_end) one_shot_end();
 }
 
 void Knob::on_mouse_down(Point pos) {
@@ -121,8 +143,11 @@ void Knob::on_mouse_down(Point pos) {
     drag_last_y_ = pos.y;
     drag_start_proportion_ = position_for_value();
     if (!gesture_active_) {
+        const auto lifetime = import_binding_lifetime_token();
+        auto begin = on_gesture_begin;
         gesture_active_ = true;
-        if (on_gesture_begin) on_gesture_begin();
+        if (begin) begin();
+        if (lifetime.expired()) return;
     }
     if (window_host())
         window_host()->set_mouse_relative_mode(true);
@@ -212,8 +237,12 @@ void Fader::on_mouse_event(const MouseEvent& event) {
 }
 
 void Fader::on_mouse_down(Point pos) {
-    if (!dragging_ && on_gesture_begin) on_gesture_begin();
+    const bool beginning = !dragging_;
+    const auto lifetime = import_binding_lifetime_token();
+    auto begin = on_gesture_begin;
     dragging_ = true;
+    if (beginning && begin) begin();
+    if (lifetime.expired()) return;
     auto b = local_bounds();
     float p = orientation_ == Orientation::horizontal
                   ? (b.width > 0 ? pos.x / b.width : 0.0f)
@@ -991,12 +1020,18 @@ void RangeSlider::update_from_position_(Point pos) {
 
 void RangeSlider::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) {
-        if (dragging_ && on_gesture_end) on_gesture_end();
+        const bool ending = dragging_;
+        auto end = on_gesture_end;
         dragging_ = false;
+        if (ending && end) end();
         return;
     }
-    if (!dragging_ && on_gesture_begin) on_gesture_begin();
+    const bool beginning = !dragging_;
+    const auto lifetime = import_binding_lifetime_token();
+    auto begin = on_gesture_begin;
     dragging_ = true;
+    if (beginning && begin) begin();
+    if (lifetime.expired()) return;
     update_from_position_(event.position);
 }
 

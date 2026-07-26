@@ -105,6 +105,13 @@ PulpAUInstrument::PulpAUInstrument(AudioComponentInstance ci, ProcessorFactory f
             // notification, wired once through the shared AU v2 bridge.
             wire_host_parameter_bridge(store_, GetComponentInstance(),
                                                ui_push_listener_);
+            parameter_display_names_.start(
+                store_, [this](state::ParamID id) {
+                    PropertyChanged(
+                        kAudioUnitProperty_ParameterInfo,
+                        kAudioUnitScope_Global,
+                        static_cast<AudioUnitElement>(id));
+                });
         }
     }
 }
@@ -373,6 +380,11 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     }
 
     return noErr;
+}
+
+void PulpAUInstrument::publish_parameter_display_changes()
+{
+    parameter_display_names_.poll_main_thread();
 }
 
 OSStatus PulpAUInstrument::SaveState(CFPropertyListRef* outData)

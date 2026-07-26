@@ -39,17 +39,19 @@ endif()
 # ── auval (AU v2, aumi MIDI processor) ───────────────────────────────────────
 # Proves the `aumi` component Apple's validator accepts: component discovery,
 # open/initialize, scope formats, required + recommended properties, the
-# parameter surface, and parameter persistence across reset. The
-# AudioComponentRegistrar kill forces a rescan so a stale cache entry from an
-# earlier build cannot mask a repackaging change.
+# parameter surface, and parameter persistence across reset. The helper runs
+# in the auto-login user's GUI bootstrap so it sees the same component registry
+# as AU hosts instead of the SSH runner's bootstrap.
 if(PULP_HAS_AUSDK AND APPLE AND NOT PULP_IOS)
     add_test(
         NAME auval-PulpTranspose
         COMMAND ${CMAKE_COMMAND} -E env
             PULP_DISABLE_PLUGIN_EDITOR=1 PULP_HEADLESS=1 PULP_TEST_MODE=1
-            bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpTranspose.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpTranspose.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aumi PTrn Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc"
+            bash "${CMAKE_SOURCE_DIR}/tools/ci/run-auval-component.sh"
+                "${CMAKE_BINARY_DIR}/AU/PulpTranspose.component" aumi PTrn Pulp
     )
     set_tests_properties(auval-PulpTranspose PROPERTIES
         LABELS "validation;au"
-        TIMEOUT 120)
+        TIMEOUT 90
+        RESOURCE_LOCK pulp_au_discovery)
 endif()

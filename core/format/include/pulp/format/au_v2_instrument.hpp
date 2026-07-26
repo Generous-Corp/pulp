@@ -11,6 +11,7 @@
 #include <AudioUnitSDK/MusicDeviceBase.h>
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/au_v2_common.hpp>
 #include <pulp/format/host_quirks.hpp>
 #include <pulp/format/detail/playhead_diff.hpp>
 #include <pulp/runtime/spsc_queue.hpp>
@@ -134,6 +135,10 @@ public:
     Float64 GetTailTime() override;
     Float64 GetLatency() override;
 
+protected:
+    /// Drain host-facing name changes on the caller's control/main thread.
+    void publish_parameter_display_changes();
+
 private:
     // The store is declared before the Processor so it is destroyed after it.
     // `Processor::state()` dereferences a pointer to this store, and a Processor
@@ -163,6 +168,7 @@ private:
     // Main-thread listener that pushes editor parameter edits to the host
     // (never from the render thread). Kept alive for the adapter's lifetime.
     state::ListenerToken ui_push_listener_;
+    ParameterDisplayNamePublisher parameter_display_names_;
 
     // Lock-free MIDI note input (single producer = host MIDI/render thread via
     // HandleNoteOn/Off; single consumer = Render). No audio-thread mutex.

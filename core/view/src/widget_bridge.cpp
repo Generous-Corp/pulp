@@ -420,6 +420,7 @@ WidgetBridge::~WidgetBridge() {
         all_bridges_set().erase(this);
     }
     if (callback_alive_) callback_alive_->store(false, std::memory_order_release);
+    release_all_param_gesture_routes();
     root_.on_global_click = {};
 }
 
@@ -700,6 +701,7 @@ std::unique_ptr<View> WidgetBridge::make_widget_for_tag(const std::string& tag,
 void WidgetBridge::clear() {
     pending_frame_ids_.clear();
     shortcuts_.clear();
+    release_all_param_gesture_routes();
     param_bindings_.clear();  // bindings reference widgets torn down below
     ComboBox::close_active_popup();
     while (root_.child_count() > 0) {

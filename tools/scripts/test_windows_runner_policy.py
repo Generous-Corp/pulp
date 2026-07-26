@@ -351,27 +351,62 @@ class WindowsMergeQueueGatingTests(unittest.TestCase):
         body = "\n".join(step.get("run", "") for step in steps)
         self.assertIn("github.event_name }}\" = \"pull_request\"", body)
 
-    def test_reporting_aliases_never_pin_the_shared_hosted_pool(self) -> None:
-        """No alias job may be strandable on the shared hosted pool.
+    def test_required_macos_alias_never_consumes_preamble_capacity(self) -> None:
+        """The long-polling required alias must leave classifiers runnable.
 
-        An alias is the LAST job in the run. Starve it of a runner and the run
-        never reaches a terminal state, so it holds this ref's `concurrency`
-        group; with cancel-in-progress set, the next push then sits at `pending`
-        with zero jobs and never dispatches. The wedge is silent and survives
-        re-pushes. `macos` already rode the self-hosted preamble; `linux` and
-        `windows` are advisory and must not be able to strand a pull request
-        either.
+        `macos` can poll the real matrix leg for an hour. If it runs on
+        `pulp-preamble`, several merge-group aliases occupy every runner capable
+        of starting the next run's fail-closed classify/resolve jobs. Hosted
+        Linux is sufficient for the API-only alias; an explicit dedicated alias
+        pool remains configurable.
         """
-        for name in ("macos", "linux", "windows"):
-            with self.subTest(alias=name):
-                runs_on = self.workflow["jobs"][name]["runs-on"]
-                self.assertIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
-                self.assertNotEqual(runs_on.strip(), "ubuntu-latest")
+        runs_on = self.workflow["jobs"]["macos"]["runs-on"]
+        self.assertIn("PULP_ALIAS_RUNS_ON_JSON", runs_on)
+        self.assertIn("ubuntu-latest", runs_on)
+        self.assertNotIn("PULP_PREAMBLE_RUNS_ON_JSON", runs_on)
 
     def test_required_macos_gate_still_runs_on_pull_request(self) -> None:
         """The required gate must keep reporting from the PR head."""
         condition = " ".join(self.workflow["jobs"]["macos"]["if"].split())
         self.assertNotIn("pull_request", condition)
+
+
+class TartMacosWorkflowPrerequisiteTests(unittest.TestCase):
+    """Pin assumptions that clean per-job Tart guests deliberately do not make."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.web_plugins = read(WORKFLOWS / "web-plugins.yml")
+        cls.examples_validation = read(WORKFLOWS / "examples-validation.yml")
+
+    def test_gpu_audio_macos_installs_and_uses_discovered_chrome(self) -> None:
+        macos = job(self.web_plugins, "gpu-audio-macos")
+        self.assertIn("uses: browser-actions/setup-chrome@v1", macos)
+        self.assertIn("id: chrome-macos", macos)
+        self.assertEqual(
+            macos.count(
+                "CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}"
+            ),
+            2,
+        )
+        self.assertNotIn("/Applications/Google Chrome.app", macos)
+
+    def test_auval_validation_is_serial_but_other_validators_stay_parallel(
+        self,
+    ) -> None:
+        validate = job(self.examples_validation, "validate")
+        self.assertRegex(
+            validate,
+            r"-L validation -E '\^auval-' -j4",
+        )
+        self.assertRegex(
+            validate,
+            r"-L validation -R '\^auval-' -j1",
+        )
+        self.assertNotRegex(
+            validate,
+            r"--no-tests=ignore -L validation -j4",
+        )
 
 
 

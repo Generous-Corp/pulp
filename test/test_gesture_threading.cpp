@@ -250,6 +250,37 @@ TEST_CASE("begin_gesture on an already-open parameter does not re-emit a host be
     REQUIRE(ends == 2);
 }
 
+TEST_CASE("StateStore coordinates direct gestures with shared editor leases",
+          "[state][gesture][balance]") {
+    state::StateStore store;
+    store.add_parameter({
+        .id = 1,
+        .name = "Gain",
+        .range = {0.0f, 1.0f, 0.0f, 0.0f},
+    });
+    int begins = 0;
+    int ends = 0;
+    store.set_gesture_callbacks(
+        [&](state::ParamID) { ++begins; },
+        [&](state::ParamID) { ++ends; });
+
+    store.begin_gesture(1);
+    store.acquire_gesture(1);
+    store.acquire_gesture(1);
+    REQUIRE(begins == 1);
+    REQUIRE(store.open_gesture_count() == 1);
+
+    store.end_gesture(1);
+    store.release_open_gestures();
+    store.release_gesture(1);
+    REQUIRE(ends == 0);
+    REQUIRE(store.open_gesture_count() == 1);
+
+    store.release_gesture(1);
+    REQUIRE(ends == 1);
+    REQUIRE(store.open_gesture_count() == 0);
+}
+
 TEST_CASE("end_gesture without a matching begin is a no-op toward the host",
           "[state][gesture][balance]") {
     state::StateStore store;

@@ -46,9 +46,11 @@ if(PULP_HAS_AUSDK AND APPLE AND NOT PULP_IOS)
     add_test(
         NAME auval-PulpMultiOut
         COMMAND ${CMAKE_COMMAND} -E env
-            bash -c "d=\"$HOME/Library/Audio/Plug-Ins/Components/PulpMultiOut.auvaltest.component\"; rm -rf \"$d\"; cp -R \"${CMAKE_BINARY_DIR}/AU/PulpMultiOut.component\" \"$d\" && { killall -KILL AudioComponentRegistrar 2>/dev/null || true; sleep 1; auval -v aumu PMOt Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'; }; rc=$?; rm -rf \"$d\"; exit $rc"
+            bash "${CMAKE_SOURCE_DIR}/tools/ci/run-auval-component.sh"
+                "${CMAKE_BINARY_DIR}/AU/PulpMultiOut.component" aumu PMOt Pulp
     )
     set_tests_properties(auval-PulpMultiOut PROPERTIES
         LABELS "validation;au"
-        TIMEOUT 120)
+        TIMEOUT 90
+        RESOURCE_LOCK pulp_au_discovery)
 endif()

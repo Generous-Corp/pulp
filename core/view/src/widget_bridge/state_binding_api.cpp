@@ -24,6 +24,95 @@
 
 namespace pulp::view {
 
+void WidgetBridge::wire_parameter_gestures(const std::string& widget_id,
+                                           View* widget) {
+    if (!widget) return;
+
+    release_param_gesture_route(widget_id);
+    auto route = std::make_shared<ParamGestureRoute>();
+    param_gesture_routes_[widget_id] = route;
+    auto alive = callback_alive_;
+    auto begin = [this, alive, route, widget_id] {
+        if (!alive || !alive->load(std::memory_order_acquire) || route->active)
+            return;
+        const auto binding = std::find_if(
+            param_bindings_.begin(), param_bindings_.end(),
+            [&](const ParamBinding& candidate) {
+                return candidate.widget_id == widget_id &&
+                       candidate.target == ParamBinding::Target::value;
+            });
+        if (binding == param_bindings_.end()) return;
+        route->active_param_id = binding->param_id;
+        route->active = true;
+        try {
+            store_.acquire_gesture(route->active_param_id);
+        } catch (...) {
+            // StateStore records the lease and open gesture before invoking its
+            // host callback. Preserve the route so release still balances it,
+            // but never unwind through the widget's input dispatch.
+        }
+    };
+    auto end = [this, alive, route] {
+        if (!alive || !alive->load(std::memory_order_acquire)) return;
+        try {
+            finish_param_gesture_route(route);
+        } catch (...) {
+            // StateStore removes the open gesture before invoking its host
+            // callback. Keep input dispatch noexcept after that external call.
+        }
+    };
+    if (auto* knob = dynamic_cast<Knob*>(widget)) {
+        knob->on_gesture_begin = begin;
+        knob->on_gesture_end = end;
+    } else if (auto* fader = dynamic_cast<Fader*>(widget)) {
+        fader->on_gesture_begin = begin;
+        fader->on_gesture_end = end;
+    } else if (auto* slider = dynamic_cast<RangeSlider*>(widget)) {
+        slider->on_gesture_begin = begin;
+        slider->on_gesture_end = end;
+    }
+}
+
+void WidgetBridge::finish_param_gesture_route(
+    const std::shared_ptr<ParamGestureRoute>& route) {
+    if (!route || !route->active) return;
+    const state::ParamID id = route->active_param_id;
+    route->active = false;
+    store_.release_gesture(id);
+}
+
+void WidgetBridge::release_param_gesture_route(
+    const std::string& widget_id) noexcept {
+    auto route = param_gesture_routes_.find(widget_id);
+    if (route == param_gesture_routes_.end()) return;
+    auto detached = std::move(route->second);
+    param_gesture_routes_.erase(route);
+    try {
+        finish_param_gesture_route(detached);
+    } catch (...) {
+        // StateStore removes the open gesture before invoking the host callback.
+        // Teardown must remain noexcept even if that external callback throws.
+    }
+}
+
+void WidgetBridge::release_all_param_gesture_routes() noexcept {
+    auto routes = std::move(param_gesture_routes_);
+    param_gesture_routes_.clear();
+
+    for (auto& [widget_id, route] : routes) {
+        (void)widget_id;
+        if (!route->active) continue;
+        const state::ParamID id = route->active_param_id;
+        route->active = false;
+        try {
+            store_.release_gesture(id);
+        } catch (...) {
+            // The StateStore has already removed the open gesture. Continue
+            // releasing the remaining routes and preserve noexcept teardown.
+        }
+    }
+}
+
 // ── Transform mini-spec ──────────────────────────────────────────────────
 // Applied to the source before it reaches the widget, in order:
 //   optional dB→linear map → scale → offset → optional clamp.
@@ -228,7 +317,10 @@ void BridgeRegistrars::register_state_binding_api(WidgetBridge& self) {
     // bindWidgetToParam(widgetId, paramName, transform?) -> bind a value widget
     // (knob / fader / slider / toggle / progress) to a param. Registered once;
     // C++ then pushes the transformed store value every frame with no per-frame
-    // JS crossing. Returns true if the param exists and the binding was set.
+    // JS crossing. Gesture-capable controls also forward their native begin/end
+    // lifecycle to StateStore; a JS change handler can therefore write values
+    // without losing host automation touch/release or undo grouping. Returns
+    // true if the param exists and the binding was set.
     register_bridge_function(api, "bindWidgetToParam", [&self](choc::javascript::ArgumentList args) {
         return choc::value::createBool(
             self.add_param_binding(args.get<std::string>(0, ""),

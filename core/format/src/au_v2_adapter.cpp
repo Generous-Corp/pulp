@@ -64,6 +64,13 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
             // notification, wired once through the shared AU v2 bridge.
             wire_host_parameter_bridge(store_, GetComponentInstance(),
                                                ui_push_listener_);
+            parameter_display_names_.start(
+                store_, [this](state::ParamID id) {
+                    PropertyChanged(
+                        kAudioUnitProperty_ParameterInfo,
+                        kAudioUnitScope_Global,
+                        static_cast<AudioUnitElement>(id));
+                });
 
             // Set defaults in AU parameter system at construction time so hosts
             // can inspect them before Initialize() is called.
@@ -74,6 +81,11 @@ PulpAUEffect::PulpAUEffect(AudioComponentInstance ci, ProcessorFactory factory)
             }
         }
     }
+}
+
+void PulpAUEffect::publish_parameter_display_changes()
+{
+    parameter_display_names_.poll_main_thread();
 }
 
 OSStatus PulpAUEffect::GetParameterList(AudioUnitScope inScope,

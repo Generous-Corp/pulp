@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 
 namespace pulp::events { class EventLoop; }
@@ -151,6 +152,32 @@ public:
     /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
 
+    /// Override only the host-facing presentation name of a stable parameter.
+    ///
+    /// The registered ParamInfo remains immutable: its ID, ordering, range,
+    /// value, and authoring name do not change. Format adapters may use this
+    /// overlay when a plugin keeps a fixed automation slot but changes the
+    /// semantic label shown by the host (for example, a generated macro slot
+    /// changing from "Tone" to "Cutoff").
+    ///
+    /// Passing an empty name clears the overlay and restores ParamInfo::name.
+    /// Safe to call from non-audio threads while processing is active. Readers
+    /// observe an immutable copy-on-write snapshot.
+    ///
+    /// @return true only when a registered parameter's displayed name changed.
+    bool set_parameter_display_name(ParamID id, std::string name);
+
+    /// Current host-facing name: overlay when present, otherwise ParamInfo::name.
+    ///
+    /// Returns an owned string so a concurrent overlay publication cannot
+    /// invalidate the caller's view.
+    std::string parameter_display_name(ParamID id) const;
+
+    /// Monotonic edge for format adapters that republish ParameterInfo.
+    std::uint64_t parameter_display_revision() const noexcept {
+        return parameter_display_revision_.load(std::memory_order_acquire);
+    }
+
     /// Block-local snapshot of @p N parameter values.
     ///
     /// Loads each parameter once and returns the values in a stack-
@@ -213,6 +240,13 @@ public:
     /// Signal the host that the current gesture has ended.
     /// **Main-thread only** — see @c begin_gesture().
     void end_gesture(ParamID id);
+
+    /// Acquire/release a shared gesture lease. Multiple live editors may bind
+    /// controls to the same StateStore parameter; only the first lease emits
+    /// begin_gesture() and only the last release emits end_gesture().
+    /// **Main-thread only** — see @c begin_gesture().
+    void acquire_gesture(ParamID id);
+    void release_gesture(ParamID id);
 
     /// Close every gesture still open and report each end to the host.
     ///
@@ -374,6 +408,11 @@ private:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    using ParameterDisplayNames =
+        std::unordered_map<ParamID, std::string>;
+    mutable std::mutex parameter_display_mutex_;
+    std::shared_ptr<const ParameterDisplayNames> parameter_display_names_;
+    std::atomic<std::uint64_t> parameter_display_revision_{0};
     // Indices (into values_/params_) of trigger / momentary parameters, cached
     // at registration so reset_triggers_rt() is allocation-free on the audio
     // thread. Empty for the overwhelmingly common no-trigger store.
@@ -391,6 +430,11 @@ private:
     // close everything still held on editor teardown. Main-thread-only, like
     // the gesture entry points that mutate it.
     std::unordered_set<ParamID> open_gestures_;
+    // Direct begin/end callers retain the historical duplicate-suppression
+    // contract independently of shared editor leases. open_gestures_ is the
+    // union that is actually open toward the host.
+    std::unordered_set<ParamID> direct_gestures_;
+    std::unordered_map<ParamID, std::size_t> gesture_leases_;
 
     // Off-main-thread gesture-misuse counter. Bumped (relaxed) by
     // begin_gesture/end_gesture when a MainThreadDispatcher backend is live but
@@ -413,6 +457,8 @@ public:
         // (e.g. AU clears callbacks on teardown, then re-installs on reopen)
         // does not have a lingering entry suppress a fresh begin_gesture.
         open_gestures_.clear();
+        direct_gestures_.clear();
+        gesture_leases_.clear();
     }
 };
 

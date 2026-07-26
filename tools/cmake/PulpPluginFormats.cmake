@@ -21,6 +21,10 @@
 # helpers are visible to user-side `pulp_add_plugin(... FORMATS vst3 clap)`
 # calls.
 
+if(APPLE AND NOT COMMAND pulp_make_bundle_relocatable)
+    include("${CMAKE_CURRENT_LIST_DIR}/PulpBundleRelocatable.cmake")
+endif()
+
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
@@ -415,6 +419,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     if(COMMAND target_copy_webgpu_binaries)
         target_copy_webgpu_binaries(${target}_AU)
     endif()
+    # AU bundles are loaded by a separate registrar/host process. Add the
+    # bundle-local runtime path without replacing CMake's other build rpaths:
+    # optional engines such as V8 may still need those during development.
+    # The strict post-build check proves every @rpath dependency also resolves
+    # inside the bundle, so an external cache path can never be the only route.
+    target_link_options(${target}_AU PRIVATE "LINKER:-rpath,@loader_path")
+    pulp_validate_bundle_relocatable(${target}_AU)
     _pulp_attach_plugin_runtime_manifest(${target} ${target}_AU)
 endfunction()
 

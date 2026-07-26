@@ -13,22 +13,40 @@
 
 #include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/au_v2_instrument.hpp>  // pulls the MusicDevice SDK bits
+#include <pulp/format/au_v2_midi_processor.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
 
 #include <AudioToolbox/AudioUnit.h>
+#include <Foundation/Foundation.h>
 
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <csignal>
 #include <memory>
+#include <spawn.h>
+#include <stdexcept>
 #include <string>
+#include <sys/wait.h>
+#include <thread>
+#include <tuple>
+#include <unistd.h>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
+
+extern char** environ;
 
 namespace {
 
 constexpr pulp::state::ParamID kFreqId = 1;   // continuous, custom display
 constexpr pulp::state::ParamID kPlainId = 2;  // no converters
+constexpr pulp::state::ParamID kLastMacroId = 12;
+class DisplayProcessor;
+DisplayProcessor* g_display_processor = nullptr;
 
 class DisplayProcessor : public pulp::format::Processor {
 public:
@@ -61,6 +79,13 @@ public:
         // No converters — flag must not be set, string property must decline.
         store.add_parameter({.id = kPlainId, .name = "Plain",
                              .range = {0.0f, 1.0f, 0.5f, 0.0f}});
+        for (pulp::state::ParamID id = 3; id <= kLastMacroId; ++id) {
+            store.add_parameter({
+                .id = id,
+                .name = "param_" + std::to_string(id),
+                .range = {0.0f, 1.0f, 0.5f, 0.0f},
+            });
+        }
     }
 
     void prepare(const pulp::format::PrepareContext&) override {}
@@ -77,15 +102,110 @@ public:
 };
 
 std::unique_ptr<pulp::format::Processor> make_display_processor() {
-    return std::make_unique<DisplayProcessor>();
+    auto processor = std::make_unique<DisplayProcessor>();
+    g_display_processor = processor.get();
+    return processor;
 }
 
 struct ScopedFactory {
     ScopedFactory() : previous(pulp::format::registered_factory()) {
         pulp::format::register_plugin(make_display_processor);
     }
-    ~ScopedFactory() { pulp::format::register_plugin(previous); }
+    ~ScopedFactory() {
+        g_display_processor = nullptr;
+        pulp::format::register_plugin(previous);
+    }
     pulp::format::ProcessorFactory previous;
+};
+
+template <typename Base>
+struct CapturingAdapter : Base {
+    using Base::Base;
+    using Base::publish_parameter_display_changes;
+
+    std::vector<std::tuple<AudioUnitPropertyID, AudioUnitScope,
+                           AudioUnitElement>> changed;
+    std::vector<std::thread::id> callback_threads;
+
+    void PropertyChanged(AudioUnitPropertyID id, AudioUnitScope scope,
+                         AudioUnitElement element) override {
+        changed.emplace_back(id, scope, element);
+        callback_threads.push_back(std::this_thread::get_id());
+    }
+};
+
+using CapturingEffect = CapturingAdapter<pulp::format::au::PulpAUEffect>;
+using CapturingInstrument =
+    CapturingAdapter<pulp::format::au::PulpAUInstrument>;
+using CapturingMidiProcessor =
+    CapturingAdapter<pulp::format::au::PulpAUMidiProcessor>;
+
+struct ExternalCapturingEffect : pulp::format::au::PulpAUEffect {
+    ExternalCapturingEffect(int& callback_count)
+        : PulpAUEffect(nullptr), callback_count(callback_count)
+    {
+    }
+
+    void PropertyChanged(AudioUnitPropertyID, AudioUnitScope,
+                         AudioUnitElement) override {
+        ++callback_count;
+    }
+
+    int& callback_count;
+};
+
+AudioStreamBasicDescription make_float_format(double sample_rate,
+                                              UInt32 channels) {
+    AudioStreamBasicDescription fmt{};
+    fmt.mSampleRate = sample_rate;
+    fmt.mFormatID = kAudioFormatLinearPCM;
+    fmt.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked |
+                       kAudioFormatFlagIsNonInterleaved;
+    fmt.mBytesPerPacket = sizeof(float);
+    fmt.mFramesPerPacket = 1;
+    fmt.mBytesPerFrame = sizeof(float);
+    fmt.mChannelsPerFrame = channels;
+    fmt.mBitsPerChannel = 32;
+    return fmt;
+}
+
+template <typename Predicate>
+bool pump_main_run_loop_until(Predicate&& predicate, double timeout_seconds) {
+    NSDate* deadline =
+        [NSDate dateWithTimeIntervalSinceNow:timeout_seconds];
+    while (!predicate() && [deadline timeIntervalSinceNow] > 0.0) {
+        [[NSRunLoop mainRunLoop]
+            runMode:NSDefaultRunLoopMode
+            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    return predicate();
+}
+
+void pump_main_run_loop_for(double seconds) {
+    NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    while ([deadline timeIntervalSinceNow] > 0.0) {
+        [[NSRunLoop mainRunLoop]
+            runMode:NSDefaultRunLoopMode
+            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+}
+
+struct ThrowWhenArmedOnCopy {
+    explicit ThrowWhenArmedOnCopy(std::shared_ptr<bool> armed)
+        : armed(std::move(armed))
+    {
+    }
+
+    ThrowWhenArmedOnCopy(const ThrowWhenArmedOnCopy& other)
+        : armed(other.armed)
+    {
+        if (*armed)
+            throw std::runtime_error("intentional notify copy failure");
+    }
+
+    void operator()(pulp::state::ParamID) const {}
+
+    std::shared_ptr<bool> armed;
 };
 
 }  // namespace
@@ -125,6 +245,311 @@ TEST_CASE("AU v2 GetParameterInfo maps range, default, and unit",
     REQUIRE_THAT(plain.minValue, WithinAbs(0.0f, 0.001f));
     REQUIRE_THAT(plain.maxValue, WithinAbs(1.0f, 0.001f));
     REQUIRE_THAT(plain.defaultValue, WithinAbs(0.5f, 0.001f));
+}
+
+TEST_CASE("AU v2 republishes display names without changing parameter identity",
+          "[au][au-v2][instrument][params][metadata]") {
+    ScopedFactory factory;
+    CapturingInstrument instrument(nullptr);
+    REQUIRE(g_display_processor != nullptr);
+
+    std::array<AudioUnitParameterID, 12> before_ids{};
+    UInt32 before_count = 0;
+    REQUIRE(instrument.GetParameterList(
+                kAudioUnitScope_Global, before_ids.data(), before_count) == noErr);
+    REQUIRE(before_count == before_ids.size());
+
+    REQUIRE(instrument.SetParameter(
+                kFreqId, kAudioUnitScope_Global, 0, 440.0f, 0) == noErr);
+    AudioUnitParameterInfo before{};
+    REQUIRE(instrument.GetParameterInfo(
+                kAudioUnitScope_Global, kFreqId, before) == noErr);
+    REQUIRE(std::string(reinterpret_cast<char*>(before.name)) == "Freq");
+    if (before.cfNameString) CFRelease(before.cfNameString);
+
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Cutoff"));
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Filter Cutoff"));
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kLastMacroId, "Macro 12 (unused)"));
+    const auto control_thread = std::this_thread::get_id();
+    instrument.publish_parameter_display_changes();
+
+    AudioUnitParameterInfo after{};
+    REQUIRE(instrument.GetParameterInfo(
+                kAudioUnitScope_Global, kFreqId, after) == noErr);
+    CHECK(std::string(reinterpret_cast<char*>(after.name)) == "Filter Cutoff");
+    if (after.cfNameString) CFRelease(after.cfNameString);
+
+    Float32 retained_value = 0.0f;
+    REQUIRE(instrument.GetParameter(
+                kFreqId, kAudioUnitScope_Global, 0, retained_value) == noErr);
+    CHECK_THAT(retained_value, WithinAbs(440.0f, 0.001f));
+
+    std::array<AudioUnitParameterID, 12> after_ids{};
+    UInt32 after_count = 0;
+    REQUIRE(instrument.GetParameterList(
+                kAudioUnitScope_Global, after_ids.data(), after_count) == noErr);
+    CHECK(after_count == before_count);
+    CHECK(after_ids == before_ids);
+
+    REQUIRE(instrument.changed.size() == 2);
+    CHECK(instrument.changed[0] ==
+          std::tuple{static_cast<AudioUnitPropertyID>(
+                         kAudioUnitProperty_ParameterInfo),
+                     static_cast<AudioUnitScope>(kAudioUnitScope_Global),
+                     static_cast<AudioUnitElement>(kFreqId)});
+    CHECK(instrument.changed[1] ==
+          std::tuple{static_cast<AudioUnitPropertyID>(
+                         kAudioUnitProperty_ParameterInfo),
+                     static_cast<AudioUnitScope>(kAudioUnitScope_Global),
+                     static_cast<AudioUnitElement>(kLastMacroId)});
+    CHECK(instrument.callback_threads ==
+          std::vector<std::thread::id>{control_thread, control_thread});
+
+    instrument.publish_parameter_display_changes();
+    CHECK(instrument.changed.size() == 2);
+
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Resonance"));
+    instrument.publish_parameter_display_changes();
+    REQUIRE(instrument.changed.size() == 3);
+    CHECK(std::get<2>(instrument.changed.back()) == kFreqId);
+
+    AudioUnitParameterInfo regenerated{};
+    REQUIRE(instrument.GetParameterInfo(
+                kAudioUnitScope_Global, kFreqId, regenerated) == noErr);
+    CHECK(std::string(reinterpret_cast<char*>(regenerated.name)) == "Resonance");
+    if (regenerated.cfNameString) CFRelease(regenerated.cfNameString);
+}
+
+TEST_CASE("AU v2 effect and MIDI adapters publish exact display-name IDs",
+          "[au][au-v2][params][metadata][main-thread]") {
+    ScopedFactory factory;
+
+    {
+        CapturingEffect effect(nullptr);
+        REQUIRE(g_display_processor != nullptr);
+        REQUIRE(g_display_processor->state().set_parameter_display_name(
+            kPlainId, "Mix"));
+        effect.publish_parameter_display_changes();
+        REQUIRE(effect.changed.size() == 1);
+        CHECK(std::get<2>(effect.changed[0]) == kPlainId);
+    }
+
+    {
+        CapturingMidiProcessor midi(nullptr);
+        REQUIRE(g_display_processor != nullptr);
+        REQUIRE(g_display_processor->state().set_parameter_display_name(
+            kFreqId, "Transpose"));
+        midi.publish_parameter_display_changes();
+        REQUIRE(midi.changed.size() == 1);
+        CHECK(std::get<2>(midi.changed[0]) == kFreqId);
+    }
+}
+
+TEST_CASE("AU v2 display-name publisher schedules on the host main thread",
+          "[au][au-v2][params][metadata][main-thread]") {
+    ScopedFactory factory;
+    CapturingEffect effect(nullptr);
+    REQUIRE(g_display_processor != nullptr);
+    REQUIRE([NSThread isMainThread]);
+
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Scheduled Cutoff"));
+    REQUIRE(pump_main_run_loop_until(
+        [&] { return !effect.changed.empty(); }, 1.0));
+
+    REQUIRE(effect.changed.size() == 1);
+    CHECK(std::get<0>(effect.changed[0]) ==
+          kAudioUnitProperty_ParameterInfo);
+    CHECK(std::get<1>(effect.changed[0]) == kAudioUnitScope_Global);
+    CHECK(std::get<2>(effect.changed[0]) == kFreqId);
+    CHECK(effect.callback_threads ==
+          std::vector<std::thread::id>{std::this_thread::get_id()});
+}
+
+TEST_CASE("AU v2 display-name publisher backs off while idle and resets fast",
+          "[au][au-v2][params][metadata][main-thread]") {
+    ScopedFactory factory;
+    CapturingEffect effect(nullptr);
+    REQUIRE(g_display_processor != nullptr);
+
+    pump_main_run_loop_for(0.1);
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Idle Cutoff"));
+
+    pump_main_run_loop_for(0.2);
+    CHECK(effect.changed.empty());
+    REQUIRE(pump_main_run_loop_until(
+        [&] { return effect.changed.size() == 1; }, 1.1));
+    CHECK(std::get<2>(effect.changed[0]) == kFreqId);
+
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Fast Cutoff"));
+    REQUIRE(pump_main_run_loop_until(
+        [&] { return effect.changed.size() == 2; }, 0.25));
+    CHECK(std::get<2>(effect.changed[1]) == kFreqId);
+}
+
+TEST_CASE("AU v2 display-name publisher deduplicates stable parameter IDs",
+          "[au][au-v2][params][metadata][main-thread]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = kFreqId, .name = "First"});
+    store.add_parameter({.id = kFreqId, .name = "Second"});
+
+    pulp::format::au::ParameterDisplayNamePublisher publisher;
+    std::vector<pulp::state::ParamID> changed;
+    publisher.start(store, [&](pulp::state::ParamID id) {
+        changed.push_back(id);
+    });
+
+    REQUIRE(store.set_parameter_display_name(kFreqId, "Shared"));
+    publisher.poll_main_thread();
+    CHECK(changed == std::vector<pulp::state::ParamID>{kFreqId});
+}
+
+TEST_CASE("AU v2 display-name publisher tolerates reentrant teardown",
+          "[au][au-v2][params][metadata][main-thread]") {
+    pulp::state::StateStore store;
+    store.add_parameter({.id = kFreqId, .name = "Freq"});
+    store.add_parameter({.id = kPlainId, .name = "Plain"});
+
+    pulp::format::au::ParameterDisplayNamePublisher publisher;
+    std::vector<pulp::state::ParamID> changed;
+    publisher.start(store, [&](pulp::state::ParamID id) {
+        changed.push_back(id);
+        publisher.stop();
+    });
+
+    REQUIRE(store.set_parameter_display_name(kFreqId, "Cutoff"));
+    REQUIRE(store.set_parameter_display_name(kPlainId, "Mix"));
+    publisher.poll_main_thread();
+
+    CHECK(changed == std::vector<pulp::state::ParamID>{kFreqId});
+}
+
+TEST_CASE("AU v2 display-name publisher releases a drain after snapshot failure",
+          "[au][au-v2][params][metadata][main-thread]") {
+    constexpr const char* kChildEnvironment =
+        "PULP_AU_DISPLAY_DRAIN_EXCEPTION_CHILD";
+    if (std::getenv(kChildEnvironment)) {
+        pulp::state::StateStore store;
+        store.add_parameter({.id = kFreqId, .name = "Freq"});
+
+        auto armed = std::make_shared<bool>(false);
+        pulp::format::au::ParameterDisplayNamePublisher::Notify notify{
+            ThrowWhenArmedOnCopy{armed}};
+        pulp::format::au::ParameterDisplayNamePublisher publisher;
+        publisher.start(store, std::move(notify));
+
+        REQUIRE(store.set_parameter_display_name(kFreqId, "Cutoff"));
+        *armed = true;
+        REQUIRE_THROWS_AS(publisher.poll_main_thread(), std::runtime_error);
+
+        // Before the drain's lifetime was guarded from its increment, the
+        // throwing std::function copy leaked drains_in_flight and this
+        // teardown waited forever.
+        publisher.stop();
+        return;
+    }
+
+    const char* executable =
+        [[[NSBundle mainBundle] executablePath] fileSystemRepresentation];
+    REQUIRE(executable != nullptr);
+    std::string executable_path(executable);
+    std::string test_name(
+        "AU v2 display-name publisher releases a drain after snapshot failure");
+    char* child_argv[] = {
+        executable_path.data(),
+        test_name.data(),
+        nullptr,
+    };
+
+    REQUIRE(::setenv(kChildEnvironment, "1", 1) == 0);
+    pid_t child = -1;
+    const int spawn_result = ::posix_spawn(
+        &child, executable_path.c_str(), nullptr, nullptr, child_argv, environ);
+    REQUIRE(::unsetenv(kChildEnvironment) == 0);
+    REQUIRE(spawn_result == 0);
+
+    int status = 0;
+    bool exited = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        const pid_t waited = ::waitpid(child, &status, WNOHANG);
+        REQUIRE(waited >= 0);
+        if (waited == child) {
+            exited = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (!exited) {
+        (void)::kill(child, SIGKILL);
+        (void)::waitpid(child, &status, 0);
+    }
+
+    REQUIRE(exited);
+    REQUIRE(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+}
+
+TEST_CASE("AU v2 delayed display-name task is inert after adapter destruction",
+          "[au][au-v2][params][metadata][main-thread]") {
+    ScopedFactory factory;
+    int callback_count = 0;
+    {
+        ExternalCapturingEffect effect(callback_count);
+        REQUIRE(g_display_processor != nullptr);
+        REQUIRE(g_display_processor->state().set_parameter_display_name(
+            kFreqId, "Destroyed Cutoff"));
+    }
+
+    pump_main_run_loop_for(0.1);
+    CHECK(callback_count == 0);
+}
+
+TEST_CASE("AU v2 instrument Render never publishes parameter metadata",
+          "[au][au-v2][instrument][params][rt-safety]") {
+    ScopedFactory factory;
+    CapturingInstrument instrument(nullptr);
+    REQUIRE(g_display_processor != nullptr);
+
+    constexpr UInt32 kFrames = 64;
+    instrument.CreateElements();
+    REQUIRE(instrument.GetOutput(0)->SetStreamFormat(
+                make_float_format(48000.0, 2)) == noErr);
+    UInt32 max_frames = kFrames;
+    REQUIRE(instrument.DispatchSetProperty(
+                kAudioUnitProperty_MaximumFramesPerSlice,
+                kAudioUnitScope_Global, 0, &max_frames,
+                sizeof(max_frames)) == noErr);
+    REQUIRE(instrument.DoInitialize() == noErr);
+
+    REQUIRE(g_display_processor->state().set_parameter_display_name(
+        kFreqId, "Cutoff"));
+    instrument.changed.clear();
+    instrument.callback_threads.clear();
+
+    std::thread audio_thread([&] {
+        instrument.publish_parameter_display_changes();
+    });
+    audio_thread.join();
+    CHECK(instrument.changed.empty());
+
+    AudioUnitRenderActionFlags flags = 0;
+    AudioTimeStamp timestamp{};
+    timestamp.mFlags = kAudioTimeStampSampleTimeValid;
+    REQUIRE(instrument.Render(flags, timestamp, kFrames) == noErr);
+    CHECK(instrument.changed.empty());
+
+    instrument.publish_parameter_display_changes();
+    REQUIRE(instrument.changed.size() == 1);
+    CHECK(std::get<2>(instrument.changed[0]) == kFreqId);
+    instrument.DoCleanup();
 }
 
 TEST_CASE("AU v2 ParameterStringFromValue formats via to_string",

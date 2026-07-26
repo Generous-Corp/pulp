@@ -475,6 +475,46 @@ const ParamInfo* StateStore::info(ParamID id) const {
     return &params_[it->second];
 }
 
+bool StateStore::set_parameter_display_name(ParamID id, std::string name) {
+    const auto registered = id_to_index_.find(id);
+    if (registered == id_to_index_.end()) return false;
+
+    const std::string& authored = params_[registered->second].name;
+    std::lock_guard lock(parameter_display_mutex_);
+    auto current = std::atomic_load_explicit(
+        &parameter_display_names_, std::memory_order_acquire);
+    const auto existing = current ? current->find(id) : ParameterDisplayNames::const_iterator{};
+    const std::string old_name =
+        current && existing != current->end() ? existing->second : authored;
+    const std::string new_name = name.empty() ? authored : name;
+    if (new_name == old_name) return false;
+
+    auto next = std::make_shared<ParameterDisplayNames>(
+        current ? *current : ParameterDisplayNames{});
+    if (name.empty() || name == authored)
+        next->erase(id);
+    else
+        (*next)[id] = std::move(name);
+    std::atomic_store_explicit(
+        &parameter_display_names_,
+        std::shared_ptr<const ParameterDisplayNames>(std::move(next)),
+        std::memory_order_release);
+    parameter_display_revision_.fetch_add(1, std::memory_order_release);
+    return true;
+}
+
+std::string StateStore::parameter_display_name(ParamID id) const {
+    const auto* parameter = info(id);
+    if (!parameter) return {};
+    auto names = std::atomic_load_explicit(
+        &parameter_display_names_, std::memory_order_acquire);
+    if (names) {
+        const auto it = names->find(id);
+        if (it != names->end()) return it->second;
+    }
+    return parameter->name;
+}
+
 namespace {
 
 // Detect (and, in debug, assert) a gesture entry point being driven off the
@@ -496,11 +536,11 @@ void StateStore::begin_gesture(ParamID id) {
         assert(false && "StateStore::begin_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
-    // Balance begin/end 1:1 toward the host: a second begin on an
-    // already-open parameter must not emit a second host begin-edit (which the
-    // matching end would then leave latched open).
-    if (!open_gestures_.insert(id).second) return;
-    if (on_begin_gesture_) on_begin_gesture_(id);
+    // Preserve the direct API's duplicate-suppression contract while sharing
+    // host ownership with lease-based editor bindings.
+    if (!direct_gestures_.insert(id).second) return;
+    if (open_gestures_.insert(id).second && on_begin_gesture_)
+        on_begin_gesture_(id);
 }
 
 void StateStore::end_gesture(ParamID id) {
@@ -509,10 +549,29 @@ void StateStore::end_gesture(ParamID id) {
         assert(false && "StateStore::end_gesture called off the host main "
                         "thread; use run_gesture_on_main()");
     }
-    // Only report an end for a gesture we actually opened — a stray end (or a
-    // duplicate) must not emit an unbalanced host end-edit.
-    if (open_gestures_.erase(id) == 0) return;
-    if (on_end_gesture_) on_end_gesture_(id);
+    // Only release the direct owner's share. A live editor lease keeps the
+    // host gesture open until its final release.
+    if (direct_gestures_.erase(id) == 0) return;
+    if (gesture_leases_.find(id) != gesture_leases_.end()) return;
+    if (open_gestures_.erase(id) != 0 && on_end_gesture_)
+        on_end_gesture_(id);
+}
+
+void StateStore::acquire_gesture(ParamID id) {
+    auto& leases = gesture_leases_[id];
+    if (leases++ != 0) return;
+    if (open_gestures_.insert(id).second && on_begin_gesture_)
+        on_begin_gesture_(id);
+}
+
+void StateStore::release_gesture(ParamID id) {
+    const auto found = gesture_leases_.find(id);
+    if (found == gesture_leases_.end()) return;
+    if (--found->second != 0) return;
+    gesture_leases_.erase(found);
+    if (direct_gestures_.find(id) != direct_gestures_.end()) return;
+    if (open_gestures_.erase(id) != 0 && on_end_gesture_)
+        on_end_gesture_(id);
 }
 
 void StateStore::release_open_gestures() {
@@ -521,14 +580,21 @@ void StateStore::release_open_gestures() {
         assert(false && "StateStore::release_open_gestures called off the host "
                         "main thread; call it from the editor-teardown path");
     }
-    if (open_gestures_.empty()) return;
-    // Move out first: firing the host end-edit must not observe a
-    // half-cleared set, and callbacks cannot re-enter a live iteration.
-    const auto held = std::move(open_gestures_);
-    open_gestures_.clear();
-    if (on_end_gesture_) {
-        for (const ParamID id : held) on_end_gesture_(id);
+    if (direct_gestures_.empty()) return;
+    // Release direct owners only. Live WidgetBridge leases belong to their
+    // respective editors and remain open until those bridges tear down.
+    auto held = std::move(direct_gestures_);
+    direct_gestures_.clear();
+    for (auto it = held.begin(); it != held.end();) {
+        if (gesture_leases_.find(*it) != gesture_leases_.end())
+            it = held.erase(it);
+        else
+            ++it;
     }
+    for (const ParamID id : held)
+        open_gestures_.erase(id);
+    if (on_end_gesture_)
+        for (const ParamID id : held) on_end_gesture_(id);
 }
 
 void StateStore::run_gesture_on_main(std::function<void()> gesture) {

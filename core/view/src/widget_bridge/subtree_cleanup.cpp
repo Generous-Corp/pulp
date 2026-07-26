@@ -94,6 +94,7 @@ void WidgetBridge::forget_widget_subtree(View* node, bool preserve_js_dom_state)
 
     forget_js_widget_subtree(engine_, ids, preserve_js_dom_state);
     for (const auto& id : ids) {
+        release_param_gesture_route(id);
         widgets_.erase(id);
         forget_widget_registrations(id);
     }

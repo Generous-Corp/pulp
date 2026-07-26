@@ -19,8 +19,10 @@ import { readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { chromium } from "playwright-core";
+import { resolveFixtureAsset } from "./fixture-assets.mjs";
 
 const HERE = new URL(".", import.meta.url).pathname;
+const SOURCE_DIR = resolve(HERE, "..");
 const PORT = 8734;
 const PAGE = `http://localhost:${PORT}/`;
 
@@ -66,9 +68,12 @@ window.__error = null;
 window.__events = [];
 
 const PARAMS = [
-  { id: 10, label: "Mix",  unit: "%",  minValue: 0, maxValue: 100, defaultValue: 35 },
-  { id: 11, label: "Size", unit: "",   minValue: 0, maxValue: 1,   defaultValue: 0.5 },
-  { id: 12, label: "Gain", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0 },
+  // Keep these IDs/ranges aligned with SuperConvolverParams in
+  // examples/super-convolver/super_convolver_ui_host.hpp. The real editor looks
+  // controls up by ParamID; placeholder IDs exercise no widget at all.
+  { id: 1, label: "Mix",  unit: "%",  minValue: 0,     maxValue: 100, defaultValue: 35 },
+  { id: 2, label: "Size", unit: "s",  minValue: 0.05,  maxValue: 4,   defaultValue: 0.5 },
+  { id: 3, label: "Gain", unit: "dB", minValue: -24,   maxValue: 24,  defaultValue: 0 },
 ];
 
 const adapter = {
@@ -104,7 +109,7 @@ const MIME = {
 };
 
 const server = http.createServer(async (req, res) => {
-  const path = decodeURIComponent(req.url.split("?")[0]);
+  const path = req.url.split("?")[0];
   const head = {
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-embedder-policy": "require-corp",
@@ -113,9 +118,8 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { ...head, "content-type": "text/html" });
     return res.end(INDEX_HTML);
   }
-  const name = path.replace(/^\//, "");
-  if (/[/\\]/.test(name)) { res.writeHead(403); return res.end(); }
-  const file = name === "pulp-ui.js" ? resolve(HERE, "..", name) : resolve(buildDir, name);
+  const file = resolveFixtureAsset(req.url, { sourceDir: SOURCE_DIR, buildDir });
+  if (!file) { res.writeHead(403); return res.end(); }
   try {
     const data = await readFile(file);
     res.writeHead(200, { ...head, "content-type": MIME[extname(file)] || "application/octet-stream" });
@@ -321,7 +325,7 @@ try {
         !!probe.label && probe.labelInk > 20,
         probe.label ? `${probe.labelInk} ink px in [${probe.label.map(Math.round).join(",")}]` : "no label rect");
 
-  // 3 — a real pointer gesture on a real knob.
+  // 3 — a real pointer gesture on a real slider.
   const box = await page.evaluate(() => {
     const r = document.getElementById("pulp-ui").getBoundingClientRect();
     return { x: r.x, y: r.y };
@@ -332,7 +336,7 @@ try {
   await page.evaluate(() => { window.__events.length = 0; });
   await page.mouse.move(cx, cy);
   await page.mouse.down();
-  for (let i = 1; i <= 6; i++) await page.mouse.move(cx, cy - i * 6);  // drag up = increase
+  for (let i = 1; i <= 6; i++) await page.mouse.move(cx + i * 12, cy);  // drag right = increase
   await page.mouse.up();
   await page.waitForTimeout(120);
 
@@ -471,9 +475,9 @@ try {
       focused: document.activeElement === c,
     };
   });
-  check("canvas surrenders touch-action (a drag must not pan the page)",
-        hygiene.touchAction === "none", `touch-action: ${hygiene.touchAction}`);
-  check("canvas is unselectable (a knob drag must not select page text)",
+  check("canvas leaves vertical touch drags to the scrollable page",
+        hygiene.touchAction === "pan-y", `touch-action: ${hygiene.touchAction}`);
+  check("canvas is unselectable (a control drag must not select page text)",
         hygiene.userSelect === "none", `user-select: ${hygiene.userSelect}`);
   check("pointerdown focuses the canvas WITHOUT scrolling the page",
         hygiene.focused && hygiene.scrolledY === 0,

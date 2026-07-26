@@ -9,9 +9,15 @@ set(_prefix "${_fixture_root}/prefix")
 set(_consumer_build "${_fixture_root}/build")
 file(REMOVE_RECURSE "${_fixture_root}")
 
+set(_producer_config Release)
+if(PULP_PARENT_BUILD_TYPE)
+    set(_producer_config "${PULP_PARENT_BUILD_TYPE}")
+endif()
+string(TOLOWER "${_producer_config}" _producer_config_lower)
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${PULP_BUILD_DIR}"
-            --prefix "${_prefix}" --config Release
+            --prefix "${_prefix}" --config "${_producer_config}"
     RESULT_VARIABLE _install_result
     OUTPUT_VARIABLE _install_output
     ERROR_VARIABLE _install_error)
@@ -21,13 +27,46 @@ if(NOT _install_result EQUAL 0)
         "${_install_output}\n${_install_error}")
 endif()
 
+set(_consumer_configure_args
+    -S "${PULP_SOURCE_DIR}/examples/timeline-sdk-consumer"
+    -B "${_consumer_build}"
+    "-DCMAKE_PREFIX_PATH=${_prefix}"
+    "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
+    "-DCMAKE_BUILD_TYPE=${_producer_config}")
+
+# This fixture verifies the installed Timeline target closure from every build
+# lane, including ASan's deliberate Debug SDK. The production guard remains
+# covered by test_debug_sdk_guard.cmake; this one explicitly acknowledges a
+# Debug producer and carries its sanitizer flags into the external consumer so
+# its static Pulp libraries link against the matching sanitizer runtime.
+if(_producer_config_lower STREQUAL "debug")
+    list(APPEND _consumer_configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
+
+set(_consumer_cxx_flags "${PULP_PARENT_CXX_FLAGS}")
+set(_consumer_linker_flags "${PULP_PARENT_EXE_LINKER_FLAGS}")
+if(PULP_PARENT_INSTRUMENTATION_CXX_FLAGS)
+    string(APPEND _consumer_cxx_flags
+        " ${PULP_PARENT_INSTRUMENTATION_CXX_FLAGS}")
+endif()
+if(PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS)
+    string(APPEND _consumer_linker_flags
+        " ${PULP_PARENT_INSTRUMENTATION_LINKER_FLAGS}")
+endif()
+string(STRIP "${_consumer_cxx_flags}" _consumer_cxx_flags)
+string(STRIP "${_consumer_linker_flags}" _consumer_linker_flags)
+
+if(_consumer_cxx_flags)
+    list(APPEND _consumer_configure_args
+        "-DCMAKE_CXX_FLAGS=${_consumer_cxx_flags}")
+endif()
+if(_consumer_linker_flags)
+    list(APPEND _consumer_configure_args
+        "-DCMAKE_EXE_LINKER_FLAGS=${_consumer_linker_flags}")
+endif()
+
 execute_process(
-    COMMAND "${CMAKE_COMMAND}"
-            -S "${PULP_SOURCE_DIR}/examples/timeline-sdk-consumer"
-            -B "${_consumer_build}"
-            "-DCMAKE_PREFIX_PATH=${_prefix}"
-            "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
-            -DCMAKE_BUILD_TYPE=Release
+    COMMAND "${CMAKE_COMMAND}" ${_consumer_configure_args}
     RESULT_VARIABLE _configure_result
     OUTPUT_VARIABLE _configure_output
     ERROR_VARIABLE _configure_error)
@@ -39,7 +78,7 @@ endif()
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${_consumer_build}"
-            --config Release --parallel 2
+            --config "${_producer_config}" --parallel 2
     RESULT_VARIABLE _build_result
     OUTPUT_VARIABLE _build_output
     ERROR_VARIABLE _build_error)
@@ -49,19 +88,26 @@ if(NOT _build_result EQUAL 0)
         "${_build_output}\n${_build_error}")
 endif()
 
-set(_executable "${_consumer_build}/pulp-timeline-sdk-consumer")
+set(_executable_suffix "")
 if(WIN32)
-    set(_executable "${_consumer_build}/Release/pulp-timeline-sdk-consumer.exe")
+    set(_executable_suffix ".exe")
+endif()
+set(_executable
+    "${_consumer_build}/pulp-timeline-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_executable}")
+    set(_executable
+        "${_consumer_build}/${_producer_config}/pulp-timeline-sdk-consumer${_executable_suffix}")
 endif()
 execute_process(COMMAND "${_executable}" RESULT_VARIABLE _run_result)
 if(NOT _run_result EQUAL 0)
     message(FATAL_ERROR "Timeline SDK consumer exited ${_run_result}")
 endif()
 
-set(_importer_executable "${_consumer_build}/pulp-dawproject-import-sdk-consumer")
-if(WIN32)
+set(_importer_executable
+    "${_consumer_build}/pulp-dawproject-import-sdk-consumer${_executable_suffix}")
+if(NOT EXISTS "${_importer_executable}")
     set(_importer_executable
-        "${_consumer_build}/Release/pulp-dawproject-import-sdk-consumer.exe")
+        "${_consumer_build}/${_producer_config}/pulp-dawproject-import-sdk-consumer${_executable_suffix}")
 endif()
 execute_process(COMMAND "${_importer_executable}" RESULT_VARIABLE _importer_run_result)
 if(NOT _importer_run_result EQUAL 0)
@@ -76,12 +122,16 @@ file(WRITE "${_missing_source}/CMakeLists.txt"
     "cmake_minimum_required(VERSION 3.24)\n"
     "project(PulpMissingComponent LANGUAGES CXX)\n"
     "find_package(Pulp REQUIRED COMPONENTS timeline component-that-does-not-exist)\n")
+set(_missing_configure_args
+    -S "${_missing_source}"
+    -B "${_missing_build}"
+    "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
+    "-DCMAKE_BUILD_TYPE=${_producer_config}")
+if(_producer_config_lower STREQUAL "debug")
+    list(APPEND _missing_configure_args -DPULP_ALLOW_DEBUG_SDK=ON)
+endif()
 execute_process(
-    COMMAND "${CMAKE_COMMAND}"
-            -S "${_missing_source}"
-            -B "${_missing_build}"
-            "-DPulp_DIR=${_prefix}/lib/cmake/Pulp"
-            -DCMAKE_BUILD_TYPE=Release
+    COMMAND "${CMAKE_COMMAND}" ${_missing_configure_args}
     RESULT_VARIABLE _missing_result
     OUTPUT_VARIABLE _missing_output
     ERROR_VARIABLE _missing_error)

@@ -1425,6 +1425,12 @@ exactly that sanitizer; the others stay on their defaults.
 | `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-26` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-sanitizer-vm-macos"]'` |
 | `PULP_SANITIZER_RTSAN_RUNS_ON_JSON` | `ubuntu-24.04` | `gh variable set PULP_SANITIZER_RTSAN_RUNS_ON_JSON --body '["self-hosted","linux","x64","sanitizer"]'` |
 
+UBSan uses a `RelWithDebInfo` build with non-recovering undefined-behaviour
+instrumentation. This keeps symbols and the complete test matrix while running
+production-scale DSP certification renders with optimized code; a Debug/O0
+build can turn seconds of offline spectral and stability analysis into
+per-test hang-guard timeouts without reporting undefined behaviour.
+
 The three macOS sanitizers (ASan/TSan/UBSan) carry a `--deny-labels
 pulp-build,pulp-build-vm` guard in `sanitizers.yml`'s resolver, so a
 sanitizer can **never** be misrouted onto the required-gate pool (the
