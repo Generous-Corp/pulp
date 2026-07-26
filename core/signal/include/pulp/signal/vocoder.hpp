@@ -457,6 +457,15 @@ public:
     // ── Audio ─────────────────────────────────────────────────────────────
 
     void process(SampleType modulator, SampleType carrier_ext, SampleType& out_dry) {
+        // Both inputs feed recursive filters. A non-finite sample is a recovery
+        // boundary: reject it before it can latch the filterbank, oscillator,
+        // voicing detector, or freeze state.
+        if (!std::isfinite(static_cast<double>(modulator)) ||
+            !std::isfinite(static_cast<double>(carrier_ext))) {
+            reset();
+            out_dry = SampleType{0};
+            return;
+        }
         const double modulator_in = static_cast<double>(modulator);
         const double blocked = modulator_dc_.process(modulator_in);
 
@@ -560,7 +569,13 @@ public:
         wet += sibilance_mix_ * unvoiced_ * sibilance_hp_.process_highpass(blocked);
         wet *= output_trim_;
 
-        out_dry = static_cast<SampleType>((1.0 - dry_wet_) * blocked + dry_wet_ * wet);
+        const double output = (1.0 - dry_wet_) * blocked + dry_wet_ * wet;
+        if (!std::isfinite(output)) {
+            reset();
+            out_dry = SampleType{0};
+            return;
+        }
+        out_dry = static_cast<SampleType>(output);
     }
 
     // ── Observability ─────────────────────────────────────────────────────

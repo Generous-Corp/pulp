@@ -265,7 +265,8 @@ public:
     /// than silently corrupting the interpolation's monotonicity assumption.
     bool add(double abscissa, double gain_db) {
         if (count_ >= kMaxBreakpoints) return false;
-        if (!(abscissa > 0.0)) return false;
+        if (!(std::isfinite(abscissa) && abscissa > 0.0) || !std::isfinite(gain_db))
+            return false;
         if (count_ > 0 && abscissa <= x_[static_cast<std::size_t>(count_ - 1)])
             return false;
         x_[static_cast<std::size_t>(count_)] = abscissa;
@@ -496,8 +497,10 @@ public:
     static constexpr double kMasterGainDefaultDb = -6.0;
 
     static constexpr double kAttackDefaultMs = 5.0;
+    static constexpr double kAttackMinMs = 0.1;
     static constexpr double kAttackMaxMs = 2000.0;
     static constexpr double kReleaseDefaultMs = 400.0;
+    static constexpr double kReleaseMinMs = 1.0;
     static constexpr double kReleaseMaxMs = 20000.0;
 
     static constexpr double kDetuneDefaultCents = 0.0;
@@ -570,7 +573,7 @@ public:
     /// **The only method here that may allocate**, and only when `max_partials`
     /// grows past what is already reserved.
     void prepare(double sample_rate, int max_partials = kMaxPartialsDefault) {
-        if (sample_rate > 0.0) sample_rate_ = sample_rate;
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) sample_rate_ = sample_rate;
         max_partials_ = std::clamp(max_partials, 1, kMaxPartialsCeiling);
         partial_count_ = std::min(partial_count_, max_partials_);
 
@@ -615,6 +618,7 @@ public:
     // ── Global voice ──────────────────────────────────────────────────────
 
     void set_fundamental_hz(double f0) {
+        if (!std::isfinite(f0)) return;
         fundamental_hz_ = std::clamp(f0, kFundamentalMinHz, kFundamentalMaxHz);
     }
     double fundamental_hz() const { return fundamental_hz_; }
@@ -631,16 +635,19 @@ public:
     /// Stiff-string coefficient. Applies only to harmonic-typed voices; a modal
     /// voice ignores it (see `VoiceTable::harmonic`).
     void set_inharmonicity_b(double b) {
+        if (!std::isfinite(b)) return;
         inharmonicity_b_ = std::clamp(b, 0.0, kInharmonicityMax);
     }
     double inharmonicity_b() const { return inharmonicity_b_; }
 
     void set_spectral_tilt_db_oct(double s) {
+        if (!std::isfinite(s)) return;
         tilt_db_oct_ = std::clamp(s, kSpectralTiltMinDbOct, kSpectralTiltMaxDbOct);
     }
     double spectral_tilt_db_oct() const { return tilt_db_oct_; }
 
     void set_master_gain_db(double g) {
+        if (!std::isfinite(g)) return;
         master_gain_db_ = std::clamp(g, kMasterGainMinDb, kMasterGainMaxDb);
         master_linear_ = units::db_to_linear(master_gain_db_);
     }
@@ -649,6 +656,13 @@ public:
     // ── The partial table ─────────────────────────────────────────────────
 
     void load_voice(const VoiceTable& v) {
+        if (v.count < 0 || v.count > VoiceTable::kMaxPartials) return;
+        for (int p = 0; p < v.count; ++p) {
+            const auto& row = v.partials[static_cast<std::size_t>(p)];
+            if (!std::isfinite(row.ratio) || !std::isfinite(row.amp) ||
+                !std::isfinite(row.phase01) || !std::isfinite(row.decay_ms))
+                return;
+        }
         voice_ = v;
         partial_count_ = std::clamp(partial_count_, 1,
                                     std::max(1, std::min(max_partials_, voice_.count)));
@@ -660,6 +674,9 @@ public:
     void set_partial(int p, double ratio, double amp_lin, double phase01,
                      double decay_ms) {
         if (p < 0 || p >= VoiceTable::kMaxPartials) return;
+        if (!std::isfinite(ratio) || !std::isfinite(amp_lin) ||
+            !std::isfinite(phase01) || !std::isfinite(decay_ms))
+            return;
         voice_.partials[static_cast<std::size_t>(p)] = {ratio, amp_lin, phase01,
                                                         decay_ms};
         voice_.count = std::max(voice_.count, p + 1);
@@ -675,6 +692,7 @@ public:
     /// interpolation between independently-fitted per-pitch amplitude tables
     /// (series law 7).
     void set_morph(float m) {
+        if (!std::isfinite(static_cast<double>(m))) return;
         morph_ = std::clamp(static_cast<double>(m), 0.0, 1.0);
     }
     double morph() const { return morph_; }
@@ -701,17 +719,25 @@ public:
     EnvelopeMode envelope_mode() const { return envelope_mode_; }
 
     void set_attack_ms(double ms) {
-        attack_ms_ = std::clamp(ms, 0.0, kAttackMaxMs);
+        if (!std::isfinite(ms)) return;
+        // Zero is the explicit instantaneous-envelope mode used by the raw
+        // oscillator/test surface. Non-zero values obey the published catalog
+        // range, including its reachable 0.1 ms lower endpoint.
+        attack_ms_ = ms == 0.0 ? 0.0 : std::clamp(ms, kAttackMinMs, kAttackMaxMs);
         refresh_onset();
     }
     void set_release_ms(double ms) {
-        release_ms_ = std::clamp(ms, 0.0, kReleaseMaxMs);
+        if (!std::isfinite(ms)) return;
+        // As above, exact zero is a deliberate instantaneous internal mode;
+        // all non-zero requests obey the declared 1 ms minimum.
+        release_ms_ = ms == 0.0 ? 0.0 : std::clamp(ms, kReleaseMinMs, kReleaseMaxMs);
         refresh_onset();
     }
 
     /// Doublet spread in cents. 0 disables the pair outright — the second
     /// oscillator is not rendered, so a mono voice costs half of a detuned one.
     void set_detune_cents(double cents) {
+        if (!std::isfinite(cents)) return;
         detune_cents_ = std::clamp(cents, 0.0, kDetuneMaxCents);
     }
     double detune_cents() const { return detune_cents_; }
@@ -721,6 +747,7 @@ public:
     /// `2^(cents(t)/1200)`, starting at `start_cents` and reaching 0 over
     /// `time_ms`. The bell's strike chiff and a drum's pitch drop.
     void set_pitch_glide(double start_cents, double time_ms) {
+        if (!std::isfinite(start_cents) || !std::isfinite(time_ms)) return;
         glide_start_cents_ = start_cents;
         glide_time_ms_ = std::max(time_ms, 0.0);
     }

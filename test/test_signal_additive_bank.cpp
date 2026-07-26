@@ -83,6 +83,7 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -1729,4 +1730,92 @@ TEST_CASE("A pitch glide scales every partial together",
     for (int p = 0; p < 4; ++p)
         REQUIRE_THAT(bank.partial_frequency(p),
                      WithinRel(kF0 * static_cast<double>(p + 1), 1e-6));
+}
+
+TEST_CASE("Block partitioning does not disturb additive phase or control cadence",
+          "[signal][additive][phase][determinism]") {
+    Bank bank;
+    bank.prepare(kSr, 64);
+    bank.load_voice(make_bell_voice(32));
+    bank.set_partial_count(32);
+    bank.set_retrig_phase(Bank::RetrigPhase::seeded_random);
+    bank.set_detune_cents(7.0);
+    bank.set_pitch_glide(120.0, 37.0);
+
+    constexpr int kSamples = 4097;
+    std::vector<double> whole(kSamples), partitioned(kSamples);
+
+    bank.reset();
+    bank.retrigger();
+    bank.process(whole.data(), kSamples);
+
+    bank.reset();
+    bank.retrigger();
+    constexpr int kChunks[] = {1, 31, 2, 63, 7, 128, 3, 17};
+    int position = 0;
+    int chunk = 0;
+    while (position < kSamples) {
+        const int count = std::min(kChunks[chunk % 8], kSamples - position);
+        bank.process(partitioned.data() + position, count);
+        position += count;
+        ++chunk;
+    }
+
+    REQUIRE(whole == partitioned);
+}
+
+TEST_CASE("Additive declared time minima and non-finite controls cannot poison the voice",
+          "[signal][additive][limits][nan-recovery]") {
+    const auto render = [](double attack_ms, double release_ms) {
+        Bank bank;
+        bank.prepare(kSr, 1);
+        bank.load_voice(harmonic_voice(1, 1.0, 0.25));
+        bank.set_partial_count(1);
+        bank.set_envelope_mode(Bank::EnvelopeMode::shared_ar);
+        bank.set_attack_ms(attack_ms);
+        bank.set_release_ms(release_ms);
+        bank.reset();
+        bank.retrigger();
+
+        std::vector<double> out(1024);
+        bank.process(out.data(), 256);
+        bank.release();
+        bank.process(out.data() + 256, 768);
+        return out;
+    };
+
+    REQUIRE(render(-100.0, -100.0) ==
+            render(Bank::kAttackMinMs, Bank::kReleaseMinMs));
+
+    Bank bank;
+    bank.prepare(kSr, 8);
+    bank.set_fundamental_hz(440.0);
+    bank.set_inharmonicity_b(0.001);
+    bank.set_spectral_tilt_db_oct(-3.0);
+    bank.set_master_gain_db(-6.0);
+    bank.set_morph(0.5f);
+    bank.set_attack_ms(10.0);
+    bank.set_release_ms(100.0);
+    bank.set_detune_cents(3.0);
+    bank.set_pitch_glide(100.0, 20.0);
+
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    bank.set_fundamental_hz(nan);
+    bank.set_inharmonicity_b(nan);
+    bank.set_spectral_tilt_db_oct(nan);
+    bank.set_master_gain_db(nan);
+    bank.set_morph(std::numeric_limits<float>::quiet_NaN());
+    bank.set_attack_ms(nan);
+    bank.set_release_ms(nan);
+    bank.set_detune_cents(nan);
+    bank.set_pitch_glide(nan, nan);
+
+    REQUIRE(bank.fundamental_hz() == 440.0);
+    REQUIRE(bank.inharmonicity_b() == 0.001);
+    REQUIRE(bank.spectral_tilt_db_oct() == -3.0);
+    REQUIRE(bank.master_gain_db() == -6.0);
+    REQUIRE(bank.morph() == 0.5);
+    bank.reset();
+    bank.retrigger();
+    for (int i = 0; i < 512; ++i) REQUIRE(std::isfinite(bank.next()));
 }

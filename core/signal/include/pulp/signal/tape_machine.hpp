@@ -781,7 +781,8 @@ public:
     /// gap-loss FIR per legal speed, so nothing in this file allocates later.
     /// May allocate.
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        if (std::isfinite(sample_rate) && sample_rate > 0.0)
+            sample_rate_ = sample_rate;
 
         for (int index = 0; index < 2; ++index)
             channels_[static_cast<std::size_t>(index)].prepare(sample_rate_, index);
@@ -833,6 +834,7 @@ public:
     /// Snapped to the nearest legal speed for the active archetype. CONTROL
     /// THREAD ONLY — see the header's RT contract.
     void set_speed_ips(double ips) {
+        if (!std::isfinite(ips)) return;
         update_speed(tape::snap_speed_ips(archetype_, ips), /*redesign=*/false);
         update_eq();
     }
@@ -849,6 +851,7 @@ public:
     Curve eq_curve() const noexcept { return curve_; }
 
     void set_bias(float bias_c) {
+        if (!std::isfinite(static_cast<double>(bias_c))) return;
         bias_request_ = std::clamp(static_cast<double>(bias_c), kBiasMin, kBiasMax);
         update_bias();
         update_print_through();
@@ -860,6 +863,7 @@ public:
     double effective_bias() const noexcept { return bias_; }
 
     void set_drive(float drive01) {
+        if (!std::isfinite(static_cast<double>(drive01))) return;
         drive01_ = std::clamp(static_cast<double>(drive01), 0.0, 1.0);
         update_bias();
     }
@@ -867,6 +871,7 @@ public:
     double drive() const noexcept { return drive01_; }
 
     void set_age(float age01) {
+        if (!std::isfinite(static_cast<double>(age01))) return;
         age01_ = std::clamp(static_cast<double>(age01), 0.0, 1.0);
         apply_age();
         update_print_through();
@@ -875,6 +880,7 @@ public:
     double age() const noexcept { return age01_; }
 
     void set_crosstalk_db(float db) {
+        if (!std::isfinite(static_cast<double>(db))) return;
         crosstalk_db_ = std::clamp(static_cast<double>(db), kCrosstalkDbMin, kCrosstalkDbMax);
         update_crosstalk();
     }
@@ -888,6 +894,9 @@ public:
     /// wrap offset; `pre_echo_enabled` adds the lookahead and the latency that
     /// goes with it.
     void set_print_through(float level_db, float offset_ms, bool pre_echo_enabled) {
+        if (!std::isfinite(static_cast<double>(level_db)) ||
+            !std::isfinite(static_cast<double>(offset_ms)))
+            return;
         print_through_db_ =
             std::clamp(static_cast<double>(level_db), kPrintThroughDbMin, kPrintThroughDbMax);
         print_offset_ms_ = std::clamp(static_cast<double>(offset_ms),
@@ -901,6 +910,7 @@ public:
     bool pre_echo_enabled() const noexcept { return pre_echo_; }
 
     void set_mix(float wet01) noexcept {
+        if (!std::isfinite(static_cast<double>(wet01))) return;
         mix_ = std::clamp(static_cast<double>(wet01), 0.0, 1.0);
     }
 
@@ -911,6 +921,16 @@ public:
         for (int n = 0; n < n_frames; ++n) {
             const double dry_l = static_cast<double>(in_l[n]);
             const double dry_r = static_cast<double>(in_r[n]);
+
+            // Inputs immediately enter several recursive stages. Treat a
+            // non-finite frame as a recovery boundary before it can latch
+            // those states; reset is allocation-free by contract.
+            if (!std::isfinite(dry_l) || !std::isfinite(dry_r)) {
+                reset();
+                out_l[n] = SampleType{0};
+                out_r[n] = SampleType{0};
+                continue;
+            }
 
             // Record chain. Companding first, so the compressor sees the
             // programme rather than the tape's own colouration.
@@ -945,8 +965,16 @@ public:
                 right = compander_r_.decode(right);
             }
 
-            out_l[n] = static_cast<SampleType>(dry_l + mix_ * (left - dry_l));
-            out_r[n] = static_cast<SampleType>(dry_r + mix_ * (right - dry_r));
+            const double output_l = dry_l + mix_ * (left - dry_l);
+            const double output_r = dry_r + mix_ * (right - dry_r);
+            if (!std::isfinite(output_l) || !std::isfinite(output_r)) {
+                reset();
+                out_l[n] = SampleType{0};
+                out_r[n] = SampleType{0};
+                continue;
+            }
+            out_l[n] = static_cast<SampleType>(output_l);
+            out_r[n] = static_cast<SampleType>(output_r);
         }
     }
 

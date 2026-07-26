@@ -44,6 +44,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <string>
@@ -1455,4 +1456,30 @@ TEST_CASE("vocoder float and double instantiations agree", "[signal][vocoder]") 
     }
     INFO("largest float/double divergence " << worst);
     REQUIRE(worst < 1e-4);
+}
+
+TEST_CASE("vocoder rejects non-finite audio before recursive state and recovers exactly",
+          "[signal][vocoder][nan-recovery][rt-safety]") {
+    Voc poisoned = make_bank();
+    Voc fresh = make_bank();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    double output = 1.0;
+
+    {
+        pulp::test::RtAllocationProbe probe;
+        poisoned.process(nan, 0.25, output);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(output == 0.0);
+
+    for (int i = 0; i < 4096; ++i) {
+        const double modulator = 0.4 * std::sin(2.0 * kPi * 220.0 * i / kSr);
+        const double carrier = 0.3 * std::sin(2.0 * kPi * 110.0 * i / kSr);
+        double recovered = 0.0;
+        double reference = 0.0;
+        poisoned.process(modulator, carrier, recovered);
+        fresh.process(modulator, carrier, reference);
+        REQUIRE(std::isfinite(recovered));
+        REQUIRE(recovered == reference);
+    }
 }

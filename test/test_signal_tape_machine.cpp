@@ -81,6 +81,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -1324,4 +1325,69 @@ TEST_CASE("Tape machine: a fresh instance and a reset instance agree",
     used.process(in_l.data(), in_r.data(), c.data(), d.data(), n);
 
     for (std::size_t k = 0; k < a.size(); ++k) REQUIRE(a[k] == c[k]);
+}
+
+TEST_CASE("Tape machine rejects non-finite controls and audio without latching recursive state",
+          "[signal][tape-machine][nan-recovery][rt-safety]") {
+    TapeMachine poisoned;
+    TapeMachine fresh;
+    for (TapeMachine* machine : {&poisoned, &fresh}) {
+        machine->set_archetype(TapeArchetype::studer_a800);
+        machine->prepare(kSr);
+        machine->set_bias(0.2f);
+        machine->set_drive(0.4f);
+        machine->set_age(0.5f);
+        machine->set_crosstalk_db(-35.0f);
+        machine->set_print_through(-55.0f, 600.0f, true);
+    }
+
+    const double speed = poisoned.speed_ips();
+    const double bias = poisoned.effective_bias();
+    const double drive = poisoned.drive();
+    const double age = poisoned.age();
+    const double crosstalk = poisoned.crosstalk_db();
+    const double print_db = poisoned.print_through_db();
+    const double print_offset = poisoned.print_offset_ms();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+
+    poisoned.set_speed_ips(std::numeric_limits<double>::quiet_NaN());
+    poisoned.set_bias(nan);
+    poisoned.set_drive(nan);
+    poisoned.set_age(nan);
+    poisoned.set_crosstalk_db(nan);
+    poisoned.set_print_through(nan, nan, true);
+    poisoned.set_mix(nan);
+    REQUIRE(poisoned.speed_ips() == speed);
+    REQUIRE(poisoned.effective_bias() == bias);
+    REQUIRE(poisoned.drive() == drive);
+    REQUIRE(poisoned.age() == age);
+    REQUIRE(poisoned.crosstalk_db() == crosstalk);
+    REQUIRE(poisoned.print_through_db() == print_db);
+    REQUIRE(poisoned.print_offset_ms() == print_offset);
+
+    float bad_l = nan;
+    float bad_r = 0.0f;
+    float bad_out_l = 1.0f;
+    float bad_out_r = 1.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        poisoned.process(&bad_l, &bad_r, &bad_out_l, &bad_out_r, 1);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(bad_out_l == 0.0f);
+    REQUIRE(bad_out_r == 0.0f);
+
+    constexpr int kSamples = 4096;
+    std::vector<float> in_l(kSamples), in_r(kSamples), recovered_l(kSamples),
+        recovered_r(kSamples), reference_l(kSamples), reference_r(kSamples);
+    for (int i = 0; i < kSamples; ++i) {
+        in_l[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 997.0 * i / kSr));
+        in_r[static_cast<std::size_t>(i)] =
+            static_cast<float>(0.2 * std::sin(2.0 * M_PI * 431.0 * i / kSr));
+    }
+    poisoned.process(in_l.data(), in_r.data(), recovered_l.data(), recovered_r.data(), kSamples);
+    fresh.process(in_l.data(), in_r.data(), reference_l.data(), reference_r.data(), kSamples);
+    REQUIRE(recovered_l == reference_l);
+    REQUIRE(recovered_r == reference_r);
 }
