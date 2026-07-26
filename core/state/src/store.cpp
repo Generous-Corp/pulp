@@ -475,6 +475,46 @@ const ParamInfo* StateStore::info(ParamID id) const {
     return &params_[it->second];
 }
 
+bool StateStore::set_parameter_display_name(ParamID id, std::string name) {
+    const auto registered = id_to_index_.find(id);
+    if (registered == id_to_index_.end()) return false;
+
+    const std::string& authored = params_[registered->second].name;
+    std::lock_guard lock(parameter_display_mutex_);
+    auto current = std::atomic_load_explicit(
+        &parameter_display_names_, std::memory_order_acquire);
+    const auto existing = current ? current->find(id) : ParameterDisplayNames::const_iterator{};
+    const std::string old_name =
+        current && existing != current->end() ? existing->second : authored;
+    const std::string new_name = name.empty() ? authored : name;
+    if (new_name == old_name) return false;
+
+    auto next = std::make_shared<ParameterDisplayNames>(
+        current ? *current : ParameterDisplayNames{});
+    if (name.empty() || name == authored)
+        next->erase(id);
+    else
+        (*next)[id] = std::move(name);
+    std::atomic_store_explicit(
+        &parameter_display_names_,
+        std::shared_ptr<const ParameterDisplayNames>(std::move(next)),
+        std::memory_order_release);
+    parameter_display_revision_.fetch_add(1, std::memory_order_release);
+    return true;
+}
+
+std::string StateStore::parameter_display_name(ParamID id) const {
+    const auto* parameter = info(id);
+    if (!parameter) return {};
+    auto names = std::atomic_load_explicit(
+        &parameter_display_names_, std::memory_order_acquire);
+    if (names) {
+        const auto it = names->find(id);
+        if (it != names->end()) return it->second;
+    }
+    return parameter->name;
+}
+
 namespace {
 
 // Detect (and, in debug, assert) a gesture entry point being driven off the

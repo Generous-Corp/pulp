@@ -219,6 +219,9 @@ public:
     Float64 GetLatency() override;
 
 protected:
+    /// Drain host-facing name changes on the caller's control/main thread.
+    void publish_parameter_display_changes();
+
     /// Called by the AU host for every short MIDI message (status has
     /// already been split into ``inStatus`` / ``inChannel``). Converts the
     /// bytes to a ``midi::MidiEvent`` and pushes it onto the lock-free
@@ -271,6 +274,7 @@ private:
     // (AudioUnitSetParameter), kept alive for the adapter's lifetime so host
     // param writes/notifications never run on the render thread. See ctor.
     state::ListenerToken ui_push_listener_;
+    ParameterDisplayNamePublisher parameter_display_names_;
 
     // Parameter-event sidecar, set on the Processor each block so the
     // param-events contract is uniform across formats. AU v2's AUEffectBase

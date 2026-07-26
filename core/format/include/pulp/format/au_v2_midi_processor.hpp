@@ -110,6 +110,9 @@ public:
     Float64 GetLatency() override;
 
 protected:
+    /// Drain host-facing name changes on the caller's control/main thread.
+    void publish_parameter_display_changes();
+
     /// Every short MIDI message the host delivers (status already split into
     /// `inStatus` / `inChannel` by `AUMIDIBase::MIDIEvent`). Overriding here
     /// rather than the per-message `HandleNoteOn` / `HandleControlChange` hooks
@@ -162,6 +165,7 @@ private:
     // alive for the adapter's lifetime so host param notifications never run on
     // the render thread.
     state::ListenerToken ui_push_listener_;
+    ParameterDisplayNamePublisher parameter_display_names_;
 
     // Parameter-event sidecar, set on the Processor each block so the
     // param-events contract is uniform across formats. AU v2 has no scheduled /

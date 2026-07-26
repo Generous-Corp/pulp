@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <span>
 
 namespace pulp::events { class EventLoop; }
@@ -150,6 +151,32 @@ public:
     /// Look up immutable metadata for a parameter.
     /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
+
+    /// Override only the host-facing presentation name of a stable parameter.
+    ///
+    /// The registered ParamInfo remains immutable: its ID, ordering, range,
+    /// value, and authoring name do not change. Format adapters may use this
+    /// overlay when a plugin keeps a fixed automation slot but changes the
+    /// semantic label shown by the host (for example, a generated macro slot
+    /// changing from "Tone" to "Cutoff").
+    ///
+    /// Passing an empty name clears the overlay and restores ParamInfo::name.
+    /// Safe to call from non-audio threads while processing is active. Readers
+    /// observe an immutable copy-on-write snapshot.
+    ///
+    /// @return true only when a registered parameter's displayed name changed.
+    bool set_parameter_display_name(ParamID id, std::string name);
+
+    /// Current host-facing name: overlay when present, otherwise ParamInfo::name.
+    ///
+    /// Returns an owned string so a concurrent overlay publication cannot
+    /// invalidate the caller's view.
+    std::string parameter_display_name(ParamID id) const;
+
+    /// Monotonic edge for format adapters that republish ParameterInfo.
+    std::uint64_t parameter_display_revision() const noexcept {
+        return parameter_display_revision_.load(std::memory_order_acquire);
+    }
 
     /// Block-local snapshot of @p N parameter values.
     ///
@@ -374,6 +401,11 @@ private:
     std::vector<ParamGroup> groups_;
     std::unordered_map<ParamID, std::size_t> id_to_index_;
     std::vector<ParamValue> values_;
+    using ParameterDisplayNames =
+        std::unordered_map<ParamID, std::string>;
+    mutable std::mutex parameter_display_mutex_;
+    std::shared_ptr<const ParameterDisplayNames> parameter_display_names_;
+    std::atomic<std::uint64_t> parameter_display_revision_{0};
     // Indices (into values_/params_) of trigger / momentary parameters, cached
     // at registration so reset_triggers_rt() is allocation-free on the audio
     // thread. Empty for the overwhelmingly common no-trigger store.
