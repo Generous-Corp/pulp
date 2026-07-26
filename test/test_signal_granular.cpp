@@ -1639,3 +1639,20 @@ TEST_CASE("Granular live input rejects non-finite samples and recovers exactly",
         }
     }
 }
+
+TEST_CASE("Granular borrowed buffers reject non-finite source frames",
+          "[granular][buffer][nan-recovery]") {
+    std::vector<double> source(4096, 0.25);
+    source[1024] = std::numeric_limits<double>::quiet_NaN();
+    source[2048] = std::numeric_limits<double>::infinity();
+    GranularEngine64 engine;
+    engine.prepare(kFs);
+    configure_buffer_engine(engine, source);
+    engine.set_density_hz(200.0);
+    engine.set_grain_ms(80.0);
+    const Stereo out = render(engine, 8192);
+    REQUIRE(std::all_of(out.left.begin(), out.left.end(),
+                        [](double v) { return std::isfinite(v); }));
+    REQUIRE(std::all_of(out.right.begin(), out.right.end(),
+                        [](double v) { return std::isfinite(v); }));
+}

@@ -339,7 +339,7 @@ public:
     /// largest grain the parameter ranges permit, so no later `set_*` can
     /// reallocate. The only method that allocates.
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) sample_rate_ = sample_rate;
 
         // Sized for the extremes of the declared ranges, not for the current
         // settings: `set_capture_ms` and `set_cycle_hz` must never reallocate,
@@ -360,6 +360,7 @@ public:
         // being zeroed and being written again.
         accum_mask_ = power_of_two_mask(static_cast<std::size_t>(2 * max_grain_) + 2u);
         accum_.assign(accum_mask_ + 1u, 0.0);
+        accum_epoch_.assign(accum_mask_ + 1u, 0u);
 
         update_lengths();
         reset();
@@ -369,6 +370,19 @@ public:
     void reset() {
         std::fill(ring_.begin(), ring_.end(), SampleType{0});
         std::fill(accum_.begin(), accum_.end(), 0.0);
+        std::fill(accum_epoch_.begin(), accum_epoch_.end(), 0u);
+        accum_generation_ = 1u;
+        reset_runtime_state();
+    }
+
+private:
+    void audio_fault_reset() noexcept {
+        ++accum_generation_;
+        if (accum_generation_ == 0u) accum_generation_ = 1u;
+        reset_runtime_state();
+    }
+
+    void reset_runtime_state() noexcept {
         write_index_ = 0;
         total_written_ = 0;
         out_read_ = 0;
@@ -381,6 +395,8 @@ public:
         end_two_grains_ago_ = 0;
     }
 
+public:
+
     // ── Parameters ────────────────────────────────────────────────────────
     //
     // None of these resets the schedule or the ring. That is deliberate: a live
@@ -388,6 +404,7 @@ public:
     // machine with a click. `reset()` is the only full clear.
 
     void set_cycle_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         cycle_hz_ = std::clamp(hz, kCycleHzMin, kCycleHzMax);
         update_lengths();
     }
@@ -398,28 +415,34 @@ public:
     }
 
     void set_crossfade_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         crossfade_pct_ = std::clamp(pct, kCrossfadePctMin, kCrossfadePctMax);
         update_lengths();
     }
 
     void set_crossfade_shape(double shape) noexcept {
+        if (!std::isfinite(shape)) return;
         crossfade_shape_ = std::clamp(shape, 0.0, 1.0);
     }
 
     void set_stretch_ratio(double ratio) noexcept {
+        if (!std::isfinite(ratio)) return;
         stretch_ratio_ = std::clamp(ratio, kStretchRatioMin, kStretchRatioMax);
     }
 
     void set_capture_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         capture_ms_ = std::clamp(ms, kCaptureMsMin, kCaptureMsMax);
         update_lengths();
     }
 
     void set_mix(double percent) noexcept {
+        if (!std::isfinite(percent)) return;
         mix_ = std::clamp(percent, 0.0, 100.0) * 0.01;
     }
 
     void set_output_db(double db) noexcept {
+        if (!std::isfinite(db)) return;
         output_gain_ = units::db_to_linear(std::clamp(db, kOutputDbMin, kOutputDbMax));
     }
 
@@ -507,7 +530,17 @@ public:
     /// every decision is driven by absolute counters, so splitting a render into
     /// different block sizes cannot change a sample of it.
     void process(const SampleType* in, SampleType* out, int n) {
+        if (n <= 0) return;
+        if (ring_.empty() || accum_.empty() || in == nullptr) {
+            std::fill_n(out, n, SampleType{0});
+            return;
+        }
         for (int i = 0; i < n; ++i) {
+            if (!std::isfinite(static_cast<double>(in[i]))) {
+                audio_fault_reset();
+                out[i] = SampleType{0};
+                continue;
+            }
             ring_[write_index_] = in[i];
             write_index_ = (write_index_ + 1u) & ring_mask_;
             ++total_written_;
@@ -526,8 +559,11 @@ public:
             while (grain_out_pos_ <= out_read_) emit_grain();
 
             const auto slot = static_cast<std::size_t>(out_read_) & accum_mask_;
-            const double wet = snap_to_zero(accum_[slot]);
+            const double wet = accum_epoch_[slot] == accum_generation_
+                                   ? snap_to_zero(accum_[slot])
+                                   : 0.0;
             accum_[slot] = 0.0;
+            accum_epoch_[slot] = accum_generation_;
             ++out_read_;
 
             // The dry path is delayed by exactly N, so `mix` blends two things
@@ -542,8 +578,13 @@ public:
                  static_cast<std::size_t>(grain_length_ + 1)) & ring_mask_);
             const double dry = static_cast<double>(ring_[dry_index]);
 
-            out[i] = static_cast<SampleType>(output_gain_ *
-                                             (mix_ * wet + (1.0 - mix_) * dry));
+            const double result = output_gain_ * (mix_ * wet + (1.0 - mix_) * dry);
+            if (!std::isfinite(result)) {
+                audio_fault_reset();
+                out[i] = SampleType{0};
+            } else {
+                out[i] = static_cast<SampleType>(result);
+            }
         }
     }
 
@@ -690,8 +731,12 @@ private:
                                rising, falling);
                 weight = falling;
             }
-            accum_[static_cast<std::size_t>(out_pos + k) & accum_mask_] +=
-                static_cast<double>(ring_[source]) * weight;
+            const auto slot = static_cast<std::size_t>(out_pos + k) & accum_mask_;
+            if (accum_epoch_[slot] != accum_generation_) {
+                accum_[slot] = 0.0;
+                accum_epoch_[slot] = accum_generation_;
+            }
+            accum_[slot] += static_cast<double>(ring_[source]) * weight;
         }
 
         // Advance so the NEXT grain's fade-in lands exactly on this grain's
@@ -765,6 +810,8 @@ private:
     /// because that one really is summing.
     std::vector<SampleType> ring_{};
     std::vector<double> accum_{};
+    std::vector<std::uint64_t> accum_epoch_{};
+    std::uint64_t accum_generation_ = 1u;
     std::size_t ring_mask_ = 0;
     std::size_t accum_mask_ = 0;
     std::size_t write_index_ = 0;

@@ -123,6 +123,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <vector>
 
@@ -1649,6 +1650,43 @@ TEST_CASE("Nonlin ambience: prepare and reset leave a usable engine",
     below_minimum_density.set_density_pct(-1e9);
     below_minimum_density.reset();
     REQUIRE(below_minimum_density.tap_count(0) == minimum_density.tap_count(0));
+}
+
+TEST_CASE("Nonlin ambience rejects non-finite frames and batches topology rebuilds",
+          "[signal][nonlin-ambience][nan-recovery][rt]") {
+    NonlinAmbience poisoned;
+    NonlinAmbience fresh;
+    poisoned.prepare(kFs, na::kMaxLengthMs);
+    fresh.prepare(kFs, na::kMaxLengthMs);
+
+    const auto before = poisoned.topology_rebuild_count();
+    poisoned.set_topology(NonlinProgram::reverse, 600.0, 20.0, 80.0, 1.0, 60.0,
+                          70.0);
+    REQUIRE(poisoned.topology_rebuild_count() == before + 1);
+    const auto unchanged = poisoned.topology_rebuild_count();
+    poisoned.set_topology(NonlinProgram::reverse, 600.0, 20.0, 80.0, 1.0, 60.0,
+                          70.0);
+    REQUIRE(poisoned.topology_rebuild_count() == unchanged);
+
+    // Reconfigure the reference once through the same atomic path.
+    fresh.set_topology(NonlinProgram::reverse, 600.0, 20.0, 80.0, 1.0, 60.0, 70.0);
+    float left = std::numeric_limits<float>::quiet_NaN();
+    float right = std::numeric_limits<float>::infinity();
+    {
+        pulp::test::RtAllocationProbe probe;
+        poisoned.process_sample(left, right);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(left == 0.0f);
+    REQUIRE(right == 0.0f);
+
+    auto stimulus = pink_ish(2048, 0xA11CEu);
+    auto a_left = stimulus, a_right = stimulus;
+    auto b_left = stimulus, b_right = stimulus;
+    poisoned.process(a_left.data(), a_right.data(), static_cast<int>(a_left.size()));
+    fresh.process(b_left.data(), b_right.data(), static_cast<int>(b_left.size()));
+    REQUIRE(a_left == b_left);
+    REQUIRE(a_right == b_right);
 }
 
 TEST_CASE("Nonlin ambience: the engine works at every supported sample rate",

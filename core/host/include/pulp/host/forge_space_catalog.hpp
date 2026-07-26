@@ -114,14 +114,17 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/nonlin_ambience.hpp>
+#include <pulp/signal/speaker_cabinet.hpp>
 #include <pulp/signal/zero_latency_convolver.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -156,6 +159,20 @@ struct ImpulseResponse {
     std::vector<std::vector<float>> channels;  // 1, 2, or 4 channels
     double sample_rate = 48000.0;
 };
+
+inline bool valid_impulse_response(const ImpulseResponse& ir) {
+    if (ir.channels.size() != 1u && ir.channels.size() != 2u && ir.channels.size() != 4u)
+        return false;
+    if (!std::isfinite(ir.sample_rate) || ir.sample_rate <= 0.0 || ir.channels[0].empty())
+        return false;
+    const std::size_t length = ir.channels[0].size();
+    for (const auto& channel : ir.channels) {
+        if (channel.size() != length) return false;
+        for (float sample : channel)
+            if (!std::isfinite(sample)) return false;
+    }
+    return true;
+}
 
 /// The load-time policy, frozen at registration. See the file note, item 2:
 /// each of these is documented by the DSP as taking effect on the next load, so
@@ -225,6 +242,8 @@ inline float convolution_reverb_worst_case_gain(const ImpulseResponse& ir,
 /// known until then.
 inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
                                                    IrPolicy policy = {}) {
+    if (!valid_impulse_response(ir))
+        throw std::invalid_argument("convolution IR must be finite, non-empty, and have 1, 2, or 4 equal-length channels");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
 
     CustomNodeType t;
@@ -250,9 +269,10 @@ inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
             std::vector<const float*> ptrs(shared->channels.size());
             for (std::size_t c = 0; c < shared->channels.size(); ++c)
                 ptrs[c] = shared->channels[c].data();
-            s->engine.load_impulse_response(
+            const bool loaded = s->engine.load_impulse_response(
                 ptrs.data(), static_cast<int>(shared->channels.size()),
                 static_cast<int>(shared->channels[0].size()), shared->sample_rate);
+            if (!loaded) throw std::runtime_error("validated convolution IR failed to load");
         }
     };
     t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
@@ -436,10 +456,11 @@ inline float nonlin_ambience_worst_case_gain() {
 /// items 4 and 5. The seed selects which velvet realization this node IS — two
 /// nodes differing only in seed are two different rooms — and law 2 forbids
 /// automating it.
-inline CustomNodeType make_nonlin_ambience_node(
-    std::uint32_t seed = cal::kDefaultSeed,
-    double max_length_ms = cal::kMaxLengthMs) {
-    const double normalized_max_length_ms = std::max(cal::kMinLengthMs, max_length_ms);
+inline CustomNodeType make_nonlin_ambience_node(std::uint32_t seed = cal::kDefaultSeed,
+                                                double max_length_ms = cal::kMaxLengthMs) {
+    const double normalized_max_length_ms = std::isfinite(max_length_ms)
+                                                ? std::max(cal::kMinLengthMs, max_length_ms)
+                                                : cal::kMaxLengthMs;
     CustomNodeType t;
     t.type_id = kTypeId;
     t.version = 1;
@@ -488,19 +509,19 @@ inline CustomNodeType make_nonlin_ambience_node(
                                         const BakedParamView& params) {
         auto* s = static_cast<Instance*>(p);
 
-        // Topology: once per block. Each of these regenerates up to 8000 taps
-        // per channel and starts a 20 ms crossfade; the DSP no-ops an unchanged
-        // value, so a static setting costs nothing here.
-        const int program = std::clamp(
-            static_cast<int>(std::lround(params.value_at(kProgram, 0))), 0,
-            static_cast<int>(kProgramSteps));
-        s->engine.set_program(static_cast<signal::NonlinProgram>(program));
-        s->engine.set_length_ms(params.value_at(kLengthMs, 0));
-        s->engine.set_predelay_ms(params.value_at(kPredelayMs, 0));
-        s->engine.set_density_pct(params.value_at(kDensityPct, 0));
-        s->engine.set_density_growth(params.value_at(kDensityGrowth, 0));
-        s->engine.set_gate_hold_pct(params.value_at(kGateHoldPct, 0));
-        s->engine.set_attack_pct(params.value_at(kAttackPct, 0));
+        // Topology is one atomic snapshot per block. Several simultaneous
+        // events must regenerate the inactive tap bank once, not once per
+        // parameter (seven full 8000-tap/channel walks in one callback).
+        const float program_value = params.value_at(kProgram, 0);
+        const int program = std::isfinite(program_value)
+                                ? std::clamp(static_cast<int>(std::lround(program_value)), 0,
+                                             static_cast<int>(kProgramSteps))
+                                : static_cast<int>(s->engine.program());
+        s->engine.set_topology(
+            static_cast<signal::NonlinProgram>(program), params.value_at(kLengthMs, 0),
+            params.value_at(kPredelayMs, 0), params.value_at(kDensityPct, 0),
+            params.value_at(kDensityGrowth, 0), params.value_at(kGateHoldPct, 0),
+            params.value_at(kAttackPct, 0));
 
         const float* in_left = in.channel_ptr(0);
         const float* in_right = in.channel_ptr(1);
@@ -540,14 +561,119 @@ inline CustomNodeType make_nonlin_ambience_node(
 
 }  // namespace nonlin_ambience
 
-// ── Speaker / cabinet emulation joins here ────────────────────────────────
-//
-// Being built now, in its own DSP header. When it lands it gets a
-// `namespace cabinet` block below, following the two above: registration
-// arguments for anything the DSP documents as load-time or topology, injectable
-// params for coefficients, and a `worst_case_gain` that cites its own suite's
-// asserted invariant. Its sampled-IR cousin is `convolution` above — a cabinet
-// IR wants `IrNormalizeMode::peak` rather than the reverb default of `energy`,
-// which is a policy argument to `make_convolution_reverb_node`, not a new node.
+namespace cabinet {
+
+inline constexpr const char* kTypeId = "space.speaker_cabinet";
+inline constexpr state::ParamID kDriver = 1;
+inline constexpr state::ParamID kBox = 2;
+inline constexpr state::ParamID kVolumeL = 3;
+inline constexpr state::ParamID kResonanceTrimSt = 4;
+inline constexpr state::ParamID kQ = 5;
+inline constexpr state::ParamID kBreakupPct = 6;
+inline constexpr state::ParamID kTrebleHz = 7;
+inline constexpr state::ParamID kDriveDb = 8;
+inline constexpr state::ParamID kCompressionPct = 9;
+inline constexpr state::ParamID kMicDistanceCm = 10;
+inline constexpr state::ParamID kMicPositionPct = 11;
+inline constexpr state::ParamID kMicAxisDeg = 12;
+inline constexpr state::ParamID kDiffractionPct = 13;
+inline constexpr state::ParamID kOutputTrimDb = 14;
+
+using Engine = signal::SpeakerModel;
+struct Instance {
+    Engine engine;
+    std::array<float, 14> last_params = [] {
+        std::array<float, 14> values{};
+        values.fill(std::numeric_limits<float>::quiet_NaN());
+        return values;
+    }();
+};
+
+inline float speaker_cabinet_worst_case_gain() {
+    return static_cast<float>(Engine{}.worst_case_gain());
+}
+
+inline CustomNodeType make_speaker_cabinet_node() {
+    CustomNodeType t;
+    t.type_id = kTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name = "Speaker Cabinet";
+    t.lowerable = true;
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [](void* p, double sr, int) { static_cast<Instance*>(p)->engine.prepare(sr); };
+    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
+    t.baked_params.push_back(
+        {kDriver, 0.0f, static_cast<float>(Engine::kArchetypeCount - 1), 0.0f});
+    t.baked_params.push_back({kBox, 0.0f, 1.0f, 0.0f});
+    t.baked_params.push_back({kVolumeL, static_cast<float>(Engine::kBoxVolumeLMin),
+                              static_cast<float>(Engine::kBoxVolumeLMax),
+                              static_cast<float>(Engine::kBoxVolumeLDefault)});
+    t.baked_params.push_back({kResonanceTrimSt,
+                              static_cast<float>(Engine::kResonanceTrimSemitonesMin),
+                              static_cast<float>(Engine::kResonanceTrimSemitonesMax), 0.0f});
+    t.baked_params.push_back({kQ, 0.0f, static_cast<float>(Engine::kQResonanceMax), 0.0f});
+    t.baked_params.push_back(
+        {kBreakupPct, 0.0f, 100.0f, static_cast<float>(Engine::kConeBreakupAmountDefault)});
+    t.baked_params.push_back({kTrebleHz, static_cast<float>(Engine::kTrebleRolloffHzMin),
+                              static_cast<float>(Engine::kTrebleRolloffHzMax),
+                              static_cast<float>(Engine::kTrebleRolloffHzDefault)});
+    t.baked_params.push_back({kDriveDb, static_cast<float>(Engine::kDriveDbMin),
+                              static_cast<float>(Engine::kDriveDbMax),
+                              static_cast<float>(Engine::kDriveDbDefault)});
+    t.baked_params.push_back(
+        {kCompressionPct, 0.0f, 100.0f, static_cast<float>(Engine::kCompressionAmountDefault)});
+    t.baked_params.push_back({kMicDistanceCm, static_cast<float>(Engine::kMicDistanceCmMin),
+                              static_cast<float>(Engine::kMicDistanceCmMax),
+                              static_cast<float>(Engine::kMicDistanceCmDefault)});
+    t.baked_params.push_back(
+        {kMicPositionPct, 0.0f, 100.0f, static_cast<float>(Engine::kMicPositionPctDefault)});
+    t.baked_params.push_back({kMicAxisDeg, static_cast<float>(Engine::kMicAxisDegMin),
+                              static_cast<float>(Engine::kMicAxisDegMax), 0.0f});
+    t.baked_params.push_back(
+        {kDiffractionPct, 0.0f, 100.0f, static_cast<float>(Engine::kDiffractionAmountDefault)});
+    t.baked_params.push_back({kOutputTrimDb, static_cast<float>(Engine::kOutputTrimDbMin),
+                              static_cast<float>(Engine::kOutputTrimDbMax), 0.0f});
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto& e = static_cast<Instance*>(p)->engine;
+        auto& last = static_cast<Instance*>(p)->last_params;
+        for (int i = 0; i < n; ++i) {
+            const auto o = static_cast<std::int32_t>(i);
+            auto forward = [&](std::size_t slot, state::ParamID id, auto&& setter) {
+                const float value = params.value_at(id, o);
+                if (std::isfinite(value) && value != last[slot]) {
+                    last[slot] = value;
+                    setter(value);
+                }
+            };
+            forward(0, kDriver,
+                    [&](float v) { e.set_driver_archetype(static_cast<int>(std::lround(v))); });
+            forward(1, kBox, [&](float v) {
+                e.set_box_type(v >= 0.5f ? signal::SpeakerBoxType::open_back
+                                         : signal::SpeakerBoxType::sealed);
+            });
+            forward(2, kVolumeL, [&](float v) { e.set_box_volume_l(v); });
+            forward(3, kResonanceTrimSt, [&](float v) { e.set_resonance_trim_semitones(v); });
+            forward(4, kQ, [&](float v) { e.set_q_resonance(v); });
+            forward(5, kBreakupPct, [&](float v) { e.set_cone_breakup_amount(v); });
+            forward(6, kTrebleHz, [&](float v) { e.set_treble_rolloff_hz(v); });
+            forward(7, kDriveDb, [&](float v) { e.set_drive_db(v); });
+            forward(8, kCompressionPct, [&](float v) { e.set_compression_amount(v); });
+            forward(9, kMicDistanceCm, [&](float v) { e.set_mic_distance_cm(v); });
+            forward(10, kMicPositionPct, [&](float v) { e.set_mic_position_pct(v); });
+            forward(11, kMicAxisDeg, [&](float v) { e.set_mic_axis_deg(v); });
+            forward(12, kDiffractionPct, [&](float v) { e.set_diffraction_amount(v); });
+            forward(13, kOutputTrimDb, [&](float v) { e.set_output_trim_db(v); });
+            out.channel_ptr(0)[i] = e.process(in.channel_ptr(0)[i]);
+        }
+    };
+    return t;
+}
+
+} // namespace cabinet
 
 }  // namespace pulp::host::space

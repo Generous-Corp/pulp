@@ -29,6 +29,7 @@
 #include <pulp/host/forge_synthesis_catalog.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <cstddef>
@@ -47,6 +48,8 @@ using pulp::test::ReusableRenderer;
 
 namespace additive = pulp::host::synthesis::additive;
 namespace vocoder = pulp::host::synthesis::vocoder;
+namespace cyclic = pulp::host::synthesis::cyclic;
+namespace granular = pulp::host::synthesis::granular;
 
 namespace {
 
@@ -244,6 +247,79 @@ private:
     format::ProcessContext ctx_{};
 };
 
+/// Bakes the granular node's asymmetric 1-in/2-out routing.
+class GranularGraph {
+  public:
+    GranularGraph() {
+        REQUIRE(graph_.register_custom_node_type(granular::make_granular_node()));
+        const auto in = graph_.add_input_node(1, "In");
+        node_ = graph_.add_custom_node(granular::kTypeId, 1, "Granular");
+        REQUIRE(node_ != 0);
+        const auto out = graph_.add_output_node(2, "Out");
+        REQUIRE(graph_.connect(in, 0, node_, 0));
+        REQUIRE(graph_.connect(node_, 0, out, 0));
+        REQUIRE(graph_.connect(node_, 1, out, 1));
+        graph_.set_canonical_executor_routing_enabled(true);
+        REQUIRE(graph_.prepare(kSr, kFrames));
+        result_ = bake(graph_);
+        REQUIRE(result_.accepted);
+        REQUIRE(result_.processor);
+
+        format::PrepareContext pc;
+        pc.sample_rate = kSr;
+        pc.max_buffer_size = kFrames;
+        pc.input_channels = 1;
+        pc.output_channels = 2;
+        result_.processor->prepare(pc);
+
+        input_.assign(kFrames, 0.0f);
+        left_.assign(kFrames, 0.0f);
+        right_.assign(kFrames, 0.0f);
+        in_ptrs_[0] = input_.data();
+        out_ptrs_[0] = left_.data();
+        out_ptrs_[1] = right_.data();
+        ctx_.sample_rate = kSr;
+        ctx_.num_samples = kFrames;
+        injector_ = static_cast<BakedGraphProcessor*>(result_.processor.get())
+                        ->claim_param_injection(node_);
+        REQUIRE(injector_.valid());
+    }
+
+    void set(std::initializer_list<std::pair<state::ParamID, float>> values) {
+        state::ParameterEventQueue q;
+        for (const auto& [id, value] : values)
+            REQUIRE(q.push(immediate(id, value)));
+        REQUIRE(injector_.inject(q) == InjectStatus::Ok);
+    }
+
+    void render() {
+        audio::BufferView<const float> in(in_ptrs_.data(), 1u, kFrames);
+        audio::BufferView<float> out(out_ptrs_.data(), 2u, kFrames);
+        result_.processor->process(out, in, midi_in_, midi_out_, ctx_);
+    }
+
+    std::vector<float>& input() {
+        return input_;
+    }
+    const std::vector<float>& left() const {
+        return left_;
+    }
+    const std::vector<float>& right() const {
+        return right_;
+    }
+
+  private:
+    SignalGraph graph_;
+    LowerResult result_;
+    NodeId node_ = 0;
+    ParamInjector injector_{};
+    std::vector<float> input_, left_, right_;
+    std::array<const float*, 1> in_ptrs_{};
+    std::array<float*, 2> out_ptrs_{};
+    midi::MidiBuffer midi_in_{}, midi_out_{};
+    format::ProcessContext ctx_{};
+};
+
 /// The vocoder's band centres, recomputed from the geometric law rather than
 /// read back from the node — the same numbers the DSP's own suite checks.
 double band_center_hz(int k, int bands = 16, double lo = 120.0, double hi = 7000.0) {
@@ -251,14 +327,13 @@ double band_center_hz(int k, int bands = 16, double lo = 120.0, double hi = 7000
     return lo * std::pow(r, static_cast<double>(k));
 }
 
-template <typename Fn>
-void require_allocates_no_memory(Fn&& fn) {
+template <typename Fn> void require_allocates_no_memory(Fn&& fn) {
     pulp::test::RtAllocationProbe probe;
     fn();
     REQUIRE(probe.allocation_count() == 0);
 }
 
-}  // namespace
+} // namespace
 
 // ═════════════════════════════════════════════════════════════════════════
 // Shape — the things a graph author sees before any audio happens
@@ -269,6 +344,9 @@ TEST_CASE("synthesis catalog nodes declare the shapes their families need",
     const auto organ = additive::make_additive_bank_node(additive::Voice::organ);
     const auto bell = additive::make_additive_bank_node(additive::Voice::bell);
     const auto voc = vocoder::make_vocoder_node();
+    const auto cyc_short = cyclic::make_cyclic_stretch_node(cyclic::Regime::short_frame);
+    const auto cyc_long = cyclic::make_cyclic_stretch_node(cyclic::Regime::long_frame);
+    const auto grains = granular::make_granular_node();
 
     // The additive bank is a source with a gate: one CV in, one audio out.
     for (const auto& t : {organ, bell}) {
@@ -288,10 +366,16 @@ TEST_CASE("synthesis catalog nodes declare the shapes their families need",
     CHECK(vocoder::kModulatorPort == 0);
     CHECK(vocoder::kCarrierPort == 1);
 
+    CHECK(cyc_short.num_input_ports == 1);
+    CHECK(cyc_short.num_output_ports == 1);
+    CHECK(cyc_short.type_id != cyc_long.type_id);
+    CHECK(grains.num_input_ports == 1);
+    CHECK(grains.num_output_ports == 2);
+
     // Every declared param must have a unique id and a default inside its own
     // range — a default outside the range is silently clamped by the framework
     // and the node then starts somewhere its own table does not describe.
-    for (const auto& t : {organ, bell, voc}) {
+    for (const auto& t : {organ, bell, voc, cyc_short, cyc_long, grains}) {
         INFO("type " << t.type_id);
         std::vector<state::ParamID> ids;
         for (const auto& p : t.baked_params) {
@@ -304,6 +388,75 @@ TEST_CASE("synthesis catalog nodes declare the shapes their families need",
         std::sort(ids.begin(), ids.end());
         CHECK(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
     }
+}
+
+TEST_CASE("additive catalog publishes the DSP's honest AR minima",
+          "[host][baked][forge][synthesis][range]") {
+    const auto type = additive::make_additive_bank_node();
+    auto range_for = [&](state::ParamID id) -> const CustomNodeBakedParam& {
+        const auto it = std::find_if(type.baked_params.begin(), type.baked_params.end(),
+                                     [=](const auto& p) { return p.id == id; });
+        REQUIRE(it != type.baked_params.end());
+        return *it;
+    };
+    CHECK(range_for(additive::kAttackMs).min_value ==
+          static_cast<float>(signal::AdditiveBank::kAttackMinMs));
+    CHECK(range_for(additive::kReleaseMs).min_value ==
+          static_cast<float>(signal::AdditiveBank::kReleaseMinMs));
+}
+
+TEST_CASE("cyclic stretch catalog bakes both regimes and routes automation",
+          "[host][baked][param-injection][forge][synthesis][cyclic]") {
+    const auto input = pulp::test::sine_block(kFrames, 375.0, kSr, 0.4f);
+    for (const auto regime : {cyclic::Regime::short_frame, cyclic::Regime::long_frame}) {
+        BakedNodeFixture<1> fx(cyclic::make_cyclic_stretch_node(regime), kSr, kFrames);
+        auto injector = fx.claim_injector();
+        REQUIRE(injector.inject(immediate(cyclic::kMixPct, 0.0f)) == InjectStatus::Ok);
+        const auto dry = fx.settle({input}, 8)[0];
+        CHECK(peak_of(dry) > 0.3);
+
+        REQUIRE(injector.inject(immediate(cyclic::kMixPct, 100.0f)) == InjectStatus::Ok);
+        REQUIRE(injector.inject(immediate(cyclic::kStretch, 2.0f)) == InjectStatus::Ok);
+        const auto wet = fx.settle({input}, 40)[0];
+        CHECK(std::all_of(wet.begin(), wet.end(), [](float v) { return std::isfinite(v); }));
+        CHECK(wet != dry);
+    }
+    CHECK(cyclic::cyclic_stretch_worst_case_gain() >= 1.0f);
+}
+
+TEST_CASE("granular catalog bakes its 1-to-2 live-ring path",
+          "[host][baked][param-injection][forge][synthesis][granular]") {
+    GranularGraph graph;
+    graph.set({{granular::kDensityHz, 80.0f},
+               {granular::kGrainMs, 50.0f},
+               {granular::kPosition, 0.0f},
+               {granular::kPanSpray, 1.0f},
+               {granular::kMix, 1.0f}});
+    std::uint32_t rng = 0x714ACu;
+    double peak = 0.0;
+    double stereo_difference = 0.0;
+    for (int block = 0; block < 40; ++block) {
+        for (auto& sample : graph.input()) {
+            rng ^= rng << 13;
+            rng ^= rng >> 17;
+            rng ^= rng << 5;
+            sample = static_cast<float>(static_cast<double>(rng) / 2147483648.0 - 1.0);
+        }
+        graph.render();
+        for (std::size_t i = 0; i < graph.left().size(); ++i) {
+            REQUIRE(std::isfinite(graph.left()[i]));
+            REQUIRE(std::isfinite(graph.right()[i]));
+            peak = std::max(peak, static_cast<double>(std::abs(graph.left()[i])));
+            stereo_difference =
+                std::max(stereo_difference,
+                         static_cast<double>(std::abs(graph.left()[i] - graph.right()[i])));
+        }
+    }
+    CHECK(peak > 1e-4);
+    CHECK(stereo_difference > 1e-5);
+    CHECK(peak <= granular::granular_worst_case_gain());
+    CHECK(granular::granular_worst_case_gain() ==
+          static_cast<float>(signal::GranularEngine::kMaxGrainBudget) * 1.25f);
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -508,13 +661,15 @@ TEST_CASE("additive remaining params each move the baked node's audio",
     GatedBank coherent{additive::make_additive_bank_node()};
     coherent.set_all({{additive::kFundamentalHz, static_cast<float>(kAdditiveF0)},
                       {additive::kPartialCount, 16.0f},
-                      {additive::kAttackMs, 0.0f},
+                      {additive::kAttackMs,
+                       static_cast<float>(pulp::signal::AdditiveBank::kAttackMinMs)},
                       {additive::kRetrigPhase, 0.0f}});
     const auto stored = coherent.settled(4);
     GatedBank scattered{additive::make_additive_bank_node()};
     scattered.set_all({{additive::kFundamentalHz, static_cast<float>(kAdditiveF0)},
                        {additive::kPartialCount, 16.0f},
-                       {additive::kAttackMs, 0.0f},
+                       {additive::kAttackMs,
+                        static_cast<float>(pulp::signal::AdditiveBank::kAttackMinMs)},
                        {additive::kRetrigPhase, 2.0f}});  // seeded_random
     const auto random_phase = scattered.settled(4);
     double phase_diff = 0.0;
@@ -550,7 +705,8 @@ TEST_CASE("additive node never exceeds the bound its DSP suite asserts",
                       {additive::kMasterGainDb,
                        static_cast<float>(signal::AdditiveBank::kMasterGainMaxDb)},
                       {additive::kRetrigPhase, 0.0f},
-                      {additive::kAttackMs, 0.0f}});
+                      {additive::kAttackMs,
+                       static_cast<float>(pulp::signal::AdditiveBank::kAttackMinMs)}});
         double worst = 0.0;
         const auto gate = dc_block_signal(kFrames, 1.0f);
         for (int b = 0; b < 32; ++b)

@@ -482,9 +482,13 @@ public:
                  double max_predelay_ms = nonlin_ambience::kMaxPredelayMs) {
         namespace na = nonlin_ambience;
 
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : 48000.0;
-        max_length_ms_ = std::max(nonlin_ambience::kMinLengthMs, max_length_ms);
-        max_predelay_ms_ = std::max(0.0, max_predelay_ms);
+        sample_rate_ = (std::isfinite(sample_rate) && sample_rate > 0.0) ? sample_rate
+                                                                         : 48000.0;
+        max_length_ms_ = std::isfinite(max_length_ms)
+                             ? std::max(nonlin_ambience::kMinLengthMs, max_length_ms)
+                             : nonlin_ambience::kMaxLengthMs;
+        max_predelay_ms_ = std::isfinite(max_predelay_ms) ? std::max(0.0, max_predelay_ms)
+                                                          : nonlin_ambience::kMaxPredelayMs;
 
         const int max_len_samples = static_cast<int>(std::ceil(
             units::ms_to_samples(max_length_ms_, sample_rate_)));
@@ -580,6 +584,7 @@ public:
     /// Window length in ms — the absolute time the dimensionless envelope is
     /// stretched across. Clamped to the `prepare()` maximum.
     void set_length_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         const double v = std::clamp(ms, nonlin_ambience::kMinLengthMs, max_length_ms_);
         if (v == length_ms_) return;
         length_ms_ = v;
@@ -587,6 +592,7 @@ public:
     }
 
     void set_predelay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         const double v = std::clamp(ms, 0.0, max_predelay_ms_);
         if (v == predelay_ms_) return;
         predelay_ms_ = v;
@@ -596,6 +602,7 @@ public:
     /// Scales `Nd_min` only; `Nd_max` is fixed so the late field stays above the
     /// smoothness floor no matter how sparse the early field is made.
     void set_density_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         const double v = std::clamp(pct, nonlin_ambience::kMinDensityPct, 100.0);
         if (v == density_pct_) return;
         density_pct_ = v;
@@ -603,6 +610,7 @@ public:
     }
 
     void set_density_growth(double gamma) {
+        if (!std::isfinite(gamma)) return;
         const double v = std::clamp(gamma, 0.0, 2.0);
         if (v == density_growth_) return;
         density_growth_ = v;
@@ -611,6 +619,7 @@ public:
 
     /// The Gated program's hold point, as a percent of the window.
     void set_gate_hold_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         const double v = std::clamp(pct, 10.0, 95.0);
         if (v == gate_hold_pct_) return;
         gate_hold_pct_ = v;
@@ -620,11 +629,54 @@ public:
     /// The Reverse program's rise point and the NonLin2 program's gate point,
     /// as a percent of the window. Ignored by Ambience and Gated.
     void set_attack_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         const double v = std::clamp(pct, 5.0, 98.0);
         if (v == attack_pct_) return;
         attack_pct_ = v;
         rebuild_and_swap();
     }
+
+    /// Atomically applies the complete topology snapshot and regenerates the
+    /// inactive tap bank at most once. Catalog/host block boundaries use this
+    /// instead of invoking seven independently rebuilding setters.
+    void set_topology(NonlinProgram program, double length_ms, double predelay_ms,
+                      double density_pct, double density_growth,
+                      double gate_hold_pct, double attack_pct) {
+        const double length = std::isfinite(length_ms)
+                                  ? std::clamp(length_ms, nonlin_ambience::kMinLengthMs,
+                                               max_length_ms_)
+                                  : length_ms_;
+        const double predelay = std::isfinite(predelay_ms)
+                                    ? std::clamp(predelay_ms, 0.0, max_predelay_ms_)
+                                    : predelay_ms_;
+        const double density = std::isfinite(density_pct)
+                                   ? std::clamp(density_pct,
+                                                nonlin_ambience::kMinDensityPct, 100.0)
+                                   : density_pct_;
+        const double growth = std::isfinite(density_growth)
+                                  ? std::clamp(density_growth, 0.0, 2.0)
+                                  : density_growth_;
+        const double hold = std::isfinite(gate_hold_pct)
+                                ? std::clamp(gate_hold_pct, 10.0, 95.0)
+                                : gate_hold_pct_;
+        const double attack = std::isfinite(attack_pct)
+                                  ? std::clamp(attack_pct, 5.0, 98.0)
+                                  : attack_pct_;
+        if (program == program_ && length == length_ms_ && predelay == predelay_ms_ &&
+            density == density_pct_ && growth == density_growth_ &&
+            hold == gate_hold_pct_ && attack == attack_pct_)
+            return;
+        program_ = program;
+        length_ms_ = length;
+        predelay_ms_ = predelay;
+        density_pct_ = density;
+        density_growth_ = growth;
+        gate_hold_pct_ = hold;
+        attack_pct_ = attack;
+        rebuild_and_swap();
+    }
+
+    std::uint64_t topology_rebuild_count() const { return topology_rebuild_count_; }
 
     /// Seed for the L channel; R derives as `seed ⊕ kSeedRodd`. Series law 2 —
     /// a preset choice, never automated.
@@ -637,6 +689,7 @@ public:
     /// Allpass coefficient. Touches two scalars and no tap, so it does not
     /// rebuild (see the file note). Clamped below 1 for stability.
     void set_diffusion(double g) {
+        if (!std::isfinite(g)) return;
         diffusion_ = std::clamp(g, 0.0, nonlin_ambience::kDiffusionMax);
     }
 
@@ -647,6 +700,7 @@ public:
     /// smoothing them — a one-pole corner change is state-continuous, so it
     /// produces no step in the output the way a gain change would.
     void set_tone(double tone) {
+        if (!std::isfinite(tone)) return;
         const double v = std::clamp(tone, -1.0, 1.0);
         if (v == tone_) return;
         tone_ = v;
@@ -654,6 +708,7 @@ public:
     }
 
     void set_hf_damp_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         const double v = std::clamp(hz, 1000.0, 18000.0);
         if (v == hf_damp_hz_) return;
         hf_damp_hz_ = v;
@@ -663,21 +718,25 @@ public:
     /// 0 % is mono (both channels exactly the mid signal), 100 % is the two
     /// independent velvet realizations.
     void set_width_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         width_.set_target(static_cast<SampleType>(std::clamp(pct, 0.0, 100.0) / 100.0));
     }
 
     /// 0 disables the converter stage entirely.
     void set_converter_amount(double amount) {
+        if (!std::isfinite(amount)) return;
         converter_.set_target(static_cast<SampleType>(std::clamp(amount, 0.0, 1.0)));
     }
 
     void set_output_gain_db(double db) {
+        if (!std::isfinite(db)) return;
         output_gain_.set_target(
             units::db_to_linear(static_cast<SampleType>(std::clamp(db, -24.0, 24.0))));
     }
 
     /// Dry/wet, 0 .. 100 %. The default is 100 (send style).
     void set_mix_pct(double pct) {
+        if (!std::isfinite(pct)) return;
         mix_.set_target(static_cast<SampleType>(std::clamp(pct, 0.0, 100.0) / 100.0));
     }
 
@@ -685,6 +744,12 @@ public:
 
     /// One stereo frame, in place. Allocation-free, lock-free, branch-light.
     void process_sample(SampleType& left, SampleType& right) {
+        if (!std::isfinite(static_cast<double>(left)) ||
+            !std::isfinite(static_cast<double>(right))) {
+            left = SampleType{0};
+            right = SampleType{0};
+            return;
+        }
         const SampleType dry_l = left;
         const SampleType dry_r = right;
 
@@ -872,6 +937,7 @@ private:
         }
         const int back = 1 - front_;
         build_bank(back);
+        ++topology_rebuild_count_;
         seg_state_[back][0].fill(SampleType{0});
         seg_state_[back][1].fill(SampleType{0});
         pending_ = back;
@@ -1046,6 +1112,7 @@ private:
     int pending_ = 0;
     bool fading_ = false;
     int fade_pos_ = 0;
+    std::uint64_t topology_rebuild_count_ = 0;
     int swap_fade_len_ = 1;
 
     SmoothedValue<SampleType> mix_{SampleType{1}};

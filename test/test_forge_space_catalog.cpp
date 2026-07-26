@@ -54,6 +54,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -61,6 +63,7 @@ using namespace pulp::host;
 namespace sp = pulp::host::space;
 namespace conv = pulp::host::space::convolution;
 namespace amb = pulp::host::space::nonlin_ambience;
+namespace cabinet = pulp::host::space::cabinet;
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 using pulp::test::immediate;
@@ -603,6 +606,23 @@ TEST_CASE("Forge space convolution: process allocates nothing",
         }
         REQUIRE(probe.allocation_count() == 0);
     }
+}
+
+TEST_CASE("Forge space convolution rejects malformed registration IRs",
+          "[host][baked][forge][forge-space][convolution]") {
+    auto ragged = delta_ir();
+    ragged.channels[1].resize(ragged.channels[0].size() - 1);
+    REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(ragged)),
+                      std::invalid_argument);
+
+    auto nonfinite = delta_ir();
+    nonfinite.channels[0][7] = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(nonfinite)),
+                      std::invalid_argument);
+
+    auto bad_count = delta_ir(3);
+    REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(bad_count)),
+                      std::invalid_argument);
 }
 
 // ══ Nonlin ambience ═══════════════════════════════════════════════════════
@@ -1197,10 +1217,32 @@ TEST_CASE("Forge space ambience: process allocates nothing, including across a s
                                      InjectStatus::Ok);
             if (block == 32) REQUIRE(inj.inject(immediate(amb::kLengthMs, 260.0f)) ==
                                      InjectStatus::Ok);
-            if (block == 48) REQUIRE(inj.inject(immediate(amb::kDensityPct, 90.0f)) ==
-                                     InjectStatus::Ok);
+            if (block == 48)
+                REQUIRE(inj.inject(immediate(amb::kDensityPct, 90.0f)) == InjectStatus::Ok);
             renderer.render();
         }
         REQUIRE(probe.allocation_count() == 0);
     }
+}
+
+TEST_CASE("Forge speaker cabinet declares and renders its complete mono node",
+          "[host][baked][param-injection][forge][forge-space][cabinet]") {
+    const auto type = cabinet::make_speaker_cabinet_node();
+    CHECK(type.num_input_ports == 1);
+    CHECK(type.num_output_ports == 1);
+    CHECK(type.baked_params.size() == 14);
+    CHECK(type.lowerable);
+
+    const auto tone = pulp::test::sine_block(kFrames, 220.0, kSr, 0.35f);
+    auto render = [&](float drive_db) {
+        pulp::test::BakedNodeFixture<1> fx(type, kSr, kFrames);
+        auto injector = fx.claim_injector();
+        REQUIRE(injector.inject(immediate(cabinet::kDriveDb, drive_db)) == InjectStatus::Ok);
+        return fx.settle({tone}, 24)[0];
+    };
+    const auto clean = render(0.0f);
+    const auto driven = render(static_cast<float>(pulp::signal::SpeakerModel::kDriveDbMax));
+    REQUIRE(std::all_of(driven.begin(), driven.end(), [](float v) { return std::isfinite(v); }));
+    CHECK(clean != driven);
+    CHECK(peak(driven) <= cabinet::speaker_cabinet_worst_case_gain());
 }

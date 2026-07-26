@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <string>
 #include <vector>
@@ -1422,6 +1423,17 @@ TEST_CASE("Forge sequencing: the pitch bound really bounds the baked pitch outpu
         const auto out = fx.render({clock_line(16), flat(0.0f)});
         for (float v : out[0]) REQUIRE(std::fabs(v) <= bound + 1e-6f);
     }
+}
+
+TEST_CASE("Forge sequencing: invalid pattern cells are ignored by nodes and bounds",
+          "[host][baked][forge][forge-sequencing][nan-recovery]") {
+    auto pattern = seqcat::stage_seq::default_pattern();
+    pattern[0].pitch_v = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE(std::isfinite(seqcat::stage_seq::stage_seq_pitch_bound_v(pattern)));
+
+    auto grid = seqcat::cartesian::default_grid();
+    grid[0] = std::numeric_limits<float>::infinity();
+    REQUIRE(std::isfinite(seqcat::cartesian::cartesian_walk_cv_bound_v(grid)));
 }
 
 TEST_CASE("Forge sequencing: no allocation in the baked render path",

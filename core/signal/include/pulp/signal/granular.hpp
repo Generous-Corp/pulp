@@ -774,9 +774,11 @@ private:
         // normalization law stays valid for both.
         double sum = 0.0;
         for (int c = 0; c < buffer_channels_; ++c) {
-            sum += static_cast<double>(
+            const double sample = static_cast<double>(
                 buffer_[static_cast<std::size_t>(index) * static_cast<std::size_t>(buffer_channels_) +
                         static_cast<std::size_t>(c)]);
+            if (!std::isfinite(sample)) return 0.0;
+            sum += sample;
         }
         return sum / static_cast<double>(buffer_channels_);
     }

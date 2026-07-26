@@ -171,7 +171,8 @@ inline float stage_seq_worst_case_gain() { return 1.0f; }
 /// overshoot either, so the pattern's extreme IS the bound.
 inline float stage_seq_pitch_bound_v(const Pattern& pattern) {
     float m = 0.0f;
-    for (const auto& s : pattern) m = std::max(m, std::fabs(s.pitch_v));
+    for (const auto& s : pattern)
+        if (std::isfinite(s.pitch_v)) m = std::max(m, std::fabs(s.pitch_v));
     return m;
 }
 
@@ -300,7 +301,8 @@ inline float cartesian_walk_worst_case_gain() { return 1.0f; }
 /// Largest absolute CV, in volts, the node can emit for a given grid.
 inline float cartesian_walk_cv_bound_v(const Grid& grid) {
     float m = 0.0f;
-    for (float v : grid) m = std::max(m, std::fabs(v));
+    for (float v : grid)
+        if (std::isfinite(v)) m = std::max(m, std::fabs(v));
     return m;
 }
 

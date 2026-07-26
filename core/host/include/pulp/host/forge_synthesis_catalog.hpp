@@ -132,6 +132,8 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/additive_bank.hpp>
+#include <pulp/signal/cyclic_stretch.hpp>
+#include <pulp/signal/granular.hpp>
 #include <pulp/signal/vocoder.hpp>
 
 #include <algorithm>
@@ -269,9 +271,11 @@ inline CustomNodeType make_additive_bank_node(Voice voice = Voice::organ,
                               static_cast<float>(Bank::kMasterGainDefaultDb)});
     t.baked_params.push_back({kEnvelopeMode, 0.0f, 1.0f, 1.0f});
     t.baked_params.push_back({kRetrigPhase, 0.0f, 2.0f, 0.0f});
-    t.baked_params.push_back({kAttackMs, 0.0f, static_cast<float>(Bank::kAttackMaxMs),
+    t.baked_params.push_back({kAttackMs, static_cast<float>(Bank::kAttackMinMs),
+                              static_cast<float>(Bank::kAttackMaxMs),
                               static_cast<float>(Bank::kAttackDefaultMs)});
-    t.baked_params.push_back({kReleaseMs, 0.0f, static_cast<float>(Bank::kReleaseMaxMs),
+    t.baked_params.push_back({kReleaseMs, static_cast<float>(Bank::kReleaseMinMs),
+                              static_cast<float>(Bank::kReleaseMaxMs),
                               static_cast<float>(Bank::kReleaseDefaultMs)});
     t.baked_params.push_back({kDetuneCents, 0.0f, static_cast<float>(Bank::kDetuneMaxCents),
                               static_cast<float>(Bank::kDetuneDefaultCents)});
@@ -534,11 +538,143 @@ inline CustomNodeType make_vocoder_node() {
 
 }  // namespace vocoder
 
-// ── Reserved: the granular engine ─────────────────────────────────────────
-//
-// `namespace granular` belongs here, between `vocoder` above and the end of
-// this namespace. It is being built in parallel and is deliberately not stubbed
-// out — an empty namespace would register nothing and would only be a place for
-// a wrong guess about its ports to sit.
+namespace cyclic {
+enum class Regime : std::uint8_t { short_frame, long_frame };
+inline constexpr const char* kShortTypeId = "synthesis.cyclic_stretch_short";
+inline constexpr const char* kLongTypeId = "synthesis.cyclic_stretch_long";
+inline constexpr state::ParamID kStretch = 1;
+inline constexpr state::ParamID kCaptureMs = 2;
+inline constexpr state::ParamID kCrossfadeShape = 3;
+inline constexpr state::ParamID kMixPct = 4;
+inline constexpr state::ParamID kOutputDb = 5;
+using Engine = signal::CyclicStretch;
+struct Instance {
+    Engine engine;
+};
+inline float cyclic_stretch_worst_case_gain() {
+    return static_cast<float>(Engine::kWorstCaseGain *
+                              signal::units::db_to_linear(Engine::kOutputDbMax));
+}
+inline CustomNodeType make_cyclic_stretch_node(Regime regime = Regime::short_frame) {
+    const auto settings = regime == Regime::short_frame ? signal::kCyclicStretchShortFrame
+                                                        : signal::kCyclicStretchLongFrame;
+    CustomNodeType t;
+    t.type_id = regime == Regime::short_frame ? kShortTypeId : kLongTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 1;
+    t.default_name =
+        regime == Regime::short_frame ? "Cyclic Stretch (Short)" : "Cyclic Stretch (Long)";
+    t.lowerable = true;
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [settings](void* p, double sr, int) {
+        auto& e = static_cast<Instance*>(p)->engine;
+        e.prepare(sr);
+        e.set_regime(settings);
+        e.reset();
+    };
+    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
+    t.baked_params.push_back({kStretch, static_cast<float>(Engine::kStretchRatioMin),
+                              static_cast<float>(Engine::kStretchRatioMax),
+                              static_cast<float>(Engine::kStretchRatioDefault)});
+    t.baked_params.push_back({kCaptureMs, static_cast<float>(Engine::kCaptureMsMin),
+                              static_cast<float>(Engine::kCaptureMsMax),
+                              static_cast<float>(Engine::kCaptureMsDefault)});
+    t.baked_params.push_back(
+        {kCrossfadeShape, 0.0f, 1.0f, static_cast<float>(settings.crossfade_shape)});
+    t.baked_params.push_back({kMixPct, 0.0f, 100.0f, static_cast<float>(Engine::kMixDefault)});
+    t.baked_params.push_back({kOutputDb, static_cast<float>(Engine::kOutputDbMin),
+                              static_cast<float>(Engine::kOutputDbMax),
+                              static_cast<float>(Engine::kOutputDbDefault)});
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto& e = static_cast<Instance*>(p)->engine;
+        e.set_stretch_ratio(params.value_at(kStretch, 0));
+        e.set_capture_ms(params.value_at(kCaptureMs, 0));
+        e.set_crossfade_shape(params.value_at(kCrossfadeShape, 0));
+        e.set_mix(params.value_at(kMixPct, 0));
+        e.set_output_db(params.value_at(kOutputDb, 0));
+        e.process(in.channel_ptr(0), out.channel_ptr(0), n);
+    };
+    return t;
+}
+} // namespace cyclic
+
+namespace granular {
+inline constexpr const char* kTypeId = "synthesis.granular_live";
+inline constexpr state::ParamID kDensityHz = 1;
+inline constexpr state::ParamID kGrainMs = 2;
+inline constexpr state::ParamID kPosition = 3;
+inline constexpr state::ParamID kPositionSprayMs = 4;
+inline constexpr state::ParamID kPitchSt = 5;
+inline constexpr state::ParamID kPitchSpraySt = 6;
+inline constexpr state::ParamID kPanSpray = 7;
+inline constexpr state::ParamID kJitter = 8;
+inline constexpr state::ParamID kLevelDb = 9;
+inline constexpr state::ParamID kMix = 10;
+using Engine = signal::GranularEngine;
+struct Instance {
+    Engine engine;
+};
+inline float granular_worst_case_gain() {
+    // At most kMaxGrainBudget grains overlap. Each grain, its window, and its
+    // pan gain are individually bounded by one; the shipped four-point cubic
+    // interpolator has a peak kernel L1 norm of 1.25.
+    return static_cast<float>(Engine::kMaxGrainBudget) * 1.25f;
+}
+inline CustomNodeType make_granular_node() {
+    CustomNodeType t;
+    t.type_id = kTypeId;
+    t.version = 1;
+    t.num_input_ports = 1;
+    t.num_output_ports = 2;
+    t.default_name = "Granular Live";
+    t.lowerable = true;
+    t.create = []() -> void* { return new Instance{}; };
+    t.destroy = [](void* p) { delete static_cast<Instance*>(p); };
+    t.prepare = [](void* p, double sr, int) {
+        auto& e = static_cast<Instance*>(p)->engine;
+        e.prepare(sr);
+        e.set_source(signal::GrainSource::live_ring);
+        e.reset();
+    };
+    t.reset = [](void* p) { static_cast<Instance*>(p)->engine.reset(); };
+    t.baked_params.push_back({kDensityHz, static_cast<float>(Engine::kMinDensityHz),
+                              static_cast<float>(Engine::kMaxDensityHz), 20.0f});
+    t.baked_params.push_back({kGrainMs, static_cast<float>(Engine::kMinGrainMs),
+                              static_cast<float>(Engine::kMaxGrainMs), 80.0f});
+    t.baked_params.push_back({kPosition, 0.0f, 1.0f, 0.0f});
+    t.baked_params.push_back(
+        {kPositionSprayMs, 0.0f, static_cast<float>(Engine::kMaxPositionSprayMs), 0.0f});
+    t.baked_params.push_back({kPitchSt, static_cast<float>(-Engine::kMaxPitchSemitones),
+                              static_cast<float>(Engine::kMaxPitchSemitones), 0.0f});
+    t.baked_params.push_back(
+        {kPitchSpraySt, 0.0f, static_cast<float>(Engine::kMaxPitchSpraySemitones), 0.0f});
+    t.baked_params.push_back({kPanSpray, 0.0f, 1.0f, 0.0f});
+    t.baked_params.push_back({kJitter, 0.0f, 1.0f, 0.0f});
+    t.baked_params.push_back({kLevelDb, static_cast<float>(Engine::kMinLevelDb),
+                              static_cast<float>(Engine::kMaxLevelDb), 0.0f});
+    t.baked_params.push_back({kMix, 0.0f, 1.0f, 1.0f});
+    t.process_instance_baked_param = [](void* p, audio::BufferView<float>& out,
+                                        const audio::BufferView<const float>& in, int n,
+                                        const BakedParamView& params) {
+        auto& e = static_cast<Instance*>(p)->engine;
+        e.set_density_hz(params.value_at(kDensityHz, 0));
+        e.set_grain_ms(params.value_at(kGrainMs, 0));
+        e.set_position(params.value_at(kPosition, 0));
+        e.set_position_spray_ms(params.value_at(kPositionSprayMs, 0));
+        e.set_pitch_semitones(params.value_at(kPitchSt, 0));
+        e.set_pitch_spray_semitones(params.value_at(kPitchSpraySt, 0));
+        e.set_pan_spray(params.value_at(kPanSpray, 0));
+        e.set_async_jitter(params.value_at(kJitter, 0));
+        e.set_level_db(params.value_at(kLevelDb, 0));
+        e.set_mix(params.value_at(kMix, 0));
+        e.process(in.channel_ptr(0), out.channel_ptr(0), out.channel_ptr(1), n);
+    };
+    return t;
+}
+} // namespace granular
 
 }  // namespace pulp::host::synthesis

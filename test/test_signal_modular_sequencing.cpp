@@ -1451,6 +1451,24 @@ TEST_CASE("StageSeq and Rungler clamp non-finite parameter values",
     for (int i = 0; i < 64; ++i) (void)t.process(1.0, i % 8 == 0 ? 1.0 : 0.0, 0.0);
 }
 
+TEST_CASE("Sequencing pattern cells retain finite values on invalid configuration",
+          "[signal][sequencing][nan-recovery]") {
+    StageSeq64 seq;
+    seq.set_stage_pitch(0, 0.75);
+    seq.set_stage_pitch(0, std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(seq.stage_pitch(0) == 0.75);
+
+    CartesianWalk64 walk;
+    walk.set_value(0, 0, -0.5);
+    walk.set_value(0, 0, std::numeric_limits<double>::infinity());
+    REQUIRE(walk.value(0, 0) == -0.5);
+
+    ProbGate64 gate;
+    gate.set_probability(0.75);
+    gate.set_probability(std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(gate.probability() == 0.75);
+}
+
 // ── Test 8: gate logic ────────────────────────────────────────────────────
 
 TEST_CASE("GateLogic truth tables are exhaustive", "[signal][sequencing][gatelogic]") {

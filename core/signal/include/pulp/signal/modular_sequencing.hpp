@@ -179,7 +179,7 @@ public:
     };
 
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) sample_rate_ = sample_rate;
         update();
     }
 
@@ -374,7 +374,7 @@ public:
     SeqDirection direction() const { return direction_; }
 
     void set_stage_pitch(int s, SampleType volts) {
-        if (in_range(s)) pitch_v_[s] = volts;
+        if (in_range(s) && std::isfinite(static_cast<double>(volts))) pitch_v_[s] = volts;
     }
     SampleType stage_pitch(int s) const { return in_range(s) ? pitch_v_[s] : SampleType{0}; }
 
@@ -738,7 +738,9 @@ public:
     int height() const { return height_; }
 
     void set_value(int x, int y, SampleType volts) {
-        if (x >= 0 && x < kMaxDim && y >= 0 && y < kMaxDim) value_[y][x] = volts;
+        if (x >= 0 && x < kMaxDim && y >= 0 && y < kMaxDim &&
+            std::isfinite(static_cast<double>(volts)))
+            value_[y][x] = volts;
     }
     SampleType value(int x, int y) const {
         return (x >= 0 && x < kMaxDim && y >= 0 && y < kMaxDim) ? value_[y][x] : SampleType{0};
@@ -1386,7 +1388,9 @@ public:
 
     void prepare(double) {}
 
-    void set_probability(double p) { probability_ = std::clamp(p, 0.0, 1.0); }
+    void set_probability(double p) {
+        if (std::isfinite(p)) probability_ = std::clamp(p, 0.0, 1.0);
+    }
     double probability() const { return probability_; }
 
     void set_seed(std::uint32_t seed) { rng_.set_seed(seed); }

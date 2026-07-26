@@ -502,7 +502,8 @@ public:
     /// Size the engine. May allocate. `channels` is the audio channel count
     /// (1 or 2); the IR channel count is independent and arrives with the IR.
     void prepare(double sample_rate, int max_block, int channels) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : 48000.0;
+        sample_rate_ = (std::isfinite(sample_rate) && sample_rate > 0.0) ? sample_rate
+                                                                         : 48000.0;
         max_block_ = std::max(1, max_block);
         channels_ = std::clamp(channels, 1, 2);
         head_len_ = std::clamp(round_up_pow2(max_block_), kHeadLenMin, kHeadLenMax);
@@ -539,6 +540,12 @@ public:
         if (ir_channels == nullptr || ir_length <= 0) return false;
         if (ir_channel_count != 1 && ir_channel_count != 2 && ir_channel_count != 4)
             return false;
+        if (!std::isfinite(ir_sample_rate) || ir_sample_rate <= 0.0) return false;
+        for (int c = 0; c < ir_channel_count; ++c) {
+            if (ir_channels[c] == nullptr) return false;
+            for (int i = 0; i < ir_length; ++i)
+                if (!std::isfinite(static_cast<double>(ir_channels[c][i]))) return false;
+        }
 
         // 1. Channel map into double working buffers. The whole ingest runs in
         //    double so the prepared IR is not shaped by the sample type.
@@ -579,10 +586,12 @@ public:
     // ── Parameters (RT-safe; no allocation) ──────────────────────────────────
 
     void set_ir_gain_db(double db) {
+        if (!std::isfinite(db)) return;
         ir_gain_db_ = std::clamp(db, kIrGainDbMin, kIrGainDbMax);
         ir_gain_lin_ = units::db_to_linear(ir_gain_db_);
     }
     void set_predelay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         predelay_ms_ = std::clamp(ms, kPredelayMsMin, kPredelayMsMax);
         const int limit = std::max(0, predelay_len_ - max_block_ - 1);
         predelay_samples_ = std::clamp(
@@ -593,16 +602,23 @@ public:
         true_stereo_ = on;
         refresh_active_cells();
     }
-    void set_wet_percent(double percent) { wet_gain_ = std::clamp(percent, 0.0, 100.0) / 100.0; }
-    void set_dry_percent(double percent) { dry_gain_ = std::clamp(percent, 0.0, 100.0) / 100.0; }
+    void set_wet_percent(double percent) {
+        if (std::isfinite(percent)) wet_gain_ = std::clamp(percent, 0.0, 100.0) / 100.0;
+    }
+    void set_dry_percent(double percent) {
+        if (std::isfinite(percent)) dry_gain_ = std::clamp(percent, 0.0, 100.0) / 100.0;
+    }
     void set_width_percent(double percent) {
+        if (!std::isfinite(percent)) return;
         width_ = std::clamp(percent, kWidthPercentMin, kWidthPercentMax) / 100.0;
     }
     void set_lowcut_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         lowcut_hz_ = std::clamp(hz, kLowcutHzMin, kLowcutHzMax);
         update_send_eq();
     }
     void set_highcut_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         highcut_hz_ = std::clamp(hz, kHighcutHzMin, kHighcutHzMax);
         update_send_eq();
     }
@@ -611,9 +627,11 @@ public:
     /// `load_impulse_response()` — by definition they re-read the IR.
     void set_normalize_mode(IrNormalizeMode mode) { normalize_mode_ = mode; }
     void set_tail_trim_db(double db) {
+        if (!std::isfinite(db)) return;
         tail_trim_db_ = std::clamp(db, kTailTrimDbMin, kTailTrimDbMax);
     }
     void set_tail_fade_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         tail_fade_ms_ = std::clamp(ms, kTailFadeMsMin, kTailFadeMsMax);
     }
     void set_resample_taps_per_phase(int taps) {
@@ -635,7 +653,7 @@ public:
             // and would hide a failed load.
             for (int c = 0; c < channels_; ++c)
                 for (int i = 0; i < n; ++i)
-                    out[c][i] = static_cast<SampleType>(dry_gain_) * in[c][i];
+                    out[c][i] = static_cast<SampleType>(dry_gain_) * finite_sample(in[c][i]);
             return;
         }
 
@@ -741,6 +759,10 @@ public:
     int predelay_samples() const { return predelay_samples_; }
 
 private:
+    static SampleType finite_sample(SampleType sample) noexcept {
+        return std::isfinite(static_cast<double>(sample)) ? sample : SampleType{0};
+    }
+
     using FftCursor = typename detail::SlicedFftPlanT<SampleType>::Cursor;
 
     // ── Partition group: two length-L partitions covering IR [2L, 4L) ────────
@@ -814,7 +836,7 @@ private:
             auto& hp = hp_state_[static_cast<std::size_t>(c)];
             auto& lp = lp_state_[static_cast<std::size_t>(c)];
             for (int i = 0; i < chunk; ++i) {
-                double x = static_cast<double>(in[c][offset + i]);
+                double x = static_cast<double>(finite_sample(in[c][offset + i]));
                 if (hp_active_) {
                     hp.z = snap_to_zero(hp_coef_ * (hp.z + x - hp.prev_x));
                     hp.prev_x = x;
@@ -895,7 +917,7 @@ private:
                 w[1] = mid - side;
             }
             for (int c = 0; c < channels_; ++c)
-                out[c][offset + i] = dry * in[c][offset + i] + gain * w[c];
+                out[c][offset + i] = dry * finite_sample(in[c][offset + i]) + gain * w[c];
         }
         predelay_write_ = (predelay_write_ + chunk) % predelay_len_;
     }

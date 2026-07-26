@@ -125,6 +125,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <complex>
 #include <cstdint>
 #include <vector>
@@ -1484,6 +1485,33 @@ TEST_CASE("Degenerate and default states are safe", "[signal][speaker]") {
         hot[i] = (i % 2 == 0) ? 1.0 : -1.0;  // full-scale square, the worst case
     model.process(hot.data(), hot.data(), static_cast<int>(hot.size()));
     for (double v : hot) REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("Speaker rejects non-finite controls and audio without poisoning state",
+          "[signal][speaker][nan-recovery][rt-safety]") {
+    SpeakerModel64 poisoned;
+    SpeakerModel64 fresh;
+    poisoned.prepare(kFs);
+    fresh.prepare(kFs);
+    poisoned.set_drive_db(6.0);
+    fresh.set_drive_db(6.0);
+    poisoned.set_drive_db(std::numeric_limits<double>::quiet_NaN());
+    poisoned.set_box_volume_l(std::numeric_limits<double>::infinity());
+
+    double rejected = 1.0;
+    {
+        pulp::test::RtAllocationProbe probe;
+        rejected = poisoned.process(std::numeric_limits<double>::quiet_NaN());
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(rejected == 0.0);
+    fresh.reset();
+
+    std::vector<double> in(2048), a(in.size()), b(in.size());
+    for (std::size_t i = 0; i < in.size(); ++i) in[i] = 0.2 * std::sin(0.01 * i);
+    poisoned.process(in.data(), a.data(), static_cast<int>(a.size()));
+    fresh.process(in.data(), b.data(), static_cast<int>(b.size()));
+    REQUIRE(a == b);
 }
 
 TEST_CASE("Float and double instantiations agree", "[signal][speaker]") {

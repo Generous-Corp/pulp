@@ -478,7 +478,7 @@ public:
 
     /// Recompute every corner coefficient for a new sample rate. No allocation.
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : 48000.0;
+        if (std::isfinite(sample_rate) && sample_rate > 0.0) sample_rate_ = sample_rate;
         const auto smoothing = static_cast<SampleType>(kSmoothingMs / 1000.0);
         const auto fs = static_cast<SampleType>(sample_rate_);
         drive_lin_.set_ramp_time(smoothing, fs);
@@ -518,49 +518,61 @@ public:
         retarget_smoothed();
     }
     void set_box_volume_l(double litres) {
+        if (!std::isfinite(litres)) return;
         box_volume_l_ = std::clamp(litres, kBoxVolumeLMin, kBoxVolumeLMax);
         retarget_smoothed();
     }
     void set_resonance_trim_semitones(double semitones) {
+        if (!std::isfinite(semitones)) return;
         resonance_trim_ =
             std::clamp(semitones, kResonanceTrimSemitonesMin, kResonanceTrimSemitonesMax);
     }
     /// Override the computed box Qtc. Pass a non-positive value to return to
     /// the archetype-and-volume computation.
     void set_q_resonance(double q) {
+        if (!std::isfinite(q)) return;
         q_override_ = q > 0.0 ? std::clamp(q, kQResonanceMin, kQResonanceMax) : 0.0;
         retarget_smoothed();
     }
     void set_cone_breakup_amount(double percent) {
+        if (!std::isfinite(percent)) return;
         breakup_amount_ = std::clamp(percent, 0.0, 100.0) / 100.0;
     }
     void set_treble_rolloff_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         treble_hz_target_ = std::clamp(hz, kTrebleRolloffHzMin, kTrebleRolloffHzMax);
         treble_hz_.set_target(static_cast<SampleType>(treble_hz_target_));
     }
     void set_drive_db(double db) {
+        if (!std::isfinite(db)) return;
         drive_db_ = std::clamp(db, kDriveDbMin, kDriveDbMax);
         drive_lin_.set_target(static_cast<SampleType>(units::db_to_linear(drive_db_)));
     }
     void set_compression_amount(double percent) {
+        if (!std::isfinite(percent)) return;
         compression_amount_ = std::clamp(percent, 0.0, 100.0) / 100.0;
     }
     void set_mic_distance_cm(double cm) {
+        if (!std::isfinite(cm)) return;
         mic_distance_cm_ = std::clamp(cm, kMicDistanceCmMin, kMicDistanceCmMax);
         proximity_db_.set_target(static_cast<SampleType>(proximity_gain_db()));
     }
     void set_mic_position_pct(double percent) {
+        if (!std::isfinite(percent)) return;
         mic_position_ = std::clamp(percent, 0.0, 100.0) / 100.0;
         presence_db_.set_target(static_cast<SampleType>(presence_shelf_db()));
     }
     void set_mic_axis_deg(double degrees) {
+        if (!std::isfinite(degrees)) return;
         mic_axis_deg_ = std::clamp(degrees, kMicAxisDegMin, kMicAxisDegMax);
         offaxis_hz_.set_target(static_cast<SampleType>(offaxis_corner_hz()));
     }
     void set_diffraction_amount(double percent) {
+        if (!std::isfinite(percent)) return;
         diffraction_amount_ = std::clamp(percent, 0.0, 100.0) / 100.0;
     }
     void set_output_trim_db(double db) {
+        if (!std::isfinite(db)) return;
         out_trim_db_ = std::clamp(db, kOutputTrimDbMin, kOutputTrimDbMax);
         out_trim_lin_.set_target(static_cast<SampleType>(units::db_to_linear(out_trim_db_)));
     }
@@ -568,6 +580,10 @@ public:
     // ── Audio ────────────────────────────────────────────────────────────────
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         if (control_counter_ == 0) update_coefficients();
         control_counter_ = (control_counter_ + 1) % kControlBlock;
 
@@ -602,7 +618,12 @@ public:
         s = air_loss_.process(s);
         s = presence_.process(s);
         s = offaxis_lp_.process_lowpass(s);
-        return s * trim;
+        const SampleType output = s * trim;
+        if (!std::isfinite(static_cast<double>(output))) {
+            reset();
+            return SampleType{0};
+        }
+        return output;
     }
 
     void process(const SampleType* in, SampleType* out, int n) {

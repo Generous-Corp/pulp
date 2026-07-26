@@ -1262,6 +1262,44 @@ TEST_CASE("A head-only IR needs no partitions at all", "[signal][convolution][sc
     REQUIRE(rms_error_db(got, direct_convolve(x, prepared_taps(conv))) < -280.0);
 }
 
+TEST_CASE("Convolver rejects malformed IRs and non-finite audio before history",
+          "[signal][convolution][nan-recovery][rt-safety]") {
+    ZeroLatencyConvolver64 conv;
+    conv.prepare(kFs, kBlock, 1);
+    std::vector<double> taps(256, 0.0);
+    taps[0] = 1.0;
+    const double* valid[1] = {taps.data()};
+    REQUIRE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()), kFs));
+
+    const double* null_child[1] = {nullptr};
+    REQUIRE_FALSE(conv.load_impulse_response(null_child, 1, 32, kFs));
+    taps[12] = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_FALSE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()), kFs));
+    taps[12] = 0.0;
+    REQUIRE_FALSE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()),
+                                              std::numeric_limits<double>::infinity()));
+
+    conv.reset();
+    conv.set_dry_percent(0.0);
+    conv.set_wet_percent(100.0);
+    double bad_in = std::numeric_limits<double>::quiet_NaN();
+    double bad_out = 1.0;
+    const double* in[1] = {&bad_in};
+    double* out[1] = {&bad_out};
+    {
+        pulp::test::RtAllocationProbe probe;
+        conv.process(in, out, 1);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(std::isfinite(bad_out));
+
+    std::vector<double> zeros(kBlock, 0.0), recovered(kBlock);
+    const double* zero_in[1] = {zeros.data()};
+    double* recovered_out[1] = {recovered.data()};
+    conv.process(zero_in, recovered_out, kBlock);
+    REQUIRE(std::all_of(recovered.begin(), recovered.end(), [](double v) { return v == 0.0; }));
+}
+
 TEST_CASE("Ragged block sizes render the same audio", "[signal][convolution][schedule]") {
     // The scheduler is sample-granular: it clips each chunk to the smallest
     // partition period so a boundary can never fall inside a chunk. A host that

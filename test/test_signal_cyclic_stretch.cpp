@@ -72,6 +72,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <complex>
 #include <vector>
 
@@ -948,4 +949,35 @@ TEST_CASE("Cyclic stretch: round_half_even ties break toward even",
     REQUIRE(round_half_even(0.5000001) == 1);
     REQUIRE(round_half_even(7.0) == 7);
     REQUIRE(round_half_even(-7.0) == -7);
+}
+
+TEST_CASE("Cyclic stretch: default and non-finite inputs are silent-safe",
+          "[signal][cyclic-stretch][nan-recovery][rt-safety]") {
+    CyclicStretch raw;
+    const std::vector<float> input(64, 0.5f);
+    std::vector<float> output(input.size(), 1.0f);
+    raw.process(input.data(), output.data(), static_cast<int>(input.size()));
+    REQUIRE(std::all_of(output.begin(), output.end(), [](float v) { return v == 0.0f; }));
+
+    CyclicStretch poisoned = make(kCyclicStretchShortFrame, 2.0);
+    CyclicStretch fresh = make(kCyclicStretchShortFrame, 2.0);
+    poisoned.set_cycle_hz(std::numeric_limits<double>::quiet_NaN());
+    poisoned.set_crossfade_pct(std::numeric_limits<double>::infinity());
+    poisoned.set_stretch_ratio(std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(std::isfinite(poisoned.flutter_hz()));
+
+    float bad = std::numeric_limits<float>::quiet_NaN();
+    float rejected = 1.0f;
+    {
+        pulp::test::RtAllocationProbe probe;
+        poisoned.process(&bad, &rejected, 1);
+        REQUIRE(probe.allocation_count() == 0);
+    }
+    REQUIRE(rejected == 0.0f);
+    fresh.reset();
+    const auto continuation = noise(4096);
+    std::vector<float> a(continuation.size()), b(continuation.size());
+    poisoned.process(continuation.data(), a.data(), static_cast<int>(a.size()));
+    fresh.process(continuation.data(), b.data(), static_cast<int>(b.size()));
+    REQUIRE(a == b);
 }
