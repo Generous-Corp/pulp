@@ -2,6 +2,7 @@
 
 #include <pulp/signal/decay_envelope.hpp>
 #include <pulp/signal/noise_source.hpp>
+#include <pulp/signal/svf.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 
 #include <algorithm>
@@ -146,6 +147,60 @@ private:
     double level_ = 0.0;
     double decay_ms_ = 60.0;
     DecayEnvelope64 envelope_;
+};
+
+/// A high-Q body resonance mixed back into an excitation path.
+///
+/// Shell resonance is a reusable topology block rather than a snare-specific
+/// filter: noise, click, or any authored body block can excite it, and its
+/// stored energy intentionally survives triggers until the owning voice is
+/// reset. That makes it suitable for genome block composition without
+/// duplicating the state rule in every voice.
+class ShellLayer {
+public:
+    void prepare(double sample_rate) {
+        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        filter_.set_sample_rate(static_cast<float>(sample_rate_));
+        filter_.set_mode(Svf::Mode::bandpass);
+        apply();
+        reset();
+    }
+
+    void reset() { filter_.reset(); }
+
+    void set_level(double level) { level_ = std::max(level, 0.0); }
+    void set_frequency_hz(double hz) {
+        frequency_hz_ = std::clamp(hz, 20.0, 20000.0);
+        apply();
+    }
+    void set_resonance(double q) {
+        resonance_ = std::clamp(q, 1.0, 30.0);
+        apply();
+    }
+
+    double level() const { return level_; }
+    double frequency_hz() const { return frequency_hz_; }
+    double resonance() const { return resonance_; }
+
+    double process(double excitation) {
+        if (level_ <= 0.0) return excitation;
+        return excitation +
+               level_ * static_cast<double>(
+                            filter_.process(static_cast<float>(excitation)));
+    }
+
+private:
+    void apply() {
+        filter_.set_frequency(static_cast<float>(
+            std::min(frequency_hz_, 0.49 * sample_rate_)));
+        filter_.set_resonance(static_cast<float>(resonance_));
+    }
+
+    double sample_rate_ = 44100.0;
+    double level_ = 0.0;
+    double frequency_hz_ = 180.0;
+    double resonance_ = 12.0;
+    Svf filter_;
 };
 
 /// A sine an octave below the body, gated by the body's own envelope.

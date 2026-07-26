@@ -35,6 +35,7 @@ using pulp::signal::drum::EngineId;
 using pulp::signal::drum::EngineProvenance;
 using pulp::signal::drum::HatVoice;
 using pulp::signal::drum::Kit;
+using pulp::signal::drum::ShellLayer;
 using pulp::signal::drum::SnareVoice;
 using pulp::signal::drum::TomVoice;
 using pulp::signal::drum::VelocityResponse;
@@ -702,6 +703,29 @@ TEST_CASE("A snare with a silenced layer still finishes",
         render(voice, static_cast<int>(kFs));
         INFO("silenced layer index " << silenced);
         REQUIRE_FALSE(voice.is_active());
+    }
+}
+
+TEST_CASE("The reusable shell block bypasses cleanly and preserves its ring",
+          "[signal][drum][layers][shell]") {
+    ShellLayer shell;
+    shell.prepare(kFs);
+    CHECK(shell.process(0.5) == 0.5);
+
+    shell.set_level(1.0);
+    shell.set_frequency_hz(1000.0);
+    shell.set_resonance(12.0);
+    double ring_energy = 0.0;
+    (void)shell.process(1.0);
+    for (int i = 0; i < 2048; ++i) {
+        const double sample = shell.process(0.0);
+        ring_energy += sample * sample;
+    }
+    CHECK(ring_energy > 1.0e-4);
+
+    shell.reset();
+    for (int i = 0; i < 512; ++i) {
+        CHECK(shell.process(0.0) == 0.0);
     }
 }
 

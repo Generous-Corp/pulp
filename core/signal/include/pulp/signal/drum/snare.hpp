@@ -110,8 +110,8 @@ public:
     void set_snap_decay_ms(double ms) { snap_.set_decay_ms(ms); }
 
     /// Level of the shell resonance applied to the noise path, and its Q.
-    void set_shell_level(double level) { shell_level_ = std::max(level, 0.0); }
-    void set_shell_resonance(double q) { shell_q_ = std::clamp(q, 1.0, 30.0); }
+    void set_shell_level(double level) { shell_.set_level(level); }
+    void set_shell_resonance(double q) { shell_.set_resonance(q); }
 
     OutputStage& output() { return output_; }
 
@@ -133,8 +133,7 @@ protected:
         noise_env_.set_sample_rate(sample_rate);
         snap_.prepare(sample_rate);
         noise_filter_.set_sample_rate(static_cast<float>(sample_rate));
-        shell_.set_sample_rate(static_cast<float>(sample_rate));
-        shell_.set_mode(Svf::Mode::bandpass);
+        shell_.prepare(sample_rate);
         snap_hp_.prepare(static_cast<float>(sample_rate));
         tone_lofi_.set_sample_rate(sample_rate);
         noise_lofi_.set_sample_rate(sample_rate);
@@ -201,8 +200,7 @@ protected:
         }
 
         snap_.trigger(brightness_);
-        shell_.set_frequency(static_cast<float>(std::min(tune_hz_, 0.49 * sample_rate())));
-        shell_.set_resonance(static_cast<float>(shell_q_));
+        shell_.set_frequency_hz(tune_hz_);
     }
 
     bool on_is_active() const override {
@@ -276,10 +274,7 @@ private:
             }
         }
 
-        double path = wires + snap;
-        if (shell_level_ > 0.0) {
-            path += shell_level_ * shell_.process(static_cast<float>(path));
-        }
+        const double path = shell_.process(wires + snap);
         return noise_lofi_.process(static_cast<float>(path));
     }
 
@@ -299,8 +294,6 @@ private:
     double noise_sweep_oct_ = 0.0;
     double rattle_ = 0.0;
     double rattle_hz_ = 45.0;
-    double shell_level_ = 0.0;
-    double shell_q_ = 12.0;
 
     NoiseSource noise_;
     DecayEnvelope64 tone_env_;
@@ -308,7 +301,7 @@ private:
     DecayEnvelope64 noise_env_;
     ClickLayer snap_;
     Svf noise_filter_;
-    Svf shell_;
+    ShellLayer shell_;
     TptFilter snap_hp_;
     LofiChain tone_lofi_;
     LofiChain noise_lofi_;
