@@ -166,13 +166,24 @@ TEST_CASE("The loop pass index is derived from the monotonic beat",
     // clock deliberately keeps its lifetime value.
     const MonotonicBeat seek_epoch{{kLoopLength.value * 9}};
     range.monotonic_start = seek_epoch;
-    REQUIRE(playback::detail::note_modifier_pass_index(range, loop, seek_epoch) == 0);
+    REQUIRE(playback::detail::note_modifier_pass_index(
+                range, loop, seek_epoch,
+                static_cast<std::uint64_t>(kLoopLength.value)) == 0);
     const auto half_loop = static_cast<std::uint64_t>(kLoopLength.value / 2);
     REQUIRE(playback::detail::note_modifier_pass_index(
                 range, loop, seek_epoch, half_loop) == 0);
     range.monotonic_start = seek_epoch + TickDuration{kLoopLength.value / 2};
     REQUIRE(playback::detail::note_modifier_pass_index(
                 range, loop, seek_epoch, half_loop) == 1);
+
+    const LoopRegion after_lead_in{true, {100}, {200}};
+    const MonotonicBeat lead_in_epoch{{0}};
+    range.monotonic_start = {{100}};
+    REQUIRE(playback::detail::note_modifier_pass_index(
+                range, after_lead_in, lead_in_epoch, 200) == 0);
+    range.monotonic_start = {{200}};
+    REQUIRE(playback::detail::note_modifier_pass_index(
+                range, after_lead_in, lead_in_epoch, 200) == 1);
 
     // Full-width valid tick regions use total unsigned distance arithmetic.
     const LoopRegion full_width{
@@ -351,7 +362,7 @@ TEST_CASE("A ratchet that would collapse below one rendered sample is refused",
     DeferredCompileExecutor executor;
     PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
     ProgramCompileRequest request;
-    request.project = std::move(project);
+    request.project = project;
     request.sequence_id = {2};
     request.tempo_map = map;
     request.document_revision = 1;
@@ -385,6 +396,11 @@ TEST_CASE("Ratchet expansion respects the compiled event budget",
     request.tempo_map = map;
     request.document_revision = 1;
     request.dirty = {.all = true};
+    request.maximum_note_events_per_track = 0;
+    auto rejected = compiler.submit(request);
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == CompileErrorCode::InvalidRequest);
+
     request.maximum_note_events_per_track = 7;
     REQUIRE(compiler.submit(std::move(request)));
     while (compiler.status().busy)

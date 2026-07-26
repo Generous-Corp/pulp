@@ -82,7 +82,8 @@ void ArrangementNoteRenderer::reset() noexcept {
     last_block_index_ = 0;
     has_note_pass_epoch_ = false;
     note_pass_epoch_ = {};
-    note_pass_epoch_loop_offset_ = 0;
+    note_pass_first_wrap_distance_ = 0;
+    note_pass_loop_ = {};
     dropped_events_ = 0;
 }
 
@@ -219,13 +220,15 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     const bool reanchor_note_pass =
         !has_note_pass_epoch_ || view.adoption == ShellAdoptionResult::Adopted ||
         block_sequence_reset || transport.reset_requested ||
-        transport.transport_started || transport.transport_changed;
+        transport.transport_started || transport.transport_changed ||
+        transport.loop != note_pass_loop_;
     if (reanchor_note_pass && transport.range_count != 0) {
         const auto& first_range = transport.ranges[0];
         note_pass_epoch_ = first_range.monotonic_start;
-        note_pass_epoch_loop_offset_ =
-            detail::note_modifier_loop_offset(first_range.timeline_tick_start,
-                                              transport.loop);
+        note_pass_first_wrap_distance_ =
+            detail::note_modifier_first_wrap_distance(
+                first_range.timeline_tick_start, transport.loop);
+        note_pass_loop_ = transport.loop;
         has_note_pass_epoch_ = true;
     }
 
@@ -242,7 +245,7 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         // without the other and leave a note hanging.
         const auto pass_index = detail::note_modifier_pass_index(
             range, transport.loop, note_pass_epoch_,
-            note_pass_epoch_loop_offset_);
+            note_pass_first_wrap_distance_);
 
         const auto search_sample =
             range.host_beat_mapping

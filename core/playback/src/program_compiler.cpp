@@ -335,9 +335,6 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
-        if (request_->maximum_note_events_per_track == 0)
-            return fail({CompileErrorCode::InvalidRequest, request_->sequence_id,
-                         request_->document_revision});
                     total_audio_clips_ += count;
                 }
                 tracks_.push_back(*old);
@@ -817,6 +814,7 @@ PlaybackProgramCompiler::submit(ProgramCompileRequest request) {
     if (!request.project || !request.sequence_id.valid() || !request.tempo_map ||
         request.document_revision == 0 || !request.automation_limits.valid() ||
         request.max_expanded_note_events == 0 || request.max_expanded_clips == 0 ||
+        request.maximum_note_events_per_track == 0 ||
         (!request.dirty.all && request.dirty.tracks.empty() && request.track_policies.empty()))
         return reject({CompileErrorCode::InvalidRequest, {}, request.document_revision});
     const auto* sequence = request.project->find_sequence(request.sequence_id);

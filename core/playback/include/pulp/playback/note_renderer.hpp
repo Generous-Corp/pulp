@@ -40,12 +40,15 @@ constexpr std::uint64_t note_modifier_loop_length(const LoopRegion& loop) noexce
                : 0;
 }
 
-constexpr std::uint64_t note_modifier_loop_offset(timebase::TickPosition position,
-                                                  const LoopRegion& loop) noexcept {
+constexpr std::uint64_t
+note_modifier_first_wrap_distance(timebase::TickPosition position,
+                                  const LoopRegion& loop) noexcept {
     const auto length = note_modifier_loop_length(loop);
-    if (length == 0 || position <= loop.start || position >= loop.end)
+    if (length == 0)
         return 0;
-    return positive_tick_distance(position.value, loop.start.value);
+    if (position < loop.end)
+        return positive_tick_distance(loop.end.value, position.value);
+    return length;
 }
 
 /// Which loop pass a transport range is playing relative to the most recent
@@ -53,23 +56,23 @@ constexpr std::uint64_t note_modifier_loop_offset(timebase::TickPosition positio
 constexpr std::uint64_t
 note_modifier_pass_index(const TransportRange& range, const LoopRegion& loop,
                          timebase::MonotonicBeat epoch,
-                         std::uint64_t epoch_loop_offset = 0) noexcept {
+                         std::uint64_t first_wrap_distance) noexcept {
     const auto length = note_modifier_loop_length(loop);
     if (length == 0 || range.monotonic_start <= epoch)
         return 0;
-    epoch_loop_offset = std::min(epoch_loop_offset, length - 1);
     const auto elapsed = positive_tick_distance(
         range.monotonic_start.position.value, epoch.position.value);
-    const auto complete = elapsed / length;
-    const auto remainder = elapsed % length;
-    return complete + (remainder >= length - epoch_loop_offset ? 1u : 0u);
+    if (elapsed < first_wrap_distance)
+        return 0;
+    return 1u + (elapsed - first_wrap_distance) / length;
 }
 
 /// Compatibility helper for callers whose monotonic origin is the loop start.
 constexpr std::uint64_t note_modifier_pass_index(const TransportRange& range,
                                                  const LoopRegion& loop) noexcept {
     return note_modifier_pass_index(
-        range, loop, timebase::MonotonicBeat{{loop.start.value}});
+        range, loop, timebase::MonotonicBeat{{loop.start.value}},
+        note_modifier_loop_length(loop));
 }
 
 } // namespace detail
@@ -145,7 +148,8 @@ class ArrangementNoteRenderer {
     std::uint64_t last_block_index_ = 0;
     bool has_note_pass_epoch_ = false;
     timebase::MonotonicBeat note_pass_epoch_{};
-    std::uint64_t note_pass_epoch_loop_offset_ = 0;
+    std::uint64_t note_pass_first_wrap_distance_ = 0;
+    LoopRegion note_pass_loop_{};
     std::uint32_t dropped_events_ = 0;
 };
 

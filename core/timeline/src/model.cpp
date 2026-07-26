@@ -227,8 +227,13 @@ runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEve
             note.channel > 15)
             return fail<NoteContent>(ModelErrorCode::InvalidNote, note.id);
     }
-    if (const auto duplicate =
-            first_duplicate(notes, [](const NoteEvent& note) { return note.id; }))
+    std::vector<ItemId> note_ids;
+    note_ids.reserve(notes.size());
+    for (const auto& note : notes)
+        note_ids.push_back(note.id);
+    std::sort(note_ids.begin(), note_ids.end());
+    if (const auto duplicate = std::adjacent_find(note_ids.begin(), note_ids.end());
+        duplicate != note_ids.end())
         return fail<NoteContent>(ModelErrorCode::DuplicateItemId, *duplicate);
     std::sort(notes.begin(), notes.end(), [](const NoteEvent& lhs, const NoteEvent& rhs) {
         return std::pair(lhs.start.value, lhs.id.value) < std::pair(rhs.start.value, rhs.id.value);
@@ -240,10 +245,7 @@ runtime::Result<NoteContent, ModelError> NoteContent::create(std::vector<NoteEve
         // admitting it would give one document two byte encodings.
         if (!note_modifier_well_formed(modifier) || note_modifier_is_neutral(modifier))
             return fail<NoteContent>(ModelErrorCode::InvalidNoteModifier, modifier.note_id);
-        const auto owner = std::find_if(notes.begin(), notes.end(), [&](const NoteEvent& note) {
-            return note.id == modifier.note_id;
-        });
-        if (owner == notes.end())
+        if (!std::binary_search(note_ids.begin(), note_ids.end(), modifier.note_id))
             return fail<NoteContent>(ModelErrorCode::MissingItem, modifier.note_id);
     }
     if (const auto duplicate =
