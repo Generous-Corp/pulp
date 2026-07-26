@@ -71,7 +71,8 @@ namespace pulp::format::vst3 {
 // expression -> per-note pressure, and brightness -> per-note timbre (CC74).
 class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                           public Steinberg::Vst::IMidiMapping,
-                          public Steinberg::Vst::INoteExpressionController {
+                          public Steinberg::Vst::INoteExpressionController,
+                          public Steinberg::Vst::IKeyswitchController {
 public:
     PulpVst3Processor(ProcessorFactory factory);
     ~PulpVst3Processor() override;
@@ -120,6 +121,19 @@ public:
         Steinberg::Vst::NoteExpressionTypeID id,
         const Steinberg::Vst::TChar* string /*in*/,
         Steinberg::Vst::NoteExpressionValue& valueNormalized /*out*/) override;
+
+    // IKeyswitchController — publishes Processor::note_names() as VST3 key
+    // switches, which is the surface a VST3 host uses to label individual keys
+    // (a drum instrument's "Kick", a sampler's articulation switches) instead
+    // of showing bare pitches. Each name becomes a single-key switch. A plug-in
+    // that names no notes reports a count of 0 and the host falls back to
+    // pitches, so nothing changes for existing plug-ins.
+    Steinberg::int32 PLUGIN_API getKeyswitchCount(
+        Steinberg::int32 busIndex, Steinberg::int16 channel) override;
+    Steinberg::tresult PLUGIN_API getKeyswitchInfo(
+        Steinberg::int32 busIndex, Steinberg::int16 channel,
+        Steinberg::int32 keySwitchIndex,
+        Steinberg::Vst::KeyswitchInfo& info /*out*/) override;
 
     // IEditController — parameter value/string conversion. Route through the
     // author-supplied ParamInfo::to_string / from_string so a host's generic

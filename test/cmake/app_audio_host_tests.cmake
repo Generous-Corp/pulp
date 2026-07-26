@@ -284,6 +284,22 @@ if(PULP_HAS_VST3)
         PULP_VST3_GUI=1
     )
     catch_discover_tests(pulp-test-vst3-audio-parity)
+
+    # Note names published through IKeyswitchController — the VST3 surface a
+    # host uses to label individual keys instead of showing bare pitches.
+    # Compiles vst3_plug_view.cpp for the GUI symbols
+    # PulpVst3Processor::createView() references, as above.
+    add_executable(pulp-test-vst3-note-names
+        test_vst3_note_names.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-note-names
+        PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-note-names PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-note-names)
 endif()
 
 if(PULP_HAS_VST3)
