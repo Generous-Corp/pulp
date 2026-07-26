@@ -194,9 +194,8 @@ protected:
     }
 
     void render_add(float* out, int num_samples) override {
-        burst_output_.sync_configuration_from(output_);
         for (int i = 0; i < num_samples; ++i) {
-            out[i] += render_frame().mono;
+            out[i] += render_frame(false).mono;
         }
     }
 
@@ -204,7 +203,7 @@ protected:
                            int num_samples) override {
         burst_output_.sync_configuration_from(output_);
         for (int i = 0; i < num_samples; ++i) {
-            const RenderFrame frame = render_frame();
+            const RenderFrame frame = render_frame(true);
             const double pan = frame.burst_pan * stereo_width_;
             left[i] += static_cast<float>(
                 0.5 * frame.mono - 0.5 * pan * frame.burst);
@@ -220,7 +219,7 @@ private:
         double burst_pan = 0.0;
     };
 
-    RenderFrame render_frame() {
+    RenderFrame render_frame(bool render_burst_side) {
         if (next_burst_ < burst_count_ && --samples_until_burst_ <= 0) {
             burst_gain_ *= falloff_;
             if (alternate_polarity_) burst_sign_ = -burst_sign_;
@@ -253,8 +252,10 @@ private:
         // interaction between the train and centred layers remains in the
         // mid channel, which preserves the canonical mono sum exactly without
         // allowing room or body energy to leak into stereo width.
-        frame.burst =
-            burst_output_.process(static_cast<float>(train)) * velocity_gain_;
+        if (render_burst_side) {
+            frame.burst =
+                burst_output_.process(static_cast<float>(train)) * velocity_gain_;
+        }
         frame.burst_pan = burst_pan_;
         return frame;
     }

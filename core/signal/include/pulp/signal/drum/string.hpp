@@ -99,6 +99,8 @@ public:
     /// Optional post-body modulation. `mix` crossfades from the unmodified
     /// string to the selected mode. FM bends the delay length, Ring multiplies
     /// by a sine, and Sync substitutes a slave saw reset by the string pitch.
+    /// The independent FM path is armed on the next hit after FM is selected;
+    /// this keeps the default and non-FM realtime paths at one string model.
     void set_modulation(StringModulation mode) {
         if (modulation_ == StringModulation::fm &&
             mode != StringModulation::fm) {
@@ -153,6 +155,7 @@ protected:
     void on_reset() override {
         string_.reset();
         fm_string_.reset();
+        fm_path_active_ = false;
         exciter_env_.reset();
         gate_env_.reset();
         gate_.reset();
@@ -172,24 +175,28 @@ protected:
         noise_.reset();
         base_frequency_ = tune_hz_ * std::exp2(response.bend(velocity));
         string_.set_frequency(base_frequency_);
-        fm_string_.set_frequency(base_frequency_);
         string_.set_decay_seconds(decay_s_);
-        fm_string_.set_decay_seconds(decay_s_);
         string_.set_damping(damping_);
-        fm_string_.set_damping(damping_);
         string_.set_stiffness(stiffness_);
-        fm_string_.set_stiffness(stiffness_);
         string_.set_pluck_position(pluck_position_);
-        fm_string_.set_pluck_position(pluck_position_);
         string_.set_pick_direction(pick_direction_);
-        fm_string_.set_pick_direction(pick_direction_);
         // Velocity opens the excitation's bandwidth: harder is brighter.
         string_.set_dynamic_bandwidth_hz(
             brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
-        fm_string_.set_dynamic_bandwidth_hz(
-            brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
         string_.pluck(restart_on_hit_);
-        fm_string_.pluck(restart_on_hit_);
+        fm_path_active_ = modulation_ == StringModulation::fm;
+        if (fm_path_active_) {
+            fm_string_.set_frequency(base_frequency_);
+            fm_string_.set_decay_seconds(decay_s_);
+            fm_string_.set_damping(damping_);
+            fm_string_.set_stiffness(stiffness_);
+            fm_string_.set_pluck_position(pluck_position_);
+            fm_string_.set_pick_direction(pick_direction_);
+            fm_string_.set_dynamic_bandwidth_hz(
+                brightness_hz_ *
+                static_cast<double>(response.brightness_scale(velocity)));
+            fm_string_.pluck(restart_on_hit_);
+        }
 
         exciter_env_.set_attack_ms(0.0);
         exciter_env_.set_decay_time_constant_ms(exciter_ms_);
@@ -205,7 +212,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return string_.is_active() || fm_string_.is_active() ||
+        return string_.is_active() ||
+               (fm_path_active_ && fm_string_.is_active()) ||
                output_.has_tail();
     }
 
@@ -218,7 +226,7 @@ protected:
             }
             const double modulator =
                 std::sin(2.0 * 3.14159265358979323846 * modulation_phase_);
-            if (modulation_ == StringModulation::fm &&
+            if (fm_path_active_ && modulation_ == StringModulation::fm &&
                 fm_depth_octaves_ > 0.0) {
                 fm_string_.set_modulated_frequency(
                     base_frequency_ *
@@ -231,8 +239,11 @@ protected:
                                      : 0.0;
             const double dry = static_cast<double>(
                 string_.process(static_cast<float>(burst)));
-            const double fm = static_cast<double>(
-                fm_string_.process(static_cast<float>(burst)));
+            const double fm =
+                fm_path_active_
+                    ? static_cast<double>(
+                          fm_string_.process(static_cast<float>(burst)))
+                    : dry;
 
             double effected = dry;
             if (modulation_ == StringModulation::fm) {
@@ -279,6 +290,7 @@ private:
     double brightness_hz_ = 1800.0;
     double pick_direction_ = 0.0;
     bool restart_on_hit_ = false;
+    bool fm_path_active_ = false;
     StringModulation modulation_ = StringModulation::none;
     double modulation_mix_ = 0.0;
     double modulation_ratio_ = 2.0;
