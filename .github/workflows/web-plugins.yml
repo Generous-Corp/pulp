@@ -362,6 +362,12 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Set up Chrome
+        id: chrome-macos
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Set up Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
@@ -401,7 +407,7 @@ jobs:
       - name: GPU-audio browser proof (WebGPU REQUIRED)
         env:
           PULP_REQUIRE_WEBGPU: "1"
-          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+          CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}
         run: |
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/gpu-audio/browser-test/node_modules
@@ -497,7 +503,7 @@ jobs:
       - name: The shipped page runs its GPU engine (WebGPU REQUIRED)
         env:
           PULP_REQUIRE_WEBGPU: "1"
-          CHROME_PATH: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+          CHROME_PATH: ${{ steps.chrome-macos.outputs.chrome-path }}
         run: |
           set -euo pipefail
           node examples/web-demos/gpu-audio/browser-test/page-gpu.mjs \
