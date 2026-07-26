@@ -29,27 +29,47 @@ constexpr bool note_event_offset_in_range(timebase::SamplePosition event,
     return true;
 }
 
-/// Which loop pass a transport range is playing, counted from the transport's
-/// monotonic origin. The monotonic beat advances without wrapping while the
-/// timeline tick returns to the loop start, so their difference grows by one
-/// loop length per wrap — that difference over the loop length IS the pass
-/// count, with no counter to drift or to reset at the wrong moment.
-///
-/// Without an enabled loop every position is played once, so the pass is zero:
-/// a linear playthrough is the first pass, not an undefined one.
+constexpr std::uint64_t positive_tick_distance(std::int64_t later,
+                                               std::int64_t earlier) noexcept {
+    return static_cast<std::uint64_t>(later) - static_cast<std::uint64_t>(earlier);
+}
+
+constexpr std::uint64_t note_modifier_loop_length(const LoopRegion& loop) noexcept {
+    return loop.enabled && loop.end > loop.start
+               ? positive_tick_distance(loop.end.value, loop.start.value)
+               : 0;
+}
+
+constexpr std::uint64_t note_modifier_loop_offset(timebase::TickPosition position,
+                                                  const LoopRegion& loop) noexcept {
+    const auto length = note_modifier_loop_length(loop);
+    if (length == 0 || position <= loop.start || position >= loop.end)
+        return 0;
+    return positive_tick_distance(position.value, loop.start.value);
+}
+
+/// Which loop pass a transport range is playing relative to the most recent
+/// playback epoch. Explicit seeks re-anchor the epoch; loop wraps do not.
+constexpr std::uint64_t
+note_modifier_pass_index(const TransportRange& range, const LoopRegion& loop,
+                         timebase::MonotonicBeat epoch,
+                         std::uint64_t epoch_loop_offset = 0) noexcept {
+    const auto length = note_modifier_loop_length(loop);
+    if (length == 0 || range.monotonic_start <= epoch)
+        return 0;
+    epoch_loop_offset = std::min(epoch_loop_offset, length - 1);
+    const auto elapsed = positive_tick_distance(
+        range.monotonic_start.position.value, epoch.position.value);
+    const auto complete = elapsed / length;
+    const auto remainder = elapsed % length;
+    return complete + (remainder >= length - epoch_loop_offset ? 1u : 0u);
+}
+
+/// Compatibility helper for callers whose monotonic origin is the loop start.
 constexpr std::uint64_t note_modifier_pass_index(const TransportRange& range,
                                                  const LoopRegion& loop) noexcept {
-    if (!loop.enabled)
-        return 0;
-    const auto length = loop.end.value - loop.start.value;
-    if (length <= 0)
-        return 0;
-    // A position before the loop, or a seek that rewound the monotonic clock
-    // past it, has not completed a pass.
-    if (range.monotonic_start.position.value <= loop.start.value)
-        return 0;
-    return static_cast<std::uint64_t>(range.monotonic_start.position.value - loop.start.value) /
-           static_cast<std::uint64_t>(length);
+    return note_modifier_pass_index(
+        range, loop, timebase::MonotonicBeat{{loop.start.value}});
 }
 
 } // namespace detail
@@ -123,6 +143,9 @@ class ArrangementNoteRenderer {
     bool state_overflow_ = false;
     bool has_block_index_ = false;
     std::uint64_t last_block_index_ = 0;
+    bool has_note_pass_epoch_ = false;
+    timebase::MonotonicBeat note_pass_epoch_{};
+    std::uint64_t note_pass_epoch_loop_offset_ = 0;
     std::uint32_t dropped_events_ = 0;
 };
 

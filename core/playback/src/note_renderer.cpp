@@ -31,6 +31,7 @@ bool ArrangementNoteRenderer::prepare(std::size_t maximum_events_per_block) {
     pending_flush_ = false;
     state_overflow_ = false;
     has_block_index_ = false;
+    has_note_pass_epoch_ = false;
     active_counts_.fill(0);
     return true;
 }
@@ -79,6 +80,9 @@ void ArrangementNoteRenderer::reset() noexcept {
     state_overflow_ = false;
     has_block_index_ = false;
     last_block_index_ = 0;
+    has_note_pass_epoch_ = false;
+    note_pass_epoch_ = {};
+    note_pass_epoch_loop_offset_ = 0;
     dropped_events_ = 0;
 }
 
@@ -212,6 +216,19 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         return result;
     }
 
+    const bool reanchor_note_pass =
+        !has_note_pass_epoch_ || view.adoption == ShellAdoptionResult::Adopted ||
+        block_sequence_reset || transport.reset_requested ||
+        transport.transport_started || transport.transport_changed;
+    if (reanchor_note_pass && transport.range_count != 0) {
+        const auto& first_range = transport.ranges[0];
+        note_pass_epoch_ = first_range.monotonic_start;
+        note_pass_epoch_loop_offset_ =
+            detail::note_modifier_loop_offset(first_range.timeline_tick_start,
+                                              transport.loop);
+        has_note_pass_epoch_ = true;
+    }
+
     const auto events = view.program->arrangement_note_events();
     const auto modifiers = view.program->note_modifiers();
     std::int64_t last_cursor = 0;
@@ -223,7 +240,9 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         // wrap always starts a new range. A note's on and its off therefore
         // resolve against the same pass, so the gate can never admit one
         // without the other and leave a note hanging.
-        const auto pass_index = detail::note_modifier_pass_index(range, transport.loop);
+        const auto pass_index = detail::note_modifier_pass_index(
+            range, transport.loop, note_pass_epoch_,
+            note_pass_epoch_loop_offset_);
 
         const auto search_sample =
             range.host_beat_mapping

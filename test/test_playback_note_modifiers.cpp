@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -160,6 +161,25 @@ TEST_CASE("The loop pass index is derived from the monotonic beat",
     REQUIRE(playback::detail::note_modifier_pass_index(range, empty) == 0);
     const LoopRegion later{true, {kLoopLength.value * 20}, TickPosition{kLoopLength.value * 21}};
     REQUIRE(playback::detail::note_modifier_pass_index(range, later) == 0);
+
+    // A seek starts a fresh pass epoch even though the transport's monotonic
+    // clock deliberately keeps its lifetime value.
+    const MonotonicBeat seek_epoch{{kLoopLength.value * 9}};
+    range.monotonic_start = seek_epoch;
+    REQUIRE(playback::detail::note_modifier_pass_index(range, loop, seek_epoch) == 0);
+    const auto half_loop = static_cast<std::uint64_t>(kLoopLength.value / 2);
+    REQUIRE(playback::detail::note_modifier_pass_index(
+                range, loop, seek_epoch, half_loop) == 0);
+    range.monotonic_start = seek_epoch + TickDuration{kLoopLength.value / 2};
+    REQUIRE(playback::detail::note_modifier_pass_index(
+                range, loop, seek_epoch, half_loop) == 1);
+
+    // Full-width valid tick regions use total unsigned distance arithmetic.
+    const LoopRegion full_width{
+        true, {std::numeric_limits<std::int64_t>::min()},
+        {std::numeric_limits<std::int64_t>::max()}};
+    range.monotonic_start = {{std::numeric_limits<std::int64_t>::max()}};
+    REQUIRE(playback::detail::note_modifier_pass_index(range, full_width) == 1);
 }
 
 TEST_CASE("A probabilistic note replays identically for one seed and differs for another",
@@ -224,6 +244,49 @@ TEST_CASE("A pass condition selects the passes a note plays on",
     const auto thirds = pitches_for_seed(3, {every_third}, kPasses);
     for (std::size_t pass = 0; pass < kPasses; ++pass)
         REQUIRE(count_pitch({thirds[pass]}, 60) == (pass % 3 == 0 ? 1u : 0u));
+}
+
+TEST_CASE("An explicit seek re-anchors conditional note passes",
+          "[playback][note-modifier][transport]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier first_only = chance(30, note_probability_certain);
+    first_only.condition = NoteConditionKind::First;
+    ProgramHarness programs;
+    programs.publish(modifier_project({first_only}, 0), map);
+
+    const auto loop_samples =
+        map->ticks_to_samples(TickPosition{kLoopLength.value}).value;
+    REQUIRE(loop_samples > 0);
+    REQUIRE(loop_samples <= std::numeric_limits<std::uint32_t>::max());
+    const auto block_frames = static_cast<std::uint32_t>(loop_samples);
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = block_frames;
+    config.initially_playing = true;
+    config.loop = {true, {0}, TickPosition{kLoopLength.value}};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+
+    for (int pass = 0; pass < 2; ++pass) {
+        TransportSnapshot snapshot;
+        REQUIRE(transport.begin_block(block_frames, snapshot) == TransportError::None);
+        REQUIRE(renderer.process(latch.begin_block(programs.store), snapshot).code ==
+                NoteRenderCode::Ok);
+    }
+
+    REQUIRE(transport.seek({0}) == TransportError::None);
+    TransportSnapshot after_seek;
+    REQUIRE(transport.begin_block(512, after_seek) == TransportError::None);
+    REQUIRE(after_seek.reset_requested);
+    REQUIRE(renderer.process(latch.begin_block(programs.store), after_seek).code ==
+            NoteRenderCode::Ok);
+    bool first_note_sounded = false;
+    for (const auto& event : renderer.events())
+        first_note_sounded |= event.is_note_on() && event.data()[1] == 60;
+    REQUIRE(first_note_sounded);
 }
 
 TEST_CASE("A ratchet subdivides a note into retriggers that fill its own span",
@@ -298,6 +361,37 @@ TEST_CASE("A ratchet that would collapse below one rendered sample is refused",
         executor.run_for(std::chrono::seconds(1), 64);
     REQUIRE(compiler.status().has_error);
     REQUIRE(compiler.status().last_error.code == CompileErrorCode::InvalidStructure);
+}
+
+TEST_CASE("Ratchet expansion respects the compiled event budget",
+          "[playback][note-modifier][capacity]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier ratchet = chance(30, note_probability_certain);
+    ratchet.ratchet_count = 4;
+    auto content = take(NoteContent::create(
+        {{{30}, {0}, {kTicksPerQuarter}, 0xffff, 60, 0}}, {ratchet}, 0));
+    auto clip = take(Clip::create({20}, {0}, kLoopLength, std::move(content)));
+    auto track = take(Track::create({10}, "notes", {std::move(clip)}));
+    auto sequence = take(Sequence::create({2}, "root", kLoopLength, {std::move(track)}));
+    auto project = std::make_shared<const Project>(take(
+        Project::create(ProjectInput{{1}, "project", 100, {2}, {}, {std::move(sequence)}})));
+
+    PlaybackProgramStore store;
+    DeferredCompileExecutor executor;
+    PlaybackProgramCompiler compiler{store, executor, std::chrono::microseconds(0)};
+    ProgramCompileRequest request;
+    request.project = std::move(project);
+    request.sequence_id = {2};
+    request.tempo_map = map;
+    request.document_revision = 1;
+    request.dirty = {.all = true};
+    request.maximum_note_events_per_track = 7;
+    REQUIRE(compiler.submit(std::move(request)));
+    while (compiler.status().busy)
+        executor.run_for(std::chrono::seconds(1), 64);
+    REQUIRE(compiler.status().has_error);
+    REQUIRE(compiler.status().last_error.code ==
+            CompileErrorCode::NoteProgramCapacityExceeded);
 }
 
 TEST_CASE("Modifier evaluation allocates nothing on the audio thread",

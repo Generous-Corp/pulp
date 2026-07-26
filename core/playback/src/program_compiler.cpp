@@ -248,6 +248,8 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                      live->audio_limits() != request_->audio_limits ||
                      live->automation_limits() != request_->automation_limits ||
                      live->generated_id_base() != request_->project->next_item_id() ||
+                     request_->maximum_note_events_per_track !=
+                         ProgramCompileRequest::default_maximum_note_events_per_track ||
                      live->tempo_map().sample_rate() != request_->tempo_map->sample_rate();
         sequence_flattener_ = std::make_unique<SequenceContentLowerer>(
             *request_->project, *request_->tempo_map, request_->max_expanded_note_events,
@@ -333,6 +335,9 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                         return fail({CompileErrorCode::AudioProgramInvalid, track.id(),
                                      request_->document_revision,
                                      AudioRendererErrorCode::CapacityExceeded});
+        if (request_->maximum_note_events_per_track == 0)
+            return fail({CompileErrorCode::InvalidRequest, request_->sequence_id,
+                         request_->document_revision});
                     total_audio_clips_ += count;
                 }
                 tracks_.push_back(*old);
@@ -479,6 +484,12 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             // condition depend on which loop pass is playing, so they stay in
             // the renderer and are carried as a side table instead.
             const std::int64_t repeats = modifier == nullptr ? 1 : modifier->ratchet_count;
+            const auto event_count = static_cast<std::size_t>(repeats) * 2u;
+            if (event_count > request_->maximum_note_events_per_track ||
+                current_note_events_.size() >
+                    request_->maximum_note_events_per_track - event_count)
+                return fail({CompileErrorCode::NoteProgramCapacityExceeded, note.id,
+                             request_->document_revision});
             if (modifier != nullptr) {
                 const auto key = timeline::note_modifier_draw_key(notes->modifier_seed(), note.id);
                 current_note_modifiers_.push_back({key, *modifier});
@@ -486,11 +497,13 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
             for (std::int64_t repeat = 0; repeat < repeats; ++repeat) {
                 // The last subdivision lands on the note's own end so a ratchet
                 // never drifts away from the authored duration.
-                const auto span_start = note.start.value + note.duration.value * repeat / repeats;
+                const auto span_start =
+                    note.start.value + ratchet_boundary(note.duration.value, repeat, repeats);
                 const auto span_end =
                     repeat + 1 == repeats
                         ? note_end.value
-                        : note.start.value + note.duration.value * (repeat + 1) / repeats;
+                        : note.start.value +
+                              ratchet_boundary(note.duration.value, repeat + 1, repeats);
                 const auto start_tick = clip.start() + timebase::TickDuration{span_start};
                 const auto end_tick = clip.start() + timebase::TickDuration{span_end};
                 const auto start_sample = request_->tempo_map->ticks_to_samples(start_tick);
