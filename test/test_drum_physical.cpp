@@ -34,6 +34,7 @@ using pulp::signal::KarplusStrong;
 using pulp::signal::PhaseDistortionOsc;
 using pulp::signal::PhaseDistortionShape;
 using pulp::signal::drum::CymbalVoice;
+using pulp::signal::drum::MembraneExciter;
 using pulp::signal::drum::MembraneVoice;
 using pulp::signal::drum::StringVoice;
 using pulp::signal::drum::VelocityResponse;
@@ -534,6 +535,71 @@ TEST_CASE("Strike position removes the modes with a node there",
     REQUIRE(centre.first > off_centre.first);     // and the first mode is stronger
 }
 
+TEST_CASE("Membrane strike position preserves total mode-gain energy",
+          "[signal][drum][membrane]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_spread(0.0);
+    voice.set_brightness(0.8);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    constexpr double expected = 1.0 / MembraneVoice::mode_count;
+    for (double position : {0.08, 0.21, 0.35, 0.5}) {
+        voice.set_position(position);
+        voice.note_on(1.0f);
+        REQUIRE(std::fabs(voice.mode_gain_energy() - expected) < 1e-7);
+        voice.reset();
+    }
+}
+
+TEST_CASE("The membrane can be struck by a single-sample pluck",
+          "[signal][drum][membrane]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_spread(0.0);
+    voice.set_exciter(MembraneExciter::pluck);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto first = hit(voice, 1.0f, 24000);
+    voice.reset();
+    const auto second = hit(voice, 1.0f, 24000);
+    REQUIRE(peak(first) > 1e-4);
+    REQUIRE(first == second);
+
+    voice.reset();
+    voice.set_exciter(MembraneExciter::noise_burst);
+    const auto burst = hit(voice, 1.0f, 24000);
+    REQUIRE_FALSE(first == burst);
+}
+
+TEST_CASE("The membrane's sub, air, and click layers reach emitted audio",
+          "[signal][drum][membrane]") {
+    auto layer = [](int selected) {
+        MembraneVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(100.0);
+        voice.set_spread(0.0);
+        voice.set_brightness(0.0);
+        voice.set_exciter_cutoff_hz(500.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        if (selected == 1) voice.set_sub_level(1.0);
+        if (selected == 2) voice.set_air_level(1.0);
+        if (selected == 3) voice.set_click_level(3.0);
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto body = layer(0);
+    const auto sub = layer(1);
+    const auto air = layer(2);
+    const auto click = layer(3);
+    REQUIRE(tone_amplitude(sub, 50.0) > tone_amplitude(body, 50.0) * 3.0);
+    REQUIRE(high_fraction(air, 4000.0) > high_fraction(body, 4000.0) * 2.0);
+
+    const std::vector<float> body_attack(body.begin(), body.begin() + 1000);
+    const std::vector<float> click_attack(click.begin(), click.begin() + 1000);
+    REQUIRE(peak(click_attack) > peak(body_attack) * 1.5);
+}
+
 // -- Cymbal ------------------------------------------------------------------
 
 TEST_CASE("The cymbal's shifter is what removes the pitch",
@@ -722,6 +788,10 @@ TEST_CASE("Every physical voice stays finite at extreme settings",
           "[signal][drum]") {
     MembraneVoice membrane;
     membrane.prepare(kFs);
+    membrane.set_exciter(MembraneExciter::pluck);
+    membrane.set_sub_level(0.5);
+    membrane.set_air_level(0.5);
+    membrane.set_click_level(0.5);
     membrane.set_tune_hz(2000.0);
     membrane.set_stretch(1.0);
     membrane.set_spread(1.0);
@@ -762,6 +832,10 @@ TEST_CASE("The physical voices allocate nothing on the audio thread",
           "[signal][drum][rt-safety]") {
     MembraneVoice membrane;
     membrane.prepare(kFs);
+    membrane.set_exciter(MembraneExciter::pluck);
+    membrane.set_sub_level(0.5);
+    membrane.set_air_level(0.5);
+    membrane.set_click_level(0.5);
     CymbalVoice cymbal;
     cymbal.prepare(kFs);
     ZapVoice zap;

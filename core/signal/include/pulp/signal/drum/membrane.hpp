@@ -14,6 +14,15 @@
 
 namespace pulp::signal::drum {
 
+/// What strikes the modal membrane.
+enum class MembraneExciter {
+    /// A short filtered-noise burst: stick or hand depending on its length.
+    noise_burst,
+    /// One filtered sample: a true impulse that rings the body without a
+    /// continuing noise texture.
+    pluck,
+};
+
 /// A struck membrane, modelled as its modes rather than as an oscillator.
 ///
 /// Everything the voice does follows from one idea: a drumhead has a set of
@@ -106,6 +115,23 @@ public:
     void set_exciter_cutoff_hz(double hz) {
         exciter_cutoff_hz_ = std::clamp(hz, 100.0, 18000.0);
     }
+    void set_exciter(MembraneExciter exciter) { exciter_ = exciter; }
+
+    /// Optional layers around the modal body. The sub follows the body's
+    /// decay at half the fundamental; air is a short high-passed noise wash;
+    /// click is a still-shorter filtered-noise strike.
+    void set_sub_level(double level) { sub_level_ = std::max(level, 0.0); }
+    void set_air_level(double level) { air_level_ = std::max(level, 0.0); }
+    void set_air_decay_ms(double ms) { air_decay_ms_ = std::clamp(ms, 1.0, 500.0); }
+    void set_click_level(double level) { click_level_ = std::max(level, 0.0); }
+    void set_click_decay_ms(double ms) {
+        click_decay_ms_ = std::clamp(ms, 0.1, 50.0);
+    }
+
+    /// Sum of squared mode gains after the constant-energy normalization.
+    /// Exposed for renderers and matchers that need to distinguish a changed
+    /// strike position from an unintended level change.
+    double mode_gain_energy() const { return mode_gain_energy_; }
 
     /// The lowpass gate that couples the tail's level to its brightness.
     LowpassGate& gate() { return gate_; }
@@ -117,7 +143,12 @@ protected:
         bank_.prepare(sample_rate, mode_count, 1);
         exciter_env_.set_sample_rate(sample_rate);
         gate_env_.set_sample_rate(sample_rate);
+        sub_env_.set_sample_rate(sample_rate);
+        air_env_.set_sample_rate(sample_rate);
+        click_env_.set_sample_rate(sample_rate);
         exciter_filter_.prepare(static_cast<float>(sample_rate));
+        air_filter_.prepare(static_cast<float>(sample_rate));
+        click_filter_.prepare(static_cast<float>(sample_rate));
         gate_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
         scratch_.assign(kBlock, 0.0f);
@@ -128,10 +159,21 @@ protected:
         bank_.reset();
         exciter_env_.reset();
         gate_env_.reset();
+        sub_env_.reset();
+        air_env_.reset();
+        click_env_.reset();
         exciter_filter_.reset();
+        air_filter_.reset();
+        click_filter_.reset();
         gate_.reset();
         output_.reset();
         noise_.reset();
+        air_noise_.set_seed(NoiseSource::default_seed ^ 0xA17F32D1u);
+        click_noise_.set_seed(NoiseSource::default_seed ^ 0xC11C74E5u);
+        air_noise_.reset();
+        click_noise_.reset();
+        pluck_pending_ = false;
+        sub_phase_ = 0.0;
         level_ = 0.0;
     }
 
@@ -143,6 +185,8 @@ protected:
         const double exciter_scale = response.brightness_scale(velocity);
 
         noise_.reset();
+        air_noise_.reset();
+        click_noise_.reset();
         build_modes(tension);
         bank_.set_modes(std::span<const ModalMode>(modes_.data(), mode_count));
 
@@ -150,9 +194,36 @@ protected:
         exciter_filter_.set_cutoff(static_cast<float>(
             std::min(exciter_cutoff_hz_ * exciter_scale, 0.49 * sample_rate())));
 
-        exciter_env_.set_attack_ms(0.0);
-        exciter_env_.set_decay_time_constant_ms(exciter_ms_);
-        exciter_env_.trigger();
+        pluck_pending_ = exciter_ == MembraneExciter::pluck;
+        if (exciter_ == MembraneExciter::noise_burst) {
+            exciter_env_.set_attack_ms(0.0);
+            exciter_env_.set_decay_time_constant_ms(exciter_ms_);
+            exciter_env_.trigger();
+        } else {
+            exciter_env_.reset();
+        }
+
+        sub_phase_ = 0.0;
+        sub_env_.reset();
+        sub_env_.set_attack_ms(0.0);
+        sub_env_.set_decay_t60_ms(decay_ms_);
+        if (sub_level_ > 0.0) sub_env_.trigger();
+
+        air_filter_.reset();
+        air_filter_.set_cutoff(static_cast<float>(
+            std::min(4000.0 * exciter_scale, 0.49 * sample_rate())));
+        air_env_.reset();
+        air_env_.set_attack_ms(0.0);
+        air_env_.set_decay_time_constant_ms(air_decay_ms_);
+        if (air_level_ > 0.0) air_env_.trigger();
+
+        click_filter_.reset();
+        click_filter_.set_cutoff(static_cast<float>(
+            std::min(8000.0 * exciter_scale, 0.49 * sample_rate())));
+        click_env_.reset();
+        click_env_.set_attack_ms(0.0);
+        click_env_.set_decay_time_constant_ms(click_decay_ms_);
+        if (click_level_ > 0.0) click_env_.trigger();
 
         // The gate's control is a fast one-shot: it opens on the strike and the
         // vactrol's own slow fall does the rest, which is the point of using a
@@ -164,7 +235,10 @@ protected:
     }
 
     bool on_is_active() const override {
-        return exciter_env_.is_active() || gate_env_.is_active() ||
+        return pluck_pending_ || exciter_env_.is_active() || gate_env_.is_active() ||
+               (sub_level_ > 0.0 && sub_env_.is_active()) ||
+               (air_level_ > 0.0 && air_env_.is_active()) ||
+               (click_level_ > 0.0 && click_env_.is_active()) ||
                level_ > kSilenceLevel || output_.has_tail();
     }
 
@@ -176,10 +250,14 @@ protected:
             // The bank renders a block at a time, so the exciter is built into
             // a scratch first rather than sample-interleaved.
             for (int i = 0; i < n; ++i) {
-                const double burst = exciter_env_.is_active()
-                                         ? static_cast<double>(noise_.white()) *
-                                               exciter_env_.process()
-                                         : 0.0;
+                double burst = 0.0;
+                if (pluck_pending_) {
+                    burst = 1.0;
+                    pluck_pending_ = false;
+                } else if (exciter_env_.is_active()) {
+                    burst = static_cast<double>(noise_.white()) *
+                            exciter_env_.process();
+                }
                 scratch_[static_cast<std::size_t>(i)] =
                     exciter_filter_.process_lowpass(static_cast<float>(burst));
             }
@@ -190,8 +268,25 @@ protected:
             for (int i = 0; i < n; ++i) {
                 const double gated = gate_.process(body_[static_cast<std::size_t>(i)],
                                                    gate_env_.process());
+                double layers = 0.0;
+                if (sub_level_ > 0.0 && sub_env_.is_active()) {
+                    sub_phase_ += 0.5 * tune_hz_ / sample_rate();
+                    if (sub_phase_ >= 1.0) sub_phase_ -= std::floor(sub_phase_);
+                    layers += std::sin(2.0 * 3.14159265358979323846 * sub_phase_) *
+                              sub_env_.process() * sub_level_;
+                }
+                if (air_level_ > 0.0 && air_env_.is_active()) {
+                    layers += static_cast<double>(air_filter_.process_highpass(
+                                  air_noise_.white())) *
+                              air_env_.process() * air_level_;
+                }
+                if (click_level_ > 0.0 && click_env_.is_active()) {
+                    layers += static_cast<double>(click_filter_.process_lowpass(
+                                  click_noise_.white())) *
+                              click_env_.process() * click_level_;
+                }
                 const double shaped =
-                    output_.process(static_cast<float>(gated)) * velocity_gain_;
+                    output_.process(static_cast<float>(gated + layers)) * velocity_gain_;
                 out[done + i] += static_cast<float>(shaped);
                 level_ = std::max(std::fabs(shaped), level_ * kLevelDecay);
             }
@@ -207,6 +302,7 @@ private:
     void build_modes(double tension) {
         // A deterministic detune per mode, drawn from the voice's own generator
         // so a hit stays reproducible.
+        double raw_gain_energy = 0.0;
         for (int m = 0; m < mode_count; ++m) {
             const double harmonic = static_cast<double>(m + 1);
             const double ratio = harmonic + structure_ * (membrane_ratios[m] - harmonic);
@@ -229,11 +325,25 @@ private:
             const double rolloff =
                 std::pow(0.6 + 0.4 * brightness_, static_cast<double>(m));
 
+            const double raw_gain = comb * rolloff;
+            raw_gain_energy += raw_gain * raw_gain;
             modes_[static_cast<std::size_t>(m)] = ModalMode{
                 static_cast<float>(std::min(f, 0.49 * sample_rate())),
                 static_cast<float>(0.001 * decay_ms_ * decay_scale),
-                static_cast<float>(comb * rolloff / static_cast<double>(mode_count)),
+                static_cast<float>(raw_gain),
             };
+        }
+
+        // Changing strike position selects modes; it must not also act as a
+        // hidden master level. Preserve the energy of six equal 1/N gains.
+        const double target_energy = 1.0 / static_cast<double>(mode_count);
+        const double scale =
+            raw_gain_energy > 0.0 ? std::sqrt(target_energy / raw_gain_energy) : 0.0;
+        mode_gain_energy_ = 0.0;
+        for (auto& mode : modes_) {
+            mode.gain = static_cast<float>(static_cast<double>(mode.gain) * scale);
+            mode_gain_energy_ +=
+                static_cast<double>(mode.gain) * static_cast<double>(mode.gain);
         }
     }
 
@@ -247,12 +357,25 @@ private:
     double spread_ = 0.1;
     double exciter_ms_ = 1.5;
     double exciter_cutoff_hz_ = 6000.0;
+    MembraneExciter exciter_ = MembraneExciter::noise_burst;
+    double sub_level_ = 0.0;
+    double air_level_ = 0.0;
+    double air_decay_ms_ = 20.0;
+    double click_level_ = 0.0;
+    double click_decay_ms_ = 2.0;
 
     NoiseSource noise_;
+    NoiseSource air_noise_;
+    NoiseSource click_noise_;
     ModalBank bank_;
     DecayEnvelope64 exciter_env_;
     DecayEnvelope64 gate_env_;
+    DecayEnvelope64 sub_env_;
+    DecayEnvelope64 air_env_;
+    DecayEnvelope64 click_env_;
     TptFilter exciter_filter_;
+    TptFilter air_filter_;
+    TptFilter click_filter_;
     LowpassGate gate_;
     OutputStage output_;
 
@@ -261,6 +384,9 @@ private:
     std::array<float, kBlock> body_{};
 
     double velocity_gain_ = 1.0;
+    double mode_gain_energy_ = 0.0;
+    double sub_phase_ = 0.0;
+    bool pluck_pending_ = false;
     double level_ = 0.0;
 };
 
