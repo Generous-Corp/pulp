@@ -135,6 +135,36 @@ Project make_project() {
 
 } // namespace
 
+TEST_CASE("Timeline track replacement preserves launcher references without a sequence-wide scan") {
+    auto first_track =
+        take_value(Track::create({6}, "first", {clip({4}, 0, 100), clip({5}, 100, 100)}));
+    auto second_track = take_value(Track::create({7}, "second", {clip({9}, 0, 100)}));
+    Scene scene{{20},
+                "launch",
+                {Slot{{21}, {4}, launch_immediate(), {}}, Slot{{22}, {9}, launch_immediate(), {}}}};
+    auto sequence = take_value(Sequence::create(SequenceInput{
+        .id = {3},
+        .name = "sequence",
+        .musical_duration = TickDuration{400},
+        .tracks = {first_track, second_track},
+        .scenes = {scene},
+    }));
+
+    auto timing_only =
+        take_value(Track::create({6}, "first", {clip({4}, 50, 100), clip({5}, 200, 100)}));
+    auto replaced = sequence.replace_track(std::move(timing_only));
+    REQUIRE(replaced);
+    REQUIRE(replaced->find_scene({20})->slots[0].clip_id == ItemId{4});
+    REQUIRE(replaced->find_scene({20})->slots[1].clip_id == ItemId{9});
+
+    auto removes_referenced_clip = take_value(Track::create({6}, "first", {clip({5}, 200, 100)}));
+    auto rejected = sequence.replace_track(std::move(removes_referenced_clip));
+    REQUIRE_FALSE(rejected);
+    REQUIRE(rejected.error().code == ModelErrorCode::MissingItem);
+    REQUIRE(rejected.error().item == ItemId{4});
+    REQUIRE(rejected.error().related_item == ItemId{21});
+}
+
 TEST_CASE("Timeline reactivation policy refreshes ancestor navigation caches") {
     const ItemLocation tombstone{ItemKind::Note, {5}, {2}, {3}, {5}, false};
     const ItemLocation requested{ItemKind::Note, {5}, {2}, {4}, {5}, false};

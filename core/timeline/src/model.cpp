@@ -1058,10 +1058,21 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
                  data_->absolute_duration->sample_count))
             return fail<Sequence>(ModelErrorCode::InvalidDuration, clip.id(), data_->id);
     }
+    // The scenes themselves are unchanged, so their structural invariants are
+    // already established. Only references to clips owned by the replaced
+    // track can become dangling. Checking those references directly preserves
+    // the invariant without rebuilding and sorting the whole sequence's clip
+    // ID set for edits that do not change clip membership.
+    const auto& previous_track = data_->tracks[found->second];
+    for (const auto& scene : data_->scenes) {
+        for (const auto& slot : scene.slots) {
+            if (slot.clip_id.valid() && previous_track.find_clip(slot.clip_id) &&
+                !track.find_clip(slot.clip_id))
+                return fail<Sequence>(ModelErrorCode::MissingItem, slot.clip_id, slot.id);
+        }
+    }
     auto tracks = data_->tracks;
     tracks[found->second] = std::move(track);
-    if (const auto invalid = validate_scenes(data_->scenes, tracks))
-        return fail<Sequence>(invalid->code, invalid->item, invalid->related_item);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
