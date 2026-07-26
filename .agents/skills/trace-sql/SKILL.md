@@ -259,3 +259,36 @@ GROUP BY name ORDER BY avg_all_us DESC;
 - `.agents/skills/trace-sql/pulp_motion_join.sql`
 - `core/runtime/include/pulp/runtime/trace.hpp` — the macro surface + category taxonomy
 - `docs/guides/tracing.md` — the guide, tiers, and worked use cases
+
+## Match `trace_processor` to the SDK's Perfetto pin
+
+`PulpTracing.cmake` pins the Perfetto SDK (`PULP_PERFETTO_VERSION`, v57.2 at time
+of writing). Query with the **same** version — `pulp trace fetch`, or
+`curl -sSL -o trace_processor https://get.perfetto.dev/trace_processor` which
+self-reports its version on `--version`.
+
+## Cost that lives BETWEEN slices
+
+`pulp_layout_vs_paint` and friends aggregate slice durations, so they cannot see
+a stall that happens inside a parent span but outside every child — the classic
+case being a blocking swapchain acquire. Two queries catch it:
+
+```sql
+-- 1. unaccounted time inside a frame: children summing to far less than the parent
+SELECT s.id, s.dur/1e6 AS frame_ms,
+       (SELECT SUM(c.dur)/1e6 FROM slice c WHERE c.parent_id = s.id) AS children_ms
+FROM slice s WHERE s.name = 'frame' AND s.dur >= 0
+ORDER BY (s.dur - IFNULL((SELECT SUM(c.dur) FROM slice c WHERE c.parent_id = s.id),0)) DESC
+LIMIT 20;
+
+-- 2. inter-frame gaps: idle or blocked BETWEEN frames
+WITH f AS (SELECT ts, dur, LEAD(ts) OVER (ORDER BY ts) AS nts
+           FROM slice WHERE name = 'frame' AND dur >= 0)
+SELECT COUNT(*) AS gaps, AVG((nts-(ts+dur))/1e6) AS mean_gap_ms,
+       MAX((nts-(ts+dur))/1e6) AS max_gap_ms
+FROM f WHERE nts IS NOT NULL;
+```
+
+Query 1 is what identified the Windows knob-drag regression: frames of 19-45 ms
+whose children summed to ~2 ms. Small gaps plus large unaccounted time means the
+thread is blocked *inside* the frame, not idle between frames.
