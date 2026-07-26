@@ -95,6 +95,7 @@
 #include <pulp/host/signal_graph.hpp>
 
 #include <pulp/signal/pitch_shifter.hpp>
+#include <pulp/signal/harmony_engine.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -330,13 +331,15 @@ inline CustomNodeType make_whammy_node(double window_ms = Shifter::kWindowMsDefa
 
 }  // namespace whammy
 
-// ── The diatonic harmony engine lands here (M16, in flight) ───────────────
-//
-// Its node goes in a `harmony` namespace beside `whammy` above, with its own
-// `kTypeId` and its own param ids restarting at 1 — the framework namespaces
-// param ids per node, so the numbers may repeat without colliding. It will
-// want the same realization test applied to whatever its analysis window
-// costs: if its pitch detector carries latency, that latency is frozen at
-// registration for the reason given at the top of this file.
+namespace harmony {
+inline constexpr const char* kTypeId="pitch.harmony_engine";
+enum : state::ParamID{kKey=1,kScale,kV1Interval,kV1Detune,kV1Level,kV2Enable,kV2Interval,kV2Detune,kV2Level,kGlideMs,kDryLevel,kHumanize,kFormantPreserve};
+using Engine=signal::HarmonyEngine;struct Instance{Engine engine;};
+inline CustomNodeType make_harmony_engine_node(){CustomNodeType t;t.type_id=kTypeId;t.version=1;t.num_input_ports=1;t.num_output_ports=1;t.default_name="Harmony Engine";t.lowerable=true;t.create=[]()->void*{return new Instance{};};t.destroy=[](void*p){delete static_cast<Instance*>(p);};t.prepare=[](void*p,double sr,int){static_cast<Instance*>(p)->engine.prepare(sr);};t.reset=[](void*p){static_cast<Instance*>(p)->engine.reset();};
+ t.baked_params={{kKey,0,11,0},{kScale,0,9,0},{kV1Interval,-14,14,float(Engine::kV1IntervalDefault)},{kV1Detune,float(-Engine::kDetuneMaxCents),float(Engine::kDetuneMaxCents),0},{kV1Level,float(Engine::kLevelMinDb),float(Engine::kLevelMaxDb),0},{kV2Enable,0,1,0},{kV2Interval,-14,14,float(Engine::kV2IntervalDefault)},{kV2Detune,float(-Engine::kDetuneMaxCents),float(Engine::kDetuneMaxCents),0},{kV2Level,float(Engine::kLevelMinDb),float(Engine::kLevelMaxDb),0},{kGlideMs,0,float(Engine::kGlideMsMax),float(Engine::kGlideMsDefault)},{kDryLevel,float(Engine::kLevelMinDb),float(Engine::kLevelMaxDb),0},{kHumanize,0,float(Engine::kHumanizeMaxCents),float(Engine::kHumanizeDefault)},{kFormantPreserve,0,1,0}};
+ t.process_instance_baked_param=[](void*p,audio::BufferView<float>&out,const audio::BufferView<const float>&in,int n,const BakedParamView&v){auto&e=static_cast<Instance*>(p)->engine;for(int i=0;i<n;++i){auto o=std::int32_t(i);e.set_key(int(std::lround(v.value_at(kKey,o))));e.set_scale(static_cast<signal::ScaleType>(std::clamp(int(std::lround(v.value_at(kScale,o))),0,9)));e.set_voice_interval(0,int(std::lround(v.value_at(kV1Interval,o))));e.set_voice_detune_cents(0,v.value_at(kV1Detune,o));e.set_voice_level_db(0,v.value_at(kV1Level,o));e.set_voice_enabled(1,v.value_at(kV2Enable,o)>=.5f);e.set_voice_interval(1,int(std::lround(v.value_at(kV2Interval,o))));e.set_voice_detune_cents(1,v.value_at(kV2Detune,o));e.set_voice_level_db(1,v.value_at(kV2Level,o));e.set_glide_ms(v.value_at(kGlideMs,o));e.set_dry_level_db(v.value_at(kDryLevel,o));e.set_humanize_cents(v.value_at(kHumanize,o));e.set_formant_preserve(v.value_at(kFormantPreserve,o)>=.5f);out.channel_ptr(0)[i]=e.process(in.channel_ptr(0)[i]);}};return t;}
+inline float worst_case_gain(){return float(Engine::kWorstCaseGain);}
+inline int latency_samples(double sample_rate){Engine e;e.prepare(sample_rate);return e.latency_samples();}
+}
 
 }  // namespace pulp::host::pitch

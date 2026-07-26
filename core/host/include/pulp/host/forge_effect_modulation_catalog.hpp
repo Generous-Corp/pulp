@@ -80,6 +80,8 @@
 
 #include <pulp/signal/chorus_family.hpp>
 #include <pulp/signal/frequency_shifter_ssb.hpp>
+#include <pulp/signal/flanger.hpp>
+#include <pulp/signal/leslie.hpp>
 #include <pulp/signal/phaser_stages.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/vibrato.hpp>
@@ -916,5 +918,32 @@ inline CustomNodeType make_univibe_node() {
 }  // namespace univibe
 
 }  // namespace vibrato
+
+namespace flanger {
+inline constexpr const char* kTypeId = "modulation.flanger";
+enum : state::ParamID { kRate=1,kDepth,kCenter,kOffset,kFeedback,kMix,kSpreadDeg,kMode,kPolarity,kEngine,kBarberpoleHz };
+struct Instance { signal::Flanger engine; };
+inline CustomNodeType make_flanger_node() {
+    using E=signal::Flanger; CustomNodeType t; t.type_id=kTypeId;t.version=1;t.num_input_ports=2;t.num_output_ports=2;t.default_name="Flanger";t.lowerable=true;
+    t.create=[]()->void*{return new Instance{};};t.destroy=[](void*p){delete static_cast<Instance*>(p);};
+    t.prepare=[](void*p,double sr,int){static_cast<Instance*>(p)->engine.prepare(sr);};t.reset=[](void*p){static_cast<Instance*>(p)->engine.reset();};
+    t.baked_params={{kRate,float(E::kRateMinHz),float(E::kRateMaxHz),.5f},{kDepth,float(E::kDepthMinMs),float(E::kDepthMaxMs),1.5f},{kCenter,float(E::kCenterMinMs),float(E::kCenterMaxMs),3.f},{kOffset,float(E::kOffsetMinMs),float(E::kOffsetMaxMs),4.f},{kFeedback,float(-E::kFbClamp),float(E::kFbClamp),.6f},{kMix,0,1,.5f},{kSpreadDeg,0,180,90},{kMode,0,2,0},{kPolarity,0,1,0},{kEngine,0,1,0},{kBarberpoleHz,float(-E::kBarberpoleShiftMaxHz),float(E::kBarberpoleShiftMaxHz),3.f}};
+    t.process_instance_baked_param=[](void*p,audio::BufferView<float>&out,const audio::BufferView<const float>&in,int n,const BakedParamView&v){auto&e=static_cast<Instance*>(p)->engine;for(int i=0;i<n;++i){auto o=std::int32_t(i);e.set_rate_hz(v.value_at(kRate,o));e.set_depth_ms(v.value_at(kDepth,o));e.set_center_delay_ms(v.value_at(kCenter,o));e.set_offset_ms(v.value_at(kOffset,o));e.set_feedback(v.value_at(kFeedback,o));e.set_mix(v.value_at(kMix,o));e.set_stereo_spread(v.value_at(kSpreadDeg,o)/360.f);e.set_mode(static_cast<signal::FlangerMode>(std::clamp(int(std::lround(v.value_at(kMode,o))),0,2)));e.set_polarity(v.value_at(kPolarity,o)>=.5f?signal::FlangerPolarity::negative:signal::FlangerPolarity::positive);e.set_delay_engine(v.value_at(kEngine,o)>=.5f?signal::FlangerDelayEngine::bbd:signal::FlangerDelayEngine::clean);e.set_barberpole_shift_hz(v.value_at(kBarberpoleHz,o));float l=in.channel_ptr(0)[i],r=in.channel_ptr(1)[i];e.process_stereo(&l,&r,out.channel_ptr(0)+i,out.channel_ptr(1)+i,1);}};return t;
+}
+inline float worst_case_gain(){return float(signal::Flanger::worst_case_gain());}
+}
+
+namespace leslie {
+inline constexpr const char* kTypeId="modulation.leslie";
+inline constexpr const char* kScannerTypeId="modulation.scanner_vibrato";
+enum : state::ParamID { kSpeed=1,kHornFast,kHornSlow,kDrumFast,kDrumSlow,kHornAccel,kDrumAccel,kCrossover,kHornRadius,kDrumRadius,kAmDepth,kDirDepth,kDirCorner,kDrumDirDepth,kDBias,kMicAngle,kMicDistance,kReflectionDb,kReflections,kReflDelay,kReflSpacing,kReflCorner,kDrift,kWetMix };
+struct Instance{signal::LeslieRotary engine;};
+inline CustomNodeType make_leslie_node(){using E=signal::LeslieRotary;CustomNodeType t;t.type_id=kTypeId;t.version=1;t.num_input_ports=2;t.num_output_ports=2;t.default_name="Leslie";t.lowerable=true;t.create=[]()->void*{return new Instance{};};t.destroy=[](void*p){delete static_cast<Instance*>(p);};t.prepare=[](void*p,double sr,int){static_cast<Instance*>(p)->engine.prepare(sr);};t.reset=[](void*p){static_cast<Instance*>(p)->engine.reset();};
+    t.baked_params={{kSpeed,0,2,2},{kHornFast,5.5,7.5,6.7},{kHornSlow,.6,1,.8},{kDrumFast,4.5,6.5,5.7},{kDrumSlow,.5,.9,.6},{kHornAccel,.3,3,1},{kDrumAccel,1,8,3},{kCrossover,700,900,800},{kHornRadius,.1,.25,.18},{kDrumRadius,.08,.18,.12},{kAmDepth,0,.9,.5},{kDirDepth,0,12,6},{kDirCorner,1000,4000,2000},{kDrumDirDepth,0,6,2},{kDBias,.2,1,.5},{kMicAngle,0,90,45},{kMicDistance,.3,3,1},{kReflectionDb,-60,-6,-12},{kReflections,1,4,2},{kReflDelay,2.5,6,3.5},{kReflSpacing,1,3,1.5},{kReflCorner,1000,8000,3000},{kDrift,0,10,3},{kWetMix,0,1,1}};
+    t.process_instance_baked_param=[](void*p,audio::BufferView<float>&out,const audio::BufferView<const float>&in,int n,const BakedParamView&v){auto&e=static_cast<Instance*>(p)->engine;for(int i=0;i<n;++i){auto o=std::int32_t(i);e.set_speed(static_cast<signal::LeslieSpeed>(std::clamp(int(std::lround(v.value_at(kSpeed,o))),0,2)));e.set_horn_fast_hz(v.value_at(kHornFast,o));e.set_horn_slow_hz(v.value_at(kHornSlow,o));e.set_drum_fast_hz(v.value_at(kDrumFast,o));e.set_drum_slow_hz(v.value_at(kDrumSlow,o));e.set_horn_accel_s(v.value_at(kHornAccel,o));e.set_drum_accel_s(v.value_at(kDrumAccel,o));e.set_crossover_hz(v.value_at(kCrossover,o));e.set_horn_radius_m(v.value_at(kHornRadius,o));e.set_drum_radius_m(v.value_at(kDrumRadius,o));e.set_am_depth(v.value_at(kAmDepth,o));e.set_dir_depth_db(v.value_at(kDirDepth,o));e.set_dir_corner_hz(v.value_at(kDirCorner,o));e.set_drum_dir_depth_db(v.value_at(kDrumDirDepth,o));e.set_d_bias_ms(v.value_at(kDBias,o));e.set_mic_angle_deg(v.value_at(kMicAngle,o));e.set_mic_distance_m(v.value_at(kMicDistance,o));e.set_reflection_db(v.value_at(kReflectionDb,o));e.set_num_reflections(int(std::lround(v.value_at(kReflections,o))));e.set_refl_delay_ms(v.value_at(kReflDelay,o));e.set_refl_spacing_ms(v.value_at(kReflSpacing,o));e.set_refl_corner_hz(v.value_at(kReflCorner,o));e.set_drift_cents(v.value_at(kDrift,o));e.set_mix(v.value_at(kWetMix,o));float l,r;e.process(in.channel_ptr(0)[i],in.channel_ptr(1)[i],l,r);out.channel_ptr(0)[i]=l;out.channel_ptr(1)[i]=r;}};return t;}
+enum : state::ParamID{kScannerMode=1,kScanHz,kLineMs,kV1,kV2,kV3,kChorusMix};struct ScannerInstance{signal::ScannerVibrato engine;};
+inline CustomNodeType make_scanner_vibrato_node(){using E=signal::ScannerVibrato;CustomNodeType t;t.type_id=kScannerTypeId;t.version=1;t.num_input_ports=1;t.num_output_ports=1;t.default_name="Scanner Vibrato";t.lowerable=true;t.create=[]()->void*{return new ScannerInstance{};};t.destroy=[](void*p){delete static_cast<ScannerInstance*>(p);};t.prepare=[](void*p,double sr,int){static_cast<ScannerInstance*>(p)->engine.prepare(sr);};t.reset=[](void*p){static_cast<ScannerInstance*>(p)->engine.reset();};t.baked_params={{kScannerMode,0,6,0},{kScanHz,6,7.5,6.9},{kLineMs,.6,1.4,1},{kV1,.1,.5,.33},{kV2,.4,.8,.66},{kV3,.7,1,1},{kChorusMix,0,1,.5}};t.process_instance_baked_param=[](void*p,audio::BufferView<float>&out,const audio::BufferView<const float>&in,int n,const BakedParamView&v){auto&e=static_cast<ScannerInstance*>(p)->engine;for(int i=0;i<n;++i){auto o=std::int32_t(i);e.set_mode(static_cast<signal::ScannerMode>(std::clamp(int(std::lround(v.value_at(kScannerMode,o))),0,6)));e.set_scan_hz(v.value_at(kScanHz,o));e.set_line_ms(v.value_at(kLineMs,o));e.set_v1_frac(v.value_at(kV1,o));e.set_v2_frac(v.value_at(kV2,o));e.set_v3_frac(v.value_at(kV3,o));e.set_chorus_mix(v.value_at(kChorusMix,o));out.channel_ptr(0)[i]=e.process(in.channel_ptr(0)[i]);}};return t;}
+inline float leslie_worst_case_gain(){return float(signal::LeslieRotary::kWorstCaseGain);}inline float scanner_worst_case_gain(){return float(signal::ScannerVibrato::kWorstCaseGain);}
+}
 
 }  // namespace pulp::host::modulation

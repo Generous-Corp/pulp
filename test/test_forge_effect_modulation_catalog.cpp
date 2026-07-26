@@ -1365,3 +1365,17 @@ TEST_CASE("Forge modulation: every node in the family has a distinct type id",
     // reverb id cannot collide with these either.
     for (const auto& id : ids) REQUIRE(id.rfind("modulation.", 0) == 0);
 }
+
+TEST_CASE("Forge modulation: flanger, Leslie and scanner factories expose canonical contracts",
+          "[host][baked][forge][forge-modulation][catalog]") {
+    auto fl=mod::flanger::make_flanger_node();auto le=mod::leslie::make_leslie_node();auto sc=mod::leslie::make_scanner_vibrato_node();
+    REQUIRE(fl.type_id==mod::flanger::kTypeId);REQUIRE(fl.baked_params.size()==11);REQUIRE(fl.num_input_ports==2);REQUIRE(fl.num_output_ports==2);
+    REQUIRE(le.type_id==mod::leslie::kTypeId);REQUIRE(le.baked_params.size()==24);REQUIRE(le.num_input_ports==2);REQUIRE(le.num_output_ports==2);
+    REQUIRE(sc.type_id==mod::leslie::kScannerTypeId);REQUIRE(sc.baked_params.size()==7);REQUIRE(sc.num_input_ports==1);REQUIRE(sc.num_output_ports==1);
+    REQUIRE(mod::flanger::worst_case_gain()==float(pulp::signal::Flanger::worst_case_gain()));
+    REQUIRE(mod::leslie::leslie_worst_case_gain()==float(pulp::signal::LeslieRotary::kWorstCaseGain));
+    REQUIRE(mod::leslie::scanner_worst_case_gain()==float(pulp::signal::ScannerVibrato::kWorstCaseGain));
+    Fixture flx(std::move(fl),kSr,kFrames);auto block=tone();auto out=flx.render({block,block});for(auto&ch:out)for(float x:ch)REQUIRE(std::isfinite(x));
+    Fixture lex(std::move(le),kSr,kFrames);out=lex.render({block,block});for(auto&ch:out)for(float x:ch)REQUIRE(std::isfinite(x));
+    pulp::test::BakedNodeFixture<1> scx(std::move(sc),kSr,kFrames);auto mono=scx.render({block});for(float x:mono[0])REQUIRE(std::isfinite(x));
+}
