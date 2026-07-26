@@ -15,6 +15,7 @@
 #include <pulp/signal/units.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -445,6 +446,64 @@ TEST_CASE("7 the fixed iteration count converges across the grid",
     REQUIRE(worst < Fuzz::kResidualTolerance);
 }
 
+TEST_CASE("7 the fixed-cost solve holds its tolerance across source impedance and transients",
+          "[fuzz][solver]") {
+    // The loop-gain ceiling is a small-signal statement, not a convergence
+    // proof for a nonlinear solve away from the operating point. Exercise the
+    // full device/fuzz/starve grid at source impedances spanning the complete
+    // accepted range, including the binding 0.1 kohm endpoint, and use a
+    // full-scale square so every configuration has to recover from the largest
+    // legitimate sample-to-sample step. A sine at the nominal impedance does
+    // not cover either of those conditioning axes.
+    constexpr int kPointsPerControlAxis = 9;
+    constexpr double kSourceKohm[] = {0.1, 1.0, 10.0, 68.0, 220.0, 1000.0};
+    constexpr int kSamplesPerPolarity = 8;
+    constexpr int kPeriods = 4;
+
+    double worst = 0.0;
+    FuzzDevice worst_device = FuzzDevice::germanium;
+    double worst_fuzz = 0.0;
+    double worst_starve = 0.0;
+    double worst_source = 0.0;
+
+    for (auto device : {FuzzDevice::germanium, FuzzDevice::silicon}) {
+        for (int fi = 0; fi < kPointsPerControlAxis; ++fi) {
+            for (int si = 0; si < kPointsPerControlAxis; ++si) {
+                const double fuzz = static_cast<double>(fi) / (kPointsPerControlAxis - 1);
+                const double starve = static_cast<double>(si) / (kPointsPerControlAxis - 1);
+                for (double source_kohm : kSourceKohm) {
+                    auto f = make_fuzz(device, fuzz, starve, source_kohm);
+                    // The solver itself is independent of the reconstruction
+                    // filter. Bypassing it makes the square's discontinuity
+                    // arrive intact and avoids disguising a bad solve with FIR
+                    // smoothing.
+                    f.set_oversampling_enabled(false);
+                    f.reset();
+                    for (int i = 0; i < 2 * kSamplesPerPolarity * kPeriods; ++i) {
+                        const double x = (i / kSamplesPerPolarity) % 2 == 0 ? 1.0 : -1.0;
+                        f.process(x);
+                    }
+
+                    if (f.worst_residual() > worst) {
+                        worst = f.worst_residual();
+                        worst_device = device;
+                        worst_fuzz = fuzz;
+                        worst_starve = starve;
+                        worst_source = source_kohm;
+                    }
+                }
+            }
+        }
+    }
+
+    INFO("worst residual=" << worst
+                            << " device="
+                            << (worst_device == FuzzDevice::germanium ? "germanium" : "silicon")
+                            << " fuzz=" << worst_fuzz << " starve=" << worst_starve
+                            << " source_kohm=" << worst_source);
+    REQUIRE(worst < Fuzz::kResidualTolerance);
+}
+
 TEST_CASE("7 both devices hold the tolerance over a long full-scale render",
           "[fuzz][solver]") {
     // The grid above covers breadth; this covers duration, so a slow drift in
@@ -456,6 +515,37 @@ TEST_CASE("7 both devices hold the tolerance over a long full-scale render",
         for (int i = 0; i < 48000; ++i) f.process(std::sin(w * i));
         REQUIRE(f.worst_residual() < Fuzz::kResidualTolerance);
     }
+}
+
+TEST_CASE("a non-finite sample resets recursive state and finite audio recovers",
+          "[fuzz][nan-recovery]") {
+    auto f = make_fuzz(FuzzDevice::silicon, 1.0, 0.75, 0.1);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double w = 2.0 * M_PI * 8000.0 / kSr;
+
+    // A non-finite sample must never enter the coupled collector state or the
+    // oversampling filters. Alternating it with finite 8 kHz input was the
+    // shortest way to demonstrate the old permanent latch.
+    for (int i = 0; i < 512; ++i) {
+        const double input = (i % 2 == 0) ? nan : std::sin(w * i);
+        const double output = f.process(input);
+        REQUIRE(std::isfinite(output));
+        if (!std::isfinite(input)) REQUIRE(output == 0.0);
+    }
+
+    // Recovery means more than returning a finite sentinel for the bad sample:
+    // subsequent ordinary audio must traverse the rebuilt recursive state and
+    // become non-silent again.
+    REQUIRE(f.process(nan) == 0.0);
+    auto fresh = make_fuzz(FuzzDevice::silicon, 1.0, 0.75, 0.1);
+    double peak = 0.0;
+    for (int i = 0; i < 4096; ++i) {
+        const double output = f.process(0.5 * std::sin(w * i));
+        REQUIRE(std::isfinite(output));
+        REQUIRE(output == fresh.process(0.5 * std::sin(w * i)));
+        peak = std::max(peak, std::abs(output));
+    }
+    REQUIRE(peak > 1e-4);
 }
 
 // ── 8. Aliasing suppression ───────────────────────────────────────────────
@@ -609,6 +699,8 @@ TEST_CASE("11 the fuzz pair allocates nothing on the audio thread",
             (void)dbl.process(0.5);
             dbl.process_block(block_d.data(), out_d.data(), static_cast<int>(block_d.size()));
         }
+        (void)single.process(std::numeric_limits<float>::quiet_NaN());
+        (void)dbl.process(std::numeric_limits<double>::quiet_NaN());
         single.reset();
         dbl.reset();
     });
