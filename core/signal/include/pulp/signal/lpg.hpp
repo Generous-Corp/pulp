@@ -163,6 +163,7 @@ public:
         gate_ = SampleType{0};
         pulse_level_ = SampleType{0};
         pulse_remaining_ = 0;
+        cutoff_hz_ = static_cast<SampleType>(fc_min_);
         filter_.reset();
     }
 
@@ -183,7 +184,8 @@ public:
         // holds unconditionally, which is the no-boost contract the LPG's
         // consumers (and its own "can only attenuate" gain law) rely on.
         const auto cutoff = static_cast<SampleType>(fc_min_ * std::exp(log_range_ * filter_control));
-        filter_.set_cutoff(std::min(cutoff, SampleType{0.25} * sample_rate_));
+        cutoff_hz_ = std::min(cutoff, SampleType{0.25} * sample_rate_);
+        filter_.set_cutoff(cutoff_hz_);
 
         const SampleType filtered = filter_.process_lowpass(input);
         const SampleType gain =
@@ -194,6 +196,11 @@ public:
     /// Conditioned cell state, 0..1 — the value both the amplitude and the
     /// cutoff are derived from. Useful as a modulation source in its own right.
     SampleType control() const { return control_; }
+
+    /// Effective cutoff commanded on the most recent `process()` call. This is
+    /// read-only telemetry for proving the brightness half of the coupled
+    /// vactrol response; it does not participate in processing.
+    SampleType cutoff_hz() const { return cutoff_hz_; }
 
 private:
     void update_coefficients_() {
@@ -232,6 +239,7 @@ private:
     TptFilterT<SampleType> filter_{};
     SampleType sample_rate_ = SampleType{48000};
     SampleType control_ = SampleType{0};
+    SampleType cutoff_hz_ = static_cast<SampleType>(kDefaultFcMinHz);
     SampleType gate_ = SampleType{0};
     SampleType pulse_level_ = SampleType{0};
     SampleType rise_coeff_ = SampleType{0};

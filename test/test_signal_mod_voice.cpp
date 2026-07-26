@@ -17,6 +17,8 @@
 #include <cmath>
 #include <cstring>
 #include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -161,43 +163,120 @@ TEST_CASE("Lpg re-strike accumulates: a roll crescendos", "[signal][mod][lpg]") 
     constexpr int kSpacing = 1440; // 30 ms
     std::vector<float> peak_control;
     std::vector<float> peak_output;
+    std::vector<float> peak_cutoff;
     const auto tone = sine(3 * kSpacing, 1000.0f);
 
     float control_peak = 0.0f;
     float output_peak = 0.0f;
+    float cutoff_peak = 0.0f;
     for (int i = 0; i < 3 * kSpacing; ++i) {
         if (i % kSpacing == 0) {
             if (i > 0) {
                 peak_control.push_back(control_peak);
                 peak_output.push_back(output_peak);
+                peak_cutoff.push_back(cutoff_peak);
             }
             control_peak = 0.0f;
             output_peak = 0.0f;
+            cutoff_peak = 0.0f;
             lpg.strike(1.0f); // identical strikes: any growth is the cell's
         }
         const float out = lpg.process(tone[static_cast<std::size_t>(i)]);
         control_peak = std::max(control_peak, lpg.control());
         output_peak = std::max(output_peak, std::abs(out));
+        cutoff_peak = std::max(cutoff_peak, lpg.cutoff_hz());
     }
     peak_control.push_back(control_peak);
     peak_output.push_back(output_peak);
+    peak_cutoff.push_back(cutoff_peak);
 
     REQUIRE(peak_control.size() == 3);
     REQUIRE(peak_control[1] > peak_control[0]);
     REQUIRE(peak_control[2] > peak_control[1]);
     REQUIRE(peak_output[1] > peak_output[0]);
     REQUIRE(peak_output[2] > peak_output[1]);
+    REQUIRE(peak_cutoff[1] > peak_cutoff[0]);
+    REQUIRE(peak_cutoff[2] > peak_cutoff[1]);
 
     // A cold strike after a full recovery lands back where the first one did:
     // the accumulation is the cell's state, not a drifting counter.
     for (int i = 0; i < 48000; ++i) (void)lpg.process(0.0f);
     lpg.strike(1.0f);
     float cold_peak = 0.0f;
+    float cold_cutoff = 0.0f;
     for (int i = 0; i < kSpacing; ++i) {
         (void)lpg.process(0.0f);
         cold_peak = std::max(cold_peak, lpg.control());
+        cold_cutoff = std::max(cold_cutoff, lpg.cutoff_hz());
     }
     REQUIRE_THAT(cold_peak, WithinRel(peak_control[0], 0.01f));
+    REQUIRE_THAT(cold_cutoff, WithinRel(peak_cutoff[0], 0.01f));
+}
+
+TEST_CASE("voice aliases start fresh and track their double forms",
+          "[signal][mod][parity][zero-init]") {
+    STATIC_REQUIRE(std::is_same_v<Vca64, VcaT<double>>);
+    STATIC_REQUIRE(std::is_same_v<Lpg64, LpgT<double>>);
+    STATIC_REQUIRE(std::is_same_v<ModMatrix64, ModMatrixT<32, double>>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Vca64&>().process(0.0, 0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<Lpg64&>().process(0.0)), double>);
+    STATIC_REQUIRE(std::is_same_v<
+                   decltype(std::declval<ModMatrix64::Slot>().depth), double>);
+    Vca vca; Vca64 vca64;
+    vca.prepare(kSampleRate); vca64.prepare(static_cast<double>(kSampleRate));
+    REQUIRE_THAT(static_cast<double>(vca.process(0.25f, 0.75f)),
+                 WithinAbs(vca64.process(0.25, 0.75), 1.0e-6));
+
+    Lpg lpg; Lpg64 lpg64;
+    lpg.prepare(kSampleRate); lpg64.prepare(static_cast<double>(kSampleRate));
+    lpg.set_gate(0.7f); lpg64.set_gate(0.7);
+    for (int i = 0; i < 64; ++i)
+        REQUIRE_THAT(static_cast<double>(lpg.process(0.25f)),
+                     WithinAbs(lpg64.process(0.25), 1.0e-5));
+    REQUIRE_THAT(static_cast<double>(lpg.cutoff_hz()),
+                 WithinRel(lpg64.cutoff_hz(), 1.0e-5));
+
+    ModMatrix matrix; ModMatrix64 matrix64;
+    const std::array<float, 1> sources{0.5f};
+    const std::array<double, 1> sources64{0.5};
+    std::array<float, 1> dests{0.0f};
+    std::array<double, 1> dests64{0.0};
+    matrix.set_slot(0, 0, 0, 0.75f);
+    matrix64.set_slot(0, 0, 0, 0.75);
+    matrix.evaluate(std::span<const float>(sources), std::span<float>(dests));
+    matrix64.evaluate(std::span<const double>(sources64), std::span<double>(dests64));
+    REQUIRE_THAT(static_cast<double>(dests[0]), WithinAbs(dests64[0], 1.0e-6));
+}
+
+TEST_CASE("voice raw value-initialized state replays after reset",
+          "[signal][mod][zero-init]") {
+    Vca vca; Vca64 vca64;
+    const auto vca_first = vca.process(0.5f, 0.75f);
+    const auto vca64_first = vca64.process(0.5, 0.75);
+    vca.reset(); vca64.reset();
+    REQUIRE(vca.process(0.5f, 0.75f) == vca_first);
+    REQUIRE(vca64.process(0.5, 0.75) == vca64_first);
+
+    Lpg lpg; Lpg64 lpg64;
+    lpg.strike(0.8f); lpg64.strike(0.8);
+    const auto lpg_first = lpg.process(0.5f);
+    const auto lpg64_first = lpg64.process(0.5);
+    lpg.reset(); lpg64.reset();
+    lpg.strike(0.8f); lpg64.strike(0.8);
+    REQUIRE(lpg.process(0.5f) == lpg_first);
+    REQUIRE(lpg64.process(0.5) == lpg64_first);
+
+    ModMatrix matrix; ModMatrix64 matrix64;
+    const std::array<float, 1> source{0.5f};
+    const std::array<double, 1> source64{0.5};
+    std::array<float, 1> dest{0.25f};
+    std::array<double, 1> dest64{0.25};
+    matrix.evaluate(std::span<const float>(source), std::span<float>(dest));
+    matrix64.evaluate(std::span<const double>(source64), std::span<double>(dest64));
+    REQUIRE(dest[0] == 0.25f);
+    REQUIRE(dest64[0] == 0.25);
 }
 
 TEST_CASE("Lpg colour 0 is a pure VCA with the filter wide open",

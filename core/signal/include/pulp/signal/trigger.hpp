@@ -219,6 +219,9 @@ private:
 };
 
 using ClockDivider = ClockDividerT;
+/// Precision-independent event state; the 64 spelling keeps generic toolkit
+/// code on the same Foo/Foo64 convention without introducing a dummy scalar.
+using ClockDivider64 = ClockDividerT;
 
 /// Emit N evenly spaced triggers per measured input period.
 ///
@@ -293,6 +296,8 @@ private:
 };
 
 using ClockMult = ClockMultT;
+/// Precision-independent event state; identical to `ClockMult`.
+using ClockMult64 = ClockMultT;
 
 /// One trigger in, a burst of N triggers out, with a spacing curve and a level
 /// ramp.
@@ -490,5 +495,7 @@ private:
 };
 
 using TrigDelay = TrigDelayT;
+/// Precision-independent event state; identical to `TrigDelay`.
+using TrigDelay64 = TrigDelayT;
 
 } // namespace pulp::signal
