@@ -179,6 +179,7 @@ bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
         lhs.markers().size() != rhs.markers().size() ||
         lhs.regions().size() != rhs.regions().size() ||
         lhs.chord_scale_lane() != rhs.chord_scale_lane() ||
+        lhs.groove() != rhs.groove() ||
         !std::equal(lhs.markers().begin(), lhs.markers().end(), rhs.markers().begin(),
                     equal_marker) ||
         !std::equal(lhs.regions().begin(), lhs.regions().end(), rhs.regions().begin(),
@@ -226,6 +227,9 @@ std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
     size = saturated_add(
         size, saturated_multiply(sequence.chord_scale_lane().events().size(),
                                  sizeof(ChordScaleEvent)));
+    size = saturated_add(size, sequence.groove().name().size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.groove().steps().size(), sizeof(GrooveStep)));
     for (const auto& track : sequence.tracks()) {
         size = saturated_add(size, sizeof(Track));
         size = saturated_add(size, track.name().size());

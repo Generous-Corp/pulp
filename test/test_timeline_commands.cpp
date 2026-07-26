@@ -275,3 +275,33 @@ TEST_CASE("Asset commands include audio loop metadata in equality and retained s
     asset.loop_info.reset();
     REQUIRE_FALSE(equivalent(with_loop, Command{CreateAsset{asset}}));
 }
+
+TEST_CASE("Sequence commands include groove state in equality and retained size") {
+    auto first_groove = GrooveTemplate::create(
+        {.name = "first", .step = TickDuration{120}, .steps = {{TickDuration{10}, 1100}}});
+    auto second_groove = GrooveTemplate::create(
+        {.name = "second", .step = TickDuration{120}, .steps = {{TickDuration{-10}, 900}}});
+    REQUIRE(first_groove);
+    REQUIRE(second_groove);
+
+    auto first = Sequence::create(SequenceInput{.id = {50},
+                                                .name = "sequence",
+                                                .musical_duration = TickDuration{480},
+                                                .groove = std::move(first_groove).value()});
+    auto second = Sequence::create(SequenceInput{.id = {50},
+                                                 .name = "sequence",
+                                                 .musical_duration = TickDuration{480},
+                                                 .groove = std::move(second_groove).value()});
+    auto plain = Sequence::create(SequenceInput{
+        .id = {50}, .name = "sequence", .musical_duration = TickDuration{480}});
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(plain);
+
+    const Command first_insert = InsertSequence{first.value()};
+    REQUIRE_FALSE(equivalent(first_insert, Command{InsertSequence{second.value()}}));
+    const auto dynamic_groove_size =
+        first->groove().name().size() + first->groove().steps().size() * sizeof(GrooveStep);
+    REQUIRE(retained_size(first_insert) >=
+            retained_size(Command{InsertSequence{plain.value()}}) + dynamic_groove_size);
+}
