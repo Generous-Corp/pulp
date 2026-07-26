@@ -236,7 +236,13 @@ if(UNIX)
     set_tests_properties(ensure-signing-ready PROPERTIES TIMEOUT 60)
     add_test(NAME pulp-installer-mcp-contract
         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_pulp_installer_mcp_contract.sh)
-    set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 45)
+    # The suite drives the installer once per scenario, so its wall time tracks
+    # how contended the host's executable-assessment service is rather than how
+    # much work it does — a few seconds standalone, tens of seconds on a fully
+    # loaded runner. The budget is ~5x the slowest run measured under saturation.
+    # It cannot mask a hang: every subprocess the script spawns is a bounded
+    # shell, awk, or sed invocation, with no network, sleep, or polling.
+    set_tests_properties(pulp-installer-mcp-contract PROPERTIES TIMEOUT 120)
 endif()
 if(Python3_Interpreter_FOUND)
     add_test(NAME pulp-mcp-binary-smoke

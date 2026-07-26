@@ -55,6 +55,14 @@ assert_file_count() {
     fi
 }
 
+# The mock commands are scenario-independent: `tar` selects whether to emit
+# pulp-mcp from MOCK_INCLUDE_MCP in the environment, and nothing else varies.
+# They are therefore built once and shared by every scenario. That is not just a
+# tidiness win — macOS assesses each freshly written executable on its first
+# exec, and that assessment is a blocking call into a shared system service. One
+# mock-bin per scenario multiplied that blocking wait by the scenario count and
+# made the whole suite's runtime scale with unrelated system load. Keep this
+# helper called exactly once.
 make_mock_commands() {
     local mock_bin="$1"
     mkdir -p "$mock_bin"
@@ -128,7 +136,7 @@ run_installer() {
         env \
             HOME="$case_root/home" \
             SHELL="$shell_path" \
-            PATH="$case_root/mock-bin:$PATH" \
+            PATH="$MOCK_BIN:$PATH" \
             PULP_VERSION="0.0.0-test" \
             PULP_SKIP_SDK_INSTALL=1 \
             PULP_INSTALL_DIR="$install_dir" \
@@ -140,10 +148,12 @@ run_installer() {
 [[ -f "$INSTALL_SH" ]] || { echo "FAIL: missing $INSTALL_SH"; exit 2; }
 [[ -f "$INSTALL_PS1" ]] || { echo "FAIL: missing $INSTALL_PS1"; exit 2; }
 
+MOCK_BIN="$TEST_ROOT/mock-bin"
+make_mock_commands "$MOCK_BIN"
+
 echo "Scenario: PATH already present, relative custom path, managed upgrade"
 managed_root="$TEST_ROOT/managed"
 mkdir -p "$managed_root/home"
-make_mock_commands "$managed_root/mock-bin"
 managed_install="$managed_root/custom install/bin"
 cat > "$managed_root/home/.zshrc" <<'EOF'
 export PATH="/already/present:$PATH"
@@ -157,7 +167,7 @@ managed_output="$managed_root/output.txt"
     env \
         HOME="$managed_root/home" \
         SHELL=/bin/zsh \
-        PATH="$managed_root/mock-bin:$managed_install:$PATH" \
+        PATH="$MOCK_BIN:$managed_install:$PATH" \
         PULP_VERSION=0.0.0-test \
         PULP_SKIP_SDK_INSTALL=1 \
         PULP_INSTALL_DIR="custom install/bin" \
@@ -184,7 +194,6 @@ fi
 echo "Scenario: user-managed MCP override is preserved"
 override_root="$TEST_ROOT/override"
 mkdir -p "$override_root/home"
-make_mock_commands "$override_root/mock-bin"
 cat > "$override_root/home/.bashrc" <<'EOF'
 export PULP_MCP_BINARY="/user/source-build/pulp-mcp"
 EOF
@@ -222,7 +231,6 @@ fi
 echo "Scenario: existing PATH syntax and ordering are preserved"
 path_root="$TEST_ROOT/path-profile"
 mkdir -p "$path_root/home"
-make_mock_commands "$path_root/mock-bin"
 cat > "$path_root/home/.zshrc" <<EOF
 export PATH="\$PATH:$path_root/bin"
 EOF
@@ -245,7 +253,6 @@ assert_file_excludes \
 echo "Scenario: comments, docs, and unset mentions do not masquerade as assignments"
 mention_root="$TEST_ROOT/text-mentions"
 mkdir -p "$mention_root/home"
-make_mock_commands "$mention_root/mock-bin"
 cat > "$mention_root/home/.zshrc" <<'EOF'
 # export PULP_MCP_BINARY=/commented
 unset PULP_MCP_BINARY
@@ -266,7 +273,6 @@ assert_file_excludes \
 echo "Scenario: Bash login and non-login profiles receive one managed assignment"
 bash_root="$TEST_ROOT/bash-profiles"
 mkdir -p "$bash_root/home"
-make_mock_commands "$bash_root/mock-bin"
 printf '%s\n' "# login" > "$bash_root/home/.bash_profile"
 printf '%s\n' "# non-login" > "$bash_root/home/.bashrc"
 run_installer "$bash_root" /bin/bash "$bash_root/bin" \
@@ -293,7 +299,6 @@ done
 echo "Scenario: Bash without .bash_profile configures login and non-login profiles"
 bash_fallback_root="$TEST_ROOT/bash-profile-fallback"
 mkdir -p "$bash_fallback_root/home"
-make_mock_commands "$bash_fallback_root/mock-bin"
 run_installer "$bash_fallback_root" /bin/bash "$bash_fallback_root/bin" \
     >"$bash_fallback_root/output.txt" 2>&1
 for bash_profile in "$bash_fallback_root/home/.bashrc" "$bash_fallback_root/home/.profile"; do
@@ -312,7 +317,6 @@ echo "Scenario: malformed marker shapes are preserved byte-for-byte"
 for malformed_kind in missing-end reversed duplicate; do
     malformed_root="$TEST_ROOT/malformed-$malformed_kind"
     mkdir -p "$malformed_root/home"
-    make_mock_commands "$malformed_root/mock-bin"
     if [[ "$malformed_kind" == "missing-end" ]]; then
         cat > "$malformed_root/home/.zshrc" <<'EOF'
 before
@@ -358,7 +362,6 @@ done
 echo "Scenario: managed MCP update preserves a symlinked profile"
 symlink_root="$TEST_ROOT/symlink"
 mkdir -p "$symlink_root/home/dotfiles"
-make_mock_commands "$symlink_root/mock-bin"
 cat > "$symlink_root/home/dotfiles/zshrc" <<'EOF'
 # >>> Pulp MCP (managed by installer) >>>
 export PULP_MCP_BINARY="/stale/pulp-mcp"
@@ -385,7 +388,6 @@ assert_file_contains \
 echo "Scenario: archive without pulp-mcp does not configure MCP"
 absent_root="$TEST_ROOT/absent"
 mkdir -p "$absent_root/home"
-make_mock_commands "$absent_root/mock-bin"
 run_installer "$absent_root" /bin/zsh "$absent_root/bin" \
     MOCK_INCLUDE_MCP=0 >"$absent_root/output.txt" 2>&1
 assert_file_excludes \
@@ -400,7 +402,6 @@ assert_file_contains \
 echo "Scenario: Fish assignments quote a custom path containing spaces"
 fish_root="$TEST_ROOT/fish"
 mkdir -p "$fish_root/home"
-make_mock_commands "$fish_root/mock-bin"
 fish_install="$fish_root/custom install/bin"
 run_installer "$fish_root" /usr/bin/fish "$fish_install" \
     >"$fish_root/output.txt" 2>&1
@@ -417,7 +418,6 @@ assert_file_contains \
 echo "Scenario: shell metacharacters round-trip in custom install paths"
 special_root="$TEST_ROOT/special-path"
 mkdir -p "$special_root/home"
-make_mock_commands "$special_root/mock-bin"
 special_component="custom \$cash \`tick\` \"quote\" \\slash 'single"
 special_install="$special_root/$special_component/bin"
 run_installer "$special_root" /bin/zsh "$special_install" \
@@ -432,7 +432,6 @@ fi
 
 fish_special_root="$TEST_ROOT/fish-special-path"
 mkdir -p "$fish_special_root/home"
-make_mock_commands "$fish_special_root/mock-bin"
 fish_special_install="$fish_special_root/$special_component/bin"
 run_installer "$fish_special_root" /usr/bin/fish "$fish_special_install" \
     >"$fish_special_root/output.txt" 2>&1
@@ -447,7 +446,6 @@ assert_file_contains \
 echo "Scenario: PULP_NO_MODIFY_PATH leaves profile untouched"
 no_modify_root="$TEST_ROOT/no-modify"
 mkdir -p "$no_modify_root/home"
-make_mock_commands "$no_modify_root/mock-bin"
 printf '%s\n' "# existing profile" > "$no_modify_root/home/.zshrc"
 cp "$no_modify_root/home/.zshrc" "$no_modify_root/profile.before"
 run_installer "$no_modify_root" /bin/zsh "$no_modify_root/bin" \
