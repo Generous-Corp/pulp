@@ -421,6 +421,30 @@ TEST_CASE("Nested notes compile like a hand-flattened track and fan out dirty ch
     auto lowered = lower_dirty_set(nested, {2}, dirty);
     REQUIRE_FALSE(lowered.all);
     REQUIRE(lowered.tracks == std::vector<ItemId>{{3}, {5}});
+
+    const DirtySet child_metadata(
+        {DirtyItem{{30}, {}, {10}, DirtyFlags::Marker},
+         DirtyItem{{10}, {}, {10}, DirtyFlags::Context}},
+        {{{10}, CompileContextKind::ChordScale}});
+    const auto metadata_lowered =
+        lower_dirty_set(nested, {2}, child_metadata);
+    REQUIRE_FALSE(metadata_lowered.all);
+    REQUIRE(metadata_lowered.tracks.empty());
+
+    const DirtySet root_metadata(
+        {DirtyItem{{31}, {}, {2}, DirtyFlags::Marker}});
+    const auto root_metadata_lowered =
+        lower_dirty_set(nested, {2}, root_metadata);
+    REQUIRE_FALSE(root_metadata_lowered.all);
+    REQUIRE(root_metadata_lowered.tracks.empty());
+
+    const auto notes_and_metadata = static_cast<DirtyFlags>(
+        static_cast<std::uint16_t>(DirtyFlags::Notes) |
+        static_cast<std::uint16_t>(DirtyFlags::Marker));
+    const DirtySet combined(
+        {DirtyItem{{13}, {11}, {10}, notes_and_metadata}});
+    REQUIRE(lower_dirty_set(nested, {2}, combined).tracks ==
+            std::vector<ItemId>{{3}, {5}});
 }
 
 TEST_CASE("Nested compile refuses unsupported child state and expansion overflow") {

@@ -1,6 +1,7 @@
 #include <pulp/playback/program_compiler.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -43,6 +44,13 @@ DirtyTrackSet lower_dirty_set(const timeline::Project& project, timeline::ItemId
                     parents[*child].push_back({sequence.id(), track.id()});
                 }
 
+    const auto affects_compiled_content = [](const timeline::DirtyItem& item) {
+        const auto flags = static_cast<std::uint16_t>(item.flags);
+        const auto metadata_only =
+            static_cast<std::uint16_t>(timeline::DirtyFlags::Context) |
+            static_cast<std::uint16_t>(timeline::DirtyFlags::Marker);
+        return (flags & ~metadata_only) != 0;
+    };
     std::vector<std::size_t> pending;
     for (const auto& item : dirty.items()) {
         if (!item.owner_sequence.valid()) {
@@ -50,6 +58,8 @@ DirtyTrackSet lower_dirty_set(const timeline::Project& project, timeline::ItemId
             result.tracks.clear();
             return result;
         }
+        if (!affects_compiled_content(item))
+            continue;
         if (item.owner_sequence == root_sequence_id) {
             if (!item.owner_track.valid()) {
                 result.all = true;
