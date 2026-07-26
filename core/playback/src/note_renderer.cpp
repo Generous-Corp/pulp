@@ -224,7 +224,7 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     const bool reanchor_note_pass =
         !has_note_pass_epoch_ || block_sequence_reset ||
         transport.reset_requested || transport.transport_started ||
-        transport.transport_changed || note_pass_loop_changed;
+        note_pass_loop_changed;
     if (reanchor_note_pass && transport.range_count != 0) {
         const auto& first_range = transport.ranges[0];
         note_pass_epoch_ = first_range.monotonic_start;

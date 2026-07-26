@@ -233,4 +233,18 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
     const ConceptCensus plain_census = census(plain);
     REQUIRE(plain_census.count(Concept::ClipNote) == 1);
     REQUIRE_FALSE(plain_census.contains(Concept::ClipNoteModifier));
+
+    // A seed is authored modifier state even when every note currently uses
+    // neutral defaults. Formats that cannot carry it must still disclose the
+    // loss rather than silently changing future probability decisions.
+    auto seeded_content =
+        take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}, {}, 7));
+    auto seeded_clip =
+        take_value(Clip::create({5}, {200}, {100}, std::move(seeded_content)));
+    auto seeded_track = take_value(Track::create({6}, "musical", {seeded_clip}));
+    auto seeded_sequence = take_value(
+        Sequence::create({2}, "root", TickDuration{1'000}, {seeded_track}));
+    const Project seeded = take_value(
+        Project::create(ProjectInput{{1}, "seeded", 100, {2}, {}, {seeded_sequence}}));
+    REQUIRE(census(seeded).count(Concept::ClipNoteModifier) == 1);
 }

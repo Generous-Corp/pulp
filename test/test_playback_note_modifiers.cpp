@@ -344,6 +344,45 @@ TEST_CASE("Program adoption preserves the current conditional note pass",
         REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
 }
 
+TEST_CASE("Non-musical transport metadata preserves the conditional note pass",
+          "[playback][note-modifier][transport]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier first_only = chance(30, note_probability_certain);
+    first_only.condition = NoteConditionKind::First;
+    ProgramHarness programs;
+    programs.publish(modifier_project({first_only}, 0), map);
+
+    const auto loop_samples =
+        map->ticks_to_samples(TickPosition{kLoopLength.value}).value;
+    REQUIRE(loop_samples > 0);
+    REQUIRE(loop_samples <= std::numeric_limits<std::uint32_t>::max());
+    const auto block_frames = static_cast<std::uint32_t>(loop_samples);
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = block_frames;
+    config.initially_playing = true;
+    config.loop = {true, {0}, TickPosition{kLoopLength.value}};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+
+    TransportSnapshot first_pass;
+    REQUIRE(transport.begin_block(block_frames, first_pass) == TransportError::None);
+    REQUIRE(renderer.process(latch.begin_block(programs.store), first_pass).code ==
+            NoteRenderCode::Ok);
+
+    TransportSnapshot metadata_change;
+    REQUIRE(transport.begin_block(block_frames, metadata_change) ==
+            TransportError::None);
+    metadata_change.transport_changed = true;
+    REQUIRE(renderer.process(latch.begin_block(programs.store), metadata_change).code ==
+            NoteRenderCode::Ok);
+    for (const auto& event : renderer.events())
+        REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
+}
+
 TEST_CASE("Changing a loop flushes notes before reanchoring conditional passes",
           "[playback][note-modifier][transport]") {
     const auto map = modifier_tempo_map();

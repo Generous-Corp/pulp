@@ -24,10 +24,11 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
             [&](const timeline::NoteContent& notes) {
                 out.record(Concept::ClipNote, id, limits);
                 // Modifiers decide whether a note sounds at all, so a format
-                // that cannot carry them loses audible content. Recording them
-                // is what keeps an export's loss manifest from claiming nothing
-                // was lost.
-                if (!notes.modifiers().empty())
+                // that cannot carry them loses audible content. A seed with no
+                // modifiers still selects a replay, so it counts too. Recording
+                // both is what keeps an export's loss manifest from claiming
+                // nothing was lost.
+                if (!notes.modifiers().empty() || notes.modifier_seed() != 0)
                     out.record(Concept::ClipNoteModifier, id, limits);
             },
             [&](const timeline::RegisteredContent&) {
