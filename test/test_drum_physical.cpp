@@ -36,6 +36,7 @@ using pulp::signal::PhaseDistortionShape;
 using pulp::signal::drum::CymbalVoice;
 using pulp::signal::drum::MembraneExciter;
 using pulp::signal::drum::MembraneVoice;
+using pulp::signal::drum::StringModulation;
 using pulp::signal::drum::StringVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
@@ -1035,6 +1036,63 @@ TEST_CASE("Stiffness stretches the partials sharp", "[signal][drum][string]") {
     REQUIRE(stiff_at_800 < rigid_at_800 * 0.8);
 }
 
+TEST_CASE("The string crossfades FM, ring, and sync modulation",
+          "[signal][drum][string]") {
+    auto modulated = [](StringModulation mode, double mix) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(1.0);
+        voice.set_damping(0.2);
+        voice.set_restart_on_hit(true);
+        voice.set_lpg_amount(0.0);
+        voice.set_modulation(mode);
+        voice.set_modulation_mix(mix);
+        voice.set_modulation_ratio(2.7);
+        voice.set_fm_depth_octaves(0.4);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto dry = modulated(StringModulation::none, 0.0);
+    // A zero crossfade is the sample-exact detector floor for every mode.
+    REQUIRE(modulated(StringModulation::fm, 0.0) == dry);
+    REQUIRE(modulated(StringModulation::ring, 0.0) == dry);
+    REQUIRE(modulated(StringModulation::sync, 0.0) == dry);
+
+    for (auto mode : {StringModulation::fm, StringModulation::ring,
+                      StringModulation::sync}) {
+        const auto wet = modulated(mode, 1.0);
+        REQUIRE_FALSE(wet == dry);
+        REQUIRE(peak(wet) > 1e-4);
+    }
+}
+
+TEST_CASE("The string's lowpass gate darkens its release",
+          "[signal][drum][string]") {
+    auto gated = [](double amount) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_damping(0.05);
+        voice.set_lpg_amount(amount);
+        voice.gate().set_colour(1.0);
+        voice.gate().set_fall_ms(120.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto bypassed = gated(0.0);
+    const auto full = gated(1.0);
+    REQUIRE_FALSE(bypassed == full);
+    const std::vector<float> bypassed_tail(bypassed.begin() + 12000,
+                                            bypassed.end());
+    const std::vector<float> full_tail(full.begin() + 12000, full.end());
+    REQUIRE(high_fraction(full_tail, 1200.0) <
+            high_fraction(bypassed_tail, 1200.0) * 0.8);
+}
+
 TEST_CASE("A second hit adds to the ringing string by default",
           "[signal][drum][string]") {
     // The physical behaviour, and why a fast repeated figure does not sound
@@ -1070,6 +1128,9 @@ TEST_CASE("The string voice allocates nothing on the audio thread",
     voice.prepare(kFs);
     voice.set_stiffness(0.4);
     voice.set_pick_direction(0.3);
+    voice.set_modulation(StringModulation::fm);
+    voice.set_modulation_mix(0.7);
+    voice.set_lpg_amount(1.0);
     voice.output().set_drive(0.3);
 
     std::vector<float> buffer(256, 0.0f);
