@@ -87,7 +87,8 @@ class BufferedContentSource {
         std::uint64_t ring_underrun_frames = 0;
         /// Frames currently ready for the audio thread.
         std::uint64_t ring_available_frames = 0;
-        /// Producer calls that returned nothing.
+        /// Producer exceptions. A zero return is transient backpressure and is
+        /// retried without incrementing this counter.
         std::uint64_t producer_errors = 0;
     };
 

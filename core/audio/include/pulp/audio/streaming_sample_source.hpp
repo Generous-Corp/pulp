@@ -198,7 +198,9 @@ public:
         std::uint64_t underrun_frames = 0;   ///< Frames the audio thread had to zero-fill mid-stream.
         std::uint64_t ring_available_frames = 0;
         std::uint64_t streamed_frames = 0;   ///< Source frames pushed through the ring since prepare/reset.
-        std::uint64_t read_errors = 0;       ///< Background reader short/zero returns.
+        /// Reader exceptions, plus zero returns when preserve-position mode
+        /// treats them as terminal. Deadline-mode backpressure is not an error.
+        std::uint64_t read_errors = 0;
         bool streaming_active = false;       ///< Tail not yet fully streamed.
     };
     Stats stats() const noexcept;
