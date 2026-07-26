@@ -21,12 +21,13 @@ enum class DirtyFlags : std::uint16_t {
     Automation = 1 << 6,
     Take = 1 << 7,
     Freeze = 1 << 8,
+    Marker = 1 << 9,
     // Sequence-owned context changed. The item names the sequence and owns no
     // track, so a consumer that maps dirty items to tracks finds nothing to
     // recompile here — which is correct, because the readers are not derivable
     // from the item. DirtySet::contexts() names the kind that changed; the
     // compiler resolves the readers through its subscription reverse index.
-    Context = 1 << 9,
+    Context = 1 << 10,
 };
 
 constexpr DirtyFlags operator|(DirtyFlags lhs, DirtyFlags rhs) noexcept {

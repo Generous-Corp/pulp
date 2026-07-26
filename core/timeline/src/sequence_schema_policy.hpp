@@ -9,7 +9,14 @@ struct SequenceSchemaVersionPolicy {
     std::string_view type_name;
     std::uint32_t oldest_readable_version;
     std::uint32_t current_version;
+    std::uint32_t annotations_introduced_version;
     std::uint32_t chord_scale_lane_introduced_version;
+
+    // Markers and regions entered the sequence schema together, so one predicate
+    // governs both arrays: a version that carries either must carry both.
+    [[nodiscard]] constexpr bool requires_annotations(std::uint32_t version) const noexcept {
+        return version >= annotations_introduced_version;
+    }
 
     [[nodiscard]] constexpr bool requires_chord_scale_lane(std::uint32_t version) const noexcept {
         return version >= chord_scale_lane_introduced_version;
@@ -17,17 +24,24 @@ struct SequenceSchemaVersionPolicy {
 };
 
 inline constexpr SequenceSchemaVersionPolicy sequence_schema_policy{
-    "pulp.timeline.sequence", 1, 2, 2,
+    "pulp.timeline.sequence", 1, 3, 2, 3,
 };
-static_assert(
-    sequence_schema_policy.oldest_readable_version > 0 &&
-    sequence_schema_policy.oldest_readable_version <= sequence_schema_policy.current_version &&
-    sequence_schema_policy.chord_scale_lane_introduced_version > 0 &&
-    sequence_schema_policy.chord_scale_lane_introduced_version <=
-        sequence_schema_policy.current_version &&
-    !sequence_schema_policy.requires_chord_scale_lane(
-        sequence_schema_policy.chord_scale_lane_introduced_version - 1) &&
-    sequence_schema_policy.requires_chord_scale_lane(
-        sequence_schema_policy.chord_scale_lane_introduced_version));
+static_assert(sequence_schema_policy.oldest_readable_version > 0 &&
+              sequence_schema_policy.oldest_readable_version <=
+                  sequence_schema_policy.current_version &&
+              sequence_schema_policy.annotations_introduced_version > 0 &&
+              sequence_schema_policy.annotations_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_annotations(
+                  sequence_schema_policy.annotations_introduced_version - 1) &&
+              sequence_schema_policy.requires_annotations(
+                  sequence_schema_policy.annotations_introduced_version) &&
+              sequence_schema_policy.chord_scale_lane_introduced_version > 0 &&
+              sequence_schema_policy.chord_scale_lane_introduced_version <=
+                  sequence_schema_policy.current_version &&
+              !sequence_schema_policy.requires_chord_scale_lane(
+                  sequence_schema_policy.chord_scale_lane_introduced_version - 1) &&
+              sequence_schema_policy.requires_chord_scale_lane(
+                  sequence_schema_policy.chord_scale_lane_introduced_version));
 
 } // namespace pulp::timeline::detail

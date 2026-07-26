@@ -8,10 +8,18 @@ runtime::Result<SchemaWriteSuccess, PersistenceError>
 migrate_sequence_v1_to_v2(std::string_view source, BoundedJsonSink& output,
                           const void* context) noexcept;
 
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v2_to_v1(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v2_to_v3(std::string_view source, BoundedJsonSink& output,
+                          const void* context) noexcept;
+
 // Refuses when the lane carries events. A downgrade that dropped them would
 // change what the document sounds like while reporting success.
 runtime::Result<SchemaWriteSuccess, PersistenceError>
-migrate_sequence_v2_to_v1(std::string_view source, BoundedJsonSink& output,
+migrate_sequence_v3_to_v2(std::string_view source, BoundedJsonSink& output,
                           const void* context) noexcept;
 
 } // namespace pulp::timeline::detail

@@ -68,6 +68,10 @@ runtime::Result<Take, PersistenceError> decode_take(const JsonValue& value, Deco
                                                     std::string path);
 runtime::Result<TakeLane, PersistenceError>
 decode_take_lane(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<SequenceMarker, PersistenceError>
+decode_marker(const JsonValue& value, DecodeContext& context, std::string path);
+runtime::Result<SequenceRegion, PersistenceError>
+decode_region(const JsonValue& value, DecodeContext& context, std::string path);
 // A null value decodes as an empty lane, which is what a pre-lane sequence
 // version means. `lane_path` is the full diagnostic path of the array itself.
 runtime::Result<ChordScaleLane, PersistenceError>

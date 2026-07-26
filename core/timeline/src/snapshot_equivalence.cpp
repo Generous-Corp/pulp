@@ -48,13 +48,24 @@ bool same_take_lane(const TakeLane& lhs, const TakeLane& rhs) noexcept {
            std::equal(lhs.takes().begin(), lhs.takes().end(), rhs.takes().begin(), same_take);
 }
 
+bool same_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.color == rhs.color;
+}
+
+bool same_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.duration == rhs.duration && lhs.color == rhs.color;
+}
+
 } // namespace
 
 bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
     if (lhs.id() != rhs.id() || lhs.name() != rhs.name() ||
         lhs.next_item_id() != rhs.next_item_id() ||
         lhs.root_sequence_id() != rhs.root_sequence_id() || lhs.tempo_map() != rhs.tempo_map() ||
-        lhs.meter_map() != rhs.meter_map() || lhs.assets().size() != rhs.assets().size() ||
+        lhs.meter_map() != rhs.meter_map() || lhs.session_start() != rhs.session_start() ||
+        lhs.assets().size() != rhs.assets().size() ||
         lhs.sequences().size() != rhs.sequences().size())
         return false;
     for (std::size_t i = 0; i < lhs.assets().size(); ++i) {
@@ -72,7 +83,13 @@ bool snapshots_equivalent(const Project& lhs, const Project& rhs) noexcept {
             !same_absolute_duration(left_sequence.absolute_duration(),
                                     right_sequence.absolute_duration()) ||
             !(left_sequence.chord_scale_lane() == right_sequence.chord_scale_lane()) ||
-            left_sequence.tracks().size() != right_sequence.tracks().size())
+            left_sequence.tracks().size() != right_sequence.tracks().size() ||
+            left_sequence.markers().size() != right_sequence.markers().size() ||
+            left_sequence.regions().size() != right_sequence.regions().size() ||
+            !std::equal(left_sequence.markers().begin(), left_sequence.markers().end(),
+                        right_sequence.markers().begin(), same_marker) ||
+            !std::equal(left_sequence.regions().begin(), left_sequence.regions().end(),
+                        right_sequence.regions().begin(), same_region))
             return false;
         for (std::size_t t = 0; t < left_sequence.tracks().size(); ++t) {
             const auto& left_track = left_sequence.tracks()[t];

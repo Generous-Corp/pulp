@@ -3,10 +3,16 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <span>
+#include <string_view>
 
 namespace pulp::timeline::detail {
 namespace {
 
+// The sequence envelope carries whole track subtrees, and a track may hold
+// opaque extension content that must survive re-save byte for byte. So both
+// directions splice the raw source rather than re-serializing a parsed tree:
+// every byte outside the edited spans is copied through untouched.
 runtime::Result<SchemaWriteSuccess, PersistenceError> fail() {
     return runtime::Err(PersistenceError{PersistenceErrorCode::MigrationFailed});
 }
@@ -29,18 +35,16 @@ bool version_is(const JsonValue& value, std::uint32_t expected) noexcept {
            decoded == expected;
 }
 
-// The fields both versions share, plus the anchor the inserted field is placed
-// after. `absolute_duration` sorts before `chord_scale_lane` and is always
-// written (null when absent), so it is a stable anchor in canonical order.
-bool common_shape(JsonValue& data) noexcept {
-    const auto* absolute = member(data, "absolute_duration");
-    const auto* id = member(data, "id");
-    const auto* name = member(data, "name");
-    const auto* tracks = member(data, "tracks");
-    return data.kind == JsonValue::Kind::Object && absolute && absolute->begin < absolute->end &&
-           id && id->kind == JsonValue::Kind::String && name &&
-           name->kind == JsonValue::Kind::String && tracks &&
-           tracks->kind == JsonValue::Kind::Array;
+// Both splices depend on canonical member order, so the exact key sequence is
+// checked before any offset is trusted. A reordered payload fails closed rather
+// than emitting a member in the wrong slot.
+bool has_exact_members(const JsonValue& data, std::span<const std::string_view> names) noexcept {
+    if (data.kind != JsonValue::Kind::Object || data.object.size() != names.size())
+        return false;
+    for (std::size_t index = 0; index < names.size(); ++index)
+        if (data.object[index].first != names[index])
+            return false;
+    return true;
 }
 
 struct RawEdit {
@@ -49,7 +53,7 @@ struct RawEdit {
     std::string_view replacement;
 };
 
-bool apply_edits(std::string_view source, std::array<RawEdit, 2> edits, BoundedJsonSink& output) {
+bool apply_edits(std::string_view source, std::span<RawEdit> edits, BoundedJsonSink& output) {
     std::sort(edits.begin(), edits.end(),
               [](const auto& lhs, const auto& rhs) { return lhs.begin < rhs.begin; });
     std::size_t cursor = 0;
@@ -64,6 +68,22 @@ bool apply_edits(std::string_view source, std::array<RawEdit, 2> edits, BoundedJ
     return output.append(source.substr(cursor));
 }
 
+runtime::Result<SchemaWriteSuccess, PersistenceError> finish(BoundedJsonSink& output, bool wrote) {
+    if (wrote)
+        return runtime::Ok(SchemaWriteSuccess{});
+    return output.failed()
+               ? runtime::Result<SchemaWriteSuccess, PersistenceError>(runtime::Err(output.error()))
+               : fail();
+}
+
+constexpr std::string_view v1_members[] = {"absolute_duration", "id", "musical_duration", "name",
+                                           "tracks"};
+constexpr std::string_view v2_members[] = {
+    "absolute_duration", "id", "markers", "musical_duration", "name", "regions", "tracks"};
+constexpr std::string_view v3_members[] = {"absolute_duration", "chord_scale_lane", "id",
+                                           "markers",           "musical_duration", "name",
+                                           "regions",           "tracks"};
+
 } // namespace
 
 runtime::Result<SchemaWriteSuccess, PersistenceError>
@@ -74,18 +94,17 @@ migrate_sequence_v1_to_v2(std::string_view source, BoundedJsonSink& output, cons
     auto root = parsed.value()->root();
     auto* data = member(root, "data");
     auto* version = member(root, "version");
-    if (!data || !version || !version_is(*version, 1) || !common_shape(*data) ||
-        member(*data, "chord_scale_lane") || version->begin >= version->end)
+    if (!data || !version || !version_is(*version, 1) || !has_exact_members(*data, v1_members) ||
+        version->begin >= version->end)
         return fail();
-    const auto* absolute = member(*data, "absolute_duration");
-    if (!apply_edits(source,
-                     {RawEdit{absolute->end, absolute->end, ",\"chord_scale_lane\":[]"},
-                      RawEdit{version->begin, version->end, "2"}},
-                     output))
-        return output.failed() ? runtime::Result<SchemaWriteSuccess, PersistenceError>(
-                                     runtime::Err(output.error()))
-                               : fail();
-    return runtime::Ok(SchemaWriteSuccess{});
+    const auto& id_value = data->object[1].second;
+    const auto& name_value = data->object[3].second;
+    if (id_value.begin >= id_value.end || name_value.begin >= name_value.end)
+        return fail();
+    std::array edits{RawEdit{id_value.end, id_value.end, ",\"markers\":[]"},
+                     RawEdit{name_value.end, name_value.end, ",\"regions\":[]"},
+                     RawEdit{version->begin, version->end, "2"}};
+    return finish(output, apply_edits(source, edits, output));
 }
 
 runtime::Result<SchemaWriteSuccess, PersistenceError>
@@ -96,45 +115,72 @@ migrate_sequence_v2_to_v1(std::string_view source, BoundedJsonSink& output, cons
     auto root = parsed.value()->root();
     auto* data = member(root, "data");
     auto* version = member(root, "version");
-    auto* lane = data ? member(*data, "chord_scale_lane") : nullptr;
-    if (!data || !version || !version_is(*version, 2) || !common_shape(*data) || !lane ||
-        lane->kind != JsonValue::Kind::Array || version->begin >= version->end)
+    if (!data || !version || !version_is(*version, 2) || !has_exact_members(*data, v2_members) ||
+        version->begin >= version->end)
         return fail();
-    // A v1 reader has no field to put these events in. Writing the document
-    // without them would be a silent transposition of every generator that
-    // follows the lane, so the downgrade refuses instead.
-    if (!lane->array.empty())
+    const auto& markers = data->object[2].second;
+    const auto& regions = data->object[5].second;
+    // A downgrade never discards authored annotations: only the empty arrays a
+    // v1 reader would have produced can be dropped.
+    if (markers.kind != JsonValue::Kind::Array || !markers.array.empty() ||
+        regions.kind != JsonValue::Kind::Array || !regions.array.empty())
         return fail();
-    // Erase the member with whichever comma actually separates it, rather than
-    // assuming canonical field order: a hand-written document may carry the
-    // fields in any order and must still downgrade to the same bytes it came
-    // from.
-    const auto found =
-        std::find_if(data->object.begin(), data->object.end(),
-                     [](const auto& entry) { return entry.first == "chord_scale_lane"; });
-    if (found == data->object.end() || lane->end > source.size())
+    const auto markers_comma = source.find(',', data->object[1].second.end);
+    const auto regions_comma = source.find(',', data->object[4].second.end);
+    if (markers_comma == std::string_view::npos || markers_comma >= markers.begin ||
+        regions_comma == std::string_view::npos || regions_comma >= regions.begin)
         return fail();
-    const auto index = static_cast<std::size_t>(found - data->object.begin());
-    std::size_t erase_begin = data->begin + 1;
-    std::size_t erase_end = lane->end;
-    if (index == 0) {
-        const auto comma = source.find(',', lane->end);
-        if (comma == std::string_view::npos)
-            return fail();
-        erase_end = comma + 1;
-    } else {
-        erase_begin = source.find(',', data->object[index - 1].second.end);
-        if (erase_begin == std::string_view::npos || erase_begin >= lane->begin)
-            return fail();
-    }
-    if (!apply_edits(source,
-                     {RawEdit{erase_begin, erase_end, {}},
-                      RawEdit{version->begin, version->end, "1"}},
-                     output))
-        return output.failed() ? runtime::Result<SchemaWriteSuccess, PersistenceError>(
-                                     runtime::Err(output.error()))
-                               : fail();
-    return runtime::Ok(SchemaWriteSuccess{});
+    std::array edits{RawEdit{markers_comma, markers.end, {}},
+                     RawEdit{regions_comma, regions.end, {}},
+                     RawEdit{version->begin, version->end, "1"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v2_to_v3(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 2) || !has_exact_members(*data, v2_members) ||
+        version->begin >= version->end)
+        return fail();
+    // The lane sorts immediately after absolute_duration in canonical order, and
+    // has_exact_members already proved that order, so this offset is trustworthy.
+    const auto& absolute_value = data->object[0].second;
+    if (absolute_value.begin >= absolute_value.end)
+        return fail();
+    std::array edits{
+        RawEdit{absolute_value.end, absolute_value.end, ",\"chord_scale_lane\":[]"},
+        RawEdit{version->begin, version->end, "3"}};
+    return finish(output, apply_edits(source, edits, output));
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_sequence_v3_to_v2(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return fail();
+    auto root = parsed.value()->root();
+    auto* data = member(root, "data");
+    auto* version = member(root, "version");
+    if (!data || !version || !version_is(*version, 3) || !has_exact_members(*data, v3_members) ||
+        version->begin >= version->end)
+        return fail();
+    const auto& lane = data->object[1].second;
+    // A v2 reader has nowhere to put authored harmony. Writing the document
+    // without it would silently retune every generator that follows the lane, so
+    // only the empty array a v2 reader would have produced can be dropped.
+    if (lane.kind != JsonValue::Kind::Array || !lane.array.empty())
+        return fail();
+    const auto lane_comma = source.find(',', data->object[0].second.end);
+    if (lane_comma == std::string_view::npos || lane_comma >= lane.begin)
+        return fail();
+    std::array edits{RawEdit{lane_comma, lane.end, {}},
+                     RawEdit{version->begin, version->end, "2"}};
+    return finish(output, apply_edits(source, edits, output));
 }
 
 } // namespace pulp::timeline::detail

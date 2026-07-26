@@ -76,6 +76,18 @@ export interface PulpTimelineCommandInsertClip {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.insert_marker` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertMarker {
+  marker: PulpTimelineMarker;
+  sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.insert_region` — domain Command, schema version 1. */
+export interface PulpTimelineCommandInsertRegion {
+  region: PulpTimelineRegion;
+  sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.insert_take` — domain Command, schema version 1. */
 export interface PulpTimelineCommandInsertTake {
   lane_id: number | string;
@@ -117,6 +129,18 @@ export interface PulpTimelineCommandRemoveClip {
   clip_id: number | string;
   sequence_id: number | string;
   track_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_marker` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveMarker {
+  marker_id: number | string;
+  sequence_id: number | string;
+}
+
+/** `pulp.timeline.command.remove_region` — domain Command, schema version 1. */
+export interface PulpTimelineCommandRemoveRegion {
+  region_id: number | string;
+  sequence_id: number | string;
 }
 
 /** `pulp.timeline.command.remove_take` — domain Command, schema version 1. */
@@ -225,7 +249,15 @@ export interface PulpTimelineDevicePlacement {
   id: number | string;
 }
 
-/** `pulp.timeline.project` — domain Document, schema version 1. */
+/** `pulp.timeline.marker` — domain Document, schema version 1. */
+export interface PulpTimelineMarker {
+  color?: number | string;
+  id: number | string;
+  name: string;
+  position: number | string;
+}
+
+/** `pulp.timeline.project` — domain Document, schema version 2. */
 export interface PulpTimelineProject {
   assets: readonly unknown[];
   id: number | string;
@@ -235,16 +267,28 @@ export interface PulpTimelineProject {
   next_item_id: number | string;
   root_sequence_id: number | string;
   sequences: readonly unknown[];
+  session_start?: Record<string, unknown>;
   tempo_map?: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 2. */
+/** `pulp.timeline.region` — domain Document, schema version 1. */
+export interface PulpTimelineRegion {
+  color?: number | string;
+  duration: number | string;
+  id: number | string;
+  name: string;
+  position: number | string;
+}
+
+/** `pulp.timeline.sequence` — domain Document, schema version 3. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
   chord_scale_lane: readonly unknown[];
   id: number | string;
+  markers: readonly unknown[];
   musical_duration: number | string;
   name: string;
+  regions: readonly unknown[];
   tracks: readonly unknown[];
 }
 
@@ -290,12 +334,16 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.create_asset"
   | "pulp.timeline.command.insert_automation_lane"
   | "pulp.timeline.command.insert_clip"
+  | "pulp.timeline.command.insert_marker"
+  | "pulp.timeline.command.insert_region"
   | "pulp.timeline.command.insert_take"
   | "pulp.timeline.command.insert_take_lane"
   | "pulp.timeline.command.move_clip"
   | "pulp.timeline.command.remove_asset"
   | "pulp.timeline.command.remove_automation_lane"
   | "pulp.timeline.command.remove_clip"
+  | "pulp.timeline.command.remove_marker"
+  | "pulp.timeline.command.remove_region"
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
   | "pulp.timeline.command.set_active_take_lane"
@@ -311,7 +359,9 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.content.media"
   | "pulp.timeline.content.notes"
   | "pulp.timeline.device_placement"
+  | "pulp.timeline.marker"
   | "pulp.timeline.project"
+  | "pulp.timeline.region"
   | "pulp.timeline.sequence"
   | "pulp.timeline.take"
   | "pulp.timeline.take_lane"
@@ -328,12 +378,16 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.create_asset": PulpTimelineCommandCreateAsset;
   "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
   "pulp.timeline.command.insert_clip": PulpTimelineCommandInsertClip;
+  "pulp.timeline.command.insert_marker": PulpTimelineCommandInsertMarker;
+  "pulp.timeline.command.insert_region": PulpTimelineCommandInsertRegion;
   "pulp.timeline.command.insert_take": PulpTimelineCommandInsertTake;
   "pulp.timeline.command.insert_take_lane": PulpTimelineCommandInsertTakeLane;
   "pulp.timeline.command.move_clip": PulpTimelineCommandMoveClip;
   "pulp.timeline.command.remove_asset": PulpTimelineCommandRemoveAsset;
   "pulp.timeline.command.remove_automation_lane": PulpTimelineCommandRemoveAutomationLane;
   "pulp.timeline.command.remove_clip": PulpTimelineCommandRemoveClip;
+  "pulp.timeline.command.remove_marker": PulpTimelineCommandRemoveMarker;
+  "pulp.timeline.command.remove_region": PulpTimelineCommandRemoveRegion;
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
@@ -349,7 +403,9 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.content.media": PulpTimelineContentMedia;
   "pulp.timeline.content.notes": PulpTimelineContentNotes;
   "pulp.timeline.device_placement": PulpTimelineDevicePlacement;
+  "pulp.timeline.marker": PulpTimelineMarker;
   "pulp.timeline.project": PulpTimelineProject;
+  "pulp.timeline.region": PulpTimelineRegion;
   "pulp.timeline.sequence": PulpTimelineSequence;
   "pulp.timeline.take": PulpTimelineTake;
   "pulp.timeline.take_lane": PulpTimelineTakeLane;

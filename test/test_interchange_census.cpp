@@ -147,7 +147,7 @@ TEST_CASE("a chord/scale context lane is recorded by the census", "[interchange]
     auto lane = take_value(ChordScaleLane::create(
         {ChordScaleEvent{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
     auto sequence =
-        take_value(Sequence::create({2}, "root", std::nullopt, std::nullopt, {follower},
+        take_value(Sequence::create({2}, "root", std::nullopt, std::nullopt, {follower}, {}, {},
                                     std::move(lane)));
     auto project =
         take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {std::move(sequence)}}));

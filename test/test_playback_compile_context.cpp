@@ -85,7 +85,8 @@ std::shared_ptr<const Project> make_project(const SchemaRegistry& registry,
 
     auto sequence =
         take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
-                              std::vector<Track>{follower, independent, plain}, std::move(lane)));
+                              std::vector<Track>{follower, independent, plain}, {}, {},
+                              std::move(lane)));
     ProjectInput input;
     input.id = {1};
     input.name = "context";

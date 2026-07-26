@@ -15,7 +15,7 @@ Project project_with_chord_lane(ChordScaleLane lane) {
     auto clip = take(Clip::create({4}, {0}, {100}, EmptyContent{}));
     auto track = take(Track::create({3}, "track", {clip}));
     auto sequence = take(Sequence::create({2}, "sequence", TickDuration{100}, std::nullopt, {track},
-                                          std::move(lane)));
+                                          {}, {}, std::move(lane)));
     return take(Project::create(ProjectInput{{1}, "project", 5, {2}, {}, {sequence}}));
 }
 
@@ -144,7 +144,7 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
 
     auto first = serialize_project(original, registry);
     REQUIRE(first.has_value());
-    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":2") !=
+    REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":3") !=
             std::string::npos);
     REQUIRE(first.value().json.find(
                 R"("chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9})") !=
@@ -228,49 +228,44 @@ TEST_CASE("a document whose chord lane is malformed is rejected on load",
     REQUIRE_FALSE(deserialize_project(descending, registry));
 }
 
-TEST_CASE("sequence v1 upgrades to an empty chord lane and downgrades only when empty",
+TEST_CASE("sequence v2 upgrades to an empty chord lane and downgrades only when empty",
           "[timeline][context-lane][migration]") {
     const auto registry = builtins();
+    // v2 is the annotations version; the chord lane arrives one step later, so
+    // the chain a v1 document walks is 1 -> 2 -> 3.
+    const std::string v2 =
+        R"({"data":{"absolute_duration":null,"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
+    const auto v3 =
+        take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 3, v2));
+    REQUIRE(v3 ==
+            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})");
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2, v3)) ==
+            v2);
+
+    // The whole chain composes, so a v1 document reaches v3 and back unchanged.
     const std::string v1 =
         R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})";
-    const auto v2 = take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 2, v1));
-    REQUIRE(v2 ==
-            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})");
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1, v2)) ==
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 3, v1)) ==
+            v3);
+    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 1, v3)) ==
             v1);
 
-    // The migration is textual, so it must survive a non-canonical member order.
-    const std::string reordered_v1 =
-        R"({"version":1,"type_name":"pulp.timeline.sequence","data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]}})";
-    const auto reordered_v2 = take(
-        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 1, 2, reordered_v1));
-    REQUIRE(reordered_v2 ==
-            R"({"version":2,"type_name":"pulp.timeline.sequence","data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","musical_duration":"100","name":"sequence","tracks":[]}})");
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
-                                  reordered_v2)) == reordered_v1);
+    // The splice trusts canonical member order, so a reordered payload is
+    // refused rather than spliced into the wrong slot.
+    const std::string reordered_v2 =
+        R"({"data":{"id":"2","absolute_duration":null,"markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
+    REQUIRE_FALSE(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 3, reordered_v2));
 
-    // A hand-written document may carry the fields in any order; the erase must
-    // pick the comma that actually separates the removed member.
-    const std::string lane_first_v2 =
-        R"({"data":{"chord_scale_lane":[],"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
-                                  lane_first_v2)) ==
-            R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})");
-    const std::string lane_last_v2 =
-        R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[],"chord_scale_lane":[]},"type_name":"pulp.timeline.sequence","version":2})";
-    REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
-                                  lane_last_v2)) ==
-            R"({"data":{"absolute_duration":null,"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":1})");
-
-    // A v1 reader has nowhere to put authored harmony. Dropping it would change
+    // A v2 reader has nowhere to put authored harmony. Dropping it would change
     // what the document sounds like while reporting success, so this refuses.
     const std::string populated =
-        R"({"data":{"absolute_duration":null,"chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"id":"2","musical_duration":"100","name":"sequence","tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
-    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 1,
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
+    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
                                    populated));
 }
 
-TEST_CASE("a v1 sequence document loads as a sequence with no harmony",
+TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
           "[timeline][context-lane][migration]") {
     const auto registry = builtins();
     const auto current = take(serialize_project(project_with_chord_lane(lane_of({})), registry)).json;
@@ -278,11 +273,11 @@ TEST_CASE("a v1 sequence document loads as a sequence with no harmony",
     const auto lane_at = legacy.find(R"("chord_scale_lane":[],)");
     REQUIRE(lane_at != std::string::npos);
     legacy.erase(lane_at, std::string_view(R"("chord_scale_lane":[],)").size());
-    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":2)");
+    const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":3)");
     REQUIRE(version_at != std::string::npos);
     legacy.replace(version_at, std::string_view(
-                                   R"("type_name":"pulp.timeline.sequence","version":2)").size(),
-                   R"("type_name":"pulp.timeline.sequence","version":1)");
+                                   R"("type_name":"pulp.timeline.sequence","version":3)").size(),
+                   R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
     REQUIRE(decoded.find_sequence({2})->chord_scale_lane().empty());
