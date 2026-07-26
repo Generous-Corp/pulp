@@ -323,6 +323,13 @@ public:
     // ── Processing ────────────────────────────────────────────────────────
 
     SampleType process(SampleType input) {
+        // Do not admit a non-finite sample into either the direction-switched
+        // detector or the lookahead ring: both are recursive state and would
+        // otherwise remain poisoned after the bad sample has passed.
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         level_db_ = detect_level_db(static_cast<double>(input));
         gain_reduction_db_ = gain_computer_db(level_db_);
         gain_linear_ = units::db_to_linear(gain_reduction_db_ + makeup_db_);

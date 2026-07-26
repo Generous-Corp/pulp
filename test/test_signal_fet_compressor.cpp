@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -1183,4 +1184,22 @@ TEST_CASE("49 the compressor allocates nothing on the audio thread",
         f.reset();
         d.reset();
     });
+}
+
+TEST_CASE("a NaN sample cannot latch the FET feedback detector",
+          "[fet-compressor][nan-recovery]") {
+    for (double sample_rate : {8000.0, 192000.0}) {
+        Comp c;
+        c.prepare(sample_rate);
+        c.set_input_gain_db(12.0);
+        c.set_ratio(FetRatio::r8_1);
+        for (int i = 0; i < static_cast<int>(sample_rate * 0.1); ++i) c.process(0.5);
+
+        c.process(std::numeric_limits<double>::quiet_NaN());
+        for (int i = 0; i < 2 * Comp::kLatencySamples + 64; ++i) {
+            REQUIRE(std::isfinite(c.process(0.25)));
+            REQUIRE(std::isfinite(c.gain_reduction_db()));
+            REQUIRE(std::isfinite(c.control_voltage()));
+        }
+    }
 }

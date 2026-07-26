@@ -285,6 +285,13 @@ public:
 
     /// One mono sample.
     SampleType process(SampleType input) {
+        // A non-finite sample is not audio and must not become detector or
+        // lookahead history. Clear the owned recursive state so the very next
+        // finite sample is processed from a valid, deterministic state.
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double level_db = detect_level_db(0, static_cast<double>(input));
         const double gain = channel_gain(0, level_db);
         return static_cast<SampleType>(delayed(0, input) * gain * makeup_linear_);
@@ -293,6 +300,13 @@ public:
     /// One stereo pair, in place. Reads both channels before writing either,
     /// which the link path requires.
     void process_stereo(SampleType& left, SampleType& right) {
+        if (!std::isfinite(static_cast<double>(left)) ||
+            !std::isfinite(static_cast<double>(right))) {
+            reset();
+            left = SampleType{0};
+            right = SampleType{0};
+            return;
+        }
         const double left_db = detect_level_db(0, static_cast<double>(left));
         const double right_db = detect_level_db(1, static_cast<double>(right));
 

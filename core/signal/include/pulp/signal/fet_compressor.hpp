@@ -657,6 +657,13 @@ public:
     /// One mono sample. Stereo composes two instances driven from a
     /// caller-computed shared detector signal.
     SampleType process(SampleType input) {
+        // The feedback tap, both resampler histories, the dry delay, and the
+        // transformer are recursive. Reject a non-finite sample before any of
+        // them sees it, then restart from the class's documented fresh state.
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double x = static_cast<double>(input);
         const double dry = push_dry(x);
         const double driven = x * input_gain_;

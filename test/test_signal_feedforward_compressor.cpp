@@ -22,6 +22,7 @@
 #include <pulp/signal/units.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -642,4 +643,23 @@ TEST_CASE("10 the compressor allocates nothing on the audio thread",
         f.reset();
         d.reset();
     });
+}
+
+TEST_CASE("a NaN sample cannot latch the feedforward detector",
+          "[feedforward-compressor][nan-recovery]") {
+    for (double sample_rate : {8000.0, 192000.0}) {
+        Comp c;
+        c.prepare(sample_rate);
+        c.set_threshold_db(-30.0);
+        c.set_ratio(8.0);
+        c.set_detector(CompressorDetector::rms);
+        c.set_program_dependent_release(true);
+        for (int i = 0; i < static_cast<int>(sample_rate * 0.1); ++i) c.process(0.5);
+
+        c.process(std::numeric_limits<double>::quiet_NaN());
+        for (int i = 0; i < 64; ++i) {
+            REQUIRE(std::isfinite(c.process(0.25)));
+            REQUIRE(std::isfinite(c.gain_reduction_db()));
+        }
+    }
 }

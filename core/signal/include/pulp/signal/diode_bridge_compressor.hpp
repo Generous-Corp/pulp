@@ -807,6 +807,13 @@ public:
     // ── Processing ────────────────────────────────────────────────────────
 
     SampleType process(SampleType input) {
+        // Every stage below owns recursive state, including the feedback tap.
+        // A non-finite input is therefore a recovery boundary: do not let it
+        // enter the loop, and make the next finite sample start validly.
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double dry = static_cast<double>(input);
 
         // Detection. The feedback tap is last sample's pre-makeup output: the
@@ -851,6 +858,10 @@ private:
         const SampleType filtered = sidechain_hpf_.process_highpass(blocked);
 
         const double fast = static_cast<double>(fast_follower_.process(filtered));
+        // Keep the slow branch synchronized even while its readout is disabled.
+        // Otherwise enabling Auto mid-release blends `fast` against a stale
+        // zero state and briefly recovers gain faster than the manual follower.
+        const double slow = static_cast<double>(slow_follower_.process(filtered));
         if (!auto_release_) return fast;
 
         // Program-dependent dual slope. The spec says `max(fast, slow)`, which
@@ -861,7 +872,6 @@ private:
         // sustain indicator is what makes it dual-slope: fast recovery right
         // after a transient, slow hold once compression has been sustained.
         // Equals `max(fast, slow)` in the sustained limit.
-        const double slow = static_cast<double>(slow_follower_.process(filtered));
         const double sustained = -smoothed_reduction_db_ > kSustainThresholdDb ? 1.0 : 0.0;
         sustain_ = snap_to_zero(sustain_ + sustain_coef_ * (sustained - sustain_));
         return fast + sustain_ * (slow - fast);

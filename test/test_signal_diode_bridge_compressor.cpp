@@ -42,6 +42,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 using namespace pulp::signal;
@@ -1351,4 +1352,61 @@ TEST_CASE("controls clamp to their declared ranges", "[diode-bridge][lifecycle]"
         out_peak = std::max(out_peak, std::abs(c.process(x)));
     }
     REQUIRE(out_peak / in_peak <= Comp::worst_case_gain());
+}
+
+TEST_CASE("a NaN sample cannot latch the diode-bridge feedback detector",
+          "[diode-bridge][nan-recovery]") {
+    for (double sample_rate : {8000.0, 192000.0}) {
+        Comp c;
+        c.prepare(sample_rate);
+        c.set_threshold_db(-30.0);
+        c.set_feedback(true);
+        c.set_auto_release(true);
+        for (int i = 0; i < static_cast<int>(sample_rate * 0.1); ++i) c.process(0.5);
+
+        c.process(std::numeric_limits<double>::quiet_NaN());
+        for (int i = 0; i < 64; ++i) {
+            REQUIRE(std::isfinite(c.process(0.25)));
+            REQUIRE(std::isfinite(c.gain_reduction_db()));
+            REQUIRE(std::isfinite(c.control_drive()));
+        }
+    }
+}
+
+TEST_CASE("enabling auto release cannot blend against a stale slow follower",
+          "[diode-bridge][ballistics]") {
+    Comp automatic;
+    Comp manual;
+    automatic.prepare(kSr);
+    manual.prepare(kSr);
+    for (Comp* c : {&automatic, &manual}) {
+        c->set_feedback(false);
+        c->set_threshold_db(-30.0);
+        c->set_ratio(4.0);
+        c->set_knee_db(0.0);
+        c->set_attack_ms(3.0);
+        c->set_release_ms(400.0);
+        c->set_auto_release(false);
+    }
+
+    for (int i = 0; i < static_cast<int>(kSr); ++i) {
+        automatic.process(0.5);
+        manual.process(0.5);
+    }
+    REQUIRE_THAT(automatic.gain_reduction_db(), WithinAbs(manual.gain_reduction_db(), 1e-12));
+
+    automatic.set_auto_release(true);
+    double maximum_premature_recovery = 0.0;
+    for (int i = 0; i < 256; ++i) {
+        automatic.process(0.0);
+        manual.process(0.0);
+        maximum_premature_recovery =
+            std::max(maximum_premature_recovery,
+                     automatic.gain_reduction_db() - manual.gain_reduction_db());
+    }
+
+    // A correctly synchronized slow follower is never below the fast follower
+    // during release, so Auto can hold MORE reduction than manual but must not
+    // recover prematurely. A frozen-at-zero slow state reverses that ordering.
+    REQUIRE(maximum_premature_recovery < 1e-9);
 }
