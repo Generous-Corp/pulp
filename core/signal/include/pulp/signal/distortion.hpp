@@ -54,15 +54,16 @@
 /// interpolates the dimensionless shape rather than blending two independently
 /// fitted waveforms.
 ///
-/// ## Why trapezoidal rule plus Newton
+/// ## Why TR-BDF2 plus Newton
 ///
 /// The clipper ODE is stiff near the diode knee — `Vt` is 26 mV against a
 /// signal swinging volts — so explicit methods need prohibitive sample rates to
 /// stay stable. That is precisely Yeh, Abel & Smith's finding for this class of
-/// ODE. Trapezoidal rule is implicit, second-order and A-stable, and its inner
-/// solve is one Newton iteration loop with a HARD ITERATION CAP: an unbounded
-/// loop in `process()` is not RT-safe, and hitting the cap clamps to the last
-/// iterate rather than crashing.
+/// ODE. TR-BDF2 is implicit, second-order, A-stable and L-stable: its trapezoid
+/// substep preserves accuracy in the audio band, while its BDF2 completion
+/// damps the stiff alternating mode that plain trapezoidal rule preserves. Each
+/// substep has a HARD Newton iteration cap: an unbounded loop in `process()` is
+/// not RT-safe, and hitting either cap clamps to the last iterate.
 ///
 /// ## Patch notes
 ///
@@ -80,8 +81,9 @@
 ///
 /// RT contract: `prepare()` may allocate (it configures the oversampler when
 /// one is in use). `set_*`, `process()` and `reset()` never allocate, never
-/// lock, never perform I/O. `process()` costs at most `kMaxNewtonIterations`
-/// iterations of one `exp` pair — bounded, never data-dependent past that cap.
+/// lock, never perform I/O. A stateful `process()` costs two implicit substeps,
+/// each capped at `kMaxNewtonIterations` evaluations of one `exp` pair —
+/// bounded, never data-dependent past those caps.
 /// There is no randomness anywhere in this file, so determinism (series law 2)
 /// is satisfied by construction; that is worth stating because it is easy to
 /// assume a "vintage" effect needs drift, and this one does not.
@@ -165,8 +167,7 @@ struct ClipperSolverConfig;
 
 namespace detail {
 
-/// One trapezoidal-rule step of `C·dv/dt = forcing + (vin − v)/R − i_D(v)`,
-/// solved by a SAFEGUARDED Newton iteration.
+/// One monotone implicit stage, solved by a SAFEGUARDED Newton iteration.
 ///
 /// Plain Newton from the previous sample — what the specification calls for —
 /// diverges here, and it is worth being precise about why rather than just
@@ -252,8 +253,10 @@ inline double solve_safeguarded_newton(Residual&& f, Derivative&& df, double lo,
 }  // namespace detail
 
 struct ClipperSolverConfig {
-    /// Convergence threshold on `|F(v)|`. Tighter costs iterations; looser
-    /// risks visible jitter at the knee.
+    /// Convergence threshold normalized to the current produced by one volt
+    /// through the modeled resistance. Each solve uses
+    /// `kNewtonTolerance / R`, making this approximately a node-voltage
+    /// tolerance instead of an absolute ampere threshold that mutes quiet input.
     /// [design parameter] default 1e-9, range 1e-11 .. 1e-6.
     static constexpr double kNewtonTolerance = 1e-9;
 
@@ -263,17 +266,91 @@ struct ClipperSolverConfig {
     /// [design parameter] default 8, range 4 .. 16.
     static constexpr int kMaxNewtonIterations = 8;
 
+    /// TR-BDF2 has two implicit stages, each with the cap above. This is the
+    /// total per-sample ceiling exposed to RT-contract tests.
+    static constexpr int kMaxNewtonIterationsPerSample = 2 * kMaxNewtonIterations;
+
     /// ADAA fallback guard on `|v[n] − v[n−1]|`. Below this the difference
     /// quotient loses precision and the plain evaluation is used.
     /// [design parameter] default 1e-5, range 1e-7 .. 1e-3.
     static constexpr double kAdaaEpsilon = 1e-5;
 };
 
+namespace detail {
+
+/// One L-stable TR-BDF2 step of
+/// `C·dv/dt = source_current(t) − v/R − i_D(v)`.
+///
+/// `gamma = 2 − sqrt(2)` is the standard TR-BDF2 choice that makes the method
+/// second-order and L-stable. The first implicit trapezoid stage advances to
+/// `t + gamma·T`; the variable-step BDF2 stage completes the sample. Unlike a
+/// full trapezoidal step, the composite method drives infinitely stiff modes
+/// to zero instead of preserving them as an alternating sample-to-sample mode.
+inline double solve_tr_bdf2(const junction::JunctionPair& network, double previous_voltage,
+                            double previous_source_current, double source_current,
+                            double capacitance, double timestep, double resistance,
+                            int& iterations_out) {
+    constexpr double gamma = 2.0 - 1.4142135623730950488016887242097;
+    constexpr double bdf2_step = (1.0 - gamma) / (2.0 - gamma);
+    constexpr double stage_weight = 1.0 / (gamma * (2.0 - gamma));
+
+    const double source_at_stage =
+        previous_source_current + gamma * (source_current - previous_source_current);
+    const double residual_tolerance = ClipperSolverConfig::kNewtonTolerance / resistance;
+    const double previous_flow = previous_source_current - previous_voltage / resistance -
+                                 network.current(previous_voltage);
+    const double c_over_stage_t = capacitance / (gamma * timestep);
+    const auto stage_residual = [&](double v) {
+        const double stage_flow = source_at_stage - v / resistance - network.current(v);
+        return c_over_stage_t * (v - previous_voltage) - 0.5 * (previous_flow + stage_flow);
+    };
+    const auto stage_derivative = [&](double v) {
+        return c_over_stage_t + 0.5 / resistance + 0.5 * network.conductance(v);
+    };
+
+    const double stage_open_circuit = source_at_stage * resistance;
+    int stage_iterations = 0;
+    const double stage_voltage = solve_safeguarded_newton(
+        stage_residual, stage_derivative,
+        /*lo=*/std::min({0.0, previous_voltage, stage_open_circuit}),
+        /*hi=*/std::max({0.0, previous_voltage, stage_open_circuit}),
+        /*initial=*/previous_voltage,
+        /*alternate=*/network.conduction_estimate(stage_open_circuit, resistance),
+        residual_tolerance, ClipperSolverConfig::kMaxNewtonIterations,
+        stage_iterations);
+
+    const double bdf2_history =
+        stage_weight * stage_voltage + (1.0 - stage_weight) * previous_voltage;
+    const double c_over_bdf2_t = capacitance / (bdf2_step * timestep);
+    const auto final_residual = [&](double v) {
+        return c_over_bdf2_t * (v - bdf2_history) -
+               (source_current - v / resistance - network.current(v));
+    };
+    const auto final_derivative = [&](double v) {
+        return c_over_bdf2_t + 1.0 / resistance + network.conductance(v);
+    };
+
+    const double final_open_circuit = source_current * resistance;
+    int final_iterations = 0;
+    const double result = solve_safeguarded_newton(
+        final_residual, final_derivative,
+        /*lo=*/std::min({0.0, bdf2_history, final_open_circuit}),
+        /*hi=*/std::max({0.0, bdf2_history, final_open_circuit}),
+        /*initial=*/stage_voltage,
+        /*alternate=*/network.conduction_estimate(final_open_circuit, resistance),
+        residual_tolerance, ClipperSolverConfig::kMaxNewtonIterations,
+        final_iterations);
+    iterations_out = stage_iterations + final_iterations;
+    return result;
+}
+
+}  // namespace detail
+
 /// The diode-to-ground clipper: series resistor, shunt diode network, optional
 /// shunt capacitor.
 ///
-/// `C·dv/dt = (vin − v)/R − i_D(v)`, solved by trapezoidal rule with a
-/// Newton-Raphson inner solve.
+/// `C·dv/dt = (vin − v)/R − i_D(v)`, solved by TR-BDF2 with safeguarded
+/// Newton-Raphson inner solves.
 template <typename SampleType = float>
 class DiodeClipperT {
 public:
@@ -340,7 +417,7 @@ public:
 
     void reset() {
         voltage_ = 0.0;
-        previous_input_ = 0.0;
+        previous_source_current_ = 0.0;
         previous_voltage_ = 0.0;
         last_iterations_ = 0;
     }
@@ -352,7 +429,7 @@ public:
     SampleType process(SampleType input) {
         const double vin = static_cast<double>(input);
         const double v = solve(vin);
-        previous_input_ = vin;
+        previous_source_current_ = vin / resistance_;
         previous_voltage_ = v;
         voltage_ = v;
         return static_cast<SampleType>(snap_to_zero(v));
@@ -386,14 +463,6 @@ private:
     }
 
     double solve(double vin) {
-        // Trapezoidal rule on C·dv/dt = (vin − v)/R − i_D(v). With C = 0 the
-        // derivative term drops out and this becomes the memoryless
-        // transcendental equation, solved by the same routine.
-        const double c_over_t = capacitance_ / timestep_;
-        const double history =
-            0.5 * ((previous_input_ - previous_voltage_) / resistance_ -
-                   network_.current(previous_voltage_));
-
         // With no capacitor the ODE is not an ODE: `C·dv/dt` vanishes and the
         // circuit equation is purely algebraic, `(vin − v)/R = i_D(v)`. Pushing
         // that through trapezoidal rule would NOT solve it — TR at `C = 0`
@@ -402,16 +471,17 @@ private:
         // behaviour of TR at a stiff limit, not a bug in the solve, and it is
         // why the degenerate case gets the algebraic equation directly.
         const bool memoryless = capacitance_ <= 0.0;
-        const auto residual = [&](double v) {
-            if (memoryless) return diode_term(v) - (vin - v) / resistance_;
-            return c_over_t * (v - previous_voltage_) -
-                   0.5 * ((vin - v) / resistance_ - diode_term(v)) - history;
-        };
+        if (!memoryless) {
+            return detail::solve_tr_bdf2(network_, previous_voltage_, previous_source_current_,
+                                         vin / resistance_, capacitance_, timestep_, resistance_,
+                                         last_iterations_);
+        }
+
+        const auto residual = [&](double v) { return diode_term(v) - (vin - v) / resistance_; };
         // Every term is strictly positive, so the residual is strictly
         // increasing in v — which is what makes the bracketed fallback safe.
         const auto derivative = [&](double v) {
-            if (memoryless) return diode_slope(v) + 1.0 / resistance_;
-            return c_over_t + 0.5 / resistance_ + 0.5 * diode_slope(v);
+            return diode_slope(v) + 1.0 / resistance_;
         };
 
         return detail::solve_safeguarded_newton(
@@ -420,7 +490,7 @@ private:
             /*hi=*/std::max({0.0, previous_voltage_, vin}),
             /*initial=*/previous_voltage_,
             /*alternate=*/network_.conduction_estimate(vin, resistance_),
-            ClipperSolverConfig::kNewtonTolerance,
+            ClipperSolverConfig::kNewtonTolerance / resistance_,
             ClipperSolverConfig::kMaxNewtonIterations, last_iterations_);
     }
 
@@ -431,7 +501,7 @@ private:
     double capacitance_ = kCapacitanceDefault;
 
     double voltage_ = 0.0;
-    double previous_input_ = 0.0;
+    double previous_source_current_ = 0.0;
     double previous_voltage_ = 0.0;
     int last_iterations_ = 0;
 };
@@ -444,7 +514,7 @@ using DiodeClipper64 = DiodeClipperT<double>;
 ///
 /// The in-loop KCL at the virtual ground reduces to the SAME functional form as
 /// the to-ground ODE with `v ≡ −vout`, `R ≡ Rf`, `C ≡ Cf`, plus a `vin/Rin`
-/// forcing term. So this reuses the identical trapezoidal + Newton solver
+/// forcing term. So this reuses the identical TR-BDF2 + Newton solver
 /// rather than introducing a second numerical method.
 ///
 /// **Small-signal gain and its bound (series law 1).** At `v → 0` the diodes'
@@ -524,7 +594,7 @@ public:
     double linear_gain() const { return feedback_resistance_ / input_resistance_; }
 
     void reset() {
-        previous_input_ = 0.0;
+        previous_source_current_ = 0.0;
         previous_voltage_ = 0.0;
         last_iterations_ = 0;
         ground_stage_.reset();
@@ -552,8 +622,8 @@ public:
         // In-loop: the same ODE with v ≡ −vout, R ≡ Rf, C ≡ Cf, and the input
         // current vin/Rin as an extra forcing term.
         const double forcing = vin / input_resistance_;
-        const double v = solve(0.0, forcing, feedback_resistance_);
-        previous_input_ = 0.0;
+        const double v = solve(forcing);
+        previous_source_current_ = forcing;
         previous_voltage_ = v;
         // v is −vout by the substitution, so the stage's output is its negation
         // — an inverting stage, which is what the topology is.
@@ -566,49 +636,10 @@ private:
         capacitance_ = 1.0 / (two_pi * feedback_resistance_ * knee_corner_hz_);
     }
 
-    /// The diode term as the solver sees it: the plain current, or its ADAA
-    /// difference quotient. The guard and the fallback live in `JunctionPair`,
-    /// so the two clipper classes cannot drift apart on either.
-    double diode_term(double v) const {
-        return network_.current(v);
-    }
-
-    /// `d/dv` of `diode_term`. It MUST follow whichever branch `diode_term`
-    /// took: a Newton step built from the plain `conductance()` while the
-    /// residual uses the ADAA quotient is solving one equation with another
-    /// equation's Jacobian, and that diverges rather than converging slowly.
-    /// See `JunctionPair::adaa_conductance` for the measured consequence.
-    double diode_slope(double v) const {
-        return network_.conductance(v);
-    }
-
-    /// The shared trapezoidal + Newton solve. `forcing` is the extra current
-    /// injected at the node (zero for the to-ground placement).
-    double solve(double vin, double forcing, double resistance) {
-        const double c_over_t = capacitance_ / timestep_;
-        const double history =
-            0.5 * (forcing + (previous_input_ - previous_voltage_) / resistance -
-                   network_.current(previous_voltage_));
-
-        const auto residual = [&](double v) {
-            return c_over_t * (v - previous_voltage_) -
-                   0.5 * (forcing + (vin - v) / resistance - diode_term(v)) - history;
-        };
-        const auto derivative = [&](double v) {
-            return c_over_t + 0.5 / resistance + 0.5 * diode_slope(v);
-        };
-
-        // Where the linear network alone would drive the node: the forcing
-        // current through the feedback resistor, plus any direct drive.
-        const double open_circuit = vin + forcing * resistance;
-        return detail::solve_safeguarded_newton(
-            residual, derivative,
-            /*lo=*/std::min({0.0, previous_voltage_, open_circuit}),
-            /*hi=*/std::max({0.0, previous_voltage_, open_circuit}),
-            /*initial=*/previous_voltage_,
-            /*alternate=*/network_.conduction_estimate(open_circuit, resistance),
-            ClipperSolverConfig::kNewtonTolerance,
-            ClipperSolverConfig::kMaxNewtonIterations, last_iterations_);
+    double solve(double source_current) {
+        return detail::solve_tr_bdf2(network_, previous_voltage_, previous_source_current_,
+                                     source_current, capacitance_, timestep_,
+                                     feedback_resistance_, last_iterations_);
     }
 
     junction::JunctionPair network_{};
@@ -620,7 +651,7 @@ private:
     double knee_corner_hz_ = kKneeCornerHzDefault;
     double capacitance_ = 0.0;
 
-    double previous_input_ = 0.0;
+    double previous_source_current_ = 0.0;
     double previous_voltage_ = 0.0;
     int last_iterations_ = 0;
 

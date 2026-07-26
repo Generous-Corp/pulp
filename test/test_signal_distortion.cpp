@@ -280,7 +280,7 @@ TEST_CASE("5 the solver terminates within its cap on a pathological step",
                 const double y = clipper.process(x);
                 REQUIRE(std::isfinite(y));
                 REQUIRE(clipper.last_iteration_count() <=
-                        ClipperSolverConfig::kMaxNewtonIterations);
+                        ClipperSolverConfig::kMaxNewtonIterationsPerSample);
             }
         }
     }
@@ -335,6 +335,137 @@ TEST_CASE("6 in-loop gain never exceeds the linear gain and only falls",
     REQUIRE(gains.front() > bound * 0.95);
     // ...and the largest are well below it, so clipping actually happened.
     REQUIRE(gains.back() < bound * 0.5);
+}
+
+TEST_CASE("6 in-loop small-signal response rolls off above the feedback corner",
+          "[distortion][clipper][gain]") {
+    FeedbackClipperT<double> clipper;
+    clipper.prepare(kSr);
+    clipper.set_topology(ClipperTopology::in_loop);
+    clipper.set_diode_model(DiodeModel::silicon);
+    clipper.set_symmetry(0.0);
+    clipper.reset();
+
+    // Keep the pair non-conducting so this measures the feedback R-C network.
+    // At 20 kHz versus a 720 Hz corner, its gain must be far below the low-band
+    // Rf/Rin gain. The former state update reused the current forcing as history
+    // and incorrectly floored near half the linear gain at Nyquist.
+    constexpr double amplitude = 1e-4;
+    constexpr int settle = 4800;
+    constexpr int frames = 4800;
+    const auto measured_gain = [&](double tone_hz) {
+        clipper.reset();
+        std::vector<double> out;
+        out.reserve(frames);
+        for (int n = 0; n < settle + frames; ++n) {
+            const double y =
+                clipper.process(amplitude * std::sin(2.0 * M_PI * tone_hz * n / kSr));
+            if (n >= settle) out.push_back(y);
+        }
+        return harmonic_magnitude(out, tone_hz, 1) / amplitude;
+    };
+    const double gain_10k = measured_gain(10000.0);
+    const double gain_20k = measured_gain(20000.0);
+    CAPTURE(gain_10k, gain_20k);
+    REQUIRE(gain_20k < gain_10k * 0.4);
+}
+
+TEST_CASE("6 in-loop small-signal gain has no absolute-tolerance dead zone",
+          "[distortion][clipper][gain][solver]") {
+    FeedbackClipperT<double> clipper;
+    clipper.prepare(kSr);
+    clipper.set_topology(ClipperTopology::in_loop);
+    clipper.set_diode_model(DiodeModel::silicon);
+    clipper.set_symmetry(0.0);
+    clipper.reset();
+
+    // Well below the old ~-105 dBFS cutoff, but still many orders above double
+    // precision. At DC the capacitor is open and the diode pair is nonconducting,
+    // so the response must approach the documented Rf/Rin gain.
+    constexpr double amplitude = 1e-7;  // -140 dBFS
+    double output = 0.0;
+    for (int n = 0; n < 48000; ++n) output = clipper.process(amplitude);
+    const double gain = std::abs(output) / amplitude;
+    CAPTURE(gain, clipper.linear_gain());
+    REQUIRE_THAT(gain, WithinRel(clipper.linear_gain(), 0.01));
+}
+
+TEST_CASE("6 in-loop gain stays bounded over the reachable drive and frequency range",
+          "[distortion][clipper][gain][solver]") {
+    // The pre-emphasis shelf can legally deliver 4x full scale to this stage.
+    // Exercise that reachable endpoint at the upper audio band, where the old
+    // trapezoidal state update became an alternating, self-amplifying mode.
+    for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+        const double tone_hz = std::min(20000.0, sr * 0.4);
+        for (auto model : {DiodeModel::silicon, DiodeModel::germanium, DiodeModel::led}) {
+            for (double symmetry : {-1.0, 0.0, 1.0}) {
+                for (double amplitude :
+                     {1.0, units::db_to_linear(ToneStackT<double>::kPreGainDbMax)}) {
+                    FeedbackClipperT<double> clipper;
+                    clipper.prepare(sr);
+                    clipper.set_topology(ClipperTopology::in_loop);
+                    clipper.set_diode_model(model);
+                    clipper.set_symmetry(symmetry);
+                    clipper.reset();
+
+                    const double bound = clipper.linear_gain() * amplitude;
+                    double peak = 0.0;
+                    const int frames = static_cast<int>(sr / 4.0);
+                    for (int n = 0; n < frames; ++n) {
+                        const double x = amplitude * std::sin(2.0 * M_PI * tone_hz * n / sr);
+                        const double y = clipper.process(x);
+                        REQUIRE(std::isfinite(y));
+                        REQUIRE(clipper.last_iteration_count() <=
+                                ClipperSolverConfig::kMaxNewtonIterationsPerSample);
+                        peak = std::max(peak, std::abs(y));
+                    }
+                    CAPTURE(sr, tone_hz, model, symmetry, amplitude, peak, bound);
+                    REQUIRE(peak <= bound * 1.001);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("the clipper solves damp their stiff mode at 8 kHz",
+          "[distortion][clipper][solver]") {
+    // At 8 kHz, the old trapezoidal update alternated sign at its iteration
+    // cap and grew into the thousands from an ordinary full-scale 440 Hz sine.
+    // A stiffly-decaying integration scheme must keep the physical gain bound
+    // even at this deliberately hostile sample rate.
+    constexpr double sr = 8000.0;
+    const auto render_peak = [](auto& clipper, double amplitude) {
+        double peak = 0.0;
+        for (int n = 0; n < 8000; ++n) {
+            const double x = amplitude * std::sin(2.0 * M_PI * 440.0 * n / sr);
+            const double y = clipper.process(x);
+            REQUIRE(std::isfinite(y));
+            REQUIRE(clipper.last_iteration_count() <=
+                    ClipperSolverConfig::kMaxNewtonIterationsPerSample);
+            peak = std::max(peak, std::abs(y));
+        }
+        return peak;
+    };
+
+    DiodeClipperT<double> ground;
+    ground.prepare(sr);
+    ground.set_diode_model(DiodeModel::silicon);
+    ground.set_symmetry(0.0);
+    ground.reset();
+    const double ground_peak = render_peak(ground, 1.0);
+    CAPTURE(ground_peak);
+    REQUIRE(ground_peak <= 1.0);
+
+    FeedbackClipperT<double> loop;
+    loop.prepare(sr);
+    loop.set_topology(ClipperTopology::in_loop);
+    loop.set_diode_model(DiodeModel::silicon);
+    loop.set_symmetry(0.0);
+    loop.reset();
+    const double amplitude = units::db_to_linear(ToneStackT<double>::kPreGainDbMax);
+    const double loop_peak = render_peak(loop, amplitude);
+    CAPTURE(loop_peak);
+    REQUIRE(loop_peak <= loop.linear_gain() * amplitude * 1.001);
 }
 
 // ── 7. Determinism ────────────────────────────────────────────────────────
@@ -562,14 +693,9 @@ TEST_CASE("The clipper solve stays bounded at full scale on every model",
     // produces a bounded output. The clipper is a CLIPPER — its output cannot
     // legitimately exceed the input's scale by more than its own small-signal
     // gain, on any diode model, at any sample rate, either topology.
-    // 8 kHz is deliberately EXCLUDED and the exclusion is documented rather
-    // than silent: at that rate the trapezoidal solve rings — output alternates
-    // sign every sample (+1.20, -1.20, +1.75, -1.75 ...) at the iteration cap,
-    // reaching 2347 for silicon at symmetry 0. That is TR's non-L-stable
-    // behaviour at a stiff limit, the same effect this header already documents
-    // for the C = 0 degenerate case, and fixing it means TR-BDF2 or a damped
-    // scheme rather than a patch. Recorded in the planning doc with numbers.
-    for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+    // Include 8 kHz: TR-BDF2's L-stable completion must damp the alternating
+    // stiff mode that previously forced this suite to exclude that rate.
+    for (double sr : {8000.0, 44100.0, 48000.0, 96000.0, 192000.0}) {
         for (auto model : {DiodeModel::silicon, DiodeModel::germanium, DiodeModel::led}) {
             for (double symmetry : {-1.0, 0.0, 1.0}) {
                 DiodeClipperT<double> ground;
