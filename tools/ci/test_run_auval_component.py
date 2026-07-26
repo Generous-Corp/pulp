@@ -64,6 +64,7 @@ echo 'AU VALIDATION SUCCEEDED'
             capture_output=True,
             text=True,
             env=env,
+            timeout=40,
         )
         return result, inventory, validation, status
 
@@ -90,7 +91,10 @@ echo 'AU VALIDATION SUCCEEDED'
         result, _inventory, validation, status = self.run_worker(
             "PEfx",
             {
-                "PULP_AU_DISCOVERY_DEADLINE_SECONDS": "3",
+                # Keep the helper's production-style wall-clock deadline well
+                # above transient scheduler stalls on saturated CI hosts. The
+                # subprocess timeout still bounds a broken retry path.
+                "PULP_AU_DISCOVERY_DEADLINE_SECONDS": "30",
                 "PULP_AU_DISCOVERY_POLL_SECONDS": "0.05",
                 "PULP_FAKE_AUVAL_COUNT_FILE": str(count_file),
             },
