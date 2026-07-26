@@ -567,6 +567,28 @@ device implementations, routing, audio, format adapters, or UI. Add those in
 their owning modules instead of widening the command and persistence core
 opportunistically.
 
+## Launch model and follow actions
+
+`Slot`, `Scene`, `FollowAction*`, and `resolve_follow_action()` in
+`clip_launch.hpp` are free-standing in-memory value types: not registered schema
+types, not serialized, and not reachable from `Sequence`. Treat a change there
+as a model-only change — it needs no schema registration and no codegen — and
+do not quietly widen it into the persistent Project graph.
+
+A random follow action (`Any`, `Other`, or a weighted candidate draw) must stay
+a **stateless hash of (session seed, slot id, draw index)**, never a stateful
+RNG. Engine determinism requires that the same document plus journal plus
+transport trace produce the same event stream, and a shared RNG breaks that in
+a way no single-lane test catches: one lane's draw would depend on how many
+other lanes happened to resolve earlier in the same block, so the result would
+track evaluation order. Hashing the deciding slot's own id makes the draw
+independent of every other lane. `FollowDraw::value()` is that hash; keep new
+random behaviour derived from it rather than adding a second source of entropy.
+
+A follow-action period is a bare `TickDuration`, not a `LaunchQuantize` — it is
+measured from the launch, so there is no phase to author and a `LaunchQuantize`
+there would carry a field nothing reads.
+
 `core/timeline/PulpTimelineSources.cmake` is the canonical production source
 inventory. Desktop targets consume its portable and native lists; WAM and
 WebCLAP consume only the portable list. Add a new translation unit to that
