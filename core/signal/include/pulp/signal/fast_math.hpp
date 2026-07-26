@@ -183,4 +183,29 @@ inline float ladder_tanh(float x) {
 #endif
 }
 
+/// A [3/2] Padé tanh that is 1-LIPSCHITZ and bounded — the saturator to reach
+/// for inside a feedback loop.
+///
+/// This is a different curve from `FastMath::tanh`, not a cheaper one, and the
+/// difference is the whole reason it exists. `FastMath::tanh` chases fidelity
+/// to `std::tanh`; this one is chosen for a property. Its derivative is
+/// (x^2-9)^2 / (9(3+x^2)^2), which is exactly 1 at the origin and strictly
+/// below 1 everywhere else, so it can never amplify — and the clamp at the
+/// point where the curve reaches unity (f(3) = 1 exactly) makes it bounded as
+/// well, without breaking that slope bound.
+///
+/// Inside a recursion those two properties are load-bearing. A saturator with
+/// small-signal gain above 1 (tanh(k*x) for k > 1 is the usual way to get one)
+/// silently raises the loop gain with it, which turns a decay-time control into
+/// a stability question; an unbounded one lets a self-oscillating loop settle
+/// only by growing more slowly than it decays. Two modules derived this same
+/// curve independently for those reasons — the character delay's dub feedback
+/// and the FDN reverb's in-loop drive — which is why it lives here now instead
+/// of once in each.
+inline double lipschitz_tanh(double v) noexcept {
+    const double x = std::clamp(v, -3.0, 3.0);
+    const double x2 = x * x;
+    return x * (27.0 + x2) / (27.0 + 9.0 * x2);
+}
+
 } // namespace pulp::signal

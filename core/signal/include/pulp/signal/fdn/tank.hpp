@@ -275,7 +275,7 @@ public:
             // the saturator can never raise the loop gain at any drive.
             if (drive_ > 0.0) {
                 const double xs = static_cast<double>(s);
-                s = static_cast<SampleType>(xs + drive_ * (fast_tanh(xs) - xs));
+                s = static_cast<SampleType>(xs + drive_ * (lipschitz_tanh(xs) - xs));
             }
 
             v[ui] = static_cast<SampleType>(static_cast<double>(s) * gain_[ui]);
