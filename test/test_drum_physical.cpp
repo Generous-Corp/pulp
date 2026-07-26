@@ -1191,6 +1191,14 @@ TEST_CASE("The string crossfades FM, ring, and sync modulation",
         REQUIRE_FALSE(wet == dry);
         REQUIRE(peak(wet) > 1e-4);
     }
+
+    const auto fm_wet = modulated(StringModulation::fm, 1.0);
+    const auto fm_half = modulated(StringModulation::fm, 0.5);
+    REQUIRE(fm_half.size() == dry.size());
+    for (std::size_t i = 0; i < fm_half.size(); ++i) {
+        const float expected = 0.5f * (dry[i] + fm_wet[i]);
+        REQUIRE(std::fabs(fm_half[i] - expected) < 1e-6f);
+    }
 }
 
 TEST_CASE("String sync modulation decays with the physical body",

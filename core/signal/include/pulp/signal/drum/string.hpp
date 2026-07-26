@@ -102,14 +102,12 @@ public:
     void set_modulation(StringModulation mode) {
         if (modulation_ == StringModulation::fm &&
             mode != StringModulation::fm) {
-            string_.set_frequency(base_frequency_);
+            fm_string_.set_frequency(base_frequency_);
         }
         modulation_ = mode;
     }
     void set_modulation_mix(double mix) {
         modulation_mix_ = std::clamp(mix, 0.0, 1.0);
-        if (modulation_mix_ == 0.0)
-            string_.set_frequency(base_frequency_);
     }
     void set_modulation_ratio(double ratio) {
         modulation_ratio_ = std::clamp(ratio, 0.125, 16.0);
@@ -117,7 +115,7 @@ public:
     void set_fm_depth_octaves(double octaves) {
         fm_depth_octaves_ = std::clamp(octaves, 0.0, 2.0);
         if (fm_depth_octaves_ == 0.0)
-            string_.set_frequency(base_frequency_);
+            fm_string_.set_frequency(base_frequency_);
     }
 
     /// Amount of the lowpass-gate stage after modulation. Zero is a transparent
@@ -142,7 +140,10 @@ public:
 protected:
     void on_prepare(double sample_rate) override {
         noise_.prepare(sample_rate);
-        string_.prepare(sample_rate, 30.0);
+        // FM can bend the 30 Hz public tuning floor down to the Karplus
+        // primitive's 20 Hz limit, so both paths need storage for that delay.
+        string_.prepare(sample_rate, 20.0);
+        fm_string_.prepare(sample_rate, 20.0);
         exciter_env_.set_sample_rate(sample_rate);
         gate_env_.set_sample_rate(sample_rate);
         gate_.set_sample_rate(sample_rate);
@@ -151,6 +152,7 @@ protected:
 
     void on_reset() override {
         string_.reset();
+        fm_string_.reset();
         exciter_env_.reset();
         gate_env_.reset();
         gate_.reset();
@@ -170,15 +172,24 @@ protected:
         noise_.reset();
         base_frequency_ = tune_hz_ * std::exp2(response.bend(velocity));
         string_.set_frequency(base_frequency_);
+        fm_string_.set_frequency(base_frequency_);
         string_.set_decay_seconds(decay_s_);
+        fm_string_.set_decay_seconds(decay_s_);
         string_.set_damping(damping_);
+        fm_string_.set_damping(damping_);
         string_.set_stiffness(stiffness_);
+        fm_string_.set_stiffness(stiffness_);
         string_.set_pluck_position(pluck_position_);
+        fm_string_.set_pluck_position(pluck_position_);
         string_.set_pick_direction(pick_direction_);
+        fm_string_.set_pick_direction(pick_direction_);
         // Velocity opens the excitation's bandwidth: harder is brighter.
         string_.set_dynamic_bandwidth_hz(
             brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
+        fm_string_.set_dynamic_bandwidth_hz(
+            brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
         string_.pluck(restart_on_hit_);
+        fm_string_.pluck(restart_on_hit_);
 
         exciter_env_.set_attack_ms(0.0);
         exciter_env_.set_decay_time_constant_ms(exciter_ms_);
@@ -194,7 +205,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return string_.is_active() || output_.has_tail();
+        return string_.is_active() || fm_string_.is_active() ||
+               output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -206,11 +218,11 @@ protected:
             }
             const double modulator =
                 std::sin(2.0 * 3.14159265358979323846 * modulation_phase_);
-            const double fm_depth =
-                fm_depth_octaves_ * modulation_mix_;
-            if (modulation_ == StringModulation::fm && fm_depth > 0.0) {
-                string_.set_modulated_frequency(
-                    base_frequency_ * std::exp2(fm_depth * modulator));
+            if (modulation_ == StringModulation::fm &&
+                fm_depth_octaves_ > 0.0) {
+                fm_string_.set_modulated_frequency(
+                    base_frequency_ *
+                    std::exp2(fm_depth_octaves_ * modulator));
             }
 
             const double burst = exciter_env_.is_active()
@@ -219,9 +231,13 @@ protected:
                                      : 0.0;
             const double dry = static_cast<double>(
                 string_.process(static_cast<float>(burst)));
+            const double fm = static_cast<double>(
+                fm_string_.process(static_cast<float>(burst)));
 
             double effected = dry;
-            if (modulation_ == StringModulation::ring) {
+            if (modulation_ == StringModulation::fm) {
+                effected = fm;
+            } else if (modulation_ == StringModulation::ring) {
                 effected = dry * modulator;
             } else if (modulation_ == StringModulation::sync) {
                 master_phase_ += base_frequency_ / sample_rate();
@@ -271,6 +287,7 @@ private:
 
     NoiseSource noise_;
     KarplusStrong string_;
+    KarplusStrong fm_string_;
     DecayEnvelope64 exciter_env_;
     DecayEnvelope64 gate_env_;
     LowpassGate gate_;
