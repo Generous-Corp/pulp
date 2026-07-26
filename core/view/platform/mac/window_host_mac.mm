@@ -595,8 +595,19 @@ static void install_app_menu(NSString* appName) {
                 // relative-mouse mode on press and clears both only on
                 // on_mouse_up, so bailing bare strands beginEdit with no
                 // endEdit — a stuck automation touch and a hidden cursor.
+                // Full release pipeline, not a bare on_mouse_up: the press
+                // reached the modern channel and bubbled pointerdown to
+                // registerPointer ancestors, so a legacy-only close leaves both
+                // unmatched. VirtualList clears dragging_scrollbar_ only on a
+                // modern event with is_down == false, so a legacy-only close
+                // sticks its scrollbar to the mouse. Empty MouseUpHost — a
+                // gesture handoff is not a click.
                 if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
-                    _dragTarget->on_mouse_up(to_local(pt, _dragTarget, self.rootView));
+                    pulp::view::deliver_mouse_up(
+                        *self.rootView, _dragTarget, pt,
+                        modifiers_from_ns_flags(event.modifierFlags),
+                        static_cast<int>(event.clickCount),
+                        pulp::view::MouseUpHost{});
                 _dragTarget = nullptr;
                 [self startAnimationTimerIfNeeded];
                 [self setNeedsDisplay:YES];
@@ -656,8 +667,19 @@ static void install_app_menu(NSString* appName) {
                 // claim on THIS release (a double-tap reaches `ended` on the
                 // second one), by which point the press was already delivered.
                 // Dropping the up here would leave the widget mid-gesture.
+                // Full release pipeline, not a bare on_mouse_up: the press
+                // reached the modern channel and bubbled pointerdown to
+                // registerPointer ancestors, so a legacy-only close leaves both
+                // unmatched. VirtualList clears dragging_scrollbar_ only on a
+                // modern event with is_down == false, so a legacy-only close
+                // sticks its scrollbar to the mouse. Empty MouseUpHost — a
+                // gesture handoff is not a click.
                 if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
-                    _dragTarget->on_mouse_up(to_local(pt, _dragTarget, self.rootView));
+                    pulp::view::deliver_mouse_up(
+                        *self.rootView, _dragTarget, pt,
+                        modifiers_from_ns_flags(event.modifierFlags),
+                        static_cast<int>(event.clickCount),
+                        pulp::view::MouseUpHost{});
                 _dragTarget = nullptr;
                 [self setNeedsDisplay:YES];
                 return;

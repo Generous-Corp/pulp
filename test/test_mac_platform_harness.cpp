@@ -1035,11 +1035,22 @@ TEST_CASE("mac harness: a non-claiming recognizer still lets the widget drag",
 // beginEdit with no endEdit: a stuck automation touch and a hidden cursor.
 TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket",
           "[mac][platform-harness][gesture]") {
+    // Counts BOTH channels. The legacy `ups` counter alone cannot see the
+    // defect this pins: the press also reached on_mouse_event and bubbled
+    // pointerdown, so a close that fires only the legacy callback leaves the
+    // modern channel and the bubble unmatched — and a modern-only consumer
+    // (VirtualList clears dragging_scrollbar_ on is_down == false) stays stuck.
     struct Probe final : View {
         int downs = 0, drags = 0, ups = 0;
+        int modern_press = 0, modern_release = 0;
         void on_mouse_down(Point) override { ++downs; }
         void on_mouse_drag(Point) override { ++drags; }
         void on_mouse_up(Point) override { ++ups; }
+        void on_mouse_event(const MouseEvent& e) override {
+            if (e.is_wheel) return;
+            if (e.phase == pulp::view::MousePhase::press) ++modern_press;
+            if (e.phase == pulp::view::MousePhase::release) ++modern_release;
+        }
     };
 
     View root;
@@ -1051,6 +1062,15 @@ TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket"
     child->flex().preferred_height = 240.0f;
     root.add_child(std::move(child));
     root.layout_children();
+
+    // An ancestor that registered a pointer handler must see the pointerup
+    // bubble matching the pointerdown the press delivered.
+    int bubbled_press = 0, bubbled_release = 0;
+    root.on_pointer_event = [&](const MouseEvent& e) {
+        if (e.is_wheel) return;
+        if (e.phase == pulp::view::MousePhase::press) ++bubbled_press;
+        if (e.phase == pulp::view::MousePhase::release) ++bubbled_release;
+    };
 
     // A pan with a wide slop: the press and the first short drag stay
     // candidates (so the widget receives them), and the long drag claims.
@@ -1068,16 +1088,23 @@ TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket"
     REQUIRE(probe->downs == 1);
     REQUIRE(probe->drags == 1);   // still only a candidate here
     REQUIRE(probe->ups == 0);
+    REQUIRE(probe->modern_press == 1);
+    REQUIRE(bubbled_press == 1);
 
     // Crosses the slop: the pan claims, and the host must close the bracket.
     REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
                                        .x = 200.0f, .y = 120.0f}));
     CHECK(probe->drags == 1);   // the claiming move is NOT delivered
     CHECK(probe->ups == 1);     // ...but the press bracket closed
+    // ...on EVERY channel the press opened, not just the legacy one.
+    CHECK(probe->modern_release == 1);
+    CHECK(bubbled_release == 1);
 
     // The release is now owned by the gesture; the widget must not see a
     // second up (that would double-close and fire a spurious endEdit).
     REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
                                        .x = 200.0f, .y = 120.0f}));
     CHECK(probe->ups == 1);
+    CHECK(probe->modern_release == 1);
+    CHECK(bubbled_release == 1);
 }
