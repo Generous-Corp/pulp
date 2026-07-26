@@ -198,7 +198,11 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         has_block_index_ && transport.block_index != last_block_index_ + 1;
     last_block_index_ = transport.block_index;
     has_block_index_ = true;
-    if (pending_flush_ || view.adoption == ShellAdoptionResult::Adopted || block_sequence_reset) {
+    const auto pass_loop = transport.scrubbing ? LoopRegion{} : transport.loop;
+    const bool note_pass_loop_changed =
+        has_note_pass_epoch_ && pass_loop != note_pass_loop_;
+    if (pending_flush_ || view.adoption == ShellAdoptionResult::Adopted ||
+        block_sequence_reset || note_pass_loop_changed) {
         if (!flush(0)) {
             result.code = NoteRenderCode::OutputOverflow;
             result.emitted_events = static_cast<std::uint32_t>(output_.size());
@@ -220,14 +224,14 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
     const bool reanchor_note_pass =
         !has_note_pass_epoch_ || block_sequence_reset ||
         transport.reset_requested || transport.transport_started ||
-        transport.transport_changed || transport.loop != note_pass_loop_;
+        transport.transport_changed || note_pass_loop_changed;
     if (reanchor_note_pass && transport.range_count != 0) {
         const auto& first_range = transport.ranges[0];
         note_pass_epoch_ = first_range.monotonic_start;
         note_pass_first_wrap_distance_ =
             detail::note_modifier_first_wrap_distance(
-                first_range.timeline_tick_start, transport.loop);
-        note_pass_loop_ = transport.loop;
+                first_range.timeline_tick_start, pass_loop);
+        note_pass_loop_ = pass_loop;
         has_note_pass_epoch_ = true;
     }
 
@@ -243,7 +247,7 @@ NoteRenderResult ArrangementNoteRenderer::process(const PlaybackProgramBlock& bl
         // resolve against the same pass, so the gate can never admit one
         // without the other and leave a note hanging.
         const auto pass_index = detail::note_modifier_pass_index(
-            range, transport.loop, note_pass_epoch_,
+            range, pass_loop, note_pass_epoch_,
             note_pass_first_wrap_distance_);
 
         const auto search_sample =

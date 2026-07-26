@@ -344,6 +344,80 @@ TEST_CASE("Program adoption preserves the current conditional note pass",
         REQUIRE_FALSE((event.is_note_on() && event.data()[1] == 60));
 }
 
+TEST_CASE("Changing a loop flushes notes before reanchoring conditional passes",
+          "[playback][note-modifier][transport]") {
+    const auto map = modifier_tempo_map();
+    ProgramHarness programs;
+    programs.publish(modifier_project({}, 0), map);
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = 1'000;
+    config.initially_playing = true;
+    config.loop = {true, {0}, TickPosition{kLoopLength.value}};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+
+    TransportSnapshot opening;
+    REQUIRE(transport.begin_block(1'000, opening) == TransportError::None);
+    REQUIRE(renderer.process(latch.begin_block(programs.store), opening).code ==
+            NoteRenderCode::Ok);
+    REQUIRE(renderer.has_active_notes());
+
+    REQUIRE(transport.set_loop(
+                {true, {0}, TickPosition{kLoopLength.value / 2}}) ==
+            TransportError::None);
+    TransportSnapshot changed;
+    REQUIRE(transport.begin_block(1'000, changed) == TransportError::None);
+    REQUIRE_FALSE(changed.transport_changed);
+    REQUIRE(renderer.process(latch.begin_block(programs.store), changed).code ==
+            NoteRenderCode::Ok);
+    REQUIRE_FALSE(renderer.events().empty());
+    REQUIRE_FALSE(renderer.events()[0].is_note_on());
+    REQUIRE(renderer.events()[0].sample_offset == 0);
+    REQUIRE_FALSE(renderer.has_active_notes());
+}
+
+TEST_CASE("Scrub windows keep conditional notes on pass zero",
+          "[playback][note-modifier][transport]") {
+    const auto map = modifier_tempo_map();
+    NoteModifier first_only = chance(30, note_probability_certain);
+    first_only.condition = NoteConditionKind::First;
+    ProgramHarness programs;
+    programs.publish(modifier_project({first_only}, 0), map);
+
+    const auto loop_samples =
+        map->ticks_to_samples(TickPosition{kLoopLength.value}).value;
+    REQUIRE(loop_samples > 0);
+    REQUIRE(loop_samples <= std::numeric_limits<std::uint32_t>::max());
+    const auto block_frames = static_cast<std::uint32_t>(loop_samples);
+
+    ArrangementNoteRenderer renderer({10});
+    REQUIRE(renderer.prepare(64));
+    PlaybackProgramBlockLatch latch;
+    MasterTransport transport;
+    MasterTransportConfig config;
+    config.max_buffer_size = block_frames;
+    config.loop = {true, {0}, TickPosition{kLoopLength.value}};
+    REQUIRE(transport.prepare(*map, config) == TransportError::None);
+    REQUIRE(transport.begin_scrub(block_frames, {0}) == TransportError::None);
+
+    for (int window = 0; window < 2; ++window) {
+        TransportSnapshot snapshot;
+        REQUIRE(transport.begin_block(block_frames, snapshot) ==
+                TransportError::None);
+        REQUIRE(snapshot.scrubbing);
+        REQUIRE(renderer.process(latch.begin_block(programs.store), snapshot).code ==
+                NoteRenderCode::Ok);
+        bool sounded = false;
+        for (const auto& event : renderer.events())
+            sounded |= event.is_note_on() && event.data()[1] == 60;
+        REQUIRE(sounded);
+    }
+}
+
 TEST_CASE("A ratchet subdivides a note into retriggers that fill its own span",
           "[playback][note-modifier]") {
     const auto map = modifier_tempo_map();
