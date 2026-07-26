@@ -234,6 +234,7 @@ public:
     /// 0..1 colour depth. Scales the internal operating amplitude only — it is
     /// not a level control and does not touch the gain law.
     void set_character(double character01) {
+        if (!std::isfinite(character01)) return;
         const double c = std::clamp(character01, 0.0, 1.0);
         drive_ = kDriveBridgeMax * (kDriveBridgeFloor + (1.0 - kDriveBridgeFloor) * c);
     }
@@ -482,6 +483,7 @@ public:
 
     /// 0..1 colour depth, shared with the bridge.
     void set_character(double character01) {
+        if (!std::isfinite(character01)) return;
         const double a = kSaturationDepth * std::clamp(character01, 0.0, 1.0);
         positive_ = a * (1.0 + kEvenAsymmetry);
         negative_ = a * (1.0 - kEvenAsymmetry);

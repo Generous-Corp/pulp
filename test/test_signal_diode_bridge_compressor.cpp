@@ -1375,21 +1375,73 @@ TEST_CASE("a NaN sample cannot latch the diode-bridge feedback detector",
 
 TEST_CASE("non-finite diode-bridge controls retain the last valid configuration",
           "[diode-bridge][nan-recovery]") {
-    Comp c;
-    c.prepare(kSr);
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    c.set_threshold_db(nan);
-    c.set_ratio(nan);
-    c.set_knee_db(nan);
-    c.set_attack_ms(nan);
-    c.set_release_ms(nan);
-    c.set_makeup_db(nan);
-    c.set_character(nan);
-    c.set_mix_percent(nan);
-    c.set_sc_hpf_hz(nan);
-    for (int i = 0; i < 512; ++i) {
-        REQUIRE(std::isfinite(c.process(0.25)));
-        REQUIRE(std::isfinite(c.gain_reduction_db()));
+    const double inf = std::numeric_limits<double>::infinity();
+    const double invalid[] = {nan, inf, -inf};
+
+    SECTION("the complete compressor retains a non-default configuration") {
+        Comp actual;
+        Comp reference;
+        for (Comp* c : {&actual, &reference}) {
+            c->prepare(kSr);
+            c->set_threshold_db(-27.0);
+            c->set_ratio(7.0);
+            c->set_knee_db(4.0);
+            c->set_attack_ms(2.5);
+            c->set_release_ms(173.0);
+            c->set_makeup_db(3.0);
+            c->set_character(0.73);
+            c->set_mix_percent(61.0);
+            c->set_sc_hpf_hz(137.0);
+        }
+
+        for (double value : invalid) {
+            actual.set_threshold_db(value);
+            actual.set_ratio(value);
+            actual.set_knee_db(value);
+            actual.set_attack_ms(value);
+            actual.set_release_ms(value);
+            actual.set_makeup_db(value);
+            actual.set_character(value);
+            actual.set_mix_percent(value);
+            actual.set_sc_hpf_hz(value);
+        }
+
+        for (int i = 0; i < 2048; ++i) {
+            const double input = 0.35 * std::sin(2.0 * M_PI * 997.0 * i / kSr);
+            REQUIRE_THAT(actual.process(input), WithinAbs(reference.process(input), 1e-12));
+            REQUIRE_THAT(actual.gain_reduction_db(),
+                         WithinAbs(reference.gain_reduction_db(), 1e-12));
+        }
+    }
+
+    SECTION("the diode bridge gain component retains its character") {
+        Bridge actual;
+        Bridge reference;
+        actual.set_character(0.73);
+        reference.set_character(0.73);
+
+        for (double value : invalid) {
+            actual.set_character(value);
+            REQUIRE_THAT(actual.drive(), WithinAbs(reference.drive(), 1e-15));
+            REQUIRE_THAT(actual.process(0.6, 2.0),
+                         WithinAbs(reference.process(0.6, 2.0), 1e-12));
+        }
+    }
+
+    SECTION("the transformer bracket component retains its character") {
+        Bracket actual;
+        Bracket reference;
+        actual.set_character(0.73);
+        reference.set_character(0.73);
+
+        for (double value : invalid) {
+            actual.set_character(value);
+            REQUIRE_THAT(actual.saturate(0.8),
+                         WithinAbs(reference.saturate(0.8), 1e-15));
+            REQUIRE_THAT(actual.saturate(-0.8),
+                         WithinAbs(reference.saturate(-0.8), 1e-15));
+        }
     }
 }
 
