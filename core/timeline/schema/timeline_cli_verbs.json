@@ -163,6 +163,21 @@
       "flags": [
         {
           "kind": "String",
+          "name": "parameter",
+          "required": true,
+          "schema_field": "parameter",
+          "value_type": "string"
+        }
+      ],
+      "name": "timeline:automation-target:track-mixer",
+      "schema_type": "pulp.timeline.automation_target.track_mixer",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "String",
           "name": "chord-quality",
           "required": true,
           "schema_field": "chord_quality",
@@ -1278,6 +1293,42 @@
       "version": 1
     },
     {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "Object",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "track-id",
+          "required": true,
+          "schema_field": "track_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-track-mixer",
+      "schema_type": "pulp.timeline.command.set_track_mixer",
+      "version": 1
+    },
+    {
       "domain": "Content",
       "flags": [],
       "name": "timeline:content:empty",
@@ -1898,6 +1949,13 @@
           "value_type": "uint"
         },
         {
+          "kind": "Object",
+          "name": "mixer",
+          "required": false,
+          "schema_field": "mixer",
+          "value_type": "json"
+        },
+        {
           "kind": "String",
           "name": "name",
           "required": true,
@@ -1921,7 +1979,7 @@
       ],
       "name": "timeline:track",
       "schema_type": "pulp.timeline.track",
-      "version": 6
+      "version": 7
     }
   ],
   "x-pulp-generator": "schema-cli-emit",
