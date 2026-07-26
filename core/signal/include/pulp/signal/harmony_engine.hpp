@@ -294,6 +294,7 @@ public:
     /// — are derived from it. Changing latency mid-stream would be a worse
     /// surprise than requiring a re-prepare.
     void set_f0_range(double min_hz, double max_hz) {
+        if (!std::isfinite(min_hz) || !std::isfinite(max_hz)) return;
         const double lo = std::clamp(min_hz, kF0MinLimit, kF0MaxLimit);
         const double hi = std::clamp(max_hz, kF0MinLimit, kF0MaxLimit);
         if (hi <= lo) return;
@@ -308,6 +309,10 @@ public:
     /// landed, so a caller can re-run its control chain only on those.
     bool process(SampleType x) {
         if (window_ <= 0) return false;
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return false;
+        }
         ring_[static_cast<std::size_t>(write_)] = static_cast<double>(x);
         write_ = (write_ + 1) % window_;
         if (++hop_counter_ < kHop) return false;
@@ -824,7 +829,7 @@ public:
     int voice_interval(int voice) const { return valid(voice) ? interval_[voice] : 0; }
 
     void set_voice_detune_cents(int voice, double cents) {
-        if (!valid(voice)) return;
+        if (!valid(voice) || !std::isfinite(cents)) return;
         detune_cents_[voice] = clamp_finite(cents, -kDetuneMaxCents, kDetuneMaxCents);
     }
     double voice_detune_cents(int voice) const {
@@ -832,7 +837,7 @@ public:
     }
 
     void set_voice_level_db(int voice, double db) {
-        if (!valid(voice)) return;
+        if (!valid(voice) || !std::isfinite(db)) return;
         level_db_[voice] = clamp_finite(db, kLevelMinDb, kLevelMaxDb);
         level_[voice] = units::db_to_linear(level_db_[voice]);
     }
@@ -847,6 +852,7 @@ public:
     bool voice_enabled(int voice) const { return valid(voice) && enabled_[voice]; }
 
     void set_dry_level_db(double db) {
+        if (!std::isfinite(db)) return;
         dry_db_ = clamp_finite(db, kLevelMinDb, kLevelMaxDb);
         dry_ = units::db_to_linear(dry_db_);
     }
@@ -856,6 +862,7 @@ public:
     /// click-safe because the shifter's crossfade masks a ratio jump within one
     /// window.
     void set_glide_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         glide_ms_ = clamp_finite(ms, 0.0, kGlideMsMax);
         for (auto& g : glide_) g.set_time_ms(glide_ms_);
     }
@@ -864,6 +871,7 @@ public:
     /// Seeded humanise depth in cents, 1σ. Off by default; deterministic when
     /// on (series law 2).
     void set_humanize_cents(double cents) {
+        if (!std::isfinite(cents)) return;
         humanize_cents_ = clamp_finite(cents, 0.0, kHumanizeMaxCents);
         // DriftT's depth is a percentage of a multiplier near 1, and
         // `cents = 1200·log2(m) ≈ (1200/ln2)·ε` for small ε — so the depth that
@@ -875,6 +883,7 @@ public:
 
     /// The shifter's crossfade window, shared by both voices.
     void set_crossfade_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         crossfade_ms_ = clamp_finite(ms, kCrossfadeMsMin, kCrossfadeMsMax);
         for (auto& s : shifter_) s.set_window_ms(crossfade_ms_);
         update_alignment();
@@ -954,6 +963,11 @@ public:
         // `process` early (which real hosts do) gets an out-of-bounds write
         // rather than a diagnosable silence.
         if (latency_ <= 0) return SampleType{0};
+
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
 
         const double in = static_cast<double>(x);
 

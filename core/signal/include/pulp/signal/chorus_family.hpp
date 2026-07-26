@@ -418,6 +418,11 @@ public:
         for (int i = 0; i < n; ++i) {
             const double in_l = static_cast<double>(left[i]);
             const double in_r = static_cast<double>(right[i]);
+            if (!std::isfinite(in_l) || !std::isfinite(in_r)) {
+                reset();
+                left[i] = right[i] = SampleType{0};
+                continue;
+            }
             const double src_l = cal.mono_source ? 0.5 * (in_l + in_r) : in_l;
             const double src_r = cal.mono_source ? src_l : in_r;
 

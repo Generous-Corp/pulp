@@ -328,6 +328,7 @@ public:
     Engine delay_engine() const { return engine_; }
 
     void set_rate_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         rate_hz_ = std::clamp(hz, kRateMinHz, kRateMaxHz);
         apply_lfo_settings();
     }
@@ -345,6 +346,7 @@ public:
     /// width simply does not vary monotonically by the same law as the
     /// odd-symmetric shapes because its wrap discontinuity moves between rails.
     void set_stereo_spread(double cycles01) {
+        if (!std::isfinite(cycles01)) return;
         stereo_spread_ = std::clamp(cycles01, 0.0, 0.5);
         apply_lfo_settings();
     }
@@ -352,31 +354,45 @@ public:
     /// Modulation excursion. The value the engine uses is
     /// `effective_depth_ms()`, which is this clamped against the mode's fixed
     /// reference — never the raw request.
-    void set_depth_ms(double ms) { depth_ms_ = std::clamp(ms, 0.0, kDepthMaxMs); }
+    void set_depth_ms(double ms) {
+        if (!std::isfinite(ms)) return;
+        depth_ms_ = std::clamp(ms, 0.0, kDepthMaxMs);
+    }
     double depth_ms() const { return depth_ms_; }
 
     void set_center_delay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         center_ms_ = std::clamp(ms, kCenterMinMs, kCenterMaxMs);
     }
     double center_delay_ms() const { return center_ms_; }
 
-    void set_offset_ms(double ms) { offset_ms_ = std::clamp(ms, kOffsetMinMs, kOffsetMaxMs); }
+    void set_offset_ms(double ms) {
+        if (!std::isfinite(ms)) return;
+        offset_ms_ = std::clamp(ms, kOffsetMinMs, kOffsetMaxMs);
+    }
     double offset_ms() const { return offset_ms_; }
 
     /// Resonance, `−kFbClamp .. +kFbClamp`. A negative coefficient is a
     /// different resonance colour, not a polarity control — `set_polarity`
     /// owns that.
-    void set_feedback(double fb) { feedback_ = std::clamp(fb, -kFbClamp, kFbClamp); }
+    void set_feedback(double fb) {
+        if (!std::isfinite(fb)) return;
+        feedback_ = std::clamp(fb, -kFbClamp, kFbClamp);
+    }
     double feedback() const { return feedback_; }
 
     /// Equal-power dry/wet, `0 .. 1`. At 0.5 both gains are `1/√2`, which is
     /// the setting the comb algebra is written for: equal dry and wet weights
     /// give exact nulls.
-    void set_mix(double wet01) { mix_ = std::clamp(wet01, 0.0, 1.0); }
+    void set_mix(double wet01) {
+        if (!std::isfinite(wet01)) return;
+        mix_ = std::clamp(wet01, 0.0, 1.0);
+    }
     double mix() const { return mix_; }
 
     /// Barberpole shift in Hz. Positive climbs, negative descends.
     void set_barberpole_shift_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         barberpole_hz_ = std::clamp(hz, -kBarberpoleShiftMaxHz, kBarberpoleShiftMaxHz);
         for (auto& ch : channels_) ch.shifter.set_shift_hz(barberpole_hz_);
     }
@@ -386,6 +402,11 @@ public:
 
     void process(const SampleType* in, SampleType* out, int n) {
         for (int i = 0; i < n; ++i) {
+            if (!std::isfinite(static_cast<double>(in[i]))) {
+                reset();
+                out[i] = SampleType{0};
+                continue;
+            }
             const Sweep sweep = advance_sweep();
             out[i] = static_cast<SampleType>(
                 run_channel(channels_[0], static_cast<double>(in[i]), sweep));
@@ -395,6 +416,12 @@ public:
     void process_stereo(const SampleType* in_left, const SampleType* in_right,
                         SampleType* out_left, SampleType* out_right, int n) {
         for (int i = 0; i < n; ++i) {
+            if (!std::isfinite(static_cast<double>(in_left[i])) ||
+                !std::isfinite(static_cast<double>(in_right[i]))) {
+                reset();
+                out_left[i] = out_right[i] = SampleType{0};
+                continue;
+            }
             const Sweep sweep = advance_sweep();
             out_left[i] = static_cast<SampleType>(
                 run_channel(channels_[0], static_cast<double>(in_left[i]), sweep));

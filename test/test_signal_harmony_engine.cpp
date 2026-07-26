@@ -1278,3 +1278,12 @@ TEST_CASE("a fresh instance survives being used before prepare",
     engine.reset();
     REQUIRE(std::isfinite(static_cast<double>(engine.process(0.5))));
 }
+TEST_CASE("harmony retains controls and recovers from non-finite audio",
+          "[signal][harmony-engine][nonfinite]") {
+    for(double bad:{NAN,INFINITY,-INFINITY}){
+        Tracker t;t.set_f0_range(73,911);t.set_f0_range(bad,1000);REQUIRE(t.f0_min_hz()==73);t.prepare(kSr);REQUIRE_FALSE(t.process(bad));
+        Engine a,b;for(auto* e:{&a,&b}){e->prepare(kSr);e->set_voice_detune_cents(0,17);e->set_voice_level_db(0,-4);e->set_dry_level_db(-9);e->set_glide_ms(31);e->set_humanize_cents(7);e->set_crossfade_ms(33);e->reset();}
+        a.set_voice_detune_cents(0,bad);a.set_voice_level_db(0,bad);a.set_dry_level_db(bad);a.set_glide_ms(bad);a.set_humanize_cents(bad);a.set_crossfade_ms(bad);
+        REQUIRE(a.voice_detune_cents(0)==b.voice_detune_cents(0));REQUIRE(a.process(bad)==0);b.reset();for(int i=0;i<64;++i)REQUIRE(a.process(.2)==b.process(.2));
+    }
+}

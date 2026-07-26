@@ -440,6 +440,7 @@ public:
 
     /// LFO rate in Hz. Forwarded to both channels' LFOs.
     void set_rate_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         for (auto& lfo : lfo_) lfo.set_rate_hz(hz);
     }
     double rate_hz() const { return lfo_[0].rate_hz(); }
@@ -447,12 +448,16 @@ public:
     /// Sweep excursion, 0..1. 1.0 swings `fc` across `[0, 2·center]` before
     /// the floor and ceiling clamps apply.
     void set_depth(float depth01) {
+        if (!std::isfinite(static_cast<double>(depth01))) return;
         depth_ = std::clamp(static_cast<double>(depth01), 0.0, 1.0);
     }
     double depth() const { return depth_; }
 
     /// Allpass corner frequency at the LFO's midpoint.
-    void set_center_hz(double fc) { center_hz_ = clamp_hz(fc); }
+    void set_center_hz(double fc) {
+        if (!std::isfinite(fc)) return;
+        center_hz_ = clamp_hz(fc);
+    }
     double center_hz() const { return center_hz_; }
 
     /// Feedback ("Color"), clamped to `±kFeedbackMax`. Positive adds a
@@ -461,6 +466,7 @@ public:
     /// and is a catalog-only extension with no hardware precedent. Both signs
     /// obey the same gain bound.
     void set_feedback(float fb) {
+        if (!std::isfinite(static_cast<double>(fb))) return;
         feedback_ = std::clamp(static_cast<double>(fb), -kFeedbackMax,
                                kFeedbackMax);
     }
@@ -468,6 +474,7 @@ public:
 
     /// Dry/wet, 0..1. 0.5 is the full-notch point; 1.0 is a flat allpass.
     void set_mix(float mix01) {
+        if (!std::isfinite(static_cast<double>(mix01))) return;
         mix_ = std::clamp(static_cast<double>(mix01), 0.0, 1.0);
     }
     double mix() const { return mix_; }
@@ -475,6 +482,7 @@ public:
     /// Right-channel LFO lead in CYCLES, 0..0.5. 0.25 is quadrature — the
     /// catalog's 90° default. 0 makes the two channels bit-identical.
     void set_stereo_spread(float cycles01) {
+        if (!std::isfinite(static_cast<double>(cycles01))) return;
         spread_ = std::clamp(static_cast<double>(cycles01), 0.0, 0.5);
         lfo_[1].set_stereo_offset(spread_);
     }
@@ -495,6 +503,7 @@ public:
     /// Per-stage corner ratio; 1.0 (the default) means every stage shares one
     /// `fc`, which is the documented single-control-current topology.
     void set_stagger_ratio(double ratio) {
+        if (!std::isfinite(ratio)) return;
         stagger_ = std::clamp(ratio, kStaggerMin, kStaggerMax);
         double p = 1.0;
         for (int i = 0; i < kMaxStages; ++i) {
@@ -532,6 +541,12 @@ public:
         for (int i = 0; i < n_frames; ++i) {
             const SampleType xl = in_l[i];
             const SampleType xr = in_r[i];
+            if (!std::isfinite(static_cast<double>(xl)) ||
+                !std::isfinite(static_cast<double>(xr))) {
+                reset();
+                out_l[i] = out_r[i] = SampleType{0};
+                continue;
+            }
             const double wl = run_cascade(0, advance_sweep(0), xl);
             const double wr = run_cascade(1, advance_sweep(1), xr);
             out_l[i] = static_cast<SampleType>(dry * static_cast<double>(xl) +
@@ -549,6 +564,11 @@ public:
         const double dry = 1.0 - mix_;
         for (int i = 0; i < n_frames; ++i) {
             const SampleType x = in[i];
+            if (!std::isfinite(static_cast<double>(x))) {
+                reset();
+                out[i] = SampleType{0};
+                continue;
+            }
             const double w = run_cascade(0, advance_sweep(0), x);
             advance_sweep(1);
             out[i] = static_cast<SampleType>(dry * static_cast<double>(x) +

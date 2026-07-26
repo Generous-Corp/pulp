@@ -114,6 +114,26 @@ double magnitude_at(const std::vector<double>& x, double hz) {
     return 2.0 * std::hypot(re, im) / static_cast<double>(x.size());
 }
 
+TEST_CASE("pitch shifter retains controls and recovers from non-finite audio",
+          "[signal][pitch-shifter][nonfinite]") {
+    for (double bad : {NAN, INFINITY, -INFINITY}) {
+        Shifter a, b;
+        for (auto* s : {&a, &b}) {
+            s->prepare(kSr); s->set_shift_semitones(7.0); s->set_pedal(.37);
+            s->set_targets(-9.0, 11.0); s->set_harmony(-4.0, 8.0);
+            s->set_detune_cents(17.0); s->set_dive_floor_semis(-18.0);
+            s->set_window_ms(31.0); s->set_glide_ms(27.0, 41.0);
+            s->set_mix(.63); s->set_drift_depth(.21); s->reset();
+        }
+        a.set_shift_semitones(bad); a.set_pedal(bad); a.set_targets(bad, 3.0);
+        a.set_harmony(3.0, bad); a.set_detune_cents(bad); a.set_dive_floor_semis(bad);
+        a.set_window_ms(bad); a.set_glide_ms(bad, 3.0); a.set_mix(bad); a.set_drift_depth(bad);
+        REQUIRE(a.shift_semitones() == b.shift_semitones()); REQUIRE(a.window_ms() == b.window_ms());
+        REQUIRE(a.process(bad) == 0.0); b.reset();
+        for (int i=0;i<64;++i) REQUIRE(a.process(.2) == b.process(.2));
+    }
+}
+
 /// Guards the recipe itself: a frequency off the bin grid makes every coherent
 /// read above leaky, and the failure looks like a DSP bug.
 bool on_bin(double hz) {

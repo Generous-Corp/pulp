@@ -1711,3 +1711,19 @@ TEST_CASE("Colour feedback adds a resonant peak and does not deepen the notch",
     // No hardware source documents it; it is a catalog-only extension.
     REQUIRE(inverted.null_depth_db < on.null_depth_db);
 }
+TEST_CASE("phaser retains controls and recovers from non-finite audio",
+          "[signal][phaser][nonfinite]") {
+    for (double bad : {NAN, INFINITY, -INFINITY}) {
+        Phaser a, b;
+        for (auto* p : {&a, &b}) { p->prepare(kSr); p->set_rate_hz(1.2); p->set_depth(.7f);
+            p->set_center_hz(913); p->set_feedback(.31f); p->set_mix(.62f);
+            p->set_stereo_spread(.17f); p->set_stagger_ratio(1.13); p->reset(); }
+        a.set_rate_hz(bad); a.set_depth(static_cast<float>(bad)); a.set_center_hz(bad);
+        a.set_feedback(static_cast<float>(bad)); a.set_mix(static_cast<float>(bad));
+        a.set_stereo_spread(static_cast<float>(bad)); a.set_stagger_ratio(bad);
+        REQUIRE(a.center_hz() == b.center_hz()); REQUIRE(a.feedback() == b.feedback());
+        double inl=bad,inr=.2,al=1,ar=1; a.process(&inl,&inr,&al,&ar,1);
+        REQUIRE(al==0); REQUIRE(ar==0); b.reset();
+        for(int i=0;i<64;++i){ double x=.2,ya=0,za=0,yb=0,zb=0; a.process(&x,&x,&ya,&za,1); b.process(&x,&x,&yb,&zb,1); REQUIRE(ya==yb); REQUIRE(za==zb); }
+    }
+}

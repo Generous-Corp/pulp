@@ -367,41 +367,50 @@ public:
     Speed speed() const { return speed_; }
 
     void set_horn_fast_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         horn_fast_hz_ = std::clamp(hz, 0.0, 20.0);
         update();
     }
     void set_horn_slow_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         horn_slow_hz_ = std::clamp(hz, 0.0, 20.0);
         update();
     }
     void set_drum_fast_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         drum_fast_hz_ = std::clamp(hz, 0.0, 20.0);
         update();
     }
     void set_drum_slow_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         drum_slow_hz_ = std::clamp(hz, 0.0, 20.0);
         update();
     }
 
     /// Seconds for the horn to close `kSettleFraction` of a speed change.
     void set_horn_accel_s(double seconds) {
+        if (!std::isfinite(seconds)) return;
         horn_accel_s_ = std::max(seconds, 0.0);
         update();
     }
     void set_horn_decel_s(double seconds) {
+        if (!std::isfinite(seconds)) return;
         horn_decel_s_ = std::max(seconds, 0.0);
         update();
     }
     void set_drum_accel_s(double seconds) {
+        if (!std::isfinite(seconds)) return;
         drum_accel_s_ = std::max(seconds, 0.0);
         update();
     }
     void set_drum_decel_s(double seconds) {
+        if (!std::isfinite(seconds)) return;
         drum_decel_s_ = std::max(seconds, 0.0);
         update();
     }
 
     void set_crossover_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         crossover_hz_ = std::clamp(hz, 20.0, 20000.0);
         update();
     }
@@ -413,9 +422,11 @@ public:
     /// depth curve (series law 7 — one scale-invariant shape, not two fitted
     /// ones).
     void set_horn_radius_m(double metres) {
+        if (!std::isfinite(metres)) return;
         horn_radius_m_ = std::clamp(metres, 0.0, kMaxRadiusM);
     }
     void set_drum_radius_m(double metres) {
+        if (!std::isfinite(metres)) return;
         drum_radius_m_ = std::clamp(metres, 0.0, kMaxRadiusM);
     }
 
@@ -424,6 +435,7 @@ public:
     /// movement; a far mic is the reverse. "Subtle vintage" is a smaller radius
     /// with a farther mic; "in your face" is a larger radius up close.
     void set_mic_distance_m(double metres) {
+        if (!std::isfinite(metres)) return;
         mic_distance_m_ = std::clamp(metres, kMinMicDistanceM, 10.0);
     }
 
@@ -432,21 +444,33 @@ public:
     /// widest ping-pong. The tasteful default reads as two mics on the cabinet,
     /// which is exactly the classic recording setup.
     void set_mic_angle_deg(double degrees) {
+        if (!std::isfinite(degrees)) return;
         mic_angle_deg_ = std::clamp(degrees, 0.0, 180.0);
         update();
     }
 
-    void set_am_depth(double depth) { am_depth_ = std::clamp(depth, 0.0, 0.9); }
+    void set_am_depth(double depth) {
+        if (!std::isfinite(depth)) return;
+        am_depth_ = std::clamp(depth, 0.0, 0.9);
+    }
 
-    void set_dir_depth_db(double db) { dir_depth_db_ = std::clamp(db, 0.0, 24.0); }
-    void set_drum_dir_depth_db(double db) { drum_dir_depth_db_ = std::clamp(db, 0.0, 24.0); }
+    void set_dir_depth_db(double db) {
+        if (!std::isfinite(db)) return;
+        dir_depth_db_ = std::clamp(db, 0.0, 24.0);
+    }
+    void set_drum_dir_depth_db(double db) {
+        if (!std::isfinite(db)) return;
+        drum_dir_depth_db_ = std::clamp(db, 0.0, 24.0);
+    }
 
     void set_dir_corner_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         dir_corner_hz_ = std::clamp(hz, 20.0, 20000.0);
         update();
     }
 
     void set_d_bias_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         d_bias_ms_ = std::clamp(ms, 0.0, kMaxDBiasMs);
     }
 
@@ -456,6 +480,7 @@ public:
     /// direct signal at `1/(2·0.0035) ≈ 143 Hz` and its odd multiples, which is
     /// where that boxiness actually comes from.
     void set_reflection_db(double db) {
+        if (!std::isfinite(db)) return;
         reflection_db_ = std::clamp(db, -120.0, 0.0);
         update();
     }
@@ -465,20 +490,24 @@ public:
         update();
     }
     void set_refl_delay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         refl_delay_ms_ = std::clamp(ms, 0.0, kMaxReflDelayMs);
         update();
     }
     void set_refl_spacing_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         refl_spacing_ms_ = std::clamp(ms, 0.0, kMaxReflSpacingMs);
         update();
     }
     void set_refl_corner_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         refl_corner_hz_ = std::clamp(hz, 20.0, 20000.0);
         update();
     }
 
     /// Motor wow, in cents of rate (1σ). 0 disables the walk.
     void set_drift_cents(double cents) {
+        if (!std::isfinite(cents)) return;
         drift_cents_ = std::clamp(cents, 0.0, 50.0);
         update();
     }
@@ -489,7 +518,10 @@ public:
         drum_drift_.set_seed(seed ^ 0x9e3779b9u);
     }
 
-    void set_mix(double mix01) { mix_ = std::clamp(mix01, 0.0, 1.0); }
+    void set_mix(double mix01) {
+        if (!std::isfinite(mix01)) return;
+        mix_ = std::clamp(mix01, 0.0, 1.0);
+    }
 
     // ── Observables ───────────────────────────────────────────────────────
 
@@ -530,6 +562,12 @@ public:
 
     void process(SampleType in_left, SampleType in_right, SampleType& out_left,
                  SampleType& out_right) {
+        if (!std::isfinite(static_cast<double>(in_left)) ||
+            !std::isfinite(static_cast<double>(in_right))) {
+            reset();
+            out_left = out_right = SampleType{0};
+            return;
+        }
         // One cabinet has one input. The dry path stays stereo so `mix` blends
         // against what actually arrived rather than against a folded-down copy.
         const double mono = 0.5 * (static_cast<double>(in_left) + static_cast<double>(in_right));
@@ -943,29 +981,35 @@ public:
     Mode mode() const { return mode_; }
 
     void set_scan_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         scan_hz_ = std::clamp(hz, 0.0, 100.0);
         update();
     }
 
     void set_line_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         line_ms_ = std::clamp(ms, 0.0, kMaxLineDelayMs);
         update();
     }
 
     void set_v1_frac(double frac) {
+        if (!std::isfinite(frac)) return;
         v1_ = std::clamp(frac, 0.0, 1.0);
         update();
     }
     void set_v2_frac(double frac) {
+        if (!std::isfinite(frac)) return;
         v2_ = std::clamp(frac, 0.0, 1.0);
         update();
     }
     void set_v3_frac(double frac) {
+        if (!std::isfinite(frac)) return;
         v3_ = std::clamp(frac, 0.0, 1.0);
         update();
     }
 
     void set_chorus_mix(double mix01) {
+        if (!std::isfinite(mix01)) return;
         chorus_mix_ = std::clamp(mix01, 0.0, 1.0);
         update();
     }
@@ -995,6 +1039,10 @@ public:
     static constexpr int latency_samples() { return 0; }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         if (mode_ == Mode::off) return input;
 
         const double dry = static_cast<double>(input);

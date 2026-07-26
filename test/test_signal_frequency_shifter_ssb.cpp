@@ -75,6 +75,24 @@ double magnitude_at(const std::vector<double>& x, double hz) {
     return std::hypot(re * scale, im * scale);
 }
 
+TEST_CASE("SSB rejects non-finite controls and audio without poisoning state",
+          "[signal][frequency-shifter][nonfinite]") {
+    for (double bad : {NAN, INFINITY, -INFINITY}) {
+        Shifter a, b;
+        for (auto* s : {&a, &b}) {
+            s->prepare(kSr); s->set_shift_hz(317.0); s->set_feedback(0.37);
+            s->set_feedback_delay_ms(13.0); s->set_mix(0.73); s->set_stereo_spread(0.41);
+        }
+        a.set_shift_hz(bad); a.set_feedback(bad); a.set_feedback_delay_ms(bad);
+        a.set_mix(bad); a.set_stereo_spread(bad);
+        REQUIRE(a.shift_hz() == b.shift_hz());
+        for (int i = 0; i < 64; ++i) REQUIRE(a.process(0.2) == b.process(0.2));
+        REQUIRE(a.process(bad) == 0.0);
+        b.reset();
+        for (int i = 0; i < 64; ++i) REQUIRE(a.process(0.2) == b.process(0.2));
+    }
+}
+
 /// Guards the recipe itself: a frequency that is not on a bin makes every
 /// magnitude read above leaky, and the failure looks like a DSP bug.
 bool on_bin(double hz) {

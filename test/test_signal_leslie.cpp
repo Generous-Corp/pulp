@@ -1137,3 +1137,11 @@ TEST_CASE("neither engine allocates on the audio thread", "[leslie][scanner][rt-
         scanner_d.reset();
     });
 }
+TEST_CASE("Leslie and scanner recover from non-finite audio with controls retained",
+          "[signal][leslie][nonfinite]") {
+    for(double bad:{NAN,INFINITY,-INFINITY}){
+        Leslie a,b;for(auto* x:{&a,&b}){x->prepare(kSr);x->set_horn_fast_hz(7);x->set_drum_fast_hz(5);x->set_mic_distance_m(1.7);x->set_mix(.73);x->reset();}
+        a.set_horn_fast_hz(bad);a.set_drum_fast_hz(bad);a.set_mic_distance_m(bad);a.set_mix(bad);double l=1,r=1;a.process(bad,.2,l,r);REQUIRE(l==0);REQUIRE(r==0);b.reset();for(int i=0;i<64;++i){double bl=0,br=0;a.process(.2,.2,l,r);b.process(.2,.2,bl,br);REQUIRE(l==bl);REQUIRE(r==br);}
+        Scanner sa,sb;for(auto* x:{&sa,&sb}){x->prepare(kSr);x->set_scan_hz(7.1);x->set_line_ms(1.3);x->set_v1_frac(.2);x->set_v2_frac(.5);x->set_v3_frac(.8);x->set_chorus_mix(.4);x->reset();}sa.set_scan_hz(bad);sa.set_line_ms(bad);sa.set_v1_frac(bad);sa.set_v2_frac(bad);sa.set_v3_frac(bad);sa.set_chorus_mix(bad);REQUIRE(sa.process(bad)==0);sb.reset();for(int i=0;i<64;++i)REQUIRE(sa.process(.2)==sb.process(.2));
+    }
+}

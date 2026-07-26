@@ -82,6 +82,25 @@ double ref_wrap(double cycles) {
     return cycles < 1.0 ? cycles : 0.0;
 }
 
+TEST_CASE("chorus recovers exactly after non-finite audio", "[signal][chorus][nonfinite]") {
+    for (double bad : {NAN, INFINITY, -INFINITY}) {
+        Chorus a, b;
+        for (auto* c : {&a, &b}) {
+            c->prepare(kSr); c->set_rate_hz(1.7); c->set_depth(0.63);
+            c->set_mix(0.71); c->set_stereo_width(0.42); c->reset();
+        }
+        double al = bad, ar = 0.2;
+        a.process(&al, &ar, 1);
+        REQUIRE(al == 0.0); REQUIRE(ar == 0.0);
+        b.reset();
+        for (int i = 0; i < 64; ++i) {
+            al = ar = 0.2; double bl = 0.2, br = 0.2;
+            a.process(&al, &ar, 1); b.process(&bl, &br, 1);
+            REQUIRE(al == bl); REQUIRE(ar == br);
+        }
+    }
+}
+
 double ref_triangle(double phi) {
     phi = ref_wrap(phi);
     if (phi < 0.25) return 4.0 * phi;

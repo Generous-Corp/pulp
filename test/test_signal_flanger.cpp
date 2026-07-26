@@ -92,6 +92,26 @@ double magnitude_at(const std::vector<double>& x, double hz) {
     return std::hypot(re * scale, im * scale);
 }
 
+TEST_CASE("flanger retains controls and recovers from non-finite audio",
+          "[signal][flanger][nonfinite]") {
+    for (double bad : {NAN, INFINITY, -INFINITY}) {
+        Fl a, b;
+        for (auto* f : {&a, &b}) {
+            f->prepare(kSr); f->set_rate_hz(1.3); f->set_depth_ms(2.1);
+            f->set_center_delay_ms(4.2); f->set_offset_ms(1.1);
+            f->set_feedback(0.37); f->set_mix(0.64); f->set_stereo_spread(0.21);
+            f->set_barberpole_shift_hz(19.0); f->reset();
+        }
+        a.set_rate_hz(bad); a.set_depth_ms(bad); a.set_center_delay_ms(bad);
+        a.set_offset_ms(bad); a.set_feedback(bad); a.set_mix(bad);
+        a.set_stereo_spread(bad); a.set_barberpole_shift_hz(bad);
+        REQUIRE(a.feedback() == b.feedback());
+        double y = 1.0; a.process(&bad, &y, 1); REQUIRE(y == 0.0);
+        b.reset();
+        for (int i = 0; i < 64; ++i) { double x=.2, ya=0, yb=0; a.process(&x,&ya,1); b.process(&x,&yb,1); REQUIRE(ya == yb); }
+    }
+}
+
 /// The mode-switch window in samples, computed the way `prepare()` computes it.
 double mode_switch_window_samples() {
     return std::max(2.0, std::round(Fl::kModeSwitchMs * 0.001 * kSr));

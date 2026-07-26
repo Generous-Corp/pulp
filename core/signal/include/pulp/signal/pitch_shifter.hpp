@@ -453,12 +453,16 @@ public:
     /// Direct shift target, used when `shift_source() == ShiftSource::direct`.
     /// Clamped to the node's `shift_semitones` range.
     void set_shift_semitones(double semitones) {
+        if (!std::isfinite(semitones)) return;
         shift_semitones_ = clamp_finite(semitones, kShiftSemisMin, kShiftSemisMax);
     }
     double shift_semitones() const { return shift_semitones_; }
 
     /// Expression position, heel = 0 to toe = 1.
-    void set_pedal(double e01) { pedal_ = clamp_finite(e01, 0.0, 1.0); }
+    void set_pedal(double e01) {
+        if (!std::isfinite(e01)) return;
+        pedal_ = clamp_finite(e01, 0.0, 1.0);
+    }
     double pedal() const { return pedal_; }
 
     /// Picks the pedal LAW only. Deliberately does not touch the mix — see
@@ -468,21 +472,25 @@ public:
 
     /// Whammy/dive endpoints in semitones.
     void set_targets(double heel, double toe) {
+        if (!std::isfinite(heel) || !std::isfinite(toe)) return;
         heel_semis_ = clamp_finite(heel, kShiftSemisMin, kShiftSemisMax);
         toe_semis_ = clamp_finite(toe, kShiftSemisMin, kShiftSemisMax);
     }
 
     /// Harmony A (heel) and B (toe) intervals in semitones.
     void set_harmony(double a, double b) {
+        if (!std::isfinite(a) || !std::isfinite(b)) return;
         interval_a_semis_ = clamp_finite(a, -24.0, 24.0);
         interval_b_semis_ = clamp_finite(b, -24.0, 24.0);
     }
 
     void set_detune_cents(double cents) {
+        if (!std::isfinite(cents)) return;
         detune_cents_ = clamp_finite(cents, -kDetuneCentsMax, kDetuneCentsMax);
     }
 
     void set_dive_floor_semis(double semitones) {
+        if (!std::isfinite(semitones)) return;
         dive_floor_semis_ =
             clamp_finite(semitones, kDiveFloorSemisMin, kDiveFloorSemisMax);
     }
@@ -497,6 +505,7 @@ public:
     /// its way out, in exchange for no click at all. `latency_samples()`
     /// reports the requested window immediately.
     void set_window_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         window_ms_ = clamp_finite(ms, kWindowMsMin, kWindowMsMax);
         update_window();
     }
@@ -506,6 +515,7 @@ public:
     /// perceptually even. `SlewMode::linear`: a move takes this long whether it
     /// is one semitone or two octaves, and it arrives exactly.
     void set_glide_ms(double up_ms, double down_ms) {
+        if (!std::isfinite(up_ms) || !std::isfinite(down_ms)) return;
         glide_.set_rise_ms(clamp_finite(up_ms, kGlideMsMin, kGlideMsMax));
         glide_.set_fall_ms(clamp_finite(down_ms, kGlideMsMin, kGlideMsMax));
     }
@@ -513,7 +523,10 @@ public:
     double glide_down_ms() const { return glide_.fall_ms(); }
 
     /// Equal-power dry↔wet. `0` is the untouched input; `1` is wet only.
-    void set_mix(double wet01) { mix_ = clamp_finite(wet01, 0.0, 1.0); }
+    void set_mix(double wet01) {
+        if (!std::isfinite(wet01)) return;
+        mix_ = clamp_finite(wet01, 0.0, 1.0);
+    }
     double mix() const { return mix_; }
 
     /// Snap the pedal-law target table to musical intervals. Applies in
@@ -532,6 +545,7 @@ public:
     /// generator is not advanced at all, so the deterministic path is bypassed
     /// rather than merely zero-amplitude.
     void set_drift_depth(double d01) {
+        if (!std::isfinite(d01)) return;
         drift_depth_ = clamp_finite(d01, 0.0, 1.0);
         drift_.set_depth_percent(drift_depth_ * kDriftMaxDepthPercent);
     }
@@ -617,6 +631,10 @@ public:
     /// One sample through the dry/wet mix. Call exactly one of `process` /
     /// `process_wet` per sample — both write the line and advance the phase.
     SampleType process(SampleType x) {
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
         const double dry = static_cast<double>(x);
         const double wet = advance(dry);
         double dry_gain = 0.0;
@@ -628,6 +646,10 @@ public:
     /// The shifted leg alone, with no dry mixed in — for callers summing
     /// several shifted voices themselves and applying their own balance.
     SampleType process_wet(SampleType x) {
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
         return static_cast<SampleType>(advance(static_cast<double>(x)));
     }
 

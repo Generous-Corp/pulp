@@ -167,6 +167,7 @@ public:
     }
 
     void set_rate_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         rate_hz_ = std::clamp(hz, kMinRateHz, kMaxRateHz);
         lfo_.set_rate_hz(rate_hz_);
         update();
@@ -179,6 +180,7 @@ public:
     /// inversion of `cents = 1200*log2(1 + 2*pi*rate*A)` — and never
     /// recomputed per sample.
     void set_depth_cents(double cents) {
+        if (!std::isfinite(cents)) return;
         depth_cents_ = std::clamp(cents, 0.0, kMaxDepthCents);
         update();
     }
@@ -189,6 +191,7 @@ public:
     /// times describe the start of a note, so changing them mid-note has no
     /// meaningful continuation.
     void set_delay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         delay_ms_ = std::clamp(ms, 0.0, kMaxLifecycleMs);
         lifecycle_.set_delay_ms(delay_ms_);
         arm();
@@ -196,6 +199,7 @@ public:
 
     /// Time for the depth to ramp 0 -> 1 after the delay, in ms. Re-arms.
     void set_fade_in_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         fade_in_ms_ = std::clamp(ms, 0.0, kMaxLifecycleMs);
         lifecycle_.set_attack_ms(fade_in_ms_);
         arm();
@@ -227,6 +231,10 @@ public:
     }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double env = lifecycle_active_ ? advance_lifecycle() : 1.0;
         const double modulation = static_cast<double>(lfo_.next());
         const double delay = base_delay_samples_ + amplitude_samples_ * env * modulation;
@@ -363,16 +371,23 @@ public:
     }
 
     void set_rate_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         rate_hz_ = std::clamp(hz, kMinRateHz, kMaxRateHz);
         lfo_.set_rate_hz(rate_hz_);
     }
 
     double rate_hz() const { return rate_hz_; }
 
-    void set_depth(double depth) { depth_ = std::clamp(depth, 0.0, 1.0); }
+    void set_depth(double depth) {
+        if (!std::isfinite(depth)) return;
+        depth_ = std::clamp(depth, 0.0, 1.0);
+    }
     double depth() const { return depth_; }
 
-    void set_center_hz(double hz) { center_hz_ = std::clamp(hz, kMinCenterHz, kMaxCenterHz); }
+    void set_center_hz(double hz) {
+        if (!std::isfinite(hz)) return;
+        center_hz_ = std::clamp(hz, kMinCenterHz, kMaxCenterHz);
+    }
     double center_hz() const { return center_hz_; }
 
     /// Stages that become active are cleared first, so switching count in does
@@ -385,7 +400,10 @@ public:
 
     int stage_count() const { return stage_count_; }
 
-    void set_mix(double mix) { mix_ = std::clamp(mix, 0.0, 1.0); }
+    void set_mix(double mix) {
+        if (!std::isfinite(mix)) return;
+        mix_ = std::clamp(mix, 0.0, 1.0);
+    }
     double mix() const { return mix_; }
 
     /// Corner the cascade is currently sitting at, in Hz. Reads the sweep
@@ -402,6 +420,10 @@ public:
     }
 
     SampleType process(SampleType input) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            return SampleType{0};
+        }
         const double modulation = static_cast<double>(lfo_.next());
         corner_hz_ = center_hz_ * std::exp2(depth_ * kSweepOctaves * modulation);
 
@@ -518,13 +540,17 @@ public:
     }
 
     void set_rate_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         rate_hz_ = std::clamp(hz, kMinRateHz, kMaxRateHz);
         lfo_.set_rate_hz(rate_hz_);
     }
 
     double rate_hz() const { return rate_hz_; }
 
-    void set_depth(double depth) { depth_ = std::clamp(depth, 0.0, 1.0); }
+    void set_depth(double depth) {
+        if (!std::isfinite(depth)) return;
+        depth_ = std::clamp(depth, 0.0, 1.0);
+    }
     double depth() const { return depth_; }
 
     void set_mode(Mode mode) { mode_ = mode; }
@@ -555,6 +581,11 @@ public:
     }
 
     void process(SampleType input, SampleType& out_left, SampleType& out_right) {
+        if (!std::isfinite(static_cast<double>(input))) {
+            reset();
+            out_left = out_right = SampleType{0};
+            return;
+        }
         const double lamp = static_cast<double>(lfo_.next_unipolar());
         const double control = vactrol_.process(lamp);
         const double scale = corner_scale(control, depth_);

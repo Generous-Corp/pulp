@@ -453,6 +453,7 @@ public:
     /// a frequency SHIFT is additive by definition, so equal time should give
     /// equal hertz.
     void set_shift_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         shift_hz_ = std::clamp(hz, -kMaxShiftHz, kMaxShiftHz);
         shift_smoother_.set_target(shift_hz_);
     }
@@ -461,6 +462,7 @@ public:
 
     /// Barberpole feedback depth, `0 .. kMaxFeedback`.
     void set_feedback(double g) {
+        if (!std::isfinite(g)) return;
         feedback_ = std::clamp(g, 0.0, kMaxFeedback);
         feedback_smoother_.set_target(feedback_);
     }
@@ -471,6 +473,7 @@ public:
     /// spacing that colours the spiral: short reads as a continuous glide,
     /// long as individually audible passes.
     void set_feedback_delay_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         feedback_delay_ms_ = std::clamp(ms, kMinDelayMs, kMaxLoopMs);
         update_delay_target();
         delay_smoother_.set_target(delay_target_samples_);
@@ -483,6 +486,7 @@ public:
 
     /// Dry/wet, `0 .. 1`.
     void set_mix(double wet01) {
+        if (!std::isfinite(wet01)) return;
         mix_ = std::clamp(wet01, 0.0, 1.0);
         mix_smoother_.set_target(mix_);
     }
@@ -502,6 +506,7 @@ public:
     /// channel at `f ± spread·Δf`, and at spread 0 the carrier stops and both
     /// channels pass the input at full magnitude.
     void set_stereo_spread(double spread01) {
+        if (!std::isfinite(spread01)) return;
         spread_ = std::clamp(spread01, 0.0, 1.0);
         spread_smoother_.set_target(spread_);
     }
@@ -512,6 +517,10 @@ public:
     /// sideband) leg, spread and all — there is no second channel to put the
     /// other one on.
     SampleType process(SampleType x) {
+        if (!std::isfinite(static_cast<double>(x))) {
+            reset();
+            return SampleType{0};
+        }
         const Controls c = advance_controls();
         const double dry = static_cast<double>(x);
         const double wet = shift_channel(0, dry, c, /*left=*/true);
@@ -522,6 +531,12 @@ public:
     /// one `sin`/`cos` pair — and each has its own Hilbert network, DC blocker
     /// and feedback line, so stereo content is preserved rather than summed.
     void process_stereo(SampleType& left, SampleType& right) {
+        if (!std::isfinite(static_cast<double>(left)) ||
+            !std::isfinite(static_cast<double>(right))) {
+            reset();
+            left = right = SampleType{0};
+            return;
+        }
         const Controls c = advance_controls();
         const double dry_l = static_cast<double>(left);
         const double dry_r = static_cast<double>(right);
