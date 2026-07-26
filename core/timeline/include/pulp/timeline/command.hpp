@@ -192,11 +192,21 @@ struct SetTrackFreeze {
     std::optional<TrackFreeze> replacement;
 };
 
+// Replaces a sequence's whole chord/scale lane under an exact optimistic gate,
+// the same shape SetTempoMap uses for the project's tempo. The lane carries no
+// ItemIds, so a whole-value swap needs no identity plan and its inverse is the
+// pair read back the other way.
+struct SetChordScaleLane {
+    ItemId sequence_id;
+    ChordScaleLane expected;
+    ChordScaleLane replacement;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
                  RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
-                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze>;
+                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze, SetChordScaleLane>;
 
 struct CommandEnvelope {
     CommandId id;

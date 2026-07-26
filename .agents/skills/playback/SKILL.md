@@ -324,6 +324,49 @@ runtime tests. Those tests exercise `pulp::audio` profile/runtime behavior and
 do not make Heritage profiles part of the immutable playback-program model;
 keep that ownership boundary when extending the shared test inventory.
 
+## Compile-context subscriptions and the exact dirty set
+
+`compile_context_registry.hpp` is the invalidation half of the
+compile-context subscription contract (the document/read half lives in
+`core/timeline` — see the timeline skill). It exists because the compiler's
+dirty set is exact rather than diffed: a renderer that reads a sequence-owned
+context lane while compiling has no dirty item of its own when that lane
+changes, so without a declaration it would render stale forever.
+
+Three pieces, and the boundaries between them matter:
+
+- `CompileContextRegistry` maps a content **schema type name** (the identity a
+  `RegisteredContent` clip actually carries) to declared subscriptions. It
+  refuses a duplicate type rather than overwriting — two renderers disagreeing
+  about what a content kind reads would make invalidation depend on registration
+  order. An unregistered type reads nothing, which is correct: no renderer
+  compiles it, so there is no program that could go stale. Built-in content
+  (media, notes, empty) is not registered and declares nothing, so the contract
+  cannot change the invalidation of anything that predates it.
+- `ContextSubscriberIndex::build()` is the kind → reader-track reverse index.
+  Rebuild it when the document's **structure** changes; a context edit alone does
+  not invalidate it, because editing a lane's contents does not change who reads
+  it. It walks clips through the exhaustive `ClipContentCases` visitor, so a new
+  `ClipContent` alternative stops the build here until someone decides whether it
+  can subscribe.
+- `resolve_dirty_tracks()` is the production translation from
+  `timeline::DirtySet` to `DirtyTrackSet` (tests used to hand-build the latter).
+  Its precision is documented per dirty-item shape in the header. Two shapes are
+  deliberately conservative and should stay that way: an item with no owning
+  sequence is project-scoped (tempo, meter, assets) and sets `all`, and a
+  trackless item in this sequence that is not `DirtyFlags::Context`-flagged is a
+  structural sequence edit and also sets `all`.
+
+**Proving invalidation exactness.** `PlaybackProgram::find_track()` returns the
+compiled `TrackProgram` the published program holds. The compiler reuses an
+untouched track's program object outright, so an unchanged **pointer** is a
+direct observation that a track was not recompiled, and a changed pointer that it
+was. Assert on that, not on a proxy like a compile counter — and assert the
+program generation actually advanced in the same test, or "unchanged pointer"
+could just mean no compile happened at all. A dirty-set test that still passes
+when the subscription is ignored and everything recompiles is vacuous; break the
+resolution both ways (over-dirty and under-dirty) and confirm it goes red.
+
 ## Dependency floor
 
 `playback`'s floor is declared in `MODULE_FLOORS` in

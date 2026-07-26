@@ -38,6 +38,15 @@ export interface PulpTimelineAutomationTargetDeviceParameter {
   parameter_id: number | string;
 }
 
+/** `pulp.timeline.chord_scale_event` — domain Document, schema version 1. */
+export interface PulpTimelineChordScaleEvent {
+  chord_quality: string;
+  chord_root: number | string;
+  position: number | string;
+  scale_mode: string;
+  scale_root: number | string;
+}
+
 /** `pulp.timeline.clip` — domain Document, schema version 1. */
 export interface PulpTimelineClip {
   content: Record<string, unknown>;
@@ -133,6 +142,13 @@ export interface PulpTimelineCommandSetActiveTakeLane {
   track_id: number | string;
 }
 
+/** `pulp.timeline.command.set_chord_scale_lane` — domain Command, schema version 1. */
+export interface PulpTimelineCommandSetChordScaleLane {
+  expected: readonly unknown[];
+  replacement: readonly unknown[];
+  sequence_id: number | string;
+}
+
 /** `pulp.timeline.command.set_clip_playback_properties` — domain Command, schema version 1. */
 export interface PulpTimelineCommandSetClipPlaybackProperties {
   clip_id: number | string;
@@ -222,9 +238,10 @@ export interface PulpTimelineProject {
   tempo_map?: readonly unknown[];
 }
 
-/** `pulp.timeline.sequence` — domain Document, schema version 1. */
+/** `pulp.timeline.sequence` — domain Document, schema version 2. */
 export interface PulpTimelineSequence {
   absolute_duration: Record<string, unknown>;
+  chord_scale_lane: readonly unknown[];
   id: number | string;
   musical_duration: number | string;
   name: string;
@@ -268,6 +285,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.asset_representation"
   | "pulp.timeline.automation_lane"
   | "pulp.timeline.automation_target.device_parameter"
+  | "pulp.timeline.chord_scale_event"
   | "pulp.timeline.clip"
   | "pulp.timeline.command.create_asset"
   | "pulp.timeline.command.insert_automation_lane"
@@ -281,6 +299,7 @@ export type TimelineSchemaTypeName =
   | "pulp.timeline.command.remove_take"
   | "pulp.timeline.command.remove_take_lane"
   | "pulp.timeline.command.set_active_take_lane"
+  | "pulp.timeline.command.set_chord_scale_lane"
   | "pulp.timeline.command.set_clip_playback_properties"
   | "pulp.timeline.command.set_meter_map"
   | "pulp.timeline.command.set_note_velocity"
@@ -304,6 +323,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.asset_representation": PulpTimelineAssetRepresentation;
   "pulp.timeline.automation_lane": PulpTimelineAutomationLane;
   "pulp.timeline.automation_target.device_parameter": PulpTimelineAutomationTargetDeviceParameter;
+  "pulp.timeline.chord_scale_event": PulpTimelineChordScaleEvent;
   "pulp.timeline.clip": PulpTimelineClip;
   "pulp.timeline.command.create_asset": PulpTimelineCommandCreateAsset;
   "pulp.timeline.command.insert_automation_lane": PulpTimelineCommandInsertAutomationLane;
@@ -317,6 +337,7 @@ export interface TimelineSchemaTypeMap {
   "pulp.timeline.command.remove_take": PulpTimelineCommandRemoveTake;
   "pulp.timeline.command.remove_take_lane": PulpTimelineCommandRemoveTakeLane;
   "pulp.timeline.command.set_active_take_lane": PulpTimelineCommandSetActiveTakeLane;
+  "pulp.timeline.command.set_chord_scale_lane": PulpTimelineCommandSetChordScaleLane;
   "pulp.timeline.command.set_clip_playback_properties": PulpTimelineCommandSetClipPlaybackProperties;
   "pulp.timeline.command.set_meter_map": PulpTimelineCommandSetMeterMap;
   "pulp.timeline.command.set_note_velocity": PulpTimelineCommandSetNoteVelocity;

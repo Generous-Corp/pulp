@@ -1,4 +1,5 @@
 #include "asset_schema_policy.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -71,10 +72,18 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     };
     static constexpr ExpectedField sequence_fields[] = {
         {"absolute_duration", SchemaValueKind::Object},
+        {"chord_scale_lane", SchemaValueKind::Array},
         {"id", SchemaValueKind::U64String},
         {"musical_duration", SchemaValueKind::I64String},
         {"name", SchemaValueKind::String},
         {"tracks", SchemaValueKind::Array},
+    };
+    static constexpr ExpectedField chord_scale_event_fields[] = {
+        {"chord_quality", SchemaValueKind::String},
+        {"chord_root", SchemaValueKind::U32},
+        {"position", SchemaValueKind::I64String},
+        {"scale_mode", SchemaValueKind::String},
+        {"scale_root", SchemaValueKind::U32},
     };
     static constexpr ExpectedField track_fields[] = {
         {"active_take_lane_id", SchemaValueKind::U64String},
@@ -132,7 +141,9 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
          asset_schema_policy.current_version, asset_schema_policy.oldest_readable_version},
         {SchemaDomain::AssetRepresentation, "pulp.timeline.asset_representation",
          representation_fields},
-        {SchemaDomain::Document, "pulp.timeline.sequence", sequence_fields},
+        {SchemaDomain::Document, sequence_schema_policy.type_name, sequence_fields,
+         sequence_schema_policy.current_version, sequence_schema_policy.oldest_readable_version},
+        {SchemaDomain::Document, "pulp.timeline.chord_scale_event", chord_scale_event_fields},
         {SchemaDomain::Document, track_schema_policy.type_name, track_fields,
          track_schema_policy.current_version, track_schema_policy.oldest_readable_version},
         {SchemaDomain::Document, "pulp.timeline.automation_lane", automation_lane_fields},

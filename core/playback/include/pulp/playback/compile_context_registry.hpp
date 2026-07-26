@@ -1,0 +1,109 @@
+#pragma once
+
+#include <pulp/playback/program_compiler.hpp>
+#include <pulp/timeline/compile_context.hpp>
+#include <pulp/timeline/transaction.hpp>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace pulp::playback {
+
+/// One content renderer's registration, reduced to the part the dirty set
+/// depends on: which content kind it renders, and which timeline context its
+/// compile hook reads beyond that content.
+///
+/// The content kind is named by the schema type of the RegisteredContent it
+/// compiles, because that is the identity the document itself carries. Built-in
+/// content (media, notes) is not registered here and therefore declares no
+/// context, which is exactly true of the built-in renderers today.
+struct ContentRendererRegistration {
+    std::string content_type_name;
+    timeline::CompileContextSubscriptions subscriptions;
+};
+
+enum class ContextRegistrationErrorCode : std::uint8_t {
+    EmptyContentTypeName,
+    DuplicateContentType,
+    CapacityExceeded,
+};
+
+struct ContextRegistrationError {
+    ContextRegistrationErrorCode code = ContextRegistrationErrorCode::EmptyContentTypeName;
+    std::string content_type_name;
+};
+
+/// The declaration side of the compile-context subscription contract.
+///
+/// A registry is built on the control thread before compiles are submitted and
+/// then only read. Registration is refused rather than overwritten on a
+/// duplicate type name: two renderers disagreeing about what a content kind
+/// reads is a configuration bug, and silently keeping one of them would make
+/// the invalidation depend on registration order.
+class CompileContextRegistry {
+  public:
+    static constexpr std::size_t kMaxRegistrations = 1024;
+
+    /// Returns the refusal, or nothing when the registration was accepted.
+    std::optional<ContextRegistrationError> declare(ContentRendererRegistration registration);
+
+    /// What the renderer for `content_type_name` declared. An unregistered type
+    /// reads nothing: no renderer compiles it, so there is no program that
+    /// could go stale.
+    timeline::CompileContextSubscriptions
+    subscriptions_for(std::string_view content_type_name) const noexcept;
+
+    std::size_t size() const noexcept {
+        return registrations_.size();
+    }
+
+  private:
+    // Sorted by content_type_name so lookup is a binary search on a hot path.
+    std::vector<ContentRendererRegistration> registrations_;
+};
+
+/// The reverse index §3.2 requires: context kind -> the tracks whose clips
+/// declared they read it.
+///
+/// Built from one pinned snapshot, it is what turns "the chord lane changed"
+/// into an exact track set instead of a full recompile. It is rebuilt when the
+/// document's structure changes; a context edit alone does not invalidate it,
+/// because editing a lane's contents does not change who reads it.
+class ContextSubscriberIndex {
+  public:
+    static ContextSubscriberIndex build(const timeline::Project& project,
+                                        timeline::ItemId sequence_id,
+                                        const CompileContextRegistry& registry);
+
+    /// Sorted, deduplicated track ids that declared a read of `kind`.
+    std::span<const timeline::ItemId> subscribers(timeline::CompileContextKind kind) const noexcept;
+
+    bool empty() const noexcept;
+
+  private:
+    std::array<std::vector<timeline::ItemId>, timeline::kCompileContextKindCount> by_kind_;
+};
+
+/// Translates a committed transaction's dirty set into the exact set of tracks
+/// the program compiler must recompile for `sequence_id`.
+///
+/// Precision, by dirty-item shape:
+///   * an item owning a track in this sequence dirties that track;
+///   * a context entry dirties exactly the index's subscribers for its kind,
+///     and nothing else — this is the contract's whole point;
+///   * an item with no owning sequence is project-scoped (tempo, meter, the
+///     asset table) and requests a full recompile, matching what the compiler
+///     already does for a tempo-map swap;
+///   * an item owning this sequence but no track, other than a context entry's
+///     companion, is a structural sequence edit and requests a full recompile.
+/// Items belonging to another sequence are ignored.
+DirtyTrackSet resolve_dirty_tracks(timeline::ItemId sequence_id, const timeline::DirtySet& dirty,
+                                   const ContextSubscriberIndex& index);
+
+} // namespace pulp::playback

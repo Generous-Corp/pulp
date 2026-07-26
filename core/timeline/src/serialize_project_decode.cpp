@@ -1,7 +1,9 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "chord_scale_names.hpp"
 #include "project_state_access.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_asset_loop_decode.hpp"
 #include "serialize_automation_decode.hpp"
 #include "serialize_decode_context.hpp"
@@ -613,6 +615,70 @@ decode_track(const std::shared_ptr<const ParsedJson>& document, const JsonValue&
     return runtime::Result<Track, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+// A null lane value is the v1 shape: the sequence predates the context lane and
+// decodes as an empty one. Everything else is validated exactly, including the
+// ordering the model requires — a document whose harmony is out of order is
+// rejected rather than silently sorted into a different tune.
+runtime::Result<ChordScaleLane, PersistenceError>
+decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path) {
+    if (!value) {
+        auto empty = ChordScaleLane::create({});
+        if (!empty)
+            return model_fail<ChordScaleLane>(empty.error(), std::move(lane_path));
+        return runtime::Result<ChordScaleLane, PersistenceError>(
+            runtime::Ok(std::move(empty).value()));
+    }
+    const auto& limits = context.limits;
+    auto& counts = context.counts;
+    if (value->array.size() >
+        limits.max_chord_scale_events -
+            std::min(counts.chord_scale_events, limits.max_chord_scale_events))
+        return fail<ChordScaleLane>(PersistenceErrorCode::LimitExceeded, lane_path, value->begin,
+                                    counts.chord_scale_events + value->array.size(),
+                                    limits.max_chord_scale_events);
+    counts.chord_scale_events += value->array.size();
+    std::vector<ChordScaleEvent> events;
+    events.reserve(value->array.size());
+    for (std::size_t index = 0; index < value->array.size(); ++index) {
+        const auto& encoded = value->array[index];
+        const auto item_path = lane_path + "/" + std::to_string(index);
+        auto quality = string_field(encoded, "chord_quality", item_path);
+        auto chord_root = required(encoded, "chord_root", item_path);
+        auto position = required(encoded, "position", item_path);
+        auto mode = string_field(encoded, "scale_mode", item_path);
+        auto scale_root = required(encoded, "scale_root", item_path);
+        if (!quality || !chord_root || !position || !mode || !scale_root)
+            return fail<ChordScaleLane>(PersistenceErrorCode::MissingField, item_path);
+        const auto decoded_quality = detail::chord_quality_from_name(quality.value());
+        const auto decoded_mode = detail::scale_mode_from_name(mode.value());
+        auto decoded_position = parse_canonical_i64_string(*position.value(),
+                                                           item_path + "/position");
+        if (!decoded_quality || !decoded_mode || !decoded_position ||
+            chord_root.value()->kind != JsonValue::Kind::Number ||
+            scale_root.value()->kind != JsonValue::Kind::Number)
+            return fail<ChordScaleLane>(PersistenceErrorCode::InvalidSchema, item_path);
+        auto decoded_chord_root =
+            parse_u32_number(*chord_root.value(), item_path + "/chord_root");
+        auto decoded_scale_root =
+            parse_u32_number(*scale_root.value(), item_path + "/scale_root");
+        // Narrowing to the model's byte-wide pitch class must not be the thing
+        // that makes an out-of-range root look valid: 256 truncates to 0, which
+        // the model would then happily accept as C.
+        if (!decoded_chord_root || !decoded_scale_root ||
+            decoded_chord_root.value() > 0xffu || decoded_scale_root.value() > 0xffu)
+            return fail<ChordScaleLane>(PersistenceErrorCode::InvalidNumber, item_path);
+        events.push_back(ChordScaleEvent{timebase::TickPosition{decoded_position.value()},
+                                         *decoded_quality,
+                                         static_cast<std::uint8_t>(decoded_chord_root.value()),
+                                         *decoded_mode,
+                                         static_cast<std::uint8_t>(decoded_scale_root.value())});
+    }
+    auto created = ChordScaleLane::create(std::move(events));
+    if (!created)
+        return model_fail<ChordScaleLane>(created.error(), lane_path);
+    return runtime::Result<ChordScaleLane, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
 runtime::Result<Sequence, PersistenceError>
 decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonValue& value,
                 const SchemaRegistry& registry, DecodeContext& context, std::string path) {
@@ -622,17 +688,29 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     if (!sequence_increment)
         return fail<Sequence>(PersistenceErrorCode::LimitExceeded, path, value.begin,
                               sequence_increment.actual, limits.max_sequences);
-    auto data = data_for(value, "pulp.timeline.sequence", path);
-    if (!data)
-        return fail<Sequence>(data.error().code, data.error().path, data.error().byte_offset);
-    auto id = required(*data.value(), "id", path + "/data");
-    auto name = string_field(*data.value(), "name", path + "/data");
-    auto tracks = required(*data.value(), "tracks", path + "/data");
-    auto musical = required(*data.value(), "musical_duration", path + "/data");
-    auto absolute = required(*data.value(), "absolute_duration", path + "/data");
+    auto envelope = data_for_versions(value, detail::sequence_schema_policy.type_name,
+                                      detail::sequence_schema_policy.oldest_readable_version,
+                                      detail::sequence_schema_policy.current_version, path);
+    if (!envelope)
+        return fail<Sequence>(envelope.error().code, envelope.error().path,
+                              envelope.error().byte_offset);
+    const auto* data_value = envelope.value().data;
+    auto id = required(*data_value, "id", path + "/data");
+    auto name = string_field(*data_value, "name", path + "/data");
+    auto tracks = required(*data_value, "tracks", path + "/data");
+    auto musical = required(*data_value, "musical_duration", path + "/data");
+    auto absolute = required(*data_value, "absolute_duration", path + "/data");
+    const auto* chord_lane = data_value->find("chord_scale_lane");
+    const auto requires_chord_lane =
+        detail::sequence_schema_policy.requires_chord_scale_lane(envelope.value().version);
     if (!id || !name || !tracks || !musical || !absolute ||
-        tracks.value()->kind != JsonValue::Kind::Array)
+        tracks.value()->kind != JsonValue::Kind::Array || (!requires_chord_lane && chord_lane) ||
+        (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
+    auto decoded_lane =
+        decode_chord_scale_lane(chord_lane, context, path + "/data/chord_scale_lane");
+    if (!decoded_lane)
+        return runtime::Err(decoded_lane.error());
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
@@ -668,7 +746,8 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         decoded_tracks.push_back(std::move(decoded).value());
     }
     auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
-                                    decoded_absolute, std::move(decoded_tracks));
+                                    decoded_absolute, std::move(decoded_tracks),
+                                    std::move(decoded_lane).value());
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));

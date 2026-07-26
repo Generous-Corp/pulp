@@ -37,6 +37,7 @@ is not a reason to add a model feature.
 | `tempo.map` | yes | Tempo changing over the document at more than one point. |
 | `meter.single` | yes | One time signature governing the whole document. |
 | `meter.map` | yes | Time signature changing over the document at more than one point. |
+| `context.chord-scale` | yes | A sequence-owned lane of chord and scale statements that other items read while compiling. |
 | `marker` | format-only | A named point or range on the timeline. |
 | `timecode.origin` | format-only | The wall-clock timecode the document's zero position represents. |
 | `media.provenance` | format-only | Where a media asset came from: source timecode, reel or tape name, original locator. |
@@ -87,6 +88,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `tempo.map` | none | tempo changing after bar 1 |
 | `meter.single` | full |  |
 | `meter.map` | none | time signature changing after bar 1 |
+| `context.chord-scale` | none | chord and scale context lanes |
 | `marker` | none | arrangement markers |
 | `timecode.origin` | none | not declared |
 | `media.provenance` | none | not declared |
@@ -133,6 +135,7 @@ Format id `dawproject`. Writer registered: no -- `run_export` refuses.
 | `tempo.map` | drop | | dropped | not declared |
 | `meter.single` | full |  |  |  |
 | `meter.map` | drop | | dropped | not declared |
+| `context.chord-scale` | drop | | dropped | not declared |
 | `marker` | drop | | dropped | not declared |
 | `timecode.origin` | drop | | dropped | not declared |
 | `media.provenance` | drop | | dropped | not declared |

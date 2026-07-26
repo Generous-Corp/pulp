@@ -131,6 +131,17 @@ pulp_add_test_suite(pulp-test-timeline-schema-codegen LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-agent
     SOURCES test_timeline_agent.cpp
     LIBRARIES pulp::tool-timeline pulp::audio pulp::timeline)
+# The chord/scale context lane plus the compile-context subscription contract
+# it carries: the document type, its schema migrations, and the read side that
+# only resolves context a renderer declared.
+pulp_add_test_suite(pulp-test-timeline-context-lane
+    SOURCES test_timeline_context_lane.cpp
+    LIBRARIES pulp::timeline)
+# The invalidation side of the same contract, driven through the real program
+# compiler so "did not recompile" is observed rather than assumed.
+pulp_add_test_suite(pulp-test-playback-compile-context
+    SOURCES test_playback_compile_context.cpp
+    LIBRARIES pulp::playback)
 pulp_add_test_suite(pulp-test-timeline-persistence
     SOURCES test_timeline_persistence.cpp
         test_timeline_automation_persistence.cpp
@@ -272,6 +283,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/compile_context.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
@@ -285,6 +297,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_schema_migrations.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_asset_loop_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp

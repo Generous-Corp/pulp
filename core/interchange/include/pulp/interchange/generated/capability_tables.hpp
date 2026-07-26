@@ -90,6 +90,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", "tempo changing after bar 1"}, // tempo.map
         {ImportLevel::Full, "", ""}, // meter.single
         {ImportLevel::None, "", "time signature changing after bar 1"}, // meter.map
+        {ImportLevel::None, "", "chord and scale context lanes"}, // context.chord-scale
         {ImportLevel::None, "", "arrangement markers"}, // marker
         {ImportLevel::None, "", ""}, // timecode.origin
         {ImportLevel::None, "", ""}, // media.provenance
@@ -137,6 +138,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for tempo.map"}, // tempo.map
         {ExportLevel::Full, Concept::Unknown, LossClass::Dropped, ""}, // meter.single
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for meter.map"}, // meter.map
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.chord-scale"}, // context.chord-scale
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for marker"}, // marker
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for timecode.origin"}, // timecode.origin
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for media.provenance"}, // media.provenance

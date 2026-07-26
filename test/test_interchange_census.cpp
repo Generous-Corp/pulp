@@ -141,3 +141,25 @@ TEST_CASE("an empty document still states its tempo and meter", "[interchange]")
     REQUIRE_FALSE(counted.contains(Concept::SequenceMultiple));
     REQUIRE(counted.contains(Concept::TempoSingle));
 }
+
+TEST_CASE("a chord/scale context lane is recorded by the census", "[interchange][census]") {
+    auto follower = take_value(Track::create({3}, "track", {}));
+    auto lane = take_value(ChordScaleLane::create(
+        {ChordScaleEvent{{0}, ChordQuality::Minor7, 9, ScaleMode::Dorian, 9}}));
+    auto sequence =
+        take_value(Sequence::create({2}, "root", std::nullopt, std::nullopt, {follower},
+                                    std::move(lane)));
+    auto project =
+        take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {std::move(sequence)}}));
+
+    const auto recorded = census(project);
+    REQUIRE(recorded.contains(Concept::ContextChordScale));
+    REQUIRE(recorded.count(Concept::ContextChordScale) == 1);
+    REQUIRE(recorded.owners(Concept::ContextChordScale)[0] == ItemId{2});
+
+    // An empty lane is the absence of harmony, not a concept an export loses.
+    auto without = take_value(Sequence::create({2}, "root", std::nullopt, {follower}));
+    auto plain =
+        take_value(Project::create(ProjectInput{{1}, "project", 4, {2}, {}, {std::move(without)}}));
+    REQUIRE_FALSE(census(plain).contains(Concept::ContextChordScale));
+}

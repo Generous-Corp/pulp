@@ -132,6 +132,9 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
         envelope("pulp.timeline.command.set_track_freeze",
                  "{\"expected\":" + std::string(parsed->raw(freeze)) +
                      R"(,"sequence_id":"5","track_id":"6"})"),
+        envelope(
+            "pulp.timeline.command.set_chord_scale_lane",
+            R"({"expected":[],"replacement":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"sequence_id":"5"})"),
     };
     std::string batch = "[";
     for (std::size_t index = 0; index < encoded.size(); ++index) {
@@ -162,6 +165,7 @@ TEST_CASE("Typed command JSON decodes every registered mutation variant") {
     REQUIRE(std::holds_alternative<SetActiveTakeLane>(commands[16]));
     REQUIRE(std::holds_alternative<SetTakeComp>(commands[17]));
     REQUIRE(std::holds_alternative<SetTrackFreeze>(commands[18]));
+    REQUIRE(std::holds_alternative<SetChordScaleLane>(commands[19]));
 }
 
 TEST_CASE("Typed command JSON rejects unknown types and invalid scalar widths") {

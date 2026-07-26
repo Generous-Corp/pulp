@@ -258,8 +258,8 @@ visit and not a chain ending in `std::get<OpaqueContent>`.
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
   `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, `SetTakeComp`, and `SetTrackFreeze` are the bounded mutation
-  vocabulary. Automation commands attach or tombstone complete Track-owned
+  `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, and `SetChordScaleLane`
+  are the bounded mutation vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.
   `reduce_transaction()` is pure: it returns a new snapshot, exact canonical
@@ -319,6 +319,72 @@ visit and not a chain ending in `std::get<OpaqueContent>`.
   checkpoint snapshot/revision mismatch or cross-entry writer-ID reuse.
 - Undo and redo submit fresh ordinary transactions. They append to the journal;
   they do not delete or rewrite history.
+
+### Sequence-owned context and the compile-context subscription contract
+
+A `Sequence` owns a `ChordScaleLane` — an ordered set of `ChordScaleEvent`s
+(position, chord root + quality, scale root + mode) that *other* items read while
+compiling. That cross-entity read is what the compile-context subscription
+contract exists for, and the contract is what keeps the compiler's dirty set
+exact:
+
+- `CompileContextKind` (`compile_context.hpp`) is the vocabulary; a renderer
+  declares the kinds it reads as a `CompileContextSubscriptions` set.
+- The **read** side is `CompileContextView`, constructed with that declaration.
+  An undeclared kind reads as null. Do not add an accessor that bypasses the
+  declaration — the whole point is that a hook cannot depend on context the
+  compiler does not know to invalidate it for.
+- The **invalidate** side lives in `core/playback` (see the playback skill):
+  `ContextSubscriberIndex` is the kind → reader-track reverse index, and
+  `resolve_dirty_tracks()` turns a `DirtySet` into an exact `DirtyTrackSet`.
+- A context edit emits **two** things: a `DirtyContext{sequence, kind}` (which
+  names what changed) and a companion `DirtyItem` flagged `DirtyFlags::Context`
+  with no owning track (so an item-scanning consumer still sees the transaction
+  changed something rather than silently seeing an empty dirty set). A
+  trackless item that is *not* Context-flagged means a structural sequence edit.
+
+Adding a context kind is a data change here plus a reverse-index case in the
+compiler. It is never a reason to widen an invalidation.
+
+### Adding a field to `pulp.timeline.sequence` touches two silent mirrors
+
+Beyond the documented recipe (model → registry → version + both migrations →
+encode/decode → regenerate codegen → web source closure → tests), two files
+mirror the registry with no reference pointing at them from it, and both fail
+with an error that does not name them:
+
+- `structural_registry_validation.cpp` carries an **exact** expected field list,
+  order, kind, required-ness, and version range per structural type. Miss it and
+  `serialize_project()` returns a bare `InvalidSchema` before writing a byte.
+- `schema_json_preflight.cpp`'s `walk_*` functions re-validate the envelope
+  independently of the decoder, pinning `[oldest_readable, current]` versions per
+  type. Miss it and every v2 document fails to load even though the decoder
+  handles it. New optional/versioned array fields also need their own
+  `governed_array` count so a hostile document cannot allocate unbounded.
+
+The paired version policy header (`sequence_schema_policy.hpp`, alongside
+`track_schema_policy.hpp` and `asset_schema_policy.hpp`) is what keeps those
+three call sites agreeing about which version introduced which field. Add one
+rather than spelling version numbers inline.
+
+### Adding a `Command` alternative fails closed in one place and aborts in another
+
+`Command` has **no** exhaustive-visitor guard of the `ClipContentCases` kind.
+Two consumers behave differently:
+
+- `command.cpp`'s `equivalent()` is an `if constexpr` chain ending in a generic
+  `else` that reads `.track_id`/`.clip_id`. A new alternative without those
+  fields is a **compile error** — it fails closed, which is what you want.
+- `detail::reduce_transaction()` in `transaction.cpp` is an `if/else if` chain
+  ending in `std::get<SetClipPlaybackProperties>`. Under `-fno-exceptions` that
+  is `std::terminate`, not a caught error. Add the reduce branch **before** the
+  final `else`; a compile-clean build proves nothing here.
+
+Also extend the two coverage guards that pin the vocabulary: the type-name array
+in `test_timeline_schema_registry.cpp` (`static_assert`ed against
+`variant_size_v<Command>`) and the encoded-envelope batch in
+`test_timeline_command_persistence.cpp` (which asserts one decoded command per
+alternative, in variant order).
 
 ## Schema codegen & drift gate
 

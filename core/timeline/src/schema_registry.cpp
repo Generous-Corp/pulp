@@ -2,6 +2,8 @@
 
 #include "asset_schema_migrations.hpp"
 #include "asset_schema_policy.hpp"
+#include "sequence_schema_migrations.hpp"
+#include "sequence_schema_policy.hpp"
 #include "take_lane_schema_migrations.hpp"
 #include "track_schema_migrations.hpp"
 #include "track_schema_policy.hpp"
@@ -288,12 +290,24 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"locators", SchemaValueKind::Array},
                                {"role", SchemaValueKind::String},
                                {"storage_policy", SchemaValueKind::String}}));
-    schemas.push_back(builtin("pulp.timeline.sequence", SchemaDomain::Document,
-                              {{"absolute_duration", SchemaValueKind::Object},
-                               {"id", SchemaValueKind::U64String},
-                               {"musical_duration", SchemaValueKind::I64String},
-                               {"name", SchemaValueKind::String},
-                               {"tracks", SchemaValueKind::Array}}));
+    auto sequence =
+        builtin(std::string(detail::sequence_schema_policy.type_name), SchemaDomain::Document,
+                {{"absolute_duration", SchemaValueKind::Object},
+                 {"chord_scale_lane", SchemaValueKind::Array},
+                 {"id", SchemaValueKind::U64String},
+                 {"musical_duration", SchemaValueKind::I64String},
+                 {"name", SchemaValueKind::String},
+                 {"tracks", SchemaValueKind::Array}},
+                detail::sequence_schema_policy.current_version);
+    sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
+    sequence.downgrades.push_back({2, 1, {}, detail::migrate_sequence_v2_to_v1});
+    schemas.push_back(std::move(sequence));
+    schemas.push_back(builtin("pulp.timeline.chord_scale_event", SchemaDomain::Document,
+                              {{"chord_quality", SchemaValueKind::String},
+                               {"chord_root", SchemaValueKind::U32},
+                               {"position", SchemaValueKind::I64String},
+                               {"scale_mode", SchemaValueKind::String},
+                               {"scale_root", SchemaValueKind::U32}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
                          {{"active_take_lane_id", SchemaValueKind::U64String},
                           {"automation_lanes", SchemaValueKind::Array},
@@ -437,6 +451,10 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"replacement", SchemaValueKind::Array},
                                {"sequence_id", SchemaValueKind::U64String},
                                {"track_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.set_chord_scale_lane", SchemaDomain::Command,
+                              {{"expected", SchemaValueKind::Array},
+                               {"replacement", SchemaValueKind::Array},
+                               {"sequence_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_freeze", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Object, false},
                                {"replacement", SchemaValueKind::Object, false},

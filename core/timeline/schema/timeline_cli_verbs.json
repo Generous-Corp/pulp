@@ -162,6 +162,49 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "String",
+          "name": "chord-quality",
+          "required": true,
+          "schema_field": "chord_quality",
+          "value_type": "string"
+        },
+        {
+          "kind": "U32",
+          "name": "chord-root",
+          "required": true,
+          "schema_field": "chord_root",
+          "value_type": "uint"
+        },
+        {
+          "kind": "I64String",
+          "name": "position",
+          "required": true,
+          "schema_field": "position",
+          "value_type": "int"
+        },
+        {
+          "kind": "String",
+          "name": "scale-mode",
+          "required": true,
+          "schema_field": "scale_mode",
+          "value_type": "string"
+        },
+        {
+          "kind": "U32",
+          "name": "scale-root",
+          "required": true,
+          "schema_field": "scale_root",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:chord-scale-event",
+      "schema_type": "pulp.timeline.chord_scale_event",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "Object",
           "name": "content",
           "required": true,
@@ -572,6 +615,35 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "Array",
+          "name": "expected",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
+          "name": "replacement",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-chord-scale-lane",
+      "schema_type": "pulp.timeline.command.set_chord_scale_lane",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "U64String",
           "name": "clip-id",
           "required": true,
@@ -968,6 +1040,13 @@
           "value_type": "json"
         },
         {
+          "kind": "Array",
+          "name": "chord-scale-lane",
+          "required": true,
+          "schema_field": "chord_scale_lane",
+          "value_type": "json"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
@@ -998,7 +1077,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Document",

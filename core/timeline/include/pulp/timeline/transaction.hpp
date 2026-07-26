@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/timeline/command.hpp>
+#include <pulp/timeline/compile_context.hpp>
 
 #include <memory>
 #include <optional>
@@ -20,6 +21,12 @@ enum class DirtyFlags : std::uint16_t {
     Automation = 1 << 6,
     Take = 1 << 7,
     Freeze = 1 << 8,
+    // Sequence-owned context changed. The item names the sequence and owns no
+    // track, so a consumer that maps dirty items to tracks finds nothing to
+    // recompile here — which is correct, because the readers are not derivable
+    // from the item. DirtySet::contexts() names the kind that changed; the
+    // compiler resolves the readers through its subscription reverse index.
+    Context = 1 << 9,
 };
 
 constexpr DirtyFlags operator|(DirtyFlags lhs, DirtyFlags rhs) noexcept {
@@ -35,16 +42,34 @@ struct DirtyItem {
     constexpr auto operator<=>(const DirtyItem&) const = default;
 };
 
+/// One sequence-owned context kind a transaction changed.
+///
+/// Context is dirtied by kind rather than by item because its readers are not
+/// its children: the edit is to a sequence lane, while the items that must
+/// recompile are clips on tracks that declared they read that kind. Naming the
+/// kind is what lets the compiler resolve exactly those readers instead of
+/// widening to the whole sequence.
+struct DirtyContext {
+    ItemId owner_sequence;
+    CompileContextKind kind = CompileContextKind::ChordScale;
+    constexpr auto operator<=>(const DirtyContext&) const = default;
+};
+
 class DirtySet {
   public:
-    explicit DirtySet(std::vector<DirtyItem> items = {});
+    explicit DirtySet(std::vector<DirtyItem> items = {},
+                      std::vector<DirtyContext> contexts = {});
     std::span<const DirtyItem> items() const noexcept {
         return items_;
+    }
+    std::span<const DirtyContext> contexts() const noexcept {
+        return contexts_;
     }
     std::size_t retained_size() const noexcept;
 
   private:
     std::vector<DirtyItem> items_;
+    std::vector<DirtyContext> contexts_;
 };
 
 enum class ConflictCode : std::uint8_t {

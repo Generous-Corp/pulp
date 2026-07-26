@@ -122,6 +122,11 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
     }
 
     for (const timeline::Sequence& sequence : project.sequences()) {
+        // Context the document states but a format has no lane for is data an
+        // export drops. Recording it here is what keeps the loss manifest from
+        // claiming nothing was lost.
+        if (!sequence.chord_scale_lane().empty())
+            out.record(Concept::ContextChordScale, sequence.id(), limits);
         for (const timeline::Track& track : sequence.tracks())
             record_track(out, track, limits);
     }

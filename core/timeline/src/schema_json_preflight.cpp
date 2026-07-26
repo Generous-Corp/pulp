@@ -5,6 +5,7 @@
 #include "json_span_reader.hpp"
 #include "schema_json_validation.hpp"
 #include "serialize_internal.hpp"
+#include "sequence_schema_policy.hpp"
 #include "track_schema_policy.hpp"
 
 #include <algorithm>
@@ -456,11 +457,13 @@ class StructuralScanner {
         bool valid_shape = false;
         if (!envelope(value, type, version, data, valid_shape))
             return false;
-        if (type != "pulp.timeline.sequence") {
+        if (type != detail::sequence_schema_policy.type_name) {
             set_error(PersistenceErrorCode::InvalidSchema, value.begin, 0, 0, path);
             return false;
         }
-        if (!require_structural_shape(valid_shape, version, path, value.begin))
+        if (!require_structural_shape(valid_shape, version, path, value.begin,
+                                      detail::sequence_schema_policy.oldest_readable_version,
+                                      detail::sequence_schema_policy.current_version))
             return false;
         const auto data_path = path + "/data";
         std::array requested{
@@ -481,6 +484,31 @@ class StructuralScanner {
             set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0, path + "/data/tracks");
             return false;
         }
+        Span lane;
+        bool has_lane = false;
+        if (!member(data, "chord_scale_lane", lane, has_lane))
+            return false;
+        if (detail::sequence_schema_policy.requires_chord_scale_lane(version) != has_lane) {
+            set_error(PersistenceErrorCode::InvalidSchema, data.begin, 0, 0,
+                      data_path + "/chord_scale_lane");
+            return false;
+        }
+        if (has_lane &&
+            !governed_array(lane, counts_.chord_scale_events, limits_.max_chord_scale_events,
+                            data_path + "/chord_scale_lane",
+                            [&](Span event, std::size_t index) {
+                                const auto event_path =
+                                    data_path + "/chord_scale_lane/" + std::to_string(index);
+                                return require_member(event, "chord_quality", StringShape,
+                                                      event_path) &&
+                                       require_member(event, "chord_root", NumberShape,
+                                                      event_path) &&
+                                       require_member(event, "position", StringShape, event_path) &&
+                                       require_member(event, "scale_mode", StringShape,
+                                                      event_path) &&
+                                       require_member(event, "scale_root", NumberShape, event_path);
+                            }))
+            return false;
         const auto tracks = requested[4].span;
         return governed_array(tracks, counts_.tracks, limits_.max_tracks, path + "/data/tracks",
                               [&](Span element, std::size_t index) {
