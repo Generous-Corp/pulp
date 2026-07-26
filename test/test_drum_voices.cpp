@@ -934,6 +934,13 @@ TEST_CASE("The reusable shell block bypasses cleanly and preserves its ring",
     }
     CHECK(ring_energy > 1.0e-4);
 
+    shell.set_level(0.0);
+    shell.set_level(1.0);
+    CHECK_FALSE(shell.is_ringing());
+    for (int i = 0; i < 512; ++i) {
+        CHECK(shell.process(0.0) == 0.0);
+    }
+
     shell.reset();
     CHECK_FALSE(shell.is_ringing());
     for (int i = 0; i < 512; ++i) {

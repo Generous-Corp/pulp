@@ -43,7 +43,10 @@ public:
         filter_.reset();
     }
 
-    void set_level(double level) { level_ = std::max(level, 0.0); }
+    void set_level(double level) {
+        level_ = std::max(level, 0.0);
+        if (level_ == 0.0) reset();
+    }
     void set_cutoff_hz(double hz) {
         cutoff_hz_ = std::clamp(hz, 20.0, 20000.0);
         apply_cutoff();
@@ -118,7 +121,10 @@ public:
 
     void reset() { envelope_.reset(); }
 
-    void set_level(double level) { level_ = std::max(level, 0.0); }
+    void set_level(double level) {
+        level_ = std::max(level, 0.0);
+        if (level_ == 0.0) reset();
+    }
     void set_decay_ms(double ms) {
         decay_ms_ = std::clamp(ms, 0.5, 4000.0);
         envelope_.set_decay_t60_ms(decay_ms_);
@@ -171,7 +177,10 @@ public:
         ring_level_ = 0.0;
     }
 
-    void set_level(double level) { level_ = std::max(level, 0.0); }
+    void set_level(double level) {
+        level_ = std::max(level, 0.0);
+        if (level_ == 0.0) reset();
+    }
     void set_frequency_hz(double hz) {
         frequency_hz_ = std::clamp(hz, 20.0, 20000.0);
         apply();
