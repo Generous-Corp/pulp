@@ -87,8 +87,8 @@ constexpr std::string_view v3_members[] = {"absolute_duration", "chord_scale_lan
                                            "markers",           "musical_duration", "name",
                                            "regions",           "tracks"};
 constexpr std::string_view v4_members[] = {
-    "absolute_duration", "chord_scale_lane", "groove", "id",    "markers",
-    "musical_duration",  "name",             "regions", "tracks"};
+    "absolute_duration", "chord_scale_lane", "groove",  "id",    "markers",
+    "musical_duration",  "name",             "regions", "scenes", "tracks"};
 constexpr std::string_view groove_members[] = {
     "name",            "step",            "steps",           "swing_denominator", "swing_grid",
     "swing_numerator", "timing_strength", "velocity_strength"};
@@ -229,11 +229,13 @@ migrate_sequence_v3_to_v4(std::string_view source, BoundedJsonSink& output, cons
     // and has_exact_members already proved that order, so this offset is
     // trustworthy.
     const auto& lane_value = data->object[1].second;
-    if (lane_value.begin >= lane_value.end)
+    const auto& regions = data->object[6].second;
+    if (lane_value.begin >= lane_value.end || regions.begin >= regions.end)
         return fail();
     std::string inserted = ",\"groove\":";
     inserted += kStraightGrooveJson;
     std::array edits{RawEdit{lane_value.end, lane_value.end, inserted},
+                     RawEdit{regions.end, regions.end, ",\"scenes\":[]"},
                      RawEdit{version->begin, version->end, "4"}};
     return finish(output, apply_edits(source, edits, output));
 }
@@ -250,15 +252,21 @@ migrate_sequence_v4_to_v3(std::string_view source, BoundedJsonSink& output, cons
         version->begin >= version->end)
         return fail();
     const auto& groove = data->object[2].second;
+    const auto& scenes = data->object[8].second;
     // A v3 reader has nowhere to put a feel. Writing the document without it
     // would move every note in the sequence while reporting success, so only the
-    // straight groove a v3 reader would have produced can be dropped.
-    if (!states_no_feel(groove))
+    // straight groove a v3 reader would have produced can be dropped. Likewise,
+    // scenes cannot be discarded because v3 has no launcher representation.
+    if (!states_no_feel(groove) || scenes.kind != JsonValue::Kind::Array ||
+        !scenes.array.empty())
         return fail();
     const auto groove_comma = source.find(',', data->object[1].second.end);
-    if (groove_comma == std::string_view::npos || groove_comma >= groove.begin)
+    const auto scenes_comma = source.find(',', data->object[7].second.end);
+    if (groove_comma == std::string_view::npos || groove_comma >= groove.begin ||
+        scenes_comma == std::string_view::npos || scenes_comma >= scenes.begin)
         return fail();
     std::array edits{RawEdit{groove_comma, groove.end, {}},
+                     RawEdit{scenes_comma, scenes.end, {}},
                      RawEdit{version->begin, version->end, "3"}};
     return finish(output, apply_edits(source, edits, output));
 }

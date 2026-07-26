@@ -21,6 +21,19 @@ decode_command_item_id(const JsonValue& data, std::string_view name, const std::
     return runtime::Ok(ItemId{decoded.value()});
 }
 
+runtime::Result<std::optional<ItemId>, PersistenceError>
+decode_optional_command_item_id(const JsonValue& data, std::string_view name,
+                                const std::string& path) {
+    const auto* value = data.find(name);
+    if (!value)
+        return runtime::Ok(std::optional<ItemId>{});
+    auto decoded = parse_canonical_u64_string(*value, path + "/" + std::string(name));
+    if (!decoded)
+        return fail<std::optional<ItemId>>(decoded.error().code, decoded.error().path,
+                                           decoded.error().byte_offset);
+    return runtime::Ok(std::optional<ItemId>{ItemId{decoded.value()}});
+}
+
 runtime::Result<bool, PersistenceError>
 decode_command_bool(const JsonValue& data, std::string_view name, const std::string& path) {
     auto value = required(data, name, path);
@@ -391,9 +404,9 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return runtime::Err(decoded_expected.error());
         if (!decoded_replacement)
             return runtime::Err(decoded_replacement.error());
-        return runtime::Ok(Command(SetChordScaleLane{sequence.value(),
-                                                     std::move(decoded_expected).value(),
-                                                     std::move(decoded_replacement).value()}));
+        return runtime::Ok(
+            Command(SetChordScaleLane{sequence.value(), std::move(decoded_expected).value(),
+                                      std::move(decoded_replacement).value()}));
     }
     if (type.value() == "pulp.timeline.command.insert_marker") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
@@ -444,9 +457,48 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             return runtime::Err(decoded_expected.error());
         if (!decoded_replacement)
             return runtime::Err(decoded_replacement.error());
-        return runtime::Ok(Command(SetGroove{sequence.value(),
-                                             std::move(decoded_expected).value(),
+        return runtime::Ok(Command(SetGroove{sequence.value(), std::move(decoded_expected).value(),
                                              std::move(decoded_replacement).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_scene") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto before = decode_optional_command_item_id(command, "before_scene_id", data_path);
+        auto scene = required(command, "scene", data_path);
+        if (!sequence || !before || !scene)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_scene(*scene.value(), context, data_path + "/scene");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(
+            Command(InsertScene{sequence.value(), std::move(decoded).value(), before.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_scene") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto scene = decode_command_item_id(command, "scene_id", data_path);
+        if (!sequence || !scene)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveScene{sequence.value(), scene.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_slot") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto scene = decode_command_item_id(command, "scene_id", data_path);
+        auto before = decode_optional_command_item_id(command, "before_slot_id", data_path);
+        auto slot = required(command, "slot", data_path);
+        if (!sequence || !scene || !before || !slot)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_slot(*slot.value(), context, data_path + "/slot");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(InsertSlot{sequence.value(), scene.value(),
+                                              std::move(decoded).value(), before.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_slot") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto scene = decode_command_item_id(command, "scene_id", data_path);
+        auto slot = decode_command_item_id(command, "slot_id", data_path);
+        if (!sequence || !scene || !slot)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveSlot{sequence.value(), scene.value(), slot.value()}));
     }
     if (type.value() == "pulp.timeline.command.set_track_freeze") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);

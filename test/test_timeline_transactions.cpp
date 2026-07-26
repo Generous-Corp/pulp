@@ -217,6 +217,138 @@ TEST_CASE("CreateAsset is undoable and redoable through its RemoveAsset inverse"
     REQUIRE(session->snapshot()->locate({asset_id})->active);
 }
 
+TEST_CASE("Scene and slot inserts are undoable with stable identity ownership") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    Scene scene{{7}, "launch", {}};
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, {}, {InsertScene{{3}, scene}})));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_scene({7}));
+    REQUIRE(session->snapshot()->locate({7})->kind == ItemKind::Scene);
+
+    Slot slot{{8}, {5}, launch_every_quarters(1), {}};
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(), {InsertSlot{{3}, {7}, slot}})));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_slot({8}));
+    REQUIRE(session->snapshot()->locate({8})->kind == ItemKind::Slot);
+    REQUIRE(session->snapshot()->locate({8})->parent_id == ItemId{7});
+
+    REQUIRE(session->undo(writer));
+    REQUIRE_FALSE(session->snapshot()->find_sequence({3})->find_slot({8}));
+    REQUIRE_FALSE(session->snapshot()->locate({8})->active);
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_slot({8}));
+
+    REQUIRE(session->undo(writer));
+    REQUIRE(session->undo(writer));
+    REQUIRE_FALSE(session->snapshot()->find_sequence({3})->find_scene({7}));
+    REQUIRE_FALSE(session->snapshot()->locate({7})->active);
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->snapshot()->find_sequence({3})->find_scene({7}));
+
+    Scene populated{{9}, "nested", {Slot{{10}, {5}, launch_immediate(), {}}}};
+    REQUIRE(session->submit(writer, session_transaction(writer, session->revision(),
+                                                        {InsertScene{{3}, populated}})));
+    REQUIRE(session->snapshot()->locate({9})->active);
+    REQUIRE(session->snapshot()->locate({10})->active);
+    REQUIRE(session->undo(writer));
+    REQUIRE_FALSE(session->snapshot()->locate({9})->active);
+    REQUIRE_FALSE(session->snapshot()->locate({10})->active);
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->snapshot()->locate({9})->active);
+    REQUIRE(session->snapshot()->locate({10})->active);
+}
+
+TEST_CASE("Scene and slot removal inverses restore exact authored order") {
+    auto session = std::move(DocumentSession::create(make_project())).value();
+    auto writer = std::move(session->register_writer()).value();
+
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, {},
+                                    {InsertScene{{3}, Scene{{7}, "first", {}}},
+                                     InsertScene{{3}, Scene{{8}, "middle", {}}},
+                                     InsertScene{{3}, Scene{{9}, "last", {}}},
+                                     InsertSlot{{3}, {7},
+                                                Slot{{10}, {5}, launch_immediate(), {}}},
+                                     InsertSlot{{3}, {7},
+                                                Slot{{11}, {5}, launch_immediate(), {}}},
+                                     InsertSlot{{3}, {7},
+                                                Slot{{12}, {5}, launch_immediate(), {}}}})));
+
+    const auto revision_before_anchor_rejections = session->revision();
+    auto missing_scene_anchor = session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {InsertScene{{3}, Scene{{13}, "unplaced", {}}, ItemId{999}}}));
+    REQUIRE_FALSE(missing_scene_anchor);
+    REQUIRE(missing_scene_anchor.error().code == ConflictCode::TargetMissing);
+    REQUIRE(session->revision() == revision_before_anchor_rejections);
+    REQUIRE_FALSE(session->snapshot()->locate({13}));
+
+    auto missing_slot_anchor = session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {InsertSlot{{3}, {7},
+                                                Slot{{14}, {5}, launch_immediate(), {}},
+                                                ItemId{999}}}));
+    REQUIRE_FALSE(missing_slot_anchor);
+    REQUIRE(missing_slot_anchor.error().code == ConflictCode::TargetMissing);
+    REQUIRE(session->revision() == revision_before_anchor_rejections);
+    REQUIRE_FALSE(session->snapshot()->locate({14}));
+
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(), {RemoveScene{{3}, {8}}})));
+    auto scenes = session->snapshot()->find_sequence({3})->scenes();
+    REQUIRE(scenes.size() == 2);
+    REQUIRE(scenes[0].id == ItemId{7});
+    REQUIRE(scenes[1].id == ItemId{9});
+
+    REQUIRE(session->undo(writer));
+    scenes = session->snapshot()->find_sequence({3})->scenes();
+    REQUIRE(scenes.size() == 3);
+    REQUIRE(scenes[0].id == ItemId{7});
+    REQUIRE(scenes[1].id == ItemId{8});
+    REQUIRE(scenes[2].id == ItemId{9});
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->undo(writer));
+
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(), {RemoveSlot{{3}, {7}, {11}}})));
+    auto slots = session->snapshot()->find_sequence({3})->find_scene({7})->slots;
+    REQUIRE(slots.size() == 2);
+    REQUIRE(slots[0].id == ItemId{10});
+    REQUIRE(slots[1].id == ItemId{12});
+
+    REQUIRE(session->undo(writer));
+    slots = session->snapshot()->find_sequence({3})->find_scene({7})->slots;
+    REQUIRE(slots.size() == 3);
+    REQUIRE(slots[0].id == ItemId{10});
+    REQUIRE(slots[1].id == ItemId{11});
+    REQUIRE(slots[2].id == ItemId{12});
+    REQUIRE(session->redo(writer));
+    REQUIRE(session->undo(writer));
+
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {RemoveSlot{{3}, {7}, {11}},
+                                     RemoveSlot{{3}, {7}, {12}}})));
+    REQUIRE(session->undo(writer));
+    slots = session->snapshot()->find_sequence({3})->find_scene({7})->slots;
+    REQUIRE(slots.size() == 3);
+    REQUIRE(slots[0].id == ItemId{10});
+    REQUIRE(slots[1].id == ItemId{11});
+    REQUIRE(slots[2].id == ItemId{12});
+
+    REQUIRE(session->submit(
+        writer, session_transaction(writer, session->revision(),
+                                    {RemoveScene{{3}, {8}}, RemoveScene{{3}, {9}}})));
+    REQUIRE(session->undo(writer));
+    scenes = session->snapshot()->find_sequence({3})->scenes();
+    REQUIRE(scenes.size() == 3);
+    REQUIRE(scenes[0].id == ItemId{7});
+    REQUIRE(scenes[1].id == ItemId{8});
+    REQUIRE(scenes[2].id == ItemId{9});
+}
+
 TEST_CASE("CreateAsset rejects an id that is already live") {
     auto session = std::move(DocumentSession::create(make_project())).value();
     auto writer = std::move(session->register_writer()).value();

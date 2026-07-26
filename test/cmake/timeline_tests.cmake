@@ -162,6 +162,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
         test_timeline_marker_persistence.cpp
+        test_timeline_session_persistence.cpp
         test_timeline_persistence_limits.cpp
         test_timeline_persistence_registry.cpp
         test_timeline_release_serialization.cpp
@@ -328,6 +329,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_release.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_sequence_annotations_decode.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
@@ -337,6 +339,7 @@ add_library(pulp-test-timeline-no-exceptions OBJECT
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_marker_internal.cpp
+    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
     ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp

@@ -149,6 +149,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "marker";
     case ItemKind::Region:
         return "region";
+    case ItemKind::Scene:
+        return "scene";
+    case ItemKind::Slot:
+        return "slot";
     }
     return "project";
 }
@@ -230,8 +234,7 @@ bool write_loop_info(EncodeContext& context, const AudioLoopInfo& loop) {
         return context.writer.quoted(name) && context.writer.character(':');
     };
     if (loop.active_range &&
-        (!member("in_marker_frame") ||
-         !context.writer.u64(loop.active_range->start_frame, true)))
+        (!member("in_marker_frame") || !context.writer.u64(loop.active_range->start_frame, true)))
         return false;
     if (!member("meter_denominator") ||
         !context.writer.u64(static_cast<std::uint32_t>(loop.meter.denominator)) ||
@@ -239,32 +242,28 @@ bool write_loop_info(EncodeContext& context, const AudioLoopInfo& loop) {
         !context.writer.u64(static_cast<std::uint32_t>(loop.meter.numerator)))
         return false;
     if (loop.musical_length &&
-        (!member("musical_length_ticks") ||
-         !context.writer.i64(loop.musical_length->value, true)))
+        (!member("musical_length_ticks") || !context.writer.i64(loop.musical_length->value, true)))
         return false;
     if (!member("one_shot") || !context.writer.append(loop.one_shot ? "true" : "false"))
         return false;
     if (loop.active_range &&
-        (!member("out_marker_frame") ||
-         !context.writer.u64(loop.active_range->end_frame, true)))
+        (!member("out_marker_frame") || !context.writer.u64(loop.active_range->end_frame, true)))
         return false;
     if (!member("points") || !context.writer.character('['))
         return false;
     for (std::size_t index = 0; index < loop.points.size(); ++index) {
         const auto& point = loop.points[index];
         if ((index != 0 && !context.writer.character(',')) ||
-            !context.writer.append("{\"frame\":") ||
-            !context.writer.u64(point.frame, true) ||
+            !context.writer.append("{\"frame\":") || !context.writer.u64(point.frame, true) ||
             !context.writer.append(",\"kind\":") ||
             !context.writer.quoted(point.kind == AudioLoopPointKind::Manual ? "manual"
-                                                                           : "automatic") ||
+                                                                            : "automatic") ||
             !context.writer.character('}'))
             return false;
     }
     if (!context.writer.character(']'))
         return false;
-    if (loop.root_note &&
-        (!member("root_note") || !context.writer.u64(*loop.root_note)))
+    if (loop.root_note && (!member("root_note") || !context.writer.u64(*loop.root_note)))
         return false;
     if (!member("tags") || !context.writer.character('['))
         return false;
@@ -276,39 +275,39 @@ bool write_loop_info(EncodeContext& context, const AudioLoopInfo& loop) {
 }
 
 bool write_asset(EncodeContext& context, const MediaAsset& asset) {
-    return write_envelope(context, "pulp.timeline.asset",
-                          detail::asset_schema_policy.current_version, [&] {
-        if (!context.writer.append("{\"content_hash\":") ||
-            !context.writer.quoted(asset.content_hash.to_hex()) ||
-            !context.writer.append(",\"frame_count\":") ||
-            !context.writer.u64(asset.frame_count, true) || !context.writer.append(",\"id\":") ||
-            !context.writer.u64(asset.id.value, true) || !context.writer.append(",\"locators\":["))
-            return false;
-        for (std::size_t index = 0; index < asset.locators.size(); ++index) {
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_locator(context, asset.locators[index]))
+    return write_envelope(
+        context, "pulp.timeline.asset", detail::asset_schema_policy.current_version, [&] {
+            if (!context.writer.append("{\"content_hash\":") ||
+                !context.writer.quoted(asset.content_hash.to_hex()) ||
+                !context.writer.append(",\"frame_count\":") ||
+                !context.writer.u64(asset.frame_count, true) ||
+                !context.writer.append(",\"id\":") || !context.writer.u64(asset.id.value, true) ||
+                !context.writer.append(",\"locators\":["))
                 return false;
-        }
-        if (!context.writer.character(']'))
-            return false;
-        if (asset.loop_info &&
-            (!context.writer.append(",\"loop_info\":") ||
-             !write_loop_info(context, *asset.loop_info)))
-            return false;
-        if (!context.writer.append(",\"name\":") || !context.writer.quoted(asset.name) ||
-            !context.writer.append(",\"representations\":["))
-            return false;
-        for (std::size_t index = 0; index < asset.representations.size(); ++index) {
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_representation(context, asset.representations[index]))
+            for (std::size_t index = 0; index < asset.locators.size(); ++index) {
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_locator(context, asset.locators[index]))
+                    return false;
+            }
+            if (!context.writer.character(']'))
                 return false;
-        }
-        return context.writer.append("],\"sample_rate\":") &&
-               write_rate(context, asset.sample_rate) &&
-               context.writer.append(",\"storage_policy\":") &&
-               context.writer.quoted(storage_name(asset.storage_policy)) &&
-               context.writer.character('}');
-    });
+            if (asset.loop_info && (!context.writer.append(",\"loop_info\":") ||
+                                    !write_loop_info(context, *asset.loop_info)))
+                return false;
+            if (!context.writer.append(",\"name\":") || !context.writer.quoted(asset.name) ||
+                !context.writer.append(",\"representations\":["))
+                return false;
+            for (std::size_t index = 0; index < asset.representations.size(); ++index) {
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_representation(context, asset.representations[index]))
+                    return false;
+            }
+            return context.writer.append("],\"sample_rate\":") &&
+                   write_rate(context, asset.sample_rate) &&
+                   context.writer.append(",\"storage_policy\":") &&
+                   context.writer.quoted(storage_name(asset.storage_policy)) &&
+                   context.writer.character('}');
+        });
 }
 
 // Every alternative owes an envelope. A content kind that falls off the end of
@@ -474,8 +473,7 @@ bool write_take_lane(EncodeContext& context, const TakeLane& lane) {
                 !context.writer.append(",\"start\":") ||
                 !context.writer.i64(segment.range.start.value, true) ||
                 !context.writer.append(",\"take_id\":") ||
-                !context.writer.u64(segment.take_id.value, true) ||
-                !context.writer.character('}'))
+                !context.writer.u64(segment.take_id.value, true) || !context.writer.character('}'))
                 return false;
         }
         if (!context.writer.append("],\"id\":") || !context.writer.u64(lane.id().value, true) ||
@@ -625,6 +623,76 @@ bool write_groove(EncodeContext& context, const GrooveTemplate& groove) {
            context.writer.character('}');
 }
 
+const char* follow_action_kind_name(FollowActionKind kind) noexcept {
+    switch (kind) {
+    case FollowActionKind::None:
+        return "none";
+    case FollowActionKind::Stop:
+        return "stop";
+    case FollowActionKind::Again:
+        return "again";
+    case FollowActionKind::Previous:
+        return "previous";
+    case FollowActionKind::Next:
+        return "next";
+    case FollowActionKind::First:
+        return "first";
+    case FollowActionKind::Last:
+        return "last";
+    case FollowActionKind::Any:
+        return "any";
+    case FollowActionKind::Other:
+        return "other";
+    case FollowActionKind::Jump:
+        return "jump";
+    }
+    return "none";
+}
+
+bool write_slot(EncodeContext& context, const Slot& slot) {
+    return write_envelope(context, "pulp.timeline.slot", 1, [&] {
+        if (!context.writer.append("{\"clip_id\":") ||
+            !context.writer.u64(slot.clip_id.value, true) ||
+            !context.writer.append(",\"follow\":{\"choices\":["))
+            return false;
+        const auto choices = slot.follow.active();
+        for (std::size_t index = 0; index < choices.size(); ++index) {
+            const auto& choice = choices[index];
+            if ((index && !context.writer.character(',')) || !context.writer.append("{\"kind\":") ||
+                !context.writer.quoted(follow_action_kind_name(choice.kind)) ||
+                !context.writer.append(",\"target\":") ||
+                !context.writer.u64(choice.target.value, true) ||
+                !context.writer.append(",\"weight\":") || !context.writer.u64(choice.weight) ||
+                !context.writer.character('}'))
+                return false;
+        }
+        return context.writer.append("],\"grid\":") &&
+               context.writer.i64(slot.follow.grid.value, true) &&
+               context.writer.append(",\"repetitions\":") &&
+               context.writer.u64(slot.follow.repetitions) && context.writer.append("},\"id\":") &&
+               context.writer.u64(slot.id.value, true) &&
+               context.writer.append(",\"launch_quantize\":{\"grid\":") &&
+               context.writer.i64(slot.launch_quantize.grid.value, true) &&
+               context.writer.append(",\"phase\":") &&
+               context.writer.i64(slot.launch_quantize.phase.value, true) &&
+               context.writer.append("}}");
+    });
+}
+
+bool write_scene(EncodeContext& context, const Scene& scene) {
+    return write_envelope(context, "pulp.timeline.scene", 1, [&] {
+        if (!context.writer.append("{\"id\":") || !context.writer.u64(scene.id.value, true) ||
+            !context.writer.append(",\"name\":") || !context.writer.quoted(scene.name) ||
+            !context.writer.append(",\"slots\":["))
+            return false;
+        for (std::size_t index = 0; index < scene.slots.size(); ++index)
+            if ((index && !context.writer.character(',')) ||
+                !write_slot(context, scene.slots[index]))
+                return false;
+        return context.writer.append("]}");
+    });
+}
+
 bool write_sequence(EncodeContext& context, const Sequence& sequence) {
     return write_envelope(
         context, detail::sequence_schema_policy.type_name,
@@ -642,8 +710,7 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
                 return false;
             if (!context.writer.append(",\"chord_scale_lane\":") ||
                 !write_chord_scale_lane(context, sequence.chord_scale_lane()) ||
-                !context.writer.append(",\"groove\":") ||
-                !write_groove(context, sequence.groove()))
+                !context.writer.append(",\"groove\":") || !write_groove(context, sequence.groove()))
                 return false;
             if (!context.writer.append(",\"id\":") ||
                 !context.writer.u64(sequence.id().value, true) ||
@@ -666,6 +733,12 @@ bool write_sequence(EncodeContext& context, const Sequence& sequence) {
             for (std::size_t index = 0; index < sequence.regions().size(); ++index)
                 if ((index != 0 && !context.writer.character(',')) ||
                     !write_region(context, sequence.regions()[index]))
+                    return false;
+            if (!context.writer.append("],\"scenes\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.scenes().size(); ++index)
+                if ((index && !context.writer.character(',')) ||
+                    !write_scene(context, sequence.scenes()[index]))
                     return false;
             if (!context.writer.append("],\"tracks\":["))
                 return false;
@@ -732,6 +805,11 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
                 return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                                 sequence_path + "/regions/" +
                                                     std::to_string(index) + "/data/name");
+        for (std::size_t index = 0; index < sequence.scenes().size(); ++index)
+            if (!is_valid_utf8(sequence.scenes()[index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/scenes/" + std::to_string(index) +
+                                                    "/data/name");
         for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index) {
             const auto& track = sequence.tracks()[track_index];
             const auto track_path =

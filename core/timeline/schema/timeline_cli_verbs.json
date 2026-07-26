@@ -378,6 +378,73 @@
       "flags": [
         {
           "kind": "U64String",
+          "name": "before-scene-id",
+          "required": false,
+          "schema_field": "before_scene_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "scene",
+          "ref": "pulp.timeline.scene",
+          "required": true,
+          "schema_field": "scene",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:insert-scene",
+      "schema_type": "pulp.timeline.command.insert_scene",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "before-slot-id",
+          "required": false,
+          "schema_field": "before_slot_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "scene-id",
+          "required": true,
+          "schema_field": "scene_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "slot",
+          "ref": "pulp.timeline.slot",
+          "required": true,
+          "schema_field": "slot",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:command:insert-slot",
+      "schema_type": "pulp.timeline.command.insert_slot",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
           "name": "lane-id",
           "required": true,
           "schema_field": "lane_id",
@@ -598,6 +665,57 @@
       ],
       "name": "timeline:command:remove-region",
       "schema_type": "pulp.timeline.command.remove_region",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "scene-id",
+          "required": true,
+          "schema_field": "scene_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-scene",
+      "schema_type": "pulp.timeline.command.remove_scene",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "scene-id",
+          "required": true,
+          "schema_field": "scene_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U64String",
+          "name": "slot-id",
+          "required": true,
+          "schema_field": "slot_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:remove-slot",
+      "schema_type": "pulp.timeline.command.remove_slot",
       "version": 1
     },
     {
@@ -1326,6 +1444,35 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "Array",
+          "name": "slots",
+          "required": true,
+          "schema_field": "slots",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:scene",
+      "schema_type": "pulp.timeline.scene",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "Object",
           "name": "absolute-duration",
           "required": true,
@@ -1384,6 +1531,13 @@
         },
         {
           "kind": "Array",
+          "name": "scenes",
+          "required": true,
+          "schema_field": "scenes",
+          "value_type": "json"
+        },
+        {
+          "kind": "Array",
           "name": "tracks",
           "required": true,
           "schema_field": "tracks",
@@ -1393,6 +1547,42 @@
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
       "version": 4
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "U64String",
+          "name": "clip-id",
+          "required": true,
+          "schema_field": "clip_id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "follow",
+          "required": true,
+          "schema_field": "follow",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "id",
+          "required": true,
+          "schema_field": "id",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Object",
+          "name": "launch-quantize",
+          "required": true,
+          "schema_field": "launch_quantize",
+          "value_type": "json"
+        }
+      ],
+      "name": "timeline:slot",
+      "schema_type": "pulp.timeline.slot",
+      "version": 1
     },
     {
       "domain": "Document",

@@ -69,8 +69,7 @@ void write_text_file(const std::filesystem::path& path, std::string_view text) {
     REQUIRE(stream.good());
 }
 
-void write_wav_file_native(const std::filesystem::path& path,
-                           const audio::AudioFileData& audio) {
+void write_wav_file_native(const std::filesystem::path& path, const audio::AudioFileData& audio) {
     std::ofstream stream(path, std::ios::binary | std::ios::trunc);
     REQUIRE(stream);
     REQUIRE(audio::write_wav_stream(stream, audio, audio::WavBitDepth::Float32));
@@ -99,8 +98,7 @@ std::string project_json(const std::filesystem::path& source, std::uint64_t fram
         {track}));
     if (locators.empty())
         locators.push_back(
-            {AssetLocatorKind::ExternalUri,
-             tools::timeline::filesystem_path_to_utf8(source)});
+            {AssetLocatorKind::ExternalUri, tools::timeline::filesystem_path_to_utf8(source)});
     MediaAsset asset{{5},
                      "source.wav",
                      frame_count,
@@ -205,9 +203,8 @@ TEST_CASE("timeline agent accepts explicit inline and file project sources") {
     REQUIRE(file_source.file_path() == project_path);
     REQUIRE(tools::timeline::validate(file_source));
 
-    const auto unicode_project_path =
-        temp.path() /
-        tools::timeline::filesystem_path_from_utf8("proyecto-\xE9\x9F\xB3-\xCE\xA9.json");
+    const auto unicode_project_path = temp.path() / tools::timeline::filesystem_path_from_utf8(
+                                                        "proyecto-\xE9\x9F\xB3-\xCE\xA9.json");
     write_text_file(unicode_project_path, json);
     REQUIRE(tools::timeline::validate(tools::timeline::ProjectSource::auto_detect(
         tools::timeline::filesystem_path_to_utf8(unicode_project_path))));
@@ -248,16 +245,14 @@ TEST_CASE("timeline agent preserves native non-ASCII render and UTF-8 asset path
         temp.path() / tools::timeline::filesystem_path_from_utf8("m\xC3\xBAsica-\xCE\xA9");
     REQUIRE(std::filesystem::create_directories(unicode_directory));
     const auto source_path =
-        unicode_directory /
-        tools::timeline::filesystem_path_from_utf8("fuente-\xE9\x9F\xB3.wav");
+        unicode_directory / tools::timeline::filesystem_path_from_utf8("fuente-\xE9\x9F\xB3.wav");
     audio::AudioFileData source;
     source.sample_rate = 48'000;
     source.channels = {std::vector<float>(32, 0.5f)};
     write_wav_file_native(source_path, source);
 
-    const auto output_path =
-        unicode_directory /
-        tools::timeline::filesystem_path_from_utf8("salida-\xE6\xB8\xB2\xE6\x9F\x93.wav");
+    const auto output_path = unicode_directory / tools::timeline::filesystem_path_from_utf8(
+                                                     "salida-\xE6\xB8\xB2\xE6\x9F\x93.wav");
     const auto rendered = tools::timeline::render(project_json(source_path), output_path);
     REQUIRE(rendered);
     REQUIRE(std::filesystem::is_regular_file(output_path));
@@ -357,7 +352,7 @@ TEST_CASE("timeline agent atomic render preserves a Linux POSIX ACL") {
 TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     const auto schema = tools::timeline::schema();
     REQUIRE(schema);
-    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") == 25);
+    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") == 29);
 
     const auto unknown = tools::timeline::command_apply(
         empty_project_json(),

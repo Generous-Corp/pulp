@@ -17,8 +17,8 @@
 // triggered on demand and quantized to a musical boundary. These are lightweight
 // value types describing WHAT is launchable and HOW it quantizes; the sample-
 // accurate resolution of a trigger to a boundary lives in the playback engine
-// (pulp/playback/clip_launch.hpp). They are deliberately not yet wired into the
-// persistent Project identity/serialization graph.
+// (pulp/playback/clip_launch.hpp). Sequence scenes persist these authored values;
+// transport launch progress remains runtime state.
 namespace pulp::timeline {
 
 // How a launch snaps to a musical boundary. The boundary set is
@@ -109,6 +109,8 @@ struct FollowActionSet {
     constexpr bool enabled() const noexcept {
         return !active().empty() && grid.value > 0 && repetitions > 0;
     }
+
+    constexpr bool operator==(const FollowActionSet&) const = default;
 };
 
 // A follow-action set built from a single unweighted action.
@@ -125,7 +127,8 @@ constexpr FollowActionSet follow_action(FollowActionKind kind, timebase::TickDur
 // A single launchable clip in a track lane. `clip_id` references a clip stored in
 // the linear model (or a launch-owned clip pool in a later slice); a null id is
 // an empty slot. Foundation slices carry identity, quantization, and the follow
-// behaviour that chooses what plays next.
+// behaviour that chooses what plays next. Persistent sequences own slots through
+// scenes; a null clip_id remains the explicit empty-slot representation.
 struct Slot {
     ItemId id;
     ItemId clip_id;
@@ -135,6 +138,7 @@ struct Slot {
     constexpr bool empty() const noexcept {
         return !clip_id.valid();
     }
+    constexpr bool operator==(const Slot&) const = default;
 };
 
 // A column of slots launched as a unit. The linear model reserves "scene" for no
@@ -144,6 +148,8 @@ struct Scene {
     ItemId id;
     std::string name;
     std::vector<Slot> slots;
+
+    bool operator==(const Scene&) const = default;
 };
 
 // Follow-action resolution

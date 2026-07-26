@@ -33,6 +33,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::Marker);
     if (value == "region")
         return runtime::Ok(ItemKind::Region);
+    if (value == "scene")
+        return runtime::Ok(ItemKind::Scene);
+    if (value == "slot")
+        return runtime::Ok(ItemKind::Slot);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
 

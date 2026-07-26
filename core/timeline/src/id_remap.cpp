@@ -96,17 +96,17 @@ void append_clip_ids(const Clip& clip, std::vector<ItemId>& ids) {
 // legible. Answering this per alternative in one place keeps the preflight
 // walks, which each scan a different level of the tree, from drifting apart.
 std::optional<ModelErrorCode> remap_rejection(const ClipContent& content) noexcept {
-    return std::visit(
-        ClipContentCases{
-            [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
-            [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
-            [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
-            [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
-            [](const OpaqueContent&) {
-                return std::optional<ModelErrorCode>{ModelErrorCode::OpaqueContentCannotRemap};
-            },
-        },
-        content);
+    return std::visit(ClipContentCases{
+                          [](const EmptyContent&) { return std::optional<ModelErrorCode>{}; },
+                          [](const MediaRef&) { return std::optional<ModelErrorCode>{}; },
+                          [](const NoteContent&) { return std::optional<ModelErrorCode>{}; },
+                          [](const RegisteredContent&) { return std::optional<ModelErrorCode>{}; },
+                          [](const OpaqueContent&) {
+                              return std::optional<ModelErrorCode>{
+                                  ModelErrorCode::OpaqueContentCannotRemap};
+                          },
+                      },
+                      content);
 }
 
 void append_take_ids(const Track& track, std::vector<ItemId>& ids) {
@@ -146,6 +146,11 @@ void append_annotation_ids(const Sequence& sequence, std::vector<ItemId>& ids) {
         ids.push_back(marker.id);
     for (const auto& region : sequence.regions())
         ids.push_back(region.id);
+    for (const auto& scene : sequence.scenes()) {
+        ids.push_back(scene.id);
+        for (const auto& slot : scene.slots)
+            ids.push_back(slot.id);
+    }
 }
 
 void allocate_annotation_owned(const Sequence& sequence, IdRemapTable& table,
@@ -159,6 +164,16 @@ void allocate_annotation_owned(const Sequence& sequence, IdRemapTable& table,
         if (error)
             return;
         error = allocate_owned(table, allocator, region.id);
+    }
+    for (const auto& scene : sequence.scenes()) {
+        if (error)
+            return;
+        error = allocate_owned(table, allocator, scene.id);
+        for (const auto& slot : scene.slots) {
+            if (error)
+                return;
+            error = allocate_owned(table, allocator, slot.id);
+        }
     }
 }
 
@@ -287,8 +302,7 @@ rebuild_take_lane(const TakeLane& lane, const IdRemapTable& table, ExternalIdFix
     std::vector<TakeCompSegment> comp(lane.comp_segments().begin(), lane.comp_segments().end());
     for (auto& segment : comp)
         segment.take_id = *table.find(segment.take_id);
-    return TakeLane::create(*table.find(lane.id()), lane.name(), std::move(takes),
-                            std::move(comp));
+    return TakeLane::create(*table.find(lane.id()), lane.name(), std::move(takes), std::move(comp));
 }
 
 runtime::Result<Track, ModelError> rebuild_track(const Track& track, const IdRemapTable& table,
@@ -362,15 +376,30 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
     std::vector<SequenceRegion> regions(sequence.regions().begin(), sequence.regions().end());
     for (auto& region : regions)
         region.id = *table.find(region.id);
-    return Sequence::create(SequenceInput{.id = *table.find(sequence.id()),
-                                          .name = sequence.name(),
-                                          .musical_duration = sequence.duration(),
-                                          .absolute_duration = sequence.absolute_duration(),
-                                          .tracks = std::move(tracks),
-                                          .markers = std::move(markers),
-                                          .regions = std::move(regions),
-                                          .chord_scale_lane = sequence.chord_scale_lane(),
-                                          .groove = sequence.groove()});
+    std::vector<Scene> scenes(sequence.scenes().begin(), sequence.scenes().end());
+    for (auto& scene : scenes) {
+        scene.id = *table.find(scene.id);
+        for (auto& slot : scene.slots) {
+            slot.id = *table.find(slot.id);
+            if (slot.clip_id.valid())
+                slot.clip_id = *table.find(slot.clip_id);
+            for (auto& action : slot.follow.choices)
+                if (action.kind == FollowActionKind::Jump && action.target.valid())
+                    action.target = *table.find(action.target);
+        }
+    }
+    return Sequence::create(SequenceInput{
+        .id = *table.find(sequence.id()),
+        .name = sequence.name(),
+        .musical_duration = sequence.duration(),
+        .absolute_duration = sequence.absolute_duration(),
+        .tracks = std::move(tracks),
+        .markers = std::move(markers),
+        .regions = std::move(regions),
+        .chord_scale_lane = sequence.chord_scale_lane(),
+        .groove = sequence.groove(),
+        .scenes = std::move(scenes),
+    });
 }
 
 } // namespace

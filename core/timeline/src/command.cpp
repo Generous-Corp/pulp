@@ -277,6 +277,17 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        equal_region(left.region, right.region);
             } else if constexpr (std::is_same_v<T, RemoveRegion>) {
                 return left.sequence_id == right.sequence_id && left.region_id == right.region_id;
+            } else if constexpr (std::is_same_v<T, InsertScene>) {
+                return left.sequence_id == right.sequence_id && left.scene == right.scene &&
+                       left.before_scene_id == right.before_scene_id;
+            } else if constexpr (std::is_same_v<T, RemoveScene>) {
+                return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id;
+            } else if constexpr (std::is_same_v<T, InsertSlot>) {
+                return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
+                       left.slot == right.slot && left.before_slot_id == right.before_slot_id;
+            } else if constexpr (std::is_same_v<T, RemoveSlot>) {
+                return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
+                       left.slot_id == right.slot_id;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -317,6 +328,10 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), value.marker.name.size());
             if constexpr (std::is_same_v<T, InsertRegion>)
                 return saturated_add(sizeof(T), value.region.name.size());
+            if constexpr (std::is_same_v<T, InsertScene>)
+                return saturated_add(
+                    saturated_add(sizeof(T), value.scene.name.size()),
+                    saturated_multiply(value.scene.slots.size(), sizeof(Slot)));
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());

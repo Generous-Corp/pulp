@@ -31,7 +31,7 @@ is not a reason to add a model feature.
 | `clip.fades` | yes | Per-clip fade in and fade out durations. |
 | `clip.crossfade` | format-only | An overlap between two adjacent clips authored as one transition item. |
 | `clip.warp` | format-only | A time-warp map deforming clip content against timeline time. |
-| `clip.launch` | format-only | Non-arrangement clip playback (scenes, launcher grids). |
+| `clip.launch` | yes | Non-arrangement clip playback (scenes, launcher grids). |
 | `gap.explicit` | format-only | A gap between clips authored as a first-class item rather than absence. |
 | `tempo.single` | yes | One tempo governing the whole document. |
 | `tempo.map` | yes | Tempo changing over the document at more than one point. |

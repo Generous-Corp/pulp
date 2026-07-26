@@ -94,18 +94,18 @@ artifact is needed. Never modify canonical project JSON text directly.
   invariant. What `Sequence::create` does enforce is a positive region length, a
   non-negative position, and containment inside the sequence's musical duration
   when it declares one — an absolute-only sequence bounds nothing above.
-- **`Sequence` is built through `create()` overloads, not aggregate init.**
-  Unlike `TrackInput`/`ProjectInput`, its `Data` is pimpl'd behind
-  `shared_ptr<const Data>`, so adding sequence-owned state means adding an
-  overload — existing call sites keep compiling and no positional brace-init
-  anywhere in the tree silently shifts a field. Preserve that: do not convert
-  `Sequence` into an input struct to add a field.
+- **`Sequence` is built through `create()`, not aggregate init.** Existing
+  partial overloads stay source-compatible; the full-fidelity path takes
+  `SequenceInput`, so new owned collections extend a named input rather than an
+  unbounded chain of positional overloads. `Sequence` remains pimpl'd behind
+  `shared_ptr<const Data>`.
 - **The `pulp.timeline.sequence` and `pulp.timeline.project` schemas are both
   versioned; the encoder must not hard-code either version.**
   `sequence_schema_policy` and `project_schema_policy` (mirroring
   `track_schema_policy`) own the type name, current version, oldest readable
-  version, and the predicate — `requires_annotations(version)` /
-  `supports_session_start(version)` — that decode and preflight both consult. A
+  version, and the predicates — `requires_annotations(version)`,
+  `requires_scenes(version)`, and `supports_session_start(version)` — that
+  decode and preflight both consult. A
   literal version in `write_sequence`, `walk_sequence`, `walk_project`, or
   `structural_registry_validation` is how these drift apart — route every one
   through the policy. `pulp.timeline.project` being versioned at all is easy to
@@ -131,6 +131,11 @@ artifact is needed. Never modify canonical project JSON text directly.
   `DirtyItem::owner_track` is legitimately zero for these commands. They emit
   inverse commands, so undo, redo, and journal replay restore the annotation and
   its tombstone ownership exactly.
+- Scenes are sequence-owned in authored order, and each scene owns its ordered
+  slots. A non-empty slot must name a clip in that sequence; a Jump follow
+  action must name an existing slot, while other kinds carry no target.
+  `InsertScene` / `RemoveScene` and `InsertSlot` / `RemoveSlot` reduce through
+  `transaction_scene_internal` with exact inverse and tombstone ownership.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -694,11 +699,16 @@ opportunistically.
 
 ## Launch model and follow actions
 
-`Slot`, `Scene`, `FollowAction*`, and `resolve_follow_action()` in
-`clip_launch.hpp` are free-standing in-memory value types: not registered schema
-types, not serialized, and not reachable from `Sequence`. Treat a change there
-as a model-only change — it needs no schema registration and no codegen — and
-do not quietly widen it into the persistent Project graph.
+`Slot`, `Scene`, and `FollowAction*` in `clip_launch.hpp` are durable authored
+values owned by `Sequence`; both structural types are registered schemas and
+their IDs live in the Project identity directory. Sequence schema v4 introduced
+the required `scenes` array. The v3→v4 migration inserts an empty array, while
+v4→v3 refuses to discard a non-empty one. Quantization and follow-action choices
+round-trip canonically, but sample-accurate launch progress remains runtime state
+in `core/playback/clip_launch.*`.
+`core/interchange` treats `clip.launch` as model-detectable and records each
+authored scene in the canonical census, so export loss manifests cannot omit
+launcher state silently.
 
 A random follow action (`Any`, `Other`, or a weighted candidate draw) must stay
 a **stateless hash of (session seed, slot id, draw index)**, never a stateful

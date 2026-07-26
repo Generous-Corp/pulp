@@ -308,6 +308,7 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                  {"musical_duration", SchemaValueKind::I64String},
                  {"name", SchemaValueKind::String},
                  {"regions", SchemaValueKind::Array},
+                 {"scenes", SchemaValueKind::Array},
                  {"tracks", SchemaValueKind::Array}},
                 detail::sequence_schema_policy.current_version);
     sequence.upgrades.push_back({1, 2, {}, detail::migrate_sequence_v1_to_v2});
@@ -346,6 +347,15 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
                                {"id", SchemaValueKind::U64String},
                                {"name", SchemaValueKind::String},
                                {"position", SchemaValueKind::I64String}}));
+    schemas.push_back(builtin("pulp.timeline.scene", SchemaDomain::Document,
+                              {{"id", SchemaValueKind::U64String},
+                               {"name", SchemaValueKind::String},
+                               {"slots", SchemaValueKind::Array}}));
+    schemas.push_back(builtin("pulp.timeline.slot", SchemaDomain::Document,
+                              {{"clip_id", SchemaValueKind::U64String},
+                               {"follow", SchemaValueKind::Object},
+                               {"id", SchemaValueKind::U64String},
+                               {"launch_quantize", SchemaValueKind::Object}}));
     auto track = builtin(std::string(detail::track_schema_policy.type_name), SchemaDomain::Document,
                          {{"active_take_lane_id", SchemaValueKind::U64String},
                           {"automation_lanes", SchemaValueKind::Array},
@@ -511,6 +521,22 @@ register_builtin_timeline_schemas(SchemaRegistryBuilder& builder) {
     schemas.push_back(builtin(
         "pulp.timeline.command.remove_region", SchemaDomain::Command,
         {{"region_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_scene", SchemaDomain::Command,
+                              {{"before_scene_id", SchemaValueKind::U64String, false},
+                               {"scene", SchemaValueKind::Object, true, "pulp.timeline.scene"},
+                               {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin(
+        "pulp.timeline.command.remove_scene", SchemaDomain::Command,
+        {{"scene_id", SchemaValueKind::U64String}, {"sequence_id", SchemaValueKind::U64String}}));
+    schemas.push_back(builtin("pulp.timeline.command.insert_slot", SchemaDomain::Command,
+                              {{"before_slot_id", SchemaValueKind::U64String, false},
+                               {"scene_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"slot", SchemaValueKind::Object, true, "pulp.timeline.slot"}}));
+    schemas.push_back(builtin("pulp.timeline.command.remove_slot", SchemaDomain::Command,
+                              {{"scene_id", SchemaValueKind::U64String},
+                               {"sequence_id", SchemaValueKind::U64String},
+                               {"slot_id", SchemaValueKind::U64String}}));
     schemas.push_back(builtin("pulp.timeline.command.set_track_freeze", SchemaDomain::Command,
                               {{"expected", SchemaValueKind::Object, false},
                                {"replacement", SchemaValueKind::Object, false},

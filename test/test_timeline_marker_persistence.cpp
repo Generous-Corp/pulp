@@ -106,16 +106,16 @@ TEST_CASE("Timeline markers and regions round trip through a snapshot") {
     REQUIRE(take(serialize_project(decoded, registry)).json == encoded.json);
 }
 
-TEST_CASE("Timeline marker fixture upgrades to the current sequence schema") {
+TEST_CASE("Timeline marker fixture matches the combined current sequence schema") {
     const auto registry = builtins();
     const auto original = marker_fixture("v4/sequence-markers.json");
     const auto decoded = take(deserialize_project(original, registry));
     const auto resaved = take(serialize_project(decoded, registry)).json;
-    REQUIRE(resaved != original);
+    REQUIRE(resaved == original);
     REQUIRE(resaved.find(R"("type_name":"pulp.timeline.sequence","version":4)") !=
             std::string::npos);
-    REQUIRE(resaved.find(R"("groove":{"name":"","step":"0","steps":[])") !=
-            std::string::npos);
+    REQUIRE(resaved.find(R"("groove":{"name":"","step":"0","steps":[])") != std::string::npos);
+    REQUIRE(resaved.find(R"("scenes":[])") != std::string::npos);
 }
 
 TEST_CASE("Timeline sequence upgrades to markers and regions and downgrades back") {
@@ -147,9 +147,9 @@ TEST_CASE("Timeline sequence downgrade refuses to discard authored annotations")
     DecodeLimits limits;
     const auto populated =
         sequence_envelope(take(serialize_project(annotated_project(), registry)).json);
-    // The chain walks 4 -> 3 (the straight groove drops cleanly), then 3 -> 2
-    // (the empty chord lane drops cleanly), and finally refuses at 2 -> 1,
-    // where the authored annotations would be lost.
+    // The chain walks 4 -> 3 (the straight groove and empty scene list drop
+    // cleanly), then 3 -> 2 (the empty chord lane drops cleanly), and finally
+    // refuses at 2 -> 1, where the authored annotations would be lost.
     auto refused =
         registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 4, 1, populated, limits);
     REQUIRE_FALSE(refused);

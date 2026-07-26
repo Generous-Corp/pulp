@@ -99,8 +99,7 @@ std::optional<ModelError> validate_media_asset(MediaAsset& asset) {
               [](const AssetRepresentation& lhs, const AssetRepresentation& rhs) {
                   return lhs.role < rhs.role;
               });
-    if (asset.loop_info &&
-        !detail::validate_and_canonicalize(*asset.loop_info, asset.frame_count))
+    if (asset.loop_info && !detail::validate_and_canonicalize(*asset.loop_info, asset.frame_count))
         return ModelError{ModelErrorCode::InvalidAudioLoopInfo, asset.id, {}};
     return std::nullopt;
 }
@@ -161,6 +160,11 @@ void visit_project_identities(const ProjectInput& input, Visitor&& visit) {
             visit(marker.id, location(ItemKind::Marker, sequence.id()));
         for (const auto& region : sequence.regions())
             visit(region.id, location(ItemKind::Region, sequence.id()));
+        for (const auto& scene : sequence.scenes()) {
+            visit(scene.id, location(ItemKind::Scene, sequence.id()));
+            for (const auto& slot : scene.slots)
+                visit(slot.id, location(ItemKind::Slot, sequence.id(), {}, {}, scene.id));
+        }
         for (const auto& track : sequence.tracks()) {
             visit(track.id(), location(ItemKind::Track, sequence.id(), track.id()));
             for (const auto& device : track.device_chain())
@@ -516,6 +520,82 @@ std::optional<ItemId> duplicate_annotation_id(const std::vector<SequenceMarker>&
     return duplicate == ids.end() ? std::nullopt : std::optional<ItemId>(*duplicate);
 }
 
+constexpr bool valid_follow_action_kind(FollowActionKind kind) noexcept {
+    switch (kind) {
+    case FollowActionKind::None:
+    case FollowActionKind::Stop:
+    case FollowActionKind::Again:
+    case FollowActionKind::Previous:
+    case FollowActionKind::Next:
+    case FollowActionKind::First:
+    case FollowActionKind::Last:
+    case FollowActionKind::Any:
+    case FollowActionKind::Other:
+    case FollowActionKind::Jump:
+        return true;
+    }
+    return false;
+}
+
+std::optional<ModelError> validate_scenes(const std::vector<Scene>& scenes,
+                                          const std::vector<Track>& tracks) {
+    if (scenes.empty())
+        return std::nullopt;
+    std::vector<ItemId> clip_ids;
+    for (const auto& track : tracks)
+        for (const auto& clip : track.clips())
+            clip_ids.push_back(clip.id());
+    std::sort(clip_ids.begin(), clip_ids.end());
+
+    std::vector<ItemId> owned_ids;
+    std::vector<ItemId> slot_ids;
+    for (const auto& scene : scenes) {
+        if (!scene.id.valid())
+            return ModelError{ModelErrorCode::InvalidItemId, scene.id, {}};
+        owned_ids.push_back(scene.id);
+        for (const auto& slot : scene.slots) {
+            if (!slot.id.valid())
+                return ModelError{ModelErrorCode::InvalidItemId, slot.id, scene.id};
+            owned_ids.push_back(slot.id);
+            slot_ids.push_back(slot.id);
+            if (slot.clip_id.value != 0 && !slot.clip_id.valid())
+                return ModelError{ModelErrorCode::InvalidItemId, slot.clip_id, slot.id};
+            if (slot.clip_id.valid() &&
+                !std::binary_search(clip_ids.begin(), clip_ids.end(), slot.clip_id))
+                return ModelError{ModelErrorCode::MissingItem, slot.clip_id, slot.id};
+            if (slot.follow.choice_count > FollowActionSet::kMaxChoices)
+                return ModelError{ModelErrorCode::InvalidSchemaIdentity, slot.id, scene.id};
+            for (std::size_t index = slot.follow.choice_count; index < FollowActionSet::kMaxChoices;
+                 ++index) {
+                if (slot.follow.choices[index] != FollowAction{})
+                    return ModelError{ModelErrorCode::InvalidSchemaIdentity, slot.id, scene.id};
+            }
+        }
+    }
+    std::sort(owned_ids.begin(), owned_ids.end());
+    if (const auto duplicate = std::adjacent_find(owned_ids.begin(), owned_ids.end());
+        duplicate != owned_ids.end())
+        return ModelError{ModelErrorCode::DuplicateItemId, *duplicate, {}};
+    std::sort(slot_ids.begin(), slot_ids.end());
+    for (const auto& scene : scenes)
+        for (const auto& slot : scene.slots)
+            for (const auto& action : slot.follow.active()) {
+                if (!valid_follow_action_kind(action.kind))
+                    return ModelError{ModelErrorCode::InvalidSchemaIdentity, slot.id, scene.id};
+                if (action.target.value != 0 && !action.target.valid())
+                    return ModelError{ModelErrorCode::InvalidItemId, action.target, slot.id};
+                if (action.kind == FollowActionKind::Jump) {
+                    if (!action.target.valid() ||
+                        !std::binary_search(slot_ids.begin(), slot_ids.end(), action.target))
+                        return ModelError{ModelErrorCode::MissingItem, action.target, slot.id};
+                } else if (action.target.value != 0) {
+                    return ModelError{ModelErrorCode::InvalidSchemaIdentity, slot.id,
+                                      action.target};
+                }
+            }
+    return std::nullopt;
+}
+
 } // namespace
 
 runtime::Result<ChordScaleLane, ModelError>
@@ -532,16 +612,16 @@ ChordScaleLane::create(std::vector<ChordScaleEvent> events) {
         if (index != 0 && events[index - 1].position.value >= event.position.value)
             return fail<ChordScaleLane>(ModelErrorCode::UnorderedChordScaleLane);
     }
-    return runtime::Result<ChordScaleLane, ModelError>(runtime::Ok(ChordScaleLane(
-        std::make_shared<const std::vector<ChordScaleEvent>>(std::move(events)))));
+    return runtime::Result<ChordScaleLane, ModelError>(runtime::Ok(
+        ChordScaleLane(std::make_shared<const std::vector<ChordScaleEvent>>(std::move(events)))));
 }
 
 const ChordScaleEvent* ChordScaleLane::at(timebase::TickPosition position) const noexcept {
-    const auto found = std::upper_bound(
-        events_->begin(), events_->end(), position,
-        [](timebase::TickPosition wanted, const ChordScaleEvent& event) {
-            return wanted.value < event.position.value;
-        });
+    const auto found =
+        std::upper_bound(events_->begin(), events_->end(), position,
+                         [](timebase::TickPosition wanted, const ChordScaleEvent& event) {
+                             return wanted.value < event.position.value;
+                         });
     return found == events_->begin() ? nullptr : &*(found - 1);
 }
 
@@ -642,8 +722,7 @@ GrooveTemplate::apply_timing(timebase::TickPosition position) const noexcept {
     // change of swing setting never re-assigns material to a different step.
     const auto* step = step_at(position);
     if (step)
-        displacement +=
-            scaled_by_strength(step->timing_offset.value, data_->timing_strength);
+        displacement += scaled_by_strength(step->timing_offset.value, data_->timing_strength);
     // Swing and table offsets can oppose one another at the signed boundary.
     // Combine their bounded deltas before the one saturating position add so
     // cancellation is preserved.
@@ -675,6 +754,7 @@ struct Sequence::Data {
     std::vector<SequenceRegion> regions;
     ChordScaleLane chord_scale_lane;
     GrooveTemplate groove;
+    std::vector<Scene> scenes;
 };
 
 runtime::Result<Sequence, ModelError>
@@ -694,21 +774,29 @@ runtime::Result<Sequence, ModelError> Sequence::create(
     ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
     std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
     std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions) {
-    auto empty_lane = ChordScaleLane::create({});
-    if (!empty_lane)
-        return runtime::Result<Sequence, ModelError>(runtime::Err(empty_lane.error()));
-    return create(id, std::move(name), musical_duration, absolute_duration, std::move(tracks),
-                  std::move(markers), std::move(regions), std::move(empty_lane).value());
+    return create(SequenceInput{.id = id,
+                                .name = std::move(name),
+                                .musical_duration = musical_duration,
+                                .absolute_duration = absolute_duration,
+                                .tracks = std::move(tracks),
+                                .markers = std::move(markers),
+                                .regions = std::move(regions)});
 }
 
-runtime::Result<Sequence, ModelError> Sequence::create(
-    ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
-    std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
-    std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions,
-    ChordScaleLane chord_scale_lane) {
-    return create(SequenceInput{id, std::move(name), musical_duration, absolute_duration,
-                                std::move(tracks), std::move(markers), std::move(regions),
-                                std::move(chord_scale_lane), std::nullopt});
+runtime::Result<Sequence, ModelError>
+Sequence::create(ItemId id, std::string name,
+                 std::optional<timebase::TickDuration> musical_duration,
+                 std::optional<AbsoluteTimelineDuration> absolute_duration,
+                 std::vector<Track> tracks, std::vector<SequenceMarker> markers,
+                 std::vector<SequenceRegion> regions, ChordScaleLane chord_scale_lane) {
+    return create(SequenceInput{.id = id,
+                                .name = std::move(name),
+                                .musical_duration = musical_duration,
+                                .absolute_duration = absolute_duration,
+                                .tracks = std::move(tracks),
+                                .markers = std::move(markers),
+                                .regions = std::move(regions),
+                                .chord_scale_lane = std::move(chord_scale_lane)});
 }
 
 runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
@@ -718,6 +806,7 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
     auto tracks = std::move(input.tracks);
     auto markers = std::move(input.markers);
     auto regions = std::move(input.regions);
+    auto scenes = std::move(input.scenes);
     // Absent context members mean the defaults the sequence would otherwise
     // carry; both validate on construction, so neither can be default-built.
     if (!input.chord_scale_lane) {
@@ -745,6 +834,8 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
         return fail<Sequence>(invalid->code, invalid->item, id);
     if (const auto duplicate = duplicate_annotation_id(markers, regions))
         return fail<Sequence>(ModelErrorCode::DuplicateItemId, *duplicate, id);
+    if (const auto invalid = validate_scenes(scenes, tracks))
+        return fail<Sequence>(invalid->code, invalid->item, invalid->related_item);
     sort_markers(markers);
     sort_regions(regions);
     std::vector<std::pair<ItemId, std::size_t>> by_id;
@@ -773,7 +864,7 @@ runtime::Result<Sequence, ModelError> Sequence::create(SequenceInput input) {
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{id, std::move(input.name), musical_duration, absolute_duration, std::move(tracks),
              std::move(by_id), std::move(markers), std::move(regions),
-             std::move(*input.chord_scale_lane), std::move(*input.groove)}))));
+             std::move(*input.chord_scale_lane), std::move(*input.groove), std::move(scenes)}))));
 }
 
 ItemId Sequence::id() const noexcept {
@@ -805,6 +896,9 @@ std::span<const SequenceMarker> Sequence::markers() const noexcept {
 std::span<const SequenceRegion> Sequence::regions() const noexcept {
     return data_->regions;
 }
+std::span<const Scene> Sequence::scenes() const noexcept {
+    return data_->scenes;
+}
 const SequenceMarker* Sequence::find_marker(ItemId id) const noexcept {
     const auto found = std::find_if(data_->markers.begin(), data_->markers.end(),
                                     [id](const SequenceMarker& marker) { return marker.id == id; });
@@ -814,6 +908,19 @@ const SequenceRegion* Sequence::find_region(ItemId id) const noexcept {
     const auto found = std::find_if(data_->regions.begin(), data_->regions.end(),
                                     [id](const SequenceRegion& region) { return region.id == id; });
     return found == data_->regions.end() ? nullptr : &*found;
+}
+const Scene* Sequence::find_scene(ItemId id) const noexcept {
+    const auto found = std::find_if(data_->scenes.begin(), data_->scenes.end(),
+                                    [id](const Scene& scene) { return scene.id == id; });
+    return found == data_->scenes.end() ? nullptr : &*found;
+}
+const Slot* Sequence::find_slot(ItemId id) const noexcept {
+    for (const auto& scene : data_->scenes)
+        if (const auto found = std::find_if(scene.slots.begin(), scene.slots.end(),
+                                            [id](const Slot& slot) { return slot.id == id; });
+            found != scene.slots.end())
+            return &*found;
+    return nullptr;
 }
 
 runtime::Result<Sequence, ModelError>
@@ -830,7 +937,7 @@ Sequence::with_annotations(std::vector<SequenceMarker> markers,
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, std::move(markers), std::move(regions),
-             data_->chord_scale_lane, data_->groove}))));
+             data_->chord_scale_lane, data_->groove, data_->scenes}))));
 }
 
 runtime::Result<Sequence, ModelError> Sequence::insert_marker(SequenceMarker marker) const {
@@ -865,6 +972,75 @@ runtime::Result<Sequence, ModelError> Sequence::erase_region(ItemId id) const {
     return with_annotations(data_->markers, std::move(regions));
 }
 
+runtime::Result<Sequence, ModelError> Sequence::with_scenes(std::vector<Scene> scenes) const {
+    if (const auto invalid = validate_scenes(scenes, data_->tracks))
+        return fail<Sequence>(invalid->code, invalid->item, invalid->related_item);
+    return runtime::Ok(Sequence(std::make_shared<const Data>(
+        Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
+             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
+             data_->chord_scale_lane, data_->groove, std::move(scenes)})));
+}
+
+runtime::Result<Sequence, ModelError>
+Sequence::insert_scene(Scene scene, std::optional<ItemId> before_scene_id) const {
+    auto scenes = data_->scenes;
+    auto position = scenes.end();
+    if (before_scene_id) {
+        position = std::find_if(scenes.begin(), scenes.end(), [&](const Scene& candidate) {
+            return candidate.id == *before_scene_id;
+        });
+        if (position == scenes.end())
+            return fail<Sequence>(ModelErrorCode::MissingItem, *before_scene_id, data_->id);
+    }
+    scenes.insert(position, std::move(scene));
+    return with_scenes(std::move(scenes));
+}
+
+runtime::Result<Sequence, ModelError> Sequence::erase_scene(ItemId id) const {
+    auto scenes = data_->scenes;
+    const auto found = std::find_if(scenes.begin(), scenes.end(),
+                                    [id](const Scene& scene) { return scene.id == id; });
+    if (found == scenes.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, id, data_->id);
+    scenes.erase(found);
+    return with_scenes(std::move(scenes));
+}
+
+runtime::Result<Sequence, ModelError>
+Sequence::insert_slot(ItemId scene_id, Slot slot, std::optional<ItemId> before_slot_id) const {
+    auto scenes = data_->scenes;
+    const auto found = std::find_if(scenes.begin(), scenes.end(), [scene_id](const Scene& scene) {
+        return scene.id == scene_id;
+    });
+    if (found == scenes.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, scene_id, data_->id);
+    auto position = found->slots.end();
+    if (before_slot_id) {
+        position =
+            std::find_if(found->slots.begin(), found->slots.end(),
+                         [&](const Slot& candidate) { return candidate.id == *before_slot_id; });
+        if (position == found->slots.end())
+            return fail<Sequence>(ModelErrorCode::MissingItem, *before_slot_id, scene_id);
+    }
+    found->slots.insert(position, std::move(slot));
+    return with_scenes(std::move(scenes));
+}
+
+runtime::Result<Sequence, ModelError> Sequence::erase_slot(ItemId scene_id, ItemId slot_id) const {
+    auto scenes = data_->scenes;
+    const auto scene = std::find_if(scenes.begin(), scenes.end(), [scene_id](const Scene& value) {
+        return value.id == scene_id;
+    });
+    if (scene == scenes.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, scene_id, data_->id);
+    const auto slot = std::find_if(scene->slots.begin(), scene->slots.end(),
+                                   [slot_id](const Slot& value) { return value.id == slot_id; });
+    if (slot == scene->slots.end())
+        return fail<Sequence>(ModelErrorCode::MissingItem, slot_id, scene_id);
+    scene->slots.erase(slot);
+    return with_scenes(std::move(scenes));
+}
+
 runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const {
     const auto found =
         std::lower_bound(data_->track_id_index.begin(), data_->track_id_index.end(), track.id(),
@@ -884,10 +1060,12 @@ runtime::Result<Sequence, ModelError> Sequence::replace_track(Track track) const
     }
     auto tracks = data_->tracks;
     tracks[found->second] = std::move(track);
+    if (const auto invalid = validate_scenes(data_->scenes, tracks))
+        return fail<Sequence>(invalid->code, invalid->item, invalid->related_item);
     return runtime::Result<Sequence, ModelError>(runtime::Ok(Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              std::move(tracks), data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, data_->groove}))));
+             data_->chord_scale_lane, data_->groove, data_->scenes}))));
 }
 
 const GrooveTemplate& Sequence::groove() const noexcept {
@@ -905,8 +1083,8 @@ Sequence Sequence::with_chord_scale_lane(ChordScaleLane lane) const {
     // fail.
     return Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
-             data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             std::move(lane), data_->groove}));
+             data_->tracks, data_->track_id_index, data_->markers, data_->regions, std::move(lane),
+             data_->groove, data_->scenes}));
 }
 
 Sequence Sequence::with_groove(GrooveTemplate groove) const {
@@ -916,7 +1094,7 @@ Sequence Sequence::with_groove(GrooveTemplate groove) const {
     return Sequence(std::make_shared<const Data>(
         Data{data_->id, data_->name, data_->musical_duration, data_->absolute_duration,
              data_->tracks, data_->track_id_index, data_->markers, data_->regions,
-             data_->chord_scale_lane, std::move(groove)}));
+             data_->chord_scale_lane, std::move(groove), data_->scenes}));
 }
 
 bool Sequence::shares_storage_with(const Sequence& other) const noexcept {
@@ -977,13 +1155,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
             return fail<Project>(ModelErrorCode::InvalidSchemaIdentity, entry.item);
         const auto invalid = ItemId{};
         const auto valid_shape = [&] {
-            // Parent is canonical and, for every kind but AutomationPoint and
-            // Take, recomputable from the item's own coordinates. An
-            // AutomationPoint's parent is its automation lane and a Take's parent
-            // is its take lane — neither lane is among (sequence, track, clip); it
-            // is carried only in parent_id and is validated by ownership below,
-            // never re-derived from coordinates here (that would be circular).
+            // Parent is canonical and, except for lane/scene-owned children,
+            // recomputable from the item's own coordinates. An AutomationPoint,
+            // Take, or Slot carries its automation lane, take lane, or scene only
+            // in parent_id; ownership below validates it without circularly
+            // re-deriving it from (sequence, track, clip).
             if (location.kind != ItemKind::AutomationPoint && location.kind != ItemKind::Take &&
+                location.kind != ItemKind::Slot &&
                 location.parent_id != immediate_parent_id(location.kind, project.id(),
                                                           location.sequence_id, location.track_id,
                                                           location.clip_id))
@@ -1003,8 +1181,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
                        location.track_id == entry.item && location.clip_id == invalid;
             case ItemKind::Marker:
             case ItemKind::Region:
+            case ItemKind::Scene:
                 return location.sequence_id.valid() && location.sequence_id != entry.item &&
                        location.track_id == invalid && location.clip_id == invalid;
+            case ItemKind::Slot:
+                return location.sequence_id.valid() && location.parent_id.valid() &&
+                       location.track_id == invalid && location.clip_id == invalid &&
+                       entry.item != location.sequence_id && entry.item != location.parent_id;
             case ItemKind::Clip:
                 return location.sequence_id.valid() && location.track_id.valid() &&
                        location.sequence_id != location.track_id &&
@@ -1050,7 +1233,13 @@ detail::ProjectStateAccess::restore_identities(Project project,
             case ItemKind::Track:
             case ItemKind::Marker:
             case ItemKind::Region:
+            case ItemKind::Scene:
                 return owner_is(location.parent_id, ItemKind::Sequence);
+            case ItemKind::Slot: {
+                const auto* scene = find_entry(location.parent_id);
+                return scene && scene->location.kind == ItemKind::Scene &&
+                       scene->location.parent_id == location.sequence_id;
+            }
             case ItemKind::Clip: {
                 const auto* track = find_entry(location.parent_id);
                 return track && track->location.kind == ItemKind::Track &&

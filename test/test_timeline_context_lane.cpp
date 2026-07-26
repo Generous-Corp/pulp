@@ -44,12 +44,12 @@ TEST_CASE("chord/scale lane resolves the harmony in force and rejects malformed 
 
     // Defensive cases: a pitch class outside an octave, a negative position,
     // and an out-of-order or duplicated position are all refusals, not repairs.
-    REQUIRE_FALSE(ChordScaleLane::create({ChordScaleEvent{{0}, ChordQuality::Major, 12,
-                                                          ScaleMode::Major, 0}}));
-    REQUIRE_FALSE(ChordScaleLane::create({ChordScaleEvent{{0}, ChordQuality::Major, 0,
-                                                          ScaleMode::Major, 12}}));
-    REQUIRE_FALSE(ChordScaleLane::create({ChordScaleEvent{{-1}, ChordQuality::Major, 0,
-                                                          ScaleMode::Major, 0}}));
+    REQUIRE_FALSE(ChordScaleLane::create(
+        {ChordScaleEvent{{0}, ChordQuality::Major, 12, ScaleMode::Major, 0}}));
+    REQUIRE_FALSE(ChordScaleLane::create(
+        {ChordScaleEvent{{0}, ChordQuality::Major, 0, ScaleMode::Major, 12}}));
+    REQUIRE_FALSE(ChordScaleLane::create(
+        {ChordScaleEvent{{-1}, ChordQuality::Major, 0, ScaleMode::Major, 0}}));
     const auto unordered = ChordScaleLane::create({
         ChordScaleEvent{{480}, ChordQuality::Major, 0, ScaleMode::Major, 0},
         ChordScaleEvent{{0}, ChordQuality::Minor, 0, ScaleMode::Major, 0},
@@ -97,8 +97,7 @@ TEST_CASE("setting the chord/scale lane dirties the context kind and nothing els
 
     Transaction transaction;
     transaction.id = {{1}, 1};
-    transaction.commands.push_back(
-        {{{1}, 1}, SetChordScaleLane{{2}, lane_of({}), replacement}});
+    transaction.commands.push_back({{{1}, 1}, SetChordScaleLane{{2}, lane_of({}), replacement}});
     auto reduced = take(reduce_transaction(project, transaction));
 
     REQUIRE(reduced.project.find_sequence({2})->chord_scale_lane().events().size() == 2);
@@ -146,9 +145,10 @@ TEST_CASE("chord/scale lane round trips and re-saves byte-identically",
     REQUIRE(first.has_value());
     REQUIRE(first.value().json.find("\"type_name\":\"pulp.timeline.sequence\",\"version\":4") !=
             std::string::npos);
-    REQUIRE(first.value().json.find(
-                R"("chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9})") !=
-            std::string::npos);
+    REQUIRE(
+        first.value().json.find(
+            R"("chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9})") !=
+        std::string::npos);
 
     const auto decoded = take(deserialize_project(first.value().json, registry));
     const auto& lane = decoded.find_sequence({2})->chord_scale_lane();
@@ -167,11 +167,11 @@ TEST_CASE("every chord quality and scale mode survives the wire spelling",
           "[timeline][context-lane][persistence]") {
     const auto registry = builtins();
     std::vector<ChordScaleEvent> events;
-    constexpr std::array qualities{ChordQuality::Major,           ChordQuality::Minor,
-                                   ChordQuality::Diminished,     ChordQuality::Augmented,
-                                   ChordQuality::Dominant7,      ChordQuality::Major7,
-                                   ChordQuality::Minor7,         ChordQuality::HalfDiminished7,
-                                   ChordQuality::Suspended2,     ChordQuality::Suspended4};
+    constexpr std::array qualities{ChordQuality::Major,      ChordQuality::Minor,
+                                   ChordQuality::Diminished, ChordQuality::Augmented,
+                                   ChordQuality::Dominant7,  ChordQuality::Major7,
+                                   ChordQuality::Minor7,     ChordQuality::HalfDiminished7,
+                                   ChordQuality::Suspended2, ChordQuality::Suspended4};
     constexpr std::array modes{ScaleMode::Major,         ScaleMode::NaturalMinor,
                                ScaleMode::HarmonicMinor, ScaleMode::MelodicMinor,
                                ScaleMode::Dorian,        ScaleMode::Phrygian,
@@ -179,8 +179,10 @@ TEST_CASE("every chord quality and scale mode survives the wire spelling",
                                ScaleMode::Locrian,       ScaleMode::Chromatic};
     static_assert(qualities.size() == modes.size());
     for (std::size_t index = 0; index < qualities.size(); ++index)
-        events.push_back(ChordScaleEvent{{static_cast<std::int64_t>(index)}, qualities[index],
-                                         static_cast<std::uint8_t>(index % 12), modes[index],
+        events.push_back(ChordScaleEvent{{static_cast<std::int64_t>(index)},
+                                         qualities[index],
+                                         static_cast<std::uint8_t>(index % 12),
+                                         modes[index],
                                          static_cast<std::uint8_t>((index + 5) % 12)});
 
     const auto original = project_with_chord_lane(lane_of(events));
@@ -195,7 +197,8 @@ TEST_CASE("every chord quality and scale mode survives the wire spelling",
 TEST_CASE("a document whose chord lane is malformed is rejected on load",
           "[timeline][context-lane][persistence]") {
     const auto registry = builtins();
-    const auto json = take(serialize_project(project_with_chord_lane(two_bar_lane()), registry)).json;
+    const auto json =
+        take(serialize_project(project_with_chord_lane(two_bar_lane()), registry)).json;
 
     // An unknown quality name is not silently coerced to a default chord.
     auto unknown_quality = json;
@@ -237,8 +240,9 @@ TEST_CASE("sequence v2 upgrades to an empty chord lane and downgrades only when 
         R"({"data":{"absolute_duration":null,"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":2})";
     const auto v3 =
         take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 2, 3, v2));
-    REQUIRE(v3 ==
-            R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})");
+    REQUIRE(
+        v3 ==
+        R"({"data":{"absolute_duration":null,"chord_scale_lane":[],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})");
     REQUIRE(take(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2, v3)) ==
             v2);
 
@@ -261,14 +265,15 @@ TEST_CASE("sequence v2 upgrades to an empty chord lane and downgrades only when 
     // what the document sounds like while reporting success, so this refuses.
     const std::string populated =
         R"({"data":{"absolute_duration":null,"chord_scale_lane":[{"chord_quality":"minor7","chord_root":9,"position":"0","scale_mode":"dorian","scale_root":9}],"id":"2","markers":[],"musical_duration":"100","name":"sequence","regions":[],"tracks":[]},"type_name":"pulp.timeline.sequence","version":3})";
-    REQUIRE_FALSE(registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2,
-                                   populated));
+    REQUIRE_FALSE(
+        registry.migrate(SchemaDomain::Document, "pulp.timeline.sequence", 3, 2, populated));
 }
 
 TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
           "[timeline][context-lane][migration]") {
     const auto registry = builtins();
-    const auto current = take(serialize_project(project_with_chord_lane(lane_of({})), registry)).json;
+    const auto current =
+        take(serialize_project(project_with_chord_lane(lane_of({})), registry)).json;
     auto legacy = current;
     const auto lane_at = legacy.find(R"("chord_scale_lane":[],)");
     REQUIRE(lane_at != std::string::npos);
@@ -278,17 +283,20 @@ TEST_CASE("a pre-lane sequence document loads as a sequence with no harmony",
     const auto groove_at = legacy.find(straight_groove);
     REQUIRE(groove_at != std::string::npos);
     legacy.erase(groove_at, straight_groove.size());
+    const auto scenes_at = legacy.find(R"("scenes":[],)");
+    REQUIRE(scenes_at != std::string::npos);
+    legacy.erase(scenes_at, std::string_view(R"("scenes":[],)").size());
     const auto version_at = legacy.find(R"("type_name":"pulp.timeline.sequence","version":4)");
     REQUIRE(version_at != std::string::npos);
-    legacy.replace(version_at, std::string_view(
-                                   R"("type_name":"pulp.timeline.sequence","version":4)").size(),
+    legacy.replace(version_at,
+                   std::string_view(R"("type_name":"pulp.timeline.sequence","version":4)").size(),
                    R"("type_name":"pulp.timeline.sequence","version":2)");
 
     const auto decoded = take(deserialize_project(legacy, registry));
     REQUIRE(decoded.find_sequence({2})->chord_scale_lane().empty());
     REQUIRE(decoded.find_sequence({2})->groove().is_canonical_default());
-    // Re-saving lands on the current version with both later context fields
-    // materialized at their canonical defaults.
+    // Re-saving lands on the current version with all later context/session
+    // fields materialized at their canonical defaults.
     REQUIRE(take(serialize_project(decoded, registry)).json == current);
 }
 
