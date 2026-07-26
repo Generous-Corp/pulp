@@ -53,7 +53,6 @@ const std::vector<TapeArchetype> kAllArchetypes = {TapeArchetype::ampex_350_440,
 std::vector<float> sine(float amplitude) {
     return pulp::test::sine_block(kFrames, kToneHz, kSr, amplitude);
 }
-
 std::vector<float> silence() {
     return std::vector<float>(static_cast<std::size_t>(kFrames), 0.0f);
 }
@@ -431,4 +430,3 @@ TEST_CASE("Forge tape: the node's process path allocates nothing",
         }
     }
 }
-
