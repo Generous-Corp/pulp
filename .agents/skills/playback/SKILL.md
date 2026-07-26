@@ -390,6 +390,7 @@ program generation actually advanced in the same test, or "unchanged pointer"
 could just mean no compile happened at all. A dirty-set test that still passes
 when the subscription is ignored and everything recompiles is vacuous; break the
 resolution both ways (over-dirty and under-dirty) and confirm it goes red.
+
 ## Production mode and replay honesty
 
 - `provider_production_declaration` / `track_production_declaration` /
@@ -407,11 +408,12 @@ resolution both ways (over-dirty and under-dirty) and confirm it goes red.
   `CompileErrorCode::InvalidRequest` and proves nothing.
 - `BufferedContentSource` composes `audio::StreamingSampleSource` with a zero
   preload window, so every frame travels through the ring where it can be
-  counted. **The stream's own `underrun_frames` reads zero when a producer never
-  produces anything**: a zero return publishes `eos_frame_` and terminates the
-  stream instead of missing a deadline. Count starvation against the *declared*
-  frame count or a total production failure reads as success — an assertion on
-  the ring's underrun counter alone is vacuously green.
+  counted. Deadline mode treats a zero producer return as “not ready yet,” not
+  permanent EOF: later pumps retry at the same frame or seek to a playhead that
+  already counted the interval as starved. Count starvation against the
+  *declared* frame count, and keep the implicit ring capacity equal to the
+  declared wall-clock lookahead; `StreamingSampleSource` clamps a larger
+  producer chunk to that capacity rather than silently widening the horizon.
 - A new `core/playback/src/*.cpp` is compiled by
   `timeline-program-threadless-no-exceptions-check` with `-fno-exceptions
   -fno-rtti` and `PULP_COMPILE_EXECUTOR_DISABLE_THREADS=1`, and swept into both
