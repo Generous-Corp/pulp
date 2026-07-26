@@ -12,13 +12,22 @@
 
     1. Bake the golden: it must carry the actions-runner agent at ~/actions-runner
        (actions-runner-linux-arm64). Copy pulp-linux-build into this host's TART_HOME.
-    2. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO, $HOME, and
-       $TART_HOME with absolute paths — launchd does NOT expand shell variables:
+    2. Copy this file to ~/Library/LaunchAgents/, replacing $PULP_REPO, $HOME,
+       $TART_HOME, and $PULP_HOST_TAG with absolute values — launchd does NOT
+       expand shell variables:
 
          sed -e "s|\$PULP_REPO|$PWD|g" -e "s|\$HOME|$HOME|g" \
              -e "s|\$TART_HOME|$HOME/VMs|g" \
+             -e "s|\$PULP_HOST_TAG|m5|g" \
            tools/launchd/pulp-tart-runner-linux.plist.template \
            > ~/Library/LaunchAgents/com.danielraffel.pulp.tart-runner-linux.plist
+
+       $PULP_HOST_TAG names WHICH machine this is, and the supervisor turns it
+       into the `pulp-host-<tag>` label the Linux lanes route to. The declared
+       tags live in tools/scripts/runner_topology.json (`macstudio`, `m5`).
+       Getting it wrong is loud — the supervisor refuses to register and lists
+       the valid tags — but leaving it unsubstituted is the failure this agent
+       had before: a runner online, idle, and selectable by nothing.
 
        (On the blackbook/M5, TART_HOME is /Users/danielraffel/VMs, not the Mac
        Studio's /Volumes/Workshop/VMs — set it to wherever the golden lives.)
@@ -49,8 +58,8 @@
         <string>/bin/bash</string>
         <string>$PULP_REPO/tools/ci/tart-runner-linux.sh</string>
         <string>--loop</string>
-        <string>--labels</string>
-        <string>self-hosted,Linux,ARM64,pulp-build-linux</string>
+        <string>--host-tag</string>
+        <string>$PULP_HOST_TAG</string>
     </array>
 
     <key>WorkingDirectory</key>

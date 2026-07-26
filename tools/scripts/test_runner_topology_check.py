@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,6 +30,15 @@ _spec = importlib.util.spec_from_file_location(
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["runner_topology_check"] = gate
 _spec.loader.exec_module(gate)
+
+_lspec = importlib.util.spec_from_file_location(
+    "runner_labels", HERE / "runner_labels.py")
+labels_mod = importlib.util.module_from_spec(_lspec)
+sys.modules["runner_labels"] = labels_mod
+_lspec.loader.exec_module(labels_mod)
+
+CI = HERE.parent / "ci"
+LAUNCHD = HERE.parent / "launchd"
 
 
 # ── Fixtures drawn from the real fleet ──────────────────────────────────
@@ -412,6 +424,225 @@ class TestShippedContract(unittest.TestCase):
     def test_namespace_paid_overflow_is_contracted_unset(self):
         self.assertIn("PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON",
                       self.c.must_remain_unset)
+
+
+# ── Supervisors must register a label set something can select ──────────
+#
+# The lane checker above reconciles the ROUTING side: a repo variable pointed at
+# labels nothing carries. This half covers the PROVISIONING side, which fails
+# the same way and is even quieter. A supervisor that registers a label set no
+# lane requests produces a runner that is online, idle, and unselectable — the
+# operator reads "3 runners free" while jobs queue against a lane none of them
+# can serve, and no runner log, job, or API response says otherwise.
+
+
+def _supervisor_default_labels(script: Path) -> list[str]:
+    """The label set the script registers when nothing overrides it."""
+    m = re.search(r'^LABELS="\$\{PULP_RUNNER_LABELS:-([^}"]+)\}"',
+                  script.read_text(), re.M)
+    assert m, f"no LABELS default found in {script}"
+    return [x.strip() for x in m.group(1).split(",") if x.strip()]
+
+
+def _plist_invocation(template: Path) -> list[str]:
+    """ProgramArguments from a launchd template (placeholders left intact)."""
+    return plistlib.loads(template.read_bytes())["ProgramArguments"]
+
+
+def _flag(argv: list[str], name: str) -> str | None:
+    return argv[argv.index(name) + 1] if name in argv else None
+
+
+SUPERVISORS = {
+    "linux": (CI / "tart-runner-linux.sh",
+              LAUNCHD / "pulp-tart-runner-linux.plist.template"),
+    "windows": (CI / "qemu-runner-windows.sh",
+                LAUNCHD / "pulp-qemu-runner-windows.plist.template"),
+}
+
+
+class TestSupervisorLabelsAreSelectable(unittest.TestCase):
+    """Drives the real shipped artifacts: the supervisor scripts, their launchd
+    templates, and the routing contract. No network, no host dependency — the
+    Shipyard tag probe is stubbed, because whether THIS machine happens to
+    answer must not change the verdict."""
+
+    def setUp(self):
+        self.lanes = labels_mod.load_lanes(HERE / "runner_topology.json")
+
+    def _platform_lanes(self, platform):
+        return labels_mod.lanes_for(platform, self.lanes)
+
+    def _tags(self, platform):
+        known = labels_mod.known_host_labels(self._platform_lanes(platform))
+        return sorted(h[len(labels_mod.HOST_PREFIX):] for h in known)
+
+    def _resolve(self, platform, labels, tag, shipyard=None):
+        lanes = self._platform_lanes(platform)
+        resolved, note = labels_mod.resolve(
+            platform, labels, tag, lanes, probe_shipyard=lambda: shipyard)
+        return labels_mod.selecting_lanes(resolved, lanes), resolved, note
+
+    def test_every_declared_host_tag_yields_a_selectable_runner(self):
+        # The derive path: naming the machine is enough to make the shipped
+        # default routable, on every machine the contract declares.
+        for platform, (script, _) in SUPERVISORS.items():
+            defaults = _supervisor_default_labels(script)
+            for tag in self._tags(platform):
+                with self.subTest(platform=platform, tag=tag):
+                    sel, resolved, note = self._resolve(platform, defaults, tag)
+                    self.assertTrue(sel, f"{resolved} selectable by nothing ({note})")
+
+    def test_launchd_invocation_is_selectable_on_every_declared_host(self):
+        # THE REGRESSION. The launchd template is what actually runs on the
+        # fleet, so a template that hardcodes a host-label-less `--labels` (or
+        # forgets to declare the host at all) is the live bug regardless of what
+        # the script's own default says.
+        for platform, (script, template) in SUPERVISORS.items():
+            argv = _plist_invocation(template)
+            labels = _flag(argv, "--labels")
+            labels = ([x.strip() for x in labels.split(",") if x.strip()]
+                      if labels else _supervisor_default_labels(script))
+            declared = _flag(argv, "--host-tag")
+            self.assertIsNotNone(
+                declared,
+                f"{template.name} never declares --host-tag, so the runner it "
+                f"registers carries no pulp-host-* label and no lane can pick it")
+            for tag in self._tags(platform):
+                # The template ships a placeholder the operator substitutes;
+                # every declared machine must be a working substitution.
+                tag = tag if declared.startswith("$") else declared
+                with self.subTest(platform=platform, tag=tag):
+                    sel, resolved, note = self._resolve(platform, labels, tag)
+                    self.assertTrue(sel, f"{resolved} selectable by nothing ({note})")
+
+    def test_undetermined_host_is_refused_rather_than_registered(self):
+        # Fail closed. A runner that looks healthy and can never be picked is
+        # worse than one that refused to start and said why.
+        for platform, (script, _) in SUPERVISORS.items():
+            with self.subTest(platform=platform):
+                sel, _, _ = self._resolve(
+                    platform, _supervisor_default_labels(script), None)
+                self.assertFalse(sel)
+
+    def test_shipyard_tag_is_used_only_on_an_exact_lane_match(self):
+        # `shipyard runner tag` answers `studio` on the Mac Studio while the
+        # routing label is `pulp-host-macstudio`. Two vocabularies that agree on
+        # m1/m5 and disagree here, so an exact match is the only safe rule: a
+        # studio -> macstudio mapping is nowhere stated in this repo.
+        defaults = _supervisor_default_labels(SUPERVISORS["linux"][0])
+        sel, _, note = self._resolve("linux", defaults, None, shipyard="studio")
+        self.assertFalse(sel)
+        self.assertIn("pulp-host-studio", note)
+
+        sel, resolved, _ = self._resolve("linux", defaults, None, shipyard="m5")
+        self.assertTrue(sel)
+        self.assertIn("pulp-host-m5", resolved)
+
+    def test_an_undeclared_host_tag_is_rejected(self):
+        defaults = _supervisor_default_labels(SUPERVISORS["linux"][0])
+        sel, resolved, note = self._resolve("linux", defaults, "nosuchbox")
+        self.assertFalse(sel)
+        self.assertNotIn("pulp-host-nosuchbox", resolved)
+        self.assertIn("no lane", note)
+
+    def test_an_explicit_complete_label_set_needs_no_tag(self):
+        # The escape hatch: --labels carrying its own host label is selectable
+        # without any derivation, so ad-hoc routing still works.
+        explicit = ["self-hosted", "Linux", "ARM64", "pulp-build-linux",
+                    "pulp-host-m5"]
+        sel, _, _ = self._resolve("linux", explicit, None)
+        self.assertTrue(sel)
+
+
+class TestSupervisorsRefuseToRegister(unittest.TestCase):
+    """The scripts must ACT on an unresolvable label set, not just be able to
+    compute one. Drives the real bash with stub `tart`/`gh`/`qemu` on PATH and
+    asserts it dies before minting a JIT config — registration is the
+    irreversible step, since a JIT runner appears in the fleet the moment it is
+    minted and an operator then reads it as capacity."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.name != "posix":
+            raise unittest.SkipTest("supervisors are POSIX shell only")
+        cls.tmp = tempfile.mkdtemp(prefix="runner-labels-")
+        cls.stub_dir = Path(cls.tmp) / "bin"
+        cls.stub_dir.mkdir()
+        cls.minted = Path(cls.tmp) / "minted"
+        for tool in ("tart", "qemu-system-aarch64"):
+            (cls.stub_dir / tool).write_text("#!/bin/sh\nexit 0\n")
+            (cls.stub_dir / tool).chmod(0o755)
+        # A `gh` that records being called: reaching it at all means the
+        # supervisor got as far as minting, which is the failure this asserts.
+        gh = cls.stub_dir / "gh"
+        gh.write_text(f'#!/bin/sh\ntouch "{cls.minted}"\nexit 1\n')
+        gh.chmod(0o755)
+
+    def _run(self, script, *args):
+        self.minted.unlink(missing_ok=True)
+        env = {
+            **os.environ,
+            "PATH": f"{self.stub_dir}:/usr/bin:/bin",
+            "TART_HOME": self.tmp,          # satisfy the store precondition
+            "PULP_RUNNER_HOST_TAG": "",     # no ambient declaration
+        }
+        return subprocess.run(["bash", str(script), "--once", *args],
+                              capture_output=True, text=True, env=env, timeout=120)
+
+    def test_the_bare_default_stops_before_minting(self):
+        # THE REGRESSION, end to end: launched with nothing but its own
+        # defaults — no flag, no env, no Shipyard on PATH — the supervisor must
+        # refuse rather than mint a runner every Linux/Windows lane will ignore.
+        # This is exactly how the LaunchAgent ran while 3 idle Linux runners sat
+        # unselectable and 8 jobs queued.
+        for platform, (script, _) in SUPERVISORS.items():
+            with self.subTest(platform=platform):
+                r = self._run(script)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("refusing to register", r.stderr)
+                self.assertFalse(self.minted.exists(),
+                                 "minted a JIT config for a runner nothing can select")
+
+    def test_an_undeclared_host_tag_stops_before_minting(self):
+        for platform, (script, _) in SUPERVISORS.items():
+            with self.subTest(platform=platform):
+                r = self._run(script, "--host-tag", "nosuchbox")
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("refusing to register", r.stderr)
+                self.assertFalse(self.minted.exists(),
+                                 "minted a JIT config for a runner nothing can select")
+
+    def test_a_declared_host_tag_gets_past_label_resolution(self):
+        # The other half of the control: same stubs, valid tag — the label step
+        # must NOT be what stops it, or the refusal above would prove nothing.
+        for platform, (script, _) in SUPERVISORS.items():
+            with self.subTest(platform=platform):
+                r = self._run(script, "--host-tag", "m5")
+                self.assertNotIn("refusing to register", r.stderr)
+
+
+class TestSelectionRule(unittest.TestCase):
+    """Selection uses GitHub's rule, not a looser one."""
+
+    def test_every_label_must_match_not_merely_some(self):
+        lanes = [{"variable": "V", "expect": ["self-hosted", "Linux", "a", "b"]}]
+        self.assertFalse(labels_mod.selecting_lanes(
+            ["self-hosted", "Linux", "a"], lanes))
+        self.assertTrue(labels_mod.selecting_lanes(
+            ["self-hosted", "Linux", "a", "b"], lanes))
+
+    def test_a_superset_still_selects(self):
+        lanes = [{"variable": "V", "expect": ["self-hosted", "Linux", "a"]}]
+        self.assertTrue(labels_mod.selecting_lanes(
+            ["self-hosted", "Linux", "a", "extra"], lanes))
+
+    def test_matching_is_case_insensitive_like_github(self):
+        # The repo spells the OS label `macos` in a supervisor default and
+        # `macOS` in a lane; GitHub does not care and neither may this.
+        lanes = [{"variable": "V", "expect": ["self-hosted", "macOS", "ARM64"]}]
+        self.assertTrue(labels_mod.selecting_lanes(
+            ["self-hosted", "macos", "arm64"], lanes))
 
 
 # ── CLI surface ─────────────────────────────────────────────────────────
