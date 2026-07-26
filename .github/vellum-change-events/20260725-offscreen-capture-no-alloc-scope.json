@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260725-offscreen-capture-no-alloc-scope",
+  "kind": "change",
+  "created_at": "2026-07-25T16:24:58Z",
+  "slices": [
+    "capture-primitives"
+  ],
+  "rationale": "Test-harness scoping, not a rendering change. View::paint_all opens a ScopedNoAlloc ('treat paint like the audio thread'). pulp #6344 linked the RT interceptor into pulp-tempo-sampler-test to enforce an allocation-free Processor::process(); because that interceptor overrides the GLOBAL operator new, it also armed the abort for every paint in that 74-case editor suite. Six cases died with '[pulp-rt-trap] allocation inside no-alloc scope' and the required macOS gate went red for every PR in the repo (reproduced on three unrelated branches). The paint path has never satisfied the contract on any platform: Skia's CPU device builds an SkPath per rounded rect and TextShaper builds the font-family fallback vector. An offscreen capture is a non-real-time event by definition, so it now suspends the contract across its paint pass via the existing ScopedAllocAllowed, the same mechanism and rationale already used for the FU-3 subtree-cache record. Live painting still runs under the contract, so genuine per-frame allocations remain caught, and the DSP process() enforcement #6344 wanted stays fully armed.",
+  "tests": [
+    "pulp-tempo-sampler-test",
+    "pulp-test-offscreen-capture-rt-contract"
+  ],
+  "disposition": "pulp-only"
+}

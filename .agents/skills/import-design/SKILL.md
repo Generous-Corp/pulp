@@ -4963,3 +4963,27 @@ default decides whether the child policy can take effect at all. When adding a
 new promoted widget kind to `native_kind_owns_imported_child_hits`, check what
 that widget does to `pointer_events` in its constructor before assuming the
 child policy applies.
+
+## Fixture lanes must scope ambient Figma credentials away
+
+`figma_rest_export.py` resolves a token from three places, in order: `--token`,
+`$FIGMA_TOKEN`, then `~/.config/pulp/figma-token`. It only takes its documented
+`no token (offline run)` path when it finds none — so supplying `--file-key
+FIXTURE` with local `--node-json` / `--frame-svg` / `--no-assets` does **not**
+make a run offline. With a token in reach it still calls `/variables/local`.
+
+A developer machine is also the CI runner here, and that token file exists, so a
+"fixture" test made live API calls with real credentials. It passed wherever DNS
+worked and, when resolution failed, retried until it blew the case's timeout:
+
+    ***Failed   60.12 sec
+    file variables: [Errno 8] nodename nor servname provided, or not known;
+    retry 1/1 in 1s
+
+which reads as flakiness rather than the network dependency it is.
+
+`ScopedOfflineFigma` in `test/test_import_design_tool.cpp` is the fix: unset
+`FIGMA_TOKEN` **and** redirect `HOME` / `XDG_CONFIG_HOME` / `USERPROFILE` at the
+case's scratch dir, restoring both on destruction. Redirecting `HOME` is the
+load-bearing half — the env var is usually not set, and the token comes from the
+file. Any new fixture lane that shells out to the exporter wants the same scope.

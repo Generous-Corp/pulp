@@ -20,6 +20,7 @@
 // core/view/CMakeLists.txt) so there is exactly one definition.
 
 #include <pulp/view/screenshot.hpp>
+#include <pulp/runtime/scoped_no_alloc.hpp>
 
 #if !defined(__APPLE__) && defined(PULP_HAS_SKIA)
 
@@ -62,8 +63,11 @@ void paint_root(SkCanvas* sk_canvas, View& root, uint32_t width,
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
-    root.paint_all(canvas);
-    pulp::view::View::paint_overlays(canvas, &root);
+    {
+        pulp::runtime::ScopedAllocAllowed offscreen_capture_is_not_realtime;
+        root.paint_all(canvas);
+        View::paint_overlays(canvas, &root);
+    }
 }
 
 // Raster-render `root` into a tightly packed pixel buffer of `color_type`.

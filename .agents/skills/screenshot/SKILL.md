@@ -260,3 +260,40 @@ When a verification pass reviews a render (see the read-only verifier in the
 not the pixel symptom. A "looks good" with no verdict is a failure mode; so is a
 reviewer that edits while reviewing. Keep review read-only and let the main agent
 apply fixes, then re-run the verifier.
+
+## Offscreen capture suspends the paint no-alloc contract
+
+`View::paint_all` opens a `pulp::runtime::ScopedNoAlloc` — "treat paint like the
+audio thread". A test binary that links
+`test/native_components/rt_intercept_test_support.cpp` overrides the **global**
+`operator new` and **aborts** on any allocation inside that scope. That override
+is per-binary, not per-test, so linking it to police one `Processor::process()`
+case also arms it for every paint the binary performs.
+
+The paint path has never satisfied that contract on any platform:
+
+- Skia's CPU device builds an `SkPath` for each rounded rect
+  (`SkBitmapDevice::drawRRect` → `SkPath::RRect` → `SkPathData::MakeNoCheck`)
+- `TextShaper::resolve_typeface` builds the font-family fallback
+  `vector<std::string>`
+
+So every capture backend suspends the contract across exactly its view-tree
+paint + overlay pass with `ScopedAllocAllowed` (same mechanism and rationale as
+the FU-3 subtree-cache record: a non-real-time event by definition). Live
+painting still runs under the contract, so a genuine per-frame allocation in
+widget code is still caught.
+
+**If you add a new capture entry point, suspend the contract in it too.** There
+is more than one implementation. Apple CPU capture is in
+`core/view/platform/mac/screenshot_mac.mm`; portable Linux/Windows Skia capture
+is in `core/view/src/screenshot_skia.cpp`; offscreen GPU capture is in
+`core/view/src/screenshot_gpu.cpp`. Patching only one file builds clean and
+leaves the sibling paths exposed, so verify all backends. The regression target
+`pulp-test-offscreen-capture-rt-contract` links the real Unix allocation trap
+and exercises live paint plus raster, CoreGraphics, raw-RGBA, and GPU capture
+where each backend is available.
+
+**Debugging the abort:** lldb cannot catch it — the trap fires in a forked
+death-test child and macOS lldb has no follow-fork-mode, so `b trap_now` + `run`
+just hangs. Add `backtrace_symbols_fd` to `trap_now` in
+`rt_intercept_test_support.cpp` and read the stack off stderr instead.

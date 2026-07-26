@@ -18,8 +18,39 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     out
 }
 
+/// Resolve symlinks as far as the path actually exists, keeping the rest
+/// verbatim (the C++ side's `std::filesystem::weakly_canonical`). The path
+/// under test is usually a directory that has not been created yet, so plain
+/// `fs::canonicalize` would fail outright.
+fn resolve_symlinks(path: &Path) -> PathBuf {
+    let normalized = lexical_normalize(path);
+    let mut trailing = Vec::new();
+    let mut cursor = normalized.as_path();
+    loop {
+        if let Ok(canonical) = std::fs::canonicalize(cursor) {
+            let mut out = canonical;
+            out.extend(trailing.iter().rev());
+            return out;
+        }
+        match (cursor.parent(), cursor.file_name()) {
+            (Some(parent), Some(name)) => {
+                trailing.push(name.to_os_string());
+                cursor = parent;
+            }
+            _ => return normalized,
+        }
+    }
+}
+
 fn path_is_within(path: &Path, root: &Path) -> bool {
-    lexical_normalize(path).starts_with(lexical_normalize(root))
+    // Compare RESOLVED paths. Lexical normalization alone compares them as
+    // spelled, so a repo reached through a symlinked prefix looks like a
+    // different tree than the same repo reached through its real path — on
+    // macOS /tmp is a symlink to private/tmp, so a checkout under /tmp made
+    // this answer "outside" for paths plainly inside it. This guard REFUSES
+    // work, so answering "outside" fails open: `pulp create` would scaffold a
+    // standalone project into the Pulp checkout and exit 0.
+    resolve_symlinks(path).starts_with(resolve_symlinks(root))
 }
 
 fn user_home_dir() -> Option<PathBuf> {
@@ -154,6 +185,39 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    // A repo reached through a symlinked prefix must still contain its own
+    // children. macOS ships exactly this shape (/tmp -> private/tmp), and when
+    // the comparison was lexical a checkout under /tmp answered "outside" for
+    // paths plainly inside it — so `pulp create` scaffolded a standalone
+    // project into the Pulp repo and exited 0 instead of refusing.
+    #[test]
+    fn path_is_within_resolves_a_symlinked_root() {
+        let base = std::env::temp_dir().join("pulp-rs-symlink-containment");
+        let _ = fs::remove_dir_all(&base);
+        let real = base.join("real-root");
+        fs::create_dir_all(&real).unwrap();
+        let link = base.join("linked-root");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(not(unix))]
+        {
+            let _ = &link;
+            return;
+        }
+
+        // Spelled through the symlink, tested against the real root.
+        assert!(path_is_within(&link.join("child"), &real));
+        // Spelled through the real path, tested against the symlinked root.
+        assert!(path_is_within(&real.join("child"), &link));
+        // The child need not exist yet — that is the whole point of the
+        // weakly-canonical behaviour.
+        assert!(path_is_within(&link.join("not/created/yet"), &real));
+        // A genuine sibling is still outside.
+        assert!(!path_is_within(&base.join("elsewhere"), &real));
+
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn resolve_out_dir_rejects_in_tree_without_root() {

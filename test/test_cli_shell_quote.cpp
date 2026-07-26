@@ -196,3 +196,35 @@ TEST_CASE("decode_system_status maps std::system wait status to child exit code"
     REQUIRE(decode_system_status(2) == 2);
 #endif
 }
+
+// A repo reached through a symlinked prefix must still contain its own
+// children. macOS ships exactly this shape (/tmp -> private/tmp), and while the
+// comparison was lexical a checkout under /tmp answered "outside" for paths
+// plainly inside it. Callers use path_is_within to REFUSE work, so answering
+// "outside" fails OPEN: `pulp create` scaffolded a standalone project into the
+// Pulp checkout and exited 0 instead of rejecting it.
+TEST_CASE("path_is_within resolves a symlinked root", "[cli][fs-safety][issue-643]") {
+    namespace fs = std::filesystem;
+    const auto base = fs::temp_directory_path() / "pulp-cli-symlink-containment";
+    std::error_code ec;
+    fs::remove_all(base, ec);
+    const auto real = base / "real-root";
+    fs::create_directories(real, ec);
+    const auto link = base / "linked-root";
+    fs::create_directory_symlink(real, link, ec);
+    if (ec) {
+        SUCCEED("symlink creation unsupported here");
+        fs::remove_all(base, ec);
+        return;
+    }
+
+    // Spelled through the symlink, tested against the real root, and vice versa.
+    REQUIRE(path_is_within(link / "child", real));
+    REQUIRE(path_is_within(real / "child", link));
+    // The child need not exist yet — that is the point of weakly_canonical.
+    REQUIRE(path_is_within(link / "not" / "created" / "yet", real));
+    // A genuine sibling is still outside.
+    REQUIRE_FALSE(path_is_within(base / "elsewhere", real));
+
+    fs::remove_all(base, ec);
+}

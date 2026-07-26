@@ -2614,3 +2614,32 @@ downgrades a bank to "declared but unverified" — a pack whose audio does not
 match its manifest would then install cleanly. Mirror any verb or flag change in
 `docs/status/cli-commands.yaml`, `docs/reference/cli.md`, and the `content`
 skill.
+
+## Containment guards must resolve symlinks
+
+`pulp create` refuses to scaffold a standalone project inside the Pulp checkout.
+That guard is a path-containment test, and a containment test that compares
+paths *as spelled* fails OPEN: answering "outside" lets the refused work happen.
+
+macOS ships the shape that breaks it — `/tmp` is a symlink to `private/tmp` — so
+a checkout under `/tmp` had every containment test answer "outside" for paths
+plainly inside it, and `pulp create --output <inside the repo>` scaffolded the
+project and exited 0.
+
+Resolve symlinks on BOTH sides before comparing: `std::filesystem::weakly_canonical`
+in C++, and in Rust canonicalize the deepest existing ancestor and re-append the
+rest (`fs::canonicalize` alone fails on a directory that does not exist yet,
+which is the normal case here).
+
+**There are two CLIs and they each have their own copy of this logic.** The
+user-facing binary is the Rust one (`build/pulp`,
+`experimental/pulp-rs/src/cmd/create/create_output.rs`); `build/tools/cli/pulp-cpp`
+is the C++ delegate (`tools/cli/cli_common.cpp`). Shell-out tests resolve
+`build/pulp` FIRST, so a fix applied only to the C++ side builds clean, passes a
+manual `pulp-cpp` invocation, and changes nothing about the failing test. Fix and
+test both.
+
+Note `tools/cli/cli_fs_util.cpp` carries a third `path_is_within` used for
+archive-extraction containment. It is still lexical-only; its callers currently
+pass pre-canonicalized paths, but it is the same fail-open shape if that ever
+stops being true.

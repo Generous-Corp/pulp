@@ -498,8 +498,25 @@ std::optional<fs::path> require_active_project_root(bool* is_standalone) {
 }
 
 bool path_is_within(const fs::path& path, const fs::path& root) {
-    auto normalized_path = fs::absolute(path).lexically_normal();
-    auto normalized_root = fs::absolute(root).lexically_normal();
+    // Resolve symlinks on BOTH sides before comparing components. Lexical
+    // normalization alone compares the paths as spelled, so a repo reached
+    // through a symlinked prefix compares unequal to the same repo reached
+    // through its real path — on macOS /tmp is a symlink to private/tmp, so a
+    // checkout under /tmp made every containment test here answer "outside".
+    //
+    // Callers use this to REFUSE work (scaffolding into the repo, extracting an
+    // archive outside its root), so a false negative fails OPEN. weakly_
+    // canonical resolves the existing prefix and keeps the rest verbatim, which
+    // is what these callers need since the path being tested usually does not
+    // exist yet.
+    auto resolve = [](const fs::path& p) {
+        std::error_code ec;
+        auto canonical = fs::weakly_canonical(fs::absolute(p), ec);
+        if (ec || canonical.empty()) return fs::absolute(p).lexically_normal();
+        return canonical.lexically_normal();
+    };
+    auto normalized_path = resolve(path);
+    auto normalized_root = resolve(root);
 
     auto path_it = normalized_path.begin();
     auto root_it = normalized_root.begin();
