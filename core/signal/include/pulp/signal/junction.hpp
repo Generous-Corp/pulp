@@ -41,11 +41,10 @@
 ///
 /// ## The antiderivative's parity
 ///
-/// `F1` is EVEN for every configuration, because the antiderivative of an odd
-/// function is even. Worth stating because it is easy to get wrong and the
-/// failure is quiet: an odd `F1` feeds ADAA a sign-flipped difference on every
-/// negative excursion, which does not crash — it produces a waveform that is
-/// wrong on half of each cycle and reads as the distortion working.
+/// `F1` is even when the positive and negative legs match, because the current
+/// is then odd. An asymmetric pair is neither odd nor even, and neither is its
+/// antiderivative. Worth stating because silently forcing even parity would
+/// erase the even-harmonic behavior that `set_symmetry` exists to create.
 ///
 /// It is computed through `exprel` rather than the algebraically obvious
 /// `θ/b·(exp(−b·v/θ) − 1)`, which divides by a vanishing `b` as a leg is

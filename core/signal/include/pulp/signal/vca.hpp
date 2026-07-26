@@ -58,6 +58,8 @@ public:
 
     /// Depth of the exponential law, in dB below unity at control → 0⁺.
     /// [design parameter] default 60 dB, range 12 .. 120 dB.
+    static constexpr double kMinRangeDb = 12.0;
+    static constexpr double kMaxRangeDb = 120.0;
     static constexpr double kDefaultRangeDb = 60.0;
 
     VcaT() { update(); }
@@ -67,7 +69,7 @@ public:
 
     /// Sets the exponential law's depth in dB. Ignored by `Response::linear`.
     void set_range_db(double db) {
-        range_db_ = std::clamp(db, 1.0, 200.0);
+        range_db_ = std::clamp(db, kMinRangeDb, kMaxRangeDb);
         update();
     }
 

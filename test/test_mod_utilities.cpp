@@ -237,6 +237,15 @@ TEST_CASE("OuWalk hits the stationary deviation solved for in its update()",
     REQUIRE_THAT(sd, WithinRel(0.25, 0.05));
 }
 
+TEST_CASE("OU walk clamps theta to its declared design range",
+          "[rng][mod-utilities][contract]") {
+    OuWalk64 walk;
+    walk.set_theta(-1.0);
+    REQUIRE(walk.theta() == OuWalk64::kMinTheta);
+    walk.set_theta(1.0);
+    REQUIRE(walk.theta() == OuWalk64::kMaxTheta);
+}
+
 TEST_CASE("OuWalk and Drift are bit-reproducible across reset", "[rng][mod-utilities]") {
     Drift64 drift;
     drift.prepare(kSr);
@@ -769,6 +778,15 @@ TEST_CASE("VCA exponential law is equal-dB per equal control travel",
                  WithinAbs(-45.0, 1e-9));
 }
 
+TEST_CASE("VCA range setter enforces its declared design range",
+          "[vca][mod-utilities][contract]") {
+    Vca64 vca;
+    vca.set_range_db(-1.0);
+    REQUIRE(vca.range_db() == Vca64::kMinRangeDb);
+    vca.set_range_db(1000.0);
+    REQUIRE(vca.range_db() == Vca64::kMaxRangeDb);
+}
+
 TEST_CASE("Attenuverter inverts and reports its own worst case", "[vca][mod-utilities]") {
     Attenuverter64 att;
     att.set_scale(-1.0);
@@ -816,6 +834,19 @@ TEST_CASE("Vactrol rise is fast and fall is slow, as the component is",
     REQUIRE_THAT(static_cast<double>(down), WithinRel(units::ms_to_samples(200.0, kSr), 0.05));
 
     REQUIRE(down > up * 50);
+}
+
+TEST_CASE("Vactrol time setters enforce their declared design ranges",
+          "[vactrol][mod-utilities][contract]") {
+    VactrolConditioner64 v;
+    v.set_rise_ms(-1.0);
+    REQUIRE(v.rise_ms() == VactrolConditioner64::kMinRiseMs);
+    v.set_rise_ms(1000.0);
+    REQUIRE(v.rise_ms() == VactrolConditioner64::kMaxRiseMs);
+    v.set_fall_ms(-1.0);
+    REQUIRE(v.fall_ms() == VactrolConditioner64::kMinFallMs);
+    v.set_fall_ms(10000.0);
+    REQUIRE(v.fall_ms() == VactrolConditioner64::kMaxFallMs);
 }
 
 TEST_CASE("Vactrol conditioner recovers after a non-finite control sample",

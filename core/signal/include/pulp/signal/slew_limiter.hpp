@@ -4,15 +4,15 @@
 /// Rate limiting for control signals: the portamento/glide/inertia primitive,
 /// and the sample-and-hold that pairs with it.
 ///
-/// `SmoothedValue` and `LogRampedValueT` already cover "ramp to a target over a
-/// fixed time" for a value the caller sets. `SlewLimiterT` covers the other
-/// shape: a *continuously arriving* control signal whose rate of change must be
-/// bounded. That is what a portamento is, what a rotor's spin-up is, and what a
-/// pedal's glide is — the target moves every sample, and the limiter is what
-/// keeps the output from following it instantly.
+/// `SmoothedValue` and `LogRampedValueT` cover a target managed by a separate
+/// control object. `SlewLimiterT` accepts the target directly in `process()`,
+/// which is convenient for portamento, rotor inertia, and pedal glide.
 ///
-/// Two modes, because the two families of caller want genuinely different
-/// behaviour and picking one silently would be wrong for the other:
+/// The two modes have genuinely different step responses. For a target that
+/// moves every sample, the linear rule below recomputes `distance / time` and
+/// is therefore mathematically close to the exponential one-pole (their
+/// outputs can be nearly identical for a smooth ramp). Callers must not choose
+/// between them expecting a distinct moving-target rate limiter:
 ///
 ///   - **`Mode::linear` — constant TIME.** The output covers the whole
 ///     remaining distance in a fixed time regardless of how far it has to go,

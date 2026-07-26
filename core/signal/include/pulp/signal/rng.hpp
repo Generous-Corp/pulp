@@ -159,17 +159,20 @@ template <typename SampleType = float>
 class OuWalkT {
 public:
     /// Mean-reversion rate per sample: the fraction of the remaining distance
-    /// to the mean the walk closes each step. Must be in (0, 2) for the
-    /// recurrence to be stable; values near 0 wander slowly, values near 1
-    /// look like white noise.
-    /// [design parameter] default 0.05, range 0.01 .. 0.2.
+    /// to the mean the walk closes each step. The mathematical recurrence is
+    /// stable on (0, 2), but this implementation deliberately accepts only
+    /// (0, 1]: values near 0 wander slowly and 1 is white noise, while values
+    /// above 1 alternate around the mean and are not useful as mechanical
+    /// drift. The small floor keeps long correlation times representable.
+    /// [design parameter] default 0.05, range 1e-6 .. 1.
+    static constexpr double kMinTheta = 1e-6;
+    static constexpr double kMaxTheta = 1.0;
     static constexpr double kDefaultTheta = 0.05;
 
-    /// Sets the mean-reversion rate directly. Clamped into the stable open
-    /// interval — a θ of 0 would be an unbounded random walk and a θ of 2 would
-    /// oscillate rather than revert.
+    /// Sets the mean-reversion rate directly. A theta of 0 would be an
+    /// unbounded random walk; values above 1 produce an alternating process.
     void set_theta(double theta) {
-        theta_ = std::fmin(std::fmax(theta, 1e-6), 1.0);
+        theta_ = std::fmin(std::fmax(theta, kMinTheta), kMaxTheta);
         update();
     }
 

@@ -53,15 +53,16 @@ class VactrolConditionerT {
 public:
     /// Default rise time in ms — the LED reaching brightness. Fast.
     /// [design parameter] default 2.0 ms, range 0.1 .. 50 ms.
+    static constexpr double kMinRiseMs = 0.1;
+    static constexpr double kMaxRiseMs = 50.0;
     static constexpr double kDefaultRiseMs = 2.0;
 
     /// Default fall time in ms — the photoresistor recovering. Slow, and the
     /// control that sets how long a struck note takes to disappear.
     /// [design parameter] default 200 ms, range 10 .. 2000 ms.
+    static constexpr double kMinFallMs = 10.0;
+    static constexpr double kMaxFallMs = 2000.0;
     static constexpr double kDefaultFallMs = 200.0;
-
-    /// Floor on either time. Below this the coefficient rounds to 1 anyway.
-    static constexpr double kMinTimeMs = 0.01;
 
     VactrolConditionerT() { update(); }
 
@@ -71,12 +72,12 @@ public:
     }
 
     void set_rise_ms(double ms) {
-        rise_ms_ = std::max(ms, kMinTimeMs);
+        rise_ms_ = std::clamp(ms, kMinRiseMs, kMaxRiseMs);
         update();
     }
 
     void set_fall_ms(double ms) {
-        fall_ms_ = std::max(ms, kMinTimeMs);
+        fall_ms_ = std::clamp(ms, kMinFallMs, kMaxFallMs);
         update();
     }
 
