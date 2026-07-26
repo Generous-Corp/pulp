@@ -108,6 +108,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         applied_bend_ = pitch_sweep_oct_ + response.bend(velocity);
@@ -141,7 +142,9 @@ protected:
         amp_env_.trigger();
     }
 
-    bool on_is_active() const override { return amp_env_.is_active(); }
+    bool on_is_active() const override {
+        return amp_env_.is_active() || output_.has_tail();
+    }
 
     void render_add(float* out, int num_samples) override {
         const double detune = std::pow(2.0, detune_cents_ / 1200.0);

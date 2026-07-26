@@ -216,6 +216,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         bend_octaves_ = pitch_sweep_oct_ + response.bend(velocity);
@@ -270,12 +271,14 @@ protected:
     bool on_is_active() const override {
         if (body_mode_ == KickBody::circuit) {
             return body_env_.is_active() || layers_active() ||
-                   pulse_remaining_ > 0 || ring_level_ > kRingSilenceLevel;
+                   pulse_remaining_ > 0 || ring_level_ > kRingSilenceLevel ||
+                   output_.has_tail();
         }
         if (body_mode_ == KickBody::resonant) {
-            return resonator_.is_ringing() || layers_active() || excite_remaining_ > 0;
+            return resonator_.is_ringing() || layers_active() || excite_remaining_ > 0 ||
+                   output_.has_tail();
         }
-        return body_env_.is_active() || layers_active();
+        return body_env_.is_active() || layers_active() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

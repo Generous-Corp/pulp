@@ -717,7 +717,9 @@ TEST_CASE("The tom's bend depth sets where the dive starts",
         voice.set_click_level(0.0);
         voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
         const auto y = hit(voice, 1.0f, 24000);
-        return crossing_rate(y, 0, 960);
+        const auto latency =
+            static_cast<std::size_t>(voice.output().latency_samples());
+        return crossing_rate(y, latency, latency + 960);
     };
 
     REQUIRE(opening(3.0) > opening(1.0) * 2.0);
@@ -739,7 +741,10 @@ TEST_CASE("Velocity deepens the tom's dive rather than only raising its level",
 
     const auto soft = hit(voice, 0.15f, 24000);
     const auto loud = hit(voice, 1.0f, 24000);
-    REQUIRE(crossing_rate(loud, 0, 960) > crossing_rate(soft, 0, 960) * 1.4);
+    const auto latency =
+        static_cast<std::size_t>(voice.output().latency_samples());
+    REQUIRE(crossing_rate(loud, latency, latency + 960) >
+            crossing_rate(soft, latency, latency + 960) * 1.4);
 
     // ...and both land on the same tuning, because velocity moves the dive and
     // not the pitch it arrives at.

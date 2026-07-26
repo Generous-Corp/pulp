@@ -127,6 +127,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         brightness_ = response.brightness_scale(velocity);
@@ -163,7 +164,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return burst_env_.is_active() || tail_env_.is_active() || next_burst_ < burst_count_;
+        return burst_env_.is_active() || tail_env_.is_active() ||
+               next_burst_ < burst_count_ || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

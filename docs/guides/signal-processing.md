@@ -745,6 +745,29 @@ The oversampler reports but does not remove its delay. For linear-phase processi
 
 **Sample rate dependency:** `set_sample_rate()` required.
 
+### Drum output-stage oversampling
+
+Every `pulp::signal::drum` voice reaches the same `OutputStage` for wavefolding,
+tanh drive, word-length reduction, sample-rate reduction, dead-zone shaping,
+and final level. That shared stage owns the drum-specific quality policy:
+
+- `OutputOversampling::x2` is the default. It wraps the nonlinear and lo-fi
+  chain in the established 65-tap, 81.3 dB Kaiser half-band pair
+  used by character-delay hysteresis and adds exactly 32 host samples.
+- `OutputOversampling::x4` cascades a second house pair for hard fold/drive
+  settings and adds exactly 48 host samples.
+- `OutputOversampling::bypass` deliberately runs the chain at the host rate,
+  adds no latency, and preserves the aliasing of period-authentic digital drum
+  machines.
+
+`OutputStage::latency_samples()` reports the selected constant. A processor
+mixing the drum path with an undelayed parallel path must compensate the dry
+path or report the maximum delay to its host. Voices keep rendering while the
+FIR owns delayed samples, so their final filter tail is drained rather than
+cut. `prepare()` creates the FIR storage; quality changes and the audio path
+are allocation-free, but a quality change resets the filter and lo-fi clock
+and therefore belongs outside the audio callback.
+
 ### Resampling Helpers
 
 `Resampler` is the arbitrary-ratio polyphase FIR sample-rate converter.

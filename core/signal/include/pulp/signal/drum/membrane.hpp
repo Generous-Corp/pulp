@@ -136,6 +136,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         const double tension = std::exp2(response.bend(velocity));
@@ -164,7 +165,7 @@ protected:
 
     bool on_is_active() const override {
         return exciter_env_.is_active() || gate_env_.is_active() ||
-               level_ > kSilenceLevel;
+               level_ > kSilenceLevel || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

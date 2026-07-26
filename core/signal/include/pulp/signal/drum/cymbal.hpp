@@ -128,6 +128,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         const double brightness = response.brightness_scale(velocity);
@@ -157,7 +158,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return strike_env_.is_active() || level_ > kSilenceLevel;
+        return strike_env_.is_active() || level_ > kSilenceLevel ||
+               output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {

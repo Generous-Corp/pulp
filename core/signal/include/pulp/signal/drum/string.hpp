@@ -108,6 +108,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
 
@@ -128,7 +129,9 @@ protected:
         exciter_env_.trigger();
     }
 
-    bool on_is_active() const override { return string_.is_active(); }
+    bool on_is_active() const override {
+        return string_.is_active() || output_.has_tail();
+    }
 
     void render_add(float* out, int num_samples) override {
         for (int i = 0; i < num_samples; ++i) {

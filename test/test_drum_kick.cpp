@@ -26,6 +26,8 @@ namespace {
 using pulp::signal::NoiseColor;
 using pulp::signal::drum::KickBody;
 using pulp::signal::drum::KickVoice;
+using pulp::signal::drum::OutputOversampling;
+using pulp::signal::drum::OutputStage;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
 
@@ -128,6 +130,17 @@ double high_fraction(const std::vector<float>& x, double split_hz) {
 void init(KickVoice& voice, KickBody body) {
     voice.set_body(body);
     voice.prepare(kFs);
+}
+
+std::vector<float> render_output_sine(OutputStage& output, double frequency,
+                                      double amplitude, int num_samples) {
+    std::vector<float> rendered(static_cast<std::size_t>(num_samples), 0.0f);
+    for (int i = 0; i < num_samples; ++i) {
+        const double phase = 2.0 * kPi * frequency * static_cast<double>(i) / kFs;
+        rendered[static_cast<std::size_t>(i)] =
+            output.process(static_cast<float>(amplitude * std::sin(phase)));
+    }
+    return rendered;
 }
 
 }  // namespace
@@ -399,12 +412,17 @@ TEST_CASE("Sweep depth changes how high the body starts",
 
     const auto deep = render_sweep(4.0);
     const auto shallow = render_sweep(2.0);
-    REQUIRE(crossing_rate(deep, 0, 480) > crossing_rate(shallow, 0, 480) * 1.8);
+    OutputStage default_output;
+    default_output.prepare(kFs);
+    const auto output_latency =
+        static_cast<std::size_t>(default_output.latency_samples());
+    REQUIRE(crossing_rate(deep, output_latency, output_latency + 480) >
+            crossing_rate(shallow, output_latency, output_latency + 480) * 1.8);
 
     // With no sweep the body sits at its tuning from the first cycle. Measured
     // by period, because 50 Hz has half a cycle in a 10 ms window.
     const auto flat = render_sweep(0.0);
-    REQUIRE(std::fabs(period_frequency(flat, 0, 9600) - 50.0) < 2.0);
+    REQUIRE(std::fabs(period_frequency(flat, output_latency, 9600) - 50.0) < 2.0);
 }
 
 TEST_CASE("Body decay sets how long the kick rings", "[signal][drum][kick]") {
@@ -572,10 +590,11 @@ TEST_CASE("The attack shunt lifts the opening pitch",
         voice.set_circuit_attack_ms(attack_ms);
         voice.set_click_level(0.0);
         const auto y = hit(voice, 1.0f, 24000);
+        const auto latency = static_cast<std::size_t>(voice.output().latency_samples());
         // Measured over the shunt's own 20 ms window. Averaging over any longer
         // span mixes the lifted opening with the settled note and understates
         // the effect -- over 50 ms the same lift reads as a few percent.
-        return crossing_rate(y, 0, 960);
+        return crossing_rate(y, latency, latency + 960);
     };
 
     // Shorting the collector resistor drops the network's shunt resistance by
@@ -638,6 +657,148 @@ TEST_CASE("The circuit body preserves its ring across a retrigger",
 }
 
 // -- Output stage and realtime contract --------------------------------------
+
+TEST_CASE("The drum output stage defaults to the exact house x2 latency",
+          "[signal][drum][output][latency]") {
+    OutputStage output;
+    output.prepare(kFs);
+
+    REQUIRE(output.oversampling() == OutputOversampling::x2);
+    REQUIRE(output.latency_samples() == 32);
+
+    std::vector<float> impulse(160, 0.0f);
+    for (std::size_t i = 0; i < impulse.size(); ++i) {
+        impulse[i] = output.process(i == 0 ? 1.0f : 0.0f);
+    }
+    const auto peak_at = static_cast<std::size_t>(std::distance(
+        impulse.begin(), std::max_element(
+                             impulse.begin(), impulse.end(),
+                             [](float a, float b) { return std::fabs(a) < std::fabs(b); })));
+    REQUIRE(peak_at == static_cast<std::size_t>(output.latency_samples()));
+    REQUIRE_FALSE(output.has_tail());
+
+    output.set_oversampling(OutputOversampling::x4);
+    REQUIRE(output.latency_samples() == 48);
+    output.set_oversampling(OutputOversampling::bypass);
+    REQUIRE(output.latency_samples() == 0);
+}
+
+TEST_CASE("Bypassed clean drum output is sample-exact and deterministic",
+          "[signal][drum][output][bypass]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+
+    std::vector<float> input(4096);
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        input[i] = 0.35f * std::sin(static_cast<float>(2.0 * kPi * 0.071 *
+                                                       static_cast<double>(i)));
+    }
+
+    std::vector<float> first(input.size());
+    std::vector<float> second(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) first[i] = output.process(input[i]);
+    output.reset();
+    for (std::size_t i = 0; i < input.size(); ++i) second[i] = output.process(input[i]);
+
+    REQUIRE(first == input);
+    REQUIRE(second == first);
+    REQUIRE_FALSE(output.has_tail());
+}
+
+TEST_CASE("Clean x2 drum output is deterministic and transparent in band",
+          "[signal][drum][output][oversampling]") {
+    OutputStage first;
+    OutputStage second;
+    first.prepare(kFs);
+    second.prepare(kFs);
+
+    constexpr int frames = 8192;
+    std::vector<float> input(frames, 0.0f);
+    std::vector<float> a(frames, 0.0f);
+    std::vector<float> b(frames, 0.0f);
+    for (int i = 0; i < frames; ++i) {
+        const double t = static_cast<double>(i) / kFs;
+        input[static_cast<std::size_t>(i)] = static_cast<float>(
+            0.3 * std::sin(2.0 * kPi * 997.0 * t) +
+            0.15 * std::sin(2.0 * kPi * 5003.0 * t));
+        a[static_cast<std::size_t>(i)] =
+            first.process(input[static_cast<std::size_t>(i)]);
+        b[static_cast<std::size_t>(i)] =
+            second.process(input[static_cast<std::size_t>(i)]);
+    }
+
+    REQUIRE(a == b);
+    const auto latency = static_cast<std::size_t>(first.latency_samples());
+    double max_error = 0.0;
+    for (std::size_t i = 512; i < a.size(); ++i) {
+        max_error = std::max(
+            max_error,
+            std::fabs(static_cast<double>(a[i] - input[i - latency])));
+    }
+    INFO("clean x2 maximum in-band error=" << max_error);
+    REQUIRE(max_error < 1e-3);
+}
+
+TEST_CASE("Reapplying the active drum quality does not reset its FIR history",
+          "[signal][drum][output][latency]") {
+    OutputStage reference;
+    OutputStage reapplied;
+    reference.prepare(kFs);
+    reapplied.prepare(kFs);
+
+    std::vector<float> expected(160, 0.0f);
+    std::vector<float> actual(160, 0.0f);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const float input = i == 0 ? 1.0f : 0.0f;
+        expected[i] = reference.process(input);
+        if (i == 16) reapplied.set_oversampling(OutputOversampling::x2);
+        actual[i] = reapplied.process(input);
+    }
+
+    REQUIRE(actual == expected);
+}
+
+TEST_CASE("House oversampling rejects the shared drum drive alias",
+          "[signal][drum][output][aliasing]") {
+    // 10 kHz driven through tanh creates a 30 kHz third harmonic. At the host
+    // rate that folds to a discrete 18 kHz alias; at x2 it exists above the
+    // host Nyquist and the house decimator removes it. A clean x2 render is the
+    // negative control proving that the 18 kHz detector has a lower floor than
+    // the asserted driven result.
+    constexpr double fundamental_hz = 10000.0;
+    constexpr double alias_hz = 18000.0;
+    constexpr int frames = 32768;
+    constexpr std::size_t settled = 2048;
+
+    OutputStage host_rate;
+    host_rate.prepare(kFs);
+    host_rate.set_oversampling(OutputOversampling::bypass);
+    host_rate.set_drive(1.0);
+    auto aliased = render_output_sine(host_rate, fundamental_hz, 0.35, frames);
+
+    OutputStage house;
+    house.prepare(kFs);
+    house.set_drive(1.0);
+    auto filtered = render_output_sine(house, fundamental_hz, 0.35, frames);
+
+    OutputStage clean_control;
+    clean_control.prepare(kFs);
+    auto clean = render_output_sine(clean_control, fundamental_hz, 0.35, frames);
+
+    aliased.erase(aliased.begin(), aliased.begin() + static_cast<std::ptrdiff_t>(settled));
+    filtered.erase(filtered.begin(), filtered.begin() + static_cast<std::ptrdiff_t>(settled));
+    clean.erase(clean.begin(), clean.begin() + static_cast<std::ptrdiff_t>(settled));
+
+    const double host_alias = tone_amplitude(aliased, alias_hz);
+    const double house_alias = tone_amplitude(filtered, alias_hz);
+    const double detector_floor = tone_amplitude(clean, alias_hz);
+    INFO("host alias=" << host_alias << " house alias=" << house_alias
+                       << " detector floor=" << detector_floor);
+    REQUIRE(host_alias > 1e-3);
+    REQUIRE(house_alias < host_alias * 0.05);
+    REQUIRE(detector_floor < house_alias * 0.25);
+}
 
 TEST_CASE("Drive adds harmonics and bounds the output",
           "[signal][drum][kick]") {

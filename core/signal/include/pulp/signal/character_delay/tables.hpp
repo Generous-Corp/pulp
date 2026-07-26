@@ -17,6 +17,8 @@
 // γ-Fe2O3 material constants, Dattorro's published diffuser network) and moving
 // them would make the model wrong rather than differently tuned.
 
+#include <pulp/signal/oversampling_fir.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -291,8 +293,8 @@ inline constexpr double kJaSilenceThreshold = 1e-7;
 /// "good across the range" finding; ≥8× shows diminishing returns. 65 taps at
 /// Kaiser β ≈ 8 is the house half-band design — the stopband figure below is
 /// the β = 8 point of the standard Kaiser formula, not an independent choice.
-inline constexpr std::size_t kHysteresisHalfBandTaps = 65;
-inline constexpr double kHysteresisHalfBandStopbandDb = 81.3;  // → β ≈ 8
+inline constexpr std::size_t kHysteresisHalfBandTaps = kHouseHalfBandTaps;
+inline constexpr double kHysteresisHalfBandStopbandDb = kHouseHalfBandStopbandDb;
 
 /// Makeup-gain tolerance around unity small-signal gain, in dB.
 inline constexpr double kJaMakeupToleranceDb = 1.0;

@@ -12,7 +12,17 @@
 #include <cstddef>
 #include <vector>
 
-namespace pulp::signal::detail {
+namespace pulp::signal {
+
+/// Pulp's low-latency linear-phase half-band design. Character-delay
+/// hysteresis and the drum output stage share these exact constants so the
+/// "house pair" cannot drift into two almost-identical filters.
+inline constexpr std::size_t kHouseHalfBandTaps = 65;
+inline constexpr double kHouseHalfBandStopbandDb = 81.3;  // Kaiser beta ~= 8
+inline constexpr double kHouseHalfBandStageOnePassband = 0.45;
+inline constexpr double kHouseHalfBandStageTwoPassband = 0.225;
+
+namespace detail {
 
 // Fixed-storage linear-phase half-band stage for nonlinear processors whose
 // configuration and processing paths must both remain allocation-free. The
@@ -166,4 +176,6 @@ template <typename SampleType> class LinearPhaseOversamplingStage2x {
     std::size_t taps_ = 0;
 };
 
-} // namespace pulp::signal::detail
+} // namespace detail
+
+} // namespace pulp::signal

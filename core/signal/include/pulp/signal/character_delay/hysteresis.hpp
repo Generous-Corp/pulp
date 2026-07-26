@@ -297,8 +297,12 @@ private:
 class HalfBandOversampler4x {
 public:
     void prepare() {
-        stage_a_.configure(0.45, kHysteresisHalfBandStopbandDb, kHysteresisHalfBandTaps);
-        stage_b_.configure(0.225, kHysteresisHalfBandStopbandDb, kHysteresisHalfBandTaps);
+        stage_a_.configure(kHouseHalfBandStageOnePassband,
+                           kHysteresisHalfBandStopbandDb,
+                           kHysteresisHalfBandTaps);
+        stage_b_.configure(kHouseHalfBandStageTwoPassband,
+                           kHysteresisHalfBandStopbandDb,
+                           kHysteresisHalfBandTaps);
         reset();
     }
 

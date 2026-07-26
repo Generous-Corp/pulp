@@ -119,6 +119,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         applied_bend_ = pitch_sweep_oct_ + response.bend(velocity);
@@ -151,7 +152,7 @@ protected:
     }
 
     bool on_is_active() const override {
-        return amp_env_.is_active() || click_.is_active();
+        return amp_env_.is_active() || click_.is_active() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -347,6 +348,7 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         applied_depth_ =
@@ -369,7 +371,7 @@ protected:
         for (const auto& env : envelopes_) {
             if (env.is_active()) return true;
         }
-        return false;
+        return output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
