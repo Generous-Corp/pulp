@@ -235,6 +235,29 @@ TEST_CASE("Choking fades rather than cutting", "[signal][drum][voice]") {
     REQUIRE_FALSE(voice.is_active());
 }
 
+TEST_CASE("Voice state distinguishes idle ringing and choking lifecycle",
+          "[signal][drum][voice][state]") {
+    using pulp::signal::drum::VoiceState;
+
+    KickVoice voice;
+    init(voice, KickBody::oscillator);
+    voice.set_body_decay_ms(2000.0);
+    REQUIRE(voice.state() == VoiceState::idle);
+
+    voice.note_on(1.0f);
+    REQUIRE(voice.state() == VoiceState::ringing);
+    voice.choke(4.0f);
+    REQUIRE(voice.state() == VoiceState::choking);
+
+    render(voice, 4800);
+    REQUIRE(voice.state() == VoiceState::idle);
+
+    voice.note_on(1.0f);
+    REQUIRE(voice.state() == VoiceState::ringing);
+    voice.reset();
+    REQUIRE(voice.state() == VoiceState::idle);
+}
+
 TEST_CASE("Choking an idle voice is a no-op", "[signal][drum][voice]") {
     KickVoice voice;
     init(voice, KickBody::oscillator);

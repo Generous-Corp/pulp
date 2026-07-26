@@ -8,6 +8,17 @@
 
 namespace pulp::signal::drum {
 
+/// Public lifecycle inspection for a drum voice. This is intentionally not a
+/// serializable DSP snapshot: voices own heterogeneous filter, delay, and RNG
+/// state, so pretending one base blob can restore them would create a false
+/// portability contract. Plugin parameter/state persistence belongs above the
+/// voice; this value is for allocation, UI, and choke-policy decisions.
+enum class VoiceState {
+    idle,
+    ringing,
+    choking,
+};
+
 /// The lifecycle every percussion voice shares.
 ///
 /// Three parts of that lifecycle are implemented here rather than left to each
@@ -84,6 +95,11 @@ public:
     /// Whether the voice still has something to render. A kit uses this to
     /// skip voices entirely rather than summing silence.
     bool is_active() const { return on_is_active(); }
+
+    VoiceState state() const {
+        if (!on_is_active()) return VoiceState::idle;
+        return choking_ ? VoiceState::choking : VoiceState::ringing;
+    }
 
     float velocity() const { return velocity_; }
     double sample_rate() const { return sample_rate_; }
