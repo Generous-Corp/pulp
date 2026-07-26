@@ -458,13 +458,13 @@ order and still say exactly the same thing. Write one refusal test per member â€
 a single "a populated groove refuses" case passes even when the predicate only
 looks at one field, which is how a weakened refusal gets through review.
 
-### `Sequence` grows by overload, and each new owned field needs a version predicate
+### `Sequence` grows through its named input, and each new owned field needs a version predicate
 
 `Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through
-`create()` overloads, so a new owned field arrives as another overload whose
-older siblings chain forward by constructing the field's default. No existing
-call site changes and there is no positional brace-init hazard â€” do **not**
-convert `Sequence` to a `SequenceInput` struct to add one.
+`create()`. Add full-fidelity owned state to `SequenceInput`; keep the existing
+partial overloads source-compatible by having them construct the named input
+with the new field's default. Do not extend the positional overload chain for
+new durable state.
 
 What does need care is `sequence_schema_policy.hpp`: each owned field gets its
 own `<field>_introduced_version` plus a `requires_<field>(version)` predicate,
@@ -690,12 +690,12 @@ opt-in Audio Quality Lab tool is installed.
 
 ## Scope boundary
 
-This subsystem owns authored take/comp state, the durable `JournalSink`
-ordering seam, and native `FileJournal`, but not package/container I/O,
-publication, realtime playback or automation delivery, launch slots, nesting,
-device implementations, routing, audio, format adapters, or UI. Add those in
-their owning modules instead of widening the command and persistence core
-opportunistically.
+This subsystem owns authored take/comp state, durable launch scenes, slots, and
+follow actions, the durable `JournalSink` ordering seam, and native
+`FileJournal`, but not package/container I/O, publication, realtime playback,
+launch scheduling or automation delivery, nesting, device implementations,
+routing, audio, format adapters, or UI. Add those in their owning modules
+instead of widening the command and persistence core opportunistically.
 
 ## Launch model and follow actions
 
