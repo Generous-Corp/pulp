@@ -41,10 +41,79 @@ template <typename SampleType = float>
 class DryWetMixerT {
 public:
     /// Set the mix ratio (0.0 = fully dry, 1.0 = fully wet)
+    ///
+    /// The ratio reaches its target over the configured ramp length
+    /// (see set_ramp_samples()). With the default ramp length of 0 the
+    /// new ratio applies to the whole of the next block.
     void set_mix(SampleType mix) {
         mix_ = std::clamp(mix, SampleType{0.0f}, SampleType{1.0f});
+        if (ramp_samples_ <= 0) {
+            current_mix_ = mix_;
+            ramp_remaining_ = 0;
+            mix_increment_ = SampleType{0.0f};
+            return;
+        }
+        mix_increment_ = (mix_ - current_mix_) /
+                         static_cast<SampleType>(ramp_samples_);
+        ramp_remaining_ = ramp_samples_;
     }
+    /// The ratio most recently requested via set_mix(), which is the
+    /// ramp target while a ramp is in flight.
     SampleType mix() const { return mix_; }
+
+    /// The ratio the next sample will actually be mixed at. Equal to
+    /// mix() once any ramp has settled.
+    SampleType current_mix() const { return current_mix_; }
+
+    /// Length of the crossfade applied when set_mix() changes the ratio.
+    ///
+    /// A mix control driven by a knob or by host automation steps at
+    /// block boundaries; crossfading dry against wet across a stepped
+    /// ratio is audible as zipper noise. A ramp of a few milliseconds
+    /// removes it.
+    ///
+    /// 0 (the default) keeps the ratio change instantaneous, so the
+    /// gains are computed once per block. A non-zero ramp computes them
+    /// per sample until the target is reached, which for the pow()- and
+    /// trig-based curves is materially more expensive — hence opt-in
+    /// rather than always-on.
+    ///
+    /// RT contract: allocation-free, safe to call from the audio thread
+    /// alongside the other setters. Shortening the ramp mid-flight
+    /// rescales the remaining distance rather than jumping.
+    void set_ramp_samples(int samples) {
+        const int new_ramp = std::max(0, samples);
+        if (new_ramp == ramp_samples_) return;
+        ramp_samples_ = new_ramp;
+        if (ramp_samples_ <= 0) {
+            // Dropping the ramp settles immediately rather than leaving a
+            // partially-applied ratio in place.
+            current_mix_ = mix_;
+            ramp_remaining_ = 0;
+            mix_increment_ = SampleType{0.0f};
+            return;
+        }
+        if (ramp_remaining_ > 0) {
+            ramp_remaining_ = std::min(ramp_remaining_, ramp_samples_);
+            mix_increment_ = ramp_remaining_ > 0
+                ? (mix_ - current_mix_) /
+                      static_cast<SampleType>(ramp_remaining_)
+                : SampleType{0.0f};
+        }
+    }
+    int ramp_samples() const { return ramp_samples_; }
+
+    /// Convenience form of set_ramp_samples() in seconds.
+    void set_ramp_time(SampleType seconds, SampleType sample_rate) {
+        if (!(seconds > SampleType{0.0f}) || !(sample_rate > SampleType{0.0f})) {
+            set_ramp_samples(0);
+            return;
+        }
+        set_ramp_samples(static_cast<int>(seconds * sample_rate));
+    }
+
+    /// True while the ratio is still travelling toward its target.
+    bool is_ramping() const { return ramp_remaining_ > 0; }
 
     /// Set the mixing curve type
     void set_curve(MixCurve curve) { curve_ = curve; }
@@ -71,11 +140,16 @@ public:
     /// Prepare for processing.
     ///
     /// RT contract: prepare() allocates dry/latency storage and is not
-    /// audio-thread safe. After prepare(), set_mix(), set_curve(), push_dry(),
-    /// mix_wet(), and reset() are allocation-free for num_channels <=
+    /// audio-thread safe. After prepare(), set_mix(), set_curve(),
+    /// set_ramp_samples(), set_ramp_time(), push_dry(), mix_wet(), and reset()
+    /// are allocation-free for num_channels <=
     /// max_channels and num_samples <= max_block_size. Calls that exceed the
     /// prepared channel/block capacity may grow storage and are non-RT.
+    ///
+    /// prepare() settles any in-flight mix ramp: a ramp does not survive a
+    /// sample-rate or block-size change.
     void prepare(int max_channels, int max_block_size) {
+        settle_ramp();
         max_channels_ = std::max(0, max_channels);
         max_block_size_ = std::max(0, max_block_size);
         delay_pos_ = 0;
@@ -132,13 +206,33 @@ public:
 
     /// Mix dry and wet signals, writing result to wet_channels (in-place)
     void mix_wet(SampleType* const* wet_channels, int num_channels, int num_samples) {
-        SampleType dry_gain, wet_gain;
-        compute_gains(dry_gain, wet_gain);
-
         const int channel_count = std::min(num_channels, active_dry_channels_);
-        for (int ch = 0; ch < channel_count; ++ch) {
-            const int sample_count = std::min(num_samples, active_dry_samples_);
-            for (int i = 0; i < sample_count; ++i) {
+        const int sample_count = std::min(num_samples, active_dry_samples_);
+        if (channel_count <= 0 || sample_count <= 0) return;
+
+        if (ramp_remaining_ <= 0) {
+            // Settled: one gain pair for the whole block.
+            SampleType dry_gain, wet_gain;
+            compute_gains(current_mix_, dry_gain, wet_gain);
+            for (int ch = 0; ch < channel_count; ++ch) {
+                for (int i = 0; i < sample_count; ++i) {
+                    wet_channels[ch][i] = dry_buffer_[ch][i] * dry_gain +
+                                          wet_channels[ch][i] * wet_gain;
+                }
+            }
+            return;
+        }
+
+        // Ramping: the ratio advances once per frame, so frames are the
+        // outer loop and every channel of a frame shares its gain pair.
+        for (int i = 0; i < sample_count; ++i) {
+            if (ramp_remaining_ > 0) {
+                current_mix_ += mix_increment_;
+                if (--ramp_remaining_ == 0) current_mix_ = mix_;
+            }
+            SampleType dry_gain, wet_gain;
+            compute_gains(current_mix_, dry_gain, wet_gain);
+            for (int ch = 0; ch < channel_count; ++ch) {
                 wet_channels[ch][i] = dry_buffer_[ch][i] * dry_gain +
                                       wet_channels[ch][i] * wet_gain;
             }
@@ -150,10 +244,15 @@ public:
         delay_pos_ = 0;
         for (auto& ch : dry_buffer_)
             std::fill(ch.begin(), ch.end(), SampleType{0.0f});
+        settle_ramp();
     }
 
 private:
     SampleType mix_ = SampleType{1.0f};
+    SampleType current_mix_ = SampleType{1.0f};
+    SampleType mix_increment_ = SampleType{0.0f};
+    int ramp_samples_ = 0;
+    int ramp_remaining_ = 0;
     MixCurve curve_ = MixCurve::Linear;
     int latency_ = 0;
     int max_channels_ = 2;
@@ -183,13 +282,19 @@ private:
         }
     }
 
-    void compute_gains(SampleType& dry, SampleType& wet) const {
+    void settle_ramp() {
+        current_mix_ = mix_;
+        ramp_remaining_ = 0;
+        mix_increment_ = SampleType{0.0f};
+    }
+
+    void compute_gains(SampleType ratio, SampleType& dry, SampleType& wet) const {
         constexpr SampleType kHalfPi = SampleType{1.57079632679489661923f};
-        const SampleType theta = mix_ * kHalfPi;
+        const SampleType theta = ratio * kHalfPi;
         switch (curve_) {
             case MixCurve::Linear:
-                dry = SampleType{1.0f} - mix_;
-                wet = mix_;
+                dry = SampleType{1.0f} - ratio;
+                wet = ratio;
                 break;
             case MixCurve::EqualPower:
             case MixCurve::Sin3dB:
@@ -197,12 +302,12 @@ private:
                 wet = std::sin(theta);
                 break;
             case MixCurve::Balanced:
-                dry = mix_ <= SampleType{0.5f}
+                dry = ratio <= SampleType{0.5f}
                     ? SampleType{1.0f}
-                    : (SampleType{1.0f} - mix_) * SampleType{2.0f};
-                wet = mix_ >= SampleType{0.5f}
+                    : (SampleType{1.0f} - ratio) * SampleType{2.0f};
+                wet = ratio >= SampleType{0.5f}
                     ? SampleType{1.0f}
-                    : mix_ * SampleType{2.0f};
+                    : ratio * SampleType{2.0f};
                 break;
             case MixCurve::Sin4_5dB: {
                 // Clamp before pow to guard against tiny negative residue.
@@ -217,16 +322,16 @@ private:
                 wet = std::sin(theta) * std::sin(theta);
                 break;
             case MixCurve::Sqrt3dB:
-                dry = std::sqrt(SampleType{1.0f} - mix_);
-                wet = std::sqrt(mix_);
+                dry = std::sqrt(SampleType{1.0f} - ratio);
+                wet = std::sqrt(ratio);
                 break;
             case MixCurve::Sqrt4_5dB:
                 // -4.5 dB = geometric mean of -3 dB sqrt (exp 0.5) and
                 // -6 dB linear (exp 1.0) → exponent 0.75. At mix=0.5
                 // produces 0.5^0.75 ≈ 0.5946 per side ≈ -4.51 dB,
                 // matching the documented midpoint notch.
-                dry = std::pow(SampleType{1.0f} - mix_, SampleType{0.75f});
-                wet = std::pow(mix_, SampleType{0.75f});
+                dry = std::pow(SampleType{1.0f} - ratio, SampleType{0.75f});
+                wet = std::pow(ratio, SampleType{0.75f});
                 break;
         }
     }
