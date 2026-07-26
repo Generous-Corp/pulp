@@ -1026,3 +1026,58 @@ TEST_CASE("mac harness: a non-claiming recognizer still lets the widget drag",
     CHECK(probe->drags == 2);   // nothing claimed, so the widget kept the drag
     CHECK(probe->ups == 1);     // ...and the bracket closed
 }
+
+// The bracket the case above opens. Once a non-claiming press is delivered to
+// `_dragTarget`, a recognizer can still claim on a LATER drag or on the
+// release — at which point the host must hand the pointer over AND close the
+// press it already delivered. A Knob opens on_gesture_begin plus relative-mouse
+// mode on press and clears both only on on_mouse_up, so bailing bare strands
+// beginEdit with no endEdit: a stuck automation touch and a hidden cursor.
+TEST_CASE("mac harness: a mid-drag gesture claim still closes the press bracket",
+          "[mac][platform-harness][gesture]") {
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 320, 240});
+
+    auto child = std::make_unique<Probe>();
+    auto* probe = child.get();
+    child->flex().preferred_width = 320.0f;
+    child->flex().preferred_height = 240.0f;
+    root.add_child(std::move(child));
+    root.layout_children();
+
+    // A pan with a wide slop: the press and the first short drag stay
+    // candidates (so the widget receives them), and the long drag claims.
+    auto pan = std::make_unique<pulp::view::PanRecognizer>();
+    pan->set_min_distance(60.0f);
+    probe->add_gesture_recognizer(std::move(pan));
+
+    auto host = pt::make_test_window(root);
+    REQUIRE(host != nullptr);
+
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::down,
+                                       .x = 40.0f, .y = 120.0f}));
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 60.0f, .y = 120.0f}));
+    REQUIRE(probe->downs == 1);
+    REQUIRE(probe->drags == 1);   // still only a candidate here
+    REQUIRE(probe->ups == 0);
+
+    // Crosses the slop: the pan claims, and the host must close the bracket.
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::drag,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->drags == 1);   // the claiming move is NOT delivered
+    CHECK(probe->ups == 1);     // ...but the press bracket closed
+
+    // The release is now owned by the gesture; the widget must not see a
+    // second up (that would double-close and fire a spurious endEdit).
+    REQUIRE(pt::simulate_mouse(*host, {.phase = pt::SimulatedMouse::Phase::up,
+                                       .x = 200.0f, .y = 120.0f}));
+    CHECK(probe->ups == 1);
+}

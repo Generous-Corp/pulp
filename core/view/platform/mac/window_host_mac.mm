@@ -586,7 +586,22 @@ static void install_app_menu(NSString* appName) {
             // live tree before any deref.
             if (!self.rootView) return;
             auto pt = [self localPoint:event];
-            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) { [self startAnimationTimerIfNeeded]; [self setNeedsDisplay:YES]; return; }
+            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::drag, true)) {
+                // A claim can land mid-drag, AFTER the press was delivered to
+                // _dragTarget. Hand the pointer to the gesture, but close the
+                // bracket that press opened and drop the target so the widget
+                // cannot silently resume dragging (with a position jump) if the
+                // gesture later goes terminal. A Knob opens on_gesture_begin and
+                // relative-mouse mode on press and clears both only on
+                // on_mouse_up, so bailing bare strands beginEdit with no
+                // endEdit — a stuck automation touch and a hidden cursor.
+                if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
+                    _dragTarget->on_mouse_up(to_local(pt, _dragTarget, self.rootView));
+                _dragTarget = nullptr;
+                [self startAnimationTimerIfNeeded];
+                [self setNeedsDisplay:YES];
+                return;
+            }
             if (!_dragTarget) return;
             if (!view_is_in_tree(_dragTarget, self.rootView)) {
                 _dragTarget = nullptr;
@@ -636,7 +651,17 @@ static void install_app_menu(NSString* appName) {
                 }
             }
             auto pt = [self localPoint:event];
-            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) { _dragTarget = nullptr; [self setNeedsDisplay:YES]; return; }
+            if (mac_should_yield_to_gesture(self.rootView, pt, event, pulp::view::MousePhase::release, false)) {
+                // Same bracket-closing rule as the drag phase: a recognizer can
+                // claim on THIS release (a double-tap reaches `ended` on the
+                // second one), by which point the press was already delivered.
+                // Dropping the up here would leave the widget mid-gesture.
+                if (_dragTarget && view_is_in_tree(_dragTarget, self.rootView))
+                    _dragTarget->on_mouse_up(to_local(pt, _dragTarget, self.rootView));
+                _dragTarget = nullptr;
+                [self setNeedsDisplay:YES];
+                return;
+            }
             if (_dragTarget && self.rootView) {
                 // Routing — legacy up, modern release, the W3C pointerup bubble,
                 // and the same-target click-suppression decision (release must
