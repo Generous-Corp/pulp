@@ -55,53 +55,57 @@ struct EngineMetadata {
     EngineProvenance provenance;
     std::string_view lineage;
     bool available;
+    bool velocity_changes_timbre;
+    bool velocity_may_change_decay;
 };
 
 /// The authoritative engine inventory. Names are persistence-safe and must not
 /// be reused for a different topology.
 inline constexpr std::array<EngineMetadata, 16> engine_registry{{
     {EngineId::kick_oscillator, "kick.oscillator", "Oscillator Kick",
-     EngineProvenance::pulp_original, "Pulp original implementation", true},
+     EngineProvenance::pulp_original, "Pulp original implementation", true, true, false},
     {EngineId::kick_resonant, "kick.resonant", "Resonant Kick",
-     EngineProvenance::pulp_original, "Pulp original implementation", true},
+     EngineProvenance::pulp_original, "Pulp original implementation", true, true, false},
     {EngineId::kick_circuit, "kick.circuit", "Bridged-T Circuit Kick",
      EngineProvenance::published_technique,
-     "Werner, Abel, and Smith bridged-T model", true},
+     "Werner, Abel, and Smith bridged-T model", true, true, false},
     {EngineId::snare, "snare", "Snare",
-     EngineProvenance::pulp_original, "Pulp original implementation", true},
+     EngineProvenance::pulp_original, "Pulp original implementation", true, true, false},
     {EngineId::hat, "hat", "Metallic Hi-Hat",
-     EngineProvenance::pulp_original, "Pulp original implementation", true},
+     EngineProvenance::pulp_original, "Pulp original implementation", true, true, false},
     {EngineId::clap, "clap", "Hand Clap",
-     EngineProvenance::pulp_original, "Pulp original implementation", true},
+     EngineProvenance::pulp_original, "Pulp original implementation", true, true, false},
     {EngineId::tom_generic, "tom.generic", "Generic Tom",
-     EngineProvenance::pulp_original, "Pulp original preset and implementation", true},
+     EngineProvenance::pulp_original, "Pulp original preset and implementation", true, true,
+     false},
     {EngineId::tom_simmons, "tom.simmons", "SDS-V-Family Tom",
      EngineProvenance::published_technique,
-     "Original implementation of the published Simmons topology", true},
+     "Original implementation of the published Simmons topology", true, true, false},
     {EngineId::cymbal_comb, "cymbal.comb", "Comb Cymbal",
      EngineProvenance::published_technique,
-     "Original implementation informed by the zionjaymes comb tutorial", true},
+     "Original implementation informed by the zionjaymes comb tutorial", true, true, true},
     {EngineId::membrane_modal, "membrane.modal", "Modal Membrane",
      EngineProvenance::published_technique,
-     "Fletcher and Rossing circular-membrane modal ratios", true},
+     "Fletcher and Rossing circular-membrane modal ratios", true, true, false},
     {EngineId::string_karplus_strong, "string.karplus-strong", "Karplus-Strong String",
      EngineProvenance::published_technique,
-     "Karplus and Strong; Jaffe and Smith extensions", true},
+     "Karplus and Strong; Jaffe and Smith extensions", true, true, false},
     {EngineId::zap_cz, "zap.cz", "CZ Phase-Distortion Zap",
      EngineProvenance::published_technique,
-     "Original implementation of Casio phase distortion", true},
+     "Original implementation of Casio phase distortion", true, true, false},
     {EngineId::fm2, "fm2", "Two-Operator FM Drum",
      EngineProvenance::published_technique,
-     "Original implementation of Chowning FM synthesis", true},
+     "Original implementation of Chowning FM synthesis", true, true, false},
     {EngineId::fm6, "fm6", "Six-Operator FM Drum",
      EngineProvenance::published_technique,
-     "Original implementation of Chowning FM synthesis", true},
+     "Original implementation of Chowning FM synthesis", true, true, false},
     {EngineId::fm8, "fm8", "Eight-Operator FM Drum",
      EngineProvenance::published_technique,
-     "Original implementation of Chowning FM synthesis", true},
+     "Original implementation of Chowning FM synthesis", true, true, false},
     {EngineId::dx7_msfa, "dx7.msfa", "DX7 (MSFA)",
      EngineProvenance::license_hold,
-     "Unavailable: MSFA vendored license-file mismatch must be resolved", false},
+     "Unavailable: MSFA vendored license-file mismatch must be resolved", false, false,
+     false},
 }};
 
 inline const EngineMetadata* find_engine(std::string_view name) noexcept {

@@ -77,6 +77,22 @@ double rms(const std::vector<float>& x, std::size_t from = 0, std::size_t to = 0
     return std::sqrt(sum / static_cast<double>(to - from));
 }
 
+double peak_normalized_difference(const std::vector<float>& a,
+                                  const std::vector<float>& b) {
+    const double a_peak = peak(a);
+    const double b_peak = peak(b);
+    if (a_peak <= 0.0 || b_peak <= 0.0) return 0.0;
+    double sum = 0.0;
+    const auto count = std::min(a.size(), b.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        const double difference =
+            static_cast<double>(a[i]) / a_peak -
+            static_cast<double>(b[i]) / b_peak;
+        sum += difference * difference;
+    }
+    return std::sqrt(sum / static_cast<double>(count));
+}
+
 // Hann-windowed Goertzel amplitude at one frequency.
 double tone_amplitude(const std::vector<float>& x, double f) {
     const double w = 2.0 * kPi * f / kFs;
@@ -1193,6 +1209,7 @@ TEST_CASE("The engine registry has stable unique names and an explicit DX7 hold"
         REQUIRE_FALSE(engine.name.empty());
         REQUIRE_FALSE(engine.display_name.empty());
         REQUIRE_FALSE(engine.lineage.empty());
+        REQUIRE(engine.velocity_changes_timbre == engine.available);
         REQUIRE(find_engine(engine.name) == &engine);
         for (std::size_t j = i + 1; j < engine_registry.size(); ++j) {
             REQUIRE(engine.name != engine_registry[j].name);
@@ -1204,8 +1221,45 @@ TEST_CASE("The engine registry has stable unique names and an explicit DX7 hold"
     const auto* held = find_engine("dx7.msfa");
     REQUIRE(held != nullptr);
     REQUIRE_FALSE(held->available);
+    REQUIRE_FALSE(held->velocity_changes_timbre);
     REQUIRE(held->provenance == EngineProvenance::license_hold);
     REQUIRE(create_engine(EngineId::dx7_msfa) == nullptr);
+}
+
+TEST_CASE("Every available engine changes timbre with velocity without hidden decay",
+          "[signal][drum][registry][velocity]") {
+    constexpr int render_samples = static_cast<int>(2.0 * kFs);
+    for (const auto& engine : engine_registry) {
+        if (!engine.available) continue;
+        INFO("engine " << engine.name);
+
+        auto soft_voice = create_engine(engine.id);
+        auto loud_voice = create_engine(engine.id);
+        REQUIRE(soft_voice != nullptr);
+        REQUIRE(loud_voice != nullptr);
+        soft_voice->prepare(kFs);
+        loud_voice->prepare(kFs);
+        const auto soft = hit(*soft_voice, 0.2f, render_samples);
+        const auto loud = hit(*loud_voice, 1.0f, render_samples);
+        const double soft_peak = peak(soft);
+        const double loud_peak = peak(loud);
+        REQUIRE(soft_peak > 1.0e-6);
+        REQUIRE(loud_peak > 1.0e-6);
+
+        // Peak normalization removes velocity gain. What remains must still
+        // differ, proving pitch/brightness/noise balance reaches the render.
+        REQUIRE(peak_normalized_difference(soft, loud) > 1.0e-4);
+
+        if (!engine.velocity_may_change_decay) {
+            const int soft_length =
+                audible_length(soft, soft_peak * 1.0e-3);
+            const int loud_length =
+                audible_length(loud, loud_peak * 1.0e-3);
+            const int tolerance =
+                std::max(256, std::max(soft_length, loud_length) / 10);
+            REQUIRE(std::abs(soft_length - loud_length) <= tolerance);
+        }
+    }
 }
 
 TEST_CASE("Every available registry entry constructs a finite audible voice",
