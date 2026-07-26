@@ -119,6 +119,11 @@ struct StreamingSampleSourceConfig {
     /// Spawn the owned background reader thread in prepare(). Set false to drive
     /// refills manually via pump_background() (deterministic testing).
     bool start_background_thread = true;
+
+    /// Advance source time across streaming underruns instead of replaying late
+    /// frames on a later pull. Intended for deadline-bound generated content;
+    /// ordinary sample playback leaves this false and preserves every frame.
+    bool advance_on_underrun = false;
 };
 
 class StreamingSampleSource {
@@ -207,6 +212,7 @@ private:
     bool fully_resident_ = false;
     bool prepared_ = false;
     bool use_thread_ = false;
+    bool advance_on_underrun_ = false;
 
     Buffer<float> preload_;          ///< Resident head, frames [0, preload_valid_).
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).

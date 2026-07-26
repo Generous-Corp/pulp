@@ -130,10 +130,12 @@ TEST_CASE("a buffered source that never produces zero-fills and counts every dec
     // block proves the source actually zero-filled rather than passing stale
     // audio through.
     REQUIRE(all_zero(block));
-    // The underlying ring never underran, because a producer that yields
-    // nothing ends the stream instead of missing a deadline. Counting against
-    // the ring alone would have reported this total failure as success.
-    REQUIRE(stats.ring_underrun_frames == 0);
+    // Deadline-bound streaming advances across every missing frame, so the
+    // underlying ring also records the full shortfall. The wrapper still owns
+    // the declaration-aware count used by production diagnostics.
+    REQUIRE(stats.ring_underrun_frames == kDeclaredFrames);
+    REQUIRE(source.position() == kDeclaredFrames);
+    REQUIRE(source.exhausted());
 }
 
 TEST_CASE("a buffered source counts the shortfall of a producer that stops early",
@@ -151,6 +153,42 @@ TEST_CASE("a buffered source counts the shortfall of a producer that stops early
     REQUIRE(stats.starved_frames == kDeclaredFrames - kAvailable);
     REQUIRE(stats.starvation_events == (kDeclaredFrames - kAvailable) / kChunkFrames);
     REQUIRE(stats.producer_errors == 1);
+    REQUIRE(source.position() == kDeclaredFrames);
+    REQUIRE(source.exhausted());
+}
+
+TEST_CASE("a buffered source discards frames that miss their playhead deadline",
+          "[playback][production]") {
+    auto config = default_config();
+    config.ring_capacity_frames = kChunkFrames;
+    playback::BufferedContentSource source;
+    REQUIRE(source.prepare(
+        buffered_declaration(), config,
+        [](std::uint64_t start_frame, audio::BufferView<float> dest,
+           std::uint64_t frames, audio::FrameReaderStopToken) {
+            for (std::uint64_t frame = 0; frame < frames; ++frame)
+                dest.channel(0)[static_cast<std::size_t>(frame)] =
+                    static_cast<float>(start_frame + frame);
+            return frames;
+        }));
+
+    audio::Buffer<float> block(1, static_cast<std::size_t>(kChunkFrames));
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+
+    // Do not pump: this block misses its deadline and becomes silence.
+    REQUIRE(source.pull(block.view(), kChunkFrames) == 0);
+    REQUIRE(all_zero(block));
+    REQUIRE(source.position() == 2 * kChunkFrames);
+
+    // The next refill starts at the current playhead, not at the missed block.
+    REQUIRE(source.pump_background() == kChunkFrames);
+    REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
+    REQUIRE(block.view().channel(0).front() == static_cast<float>(2 * kChunkFrames));
+
+    const auto stats = source.stats();
+    REQUIRE(stats.produced_frames == 2 * kChunkFrames);
+    REQUIRE(stats.starved_frames == kChunkFrames);
+    REQUIRE(stats.produced_frames + stats.starved_frames == source.position());
 }
 
 TEST_CASE("the audio-thread pull path allocates nothing", "[playback][production][rt-safety]") {
@@ -209,9 +247,9 @@ TEST_CASE("counters stay consistent with the play cursor across the producer thr
     const auto stats = source.stats();
     source.release(); // Joins the producer thread before anything is asserted.
 
-    // Every produced frame advanced the play cursor exactly once, so the
-    // counter and the cursor cannot have desynchronized across the two threads.
-    REQUIRE(stats.produced_frames == position);
+    // Every frame that reached the playhead was either produced on time or
+    // permanently counted as starved.
+    REQUIRE(stats.produced_frames + stats.starved_frames == position);
     REQUIRE(stats.produced_frames <= kLongFrames);
     // The producer was never asked past its declared end, so nothing it
     // returned should have registered as a failed read.

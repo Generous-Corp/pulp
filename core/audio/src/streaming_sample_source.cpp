@@ -49,6 +49,7 @@ bool StreamingSampleSource::prepare(const StreamingSampleSourceConfig& config,
     channels_ = config.channels;
     total_frames_ = config.total_frames;
     sample_rate_ = config.sample_rate;
+    advance_on_underrun_ = config.advance_on_underrun;
     reader_ = std::move(reader);
     reader_stop_requested_.store(false, std::memory_order_release);
 
@@ -153,6 +154,7 @@ void StreamingSampleSource::release() noexcept {
     fully_resident_ = false;
     prepared_ = false;
     use_thread_ = false;
+    advance_on_underrun_ = false;
     play_pos_.store(0, std::memory_order_relaxed);
     reader_pos_.store(0, std::memory_order_relaxed);
     eos_frame_.store(0, std::memory_order_relaxed);
@@ -242,7 +244,10 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             // Use the effective end (may have been shrunk by the reader on an
             // early source end) so a one-shot terminates at the real last frame
             // instead of waiting forever for tail frames that never arrive.
-            const std::uint64_t end = eos_frame_.load(std::memory_order_acquire);
+            const std::uint64_t end =
+                advance_on_underrun_
+                    ? total_frames_
+                    : eos_frame_.load(std::memory_order_acquire);
             if (pos >= end) break;  // one-shot reached the end
             segment_end = end;
         }
@@ -266,9 +271,13 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             const std::uint64_t avail =
                 std::min<std::uint64_t>(want, ring_.available_frames());
             if (avail == 0) {
-                // Underrun: hold position so the late-arriving frames still play
-                // in order on the next pull. Remainder is zero-filled below.
                 underrun_frames_.fetch_add(want, std::memory_order_relaxed);
+                if (advance_on_underrun_) {
+                    // Deadline-bound generated content owns source time, not
+                    // the producer. Account for the missed interval now; the
+                    // refill path will seek past any result that arrives late.
+                    play_pos_.store(pos + want, std::memory_order_release);
+                }
                 break;
             }
             BufferView<float> sub =
@@ -279,6 +288,8 @@ std::uint64_t StreamingSampleSource::pull(BufferView<float> dest,
             play_pos_.store(pos + avail, std::memory_order_relaxed);
             if (avail < want) {
                 underrun_frames_.fetch_add(want - avail, std::memory_order_relaxed);
+                if (advance_on_underrun_)
+                    play_pos_.store(pos + want, std::memory_order_release);
                 break;  // ring drained mid-block
             }
         }
@@ -297,7 +308,14 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
     // this method before flipping prepared_ true.
     if (fully_resident_ || !reader_.read) return 0;
 
-    const std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
+    std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
+    if (advance_on_underrun_) {
+        // A deadline miss may have moved the audio playhead beyond the next
+        // unread producer frame. Seek the random-access reader to current time
+        // so late content is discarded rather than replayed out of time.
+        rpos = std::max(rpos, play_pos_.load(std::memory_order_acquire));
+        reader_pos_.store(rpos, std::memory_order_relaxed);
+    }
     if (rpos >= total_frames_) return 0;  // tail fully streamed
 
     const std::uint64_t room = ring_.free_frames();
@@ -331,8 +349,16 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
         return 0;
     }
     const std::uint64_t clamped = std::min(got, want);
-    const std::uint64_t written = ring_.write(read_scratch_.view(), clamped);
-    reader_pos_.store(rpos + written, std::memory_order_relaxed);
+    const std::uint64_t play_pos =
+        advance_on_underrun_ ? play_pos_.load(std::memory_order_acquire) : rpos;
+    const std::uint64_t skipped =
+        play_pos > rpos ? std::min(clamped, play_pos - rpos) : 0;
+    const std::uint64_t ready = clamped - skipped;
+    const std::uint64_t written =
+        ring_.write(read_scratch_.view().slice(static_cast<std::size_t>(skipped),
+                                               static_cast<std::size_t>(ready)),
+                    ready);
+    reader_pos_.store(rpos + clamped, std::memory_order_relaxed);
     streamed_frames_.fetch_add(written, std::memory_order_relaxed);
     return written;
 }

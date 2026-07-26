@@ -17,10 +17,9 @@
 /// The ring, the RT pull contract, the background-refill pump, and the
 /// cooperative stop token are `audio::StreamingSampleSource`'s, reused rather
 /// than restated. What this adds is the declaration it is prepared against and
-/// an honest starvation count: a producer that yields nothing at all ends the
-/// underlying stream early and leaves the ring's own underrun counter at zero,
-/// so counting must be done against the declared frame count or a total failure
-/// to produce reads as success.
+/// an honest starvation count against the declaration. The underlying stream's
+/// underrun count describes ring delivery; it does not carry the production
+/// declaration or distinguish content that permanently missed its deadline.
 ///
 /// Thread model:
 ///   * prepare()/release()  — control thread, allocates.
@@ -82,9 +81,7 @@ class BufferedContentSource {
         std::uint64_t starved_frames = 0;
         /// Pull calls that came up short of what the declaration promised.
         std::uint64_t starvation_events = 0;
-        /// Ring-level underruns reported by the underlying stream. Zero when
-        /// the producer never produced at all — that case only shows up in
-        /// `starved_frames`.
+        /// Ring-level underruns reported by the underlying stream.
         std::uint64_t ring_underrun_frames = 0;
         /// Producer calls that returned nothing.
         std::uint64_t producer_errors = 0;
@@ -118,6 +115,10 @@ class BufferedContentSource {
                                           config.produce_chunk_frames);
         stream_config.read_chunk_frames = config.produce_chunk_frames;
         stream_config.start_background_thread = config.start_background_thread;
+        // Generated content is tied to playhead deadlines. Once a frame has
+        // been emitted as starvation silence, producing it later must not move
+        // subsequent content out of time.
+        stream_config.advance_on_underrun = true;
 
         audio::FrameReaderBinding binding;
         binding.read = std::move(producer);
