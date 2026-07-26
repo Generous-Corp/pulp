@@ -702,3 +702,37 @@ TEST_CASE("deliver_mouse_wheel with an empty host repaint hook is a no-op-safe",
     deliver_mouse_wheel(root, {10, 10}, 0.0f, 1.0f, /*host=*/{});
     CHECK(spy->hits == 1);                     // routing still happens; no repaint hook to call
 }
+
+// A scripted widget subscribes to pointer input through the `on_pointer_event`
+// and `on_drag` callbacks (registerPointer installs both). simulate_drag used to
+// drive only the point-only virtuals, so those two stayed silent: a headless
+// drag test could assert its handlers were installed and still never exercise
+// them, and every JS knob read as inert under simulation while working in a
+// real host.
+TEST_CASE("simulate_drag drives the callback channels a scripted widget uses",
+          "[view][input][drag]") {
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    auto child = std::make_unique<View>();
+    View* knob = child.get();
+    knob->set_bounds({100, 50, 120, 120});
+    root.add_child(std::move(child));
+
+    std::vector<MousePhase> phases;
+    std::vector<Point> drags;
+    knob->on_pointer_event = [&](const MouseEvent& e) { phases.push_back(e.phase); };
+    knob->on_drag = [&](Point p) { drags.push_back(p); };
+
+    REQUIRE(root.hit_test({160, 80}) == knob);
+    root.simulate_drag({160, 80}, {160, 160}, /*steps=*/4);
+
+    // One pointermove per step, each in the knob's own local space.
+    REQUIRE(drags.size() == 4);
+    CHECK_THAT(drags.back().y, WithinAbs(110.0f, 0.01f));   // 160 - 50
+
+    // The modern channel carries the press and the release around them.
+    REQUIRE(phases.size() >= 2);
+    CHECK(phases.front() == MousePhase::press);
+    CHECK(phases.back() == MousePhase::release);
+}

@@ -2,6 +2,21 @@
 
 #include <cstdint>
 #include <cstddef>
+
+// choc_MIDI.h's Message::operator== calls `memcmp` unqualified and includes no
+// string header of its own. The call is type-dependent, so ADL runs at the point
+// of instantiation and finds nothing (the arguments are pointers to a
+// fundamental type); the name can only be resolved by ordinary lookup at the
+// point of the template's *definition*. So the declaration has to precede this
+// include, not merely exist in the instantiating TU.
+//
+// `<string.h>` rather than `<cstring>` on purpose: CHOC needs global `::memcmp`,
+// and only the C header is guaranteed to declare names in the global namespace
+// ([depr.c.headers]) — `<cstring>` only guarantees `std::memcmp`. libc++ happens
+// to expose the global one transitively via `<string>`, which is why this
+// compiled on macOS and broke the GCC/libstdc++ Linux build.
+#include <string.h>
+
 #include <choc/audio/choc_MIDI.h>
 
 namespace pulp::midi {

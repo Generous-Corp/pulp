@@ -6,6 +6,7 @@
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/view/theme.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -441,4 +442,39 @@ TEST_CASE("TextEditor interaction harness captures mouse keyboard and text-input
     const auto shift_up = capture("04-shift-up-selection");
     REQUIRE(shift_up.ok);
     REQUIRE(analyze_screenshot_content(shift_up.png).passes_content_floor());
+}
+
+TEST_CASE("TextEditor caret is sized by the text line, not by the field",
+          "[view][text_editor][paint]") {
+    // A composer that grows to hold attachments is a tall single-line field.
+    // The caret marks a position in the TEXT, so its height must come from the
+    // line it sits on. Sizing it from the widget box drew a caret spanning the
+    // whole composer — a ~230px I-beam beside ~20px of text.
+    //
+    // Measured off the PAINTED caret, not caret_rect(): that accessor derives
+    // its own geometry from the font and stays correct either way, so it cannot
+    // see this bug.
+    const auto painted_caret_height = [](float box_height) {
+        TextEditor editor;
+        editor.on_focus_changed(true);
+        editor.set_bounds({0, 0, 400, box_height});
+        editor.set_text("Ag");
+        RecordingCanvas canvas;
+        editor.paint(canvas);
+        // The I-beam is the tallest vertical stroke_line in the recording.
+        float tallest = 0.0f;
+        for (const auto& cmd : canvas.commands()) {
+            if (cmd.type != DrawCommand::Type::stroke_line) continue;
+            if (std::abs(cmd.f[2] - cmd.f[0]) > 0.5f) continue;  // vertical only
+            tallest = std::max(tallest, std::abs(cmd.f[3] - cmd.f[1]));
+        }
+        return tallest;
+    };
+
+    const float snug = painted_caret_height(24.0f);
+    const float tall = painted_caret_height(240.0f);
+
+    REQUIRE(snug > 0.0f);            // a caret was actually painted
+    CHECK(std::abs(tall - snug) < 0.01f);  // ten-fold taller field, same caret
+    CHECK(tall < 60.0f);             // a box-sized caret here would be ~232
 }

@@ -44,6 +44,31 @@ constexpr std::array<Realization, 6> kRealizations = {{
     {catalog::Character::diffusion, catalog::TapeTier::standard},
 }};
 
+struct ParameterContract {
+    pulp::state::ParamID id;
+    float baseline;
+    float low;
+    float high;
+    pulp::state::ParamID dependency_id = 0;
+    float dependency_value = 0.0f;
+};
+
+// The catalog parameter contract, once. Baseline setup, registration count,
+// and audio-reachability probes all derive from this table so adding or
+// removing a baked parameter cannot leave one of those surfaces stale.
+constexpr std::array<ParameterContract, 10> kParameterContracts = {{
+    {catalog::kTimeMs, 20.0f, 8.0f, 45.0f},
+    {catalog::kTimeOffset, 1.0f, 0.6f, 1.4f},
+    {catalog::kFeedback, 0.45f, 0.05f, 0.95f},
+    {catalog::kCrossfeed, 0.25f, 0.0f, 1.0f},
+    {catalog::kCharacter, 0.65f, 0.0f, 1.0f},
+    {catalog::kModRate, 0.4f, 0.05f, 0.95f, catalog::kModDepth, 1.0f},
+    {catalog::kModDepth, 0.6f, 0.0f, 1.0f},
+    {catalog::kDuck, 0.0f, 0.0f, 1.0f},
+    {catalog::kFreeze, 0.0f, 0.0f, 1.0f},
+    {catalog::kReverse, 0.0f, 0.0f, 1.0f},
+}};
+
 std::vector<float> noise_block(bool invert = false) {
     std::vector<float> out(static_cast<std::size_t>(kFrames));
     std::uint32_t state = 0x51A7E123u;
@@ -63,26 +88,18 @@ std::vector<float> silence() {
 }
 
 void baseline(ParamInjector& injector) {
-    REQUIRE(injector.inject(immediate(catalog::kTimeMs, 20.0f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kTimeOffset, 1.0f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kFeedback, 0.45f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kCrossfeed, 0.25f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kCharacter, 0.65f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kModRate, 0.4f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kModDepth, 0.6f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kDuck, 0.0f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kFreeze, 0.0f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(catalog::kReverse, 0.0f)) == InjectStatus::Ok);
+    for (const auto& parameter : kParameterContracts)
+        REQUIRE(injector.inject(immediate(parameter.id, parameter.baseline)) == InjectStatus::Ok);
 }
 
-std::vector<float> render_tape_at(pulp::state::ParamID id, float value,
-                                  bool force_mod_depth = false) {
+std::vector<float> render_tape_at(const ParameterContract& parameter, float value) {
     Fixture fixture(catalog::make_character_delay_node(catalog::Character::tape), kSr, kFrames);
     auto injector = fixture.claim_injector();
     baseline(injector);
-    if (force_mod_depth)
-        REQUIRE(injector.inject(immediate(catalog::kModDepth, 1.0f)) == InjectStatus::Ok);
-    REQUIRE(injector.inject(immediate(id, value)) == InjectStatus::Ok);
+    if (parameter.dependency_id != 0)
+        REQUIRE(injector.inject(immediate(parameter.dependency_id,
+                                          parameter.dependency_value)) == InjectStatus::Ok);
+    REQUIRE(injector.inject(immediate(parameter.id, value)) == InjectStatus::Ok);
 
     const auto left = noise_block();
     const auto right = noise_block(true);
@@ -118,7 +135,7 @@ TEST_CASE("character delay catalog registers six distinct baked realizations",
         REQUIRE(type.lowerable);
         REQUIRE(type.num_input_ports == 2);
         REQUIRE(type.num_output_ports == 2);
-        REQUIRE(type.baked_params.size() == 10);
+        REQUIRE(type.baked_params.size() == kParameterContracts.size());
         REQUIRE(static_cast<bool>(type.process_instance_baked_param));
         ids.emplace_back(type.type_id);
 
@@ -142,29 +159,10 @@ TEST_CASE("character delay catalog registers six distinct baked realizations",
 
 TEST_CASE("every character-delay baked parameter reaches the running audio",
           "[character-delay][catalog][baked][param-injection]") {
-    struct Probe {
-        pulp::state::ParamID id;
-        float low;
-        float high;
-        bool force_mod_depth;
-    };
-    const std::array<Probe, 10> probes = {{
-        {catalog::kTimeMs, 8.0f, 45.0f, false},
-        {catalog::kTimeOffset, 0.6f, 1.4f, false},
-        {catalog::kFeedback, 0.05f, 0.95f, false},
-        {catalog::kCrossfeed, 0.0f, 1.0f, false},
-        {catalog::kCharacter, 0.0f, 1.0f, false},
-        {catalog::kModRate, 0.05f, 0.95f, true},
-        {catalog::kModDepth, 0.0f, 1.0f, false},
-        {catalog::kDuck, 0.0f, 1.0f, false},
-        {catalog::kFreeze, 0.0f, 1.0f, false},
-        {catalog::kReverse, 0.0f, 1.0f, false},
-    }};
-
-    for (const auto& probe : probes) {
-        const auto low = render_tape_at(probe.id, probe.low, probe.force_mod_depth);
-        const auto high = render_tape_at(probe.id, probe.high, probe.force_mod_depth);
-        INFO("parameter id " << probe.id);
+    for (const auto& parameter : kParameterContracts) {
+        const auto low = render_tape_at(parameter, parameter.low);
+        const auto high = render_tape_at(parameter, parameter.high);
+        INFO("parameter id " << parameter.id);
         for (float value : low) REQUIRE(std::isfinite(value));
         for (float value : high) REQUIRE(std::isfinite(value));
         REQUIRE(maximum_difference(low, high) > 1e-6);

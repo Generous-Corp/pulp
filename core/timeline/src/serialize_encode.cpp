@@ -1,8 +1,10 @@
 #include <pulp/timeline/serialize.hpp>
 
 #include "asset_schema_policy.hpp"
+#include "project_schema_policy.hpp"
 #include "project_state_access.hpp"
 #include "schema_json_write_internal.hpp"
+#include "sequence_schema_policy.hpp"
 #include "serialize_internal.hpp"
 #include "track_schema_policy.hpp"
 
@@ -142,6 +144,10 @@ const char* item_kind_name(ItemKind value) noexcept {
         return "take_lane";
     case ItemKind::Take:
         return "take";
+    case ItemKind::Marker:
+        return "marker";
+    case ItemKind::Region:
+        return "region";
     }
     return "project";
 }
@@ -304,51 +310,62 @@ bool write_asset(EncodeContext& context, const MediaAsset& asset) {
     });
 }
 
+// Every alternative owes an envelope. A content kind that falls off the end of
+// this dispatch is a clip saved without its payload, so the visit is exhaustive
+// by construction rather than by a trailing else.
 bool write_content(EncodeContext& context, const ClipContent& content) {
-    if (std::holds_alternative<EmptyContent>(content))
-        return write_envelope(context, "pulp.timeline.content.empty", 1,
-                              [&] { return context.writer.append("{}"); });
-    if (const auto* media = std::get_if<MediaRef>(&content)) {
-        return write_envelope(context, "pulp.timeline.content.media", 1, [&] {
-            return context.writer.append("{\"asset_id\":") &&
-                   context.writer.u64(media->asset_id.value, true) &&
-                   context.writer.append(",\"frame_count\":") &&
-                   context.writer.u64(media->frame_count, true) &&
-                   context.writer.append(",\"source_start\":") &&
-                   context.writer.i64(media->source_start.value, true) &&
-                   context.writer.character('}');
-        });
-    }
-    if (const auto* note_content = std::get_if<NoteContent>(&content)) {
-        return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
-            if (!context.writer.append("{\"notes\":["))
-                return false;
-            for (std::size_t index = 0; index < note_content->notes().size(); ++index) {
-                const auto& note = note_content->notes()[index];
-                if ((index != 0 && !context.writer.character(',')) ||
-                    !context.writer.append("{\"channel\":") || !context.writer.u64(note.channel) ||
-                    !context.writer.append(",\"duration_ticks\":") ||
-                    !context.writer.i64(note.duration.value, true) ||
-                    !context.writer.append(",\"id\":") ||
-                    !context.writer.u64(note.id.value, true) ||
-                    !context.writer.append(",\"pitch\":") || !context.writer.u64(note.pitch) ||
-                    !context.writer.append(",\"start_ticks\":") ||
-                    !context.writer.i64(note.start.value, true) ||
-                    !context.writer.append(",\"velocity\":") ||
-                    !context.writer.u64(note.velocity) || !context.writer.character('}'))
-                    return false;
-            }
-            return context.writer.append("]}");
-        });
-    }
-    if (const auto* registered = std::get_if<RegisteredContent>(&content)) {
-        return write_envelope(
-            context, registered->schema().type_name, registered->schema().version,
-            [&] { return context.writer.append(registered->canonical_payload_json()); });
-    }
-    const auto& unknown = std::get<OpaqueContent>(content);
-    context.opaque = true;
-    return context.writer.append(unknown.raw_json());
+    return std::visit(
+        ClipContentCases{
+            [&](const EmptyContent&) {
+                return write_envelope(context, "pulp.timeline.content.empty", 1,
+                                      [&] { return context.writer.append("{}"); });
+            },
+            [&](const MediaRef& media) {
+                return write_envelope(context, "pulp.timeline.content.media", 1, [&] {
+                    return context.writer.append("{\"asset_id\":") &&
+                           context.writer.u64(media.asset_id.value, true) &&
+                           context.writer.append(",\"frame_count\":") &&
+                           context.writer.u64(media.frame_count, true) &&
+                           context.writer.append(",\"source_start\":") &&
+                           context.writer.i64(media.source_start.value, true) &&
+                           context.writer.character('}');
+                });
+            },
+            [&](const NoteContent& note_content) {
+                return write_envelope(context, "pulp.timeline.content.notes", 1, [&] {
+                    if (!context.writer.append("{\"notes\":["))
+                        return false;
+                    for (std::size_t index = 0; index < note_content.notes().size(); ++index) {
+                        const auto& note = note_content.notes()[index];
+                        if ((index != 0 && !context.writer.character(',')) ||
+                            !context.writer.append("{\"channel\":") ||
+                            !context.writer.u64(note.channel) ||
+                            !context.writer.append(",\"duration_ticks\":") ||
+                            !context.writer.i64(note.duration.value, true) ||
+                            !context.writer.append(",\"id\":") ||
+                            !context.writer.u64(note.id.value, true) ||
+                            !context.writer.append(",\"pitch\":") ||
+                            !context.writer.u64(note.pitch) ||
+                            !context.writer.append(",\"start_ticks\":") ||
+                            !context.writer.i64(note.start.value, true) ||
+                            !context.writer.append(",\"velocity\":") ||
+                            !context.writer.u64(note.velocity) || !context.writer.character('}'))
+                            return false;
+                    }
+                    return context.writer.append("]}");
+                });
+            },
+            [&](const RegisteredContent& registered) {
+                return write_envelope(
+                    context, registered.schema().type_name, registered.schema().version,
+                    [&] { return context.writer.append(registered.canonical_payload_json()); });
+            },
+            [&](const OpaqueContent& unknown) {
+                context.opaque = true;
+                return context.writer.append(unknown.raw_json());
+            },
+        },
+        content);
 }
 
 bool write_clip(EncodeContext& context, const Clip& clip) {
@@ -406,6 +423,11 @@ bool write_automation_lane(EncodeContext& context, const AutomationLane& lane) {
                 !context.writer.character('}'))
                 return false;
         }
+        static_assert(kAutomationTargetAlternativeCount == 1,
+                      "AutomationTarget gained an alternative: this encoder writes a "
+                      "device_parameter envelope unconditionally and std::get terminates "
+                      "under -fno-exceptions on a different kind. Give the new target its "
+                      "own envelope before widening the variant.");
         const auto& target = std::get<DeviceParameterTarget>(lane.target());
         return context.writer.append("],\"target\":") &&
                write_envelope(
@@ -524,36 +546,81 @@ bool write_track(EncodeContext& context, const Track& track) {
         });
 }
 
-bool write_sequence(EncodeContext& context, const Sequence& sequence) {
-    return write_envelope(context, "pulp.timeline.sequence", 1, [&] {
-        if (!context.writer.append("{\"absolute_duration\":"))
+bool write_marker(EncodeContext& context, const SequenceMarker& marker) {
+    return write_envelope(context, "pulp.timeline.marker", 1, [&] {
+        if (!context.writer.character('{'))
             return false;
-        if (sequence.absolute_duration()) {
-            if (!context.writer.append("{\"sample_count\":") ||
-                !context.writer.u64(sequence.absolute_duration()->sample_count, true) ||
-                !context.writer.append(",\"sample_rate\":") ||
-                !write_rate(context, sequence.absolute_duration()->sample_rate) ||
-                !context.writer.character('}'))
-                return false;
-        } else if (!context.writer.append("null"))
+        if (marker.color && (!context.writer.append("\"color\":") ||
+                             !context.writer.u64(*marker.color) || !context.writer.character(',')))
             return false;
-        if (!context.writer.append(",\"id\":") || !context.writer.u64(sequence.id().value, true) ||
-            !context.writer.append(",\"musical_duration\":"))
-            return false;
-        if (sequence.duration()) {
-            if (!context.writer.i64(sequence.duration()->value, true))
-                return false;
-        } else if (!context.writer.append("null"))
-            return false;
-        if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
-            !context.writer.append(",\"tracks\":["))
-            return false;
-        for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_track(context, sequence.tracks()[index]))
-                return false;
-        return context.writer.append("]}");
+        return context.writer.append("\"id\":") && context.writer.u64(marker.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(marker.name) &&
+               context.writer.append(",\"position\":") &&
+               context.writer.i64(marker.position.value, true) && context.writer.character('}');
     });
+}
+
+bool write_region(EncodeContext& context, const SequenceRegion& region) {
+    return write_envelope(context, "pulp.timeline.region", 1, [&] {
+        if (!context.writer.character('{'))
+            return false;
+        if (region.color && (!context.writer.append("\"color\":") ||
+                             !context.writer.u64(*region.color) || !context.writer.character(',')))
+            return false;
+        return context.writer.append("\"duration\":") &&
+               context.writer.i64(region.duration.value, true) &&
+               context.writer.append(",\"id\":") && context.writer.u64(region.id.value, true) &&
+               context.writer.append(",\"name\":") && context.writer.quoted(region.name) &&
+               context.writer.append(",\"position\":") &&
+               context.writer.i64(region.position.value, true) && context.writer.character('}');
+    });
+}
+
+bool write_sequence(EncodeContext& context, const Sequence& sequence) {
+    return write_envelope(
+        context, detail::sequence_schema_policy.type_name,
+        detail::sequence_schema_policy.current_version, [&] {
+            if (!context.writer.append("{\"absolute_duration\":"))
+                return false;
+            if (sequence.absolute_duration()) {
+                if (!context.writer.append("{\"sample_count\":") ||
+                    !context.writer.u64(sequence.absolute_duration()->sample_count, true) ||
+                    !context.writer.append(",\"sample_rate\":") ||
+                    !write_rate(context, sequence.absolute_duration()->sample_rate) ||
+                    !context.writer.character('}'))
+                    return false;
+            } else if (!context.writer.append("null"))
+                return false;
+            if (!context.writer.append(",\"id\":") ||
+                !context.writer.u64(sequence.id().value, true) ||
+                !context.writer.append(",\"markers\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.markers().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_marker(context, sequence.markers()[index]))
+                    return false;
+            if (!context.writer.append("],\"musical_duration\":"))
+                return false;
+            if (sequence.duration()) {
+                if (!context.writer.i64(sequence.duration()->value, true))
+                    return false;
+            } else if (!context.writer.append("null"))
+                return false;
+            if (!context.writer.append(",\"name\":") || !context.writer.quoted(sequence.name()) ||
+                !context.writer.append(",\"regions\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.regions().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_region(context, sequence.regions()[index]))
+                    return false;
+            if (!context.writer.append("],\"tracks\":["))
+                return false;
+            for (std::size_t index = 0; index < sequence.tracks().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_track(context, sequence.tracks()[index]))
+                    return false;
+            return context.writer.append("]}");
+        });
 }
 
 } // namespace
@@ -598,6 +665,16 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         if (!is_valid_utf8(sequence.name()))
             return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
                                             sequence_path + "/name");
+        for (std::size_t index = 0; index < sequence.markers().size(); ++index)
+            if (!is_valid_utf8(sequence.markers()[index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/markers/" +
+                                                    std::to_string(index) + "/data/name");
+        for (std::size_t index = 0; index < sequence.regions().size(); ++index)
+            if (!is_valid_utf8(sequence.regions()[index].name))
+                return fail<SerializedSnapshot>(PersistenceErrorCode::InvalidUtf8,
+                                                sequence_path + "/regions/" +
+                                                    std::to_string(index) + "/data/name");
         for (std::size_t track_index = 0; track_index < sequence.tracks().size(); ++track_index) {
             const auto& track = sequence.tracks()[track_index];
             const auto track_path =
@@ -613,54 +690,66 @@ serialize_project(const Project& project, const SchemaRegistry& registry,
         }
     }
     EncodeContext context{JsonWriter(options.max_output_bytes), registry, false, std::nullopt};
-    const auto wrote = write_envelope(context, "pulp.timeline.project", 1, [&] {
-        if (!context.writer.append("{\"assets\":["))
-            return false;
-        for (std::size_t index = 0; index < project.assets().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_asset(context, project.assets()[index]))
+    const auto wrote = write_envelope(
+        context, detail::project_schema_policy.type_name,
+        detail::project_schema_policy.current_version, [&] {
+            if (!context.writer.append("{\"assets\":["))
                 return false;
-        if (!context.writer.append("],\"id\":") || !context.writer.u64(project.id().value, true) ||
-            !context.writer.append(",\"identities\":["))
-            return false;
-        const auto identities = detail::ProjectStateAccess::identity_entries(project);
-        for (std::size_t index = 0; index < identities.size(); ++index) {
-            const auto& identity = identities[index];
-            const auto& location = identity.location;
-            if ((index != 0 && !context.writer.character(',')) ||
-                !context.writer.append("{\"active\":") ||
-                !context.writer.append(location.active ? "true" : "false") ||
-                !context.writer.append(",\"clip_id\":") ||
-                !context.writer.u64(location.clip_id.value, true) ||
-                !context.writer.append(",\"id\":") ||
-                !context.writer.u64(identity.item.value, true) ||
-                !context.writer.append(",\"kind\":") ||
-                !context.writer.quoted(item_kind_name(location.kind)) ||
-                !context.writer.append(",\"parent_id\":") ||
-                !context.writer.u64(location.parent_id.value, true) ||
-                !context.writer.append(",\"sequence_id\":") ||
-                !context.writer.u64(location.sequence_id.value, true) ||
-                !context.writer.append(",\"track_id\":") ||
-                !context.writer.u64(location.track_id.value, true) ||
-                !context.writer.character('}'))
+            for (std::size_t index = 0; index < project.assets().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_asset(context, project.assets()[index]))
+                    return false;
+            if (!context.writer.append("],\"id\":") ||
+                !context.writer.u64(project.id().value, true) ||
+                !context.writer.append(",\"identities\":["))
                 return false;
-        }
-        if (!context.writer.append("],\"meter_map\":") ||
-            !write_meter_map(context, project.meter_map()) ||
-            !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
-            !context.writer.append(",\"next_item_id\":") ||
-            !context.writer.u64(project.next_item_id(), true) ||
-            !context.writer.append(",\"root_sequence_id\":") ||
-            !context.writer.u64(project.root_sequence_id().value, true) ||
-            !context.writer.append(",\"sequences\":["))
-            return false;
-        for (std::size_t index = 0; index < project.sequences().size(); ++index)
-            if ((index != 0 && !context.writer.character(',')) ||
-                !write_sequence(context, project.sequences()[index]))
+            const auto identities = detail::ProjectStateAccess::identity_entries(project);
+            for (std::size_t index = 0; index < identities.size(); ++index) {
+                const auto& identity = identities[index];
+                const auto& location = identity.location;
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !context.writer.append("{\"active\":") ||
+                    !context.writer.append(location.active ? "true" : "false") ||
+                    !context.writer.append(",\"clip_id\":") ||
+                    !context.writer.u64(location.clip_id.value, true) ||
+                    !context.writer.append(",\"id\":") ||
+                    !context.writer.u64(identity.item.value, true) ||
+                    !context.writer.append(",\"kind\":") ||
+                    !context.writer.quoted(item_kind_name(location.kind)) ||
+                    !context.writer.append(",\"parent_id\":") ||
+                    !context.writer.u64(location.parent_id.value, true) ||
+                    !context.writer.append(",\"sequence_id\":") ||
+                    !context.writer.u64(location.sequence_id.value, true) ||
+                    !context.writer.append(",\"track_id\":") ||
+                    !context.writer.u64(location.track_id.value, true) ||
+                    !context.writer.character('}'))
+                    return false;
+            }
+            if (!context.writer.append("],\"meter_map\":") ||
+                !write_meter_map(context, project.meter_map()) ||
+                !context.writer.append(",\"name\":") || !context.writer.quoted(project.name()) ||
+                !context.writer.append(",\"next_item_id\":") ||
+                !context.writer.u64(project.next_item_id(), true) ||
+                !context.writer.append(",\"root_sequence_id\":") ||
+                !context.writer.u64(project.root_sequence_id().value, true) ||
+                !context.writer.append(",\"sequences\":["))
                 return false;
-        return context.writer.append("],\"tempo_map\":") &&
-               write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
-    });
+            for (std::size_t index = 0; index < project.sequences().size(); ++index)
+                if ((index != 0 && !context.writer.character(',')) ||
+                    !write_sequence(context, project.sequences()[index]))
+                    return false;
+            if (!context.writer.character(']'))
+                return false;
+            if (project.session_start() &&
+                (!context.writer.append(",\"session_start\":{\"sample_rate\":") ||
+                 !write_rate(context, project.session_start()->sample_rate) ||
+                 !context.writer.append(",\"start\":") ||
+                 !context.writer.i64(project.session_start()->start.value, true) ||
+                 !context.writer.character('}')))
+                return false;
+            return context.writer.append(",\"tempo_map\":") &&
+                   write_tempo_map(context, project.tempo_map()) && context.writer.character('}');
+        });
     if (!wrote) {
         if (context.failure)
             return runtime::Result<SerializedSnapshot, PersistenceError>(

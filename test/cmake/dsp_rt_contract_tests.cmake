@@ -33,6 +33,10 @@ pulp_add_test_suite(pulp-test-signal-rt-safety
     SOURCES test_signal_rt_safety.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal pulp::signal-fft-backend)
 
+pulp_add_test_suite(pulp-test-signal-mod-rt-safety
+    SOURCES test_signal_mod_rt_safety.cpp harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::signal)
+
 pulp_add_test_suite(pulp-test-multi-channel-meter
     SOURCES test_multi_channel_meter.cpp harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal)
@@ -145,12 +149,13 @@ pulp_add_test_suite(pulp-test-drum-fm
 
 # The Tier 0 mod-utilities toolkit: the shared modulation infrastructure the DSP
 # series composes (planning/2026-07-25-dsp-series-round2.md, adjudication A-1).
-# One suite for all nine headers, because their contracts are cross-cutting —
-# an LFO's phase-offset law is asserted by the chorus voicings, the slew's
-# constant-time mode by the stage sequencer, and splitting them per header
-# would scatter the one place those promises are checked.
+# One executable keeps the toolkit's shared RT roster together, while focused
+# sources keep the independent trigger and matrix families navigable.
 pulp_add_test_suite(pulp-test-mod-utilities
-    SOURCES test_mod_utilities.cpp harness/rt_allocation_probe.cpp
+    SOURCES test_mod_utilities.cpp
+            test_mod_utilities_trigger.cpp
+            test_mod_utilities_mod_matrix.cpp
+            harness/rt_allocation_probe.cpp
     LIBRARIES pulp::signal
     TIMEOUT 600)
 

@@ -511,6 +511,123 @@ private:
         return std::clamp(1.0 - collector_load_ * current, 0.0, 1.0);
     }
 
+    struct PairState {
+        double first;
+        double second;
+    };
+
+    struct Residual {
+        double first;
+        double second;
+
+        double infinity_norm() const {
+            return std::max(std::abs(first), std::abs(second));
+        }
+        double euclidean_norm() const { return std::hypot(first, second); }
+    };
+
+    struct PairEvaluation {
+        PairState current;
+        PairState collector_voltage;
+        Residual residual;
+    };
+
+    PairEvaluation evaluate_pair(PairState voltage, double scale, double drive,
+                                 double feedback) const {
+        const PairState current{scale * junction_current(voltage.first),
+                                scale * junction_current(voltage.second)};
+        const PairState collector_voltage{collector(current.first), collector(current.second)};
+        const Residual residual{
+            voltage.first + kEmitterDegeneration * current.first -
+                (base_bias1_ + drive +
+                 feedback * (collector_voltage.second - quiescent2_) * kCouplingGain),
+            voltage.second + kEmitterDegeneration * current.second -
+                (base_bias2_ + (collector_voltage.first - quiescent1_) * kCouplingGain)};
+        return {current, collector_voltage, residual};
+    }
+
+    void accept_if_better(PairState candidate, double scale, double drive,
+                          double feedback, PairState& best, double& best_merit) const {
+        const double merit =
+            evaluate_pair(candidate, scale, drive, feedback).residual.euclidean_norm();
+        if (merit < best_merit) {
+            best = candidate;
+            best_merit = merit;
+        }
+    }
+
+    /// One safeguarded Newton descent. Returns true only when the incoming
+    /// state already satisfies the residual tolerance. Candidate selection is
+    /// centralized here so the audio path has one definition of "better" and
+    /// the fixed trust-region ladder cannot drift between branches.
+    bool solve_iteration(PairState& voltage, double scale, double drive,
+                         double feedback, double step_limit) const {
+        const PairEvaluation point = evaluate_pair(voltage, scale, drive, feedback);
+        if (point.residual.infinity_norm() < kResidualTolerance) return true;
+
+        const double gm1 = scale * transconductance(voltage.first);
+        const double gm2 = scale * transconductance(voltage.second);
+        // A clamped collector has zero coupling derivative; emitter
+        // degeneration remains active on the diagonal.
+        const double slope1 = point.collector_voltage.first > 0.0 &&
+                                      point.collector_voltage.first < 1.0
+                                  ? collector_load_ * gm1
+                                  : 0.0;
+        const double slope2 = point.collector_voltage.second > 0.0 &&
+                                      point.collector_voltage.second < 1.0
+                                  ? collector_load_ * gm2
+                                  : 0.0;
+        const double j11 = 1.0 + kEmitterDegeneration * gm1;
+        const double j22 = 1.0 + kEmitterDegeneration * gm2;
+        const double j12 = feedback * kCouplingGain * slope2;
+        const double j21 = kCouplingGain * slope1;
+        const double determinant = j11 * j22 - j12 * j21;
+        if (std::abs(determinant) <= 1e-12) return false;
+
+        const PairState newton_step{
+            (j22 * point.residual.first - j12 * point.residual.second) / determinant,
+            (j11 * point.residual.second - j21 * point.residual.first) / determinant};
+        const double newton_scale =
+            std::min(1.0, step_limit /
+                              std::max({std::abs(newton_step.first),
+                                        std::abs(newton_step.second), 1e-30}));
+
+        const PairState gradient{
+            j11 * point.residual.first + j21 * point.residual.second,
+            j12 * point.residual.first + j22 * point.residual.second};
+        const double gradient_scale =
+            step_limit /
+            std::max({std::abs(gradient.first), std::abs(gradient.second), 1e-30});
+
+        PairState best = voltage;
+        double best_merit = point.residual.euclidean_norm();
+        const PairState full_newton{voltage.first - newton_scale * newton_step.first,
+                                    voltage.second - newton_scale * newton_step.second};
+        const double full_newton_merit =
+            evaluate_pair(full_newton, scale, drive, feedback).residual.euclidean_norm();
+        if (full_newton_merit < best_merit) {
+            // Preserve Newton's quadratic path in its local basin.
+            voltage = full_newton;
+            return false;
+        }
+
+        // At a rail kink Newton's active-set Jacobian can point across the
+        // kink. A fixed ladder along both Newton and residual-gradient
+        // directions keeps the cost bounded while retaining a descent option.
+        double damping = 1.0;
+        for (int trial = 0; trial < 6; ++trial) {
+            accept_if_better({voltage.first - damping * newton_scale * newton_step.first,
+                              voltage.second - damping * newton_scale * newton_step.second},
+                             scale, drive, feedback, best, best_merit);
+            accept_if_better({voltage.first - damping * gradient_scale * gradient.first,
+                              voltage.second - damping * gradient_scale * gradient.second},
+                             scale, drive, feedback, best, best_merit);
+            damping *= 0.5;
+        }
+        voltage = best;
+        return false;
+    }
+
     /// One oversampled sample through the coupled pair.
     ///
     /// A true 2×2 Newton solve, not the fixed-point iteration the equations
@@ -565,7 +682,6 @@ private:
         const double scale = saturation / saturation_;
 
         const double drive = input * input_scale_ * loading_;
-        double residual = 0.0;
 
         // The feedback path carries the source-impedance loading for the same
         // reason the input does: it is the same node. One ratio, two
@@ -605,176 +721,34 @@ private:
             base_bias1_ + drive + beta * (collector2_ - quiescent2_) * kCouplingGain;
         const double base2 = base_bias2_ + (collector1_ - quiescent1_) * kCouplingGain;
         const double degeneration_scale = kEmitterDegeneration * scale;
-        double v1 = std::min(knee1_ + (base1 - base_bias1_) / degeneration1_,
-                             network_.conduction_estimate(base1, degeneration_scale));
-        double v2 = std::min(knee2_ + (base2 - base_bias2_) / degeneration2_,
-                             network_.conduction_estimate(base2, degeneration_scale));
+        PairState voltage{
+            std::min(knee1_ + (base1 - base_bias1_) / degeneration1_,
+                     network_.conduction_estimate(base1, degeneration_scale)),
+            std::min(knee2_ + (base2 - base_bias2_) / degeneration2_,
+                     network_.conduction_estimate(base2, degeneration_scale))};
 
         // Per-iteration step limit, in thermal voltages. The standard remedy
         // for Newton on a junction: unlimited, a step taken where the
         // exponential is steep lands somewhere it can take many iterations to
         // climb back from.
         const double step_limit = kNewtonStepThermal * ideality_ * kThermalVoltage;
-        struct ResidualMetrics {
-            double infinity;
-            double euclidean;
-        };
-        const auto residual_metrics_at = [&](double candidate1, double candidate2) {
-            const double i1 = scale * junction_current(candidate1);
-            const double i2 = scale * junction_current(candidate2);
-            const double c1 = collector(i1);
-            const double c2 = collector(i2);
-            const double f1 =
-                candidate1 + kEmitterDegeneration * i1 -
-                (base_bias1_ + drive + beta * (c2 - quiescent2_) * kCouplingGain);
-            const double f2 =
-                candidate2 + kEmitterDegeneration * i2 -
-                (base_bias2_ + (c1 - quiescent1_) * kCouplingGain);
-            return ResidualMetrics{std::max(std::abs(f1), std::abs(f2)), std::hypot(f1, f2)};
-        };
-
         bool converged = false;
         for (int iter = 0; iter < kSolverIterations; ++iter) {
-            // Keep the compile-time-fixed loop bound while avoiding redundant
-            // exponentials after this sample has already met the tolerance.
-            if (converged) continue;
-            const double i1 = scale * junction_current(v1);
-            const double i2 = scale * junction_current(v2);
-            const double c1 = collector(i1);
-            const double c2 = collector(i2);
-
-            // Stage 1's base sees the bias, the loaded input, and the feedback
-            // from Stage 2's collector DEVIATION — the deviation rather than the
-            // absolute voltage because the feedback resistor's DC servo is what
-            // holds the quiescent point in the real circuit. The left-hand side
-            // is the base node `v_be + R_e·i`, not the junction voltage: the
-            // emitter rises under the current its own base asked for, and that
-            // is what keeps the stage gain off the bias point.
-            const double f1 =
-                v1 + kEmitterDegeneration * i1 -
-                (base_bias1_ + drive + beta * (c2 - quiescent2_) * kCouplingGain);
-            // Direct coupling: Stage 2's base tracks Stage 1's collector. It is
-            // taken in natural units, not renormalised, because the degeneration
-            // has already put Stage 2's input window on the same scale as Stage
-            // 1's collector swing — a full rail out of Stage 1 overdrives Stage
-            // 2 by about `g_couple · R_c/R_e`, which is the ~2x a hot input is
-            // supposed to feel and the ~0.5x a rolled-back guitar is supposed to
-            // stay under.
-            const double f2 =
-                v2 + kEmitterDegeneration * i2 -
-                (base_bias2_ + (c1 - quiescent1_) * kCouplingGain);
-            // The CONVERGED residual, not the running maximum: the first
-            // iteration's residual is the initial guess's error, which after a
-            // large input step is legitimately big and says nothing about
-            // whether the solve converged.
-            residual = std::max(std::abs(f1), std::abs(f2));
-            if (residual < kResidualTolerance) {
-                converged = true;
-                continue;
-            }
-            const double gm1 = scale * transconductance(v1);
-            const double gm2 = scale * transconductance(v2);
-            // The collector clamps flatten the COUPLING derivative to zero where
-            // they engage, which is physically right — a saturated stage passes
-            // no signal on — and keeps the Jacobian well conditioned there. The
-            // diagonal degeneration terms are unaffected: the emitter still
-            // rises with the current, clamped collector or not.
-            const double slope1 = c1 > 0.0 && c1 < 1.0 ? collector_load_ * gm1 : 0.0;
-            const double slope2 = c2 > 0.0 && c2 < 1.0 ? collector_load_ * gm2 : 0.0;
-            const double j11 = 1.0 + kEmitterDegeneration * gm1;
-            const double j22 = 1.0 + kEmitterDegeneration * gm2;
-            const double j12 = beta * kCouplingGain * slope2;
-            const double j21 = kCouplingGain * slope1;
-            const double det = j11 * j22 - j12 * j21;
-            if (std::abs(det) > 1e-12) {
-                const double step1 = (j22 * f1 - j12 * f2) / det;
-                const double step2 = (j11 * f2 - j21 * f1) / det;
-
-                // Limit the Newton VECTOR with one common scale. Clamping its
-                // two components independently changes the direction, which is
-                // especially destructive near the intended 0.94 loop-gain
-                // ceiling: a coupled correction becomes two unrelated maximum
-                // steps and can cross into the exponential's steep flank.
-                const double largest_step = std::max(std::abs(step1), std::abs(step2));
-                const double newton_scale =
-                    std::min(1.0, step_limit / std::max(largest_step, 1e-30));
-                const double gradient1 = j11 * f1 + j21 * f2;
-                const double gradient2 = j12 * f1 + j22 * f2;
-                const double largest_gradient =
-                    std::max(std::abs(gradient1), std::abs(gradient2));
-                const double gradient_scale =
-                    step_limit / std::max(largest_gradient, 1e-30);
-
-                // Fixed-cap backtracking keeps the Newton correction inside
-                // the basin where it actually reduces the coupled residual.
-                // Near the loop-gain ceiling the full correction can cross a
-                // junction knee even though its direction is right; accepting
-                // that step sends the next exponential evaluation orders of
-                // magnitude away. Six predetermined candidates retain a hard
-                // RT bound and avoid data-dependent retry loops.
-                double best1 = v1;
-                double best2 = v2;
-                double best_merit = std::hypot(f1, f2);
-                const double full_newton1 = v1 - newton_scale * step1;
-                const double full_newton2 = v2 - newton_scale * step2;
-                const double full_newton_merit =
-                    residual_metrics_at(full_newton1, full_newton2).euclidean;
-                if (full_newton_merit < best_merit) {
-                    // In Newton's local basin the full step is the quadratic
-                    // path. Avoid evaluating safeguards that cannot improve its
-                    // convergence order on the ordinary smooth-audio path.
-                    best1 = full_newton1;
-                    best2 = full_newton2;
-                } else {
-                    double damping = 1.0;
-                    for (int trial = 0; trial < 6; ++trial) {
-                        const double newton1 = v1 - damping * newton_scale * step1;
-                        const double newton2 = v2 - damping * newton_scale * step2;
-                        const double newton_merit =
-                            residual_metrics_at(newton1, newton2).euclidean;
-                        if (newton_merit < best_merit) {
-                            best1 = newton1;
-                            best2 = newton2;
-                            best_merit = newton_merit;
-                        }
-
-                        // At a collector-rail kink the active-set Jacobian can
-                        // point across the kink, where its Newton prediction is
-                        // no longer valid. The residual gradient remains a
-                        // descent direction there, so include the same fixed
-                        // ladder along it as a trust-region fallback.
-                        const double gradient_candidate1 =
-                            v1 - damping * gradient_scale * gradient1;
-                        const double gradient_candidate2 =
-                            v2 - damping * gradient_scale * gradient2;
-                        const double gradient_merit =
-                            residual_metrics_at(gradient_candidate1, gradient_candidate2)
-                                .euclidean;
-                        if (gradient_merit < best_merit) {
-                            best1 = gradient_candidate1;
-                            best2 = gradient_candidate2;
-                            best_merit = gradient_merit;
-                        }
-                        damping *= 0.5;
-                    }
-                }
-                v1 = best1;
-                v2 = best2;
-            }
+            // The loop bound remains compile-time fixed for RT predictability;
+            // a converged sample simply skips further transcendental work.
+            if (!converged)
+                converged = solve_iteration(voltage, scale, drive, beta, step_limit);
         }
 
-        // Measure the state that is actually committed. The residual sampled
-        // at the top of the final iteration describes the penultimate state,
-        // before that iteration's Newton correction.
-        residual = residual_metrics_at(v1, v2).infinity;
+        const PairEvaluation solved = evaluate_pair(voltage, scale, drive, beta);
 
         // The only state carried to the next sample. The junction voltages are
         // NOT kept: the warm start re-derives them from these collectors, so
         // holding them too would be a second copy of the same operating point
         // that could disagree with this one after a parameter change.
-        collector1_ = collector(scale * junction_current(v1));
-        collector2_ = collector(scale * junction_current(v2));
-        worst_residual_ = std::max(worst_residual_, residual);
+        collector1_ = solved.collector_voltage.first;
+        collector2_ = solved.collector_voltage.second;
+        worst_residual_ = std::max(worst_residual_, solved.residual.infinity_norm());
 
         // The output is Q2's collector deviation — bounded to the rail by
         // construction, which is also where the hard fuzz clipping comes from.

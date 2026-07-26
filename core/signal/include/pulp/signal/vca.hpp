@@ -1,151 +1,149 @@
 #pragma once
 
 /// @file vca.hpp
-/// The control-to-gain law, and the attenuverter that conditions a modulation
-/// signal before it gets there.
+/// Control-driven amplifier with a linear or exponential response and built-in
+/// control lag.
 ///
-/// `GainT` applies a gain a caller already decided on. `VcaT` is the other
-/// half: it turns a *control signal* into that gain, and the interesting part
-/// is the law, not the multiply. Two laws exist because two things are being
-/// modelled:
+/// RT contract: `prepare()` and the `set_*()` setters are control-side calls;
+/// `process()`, `gain_for()`, `reset()`, and the accessors allocate nothing and
+/// are audio-thread safe. The type owns no memory.
 ///
-///   - **`Response::linear`** — gain IS the control. Correct whenever the
-///     control is already a magnitude: a band's envelope in a vocoder, a
-///     rectified detector output, a normalised window. Using an exponential
-///     law there would square a quantity that was already the answer.
-///   - **`Response::exponential`** — gain is `control` mapped onto a decibel
-///     range, so equal control travel is equal dB. Correct whenever the control
-///     is a *position*: an envelope meant to sound like a fade, a pedal, an
-///     LFO driving tremolo depth. A linear fade spends most of its travel in
-///     the top 6 dB and reads as "nothing, nothing, nothing, then everything".
+/// USE — the VCA idioms worth knowing, because "multiply by a control" is one
+/// line and every one of these is still a distinct musical result:
 ///
-/// The exponential law is stated as a floor in dB rather than as a bare
-/// exponent, because a floor is the thing a spec can state a range for and an
-/// exponent is not: `set_range_db(60)` means "control 0 is 60 dB down", which
-/// is checkable. Control 0 maps to exactly zero gain, not to the floor, so a
-/// closed VCA is silent rather than −60 dB — an important difference when
-/// sixteen of them sum.
-///
-/// **Small-signal gain (series law 1):** both laws are gain-carrying but
-/// neither is a nonlinearity in the signal path — the control is not derived
-/// from the signal, so there is no loop and no slope to compensate. Peak gain
-/// is exactly 1 at `control = 1` in both laws, by construction, so a VCA can
-/// never make a signal louder than it was. `AttenuverterT` is likewise bounded
-/// by `|scale| + |offset|`.
-///
-/// RT contract: everything here is stateless arithmetic over POD members.
-/// Nothing allocates, locks, or performs I/O. `Response::exponential` costs one
-/// `std::pow` per sample; a caller modulating at block rate should compute the
-/// gain once per block via `gain_for()` and apply it with `GainT`.
+/// - **Tremolo** — a 4-7 Hz sine at 20-40% depth (the depth belongs to an
+///   `AttenuverterT`, not here). The exponential response reads more "amp-like"
+///   than linear, because loudness perception is closer to logarithmic than the
+///   control is.
+/// - **Auto-pan** — `LfoT::next_quadrature()` into two of these. Constant power
+///   by construction: `sin^2 + cos^2 = 1`, so the pair cannot dip in the
+///   middle the way two offset triangles do.
+/// - **Sidechain pump with no compressor** — `TriggerDetectT` on the kick, into
+///   an `ArT` (attack = how fast it ducks, release = how fast it recovers),
+///   inverted through an `AttenuverterT(gain -0.8, offset 1)`, into this. The
+///   exact pump shape you asked for, deterministic, and immune to the kick's
+///   level changing.
+/// - **Chopper** — a square LFO or a `GateGenT` through the lag. The lag is the
+///   click-versus-crunch knob; it is the whole difference between a gate and a
+///   glitch.
+/// - **AM and ring territory** — an audio-rate LFO into a linear-response VCA
+///   is clean amplitude modulation. Sweeping the LFO rate from 5 Hz upward
+///   plays the tremolo-to-sideband transition as a gesture rather than as a
+///   mode switch.
+
+#include <pulp/signal/smoothed_value.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pulp::signal {
 
-/// How a `VcaT` maps its control signal onto gain.
-enum class VcaResponse {
-    linear,       ///< gain = control. For controls that are already magnitudes.
-    exponential,  ///< gain = control mapped onto a dB range. For positions.
-};
+enum class VcaResponse : std::uint8_t { linear, exponential };
 
-/// A voltage-controlled amplifier: a stated control-to-gain law plus the
-/// multiply.
+/// Voltage-controlled amplifier.
+///
+/// The exponential response is `g = (e^(k*c) - 1) / (e^k - 1)` with `k = 4.6`,
+/// which spans about 40 dB — enough that the bottom of the control range is
+/// perceptually silent without the numerical hazards of an actual log curve.
+/// Both responses are exactly 0 at control 0 and exactly 1 at control 1; unity
+/// at full is a series law, so a VCA left wide open is bit-transparent rather
+/// than approximately transparent.
 template <typename SampleType = float>
 class VcaT {
 public:
     using Response = VcaResponse;
 
-    /// Depth of the exponential law, in dB below unity at control → 0⁺.
-    /// [design parameter] default 60 dB, range 12 .. 120 dB.
+    /// Depth of the equal-dB exponential response.
     static constexpr double kMinRangeDb = 12.0;
     static constexpr double kMaxRangeDb = 120.0;
     static constexpr double kDefaultRangeDb = 60.0;
 
-    VcaT() { update(); }
+    /// Default control lag. Long enough to kill the click from a hard-switched
+    /// gate, short enough that a percussive envelope keeps its transient.
+    static constexpr double kDefaultLagMs = 1.0;
 
-    void set_response(Response response) { response_ = response; }
+    void prepare(SampleType sample_rate) {
+        sample_rate_ = std::isfinite(static_cast<double>(sample_rate)) &&
+                               sample_rate > SampleType{0}
+                           ? sample_rate
+                           : SampleType{1};
+        update_lag_();
+        reset();
+    }
+
+    void set_response(Response r) { response_ = r; }
     Response response() const { return response_; }
 
-    /// Sets the exponential law's depth in dB. Ignored by `Response::linear`.
     void set_range_db(double db) {
+        if (!std::isfinite(db)) return;
         range_db_ = std::clamp(db, kMinRangeDb, kMaxRangeDb);
-        update();
     }
 
     double range_db() const { return range_db_; }
 
-    /// The gain this VCA would apply for `control`, without applying it.
-    /// Control is clamped to `[0, 1]`: a VCA does not invert (that is what
-    /// `AttenuverterT` is for) and does not amplify past unity.
-    SampleType gain_for(SampleType control) const {
-        const double c = std::clamp(static_cast<double>(control), 0.0, 1.0);
-        if (response_ == Response::linear) return static_cast<SampleType>(c);
-        // Exactly zero at c = 0 rather than the floor gain, so a closed VCA is
-        // silent. The `pow` below would give 10^(−range/20), which is small but
-        // not zero, and sixteen of those sum to something audible.
-        if (c <= 0.0) return SampleType{0};
-        return static_cast<SampleType>(std::pow(10.0, floor_exponent_ * (1.0 - c)));
+    void set_lag_ms(double ms) {
+        if (!std::isfinite(ms)) return;
+        lag_ms_ = std::max(0.0, ms);
+        update_lag_();
     }
 
-    /// Applies the law to `input`.
-    SampleType process(SampleType input, SampleType control) const {
-        return input * gain_for(control);
+    void reset(SampleType control = SampleType{0}) {
+        lag_.set_immediate(control);
+        last_control_ = control;
     }
+
+    /// Static response curve, without the lag. Exposed so a UI can draw the
+    /// same curve the audio path uses.
+    SampleType gain_for(SampleType control) const {
+        if (!std::isfinite(static_cast<double>(control))) return SampleType{0};
+        const SampleType c = std::clamp(control, SampleType{0}, SampleType{1});
+        if (response_ == Response::linear) return c;
+        if (c <= SampleType{0}) return SampleType{0};
+        // Equal control travel is equal dB travel. Keep the endpoint special
+        // so a wide-open VCA remains exactly bit-transparent.
+        if (c >= SampleType{1}) return SampleType{1};
+        return static_cast<SampleType>(
+            std::pow(10.0, (-range_db_ / 20.0) *
+                               (1.0 - static_cast<double>(c))));
+    }
+
+    /// Advance the lag by one sample and return the gain that would be applied.
+    SampleType next_gain(SampleType control) {
+        if (!std::isfinite(static_cast<double>(control))) control = SampleType{0};
+        const SampleType target = std::clamp(control, SampleType{0}, SampleType{1});
+        // Re-targeting every sample would restart the ramp every sample and the
+        // value would approach the target without ever arriving. Only a genuine
+        // change starts a new ramp, so a held control lands exactly.
+        if (target != last_control_) {
+            lag_.set_target(target);
+            last_control_ = target;
+        }
+        return gain_for(lag_.next());
+    }
+
+    SampleType process(SampleType input, SampleType control) {
+        return input * next_gain(control);
+    }
+
+    /// The lagged control value, for metering or for driving a second stage
+    /// from the same conditioned control.
+    SampleType control() const { return lag_.current(); }
 
 private:
-    void update() { floor_exponent_ = -range_db_ / 20.0; }
+    void update_lag_() {
+        lag_.set_ramp_time(static_cast<SampleType>(lag_ms_ * 0.001), sample_rate_);
+    }
 
-    Response response_ = Response::linear;
+    SmoothedValue<SampleType> lag_{};
+    SampleType sample_rate_ = SampleType{48000};
+    SampleType last_control_ = SampleType{0};
+    double lag_ms_ = kDefaultLagMs;
     double range_db_ = kDefaultRangeDb;
-    double floor_exponent_ = -kDefaultRangeDb / 20.0;
+    Response response_ = Response::linear;
 };
 
 using Vca = VcaT<float>;
 using Vca64 = VcaT<double>;
 
-/// Scales a modulation signal by a factor in `[-1, +1]` and adds an offset —
-/// the modular world's attenuverter.
-///
-/// The inversion is the point. Patching one LFO into two destinations with
-/// opposite polarity is how a chorus gets its anti-phase voice and how a filter
-/// and an amplitude move in opposition; without an attenuverter every module
-/// would need its own "invert" flag. The offset then re-centres the result, so
-/// a bipolar LFO can drive a unipolar destination without the destination
-/// knowing anything about polarity.
-///
-/// RT contract: stateless arithmetic. No allocation, no locks.
-template <typename SampleType = float>
-class AttenuverterT {
-public:
-    /// Scale factor in `[-1, +1]`. Negative inverts.
-    void set_scale(SampleType scale) {
-        scale_ = std::clamp(static_cast<double>(scale), -1.0, 1.0);
-    }
-
-    /// DC offset added after scaling.
-    void set_offset(SampleType offset) { offset_ = static_cast<double>(offset); }
-
-    SampleType scale() const { return static_cast<SampleType>(scale_); }
-    SampleType offset() const { return static_cast<SampleType>(offset_); }
-
-    /// The largest magnitude this attenuverter can output for a unit-bounded
-    /// input — `|scale| + |offset|`. Exposed because it is the bound a caller
-    /// needs to state its own worst-case gain without guessing.
-    SampleType worst_case_output() const {
-        return static_cast<SampleType>(std::abs(scale_) + std::abs(offset_));
-    }
-
-    SampleType process(SampleType input) const {
-        return static_cast<SampleType>(static_cast<double>(input) * scale_ + offset_);
-    }
-
-private:
-    double scale_ = 1.0;
-    double offset_ = 0.0;
-};
-
-using Attenuverter = AttenuverterT<float>;
-using Attenuverter64 = AttenuverterT<double>;
-
-}  // namespace pulp::signal
+} // namespace pulp::signal

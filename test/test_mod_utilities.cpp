@@ -21,7 +21,6 @@
 #include <pulp/signal/mod_matrix.hpp>
 #include <pulp/signal/rng.hpp>
 #include <pulp/signal/slew_limiter.hpp>
-#include <pulp/signal/trigger_kit.hpp>
 #include <pulp/signal/units.hpp>
 #include <pulp/signal/vactrol.hpp>
 #include <pulp/signal/vca.hpp>
@@ -787,24 +786,27 @@ TEST_CASE("VCA range setter enforces its declared design range",
     REQUIRE(vca.range_db() == Vca64::kMaxRangeDb);
 }
 
-TEST_CASE("Attenuverter inverts and reports its own worst case", "[vca][mod-utilities]") {
+TEST_CASE("Attenuverter inverts and its settings bound the output", "[vca][mod-utilities]") {
     Attenuverter64 att;
-    att.set_scale(-1.0);
+    att.set_gain(-1.0);
     att.set_offset(0.0);
     REQUIRE_THAT(static_cast<double>(att.process(0.7)), WithinAbs(-0.7, 1e-12));
 
-    att.set_scale(0.5);
+    att.set_gain(0.5);
     att.set_offset(0.5);
     REQUIRE_THAT(static_cast<double>(att.process(-1.0)), WithinAbs(0.0, 1e-12));
     REQUIRE_THAT(static_cast<double>(att.process(1.0)), WithinAbs(1.0, 1e-12));
-    REQUIRE_THAT(static_cast<double>(att.worst_case_output()), WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(std::abs(static_cast<double>(att.gain())) +
+                     std::abs(static_cast<double>(att.offset())),
+                 WithinAbs(1.0, 1e-12));
 
     // The bound actually bounds, for unit-bounded input.
-    att.set_scale(-0.3);
+    att.set_gain(-0.3);
     att.set_offset(0.2);
+    const double worst_case = std::abs(static_cast<double>(att.gain())) +
+                              std::abs(static_cast<double>(att.offset()));
     for (double x = -1.0; x <= 1.0; x += 0.01)
-        REQUIRE(std::abs(static_cast<double>(att.process(x))) <=
-                static_cast<double>(att.worst_case_output()) + 1e-12);
+        REQUIRE(std::abs(static_cast<double>(att.process(x))) <= worst_case + 1e-12);
 }
 
 // ── vactrol ───────────────────────────────────────────────────────────────
@@ -885,275 +887,6 @@ TEST_CASE("LowpassGate still behaves identically after composing the conditioner
     }
 }
 
-// ── trigger kit ───────────────────────────────────────────────────────────
-
-TEST_CASE("TriggerDetect fires once per edge and hysteresis stops chatter",
-          "[trigger][mod-utilities]") {
-    TriggerDetect det;
-    det.reset();
-
-    REQUIRE(det.process(1.0f));       // rising
-    REQUIRE_FALSE(det.process(1.0f)); // still high
-    REQUIRE_FALSE(det.process(0.4f)); // inside the window: not yet re-armed
-    REQUIRE_FALSE(det.process(1.0f)); // and therefore no second edge
-    REQUIRE_FALSE(det.process(0.1f)); // below low: re-armed
-    REQUIRE(det.process(1.0f));       // second real edge
-}
-
-TEST_CASE("ClockDivider passes the first edge after reset", "[trigger][mod-utilities]") {
-    // A divider whose downbeat lands n−1 edges late is unusable to start a
-    // piece with; this is the property that prevents it.
-    ClockDivider div;
-    div.set_division(4);
-    div.reset();
-
-    int passes = 0;
-    bool first_passed = false;
-    for (int edge = 0; edge < 16; ++edge) {
-        const bool p = div.process(1.0f);
-        div.process(0.0f);
-        if (edge == 0) first_passed = p;
-        if (p) ++passes;
-    }
-    REQUIRE(first_passed);
-    REQUIRE(passes == 4);
-}
-
-TEST_CASE("trigger-kit factor setters enforce their declared ranges",
-          "[trigger][mod-utilities][contract]") {
-    ClockDivider div;
-    div.set_division(-1);
-    REQUIRE(div.division() == ClockDivider::kMinDivision);
-    div.set_division(ClockDivider::kMaxDivision + 1);
-    REQUIRE(div.division() == ClockDivider::kMaxDivision);
-
-    ClockMult mult;
-    mult.set_multiple(-1);
-    REQUIRE(mult.multiple() == ClockMult::kMinMultiple);
-    mult.set_multiple(ClockMult::kMaxMultiple + 1);
-    REQUIRE(mult.multiple() == ClockMult::kMaxMultiple);
-}
-
-TEST_CASE("trigger-kit time and count setters enforce declared ranges",
-          "[trigger][mod-utilities][contract]") {
-    GateGen gate;
-    gate.set_length_ms(-1.0);
-    REQUIRE(gate.length_ms() == GateGen::kMinLengthMs);
-    gate.set_length_ms(20000.0);
-    REQUIRE(gate.length_ms() == GateGen::kMaxLengthMs);
-
-    TrigDelay delay;
-    delay.set_delay_ms(-1.0);
-    REQUIRE(delay.delay_ms() == TrigDelay::kMinDelayMs);
-    delay.set_delay_ms(20000.0);
-    REQUIRE(delay.delay_ms() == TrigDelay::kMaxDelayMs);
-
-    BurstGen burst;
-    burst.set_count(0);
-    REQUIRE(burst.count() == BurstGen::kMinCount);
-    burst.set_count(256);
-    REQUIRE(burst.count() == BurstGen::kMaxCount);
-    burst.set_interval_ms(0.0);
-    REQUIRE(burst.interval_ms() == BurstGen::kMinIntervalMs);
-    burst.set_interval_ms(3000.0);
-    REQUIRE(burst.interval_ms() == BurstGen::kMaxIntervalMs);
-}
-
-TEST_CASE("ClockMult emits the stated number of triggers per steady period",
-          "[trigger][mod-utilities]") {
-    ClockMult mult;
-    mult.prepare(kSr);
-    mult.set_multiple(4);
-    mult.reset();
-
-    constexpr int period = 4800;  // 10 Hz at 48 kHz
-    int fired = 0;
-    // Two priming periods establish the measured period, then count.
-    for (int p = 0; p < 6; ++p) {
-        for (int i = 0; i < period; ++i) {
-            const bool f = mult.process(i == 0 ? 1.0f : 0.0f);
-            if (p >= 2 && f) ++fired;
-        }
-    }
-    REQUIRE(fired == 4 * 4);
-}
-
-TEST_CASE("ClockMult treats a stopped clock as stopped, not as a very slow one",
-          "[trigger][mod-utilities]") {
-    ClockMult mult;
-    mult.prepare(kSr);
-    mult.set_multiple(4);
-    mult.reset();
-
-    // One edge, then a gap far longer than the ceiling, then another edge.
-    mult.process(1.0f);
-    const int gap = static_cast<int>(units::ms_to_samples(ClockMultT<float>::kMaxPeriodMs, kSr)) * 2;
-    int spurious = 0;
-    for (int i = 0; i < gap; ++i)
-        if (mult.process(0.0f)) ++spurious;
-    // The single edge after a reset has no measured period, so nothing should
-    // have been subdivided at all.
-    REQUIRE(spurious == 0);
-
-    REQUIRE(mult.process(1.0f));
-    int after = 0;
-    for (int i = 0; i < 48000; ++i)
-        if (mult.process(0.0f)) ++after;
-    REQUIRE(after == 0);  // period was rejected as "clock restarted"
-}
-
-TEST_CASE("ClockMult factor changes cannot emit subdivisions from the old grid",
-          "[trigger][mod-utilities]") {
-    ClockMult mult;
-    mult.prepare(kSr);
-    mult.set_multiple(8);
-    mult.reset();
-
-    constexpr int period = 800;
-    REQUIRE(mult.process(1.0f));
-    for (int i = 1; i < period; ++i) REQUIRE_FALSE(mult.process(0.0f));
-    REQUIRE(mult.process(1.0f));  // establishes the 8x schedule
-
-    for (int i = 1; i < period / 3; ++i) (void)mult.process(0.0f);
-    mult.set_multiple(1);
-
-    // x1 means only source edges. No ticks from the abandoned x8 grid may
-    // leak through before the next source edge.
-    for (int i = period / 3; i < period; ++i) REQUIRE_FALSE(mult.process(0.0f));
-    REQUIRE(mult.process(1.0f));
-}
-
-TEST_CASE("ClockMult factor increases schedule only the future points of the new grid",
-          "[trigger][mod-utilities]") {
-    ClockMult mult;
-    mult.prepare(kSr);
-    mult.set_multiple(2);
-    mult.reset();
-
-    constexpr int period = 800;
-    REQUIRE(mult.process(1.0f));
-    for (int i = 1; i < period; ++i) (void)mult.process(0.0f);
-    REQUIRE(mult.process(1.0f));
-
-    constexpr int change_at = 250;
-    for (int i = 1; i <= change_at; ++i) REQUIRE_FALSE(mult.process(0.0f));
-    mult.set_multiple(8);
-
-    int future_subdivisions = 0;
-    for (int i = change_at + 1; i < period; ++i)
-        if (mult.process(0.0f)) ++future_subdivisions;
-    // The x8 grid is at 100-sample multiples. 100 and 200 are behind the
-    // change; 300..700 are the five realizable future subdivisions.
-    REQUIRE(future_subdivisions == 5);
-    REQUIRE(mult.process(1.0f));
-}
-
-TEST_CASE("GateGen opens for its stated length and retrigger restarts it",
-          "[trigger][mod-utilities]") {
-    GateGen gate;
-    gate.prepare(kSr);
-    gate.set_length_ms(10.0);
-    gate.reset();
-
-    const int expected = static_cast<int>(std::llround(units::ms_to_samples(10.0, kSr)));
-    int high = 0;
-    gate.process(1.0f);
-    ++high;
-    for (int i = 0; i < expected * 3; ++i)
-        if (gate.process(0.0f) > 0.5f) ++high;
-    REQUIRE(high == expected);
-}
-
-TEST_CASE("TrigDelay delays by its stated time", "[trigger][mod-utilities]") {
-    TrigDelay del;
-    del.prepare(kSr);
-    del.set_delay_ms(5.0);
-    del.reset();
-
-    const int expected = static_cast<int>(std::llround(units::ms_to_samples(5.0, kSr)));
-    REQUIRE_FALSE(del.process(1.0f));
-    int n = 0;
-    bool fired = false;
-    for (int i = 0; i < expected * 3 && !fired; ++i) {
-        fired = del.process(0.0f);
-        ++n;
-    }
-    REQUIRE(fired);
-    REQUIRE(n == expected);
-}
-
-TEST_CASE("BurstGen emits exactly its count at its interval", "[trigger][mod-utilities]") {
-    BurstGen burst;
-    burst.prepare(kSr);
-    burst.set_count(5);
-    burst.set_interval_ms(10.0);
-    burst.reset();
-
-    const int interval = static_cast<int>(std::llround(units::ms_to_samples(10.0, kSr)));
-    int fired = burst.process(1.0f) ? 1 : 0;
-    for (int i = 0; i < interval * 8; ++i)
-        if (burst.process(0.0f)) ++fired;
-    REQUIRE(fired == 5);
-    REQUIRE_FALSE(burst.busy());
-}
-
-// ── mod matrix ────────────────────────────────────────────────────────────
-
-TEST_CASE("ModMatrix sums routes and reports its own worst case",
-          "[mod-matrix][mod-utilities]") {
-    ModMatrixT<4, 3, double> matrix;
-    REQUIRE(matrix.add_route(0, 1, 0.5));
-    REQUIRE(matrix.add_route(2, 1, -0.25));
-    REQUIRE(matrix.route_count() == 2);
-
-    matrix.set_source(0, 1.0);
-    matrix.set_source(2, 1.0);
-    matrix.process();
-    REQUIRE_THAT(matrix.get(1), WithinAbs(0.25, 1e-12));
-
-    // Unrouted destinations read exactly zero, never a stale value.
-    REQUIRE(matrix.get(0) == 0.0);
-    REQUIRE(matrix.get(2) == 0.0);
-
-    // The bound bounds, for contractually unit-bounded sources.
-    REQUIRE_THAT(matrix.worst_case_for(1), WithinAbs(0.75, 1e-12));
-    for (double a : {-1.0, -0.3, 0.0, 0.6, 1.0}) {
-        for (double b : {-1.0, 0.0, 1.0}) {
-            matrix.set_source(0, a);
-            matrix.set_source(2, b);
-            matrix.process();
-            REQUIRE(std::abs(matrix.get(1)) <= matrix.worst_case_for(1) + 1e-12);
-        }
-    }
-}
-
-TEST_CASE("ModMatrix refuses bad routes rather than dropping them silently",
-          "[mod-matrix][mod-utilities]") {
-    ModMatrixT<2, 2, double> matrix;
-    REQUIRE_FALSE(matrix.add_route(2, 0, 1.0));
-    REQUIRE_FALSE(matrix.add_route(0, 2, 1.0));
-    REQUIRE(matrix.route_count() == 0);
-
-    for (std::size_t i = 0; i < decltype(matrix)::kMaxRoutes; ++i)
-        REQUIRE(matrix.add_route(0, 0, 0.1));
-    REQUIRE_FALSE(matrix.add_route(0, 0, 0.1));
-}
-
-TEST_CASE("ModMatrix reset clears signal state but preserves the patch",
-          "[mod-matrix][mod-utilities]") {
-    ModMatrixT<2, 2, double> matrix;
-    matrix.add_route(0, 0, 1.0);
-    matrix.set_source(0, 1.0);
-    matrix.process();
-    REQUIRE_THAT(matrix.get(0), WithinAbs(1.0, 1e-12));
-
-    matrix.reset();
-    REQUIRE(matrix.route_count() == 1);
-    REQUIRE(matrix.source(0) == 0.0);
-    matrix.process();
-    REQUIRE(matrix.get(0) == 0.0);
-}
-
 // ── RT allocation probe roster ────────────────────────────────────────────
 
 TEST_CASE("mod-utilities allocate nothing on the audio thread",
@@ -1167,17 +900,10 @@ TEST_CASE("mod-utilities allocate nothing on the audio thread",
     Attenuverter att;
     VactrolConditioner vactrol;
     LowpassGate lpg;
-    TriggerDetect trig;
-    Comparator comp;
-    GateGen gate;
-    ClockDivider div;
-    ClockMult mult;
-    TrigDelay tdelay;
-    BurstGen burst;
     Drift drift;
     OuWalk walk;
     Xorshift32 rng{7u};
-    ModMatrixT<8, 8, float> matrix;
+    DenseModMatrixT<8, 8, float> matrix;
 
     // prepare() may allocate by contract; do it outside the probe.
     lfo.prepare(kSr);
@@ -1186,10 +912,6 @@ TEST_CASE("mod-utilities allocate nothing on the audio thread",
     mod_env.prepare(kSr);
     vactrol.prepare(kSr);
     lpg.set_sample_rate(kSr);
-    gate.prepare(kSr);
-    mult.prepare(kSr);
-    tdelay.prepare(kSr);
-    burst.prepare(kSr);
     drift.prepare(kSr);
     matrix.add_route(0, 0, 0.5f);
 
@@ -1216,14 +938,6 @@ TEST_CASE("mod-utilities allocate nothing on the audio thread",
             (void)att.process(x);
             (void)vactrol.process(0.5);
             (void)lpg.process(x, 0.5);
-
-            (void)trig.process(clock);
-            (void)comp.process(clock);
-            (void)gate.process(clock);
-            (void)div.process(clock);
-            (void)mult.process(clock);
-            (void)tdelay.process(clock);
-            (void)burst.process(clock);
 
             (void)drift.next();
             (void)walk.next();

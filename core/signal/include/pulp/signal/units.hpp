@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pulp::signal::units {
 
@@ -254,6 +255,87 @@ template <typename T>
 inline T untaper_linear(T value, T lo, T hi) {
     if (hi == lo) return T{0};
     return std::clamp((value - lo) / (hi - lo), T{0}, T{1});
+}
+
+/// Compatibility spelling used by the shared modulation toolkit.
+template <typename T>
+inline T taper_log_inverse(T value, T lo, T hi) {
+    return untaper_log(value, lo, hi);
+}
+
+/// Per-sample gain for a feedback path that decays by 60 dB in `t60_seconds`.
+template <typename T>
+inline T t60_to_per_sample_gain(T t60_seconds, T sample_rate) {
+    const T samples = std::max(T{1}, t60_seconds * sample_rate);
+    return std::pow(T{10}, T{-3} / samples);
+}
+
+template <typename T>
+inline T beats_to_seconds(T beats, T bpm) {
+    return beats * T{60} / std::max(T{1e-3}, bpm);
+}
+
+template <typename T>
+inline T seconds_to_beats(T seconds, T bpm) {
+    return seconds * std::max(T{1e-3}, bpm) / T{60};
+}
+
+/// Shared serialized musical-division vocabulary. Order is ABI/preset state:
+/// append before `count`; never reorder existing entries.
+enum class Division : std::uint8_t {
+    whole,
+    whole_dotted,
+    whole_triplet,
+    half,
+    half_dotted,
+    half_triplet,
+    quarter,
+    quarter_dotted,
+    quarter_triplet,
+    eighth,
+    eighth_dotted,
+    eighth_triplet,
+    sixteenth,
+    sixteenth_dotted,
+    sixteenth_triplet,
+    thirty_second,
+    thirty_second_dotted,
+    thirty_second_triplet,
+    sixty_fourth,
+    sixty_fourth_dotted,
+    sixty_fourth_triplet,
+    count,
+};
+
+inline constexpr int kDivisionCount = static_cast<int>(Division::count);
+
+constexpr float division_to_beats(Division division) {
+    const int index = static_cast<int>(division);
+    if (index < 0 || index >= kDivisionCount) return 1.0f;
+    const int family = index / 3;
+    float beats = 4.0f;
+    for (int i = 0; i < family; ++i) beats *= 0.5f;
+    switch (index % 3) {
+        case 1: return beats * 1.5f;
+        case 2: return beats * (2.0f / 3.0f);
+        default: return beats;
+    }
+}
+
+constexpr float division_to_beats(int index) {
+    return division_to_beats(static_cast<Division>(index));
+}
+
+inline float division_to_seconds(Division division, float bpm) {
+    return beats_to_seconds(division_to_beats(division), bpm);
+}
+
+inline double division_to_samples(Division division, float bpm, double sample_rate) {
+    return static_cast<double>(division_to_seconds(division, bpm)) * sample_rate;
+}
+
+inline float division_to_hz(Division division, float bpm) {
+    return 1.0f / std::max(1.0e-6f, division_to_seconds(division, bpm));
 }
 
 }  // namespace pulp::signal::units

@@ -65,6 +65,9 @@ enum class ModelErrorCode : std::uint8_t {
     ActiveCompTakeRemoval,
     InvalidAudioLoopInfo,
     InvalidAssetStoragePolicy,
+    InvalidMarker,
+    InvalidRegion,
+    InvalidSessionStart,
 };
 
 struct ModelError {
@@ -248,6 +251,43 @@ class OpaqueContent {
 
 using ClipContent =
     std::variant<EmptyContent, MediaRef, NoteContent, RegisteredContent, OpaqueContent>;
+
+/// Overload set for visiting a ClipContent with **no generic fallback**.
+///
+/// What a clip *is* decides whether it renders audio, contributes notes, owns
+/// ItemIds that must be remapped, or survives a save. Every one of those
+/// decisions is a per-alternative dispatch, and none of them has a defensible
+/// default: a content kind nobody wrote a branch for is not "nothing", it is a
+/// clip whose data was dropped. Consumers that dispatch through a generic
+/// lambda (`[](const auto&)`, or an `if`/`if constexpr` chain that falls
+/// through) keep compiling when the variant grows and then quietly treat the
+/// new alternative as absent — a clip that renders silence, an export manifest
+/// that reports no loss while losing data, a remap that leaves stale ItemIds
+/// behind. Visiting through this type makes a new alternative a compile error
+/// at every call site until someone decides what it means.
+///
+///     std::visit(ClipContentCases{
+///                    [&](const EmptyContent&) { ... },
+///                    [&](const MediaRef& media) { ... },
+///                    [&](const NoteContent& notes) { ... },
+///                    [&](const RegisteredContent& registered) { ... },
+///                    [&](const OpaqueContent& opaque) { ... },
+///                },
+///                clip.content());
+template <class... Fs> struct ClipContentCases : Fs... {
+    using Fs::operator()...;
+};
+template <class... Fs> ClipContentCases(Fs...) -> ClipContentCases<Fs...>;
+
+/// Guard for code that can only be correct while ClipContent holds exactly the
+/// alternatives it does today — a decoder keyed on envelope type names, a
+/// referential-integrity scan that assumes MediaRef is the only alternative
+/// naming an asset, an audio path that assumes MediaRef is the only alternative
+/// carrying samples. Those sites cannot be expressed as a visit, so they assert
+/// on the alternative count instead: widening the variant stops the build with a
+/// message naming the decision that site owes, rather than shipping a document
+/// that silently loses the new content on load, save, or render.
+inline constexpr std::size_t kClipContentAlternativeCount = std::variant_size_v<ClipContent>;
 
 class Clip {
   public:
@@ -498,6 +538,42 @@ class Track {
     std::shared_ptr<const Data> data_;
 };
 
+// A marker is a named point on the sequence timeline; a region is a named span.
+// Both are anchored in canonical ticks — the same musical domain a musical clip
+// uses — and both carry a stable ItemId so a command can address one by identity.
+// A region is not a clip: it holds no content and never renders. When the
+// sequence declares a musical duration, a marker's position and a region's whole
+// span must lie inside it.
+//
+// Both are owned by the Sequence, not the Project. A Project holds many
+// sequences, so a project-level annotation list could not say which timeline it
+// annotates; sequence ownership makes the annotated timeline structural rather
+// than conventional.
+//
+// `color` is a packed 0xRRGGBBAA value, not a float colour: the document model
+// stores exact bytes that compare and re-serialize identically, and the float
+// colour types live in render layers outside this module's dependency floor.
+// It is optional — absent means the presentation layer chooses.
+struct SequenceMarker {
+    ItemId id;
+    std::string name;
+    timebase::TickPosition position;
+    std::optional<std::uint32_t> color;
+};
+
+// Regions MAY overlap, including full containment. Named sections nest by
+// nature ("chorus" inside "part B"), so disjointness is deliberately not an
+// invariant: Sequence::create accepts any set of in-bounds, positive-length,
+// uniquely identified regions. The only ordering guarantee is the canonical
+// sort below.
+struct SequenceRegion {
+    ItemId id;
+    std::string name;
+    timebase::TickPosition position;
+    timebase::TickDuration duration;
+    std::optional<std::uint32_t> color;
+};
+
 class Sequence {
   public:
     static runtime::Result<Sequence, ModelError>
@@ -506,6 +582,10 @@ class Sequence {
     static runtime::Result<Sequence, ModelError>
     create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
            std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks);
+    static runtime::Result<Sequence, ModelError>
+    create(ItemId id, std::string name, std::optional<timebase::TickDuration> musical_duration,
+           std::optional<AbsoluteTimelineDuration> absolute_duration, std::vector<Track> tracks,
+           std::vector<SequenceMarker> markers, std::vector<SequenceRegion> regions);
 
     ItemId id() const noexcept;
     const std::string& name() const noexcept;
@@ -513,13 +593,43 @@ class Sequence {
     std::optional<AbsoluteTimelineDuration> absolute_duration() const noexcept;
     std::span<const Track> tracks() const noexcept;
     const Track* find_track(ItemId id) const noexcept;
+    // Ordered by (position, id). Markers and regions share one identity space:
+    // no marker may reuse a region's ItemId within the same sequence.
+    std::span<const SequenceMarker> markers() const noexcept;
+    // Ordered by (position, duration, id). Overlap is permitted.
+    std::span<const SequenceRegion> regions() const noexcept;
+    const SequenceMarker* find_marker(ItemId id) const noexcept;
+    const SequenceRegion* find_region(ItemId id) const noexcept;
     runtime::Result<Sequence, ModelError> replace_track(Track track) const;
+    runtime::Result<Sequence, ModelError> insert_marker(SequenceMarker marker) const;
+    runtime::Result<Sequence, ModelError> erase_marker(ItemId id) const;
+    runtime::Result<Sequence, ModelError> insert_region(SequenceRegion region) const;
+    runtime::Result<Sequence, ModelError> erase_region(ItemId id) const;
     bool shares_storage_with(const Sequence& other) const noexcept;
 
   private:
     struct Data;
+    // Annotation edits validate only the annotation lists and share the existing
+    // track storage and identity index; they never re-walk the arrangement.
+    runtime::Result<Sequence, ModelError>
+    with_annotations(std::vector<SequenceMarker> markers,
+                     std::vector<SequenceRegion> regions) const;
     explicit Sequence(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
     std::shared_ptr<const Data> data_;
+};
+
+// Where this session's zero sits on the source/house clock — the document form
+// of "this session starts at 01:00:00:00". Stored as an absolute sample offset
+// paired with its own rational rate, never as a formatted timecode string:
+// frame-rate formatting is a presentation concern and a string would make the
+// same instant compare unequal across display rates.
+struct SessionStart {
+    timebase::SamplePosition start;
+    timebase::RationalRate sample_rate;
+
+    constexpr bool operator==(const SessionStart& other) const noexcept {
+        return start == other.start && sample_rate == other.sample_rate;
+    }
 };
 
 struct ProjectInput {
@@ -531,6 +641,7 @@ struct ProjectInput {
     std::vector<Sequence> sequences;
     timebase::TempoMap tempo_map{};
     timebase::MeterMap meter_map{};
+    std::optional<SessionStart> session_start;
 };
 
 enum class ItemKind : std::uint8_t {
@@ -545,6 +656,8 @@ enum class ItemKind : std::uint8_t {
     AutomationPoint,
     TakeLane,
     Take,
+    Marker,
+    Region,
 };
 
 // Canonical immediate parent for a kind. Every parent that an item's own
@@ -565,6 +678,8 @@ constexpr ItemId immediate_parent_id(ItemKind kind, ItemId project_id, ItemId se
     case ItemKind::Sequence:
         return project_id;
     case ItemKind::Track:
+    case ItemKind::Marker:
+    case ItemKind::Region:
         return sequence_id;
     case ItemKind::Clip:
     case ItemKind::DevicePlacement:
@@ -626,6 +741,7 @@ class Project {
     std::span<const Sequence> sequences() const noexcept;
     const timebase::TempoMap& tempo_map() const noexcept;
     const timebase::MeterMap& meter_map() const noexcept;
+    const std::optional<SessionStart>& session_start() const noexcept;
     const MediaAsset* find_asset(ItemId id) const noexcept;
     const Sequence* find_sequence(ItemId id) const noexcept;
     std::optional<ItemLocation> locate(ItemId id) const noexcept;

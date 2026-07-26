@@ -8,6 +8,12 @@
 namespace pulp::timeline::detail {
 namespace {
 
+static_assert(kAutomationTargetAlternativeCount == 1,
+              "AutomationTarget gained an alternative: std::get<DeviceParameterTarget> "
+              "below terminates under -fno-exceptions when the target is a different "
+              "kind. Dispatch through AutomationTargetCases and decide what the new "
+              "target means here before widening the variant.");
+
 const DeviceParameterTarget& device_target(const AutomationLane& lane) noexcept {
     return std::get<DeviceParameterTarget>(lane.target());
 }

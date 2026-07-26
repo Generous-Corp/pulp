@@ -26,6 +26,7 @@
 // character macro.
 
 #include <algorithm>
+#include <pulp/signal/fast_math.hpp>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -53,11 +54,7 @@ inline double flush_denormal(double v) noexcept {
 // is asymptotically v/9, i.e. NOT bounded; the clamp is what lets a >unity
 // feedback loop (the deliberate self-oscillating dub behavior) settle at a
 // bounded level instead of merely decaying more slowly than it grows.
-inline double fast_tanh(double v) noexcept {
-    const double x = std::clamp(v, -3.0, 3.0);
-    const double x2 = x * x;
-    return x * (27.0 + x2) / (27.0 + 9.0 * x2);
-}
+inline double fast_tanh(double v) noexcept { return lipschitz_tanh(v); }
 
 // ── Deterministic randomness ──────────────────────────────────────────────
 // xorshift32 (Marsaglia 2003). Per-instance state, re-seeded on reset(), so

@@ -76,8 +76,8 @@ pulp_dsp_series_signal_suite(pulp-test-signal-modular-sequencing
                              test_signal_modular_sequencing.cpp)
 
 # ── Catalog suites (one per module that ships its own catalog header) ──────
-pulp_dsp_series_catalog_suite(pulp-test-forge-modulation-catalog
-                              test_forge_modulation_catalog.cpp)
+pulp_dsp_series_catalog_suite(pulp-test-forge-effect-modulation-catalog
+                              test_forge_effect_modulation_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-pitch-catalog  test_forge_pitch_catalog.cpp)
 pulp_dsp_series_catalog_suite(pulp-test-forge-synthesis-catalog
                               test_forge_synthesis_catalog.cpp)

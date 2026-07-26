@@ -375,6 +375,40 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
                                                std::move(decoded_expected).value(),
                                                std::move(decoded_replacement).value()}));
     }
+    if (type.value() == "pulp.timeline.command.insert_marker") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto marker = required(command, "marker", data_path);
+        if (!sequence || !marker)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_marker(*marker.value(), context, data_path + "/marker");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(InsertMarker{sequence.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_marker") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto marker = decode_command_item_id(command, "marker_id", data_path);
+        if (!sequence || !marker)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveMarker{sequence.value(), marker.value()}));
+    }
+    if (type.value() == "pulp.timeline.command.insert_region") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto region = required(command, "region", data_path);
+        if (!sequence || !region)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto decoded = decode_region(*region.value(), context, data_path + "/region");
+        if (!decoded)
+            return runtime::Err(decoded.error());
+        return runtime::Ok(Command(InsertRegion{sequence.value(), std::move(decoded).value()}));
+    }
+    if (type.value() == "pulp.timeline.command.remove_region") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto region = decode_command_item_id(command, "region_id", data_path);
+        if (!sequence || !region)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        return runtime::Ok(Command(RemoveRegion{sequence.value(), region.value()}));
+    }
     if (type.value() == "pulp.timeline.command.set_track_freeze") {
         auto sequence = decode_command_item_id(command, "sequence_id", data_path);
         auto track = decode_command_item_id(command, "track_id", data_path);

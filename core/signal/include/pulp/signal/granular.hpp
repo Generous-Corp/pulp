@@ -300,7 +300,7 @@ public:
         if (ring_length_ <= 0) return;
         // Live freeze holds the captured material, not merely its nominal
         // centre while the ring overwrites it underneath us.
-        if (source_ == GrainSource::live_ring && stretch_ == 0.0) return;
+        if (!accepts_live_input()) return;
         for (int i = 0; i < n; ++i) write_one(in[i]);
     }
 
@@ -510,6 +510,10 @@ public:
     }
 
 private:
+    bool accepts_live_input() const {
+        return source_ != GrainSource::live_ring || stretch_ != 0.0;
+    }
+
     struct Grain {
         bool active = false;
         double phase = 0.0;
@@ -757,8 +761,7 @@ private:
     void render(const SampleType* in, SampleType* out_left, SampleType* out_right, int n) {
         const double buffer_span = static_cast<double>(std::max(buffer_length_, 1));
         for (int i = 0; i < n; ++i) {
-            if (in != nullptr &&
-                !(source_ == GrainSource::live_ring && stretch_ == 0.0)) {
+            if (in != nullptr && accepts_live_input()) {
                 write_one(in[i]);
             }
 

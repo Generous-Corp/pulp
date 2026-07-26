@@ -301,14 +301,25 @@ per-ABI entry point for it.** Go through the plugin's own state:
   bulk construction with repeated persistent insertion; wasm's tighter memory
   ceiling makes the transient allocation growth especially costly.
 
-- A new `core/timeline` translation unit belongs in four source lists:
-  `core/timeline/CMakeLists.txt`, the `pulp-test-timeline-no-exceptions` OBJECT
-  library in `test/cmake/timeline_tests.cmake`, `PulpWam.cmake`, and
-  `PulpWclap.cmake`. That fourth list mirrors the timeline sources specifically,
-  so it applies to timeline units and not to engine units from other modules.
-  `web-timeline-source-closure` compares only the WAM and WebCLAP lanes, so a
-  missing no-exceptions entry passes that check and surfaces instead as an
-  undefined symbol when the no-exceptions target links.
+- A new `core/timeline` translation unit belongs in **two** places, not four.
+  `core/timeline/CMakeLists.txt`, `PulpWam.cmake`, and `PulpWclap.cmake` all
+  resolve their timeline sources through `pulp_resolve_timeline_sources()` in
+  `core/timeline/PulpTimelineSources.cmake`, so adding the file to that one
+  function covers the native target and both web lanes at once. The second place
+  is the `pulp-test-timeline-no-exceptions` OBJECT library in
+  `test/cmake/timeline_tests.cmake`, which still enumerates sources by hand.
+  `web-timeline-source-closure` compares only the WAM and WebCLAP lanes — both
+  fed by the shared function — so a missing no-exceptions entry passes that check
+  and surfaces instead as an undefined symbol when the no-exceptions target
+  links. A portable unit added to the shared function but not to the
+  no-exceptions library is the failure mode to watch for; the reverse cannot
+  happen silently.
+
+- Sequence-level document state (markers, regions) is portable engine data, so
+  its migration and reducer units — `sequence_schema_migrations.cpp`,
+  `transaction_marker_internal.cpp` — belong in the shared timeline source
+  function and the no-exceptions library like any other timeline TU, even though
+  they never run in a render path.
 
 - The browser lanes inherit transport behavior for free, including behavior that
   did not exist when the ABI lists were written. Playhead scrubbing is the worked
@@ -322,10 +333,28 @@ per-ABI entry point for it.** Go through the plugin's own state:
   evidence that the wasm lanes are unaffected — check what the transport now
   publishes per block, not just which files moved.
 
+- A compile-time guard in a portable timeline header fires in the browser lanes
+  too. `core/timeline`'s `AutomationTarget` carries a `static_assert` on its
+  alternative count (and an overload set with no generic fallback) precisely so
+  that widening the variant cannot slip through silently. Because those sources
+  are in the WAM/WebCLAP closure, widening it breaks the wasm builds at the same
+  point as the native ones — which is what you want. It also means the guard
+  must be satisfied before the widening lands, not after, or both lanes go red
+  together.
+
 - Extraction produces a new translation unit and carries the same obligation.
   Moving a helper out of an already-listed engine `.cpp` into its own file reads
   as a pure refactor, because the origin unit stays listed everywhere — but the
   extracted file is new to every list its module maintains.
+
+- `core/timeline` and `core/playback` are in the wasm closure, so their
+  compile-time model guards fire in the browser lanes too. `ClipContent` carries
+  an overload set with no generic fallback plus `static_assert`s on its
+  alternative count, precisely so a new clip content kind cannot slip through as
+  silence. Widening it therefore reds the WAM and WebCLAP builds at the same
+  points as the native ones, which is the intent — but it also means the guards
+  must be satisfied *before* the widening lands, not in a follow-up, or every
+  lane goes red at once with no partial-progress path.
 
 - Both ABIs already expose the plugin's opaque state behind ONE `HostAdapter`
   call — WAM through `wam_state_size`/`wam_read_state`/`wam_write_state`, WebCLAP

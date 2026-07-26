@@ -1453,6 +1453,29 @@ void emit_node(std::ostringstream& out,
                                 : std::min(node.children.size(), resolved.children.size());
     const bool parent_owns_imported_child_hits =
         native_kind_owns_imported_child_hits(resolved.kind);
+    // A promoted widget that keeps a reachable child must be re-opened first.
+    // TextButton defaults to PointerEvents::box_only so a centred icon cannot
+    // swallow its own click, and hit_test() then never descends — which would
+    // make the box_none emitted below inert and silently drop the interactive
+    // descendant. Emitted once here so it covers both the extracted-factory
+    // path and the inline emit_node path.
+    //
+    // Skipped when this node is itself `pass_through_self`: its own box_none was
+    // emitted above, and re-opening here would clobber it — the parent's policy
+    // for this node outranks this node's policy for its children, which is the
+    // order the runtime materializer already uses.
+    if (parent_owns_imported_child_hits &&
+        self_hit_policy != PromotedChildHitPolicy::pass_through_self) {
+        for (std::size_t i = 0; i < count; ++i) {
+            if (promoted_widget_child_hit_policy(node.children[i], resolved.children[i]) ==
+                PromotedChildHitPolicy::disabled)
+                continue;
+            emit_line(out, depth, ctx.opts.indent_spaces,
+                      var + "->set_pointer_events(pulp::view::View::PointerEvents::auto_);");
+            break;
+        }
+    }
+
     for (std::size_t i = 0; i < count; ++i) {
         const auto& child = node.children[i];
         const auto child_hit_policy = parent_owns_imported_child_hits

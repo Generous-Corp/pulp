@@ -1,415 +1,753 @@
 #pragma once
 
 /// @file envelope.hpp
-/// The envelope family: one segment engine, six named shapes.
+/// The envelope family — AR, AD, AHD, DAHDSR, and a trigger-driven modulation
+/// envelope — plus a level-independent transient detector.
 ///
-/// `AdsrT` (adsr.hpp) already covers the keyboard envelope — the one with a
-/// sustain that holds while a key is down. This header covers the rest of the
-/// family, which is what modulation actually uses: percussive shapes with no
-/// sustain at all (`ArT`, `AdT`, `AhdT`), the full modular shape with a
-/// pre-delay and a hold (`DahdsrT`), and a bipolar variant for modulation
-/// destinations that go both ways (`ModEnvT`).
+/// `AdsrT` (adsr.hpp) is the existing keyboard envelope and stays exactly as it
+/// is. Everything here is additive: the shapes it does not cover, and the one
+/// superset to reach for when it is not enough.
 ///
-/// They are all the same machine. Rather than six hand-written state machines
-/// that each get the "what happens if the gate falls during attack" question
-/// slightly differently right, there is one `EnvelopeCore` walking a fixed
-/// segment list, and each named type is that core with segments enabled or
-/// disabled. The behaviours a spec has to be able to rely on are therefore
-/// decided once:
+/// RT contract: every type here holds fixed scalar state and owns no memory.
+/// `prepare()` and the `set_*()` setters are control-side calls; `trigger()`,
+/// `gate()`, `note_on()`, `note_off()`, `next()`, `reset()`, and the accessors
+/// allocate nothing and are audio-thread safe.
 ///
-///   - **A gate release during any stage jumps straight to release**, from
-///     wherever the level currently is. No stage is "uninterruptible"; a
-///     staccato note on a 2-second attack must not hang for 2 seconds.
-///   - **Retrigger continues from the current level**, it does not restart
-///     from zero. Restarting from zero clicks, and the click is not a
-///     character choice anybody asked for.
-///   - **Times are real milliseconds** (series law 3), and every stage's curve
-///     is the same exponential-approach shape, stated as a `curve` in
-///     `[0, 1]`: 0 is linear, 1 is a strongly exponential approach. One curve
-///     control, applied identically to every segment, rather than a per-stage
-///     shape nobody can predict the sum of.
-///   - **There is no randomness**, so determinism (series law 2) is trivial.
+/// USE — the whole point of having five of these is that reaching for the right
+/// one is cheaper than configuring the wrong one:
 ///
-/// Curve law: a segment of length `L` samples advances a normalised position
-/// `p` from 0 to 1 linearly, and the output is `shape(p)` where
-/// `shape(p) = (1 − exp(−k·p)) / (1 − exp(−k))` with `k = kCurveKnee·curve`.
-/// At `curve = 0` the limit is exactly `p` (linear); as `curve` rises the
-/// segment covers more of its distance early, which is what a discharging
-/// capacitor does and what a decay needs to sound natural. The normalisation
-/// means a segment ALWAYS arrives exactly at its endpoint in exactly `L`
-/// samples, whatever the curve — so "a 200 ms decay" is 200 ms at every curve
-/// setting, which a linear-vs-exponential switch usually gets wrong.
-///
-/// RT contract: `prepare()` recomputes per-stage sample counts and allocates
-/// nothing. `set_*`, `gate_on()`, `gate_off()`, `next()`, and `reset()`
-/// allocate nothing, take no locks, and perform no I/O. `next()` costs one
-/// `std::exp` per sample on curved segments; a caller modulating at block rate
-/// can run the envelope at block rate instead.
+/// - **`ArT`** is the sustained-gate workhorse: pad and drone VCAs, gate-CV
+///   amplitude, sidechain duck-and-recover shapes (invert it with an
+///   `AttenuverterT`). When a sound has no decay stage, use this, not an ADSR
+///   with sustain pinned to 1.
+/// - **`AdT`** is percussion and plucks from triggers, and modulation blips
+///   like filter pings — anything fired by an event rather than held by a key.
+/// - **`AhdT`** is drum voices and sample playback: the hold keeps the
+///   transient and body at full level for a defined window before the tail. It
+///   is also how you get gate-length-independent chopped shapes, with the hold
+///   as the chop length.
+/// - **`AdsrT`** (existing) is keyboard and sustain instruments — the
+///   note-length-aware classic. Do not extend it; reach for `DahdsrT`.
+/// - **`DahdsrT`** is the superset for layered and orchestral patches. The
+///   delay staggers layers (a swell pad under a pluck), the hold shapes the
+///   pre-decay plateau, and per-stage curves match sampled-instrument contours.
+///   When in doubt in a mod matrix, this is the mod source.
+/// - **Looping** on `AdT` / `AhdT` / `DahdsrT` gives envelope-as-LFO hybrids:
+///   rhythmic swells that are shaped rather than symmetric. With synced stage
+///   times it is a groove-locked modulation sequence from one primitive.
+/// - **`ModEnvT`** is per-hit modulation shaping — filter sweep depth per drum
+///   hit, pitch-drop envelopes. Trigger-driven, ignores gates, signed depth.
+/// - **`TransientDetectorT`** is level-independent attack detection: input
+///   duckers, adaptive transient shapers, "how hard was that hit" as a mod
+///   source.
 
-#include <pulp/signal/denormal.hpp>
-#include <pulp/signal/units.hpp>
+#include <pulp/signal/ballistics_filter.hpp>
+#include <pulp/signal/mod_tools.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace pulp::signal {
 
-/// Which segment an envelope is currently in.
-enum class EnvelopeStage {
-    idle,     ///< Finished (or never started). Output is 0.
-    delay,    ///< Waiting before the attack. Output holds at 0.
-    attack,   ///< Rising to peak.
-    hold,     ///< Holding at peak for a fixed time.
-    decay,    ///< Falling from peak to sustain.
-    sustain,  ///< Holding at sustain while the gate is high.
-    release,  ///< Falling to 0 after the gate falls.
+/// Stage of any envelope in this header. Reported by every type's `stage()`;
+/// the shorter shapes simply never enter the stages they do not have.
+enum class EnvelopeStage : std::uint8_t {
+    idle,
+    delay,
+    attack,
+    hold,
+    decay,
+    sustain,
+    release,
 };
 
-/// The shared segment engine. The named envelopes below are this core with
-/// stages enabled; it is not intended to be instantiated directly, but it is
-/// public because the named types are aliases over it rather than wrappers,
-/// and because a module with a genuinely unusual shape should configure this
-/// rather than write a seventh state machine.
+namespace detail {
+
+/// Sample counter for one envelope stage. `progress()` runs 0 -> 1 exclusive
+/// over `length` samples; `advance()` reports the sample on which the stage is
+/// over. A zero-length stage is complete immediately and is skipped by the
+/// engine rather than consuming a sample.
+struct EnvelopeStageClock {
+    long long pos = 0;
+    long long length = 0;
+
+    void restart(long long len) {
+        pos = 0;
+        length = len;
+    }
+
+    float progress() const {
+        if (length <= 0) return 1.0f;
+        return static_cast<float>(pos) / static_cast<float>(length);
+    }
+
+    bool advance() { return ++pos >= length; }
+};
+
+inline long long envelope_ms_to_samples(double ms, double sample_rate) {
+    return static_cast<long long>(std::lround(std::max(0.0, ms) * 0.001 * sample_rate));
+}
+
+/// The DAHDSR superset state machine. Every public envelope in this header is
+/// this engine with some stages disabled and some behavior flags set, so the
+/// stage timing, the curve law, retrigger-from-current-level, and looping have
+/// exactly one implementation to get right.
+///
+/// RT contract: fixed scalar state; `next()`, `trigger()`, `release()`, and
+/// `reset()` allocate nothing.
 template <typename SampleType = float>
-class EnvelopeCore {
+class EnvelopeEngine {
 public:
     using Stage = EnvelopeStage;
 
-    /// Maximum exponent of the curve law. At `curve = 1` a segment covers
-    /// `1 − 1/e^kCurveKnee` ≈ 99.3 % of its distance in the first half — steep
-    /// enough to read as "snappy", not so steep that the tail vanishes into
-    /// denormals.
-    /// [design parameter] default 5.0, range 2.0 .. 10.0.
-    static constexpr double kCurveKnee = 5.0;
-
-    /// Floor on a stage time. A zero-length stage is legal and means "skip",
-    /// but the sample count must never be zero inside the ramp arithmetic.
-    /// [design parameter] default 1e-4 ms, range 1e-6 .. 1e-2 ms.
-    static constexpr double kMinStageMs = 1e-4;
+    static constexpr int kMaxLoops = 128;
 
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
-        update();
+        sample_rate_ = sample_rate > 0.0 ? sample_rate : 1.0;
+        update_lengths_();
+        reset();
     }
 
-    void set_delay_ms(double ms) { delay_ms_ = std::max(ms, 0.0); update(); }
-    void set_attack_ms(double ms) { attack_ms_ = std::max(ms, 0.0); update(); }
-    void set_hold_ms(double ms) { hold_ms_ = std::max(ms, 0.0); update(); }
-    void set_decay_ms(double ms) { decay_ms_ = std::max(ms, 0.0); update(); }
-    void set_release_ms(double ms) { release_ms_ = std::max(ms, 0.0); update(); }
+    void set_delay_ms(double ms) { delay_ms_ = std::max(0.0, ms); update_lengths_(); }
+    void set_attack_ms(double ms) { attack_ms_ = std::max(0.0, ms); update_lengths_(); }
+    void set_hold_ms(double ms) { hold_ms_ = std::max(0.0, ms); update_lengths_(); }
+    void set_decay_ms(double ms) { decay_ms_ = std::max(0.0, ms); update_lengths_(); }
+    void set_release_ms(double ms) { release_ms_ = std::max(0.0, ms); update_lengths_(); }
 
-    /// Sustain level in `[0, 1]`. Ignored by the shapes that have no sustain.
-    void set_sustain(double level) { sustain_ = std::clamp(level, 0.0, 1.0); }
+    void set_attack_curve(float c) { attack_curve_ = std::clamp(c, -1.0f, 1.0f); }
+    void set_decay_curve(float c) { decay_curve_ = std::clamp(c, -1.0f, 1.0f); }
+    void set_release_curve(float c) { release_curve_ = std::clamp(c, -1.0f, 1.0f); }
 
-    /// Segment curvature in `[0, 1]`: 0 linear, 1 strongly exponential.
-    void set_curve(double curve) {
-        curve_ = std::clamp(curve, 0.0, 1.0);
-        curve_k_ = kCurveKnee * curve_;
-        // Precomputed so the per-sample shape is one exp and one multiply.
-        curve_norm_ = curve_k_ > 0.0 ? 1.0 / (1.0 - std::exp(-curve_k_)) : 0.0;
+    void set_sustain(SampleType level) {
+        sustain_ = std::clamp(level, SampleType{0}, SampleType{1});
     }
 
-    double sustain() const { return sustain_; }
-    double curve() const { return curve_; }
+    void set_has_sustain(bool on) { has_sustain_ = on; }
+    void set_gate_driven(bool on) { gate_driven_ = on; }
 
-    /// Enables or disables individual stages. This is how the named shapes are
-    /// built: `ArT` disables delay, hold, decay, and sustain.
-    void enable_stages(bool delay, bool hold, bool decay, bool sustain) {
-        has_delay_ = delay;
-        has_hold_ = hold;
-        has_decay_ = decay;
-        has_sustain_ = sustain;
-    }
-
-    /// Starts (or retriggers) the envelope. Retrigger continues from the
-    /// current level rather than restarting from zero, so a fast repeat does
-    /// not click.
-    void gate_on() {
-        gate_ = true;
-        position_ = 0.0;
-        segment_start_ = level_;
-        stage_ = has_delay_ && delay_samples_ > 0.0 ? Stage::delay : Stage::attack;
-        if (stage_ == Stage::attack) segment_target_ = 1.0;
-    }
-
-    /// Releases the envelope from wherever it currently is. Legal in any
-    /// stage — a short note on a long attack releases immediately.
-    void gate_off() {
-        gate_ = false;
-        if (stage_ == Stage::idle) return;
-        stage_ = Stage::release;
-        position_ = 0.0;
-        segment_start_ = level_;
-        segment_target_ = 0.0;
+    void set_loop(bool on, int count) {
+        loop_ = on;
+        loop_count_ = std::clamp(count, 0, kMaxLoops);
     }
 
     void reset() {
         stage_ = Stage::idle;
-        level_ = 0.0;
-        position_ = 0.0;
-        segment_start_ = 0.0;
-        segment_target_ = 0.0;
+        level_ = SampleType{0};
+        peak_ = SampleType{1};
+        start_ = SampleType{0};
+        release_start_ = SampleType{0};
+        loops_done_ = 0;
+        clock_.restart(0);
+    }
+
+    void trigger(SampleType velocity) {
+        peak_ = std::clamp(velocity, SampleType{0}, SampleType{1});
+        loops_done_ = 0;
+        begin_shape_();
+    }
+
+    void release() {
+        if (!gate_driven_ || stage_ == Stage::idle || stage_ == Stage::release) return;
+        release_start_ = level_;
+        stage_ = Stage::release;
+        clock_.restart(release_samples_);
+        if (release_samples_ <= 0) {
+            // Straight to idle, not through finish_(): a release is the end of
+            // the note, and finish_() would loop a looping envelope — a
+            // note-off would start it over.
+            stage_ = Stage::idle;
+            level_ = SampleType{0};
+            clock_.restart(0);
+        }
+    }
+
+    SampleType next() {
+        level_ = level_at_();
+        advance_();
+        return level_;
+    }
+
+    /// Compatibility ordering for the former effect-envelope API, whose
+    /// first rendered attack sample was 1/N rather than the trigger point 0.
+    SampleType next_advanced() {
+        advance_();
+        level_ = level_at_();
+        return level_;
+    }
+
+    SampleType current() const { return level_; }
+    Stage stage() const { return stage_; }
+    bool active() const { return stage_ != Stage::idle; }
+    int loops_completed() const { return loops_done_; }
+
+private:
+    void update_lengths_() {
+        delay_samples_ = envelope_ms_to_samples(delay_ms_, sample_rate_);
+        attack_samples_ = envelope_ms_to_samples(attack_ms_, sample_rate_);
+        hold_samples_ = envelope_ms_to_samples(hold_ms_, sample_rate_);
+        decay_samples_ = envelope_ms_to_samples(decay_ms_, sample_rate_);
+        release_samples_ = envelope_ms_to_samples(release_ms_, sample_rate_);
+    }
+
+    long long shape_length_() const {
+        return delay_samples_ + attack_samples_ + hold_samples_ + decay_samples_;
+    }
+
+    SampleType sustain_level_() const {
+        return has_sustain_ ? sustain_ * peak_ : SampleType{0};
+    }
+
+    void begin_shape_() {
+        start_ = level_;
+        enter_delay_();
+    }
+
+    void enter_delay_() {
+        if (delay_samples_ <= 0) {
+            enter_attack_();
+            return;
+        }
+        stage_ = Stage::delay;
+        clock_.restart(delay_samples_);
+    }
+
+    void enter_attack_() {
+        if (attack_samples_ <= 0) {
+            level_ = peak_;
+            enter_hold_();
+            return;
+        }
+        stage_ = Stage::attack;
+        clock_.restart(attack_samples_);
+    }
+
+    void enter_hold_() {
+        if (hold_samples_ <= 0) {
+            enter_decay_();
+            return;
+        }
+        stage_ = Stage::hold;
+        clock_.restart(hold_samples_);
+    }
+
+    void enter_decay_() {
+        if (decay_samples_ <= 0) {
+            level_ = sustain_level_();
+            enter_after_decay_();
+            return;
+        }
+        stage_ = Stage::decay;
+        clock_.restart(decay_samples_);
+    }
+
+    void enter_after_decay_() {
+        // Looping skips the sustain hold: an envelope that stops to wait for a
+        // note-off cannot also be a cycling modulation source.
+        if (has_sustain_ && !loop_) {
+            stage_ = Stage::sustain;
+            clock_.restart(0);
+            return;
+        }
+        finish_();
+    }
+
+    void finish_() {
+        // A shape with no length at all cannot be looped — that is an infinite
+        // loop, not a modulation source.
+        if (loop_ && shape_length_() > 0) {
+            ++loops_done_;
+            if (loop_count_ == 0 || loops_done_ < loop_count_) {
+                start_ = level_;
+                enter_delay_();
+                return;
+            }
+        }
+        stage_ = Stage::idle;
+        level_ = SampleType{0};
+        clock_.restart(0);
+    }
+
+    SampleType level_at_() const {
+        const float p = clock_.progress();
+        switch (stage_) {
+            case Stage::delay:
+                // A fresh trigger enters the delay at zero because `start_` is
+                // zero. A retrigger holds the level it captured instead:
+                // snapping to zero for the delay and then resuming the attack
+                // from `start_` would be two full-scale steps, which is the
+                // opposite of retrigger-from-current-level.
+                return start_;
+            case Stage::attack:
+                return start_ + (peak_ - start_)
+                                    * static_cast<SampleType>(curve_rise(p, attack_curve_));
+            case Stage::hold:
+                return peak_;
+            case Stage::decay: {
+                const SampleType floor_level = sustain_level_();
+                return floor_level + (peak_ - floor_level)
+                                         * static_cast<SampleType>(curve_fall(p, decay_curve_));
+            }
+            case Stage::sustain:
+                return sustain_level_();
+            case Stage::release:
+                return release_start_ * static_cast<SampleType>(curve_fall(p, release_curve_));
+            case Stage::idle:
+            default:
+                return SampleType{0};
+        }
+    }
+
+    void advance_() {
+        switch (stage_) {
+            case Stage::delay:
+                if (clock_.advance()) enter_attack_();
+                return;
+            case Stage::attack:
+                if (clock_.advance()) enter_hold_();
+                return;
+            case Stage::hold:
+                if (clock_.advance()) enter_decay_();
+                return;
+            case Stage::decay:
+                if (clock_.advance()) enter_after_decay_();
+                return;
+            case Stage::release:
+                if (clock_.advance()) {
+                    stage_ = Stage::idle;
+                    level_ = SampleType{0};
+                    clock_.restart(0);
+                }
+                return;
+            case Stage::sustain:
+            case Stage::idle:
+            default:
+                return;
+        }
+    }
+
+    EnvelopeStageClock clock_{};
+    double sample_rate_ = 48000.0;
+    double delay_ms_ = 0.0;
+    double attack_ms_ = 10.0;
+    double hold_ms_ = 0.0;
+    double decay_ms_ = 100.0;
+    double release_ms_ = 200.0;
+    long long delay_samples_ = 0;
+    long long attack_samples_ = 480;
+    long long hold_samples_ = 0;
+    long long decay_samples_ = 4800;
+    long long release_samples_ = 9600;
+    SampleType level_ = SampleType{0};
+    SampleType peak_ = SampleType{1};
+    SampleType start_ = SampleType{0};
+    SampleType release_start_ = SampleType{0};
+    SampleType sustain_ = SampleType{0.7};
+    float attack_curve_ = 0.0f;
+    float decay_curve_ = 0.0f;
+    float release_curve_ = 0.0f;
+    int loop_count_ = 0;
+    int loops_done_ = 0;
+    Stage stage_ = Stage::idle;
+    bool has_sustain_ = true;
+    bool gate_driven_ = true;
+    bool loop_ = false;
+};
+
+} // namespace detail
+
+/// Attack-Release, gate-driven. Attack while the gate is high, sustain at 1,
+/// release when it falls.
+///
+/// USE: the sustained-gate workhorse — pad and drone VCAs, gate-CV amplitude,
+/// and sidechain duck-and-recover shapes (invert it through an
+/// `AttenuverterT`). When a sound has no decay stage, this is the right
+/// primitive; an ADSR with sustain pinned to 1 is the same shape with three
+/// more parameters to explain and get wrong.
+template <typename SampleType = float>
+class ArT {
+public:
+    void prepare(double sample_rate) {
+        engine_.set_has_sustain(true);
+        engine_.set_sustain(SampleType{1});
+        engine_.set_gate_driven(true);
+        engine_.set_hold_ms(0.0);
+        engine_.set_decay_ms(0.0);
+        engine_.prepare(sample_rate);
+    }
+
+    void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
+    void set_release_ms(double ms) { engine_.set_release_ms(ms); }
+    /// Compatibility with the former shared envelope core. `ArT` has no
+    /// adjustable sustain segment: while gated it always holds its peak, so
+    /// this setter is intentionally a no-op (the old core ignored it too).
+    void set_sustain(SampleType) {}
+    void set_attack_curve(float c) { engine_.set_attack_curve(c); }
+    void set_release_curve(float c) { engine_.set_release_curve(c); }
+
+    /// Round-2 compatibility curve: 0 is linear and 1 is the strongest
+    /// capacitor-like attack/release pair. The shared engine's signed curves
+    /// use opposite signs for rising and falling segments.
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_release_curve(curve);
+    }
+
+    /// Gate edges drive the envelope; repeated calls with the same state are
+    /// no-ops, so this can be called every sample from a gate signal.
+    void gate(bool on) {
+        legacy_advanced_next_ = false;
+        if (on == gate_) return;
+        gate_ = on;
+        if (on) engine_.trigger(SampleType{1});
+        else engine_.release();
+    }
+
+    void gate_on() {
+        gate(true);
+        legacy_advanced_next_ = true;
+    }
+    void gate_off() { gate(false); }
+
+    void reset() {
+        engine_.reset();
         gate_ = false;
     }
 
-    Stage stage() const { return stage_; }
-    bool active() const { return stage_ != Stage::idle; }
-    SampleType value() const { return static_cast<SampleType>(level_); }
-
-    /// Advances one sample and returns the new level in `[0, 1]`.
     SampleType next() {
-        switch (stage_) {
-            case Stage::idle:
-                return SampleType{0};
-
-            case Stage::delay:
-                if (advance(delay_samples_)) enter_attack();
-                level_ = 0.0;
-                break;
-
-            case Stage::attack:
-                level_ = ramp(attack_samples_);
-                if (position_ >= 1.0) enter_after_attack();
-                break;
-
-            case Stage::hold:
-                level_ = 1.0;
-                if (advance(hold_samples_)) enter_after_hold();
-                break;
-
-            case Stage::decay:
-                level_ = ramp(decay_samples_);
-                if (position_ >= 1.0) enter_after_decay();
-                break;
-
-            case Stage::sustain:
-                // `segment_start_` is the level this stage was entered at. For
-                // a shape with no sustain segment — `ArT`, or `AhdT` with hold
-                // disabled — that is the PEAK, and holding there is the whole
-                // meaning of "the shape ends at the peak and a held gate holds
-                // it". Reading `sustain_` unconditionally instead parked those
-                // shapes at an unrelated member (default 0.7), stepping the
-                // output down 3.1 dB in a single sample the moment attack
-                // finished.
-                level_ = has_sustain_ ? sustain_ : segment_start_;
-                break;
-
-            case Stage::release:
-                level_ = ramp(release_samples_);
-                if (position_ >= 1.0) {
-                    level_ = 0.0;
-                    stage_ = Stage::idle;
-                }
-                break;
-        }
-        level_ = snap_to_zero(level_);
-        return static_cast<SampleType>(level_);
+        return legacy_advanced_next_ ? engine_.next_advanced() : engine_.next();
     }
+    SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
+    bool active() const { return engine_.active(); }
+    EnvelopeStage stage() const { return engine_.stage(); }
 
 private:
-    /// Advances `position_` by one sample of a `samples`-long stage. Returns
-    /// true once the stage is complete.
-    bool advance(double samples) {
-        position_ += samples > 0.0 ? 1.0 / samples : 1.0;
-        return position_ >= 1.0;
-    }
-
-    /// One sample of a curved ramp from `segment_start_` to `segment_target_`.
-    double ramp(double samples) {
-        advance(samples);
-        const double p = std::min(position_, 1.0);
-        return segment_start_ + (segment_target_ - segment_start_) * shape(p);
-    }
-
-    double shape(double p) const {
-        if (curve_k_ <= 0.0) return p;
-        return (1.0 - std::exp(-curve_k_ * p)) * curve_norm_;
-    }
-
-    void enter_attack() {
-        stage_ = Stage::attack;
-        position_ = 0.0;
-        segment_start_ = level_;
-        segment_target_ = 1.0;
-    }
-
-    void enter_after_attack() {
-        level_ = 1.0;
-        position_ = 0.0;
-        segment_start_ = 1.0;
-        if (has_hold_ && hold_samples_ > 0.0) {
-            stage_ = Stage::hold;
-        } else {
-            enter_after_hold();
-        }
-    }
-
-    void enter_after_hold() {
-        position_ = 0.0;
-        segment_start_ = level_;
-        if (has_decay_) {
-            stage_ = Stage::decay;
-            segment_target_ = has_sustain_ ? sustain_ : 0.0;
-        } else if (has_sustain_) {
-            stage_ = Stage::sustain;
-        } else {
-            // No decay and no sustain: the shape ends at the peak, so a gate
-            // that is still high holds there and a gate that has fallen
-            // releases. `AhdT` with hold disabled degenerates to this.
-            stage_ = gate_ ? Stage::sustain : Stage::release;
-            segment_target_ = 0.0;
-        }
-    }
-
-    void enter_after_decay() {
-        level_ = has_sustain_ ? sustain_ : 0.0;
-        position_ = 0.0;
-        segment_start_ = level_;
-        if (has_sustain_) {
-            stage_ = Stage::sustain;
-        } else {
-            level_ = 0.0;
-            stage_ = Stage::idle;
-        }
-    }
-
-    void update() {
-        // NOT `stage_samples()`. That floors every stage at `kMinStageMs` so a
-        // ramp can never divide by zero — but a delay is a WAIT, not a ramp,
-        // and zero is a meaningful, safe value for it (`advance()` completes a
-        // zero-length stage immediately). Flooring it meant `delay_samples_`
-        // was nonzero even when the caller asked for no delay, so `gate_on()`
-        // always routed through the delay stage, which forces the level to
-        // zero. A retrigger therefore punched a full-scale one-sample notch —
-        // a broadband click — into every delay-capable shape, contradicting
-        // this class's own promise that retrigger continues from the current
-        // level.
-        delay_samples_ = units::ms_to_samples(std::max(delay_ms_, 0.0), sample_rate_);
-        attack_samples_ = stage_samples(attack_ms_);
-        hold_samples_ = stage_samples(hold_ms_);
-        decay_samples_ = stage_samples(decay_ms_);
-        release_samples_ = stage_samples(release_ms_);
-    }
-
-    double stage_samples(double ms) const {
-        return units::ms_to_samples(std::max(ms, kMinStageMs), sample_rate_);
-    }
-
-    double sample_rate_ = 44100.0;
-    double delay_ms_ = 0.0;
-    double attack_ms_ = 5.0;
-    double hold_ms_ = 0.0;
-    double decay_ms_ = 200.0;
-    double release_ms_ = 200.0;
-    double sustain_ = 0.7;
-    double curve_ = 0.5;
-    double curve_k_ = kCurveKnee * 0.5;
-    double curve_norm_ = 1.0 / (1.0 - std::exp(-kCurveKnee * 0.5));
-
-    double delay_samples_ = 0.0;
-    double attack_samples_ = 1.0;
-    double hold_samples_ = 0.0;
-    double decay_samples_ = 1.0;
-    double release_samples_ = 1.0;
-
-    Stage stage_ = Stage::idle;
-    double level_ = 0.0;
-    double position_ = 0.0;
-    double segment_start_ = 0.0;
-    double segment_target_ = 0.0;
+    detail::EnvelopeEngine<SampleType> engine_{};
     bool gate_ = false;
-
-    bool has_delay_ = true;
-    bool has_hold_ = true;
-    bool has_decay_ = true;
-    bool has_sustain_ = true;
-};
-
-/// Attack–Release: rises to peak, then falls. No sustain — a trigger shape, not
-/// a gate shape. The percussion envelope.
-template <typename SampleType = float>
-class ArT : public EnvelopeCore<SampleType> {
-public:
-    ArT() { this->enable_stages(false, false, false, false); }
-};
-
-/// Attack–Decay: rises to peak, then falls to zero without waiting for a gate
-/// release. Distinct from `ArT` only in which time control names the fall,
-/// which matters because a spec that says "decay" and gets "release" is a spec
-/// whose test reads the wrong setter.
-template <typename SampleType = float>
-class AdT : public EnvelopeCore<SampleType> {
-public:
-    AdT() { this->enable_stages(false, false, true, false); }
-};
-
-/// Attack–Hold–Decay: rises, sits at peak for a stated time, then falls. The
-/// shape a gated reverb's envelope and a drum's body both want.
-template <typename SampleType = float>
-class AhdT : public EnvelopeCore<SampleType> {
-public:
-    AhdT() { this->enable_stages(false, true, true, false); }
-};
-
-/// Delay–Attack–Hold–Decay–Sustain–Release: the full modular shape. The
-/// pre-delay is what lets a second envelope arrive after the first, which is
-/// how a delayed vibrato or a two-stage swell is built without a sequencer.
-template <typename SampleType = float>
-class DahdsrT : public EnvelopeCore<SampleType> {
-public:
-    DahdsrT() { this->enable_stages(true, true, true, true); }
-};
-
-/// A `DahdsrT` mapped to bipolar `[-1, +1]` output, with its own depth and
-/// polarity — the modulation-destination shape.
-///
-/// Kept separate from a plain envelope plus an `AttenuverterT` because the
-/// combination has a trap: attenuverting a `[0, 1]` envelope to bipolar makes
-/// its REST state −depth rather than 0, so an idle envelope silently offsets
-/// its destination. This maps rest to 0 and peak to ±depth, which is what
-/// "modulation envelope" means everywhere it is used.
-///
-/// RT contract: as `EnvelopeCore`.
-template <typename SampleType = float>
-class ModEnvT {
-public:
-    using Stage = EnvelopeStage;
-
-    void prepare(double sample_rate) { core_.prepare(sample_rate); }
-
-    /// Modulation depth. Negative inverts the envelope's direction.
-    void set_depth(double depth) { depth_ = std::clamp(depth, -1.0, 1.0); }
-    double depth() const { return depth_; }
-
-    void set_delay_ms(double ms) { core_.set_delay_ms(ms); }
-    void set_attack_ms(double ms) { core_.set_attack_ms(ms); }
-    void set_hold_ms(double ms) { core_.set_hold_ms(ms); }
-    void set_decay_ms(double ms) { core_.set_decay_ms(ms); }
-    void set_release_ms(double ms) { core_.set_release_ms(ms); }
-    void set_sustain(double level) { core_.set_sustain(level); }
-    void set_curve(double curve) { core_.set_curve(curve); }
-
-    void gate_on() { core_.gate_on(); }
-    void gate_off() { core_.gate_off(); }
-    void reset() { core_.reset(); }
-
-    Stage stage() const { return core_.stage(); }
-    bool active() const { return core_.active(); }
-
-    /// Advances one sample. Rest is exactly 0; peak is `depth`.
-    SampleType next() {
-        return static_cast<SampleType>(static_cast<double>(core_.next()) * depth_);
-    }
-
-private:
-    EnvelopeCore<SampleType> core_{};
-    double depth_ = 1.0;
+    bool legacy_advanced_next_ = false;
 };
 
 using Ar = ArT<float>;
-using Ad = AdT<float>;
-using Ahd = AhdT<float>;
-using Dahdsr = DahdsrT<float>;
-using ModEnv = ModEnvT<float>;
+using Ar64 = ArT<double>;
 
-}  // namespace pulp::signal
+/// Attack-Decay one-shot, trigger-driven. Gate release is ignored by
+/// construction.
+///
+/// USE: percussion and plucks fired from `TriggerDetectT` or `BurstGenT`;
+/// modulation blips such as filter pings; anything where the event has no
+/// duration. Retriggering during the decay ramps from the current level rather
+/// than from zero, so a fast roll does not click.
+template <typename SampleType = float>
+class AdT {
+public:
+    void prepare(double sample_rate) {
+        engine_.set_has_sustain(false);
+        engine_.set_gate_driven(false);
+        engine_.set_hold_ms(0.0);
+        engine_.prepare(sample_rate);
+    }
+
+    void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
+    void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
+    void set_attack_curve(float c) { engine_.set_attack_curve(c); }
+    void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+    }
+
+    /// @param on true to loop; `count` 0 loops forever, otherwise 1..128.
+    void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
+
+    void trigger(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void gate_on() { trigger(); }
+    void gate_off() {}
+    void reset() { engine_.reset(); }
+
+    SampleType next() { return engine_.next(); }
+    SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
+    bool active() const { return engine_.active(); }
+    int loops_completed() const { return engine_.loops_completed(); }
+    EnvelopeStage stage() const { return engine_.stage(); }
+
+private:
+    detail::EnvelopeEngine<SampleType> engine_{};
+};
+
+using Ad = AdT<float>;
+using Ad64 = AdT<double>;
+
+/// Attack-Hold-Decay one-shot, trigger-driven.
+///
+/// USE: drum voices and sample playback. The hold keeps the transient and body
+/// at full level for a defined window before the tail starts, which is the
+/// output-VCA shape of essentially every drum synth. It is also the way to get
+/// a chopped shape whose length does not depend on how long a gate was held —
+/// the hold *is* the chop length.
+template <typename SampleType = float>
+class AhdT {
+public:
+    void prepare(double sample_rate) {
+        engine_.set_has_sustain(false);
+        engine_.set_gate_driven(false);
+        engine_.prepare(sample_rate);
+    }
+
+    void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
+    void set_hold_ms(double ms) { engine_.set_hold_ms(ms); }
+    void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
+    void set_attack_curve(float c) { engine_.set_attack_curve(c); }
+    void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+    }
+    void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
+
+    void trigger(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void gate_on() { trigger(); }
+    void gate_off() {}
+    void reset() { engine_.reset(); }
+
+    SampleType next() { return engine_.next(); }
+    SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
+    bool active() const { return engine_.active(); }
+    int loops_completed() const { return engine_.loops_completed(); }
+    EnvelopeStage stage() const { return engine_.stage(); }
+
+private:
+    detail::EnvelopeEngine<SampleType> engine_{};
+};
+
+using Ahd = AhdT<float>;
+using Ahd64 = AhdT<double>;
+
+/// Delay-Attack-Hold-Decay-Sustain-Release with per-stage curves and velocity.
+///
+/// USE: the superset for layered and orchestral patches. The delay staggers
+/// layers — a swell pad arriving under a pluck is one parameter, not a second
+/// voice. The hold shapes the pre-decay plateau. The per-stage curves are what
+/// let a synthesized contour match a sampled instrument's. When in doubt about
+/// which mod source a matrix slot should carry, this is it.
+///
+/// Velocity scales the peak, so the decay floor (`sustain * velocity`) tracks
+/// it too — a soft note is quieter throughout, not just at its attack.
+///
+/// In looping mode the sustain stage is skipped: an envelope that stops to wait
+/// for a note-off cannot also be a cycling source.
+template <typename SampleType = float>
+class DahdsrT {
+public:
+    void prepare(double sample_rate) {
+        engine_.set_has_sustain(true);
+        engine_.set_gate_driven(true);
+        engine_.prepare(sample_rate);
+    }
+
+    void set_delay_ms(double ms) { engine_.set_delay_ms(ms); }
+    void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
+    void set_hold_ms(double ms) { engine_.set_hold_ms(ms); }
+    void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
+    void set_sustain(SampleType level) { engine_.set_sustain(level); }
+    void set_release_ms(double ms) { engine_.set_release_ms(ms); }
+
+    void set_attack_curve(float c) { engine_.set_attack_curve(c); }
+    void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+    void set_release_curve(float c) { engine_.set_release_curve(c); }
+
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+        engine_.set_release_curve(curve);
+    }
+
+    void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
+
+    void note_on(SampleType velocity = SampleType{1}) { engine_.trigger(velocity); }
+    void note_off() { engine_.release(); }
+    void gate_on() { note_on(); }
+    void gate_off() { note_off(); }
+    void reset() { engine_.reset(); }
+
+    SampleType next() { return engine_.next(); }
+    SampleType current() const { return engine_.current(); }
+    SampleType value() const { return current(); }
+    bool active() const { return engine_.active(); }
+    int loops_completed() const { return engine_.loops_completed(); }
+    EnvelopeStage stage() const { return engine_.stage(); }
+
+private:
+    detail::EnvelopeEngine<SampleType> engine_{};
+};
+
+using Dahdsr = DahdsrT<float>;
+using Dahdsr64 = DahdsrT<double>;
+
+/// Delay-Attack-Hold-Decay modulation envelope with a signed depth. No sustain,
+/// no release, gates ignored.
+///
+/// USE: per-hit modulation shaping — filter sweep depth per drum hit, pitch
+/// drops, the mod-envelope role in a drum rack. The signed depth is why this is
+/// not just an `AhdT`: a modulation destination usually wants to be pushed
+/// *down* as often as up, and negating at the source keeps the matrix slot's
+/// depth free for the amount.
+template <typename SampleType = float>
+class ModEnvT {
+public:
+    void prepare(double sample_rate) {
+        engine_.set_has_sustain(false);
+        engine_.set_gate_driven(false);
+        engine_.prepare(sample_rate);
+    }
+
+    void set_delay_ms(double ms) { engine_.set_delay_ms(ms); }
+    void set_attack_ms(double ms) { engine_.set_attack_ms(ms); }
+    void set_hold_ms(double ms) { engine_.set_hold_ms(ms); }
+    void set_decay_ms(double ms) { engine_.set_decay_ms(ms); }
+    void set_release_ms(double ms) { engine_.set_release_ms(ms); }
+    void set_sustain(SampleType level) { engine_.set_sustain(level); }
+    void set_attack_curve(float c) { engine_.set_attack_curve(c); }
+    void set_decay_curve(float c) { engine_.set_decay_curve(c); }
+    void set_curve(double c) {
+        const float curve = static_cast<float>(std::clamp(c, 0.0, 1.0));
+        engine_.set_attack_curve(-curve);
+        engine_.set_decay_curve(curve);
+        engine_.set_release_curve(curve);
+    }
+    void set_loop(bool on, int count = 0) { engine_.set_loop(on, count); }
+
+    /// Signed, -1..+1. Applied by `modulation()`, not by `next()`.
+    void set_depth(SampleType d) { depth_ = std::clamp(d, SampleType{-1}, SampleType{1}); }
+
+    void trigger(SampleType velocity = SampleType{1}) {
+        legacy_scaled_next_ = false;
+        engine_.set_has_sustain(false);
+        engine_.set_gate_driven(false);
+        engine_.trigger(velocity);
+    }
+    void gate_on() {
+        legacy_scaled_next_ = true;
+        engine_.set_has_sustain(true);
+        engine_.set_gate_driven(true);
+        engine_.trigger(SampleType{1});
+    }
+    void gate_off() { engine_.release(); }
+    void reset() { engine_.reset(); }
+
+    /// Raw unipolar level, 0..1.
+    SampleType next() {
+        const SampleType level = engine_.next();
+        return legacy_scaled_next_ ? level * depth_ : level;
+    }
+
+    /// The last `next()` scaled by the signed depth — the value to hand a
+    /// modulation destination.
+    SampleType modulation() const { return engine_.current() * depth_; }
+
+    SampleType current() const { return engine_.current(); }
+    SampleType value() const {
+        return legacy_scaled_next_ ? engine_.current() * depth_ : engine_.current();
+    }
+    bool active() const { return engine_.active(); }
+    EnvelopeStage stage() const { return engine_.stage(); }
+
+private:
+    detail::EnvelopeEngine<SampleType> engine_{};
+    SampleType depth_ = SampleType{1};
+    bool legacy_scaled_next_ = false;
+};
+
+using ModEnv = ModEnvT<float>;
+using ModEnv64 = ModEnvT<double>;
+
+/// Level-independent transient detector: the normalized excess of a fast
+/// envelope follower over a slow one.
+///
+///     out = max(0, (fast - slow) / max(slow, epsilon))
+///
+/// The division is what makes it level-independent: the same musical gesture at
+/// -6 dBFS and at -30 dBFS produces the same output, because both followers
+/// scale with the input and the ratio does not. An absolute-difference detector
+/// needs its threshold re-tuned for every source; this one does not.
+///
+/// RT contract: two `BallisticsFilterT` instances of scalar state.
+/// `process()` and `reset()` allocate nothing.
+///
+/// USE: input duckers; adaptive transient shapers; "how hard was that hit" as a
+/// modulation source; striking an `LpgT` from a live input's attacks so an
+/// effect breathes with the playing rather than with a fixed clock.
+template <typename SampleType = float>
+class TransientDetectorT {
+public:
+    /// Fast enough to sit on the attack itself.
+    static constexpr SampleType kDefaultFastMs = SampleType{2};
+    /// Slow enough to represent "the level this material has been running at".
+    static constexpr SampleType kDefaultSlowMs = SampleType{40};
+
+    void prepare(SampleType sample_rate) {
+        // RMS rather than peak on both followers: a peak follower fast enough
+        // to sit on an attack also tracks the waveform ripple of any low tone,
+        // which reads as a permanent 20% transient on a held bass note. RMS
+        // averages the ripple out without slowing the attack response.
+        fast_.set_mode(BallisticsFilterT<SampleType>::Mode::rms);
+        slow_.set_mode(BallisticsFilterT<SampleType>::Mode::rms);
+        fast_.prepare(sample_rate);
+        slow_.prepare(sample_rate);
+        apply_times_();
+    }
+
+    void set_fast_ms(SampleType ms) {
+        fast_ms_ = std::max(SampleType{0.01}, ms);
+        apply_times_();
+    }
+
+    void set_slow_ms(SampleType ms) {
+        slow_ms_ = std::max(SampleType{0.01}, ms);
+        apply_times_();
+    }
+
+    void reset() {
+        fast_.reset();
+        slow_.reset();
+    }
+
+    SampleType process(SampleType input) {
+        const SampleType magnitude = std::abs(input);
+        const SampleType f = fast_.process(magnitude);
+        const SampleType s = slow_.process(magnitude);
+        // The floor only engages in near-silence, well below any level where a
+        // transient means anything, so it does not break scale invariance in
+        // the range the detector is actually used in.
+        const SampleType denominator = std::max(s, SampleType{1e-9});
+        return std::max(SampleType{0}, (f - s) / denominator);
+    }
+
+private:
+    void apply_times_() {
+        // Symmetric ballistics on both followers: the detector compares two
+        // time scales, and an asymmetric follower would make the comparison
+        // depend on whether the signal happens to be rising.
+        fast_.set_attack_ms(fast_ms_);
+        fast_.set_release_ms(fast_ms_);
+        slow_.set_attack_ms(slow_ms_);
+        slow_.set_release_ms(slow_ms_);
+    }
+
+    BallisticsFilterT<SampleType> fast_{};
+    BallisticsFilterT<SampleType> slow_{};
+    SampleType fast_ms_ = kDefaultFastMs;
+    SampleType slow_ms_ = kDefaultSlowMs;
+};
+
+using TransientDetector = TransientDetectorT<float>;
+using TransientDetector64 = TransientDetectorT<double>;
+
+} // namespace pulp::signal

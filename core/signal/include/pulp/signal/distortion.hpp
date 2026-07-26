@@ -278,6 +278,39 @@ struct ClipperSolverConfig {
 
 namespace detail {
 
+/// Solves one implicit stage of
+/// `C·dv/dt = source_current − v/R − i_D(v)`.
+///
+/// Both halves of TR-BDF2 have this exact shape. They differ only in the
+/// history voltage, the already-known flow carried by that history, the weight
+/// of the new flow, and the effective `C/dt` coefficient. Keeping the nonlinear
+/// solve here gives the two stages one bracket, warm-start, tolerance, and
+/// iteration policy.
+inline double solve_implicit_flow_stage(const junction::JunctionPair& network,
+                                        double history_voltage, double history_flow,
+                                        double source_current, double flow_weight,
+                                        double c_over_step, double resistance,
+                                        double initial, int& iterations_out) {
+    const auto residual = [&](double v) {
+        const double flow = source_current - v / resistance - network.current(v);
+        return c_over_step * (v - history_voltage) -
+               flow_weight * (history_flow + flow);
+    };
+    const auto derivative = [&](double v) {
+        return c_over_step +
+               flow_weight * (1.0 / resistance + network.conductance(v));
+    };
+
+    const double open_circuit = source_current * resistance;
+    return solve_safeguarded_newton(
+        residual, derivative,
+        /*lo=*/std::min({0.0, history_voltage, open_circuit}),
+        /*hi=*/std::max({0.0, history_voltage, open_circuit}),
+        initial, network.conduction_estimate(open_circuit, resistance),
+        ClipperSolverConfig::kNewtonTolerance / resistance,
+        ClipperSolverConfig::kMaxNewtonIterations, iterations_out);
+}
+
 /// One L-stable TR-BDF2 step of
 /// `C·dv/dt = source_current(t) − v/R − i_D(v)`.
 ///
@@ -296,50 +329,23 @@ inline double solve_tr_bdf2(const junction::JunctionPair& network, double previo
 
     const double source_at_stage =
         previous_source_current + gamma * (source_current - previous_source_current);
-    const double residual_tolerance = ClipperSolverConfig::kNewtonTolerance / resistance;
     const double previous_flow = previous_source_current - previous_voltage / resistance -
                                  network.current(previous_voltage);
     const double c_over_stage_t = capacitance / (gamma * timestep);
-    const auto stage_residual = [&](double v) {
-        const double stage_flow = source_at_stage - v / resistance - network.current(v);
-        return c_over_stage_t * (v - previous_voltage) - 0.5 * (previous_flow + stage_flow);
-    };
-    const auto stage_derivative = [&](double v) {
-        return c_over_stage_t + 0.5 / resistance + 0.5 * network.conductance(v);
-    };
-
-    const double stage_open_circuit = source_at_stage * resistance;
     int stage_iterations = 0;
-    const double stage_voltage = solve_safeguarded_newton(
-        stage_residual, stage_derivative,
-        /*lo=*/std::min({0.0, previous_voltage, stage_open_circuit}),
-        /*hi=*/std::max({0.0, previous_voltage, stage_open_circuit}),
-        /*initial=*/previous_voltage,
-        /*alternate=*/network.conduction_estimate(stage_open_circuit, resistance),
-        residual_tolerance, ClipperSolverConfig::kMaxNewtonIterations,
-        stage_iterations);
+    const double stage_voltage = solve_implicit_flow_stage(
+        network, previous_voltage, previous_flow, source_at_stage,
+        /*flow_weight=*/0.5, c_over_stage_t, resistance,
+        /*initial=*/previous_voltage, stage_iterations);
 
     const double bdf2_history =
         stage_weight * stage_voltage + (1.0 - stage_weight) * previous_voltage;
     const double c_over_bdf2_t = capacitance / (bdf2_step * timestep);
-    const auto final_residual = [&](double v) {
-        return c_over_bdf2_t * (v - bdf2_history) -
-               (source_current - v / resistance - network.current(v));
-    };
-    const auto final_derivative = [&](double v) {
-        return c_over_bdf2_t + 1.0 / resistance + network.conductance(v);
-    };
-
-    const double final_open_circuit = source_current * resistance;
     int final_iterations = 0;
-    const double result = solve_safeguarded_newton(
-        final_residual, final_derivative,
-        /*lo=*/std::min({0.0, bdf2_history, final_open_circuit}),
-        /*hi=*/std::max({0.0, bdf2_history, final_open_circuit}),
-        /*initial=*/stage_voltage,
-        /*alternate=*/network.conduction_estimate(final_open_circuit, resistance),
-        residual_tolerance, ClipperSolverConfig::kMaxNewtonIterations,
-        final_iterations);
+    const double result = solve_implicit_flow_stage(
+        network, bdf2_history, /*history_flow=*/0.0, source_current,
+        /*flow_weight=*/1.0, c_over_bdf2_t, resistance,
+        /*initial=*/stage_voltage, final_iterations);
     iterations_out = stage_iterations + final_iterations;
     return result;
 }
@@ -446,22 +452,6 @@ public:
     }
 
 private:
-    /// The diode term as the solver sees it: the plain current, or its ADAA
-    /// difference quotient. The guard and the fallback live in `JunctionPair`,
-    /// so the two clipper classes cannot drift apart on either.
-    double diode_term(double v) const {
-        return network_.current(v);
-    }
-
-    /// `d/dv` of `diode_term`. It MUST follow whichever branch `diode_term`
-    /// took: a Newton step built from the plain `conductance()` while the
-    /// residual uses the ADAA quotient is solving one equation with another
-    /// equation's Jacobian, and that diverges rather than converging slowly.
-    /// See `JunctionPair::adaa_conductance` for the measured consequence.
-    double diode_slope(double v) const {
-        return network_.conductance(v);
-    }
-
     double solve(double vin) {
         // With no capacitor the ODE is not an ODE: `C·dv/dt` vanishes and the
         // circuit equation is purely algebraic, `(vin − v)/R = i_D(v)`. Pushing
@@ -477,11 +467,13 @@ private:
                                          last_iterations_);
         }
 
-        const auto residual = [&](double v) { return diode_term(v) - (vin - v) / resistance_; };
+        const auto residual = [&](double v) {
+            return network_.current(v) - (vin - v) / resistance_;
+        };
         // Every term is strictly positive, so the residual is strictly
         // increasing in v — which is what makes the bracketed fallback safe.
         const auto derivative = [&](double v) {
-            return diode_slope(v) + 1.0 / resistance_;
+            return network_.conductance(v) + 1.0 / resistance_;
         };
 
         return detail::solve_safeguarded_newton(

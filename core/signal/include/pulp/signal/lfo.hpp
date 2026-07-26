@@ -1,251 +1,664 @@
 #pragma once
 
 /// @file lfo.hpp
-/// The one low-frequency modulation source the catalog modulates with.
+/// The house low-frequency oscillator: seven waveforms plus a continuous shape
+/// morph, a delay/fade/repeat lifecycle, stereo and quadrature output, and a
+/// deterministic random layer — all on one phase accumulator.
 ///
-/// Chorus voices, flanger sweeps, phaser sweeps, Leslie rotors, tremolo,
-/// scanner vibrato, auto-pan — every one of them is "a periodic shape at a
-/// stated rate, at a stated phase offset". Written separately they each drift
-/// into their own conventions: one counts phase in radians and one in cycles,
-/// one calls the triangle's peak +1 and another calls it 1, one resets phase on
-/// a rate change and another does not. `LfoT` fixes all of that once, so a
-/// spec that says "voice k of N sits at phase k/N" means the same thing in
-/// every module that reads it.
+/// RT contract: `prepare()` and the `set_*()` setters recompute coefficients
+/// and are control-side calls. `next()`, `next_stereo()`, `next_unipolar()`,
+/// `next_quadrature()`, `retrigger()`, `reset()`, and the accessors allocate
+/// nothing and are audio-thread safe. The type owns no memory.
 ///
-/// The contract, in the form specs cite it:
+/// USE — what each waveform is actually for, because picking the wrong one is
+/// the difference between "modulated" and "musical":
 ///
-///   - **Output is bipolar `[-1, +1]`** for every shape. A module that wants
-///     unipolar `[0, 1]` asks for `next_unipolar()`; it does not scale by hand.
-///   - **Phase is in CYCLES**, `[0, 1)`. `set_phase_offset(0.25)` is a quarter
-///     cycle; `set_phase_offset(0.5)` is exact inversion for `sine`,
-///     `triangle`, and `square` — the shapes that are odd-symmetric about
-///     their half-cycle.
+/// - **sine** — vibrato and tremolo. The only wave with no corners, so it is
+///   the only one that needs nothing downstream to smooth it.
+/// - **triangle** — filter sweeps. Linear travel and no dwell at the extremes,
+///   so the sweep reads as constant motion rather than as two held positions.
+/// - **saw_down** — rhythmic plucks and pumping. The instant reset followed by
+///   a decay is read by the ear as a beat, which is why it is the shape a
+///   sidechain imitation converges on.
+/// - **saw_up** — risers and reverse-feel swells; the same event heard
+///   backwards.
+/// - **square + pulse width** — choppers and trance gates. The pulse width *is*
+///   the gate length. Feed it a `SlewLimiterT` unless clicks are the goal.
+/// - **sh_random** — the classic random-step patch: sample-and-hold bass
+///   filters, burbling leads.
+/// - **smooth_random** (and its N-segment mode) — analog drift and wander, the
+///   "nothing repeats but nothing jumps" layer. Adjacent to tape wow.
+/// - **shape morph automated** — evolving motion from a single source, when a
+///   second LFO would be one too many moving parts.
+/// - **audio rate** — the tremolo-to-AM continuum. Ride `set_rate_hz()` from
+///   5 Hz into the hundreds; the transition itself is the effect.
+/// - **delay + fade in** — delayed vibrato, the performance behavior where the
+///   vibrato arrives after the note has settled.
+/// - **repeat 1 + fade out** — a shaped one-shot swell: an envelope wearing an
+///   LFO's clothes.
 ///
-///     It is NOT inversion for `saw_up` or `saw_down`, and that is inherent
-///     rather than a defect: a sawtooth's discontinuity means a half-cycle
-///     shift is a shift, not a negation. `saw(φ + 0.5) = −saw(φ)` holds only at
-///     φ = 0.5; everywhere else the two differ by a full unit. Anti-phase pair
-///     construction (`chorus_family`, `flanger`, `phaser_stages`) is therefore
-///     only anti-phase on the three shapes named above. This list previously
-///     named saw and omitted square — exactly backwards, and the suite had
-///     been narrowed to the passing shapes without the claim being corrected.
-///   - **Rate accuracy is exact to the phase accumulator**, which counts in
-///     `double`. Zero-crossing count over 100 s matches the configured rate to
-///     far better than the ±0.01 % the chorus/flanger specs assert.
-///   - **`next_quadrature()` computes `sin` and `cos` of the SAME accumulated
-///     phase**, not a recursive resonator. The exactness matters: a resonator's
-///     slow amplitude and phase drift is harmless in a tremolo and fatal in a
-///     frequency shifter's carrier, where it wrecks image rejection. One
-///     discipline, no per-caller decision.
-///   - **Randomness is seeded.** The two stochastic shapes (`sample_hold`,
-///     `smooth_random`) draw from `Xorshift32`, rewound by `reset()`, per
-///     series law 2. The seed is a construction choice, never an automatable
-///     parameter.
-///
-/// The phase itself is `osc::PhaseAccumulator` — the house wrap law, exact for
-/// negative and greater-than-one increments alike. An LFO never needs those,
-/// but sharing the accumulator means there is exactly one place in the library
-/// where "what happens at the wrap" is decided.
-///
-/// RT contract: `prepare()` recomputes one increment and allocates nothing.
-/// `set_*`, `next*`, and `reset()` allocate nothing, take no locks, and perform
-/// no I/O; all are safe per sample on the audio thread. `next()` costs one
-/// accumulator advance plus one shape evaluation — a `sin` call for
-/// `Wave::sine`, arithmetic only for the rest.
+/// Depth windows and cross-modulation of rate or fade are deliberately *not*
+/// here. Routing concerns belong to `ModMatrixT` and `AttenuverterT`; "an
+/// envelope rides the LFO's depth" is the matrix's `via` slot. The LFO stays a
+/// pure source.
 
-#include <pulp/signal/osc/phase.hpp>
+#include <pulp/signal/mod_tools.hpp>
 #include <pulp/signal/rng.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
 
 namespace pulp::signal {
 
-/// The shapes an `LfoT` can produce. All are bipolar `[-1, +1]` and all start
-/// at phase 0 when `reset()` is called.
-enum class LfoWave {
-    sine,           ///< `sin(2π·φ)`. Smooth; the default for anything summed.
-    triangle,       ///< Linear rise and fall, peaks at φ = 0.25 / 0.75.
-    saw_up,         ///< Rises −1 → +1 across the cycle, steps back at the wrap.
-    saw_down,       ///< Falls +1 → −1 across the cycle.
-    square,         ///< +1 for the first half cycle, −1 for the second.
-    sample_hold,    ///< A new seeded random value latched at each wrap.
-    smooth_random,  ///< `sample_hold` interpolated smoothly between draws.
+/// Round-2 effect-wave vocabulary. It is intentionally distinct from the
+/// modulation toolkit's nested `LfoT::Wave`: selecting this overload also
+/// selects the effect convention whose triangle is sine-aligned (zero at phase
+/// 0, positive peak at 0.25) instead of the toolkit convention (-1 at phase 0).
+enum class LfoWave : std::uint8_t {
+    sine,
+    triangle,
+    saw_up,
+    saw_down,
+    square,
+    sample_hold,
+    smooth_random,
 };
 
-/// A low-frequency oscillator. Bipolar output, phase in cycles, exact rate.
+/// Low-frequency oscillator with the full house option set.
 template <typename SampleType = float>
 class LfoT {
 public:
-    using Wave = LfoWave;
+    enum class Wave : std::uint8_t {
+        sine,
+        triangle,
+        saw_up,
+        saw_down,
+        square,
+        sh_random,
+        smooth_random,
+    };
 
-    /// Rate ceiling. An "LFO" above this is an audio oscillator and should be
-    /// one — the shapes here are not band-limited, so running them into the
-    /// audible range aliases. Modules that genuinely want an audio-rate
-    /// modulator use the `osc` family instead.
-    /// [design parameter] default 200 Hz, range 20 .. 1000 Hz.
+    /// Read-only bridge for callers compiled against either waveform
+    /// vocabulary.  The stored value remains the toolkit `Wave`; conversion to
+    /// `LfoWave` gives Round-2 effect code its matching public enum without
+    /// making one API spelling replace the other.
+    class WaveValue {
+    public:
+        constexpr operator Wave() const { return wave_; }
+        constexpr operator LfoWave() const {
+            switch (wave_) {
+                case Wave::sine: return LfoWave::sine;
+                case Wave::triangle: return LfoWave::triangle;
+                case Wave::saw_up: return LfoWave::saw_up;
+                case Wave::saw_down: return LfoWave::saw_down;
+                case Wave::square: return LfoWave::square;
+                case Wave::sh_random: return LfoWave::sample_hold;
+                case Wave::smooth_random: return LfoWave::smooth_random;
+            }
+            return LfoWave::sine;
+        }
+
+    private:
+        friend class LfoT;
+        constexpr explicit WaveValue(Wave wave) : wave_(wave) {}
+        Wave wave_;
+    };
+
+    /// `free` runs from `reset()` and ignores `retrigger()` — that is what
+    /// "free running" means, and a free LFO that silently restarts on note-on
+    /// is the single most common LFO bug. `retrig` restarts phase *and* the
+    /// lifecycle on every trigger. `one_shot` is `retrig` with an implied
+    /// repeat count of 1 when none is set.
+    enum class Mode : std::uint8_t { free, retrig, one_shot };
+
+    enum class FadeCurve : std::uint8_t { linear, quadratic };
+
+    enum class Stage : std::uint8_t { delay, fade_in, sustain, fade_out, done };
+
+    /// Rate floor. One cycle every ~17 minutes; below this the LFO is a
+    /// constant with extra steps.
+    static constexpr double kMinRateHz = 0.001;
+
+    /// Rate ceiling as a fraction of the sample rate. Above Nyquist the phase
+    /// accumulator aliases into nonsense; 0.45 keeps the "extended" audio-rate
+    /// mode usable right up to the edge without crossing it.
+    static constexpr double kMaxRateFraction = 0.45;
+
+    /// Ceiling of the bounded effect-LFO lane. The modulation-toolkit `Wave`
+    /// overload keeps its audio-rate ceiling of `kMaxRateFraction * fs`.
     static constexpr double kMaxRateHz = 200.0;
 
-    /// A default-constructed LFO is a 1 Hz sine at 44.1 kHz — usable without a
-    /// setup call, so a caller that only sets a depth still modulates.
-    LfoT() {
-        update();
-        // Draws the first random-shape pair too, so `sample_hold` on a
-        // never-reset LFO still modulates instead of sitting at zero.
+    /// Suggested segment count for the N-segment smooth-random mode. The
+    /// default is 1 (one target per cycle, the plain glide); 4 is the setting
+    /// that produces the wandering character the mode exists for.
+    static constexpr int kDefaultRandomSegments = 4;
+
+    static constexpr int kMaxRandomSegments = 16;
+
+    /// Upper bound on `set_repeat_count()`.
+    static constexpr int kMaxRepeatCount = 128;
+
+    // ── lifecycle ────────────────────────────────────────────────────────────
+
+    void prepare(double sample_rate) {
+        sample_rate_ = sample_rate > 0.0 ? sample_rate : 1.0;
+        update_increment_();
+        update_stage_lengths_();
         reset();
     }
 
-    /// Recomputes the phase increment for a sample rate. Does not reset phase:
-    /// a sample-rate change mid-render should not restart the sweep.
-    void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
-        update();
+    /// Rewind to a fresh start: phase 0, lifecycle restarted, random streams
+    /// re-seeded. Deterministic — two `reset()` LFOs with the same seed produce
+    /// bit-identical output forever.
+    void reset() {
+        phase_ = 0.0;
+        cycles_ = 0;
+        seed_chains_();
+        restart_lifecycle_();
     }
 
-    /// Rate in Hz. Clamped to `(0, kMaxRateHz]`.
+    /// Restart phase and the delay/fade lifecycle. Ignored in `free` mode.
+    ///
+    /// The random streams deliberately do *not* re-seed here: a re-seeding
+    /// retrigger would make every note's "random" modulation identical, which
+    /// is the opposite of what a random LFO is for. The whole render stays
+    /// reproducible because `reset()` is the only seeding point.
+    void retrigger() {
+        if (mode_ == Mode::free) return;
+        phase_ = 0.0;
+        cycles_ = 0;
+        restart_lifecycle_();
+    }
+
+    // ── rate ─────────────────────────────────────────────────────────────────
+
+    /// Free-running rate. The full range is legal, including audio rate; a
+    /// caller mapping this to a knob should use `units::taper_log()`. The
+    /// requested value is kept separately from the effective one, so a rate
+    /// clamped by a low sample rate is restored by a later `prepare()` at a
+    /// higher one instead of being silently lost.
     void set_rate_hz(double hz) {
-        rate_hz_ = std::clamp(hz, 0.0, kMaxRateHz);
-        update();
+        requested_rate_hz_ = hz;
+        update_increment_();
+    }
+
+    /// Synced use. Tempo-to-period conversion is the *caller's* job so one
+    /// transport read feeds every synced object in the plugin;
+    /// `units::division_to_samples()` does the arithmetic.
+    void set_period_samples(double samples) {
+        const double min_period = 1.0 / kMaxRateFraction;
+        increment_ = 1.0 / std::max(samples, min_period);
+        rate_hz_ = increment_ * sample_rate_;
+        requested_rate_hz_ = rate_hz_;
     }
 
     double rate_hz() const { return rate_hz_; }
+    double period_samples() const { return increment_ > 0.0 ? 1.0 / increment_ : 0.0; }
 
-    void set_wave(Wave wave) { wave_ = wave; }
-    Wave wave() const { return wave_; }
+    // ── shape ────────────────────────────────────────────────────────────────
 
-    /// Phase offset in **cycles**, wrapped into `[0, 1)`. This is the N-voice
-    /// spacing control: voice `k` of `N` sits at `set_phase_offset(k / N)`.
-    /// Changing it does not move the accumulator, so an offset change shifts
-    /// the output immediately without a discontinuity in the underlying phase.
-    void set_phase_offset(double cycles) { offset_ = wrap_cycles(cycles); }
-
-    double phase_offset() const { return offset_; }
-
-    /// The stereo special case, named because it is what most callers want:
-    /// `set_stereo_offset(0.5)` puts this LFO in anti-phase with an
-    /// otherwise-identical one. Identical to `set_phase_offset`, kept as a
-    /// distinct spelling so a call site reads as intent.
-    void set_stereo_offset(double cycles) { set_phase_offset(cycles); }
-
-    /// Seeds the stochastic shapes. Construction/preset choice only — never an
-    /// automatable parameter (series law 2).
-    void set_seed(std::uint32_t seed) {
-        rng_.set_seed(seed);
-        reset();
+    void set_wave(Wave w) {
+        wave_ = w;
+        legacy_effect_wave_ = false;
+        update_increment_();
     }
-
-    /// Rewinds phase to 0, rewinds the generator, and redraws the random-shape
-    /// state so a render from `reset()` is bit-identical every time.
-    void reset() {
-        phase_.reset(0.0);
-        rng_.reset();
-        previous_phi_ = wrap_cycles(offset_);
-        random_previous_ = rng_.next_bipolar<double>();
-        random_current_ = rng_.next_bipolar<double>();
-    }
-
-    /// Current phase in cycles, INCLUDING the offset. `[0, 1)`.
-    double phase() const { return wrap_cycles(phase_.phase() + offset_); }
-
-    /// Advances one sample and returns the shape value in `[-1, +1]`.
-    SampleType next() {
-        phase_.advance(increment_);
-        const double phi = wrap_cycles(phase_.phase() + offset_);
-        // A wrap is what re-draws the random shapes. Detected from the
-        // OFFSET-INCLUDED phase going backwards, not the raw accumulator: the
-        // shape a caller hears is the offset one, so a draw keyed to the raw
-        // wrap would land mid-shape and step. Comparing phases rather than
-        // reading the accumulator's event span also keeps this O(1) — the LFO
-        // increment is always in [0, 1), so it wraps at most once per sample.
-        if (phi < previous_phi_) {
-            random_previous_ = random_current_;
-            random_current_ = rng_.next_bipolar<double>();
+    void set_wave(LfoWave w) {
+        legacy_effect_wave_ = true;
+        morph_enabled_ = false;
+        switch (w) {
+            case LfoWave::sine: wave_ = Wave::sine; break;
+            case LfoWave::triangle: wave_ = Wave::triangle; break;
+            case LfoWave::saw_up: wave_ = Wave::saw_up; break;
+            case LfoWave::saw_down: wave_ = Wave::saw_down; break;
+            case LfoWave::square: wave_ = Wave::square; break;
+            case LfoWave::sample_hold: wave_ = Wave::sh_random; break;
+            case LfoWave::smooth_random: wave_ = Wave::smooth_random; break;
         }
-        previous_phi_ = phi;
-        return static_cast<SampleType>(shape(phi));
+        update_increment_();
+    }
+    WaveValue wave() const { return WaveValue{wave_}; }
+
+    /// Continuous blend across sine -> triangle -> saw_up -> square as `m`
+    /// runs 0 -> 3, by crossfading the adjacent pair. Enables morph mode, which
+    /// overrides `set_wave()`. At integer positions the output is bit-identical
+    /// to the corresponding pure wave.
+    void set_shape_morph(float m) {
+        shape_morph_ = std::clamp(m, 0.0f, 3.0f);
+        morph_enabled_ = true;
     }
 
-    /// Advances one sample and returns the shape mapped to `[0, 1]` — for
-    /// depths and gains, where a bipolar value would have to be rescaled at
-    /// every call site.
-    SampleType next_unipolar() {
-        return static_cast<SampleType>(0.5 * (static_cast<double>(next()) + 1.0));
+    void set_shape_morph_enabled(bool on) { morph_enabled_ = on; }
+    bool shape_morph_enabled() const { return morph_enabled_; }
+
+    /// Duty cycle of the square wave.
+    void set_pulse_width(float pw) { pulse_width_ = std::clamp(pw, 0.05f, 0.95f); }
+
+    /// Rise/fall skew of the triangle. 0 is symmetric; +1 pushes the peak to
+    /// the end of the cycle (a ramp up with a cliff), -1 to the start.
+    void set_tri_bias(float b) { tri_bias_ = std::clamp(b, -1.0f, 1.0f); }
+
+    /// Crossfade the chosen waveform against a per-cycle sample-and-hold random
+    /// value — "how random is this LFO" as one control. Works with every wave,
+    /// including the random ones.
+    void set_random_blend(float b) { random_blend_ = std::clamp(b, 0.0f, 1.0f); }
+
+    /// Targets latched per cycle in `smooth_random`. 1 is the plain
+    /// one-target-per-cycle glide; higher values latch N targets per cycle and
+    /// cosine-glide between them at N times the rate, which wanders instead of
+    /// swinging. Audibly a different animal, not just a faster one.
+    void set_random_segments(int n) { segments_ = std::clamp(n, 1, kMaxRandomSegments); }
+
+    /// Seed for the random waveforms and the random blend. Applied at the next
+    /// `reset()`.
+    void set_seed(std::uint32_t s) {
+        seed_ = s;
+        if (legacy_effect_wave_) reset();
     }
 
-    /// One sample of an exact quadrature pair: `sin` and `cos` of the same
-    /// accumulated phase. Ignores `wave()` — quadrature is only meaningful for
-    /// a sinusoid — and never uses a recursive resonator, whose amplitude and
-    /// phase drift would destroy the image rejection of anything that mixes
-    /// with it.
+    // ── phase & stereo ───────────────────────────────────────────────────────
+
+    /// Output phase offset in cycles (0..1); present a 0-360 degree control.
+    void set_phase_offset(double cycles01) { phase_offset_ = wrap01(cycles01); }
+
+    /// Offset of the right output in `next_stereo()`, in cycles. Present a
+    /// +/-180 degree control; 0.25 is quadrature.
+    void set_stereo_offset(double cycles01) {
+        if (legacy_effect_wave_)
+            phase_offset_ = wrap01(cycles01);
+        else
+            stereo_offset_ = wrap01(cycles01);
+    }
+
+    // ── lifecycle shaping ────────────────────────────────────────────────────
+
+    /// Silence (a neutral output) before the LFO starts. Phase does not advance
+    /// during the delay, so the wave always begins at its own start.
+    void set_delay_ms(double ms) {
+        delay_ms_ = std::clamp(ms, 0.0, 120000.0);
+        update_stage_lengths_();
+        restart_if_idle_();
+    }
+
+    /// Depth ramps 0 -> 1 over this time once the delay expires.
+    void set_fade_in_ms(double ms) {
+        fade_in_ms_ = std::clamp(ms, 0.0, 120000.0);
+        update_stage_lengths_();
+        restart_if_idle_();
+    }
+
+    /// Depth ramps back to 0 after the repeat count is exhausted.
+    void set_fade_out_ms(double ms, bool enabled) {
+        fade_out_ms_ = std::clamp(ms, 0.0, 120000.0);
+        fade_out_enabled_ = enabled;
+        update_stage_lengths_();
+    }
+
+    void set_fade_curve(FadeCurve c) { fade_curve_ = c; }
+
+    /// 0 = run forever. Otherwise the LFO completes N cycles and then fades out
+    /// or stops. Repeat 1 plus a fade out is how you get a shaped one-shot
+    /// swell out of an oscillator.
+    void set_repeat_count(int n) { repeat_count_ = std::clamp(n, 0, kMaxRepeatCount); }
+
+    void set_mode(Mode m) { mode_ = m; }
+    Mode mode() const { return mode_; }
+
+    Stage stage() const { return stage_; }
+    bool finished() const { return stage_ == Stage::done; }
+    long long cycles_completed() const { return cycles_; }
+    double phase() const {
+        return legacy_effect_wave_ ? wrap01(phase_ + static_cast<double>(phase_offset_))
+                                   : phase_;
+    }
+
+    // ── output ───────────────────────────────────────────────────────────────
+
+    /// Bipolar output in [-1, 1], scaled by the lifecycle depth envelope.
+    SampleType next() {
+        if (legacy_effect_wave_) advance_();
+        const float env = envelope_();
+        const double p = wrap01(phase_ + static_cast<double>(phase_offset_));
+        update_chain_(chains_[0], p);
+        if (legacy_effect_wave_)
+            return static_cast<SampleType>(static_cast<double>(env)
+                                           * legacy_effect_shape_(p, chains_[0]));
+        const float value = shape_(p, chains_[0]);
+        advance_();
+        return static_cast<SampleType>(env * value);
+    }
+
+    /// Unipolar output in [0, 1]. During the delay and after the fade out this
+    /// sits at 0.5 — the neutral value for a unipolar destination, which is
+    /// what "silence" means for one.
+    SampleType next_unipolar() { return static_cast<SampleType>(bi_to_uni(static_cast<float>(next()))); }
+
+    /// The stereo pair: the same LFO evaluated at `phase` and
+    /// `phase + stereo_offset`. A zero offset produces bit-identical channels
+    /// for every waveform, including the random ones — the second latch stream
+    /// is only engaged when there is actually an offset to decorrelate.
+    ///
+    /// With a nonzero offset the random waveforms give the right channel its
+    /// own decorrelated latch stream rather than a time-shifted copy of the
+    /// left, because a time-shifted random stream would require values the
+    /// generator has not drawn yet. Two decorrelated random walks locked to one
+    /// rate is also the more useful stereo behavior.
+    void next_stereo(SampleType& left, SampleType& right) {
+        const float env = envelope_();
+        const double pl = wrap01(phase_ + static_cast<double>(phase_offset_));
+        update_chain_(chains_[0], pl);
+        const float l = shape_(pl, chains_[0]);
+        float r = l;
+        if (stereo_offset_ != 0.0f) {
+            const double pr = wrap01(pl + static_cast<double>(stereo_offset_));
+            update_chain_(chains_[1], pr);
+            r = shape_(pr, chains_[1]);
+        }
+        left = static_cast<SampleType>(env * l);
+        right = static_cast<SampleType>(env * r);
+        advance_();
+    }
+
+    /// Exact sine/cosine pair at the current phase, regardless of the selected
+    /// waveform. Orthogonal by construction, which is what single-sideband and
+    /// barberpole effects need — a "quadrature" pair built by offsetting a
+    /// triangle or a square is not orthogonal and the sidebands do not cancel.
     void next_quadrature(SampleType& sine_out, SampleType& cosine_out) {
-        phase_.advance(increment_);
-        const double radians = kTwoPi * wrap_cycles(phase_.phase() + offset_);
-        sine_out = static_cast<SampleType>(std::sin(radians));
-        cosine_out = static_cast<SampleType>(std::cos(radians));
+        if (legacy_effect_wave_) advance_();
+        const float env = envelope_();
+        const double p = wrap01(phase_ + static_cast<double>(phase_offset_));
+        update_chain_(chains_[0], p);
+        const double angle = 6.283185307179586477 * p;
+        if (legacy_effect_wave_) {
+            sine_out = static_cast<SampleType>(static_cast<double>(env) * std::sin(angle));
+            cosine_out = static_cast<SampleType>(static_cast<double>(env) * std::cos(angle));
+            return;
+        }
+        sine_out = static_cast<SampleType>(env * static_cast<float>(std::sin(angle)));
+        cosine_out = static_cast<SampleType>(env * static_cast<float>(std::cos(angle)));
+        advance_();
     }
 
 private:
-    static constexpr double kTwoPi = 6.283185307179586476925286766559;
+    struct RandomChain {
+        Xorshift32 rng{};
+        float sh = 0.0f;
+        float glide_prev = 0.0f;
+        float glide_next = 0.0f;
+        float seg_frac = 0.0f;
+        int seg_index = -1;
+        float prev_phase = 2.0f;
+        bool primed = false;
 
-    /// Smoothing applied between `smooth_random` draws. Smoothstep rather than
-    /// a linear ramp so the modulation has no corner at the draw instant —
-    /// a corner is audible as a tick when the target is a filter cutoff.
-    static double smoothstep(double t) { return t * t * (3.0 - 2.0 * t); }
-
-    static double wrap_cycles(double c) {
-        c -= std::floor(c);
-        // `floor` of a value just below an integer can round up to it in the
-        // subtraction, leaving exactly 1.0; fold that back so the domain stays
-        // half-open and `shape()` never sees φ = 1.
-        return c < 1.0 ? c : 0.0;
-    }
-
-    double shape(double phi) const {
-        switch (wave_) {
-            case Wave::sine:
-                return std::sin(kTwoPi * phi);
-            case Wave::triangle:
-                // Odd-symmetric about the half cycle, exactly like the sine it
-                // stands in for: 0 at φ = 0, +1 at 0.25, 0 at 0.5, −1 at 0.75.
-                // That symmetry is what makes `set_stereo_offset(0.5)` an exact
-                // inversion, which the chorus voicings assert directly.
-                if (phi < 0.25) return 4.0 * phi;
-                if (phi < 0.75) return 2.0 - 4.0 * phi;
-                return 4.0 * phi - 4.0;
-            case Wave::saw_up:
-                return 2.0 * phi - 1.0;
-            case Wave::saw_down:
-                return 1.0 - 2.0 * phi;
-            case Wave::square:
-                return phi < 0.5 ? 1.0 : -1.0;
-            case Wave::sample_hold:
-                return random_current_;
-            case Wave::smooth_random:
-                return random_previous_ +
-                       (random_current_ - random_previous_) * smoothstep(phi);
+        float smooth() const {
+            const float w = 0.5f - 0.5f * std::cos(3.14159265358979324f * seg_frac);
+            return glide_prev + (glide_next - glide_prev) * w;
         }
-        return 0.0;
+    };
+
+    static double wrap01(double x) { return x - std::floor(x); }
+    static float wrap01(float x) { return x - std::floor(x); }
+
+    void update_increment_() {
+        const double max_rate = legacy_effect_wave_
+                                    ? kMaxRateHz
+                                    : kMaxRateFraction * sample_rate_;
+        const double min_rate = legacy_effect_wave_ ? 0.0 : kMinRateHz;
+        rate_hz_ = std::clamp(requested_rate_hz_, min_rate,
+                              std::max(min_rate, max_rate));
+        increment_ = rate_hz_ / sample_rate_;
     }
 
-    void update() {
-        increment_ = sample_rate_ > 0.0 ? rate_hz_ / sample_rate_ : 0.0;
+    void update_stage_lengths_() {
+        delay_samples_ = static_cast<long long>(std::lround(delay_ms_ * 0.001 * sample_rate_));
+        fade_in_samples_ = static_cast<long long>(std::lround(fade_in_ms_ * 0.001 * sample_rate_));
+        fade_out_samples_ = static_cast<long long>(std::lround(fade_out_ms_ * 0.001 * sample_rate_));
     }
 
-    double sample_rate_ = 44100.0;
+    void seed_chains_() {
+        chains_[0] = RandomChain{};
+        chains_[1] = RandomChain{};
+        chains_[0].rng.seed(static_cast<std::uint32_t>(mix64(seed_) & 0xFFFFFFFFu));
+        chains_[1].rng.seed(static_cast<std::uint32_t>(mix64(seed_ ^ 0x5DEECE66Du) >> 32));
+    }
+
+    void restart_lifecycle_() {
+        stage_pos_ = 0;
+        fade_out_start_ = 1.0f;
+        if (delay_samples_ > 0) stage_ = Stage::delay;
+        else if (fade_in_samples_ > 0) stage_ = Stage::fade_in;
+        else stage_ = Stage::sustain;
+    }
+
+    /// Re-derive the opening stage when nothing has been produced yet, so the
+    /// natural `prepare()` -> configure -> run order works without a second
+    /// `reset()`.
+    void restart_if_idle_() {
+        if (stage_pos_ == 0 && cycles_ == 0 && phase_ == 0.0) restart_lifecycle_();
+    }
+
+    int effective_repeat_() const {
+        if (mode_ == Mode::one_shot && repeat_count_ == 0) return 1;
+        return repeat_count_;
+    }
+
+    float fade_shape_(float t) const {
+        const float c = std::clamp(t, 0.0f, 1.0f);
+        return fade_curve_ == FadeCurve::quadratic ? c * c : c;
+    }
+
+    float envelope_() const {
+        switch (stage_) {
+            case Stage::delay:
+                return 0.0f;
+            case Stage::fade_in:
+                if (fade_in_samples_ <= 0) return 1.0f;
+                return fade_shape_(static_cast<float>(stage_pos_)
+                                   / static_cast<float>(fade_in_samples_));
+            case Stage::sustain:
+                return 1.0f;
+            case Stage::fade_out:
+                if (fade_out_samples_ <= 0) return 0.0f;
+                return fade_out_start_
+                       * (1.0f - fade_shape_(static_cast<float>(stage_pos_)
+                                             / static_cast<float>(fade_out_samples_)));
+            case Stage::done:
+            default:
+                return 0.0f;
+        }
+    }
+
+    void advance_() {
+        const Stage before = stage_;
+        advance_lifecycle_();
+        if (before == Stage::delay || before == Stage::done) return;
+        advance_phase_();
+    }
+
+    void advance_lifecycle_() {
+        switch (stage_) {
+            case Stage::delay:
+                if (++stage_pos_ >= delay_samples_) {
+                    stage_ = fade_in_samples_ > 0 ? Stage::fade_in : Stage::sustain;
+                    stage_pos_ = 0;
+                }
+                return;
+            case Stage::fade_in:
+                if (++stage_pos_ >= fade_in_samples_) {
+                    stage_ = Stage::sustain;
+                    stage_pos_ = 0;
+                }
+                return;
+            case Stage::fade_out:
+                if (++stage_pos_ >= fade_out_samples_) {
+                    stage_ = Stage::done;
+                    stage_pos_ = 0;
+                }
+                return;
+            case Stage::sustain:
+            case Stage::done:
+            default:
+                return;
+        }
+    }
+
+    void advance_phase_() {
+        phase_ += increment_;
+        if (phase_ >= 1.0) {
+            const double whole = std::floor(phase_);
+            phase_ -= whole;
+            cycles_ += static_cast<long long>(whole);
+            on_cycles_completed_();
+        }
+    }
+
+    void on_cycles_completed_() {
+        const int limit = effective_repeat_();
+        if (limit <= 0 || cycles_ < limit) return;
+        if (stage_ == Stage::fade_out || stage_ == Stage::done) return;
+        if (fade_out_enabled_ && fade_out_samples_ > 0) {
+            fade_out_start_ = envelope_();
+            stage_ = Stage::fade_out;
+            stage_pos_ = 0;
+        } else {
+            stage_ = Stage::done;
+            stage_pos_ = 0;
+        }
+    }
+
+    void update_chain_(RandomChain& c, double phase) {
+        const auto p = static_cast<float>(phase);
+        if (!c.primed || p < c.prev_phase) {
+            c.sh = c.rng.next_bipolar();
+            c.primed = true;
+        }
+        c.prev_phase = p;
+        const float scaled = p * static_cast<float>(segments_);
+        int seg = static_cast<int>(scaled);
+        seg = std::clamp(seg, 0, segments_ - 1);
+        if (seg != c.seg_index) {
+            c.glide_prev = c.seg_index < 0 ? c.rng.next_bipolar() : c.glide_next;
+            c.glide_next = c.rng.next_bipolar();
+            c.seg_index = seg;
+        }
+        c.seg_frac = std::clamp(scaled - static_cast<float>(seg), 0.0f, 1.0f);
+    }
+
+    float pure_wave_(Wave w, double phase, const RandomChain& c) const {
+        const auto p = static_cast<float>(phase);
+        switch (w) {
+            case Wave::sine:
+                return static_cast<float>(std::sin(6.283185307179586477 * phase));
+            case Wave::triangle: {
+                if (legacy_effect_wave_) {
+                    if (p < 0.25f) return 4.0f * p;
+                    if (p < 0.75f) return 2.0f - 4.0f * p;
+                    return 4.0f * p - 4.0f;
+                }
+                const float peak = std::clamp(0.5f + 0.5f * tri_bias_, 1.0e-4f, 1.0f - 1.0e-4f);
+                if (p < peak) return -1.0f + 2.0f * (p / peak);
+                return 1.0f - 2.0f * ((p - peak) / (1.0f - peak));
+            }
+            case Wave::saw_up:
+                return 2.0f * p - 1.0f;
+            case Wave::saw_down:
+                return 1.0f - 2.0f * p;
+            case Wave::square:
+                return p < pulse_width_ ? 1.0f : -1.0f;
+            case Wave::sh_random:
+                return c.sh;
+            case Wave::smooth_random:
+            default:
+                return c.smooth();
+        }
+    }
+
+    /// The Round-2 effect lane was specified and tested at double precision;
+    /// retaining the toolkit's float waveform core here would put quantization
+    /// steps into otherwise-linear sweeps. Random modes intentionally reuse
+    /// the shared seeded implementation because their exact values, rather
+    /// than their analytic slope, are the contract.
+    double legacy_effect_shape_(double p, const RandomChain& c) const {
+        switch (wave_) {
+            case Wave::sine: return std::sin(6.283185307179586477 * p);
+            case Wave::triangle:
+                if (p < 0.25) return 4.0 * p;
+                if (p < 0.75) return 2.0 - 4.0 * p;
+                return 4.0 * p - 4.0;
+            case Wave::saw_up: return 2.0 * p - 1.0;
+            case Wave::saw_down: return 1.0 - 2.0 * p;
+            case Wave::square: return p < static_cast<double>(pulse_width_) ? 1.0 : -1.0;
+            case Wave::sh_random:
+            case Wave::smooth_random:
+            default: return static_cast<double>(shape_(p, c));
+        }
+    }
+
+    float morph_shape_(double phase, const RandomChain& c) const {
+        static constexpr Wave kMorphOrder[4] = {
+            Wave::sine, Wave::triangle, Wave::saw_up, Wave::square};
+        int index = static_cast<int>(shape_morph_);
+        index = std::clamp(index, 0, 2);
+        const float w = shape_morph_ - static_cast<float>(index);
+        // Both endpoints of the pair short-circuit, so an integer morph
+        // position is the pure wave bit for bit rather than a crossfade that
+        // happens to land near it.
+        if (w == 0.0f) return pure_wave_(kMorphOrder[index], phase, c);
+        if (w == 1.0f) return pure_wave_(kMorphOrder[index + 1], phase, c);
+        const float a = pure_wave_(kMorphOrder[index], phase, c);
+        const float b = pure_wave_(kMorphOrder[index + 1], phase, c);
+        return a + w * (b - a);
+    }
+
+    float shape_(double phase, const RandomChain& c) const {
+        const float base = morph_enabled_ ? morph_shape_(phase, c)
+                                          : pure_wave_(wave_, phase, c);
+        if (random_blend_ <= 0.0f) return base;
+        return base + random_blend_ * (c.sh - base);
+    }
+
+    RandomChain chains_[2]{};
+
+    double sample_rate_ = 48000.0;
     double rate_hz_ = 1.0;
-    double increment_ = 0.0;
-    double offset_ = 0.0;
-    Wave wave_ = Wave::sine;
+    double requested_rate_hz_ = 1.0;
+    double increment_ = 1.0 / 48000.0;
+    double phase_ = 0.0;
 
-    osc::PhaseAccumulator phase_{};
-    Xorshift32 rng_{0x2545F491u};
-    double previous_phi_ = 0.0;
-    double random_previous_ = 0.0;
-    double random_current_ = 0.0;
+    double delay_ms_ = 0.0;
+    double fade_in_ms_ = 0.0;
+    double fade_out_ms_ = 0.0;
+    long long delay_samples_ = 0;
+    long long fade_in_samples_ = 0;
+    long long fade_out_samples_ = 0;
+    long long stage_pos_ = 0;
+
+    double phase_offset_ = 0.0;
+    float stereo_offset_ = 0.0f;
+    float shape_morph_ = 0.0f;
+    float pulse_width_ = 0.5f;
+    float tri_bias_ = 0.0f;
+    float random_blend_ = 0.0f;
+    float fade_out_start_ = 1.0f;
+
+    std::uint32_t seed_ = 0x12345678u;
+    int segments_ = 1;
+    int repeat_count_ = 0;
+    // 64-bit: a free-running LFO at the rate ceiling wraps ~86400 cycles per
+    // second at 192 kHz, which overflows a 32-bit counter within hours.
+    long long cycles_ = 0;
+
+    Wave wave_ = Wave::sine;
+    Mode mode_ = Mode::free;
+    Stage stage_ = Stage::sustain;
+    FadeCurve fade_curve_ = FadeCurve::linear;
+    bool morph_enabled_ = false;
+    bool fade_out_enabled_ = false;
+    bool legacy_effect_wave_ = std::is_same_v<SampleType, double>;
 };
 
 using Lfo = LfoT<float>;
 using Lfo64 = LfoT<double>;
 
-}  // namespace pulp::signal
+} // namespace pulp::signal

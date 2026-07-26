@@ -149,7 +149,7 @@ TEST_CASE("Timeline release export validates caller-defined maps") {
             take(serialize_project(project_with_takes(), registry)).json);
 
     constexpr std::array future{
-        SchemaVersionTarget{SchemaDomain::Document, "pulp.timeline.project", 2},
+        SchemaVersionTarget{SchemaDomain::Document, "pulp.timeline.project", 3},
     };
     auto future_result =
         serialize_project_for_release(project_with(), registry, SchemaReleaseMap{"future", future});
