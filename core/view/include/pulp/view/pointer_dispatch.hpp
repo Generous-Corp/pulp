@@ -194,9 +194,10 @@ void deliver_mouse_up(View& root, View* target, Point root_pt,
 /// but the press it already delivered is still outstanding: a Knob opens
 /// `on_gesture_begin` and relative-mouse mode on press and clears them only on
 /// release, so bailing bare strands beginEdit with no endEdit — a stuck
-/// automation touch and a hidden cursor. Callers clear their captured
-/// drag-target slot after this returns, so a gesture that later goes terminal
-/// cannot silently resume the raw drag with a position jump.
+/// automation touch and a hidden cursor. Callers must clear their captured
+/// drag-target slot before invoking this user-callback pipeline, so a callback
+/// exception or a gesture that later goes terminal cannot retry or resume the
+/// raw drag with a position jump.
 ///
 /// Runs the FULL release pipeline rather than a bare `on_mouse_up`, because the
 /// press ran the full press pipeline: a legacy-only close leaves the modern
