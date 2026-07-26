@@ -652,6 +652,28 @@ TEST_CASE("Variation makes successive crashes differ",
     REQUIRE_FALSE(first == second);
 }
 
+TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
+          "[signal][drum][cymbal][life]") {
+    using pulp::signal::drum::HitLifeMode;
+
+    CymbalVoice voice;
+    voice.prepare(kFs);
+    voice.set_variation(1.0);
+    REQUIRE(voice.hit_life() == HitLifeMode::advancing_seed);
+
+    voice.set_hit_life(HitLifeMode::fixed_seed);
+    voice.reset();
+    const auto fixed_a = hit(voice, 0.8f, 12000);
+    voice.reset();
+    const auto fixed_b = hit(voice, 0.8f, 12000);
+    REQUIRE(fixed_a == fixed_b);
+
+    voice.set_hit_life(HitLifeMode::preserved_state);
+    const auto living_a = hit(voice, 0.8f, 12000);
+    const auto living_b = hit(voice, 0.8f, 12000);
+    REQUIRE_FALSE(living_a == living_b);
+}
+
 TEST_CASE("Cymbal decay controls how long the wash lasts",
           "[signal][drum][cymbal]") {
     auto length_for = [](double decay_ms) {

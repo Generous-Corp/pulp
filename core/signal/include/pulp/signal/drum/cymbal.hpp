@@ -2,6 +2,7 @@
 
 #include <pulp/signal/decay_envelope.hpp>
 #include <pulp/signal/delay_line.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/frequency_shifter.hpp>
 #include <pulp/signal/noise_source.hpp>
@@ -118,7 +119,15 @@ public:
     void set_low_cut_hz(double hz) { low_cut_hz_ = std::clamp(hz, 20.0, 2000.0); }
 
     /// How much successive hits differ, 0 (bit-identical) to 1.
-    void set_variation(double amount) { variation_ = std::clamp(amount, 0.0, 1.0); }
+    void set_variation(double amount) {
+        variation_ = std::clamp(amount, 0.0, 1.0);
+        hit_life_.set_mode(variation_ > 0.0
+                               ? HitLifeMode::advancing_seed
+                               : HitLifeMode::fixed_seed);
+    }
+
+    void set_hit_life(HitLifeMode mode) { hit_life_.set_mode(mode); }
+    HitLifeMode hit_life() const { return hit_life_.mode(); }
 
     void set_noise_color(NoiseColor color) { noise_.set_color(color); }
 
@@ -151,7 +160,7 @@ protected:
         low_cut_.reset();
         output_.reset();
         noise_.reset();
-        seed_advance_ = 0;
+        hit_life_.reset();
         level_ = 0.0;
         strike_phase_ = 0.0;
     }
@@ -164,16 +173,11 @@ protected:
         const double brightness = response.brightness_scale(velocity);
         velocity_ = velocity;
 
-        // Variation advances the seed per hit, so two crashes differ; at zero
-        // the seed is fixed and the voice is reproducible.
-        if (variation_ > 0.0) {
-            ++seed_advance_;
-            noise_.set_seed(NoiseSource::default_seed +
-                            static_cast<std::uint32_t>(seed_advance_ * 2654435761u));
-        } else {
-            noise_.set_seed(NoiseSource::default_seed);
+        const auto life = hit_life_.trigger(NoiseSource::default_seed);
+        if (life.reseed_excitation) {
+            noise_.set_seed(life.seed);
+            noise_.reset();
         }
-        noise_.reset();
 
         update_combs();
         shifter_.set_shift_hz(shift_hz_);
@@ -317,6 +321,7 @@ private:
     double variation_ = 0.5;
 
     NoiseSource noise_;
+    HitLife hit_life_{HitLifeMode::advancing_seed};
     std::array<DelayLine, comb_count> combs_;
     std::array<TptFilter, comb_count> dampers_;
     std::array<TptFilter, comb_count> upper_highpasses_;
@@ -334,7 +339,6 @@ private:
     double velocity_ = 1.0;
     double level_ = 0.0;
     double strike_phase_ = 0.0;
-    unsigned seed_advance_ = 0;
 };
 
 }  // namespace pulp::signal::drum

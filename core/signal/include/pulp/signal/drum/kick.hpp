@@ -2,6 +2,7 @@
 
 #include <pulp/signal/bridged_t_resonator.hpp>
 #include <pulp/signal/decay_envelope.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/noise_source.hpp>
@@ -176,6 +177,13 @@ public:
     /// sigh is emergent rather than scripted, and is a usable sound in itself.
     void set_circuit_sigh(bool enabled) { circuit_.set_sigh_enabled(enabled); }
 
+    /// Select whether circuit retriggers restart, vary their excitation, or
+    /// preserve the network memory. The authentic default is preserved_state.
+    void set_circuit_hit_life(HitLifeMode mode) {
+        circuit_life_.set_mode(mode);
+    }
+    HitLifeMode circuit_hit_life() const { return circuit_life_.mode(); }
+
 protected:
     void on_prepare(double sample_rate) override {
         noise_.prepare(sample_rate);
@@ -204,6 +212,7 @@ protected:
         circuit_.set_attack_shunt(false);
         output_.reset();
         noise_.reset();
+        circuit_life_.reset();
         shaper_.reset();
         tone_.reset();
         phase_ = 0.0;
@@ -257,9 +266,18 @@ protected:
                 break;
 
             case KickBody::circuit:
-                // The network is deliberately not reset: a trigger adds energy
-                // to a body that may still be ringing, which is what stops
-                // repeated hits sounding identical and mechanical.
+                // The authentic default does not reset the network: a trigger
+                // adds energy to a body that may still be ringing. Fixed and
+                // advancing modes explicitly restart it.
+                if (const auto life =
+                        circuit_life_.trigger(NoiseSource::default_seed);
+                    life.reset_dsp_state) {
+                    reset_circuit_memory();
+                    if (life.reseed_excitation) {
+                        noise_.set_seed(life.seed);
+                        noise_.reset();
+                    }
+                }
                 pulse_remaining_ = std::max(
                     1, static_cast<int>(0.001 * circuit_pulse_ms_ * sample_rate()));
                 shunt_remaining_ =
@@ -306,6 +324,17 @@ protected:
     }
 
 private:
+    void reset_circuit_memory() {
+        circuit_.reset();
+        circuit_.set_attack_shunt(false);
+        shaper_.reset();
+        tone_.reset();
+        feedback_z_ = 0.0;
+        ring_level_ = 0.0;
+        pulse_remaining_ = 0;
+        shunt_remaining_ = 0;
+    }
+
     double render_oscillator_body(double body_env) {
         const double pitch_env = pitch_env_.process();
         const double f = tune_hz_ * std::exp2(bend_octaves_ * pitch_env);
@@ -439,6 +468,7 @@ private:
     SubLayer sub_;
     TwoPoleResonator resonator_;
     BridgedTResonator circuit_;
+    HitLife circuit_life_{HitLifeMode::preserved_state};
     OutputStage output_;
 
     double velocity_gain_ = 1.0;

@@ -679,6 +679,27 @@ TEST_CASE("The circuit body preserves its ring across a retrigger",
     REQUIRE(third == first);
 }
 
+TEST_CASE("The circuit anti-machine-gun policy is selectable",
+          "[signal][drum][kick][circuit][life]") {
+    using pulp::signal::drum::HitLifeMode;
+
+    KickVoice voice;
+    init(voice, KickBody::circuit);
+    voice.set_circuit_feedback(0.95);
+    voice.set_click_level(0.0);
+    voice.set_noise_level(0.0);
+    voice.set_circuit_hit_life(HitLifeMode::fixed_seed);
+
+    const auto first = hit(voice, 1.0f, 12000);
+    const auto second = hit(voice, 1.0f, 12000);
+    REQUIRE(first == second);
+
+    voice.set_circuit_hit_life(HitLifeMode::preserved_state);
+    REQUIRE(voice.circuit_hit_life() == HitLifeMode::preserved_state);
+    const auto living = hit(voice, 1.0f, 12000);
+    REQUIRE_FALSE(living == first);
+}
+
 // -- Output stage and realtime contract --------------------------------------
 
 TEST_CASE("The drum output stage defaults to the exact house x2 latency",
