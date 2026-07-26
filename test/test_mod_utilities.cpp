@@ -934,6 +934,31 @@ TEST_CASE("trigger-kit factor setters enforce their declared ranges",
     REQUIRE(mult.multiple() == ClockMult::kMaxMultiple);
 }
 
+TEST_CASE("trigger-kit time and count setters enforce declared ranges",
+          "[trigger][mod-utilities][contract]") {
+    GateGen gate;
+    gate.set_length_ms(-1.0);
+    REQUIRE(gate.length_ms() == GateGen::kMinLengthMs);
+    gate.set_length_ms(20000.0);
+    REQUIRE(gate.length_ms() == GateGen::kMaxLengthMs);
+
+    TrigDelay delay;
+    delay.set_delay_ms(-1.0);
+    REQUIRE(delay.delay_ms() == TrigDelay::kMinDelayMs);
+    delay.set_delay_ms(20000.0);
+    REQUIRE(delay.delay_ms() == TrigDelay::kMaxDelayMs);
+
+    BurstGen burst;
+    burst.set_count(0);
+    REQUIRE(burst.count() == BurstGen::kMinCount);
+    burst.set_count(256);
+    REQUIRE(burst.count() == BurstGen::kMaxCount);
+    burst.set_interval_ms(0.0);
+    REQUIRE(burst.interval_ms() == BurstGen::kMinIntervalMs);
+    burst.set_interval_ms(3000.0);
+    REQUIRE(burst.interval_ms() == BurstGen::kMaxIntervalMs);
+}
+
 TEST_CASE("ClockMult emits the stated number of triggers per steady period",
           "[trigger][mod-utilities]") {
     ClockMult mult;

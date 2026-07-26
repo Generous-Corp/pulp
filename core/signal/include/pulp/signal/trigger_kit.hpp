@@ -142,6 +142,8 @@ class GateGenT {
 public:
     /// Gate length in ms.
     /// [design parameter] default 10 ms, range 0.1 .. 10000 ms.
+    static constexpr double kMinLengthMs = 0.1;
+    static constexpr double kMaxLengthMs = 10000.0;
     static constexpr double kDefaultLengthMs = 10.0;
 
     void prepare(double sample_rate) {
@@ -150,9 +152,10 @@ public:
     }
 
     void set_length_ms(double ms) {
-        length_ms_ = std::max(ms, 0.0);
+        length_ms_ = std::fmin(std::fmax(ms, kMinLengthMs), kMaxLengthMs);
         update();
     }
+    double length_ms() const { return length_ms_; }
 
     void set_levels(SampleType low_level, SampleType high_level) {
         low_level_ = low_level;
@@ -350,6 +353,8 @@ template <typename SampleType = float>
 class TrigDelayT {
 public:
     /// [design parameter] default 0 ms, range 0 .. 10000 ms.
+    static constexpr double kMinDelayMs = 0.0;
+    static constexpr double kMaxDelayMs = 10000.0;
     static constexpr double kDefaultDelayMs = 0.0;
 
     void prepare(double sample_rate) {
@@ -358,9 +363,10 @@ public:
     }
 
     void set_delay_ms(double ms) {
-        delay_ms_ = std::max(ms, 0.0);
+        delay_ms_ = std::fmin(std::fmax(ms, kMinDelayMs), kMaxDelayMs);
         update();
     }
+    double delay_ms() const { return delay_ms_; }
 
     void reset() {
         countdown_ = -1;
@@ -404,9 +410,13 @@ template <typename SampleType = float>
 class BurstGenT {
 public:
     /// [design parameter] count default 4, range 1 .. 64.
+    static constexpr int kMinCount = 1;
+    static constexpr int kMaxCount = 64;
     static constexpr int kDefaultCount = 4;
 
     /// [design parameter] interval default 50 ms, range 1 .. 2000 ms.
+    static constexpr double kMinIntervalMs = 1.0;
+    static constexpr double kMaxIntervalMs = 2000.0;
     static constexpr double kDefaultIntervalMs = 50.0;
 
     void prepare(double sample_rate) {
@@ -414,12 +424,14 @@ public:
         update();
     }
 
-    void set_count(int count) { count_ = std::clamp(count, 1, 256); }
+    void set_count(int count) { count_ = std::clamp(count, kMinCount, kMaxCount); }
+    int count() const { return count_; }
 
     void set_interval_ms(double ms) {
-        interval_ms_ = std::max(ms, 0.0);
+        interval_ms_ = std::fmin(std::fmax(ms, kMinIntervalMs), kMaxIntervalMs);
         update();
     }
+    double interval_ms() const { return interval_ms_; }
 
     void reset() {
         remaining_ = 0;
