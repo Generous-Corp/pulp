@@ -282,6 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           ln -sfn "$GITHUB_WORKSPACE/node_modules" examples/web-demos/super-convolver-ui/browser-test/node_modules
+          node --test examples/web-demos/super-convolver-ui/browser-test/fixture-assets.test.mjs
           node examples/web-demos/super-convolver-ui/browser-test/validate.mjs \
             --build "$GITHUB_WORKSPACE/build-webui" \
             --artifact /tmp/pulp-ui-browser.png
