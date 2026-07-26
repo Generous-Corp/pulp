@@ -128,7 +128,8 @@ class BufferedContentSource {
         // Generated content is tied to playhead deadlines. Once a frame has
         // been emitted as starvation silence, producing it later must not move
         // subsequent content out of time.
-        stream_config.advance_on_underrun = true;
+        stream_config.underrun_policy =
+            audio::StreamingUnderrunPolicy::AdvancePosition;
         stream_config.max_read_ahead_frames = declared_lookahead;
 
         audio::FrameReaderBinding binding;

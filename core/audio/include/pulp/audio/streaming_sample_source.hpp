@@ -92,6 +92,11 @@ struct FrameReaderBinding {
     FrameReaderStopMode stop_mode = FrameReaderStopMode::JoinOnly;
 };
 
+enum class StreamingUnderrunPolicy : std::uint8_t {
+    PreservePosition = 0,
+    AdvancePosition,
+};
+
 struct StreamingSampleSourceConfig {
     std::uint32_t channels = 0;          ///< Source channel count (1 or 2 typical).
     std::uint64_t total_frames = 0;      ///< Total length of the source in frames.
@@ -120,10 +125,11 @@ struct StreamingSampleSourceConfig {
     /// refills manually via pump_background() (deterministic testing).
     bool start_background_thread = true;
 
-    /// Advance source time across streaming underruns instead of replaying late
-    /// frames on a later pull. Intended for deadline-bound generated content;
-    /// ordinary sample playback leaves this false and preserves every frame.
-    bool advance_on_underrun = false;
+    /// Whether a streaming underrun preserves the source cursor or consumes its
+    /// missing interval. Generated deadline-bound content advances; ordinary
+    /// sample playback preserves every frame.
+    StreamingUnderrunPolicy underrun_policy =
+        StreamingUnderrunPolicy::PreservePosition;
 
     /// Maximum distance the reader may produce ahead of the play cursor. Zero
     /// leaves read-ahead bounded only by ring capacity. Deadline-bound sources
@@ -198,6 +204,35 @@ public:
     Stats stats() const noexcept;
 
 private:
+    struct DeadlinePolicy {
+        bool enabled = false;
+        std::uint64_t max_read_ahead_frames = 0;
+        std::atomic<std::uint64_t> ring_start_frame{0};
+
+        void configure(const StreamingSampleSourceConfig& config,
+                       std::uint64_t initial_frame) noexcept;
+        void clear() noexcept;
+        std::uint64_t effective_end(std::uint64_t total_frames,
+                                    std::uint64_t eos_frame) const noexcept;
+        void apply_underrun(std::atomic<std::uint64_t>& play_pos,
+                            std::uint64_t next_position) const noexcept;
+        bool zero_is_backpressure() const noexcept;
+        std::uint64_t producer_cursor(std::uint64_t play_pos,
+                                      std::uint64_t reader_pos) const noexcept;
+        bool discard_stale(PlanarAudioRingBuffer& ring,
+                           std::uint64_t play_pos) noexcept;
+        void consumed(std::uint64_t ring_start,
+                      std::uint64_t frames) noexcept;
+        bool align_reader(PlanarAudioRingBuffer& ring,
+                          std::uint64_t play_pos,
+                          std::uint64_t& reader_pos) noexcept;
+        std::uint64_t read_ahead_room(std::uint64_t total_frames,
+                                      std::uint64_t play_pos,
+                                      std::uint64_t reader_pos) const noexcept;
+        void publish_start_if_empty(PlanarAudioRingBuffer& ring,
+                                    std::uint64_t frame) noexcept;
+    };
+
     void stop_thread() noexcept;
     void reader_loop() noexcept;
     void notify_reader() noexcept;
@@ -218,8 +253,7 @@ private:
     bool fully_resident_ = false;
     bool prepared_ = false;
     bool use_thread_ = false;
-    bool advance_on_underrun_ = false;
-    std::uint64_t max_read_ahead_frames_ = 0;
+    DeadlinePolicy deadline_;
 
     Buffer<float> preload_;          ///< Resident head, frames [0, preload_valid_).
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).
@@ -229,10 +263,6 @@ private:
 
     std::atomic<std::uint64_t> play_pos_{0};    ///< Audio-thread owned: next source frame to emit.
     std::atomic<std::uint64_t> reader_pos_{0};  ///< Background owned: next source frame to push.
-    // Absolute source frame represented by the next FIFO frame. Deadline-bound
-    // mode uses this tag to drain a producer write that became late while it
-    // raced an audio-thread underrun.
-    std::atomic<std::uint64_t> ring_start_frame_{0};
     // Effective end-of-stream in source frames: starts at total_frames_ and is
     // shrunk by the background reader to the realized length if the FrameReader
     // signals an early end/error mid-stream (a short/zero return before the

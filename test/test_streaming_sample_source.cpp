@@ -805,7 +805,8 @@ TEST_CASE("deadline-bound streaming finishes only after its declared interval",
     cfg.ring_capacity_frames = block;
     cfg.read_chunk_frames = block;
     cfg.start_background_thread = false;
-    cfg.advance_on_underrun = true;
+    cfg.underrun_policy =
+        pulp::audio::StreamingUnderrunPolicy::AdvancePosition;
 
     StreamingSampleSource src;
     REQUIRE(src.prepare(cfg, make_synth_reader(1, 0)));

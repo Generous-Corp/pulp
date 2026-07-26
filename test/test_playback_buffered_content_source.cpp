@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -155,7 +156,7 @@ TEST_CASE("a buffered source counts the shortfall of a producer that stops early
     REQUIRE(stats.produced_frames == kAvailable);
     REQUIRE(stats.starved_frames == kDeclaredFrames - kAvailable);
     REQUIRE(stats.starvation_events == (kDeclaredFrames - kAvailable) / kChunkFrames);
-    REQUIRE(stats.producer_errors > 0);
+    REQUIRE(stats.producer_errors == 0);
     REQUIRE(source.position() == kDeclaredFrames);
     REQUIRE(source.exhausted());
 }
@@ -181,6 +182,19 @@ TEST_CASE("a buffered producer can recover after returning no frames",
     REQUIRE(source.pump_background() == kChunkFrames);
     REQUIRE(source.pull(block.view(), kChunkFrames) == kChunkFrames);
     REQUIRE(source.position() == 2 * kChunkFrames);
+    REQUIRE(source.stats().producer_errors == 0);
+}
+
+TEST_CASE("a buffered source reports producer exceptions as errors",
+          "[playback][production]") {
+    playback::BufferedContentSource source;
+    REQUIRE(source.prepare(
+        buffered_declaration(), default_config(),
+        [](std::uint64_t, audio::BufferView<float>, std::uint64_t,
+           audio::FrameReaderStopToken) -> std::uint64_t {
+            throw std::runtime_error("producer failed");
+        }));
+
     REQUIRE(source.stats().producer_errors == 1);
 }
 
