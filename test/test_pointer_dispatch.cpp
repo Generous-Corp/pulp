@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <pulp/view/gesture.hpp>
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/view.hpp>
@@ -735,4 +736,151 @@ TEST_CASE("simulate_drag drives the callback channels a scripted widget uses",
     REQUIRE(phases.size() >= 2);
     CHECK(phases.front() == MousePhase::press);
     CHECK(phases.back() == MousePhase::release);
+}
+
+// ── should_yield_to_gesture ──────────────────────────────────────────────
+//
+// The gating decision every host phase early-returns on. It was spelled out
+// inline at six call sites; the standalone macOS host had it wrong (yielding on
+// the CONSUMED flag rather than an actual claim) for a full release after the
+// plugin host was fixed, which is why it lives in one tested place now.
+
+namespace {
+
+// Counts the press/drag/release a widget under a recognizer receives.
+// (Distinct from DragSpy above, which logs channel ORDER rather than counts.)
+struct PhaseCounter final : View {
+    int downs = 0, drags = 0, ups = 0;
+    void on_mouse_down(Point) override { ++downs; }
+    void on_mouse_drag(Point) override { ++drags; }
+    void on_mouse_up(Point) override { ++ups; }
+};
+
+MouseEvent phase_event(Point p, MousePhase phase) {
+    MouseEvent e;
+    e.position = p;
+    e.window_position = p;
+    e.button = MouseButton::left;
+    e.is_down = phase != MousePhase::release;
+    e.phase = phase;
+    return e;
+}
+
+}  // namespace
+
+TEST_CASE("should_yield_to_gesture does not yield without any recognizer",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    child->set_bounds({20, 20, 160, 160});
+    root.add_child(std::move(child));
+
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({40, 40}, MousePhase::press)));
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({80, 80}, MousePhase::drag)));
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({80, 80}, MousePhase::release)));
+}
+
+// The regression that matters: a recognizer that never recognizes. Its
+// per-event dispatch returns true throughout — a candidate EXISTS — so a host
+// gating on that value hands every event to the gesture and the widget under it
+// becomes permanently undraggable while looking perfectly alive.
+TEST_CASE("should_yield_to_gesture does not yield to a mere candidate",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({20, 20, 160, 160});
+    root.add_child(std::move(child));
+    spy->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    // Precondition: the raw dispatch DOES report consumed here. Without this
+    // the test would pass for the wrong reason — a recognizer that was never
+    // a candidate at all yields false trivially.
+    auto press = phase_event({40, 40}, MousePhase::press);
+    REQUIRE(root.dispatch_gesture_pointer_event(press));
+
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({60, 60}, MousePhase::drag)));
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({90, 90}, MousePhase::drag)));
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({90, 90}, MousePhase::release)));
+}
+
+TEST_CASE("should_yield_to_gesture yields once a recognizer claims",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->set_min_distance(40.0f);
+    spy->add_gesture_recognizer(std::move(pan));
+
+    // Press and a short move stay under the slop: candidate, not a claim.
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({40, 40}, MousePhase::press)));
+    CHECK_FALSE(should_yield_to_gesture(root, phase_event({50, 40}, MousePhase::drag)));
+    // Crossing the slop is the claim edge — and it stays claimed afterward, so
+    // the host keeps yielding for the rest of the gesture.
+    CHECK(should_yield_to_gesture(root, phase_event({100, 40}, MousePhase::drag)));
+    CHECK(should_yield_to_gesture(root, phase_event({140, 40}, MousePhase::drag)));
+}
+
+// Guards the seam against being "simplified" into a pure predicate: the arbiter
+// only advances because every event is dispatched, including the events that
+// return false. Skip those and nothing ever reaches the claim edge.
+TEST_CASE("should_yield_to_gesture dispatches even when it does not yield",
+          "[view][input][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->set_min_distance(40.0f);
+    int began = 0;
+    pan->on_began = [&](GestureRecognizer&) { ++began; };
+    spy->add_gesture_recognizer(std::move(pan));
+
+    // Only the press and one sub-slop move go through the helper, and both
+    // return false. The claim on the next move is only reachable if those two
+    // still reached the arbiter.
+    REQUIRE_FALSE(should_yield_to_gesture(root, phase_event({40, 40}, MousePhase::press)));
+    REQUIRE_FALSE(should_yield_to_gesture(root, phase_event({50, 40}, MousePhase::drag)));
+    REQUIRE(began == 0);
+
+    CHECK(should_yield_to_gesture(root, phase_event({100, 40}, MousePhase::drag)));
+    CHECK(began == 1);
+}
+
+// ── simulate_drag yields mid-loop ────────────────────────────────────────
+//
+// The headless drag must stop delivering the moment a recognizer takes the
+// pointer, the way the hosts do — otherwise a headless test can observe drag
+// behavior no real host would ever produce. The claim here lands MID-loop
+// rather than on the first move, which is the case a first-move probe misses.
+TEST_CASE("simulate_drag stops delivering moves once a recognizer claims",
+          "[view][input][drag][gesture]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto child = std::make_unique<PhaseCounter>();
+    auto* spy = child.get();
+    child->set_bounds({0, 0, 200, 200});
+    root.add_child(std::move(child));
+
+    auto pan = std::make_unique<PanRecognizer>();
+    pan->set_min_distance(40.0f);
+    spy->add_gesture_recognizer(std::move(pan));
+
+    // Ten 10px steps; the pan claims on the fourth, where travel first
+    // reaches the 40px slop.
+    root.simulate_drag({40, 40}, {140, 40}, /*steps=*/10);
+
+    CHECK(spy->downs == 1);
+    CHECK(spy->drags == 3);   // steps 1-3 only; the claim ends delivery
+    CHECK(spy->ups == 1);     // the press bracket still closes exactly once
 }

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "event_id": "20260726-mac-gesture-claim-host-parity",
+  "kind": "change",
+  "created_at": "2026-07-26T03:13:10Z",
+  "slices": [
+    "retained-ui-kernel"
+  ],
+  "rationale": "The macOS standalone and plug-in hosts now distinguish a recognizer candidate from a real pointer claim, and a mid-session claim closes the already-delivered raw pointer bracket through the full release pipeline. Capture is cleared before that user-callback pipeline so an exception cannot cause a duplicate close. Pulp-only: these host routing defects and their fixes originate here, with no counterpart framework change to backport.",
+  "tests": [
+    "pulp-test-mac-platform-harness",
+    "pulp-test-pointer-dispatch"
+  ],
+  "disposition": "pulp-only"
+}
