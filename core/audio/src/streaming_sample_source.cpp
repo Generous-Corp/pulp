@@ -345,11 +345,20 @@ std::uint64_t StreamingSampleSource::pump_background() noexcept {
 
     std::uint64_t rpos = reader_pos_.load(std::memory_order_relaxed);
     if (advance_on_underrun_) {
-        // A deadline miss may have moved the audio playhead beyond the next
-        // unread producer frame. Seek the random-access reader to current time
-        // so late content is discarded rather than replayed out of time.
-        rpos = std::max(rpos, play_pos_.load(std::memory_order_acquire));
-        reader_pos_.store(rpos, std::memory_order_relaxed);
+        const std::uint64_t play_pos =
+            play_pos_.load(std::memory_order_acquire);
+        if (play_pos > rpos) {
+            // One FIFO start tag can describe only one contiguous source
+            // interval. If an earlier result raced the deadline and remains in
+            // the ring, let the consumer drain it as stale before seeking to
+            // current time; appending after the gap would make valid frames
+            // indistinguishable from that stale prefix.
+            if (ring_.available_frames() != 0)
+                return 0;
+            rpos = play_pos;
+            reader_pos_.store(rpos, std::memory_order_relaxed);
+            ring_start_frame_.store(rpos, std::memory_order_release);
+        }
     }
     if (rpos >= total_frames_) return 0;  // tail fully streamed
 
