@@ -137,6 +137,20 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 if (me.is_wheel) {
                     return;
                 }
+                // Drag ticks arrive here too: the hosts deliver phase=drag on
+                // this channel so a widget can read modifiers mid-drag. The JS
+                // pointermove / mousemove stream is owned by on_drag below, so
+                // this channel publishes only the gesture's endpoints.
+                //
+                // Without this gate the type is derived from is_down alone, and
+                // a drag tick (is_down == true) reads as a second pointerdown.
+                // Every tick then re-runs the JS pointerdown handler, which
+                // re-latches whatever origin it captured — the standard knob
+                // idiom `y0 = e.clientY; v0 = value` — so each move computes its
+                // delta against the point it just reached and the control never
+                // leaves its starting value.
+                if (me.phase == MousePhase::drag) return;
+
                 std::string type;
                 if (me.is_down) type = "pointerdown";
                 else type = "pointerup";

@@ -631,3 +631,110 @@ TEST_CASE("clearing child recognizers cancels root arbiter sessions",
     CHECK_FALSE(root.dispatch_gesture_pointer_event(
         pointer_event({40, 10}, MousePhase::release, &t), t));
 }
+
+TEST_CASE("a mere candidate recognizer does not claim the pointer",
+          "[view][gesture]") {
+    // dispatch_gesture_pointer_event() returns true whenever a recognizer is a
+    // CANDIDATE on the hit view's ancestor chain — candidates are never pruned
+    // within a session, a failing recognizer only changes state. A host that
+    // reads that return as "the gesture took this pointer" stops delivering
+    // press/drag/release to the widget, so ANY control that registers a
+    // recognizer becomes permanently undraggable while looking perfectly alive.
+    // gesture_claimed_pointer() is the honest signal, and must stay false until
+    // a recognizer actually activates.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    View& child = add_child(root, {20, 20, 100, 100});
+
+    // A double-tap recognizer: on a single press it is a candidate, not a claim.
+    child.add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    double t = 0.0;
+    auto down = pointer_event({30, 30}, MousePhase::press, &t);
+    const bool had_candidate = root.dispatch_gesture_pointer_event(down, t);
+
+    CHECK(had_candidate);                          // a recognizer is present...
+    CHECK_FALSE(root.gesture_claimed_pointer());   // ...but it has claimed nothing
+
+    // A wheel event must not leave a stale claim behind. handle_pointer_event
+    // returns early for wheels, so the clear has to precede that early-out.
+    auto wheel = pointer_event({30, 30}, MousePhase::hover, &t);
+    wheel.is_wheel = true;
+    CHECK_FALSE(root.dispatch_gesture_pointer_event(wheel, t));
+    CHECK_FALSE(root.gesture_claimed_pointer());
+
+    // A view with no recognizer at all claims nothing either.
+    View bare;
+    bare.set_bounds({0, 0, 200, 200});
+    View& plain = add_child(bare, {20, 20, 100, 100});
+    (void)plain;
+    auto down2 = pointer_event({30, 30}, MousePhase::press, &t);
+    CHECK_FALSE(bare.dispatch_gesture_pointer_event(down2, t));
+    CHECK_FALSE(bare.gesture_claimed_pointer());
+}
+
+TEST_CASE("a widget carrying a recognizer still receives its own events",
+          "[view][gesture]") {
+    // The end-to-end shape of the host bug: a control that merely REGISTERS a
+    // recognizer must keep working normally until that recognizer actually
+    // claims. Previously the mere presence of one suppressed press/drag/release
+    // entirely, so a knob with a double-tap gesture was dead to the mouse while
+    // still painting and showing its value.
+    struct Probe final : View {
+        int downs = 0;
+        int ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<Probe>();
+    auto* probe = owned.get();
+    owned->set_bounds({20, 20, 100, 100});
+    root.add_child(std::move(owned));
+
+    // Control: no recognizer at all.
+    root.simulate_click({50, 50});
+    CHECK(probe->downs == 1);
+    CHECK(probe->ups == 1);
+
+    // Subject: identical, except the widget now carries a double-tap gesture.
+    // A single click leaves it a candidate, never a claim, so delivery must be
+    // unchanged — and the down/up bracket must stay balanced, or a real widget
+    // would hold begin_gesture open with no matching end.
+    probe->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+    root.simulate_click({50, 50});
+    CHECK(probe->downs == 2);
+    CHECK(probe->ups == 2);
+}
+
+TEST_CASE("a drag under a recognizer that never claims still gets its release",
+          "[view][gesture]") {
+    // The leak the claim-edge cases cannot see. Both of those use a recognizer
+    // that DOES claim, so they take the takeover path. Here the recognizer is a
+    // double-tap: present throughout the drag, recognizing nothing. Its
+    // per-move dispatch still returns true — a candidate exists — and OR-ing
+    // that into the release bail skipped on_mouse_up entirely, leaving the same
+    // begins=2/ends=1 shape as the host bug in the shared headless path.
+    struct Probe final : View {
+        int downs = 0, drags = 0, ups = 0;
+        void on_mouse_down(Point) override { ++downs; }
+        void on_mouse_drag(Point) override { ++drags; }
+        void on_mouse_up(Point) override { ++ups; }
+    };
+
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    auto owned = std::make_unique<Probe>();
+    auto* probe = owned.get();
+    owned->set_bounds({20, 20, 160, 160});
+    root.add_child(std::move(owned));
+    probe->add_gesture_recognizer(std::make_unique<TapRecognizer>(2));
+
+    root.simulate_drag({40, 40}, {150, 150}, /*steps=*/6);
+
+    CHECK(probe->downs == 1);
+    CHECK(probe->drags == 6);   // the widget kept the drag — nothing claimed it
+    CHECK(probe->ups == 1);     // ...and the bracket closed
+}

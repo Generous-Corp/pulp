@@ -521,7 +521,14 @@ TEST_CASE("modal bank throughput scales to large banks in real time",
 
     const double fs = 48000.0;
     constexpr int block = 512;
-    const std::size_t seconds_samples = 48000;
+    // A whole number of blocks. One second at 48 kHz is 93.75 blocks, and the
+    // loops below hand every call a full `block` — so a bare 48000 made the
+    // last call claim 512 samples with 384 left, reading and writing 128 past
+    // both buffers (ASan: heap-buffer-overflow at modal_bank.hpp's input read).
+    // Rounding up fixes that and keeps every timed call the same size, which a
+    // per-sample cost measurement wants anyway.
+    const std::size_t seconds_samples = ((48000 + block - 1) / block) * block;
+    REQUIRE(seconds_samples % static_cast<std::size_t>(block) == 0);
 
     std::printf("\nmodal bank throughput (single core, %d-sample blocks, %.0f Hz)\n",
                 block, fs);
@@ -563,7 +570,8 @@ TEST_CASE("modal bank throughput scales to large banks in real time",
         const double ns_per_sample =
             best_s * 1e9 / static_cast<double>(seconds_samples);
         const double ns_per_mode_sample = ns_per_sample / num_modes;
-        const double x_realtime = best_s / 1.0;
+        // Against the audio the render actually covers, not a nominal 1.0 s.
+        const double x_realtime = best_s / (static_cast<double>(seconds_samples) / fs);
         std::printf("%10d %14.1f %16.3f %14.4f\n", num_modes, ns_per_sample,
                     ns_per_mode_sample, x_realtime);
         if (num_modes == 1024) cost_1024 = x_realtime;
@@ -582,7 +590,10 @@ TEST_CASE("modal bank pickups share one pass over the resonator state",
     const double fs = 48000.0;
     constexpr int block = 512;
     constexpr int num_modes = 4096;
-    const std::size_t seconds_samples = 48000;
+    // A whole number of blocks — see the throughput case above; this loop hands
+    // every call a full `block` too, so a bare 48000 ran past the buffers.
+    const std::size_t seconds_samples = ((48000 + block - 1) / block) * block;
+    REQUIRE(seconds_samples % static_cast<std::size_t>(block) == 0);
 
     std::vector<ModalMode> modes(num_modes);
     std::mt19937 rng(0xacc0Cade);

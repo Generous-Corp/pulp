@@ -81,6 +81,56 @@ artifact is needed. Never modify canonical project JSON text directly.
   exist in its device chain, and permits only one lane per placement/parameter
   pair. Lane and point IDs are Project identities owned by that Track; host
   delivery remains a separate contract.
+- A `Sequence` owns two annotation lists: `SequenceMarker` (a named point) and
+  `SequenceRegion` (a named span). They are **sequence**-owned, not
+  project-owned: a `Project` holds many sequences, so a project-level list could
+  not say which timeline it annotates. Both are canonical-ticks values, carry an
+  optional packed `0xRRGGBBAA` colour (a float colour type would live outside
+  this module's dependency floor, and exact bytes are what a document model
+  needs), share one identity space (a marker may not reuse a region's `ItemId` in
+  the same sequence), and are stored sorted — markers by `(position, id)`, regions by
+  `(position, duration, id)`. **Regions may overlap and nest by design**: named
+  sections contain sub-sections, so disjointness is deliberately not an
+  invariant. What `Sequence::create` does enforce is a positive region length, a
+  non-negative position, and containment inside the sequence's musical duration
+  when it declares one — an absolute-only sequence bounds nothing above.
+- **`Sequence` is built through `create()` overloads, not aggregate init.**
+  Unlike `TrackInput`/`ProjectInput`, its `Data` is pimpl'd behind
+  `shared_ptr<const Data>`, so adding sequence-owned state means adding an
+  overload — existing call sites keep compiling and no positional brace-init
+  anywhere in the tree silently shifts a field. Preserve that: do not convert
+  `Sequence` into an input struct to add a field.
+- **The `pulp.timeline.sequence` and `pulp.timeline.project` schemas are both
+  versioned; the encoder must not hard-code either version.**
+  `sequence_schema_policy` and `project_schema_policy` (mirroring
+  `track_schema_policy`) own the type name, current version, oldest readable
+  version, and the predicate — `requires_annotations(version)` /
+  `supports_session_start(version)` — that decode and preflight both consult. A
+  literal version in `write_sequence`, `walk_sequence`, `walk_project`, or
+  `structural_registry_validation` is how these drift apart — route every one
+  through the policy. `pulp.timeline.project` being versioned at all is easy to
+  miss: it sat at v1 long enough that several call sites reached for the
+  fixed-version `data_for()` helper instead of `data_for_versions()`.
+- **A required member and an optional one need different migration shapes.**
+  Sequence markers/regions are required arrays, so v1→v2 splices `[]` in at the
+  canonical position and v2→v1 refuses when either is non-empty. The project's
+  `session_start` is optional, so its migration pair only moves the version
+  number — nothing is inserted — and the downgrade refuses only when the member
+  is actually present. Copy the shape that matches the field, not the nearest
+  migration.
+- **`Project::Data` is brace-initialized positionally in `append_asset` and
+  `remove_asset`.** Appending a field to the struct there fails *open*: those
+  sites keep compiling and silently leave the new field default, dropping
+  document state on any asset edit. Those two sites now use designated
+  initializers; keep them that way, and put any new field where a stale
+  positional init cannot type-check.
+- Markers and regions are command-addressable: `InsertMarker` / `RemoveMarker` /
+  `InsertRegion` / `RemoveRegion` reduce through
+  `transaction_marker_internal`, which plans an `ItemKind::Marker` or
+  `ItemKind::Region` identity parented by the **sequence** (not a track), so
+  `DirtyItem::owner_track` is legitimately zero for these commands. They emit
+  inverse commands, so undo, redo, and journal replay restore the annotation and
+  its tombstone ownership exactly.
 - Automation lanes are command-addressable: `InsertAutomationLane` /
   `RemoveAutomationLane` reduce through the shared transaction pipeline
   (`transaction_reduction_support` + `transaction_automation_internal`),
@@ -223,13 +273,44 @@ artifact is needed. Never modify canonical project JSON text directly.
   remap as internal references, and opaque parameter IDs remain unchanged.
 - Fallible public APIs return `pulp::runtime::Result`; do not throw.
 
+### Widening `ClipContent` is guarded, and the two guards are not interchangeable
+
+`ClipContent` decides what a clip *is*, so nearly every consumer dispatches on
+it — and the default failure of a new alternative is silence, not an error. A
+consumer written as an `if`/`if constexpr` chain keeps compiling and treats the
+new kind as absent: a clip that renders nothing, an export manifest that reports
+no loss while dropping data, a remap that carries stale ItemIds into a copy. No
+test catches that, because nothing wrote a test for a kind that did not exist.
+
+So the variant carries two guards, and which one a site gets is a judgement, not
+a style preference:
+
+- **Visit through `ClipContentCases`** when the site is genuinely dispatching —
+  the encoder, content equality, the journal's retained-size accounting, the
+  interchange census, the id-remap walk, and the playback compiler's content
+  classifier. The overload set has no generic fallback, so widening the variant
+  fails overload resolution right there.
+- **`static_assert(kClipContentAlternativeCount == N)`** when the site *cannot*
+  be a visit but is only correct for today's alternatives — the decoder, which
+  dispatches on envelope type names rather than on the variant, and the two
+  asset referential-integrity scans, which reach assets through `MediaRef`
+  alone. Each message names the decision that site owes.
+
+A site that reads one alternative and is correct for every other one (a note
+lookup, a `MediaRef` range check at construction) needs neither; do not add
+noise there. And note that `-fno-exceptions` makes a bare `std::get` on a
+mismatched alternative call `std::terminate` rather than throw, so a fallthrough
+`std::get` is a process abort, not a caught error — that is why the encoder is a
+visit and not a chain ending in `std::get<OpaqueContent>`.
+
 ## Editing contracts
 
 - `InsertClip`, `RemoveClip`, `InsertAutomationLane`, `RemoveAutomationLane`,
   `MoveClip`, `SetNoteVelocity`, `SetClipPlaybackProperties`, `SetTempoMap`,
   `SetMeterMap`, `CreateAsset`, `RemoveAsset`, `InsertTakeLane`,
   `RemoveTakeLane`, `InsertTake`, `RemoveTake`, `SetRecordArm`,
-  `SetActiveTakeLane`, `SetTakeComp`, and `SetTrackFreeze` are the bounded mutation
+  `SetActiveTakeLane`, `SetTakeComp`, `SetTrackFreeze`, `InsertMarker`,
+  `RemoveMarker`, `InsertRegion`, and `RemoveRegion` are the bounded mutation
   vocabulary. Automation commands attach or tombstone complete Track-owned
   lanes; map commands carry exact expected/replacement document values and
   participate in the same transaction, journal, undo, and replay machinery.
@@ -533,6 +614,28 @@ like silence at the head of the stream:
 `ReadGuard`. A render loop cannot reassign one guard as it swaps programs —
 hold a separate guard per program and drive the blocks through a helper, which
 also keeps the transport position continuous across the swap.
+
+### Widening `AutomationTarget` is guarded, and the guard is load-bearing
+
+`AutomationTarget` is a `std::variant`, and `core/timeline` compiles
+`-fno-exceptions`. That combination makes `std::get<Alternative>` on a
+mismatched target call `std::terminate` rather than throw — so a consumer that
+reads the target with `std::get` is a latent process abort the moment the
+variant grows. Three encoder/transaction/document sites do exactly that, and
+they carry a `static_assert` on `kAutomationTargetAlternativeCount` for it.
+
+The opposite mistake is quieter and worse. A consumer that visits with a generic
+lambda (`[](const auto&)`, or an `if constexpr` chain with no `else`) keeps
+compiling and silently ignores the new alternative. A target that exists in the
+document but is missing from a census or an export loss manifest reads as
+"nothing was there" — a manifest claiming no loss while dropping data is worse
+than a refusal.
+
+So visit through `AutomationTargetCases`, the overload set with no generic
+fallback. Adding an alternative then fails the build at every call site until
+someone decides what it means. When you do widen the variant, expect the
+`static_assert`s to fire: that is the design, and each message names the
+decision that site owes.
 
 ### `pulp_audio_compare` is advisory and opt-in
 

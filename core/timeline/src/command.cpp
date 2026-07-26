@@ -21,29 +21,40 @@ bool equal_automation_point(const AutomationPoint& lhs, const AutomationPoint& r
                std::bit_cast<std::uint32_t>(rhs.curvature);
 }
 
+// Coalescing and undo squashing both hinge on this: content that compares equal
+// is content the journal is allowed to drop an entry for. An alternative with no
+// branch here would have to answer "equal" or "unequal" by default, and both
+// answers are wrong — equal loses an edit, unequal defeats coalescing forever.
+// The visit runs after the index check, so both sides hold the same alternative.
 bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
     if (lhs.index() != rhs.index())
         return false;
-    if (std::holds_alternative<EmptyContent>(lhs))
-        return true;
-    if (const auto* left = std::get_if<MediaRef>(&lhs)) {
-        const auto& right = std::get<MediaRef>(rhs);
-        return left->asset_id == right.asset_id && left->source_start == right.source_start &&
-               left->frame_count == right.frame_count;
-    }
-    if (const auto* left = std::get_if<NoteContent>(&lhs)) {
-        const auto right = std::get<NoteContent>(rhs).notes();
-        return left->notes().size() == right.size() &&
-               std::equal(left->notes().begin(), left->notes().end(), right.begin(), equal_note);
-    }
-    if (const auto* left = std::get_if<RegisteredContent>(&lhs)) {
-        const auto& right = std::get<RegisteredContent>(rhs);
-        return left->schema() == right.schema() &&
-               left->canonical_payload_json() == right.canonical_payload_json();
-    }
-    const auto& left = std::get<OpaqueContent>(lhs);
-    const auto& right = std::get<OpaqueContent>(rhs);
-    return left.schema() == right.schema() && left.raw_json() == right.raw_json();
+    return std::visit(
+        ClipContentCases{
+            [](const EmptyContent&) { return true; },
+            [&](const MediaRef& left) {
+                const auto& right = std::get<MediaRef>(rhs);
+                return left.asset_id == right.asset_id &&
+                       left.source_start == right.source_start &&
+                       left.frame_count == right.frame_count;
+            },
+            [&](const NoteContent& left) {
+                const auto right = std::get<NoteContent>(rhs).notes();
+                return left.notes().size() == right.size() &&
+                       std::equal(left.notes().begin(), left.notes().end(), right.begin(),
+                                  equal_note);
+            },
+            [&](const RegisteredContent& left) {
+                const auto& right = std::get<RegisteredContent>(rhs);
+                return left.schema() == right.schema() &&
+                       left.canonical_payload_json() == right.canonical_payload_json();
+            },
+            [&](const OpaqueContent& left) {
+                const auto& right = std::get<OpaqueContent>(rhs);
+                return left.schema() == right.schema() && left.raw_json() == right.raw_json();
+            },
+        },
+        lhs);
 }
 
 std::size_t saturated_add(std::size_t lhs, std::size_t rhs) noexcept {
@@ -58,15 +69,25 @@ std::size_t saturated_multiply(std::size_t lhs, std::size_t rhs) noexcept {
                : lhs * rhs;
 }
 
+// This feeds the journal's retained-memory budget, so an alternative with no
+// branch here reports its payload as free and lets the journal grow past the
+// limit the caller asked for. Each alternative states its own cost.
 std::size_t clip_retained_size(const Clip& clip) noexcept {
-    auto size = sizeof(Clip);
-    if (const auto* notes = std::get_if<NoteContent>(&clip.content()))
-        size = saturated_add(size, notes->notes().size() * sizeof(NoteEvent));
-    else if (const auto* opaque = std::get_if<OpaqueContent>(&clip.content()))
-        size = saturated_add(size, opaque->raw_json().size());
-    else if (const auto* registered = std::get_if<RegisteredContent>(&clip.content()))
-        size = saturated_add(size, registered->retained_bytes());
-    return size;
+    return std::visit(
+        ClipContentCases{
+            [](const EmptyContent&) { return sizeof(Clip); },
+            [](const MediaRef&) { return sizeof(Clip); },
+            [](const NoteContent& notes) {
+                return saturated_add(sizeof(Clip), notes.notes().size() * sizeof(NoteEvent));
+            },
+            [](const RegisteredContent& registered) {
+                return saturated_add(sizeof(Clip), registered.retained_bytes());
+            },
+            [](const OpaqueContent& opaque) {
+                return saturated_add(sizeof(Clip), opaque.raw_json().size());
+            },
+        },
+        clip.content());
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
@@ -86,6 +107,16 @@ std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
                               saturated_multiply(lane.takes().size(), sizeof(Take)));
     return saturated_add(
         size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
+}
+
+bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.color == rhs.color;
+}
+
+bool equal_region(const SequenceRegion& lhs, const SequenceRegion& rhs) noexcept {
+    return lhs.id == rhs.id && lhs.name == rhs.name && lhs.position == rhs.position &&
+           lhs.duration == rhs.duration && lhs.color == rhs.color;
 }
 
 bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLocator> rhs) noexcept {
@@ -232,6 +263,16 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
+            } else if constexpr (std::is_same_v<T, InsertMarker>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_marker(left.marker, right.marker);
+            } else if constexpr (std::is_same_v<T, RemoveMarker>) {
+                return left.sequence_id == right.sequence_id && left.marker_id == right.marker_id;
+            } else if constexpr (std::is_same_v<T, InsertRegion>) {
+                return left.sequence_id == right.sequence_id &&
+                       equal_region(left.region, right.region);
+            } else if constexpr (std::is_same_v<T, RemoveRegion>) {
+                return left.sequence_id == right.sequence_id && left.region_id == right.region_id;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -268,6 +309,10 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(sizeof(T), take_lane_retained_size(value.lane));
             if constexpr (std::is_same_v<T, InsertTake>)
                 return sizeof(T);
+            if constexpr (std::is_same_v<T, InsertMarker>)
+                return saturated_add(sizeof(T), value.marker.name.size());
+            if constexpr (std::is_same_v<T, InsertRegion>)
+                return saturated_add(sizeof(T), value.region.name.size());
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());
