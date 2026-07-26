@@ -208,7 +208,8 @@ double magnitude_at(const std::vector<float>& v, int from, int to, double hz) {
     const int end = std::min(to, static_cast<int>(v.size()));
     const int count = end - from;
     for (int i = from; i < end; ++i) {
-        const double phase = 2.0 * cd::kPi * hz * static_cast<double>(i - from) / kSr;
+        const double phase =
+            2.0 * cd::kPi * hz * static_cast<double>(i - from) / kSr;
         const double s = static_cast<double>(v[static_cast<std::size_t>(i)]);
         real += s * std::cos(phase);
         imaginary -= s * std::sin(phase);
@@ -274,9 +275,64 @@ double spectral_centroid(const std::vector<float>& v, int from, int to) {
     return total > 0.0 ? weighted / total : 0.0;
 }
 
+void configure(Engine& delay, Character character, double time_ms, double feedback,
+               double character_amount, TapeTier tier = TapeTier::standard);
+double slew_seconds(Character character);
+
+double measured_wet_tone_gain(Character character, double time_ms, double amount,
+                              double hz) {
+    Engine delay;
+    configure(delay, character, time_ms, 0.0, amount);
+    settle(delay, 4.0 * slew_seconds(character) + 0.5);
+
+    const int n = static_cast<int>(kSr * 1.5);
+    constexpr float kAmplitude = 0.05f;
+    auto buffers = sine_both(n, hz, kAmplitude);
+    render(delay, buffers);
+    // BBD clock wander spreads a steady carrier into close sidebands. RMS
+    // measures the complete wet tone instead of mistaking that intentional
+    // modulation for filter loss by looking at one FFT bin.
+    return rms(buffers.left, static_cast<int>(kSr), n) * std::sqrt(2.0) / kAmplitude;
+}
+
+template <typename GainAt>
+double measured_minus_3db_crossing(double expected_hz, GainAt&& gain_at,
+                                   double high_factor = 1.8) {
+    const double reference_hz = std::max(80.0, expected_hz * 0.05);
+    const double reference = gain_at(reference_hz);
+    const double threshold = reference / std::sqrt(2.0);
+    REQUIRE(reference > 1e-6);
+
+    constexpr int kPoints = 17;
+    const double low = std::max(100.0, expected_hz * 0.35);
+    const double high = std::min(0.45 * kSr, expected_hz * high_factor);
+    double previous_hz = low;
+    double previous_gain = gain_at(previous_hz);
+    UNSCOPED_INFO("response reference " << reference_hz << " Hz=" << reference
+                                         << ", probe " << previous_hz << " Hz="
+                                         << previous_gain);
+    for (int point = 1; point < kPoints; ++point) {
+        const double fraction = static_cast<double>(point) / (kPoints - 1);
+        const double hz = low * std::pow(high / low, fraction);
+        const double gain = gain_at(hz);
+        UNSCOPED_INFO("response probe " << hz << " Hz=" << gain);
+        if (gain <= threshold && previous_gain > threshold) {
+            const double previous_db = 20.0 * std::log10(previous_gain / reference);
+            const double gain_db = 20.0 * std::log10(gain / reference);
+            const double mix = (-3.01029995664 - previous_db) / (gain_db - previous_db);
+            return std::exp(std::log(previous_hz) +
+                            std::clamp(mix, 0.0, 1.0) *
+                                (std::log(hz) - std::log(previous_hz)));
+        }
+        previous_hz = hz;
+        previous_gain = gain;
+    }
+    return 0.0;
+}
+
 /// Configure a delay with the common test defaults.
 void configure(Engine& delay, Character character, double time_ms, double feedback,
-               double character_amount, TapeTier tier = TapeTier::standard) {
+               double character_amount, TapeTier tier) {
     delay.set_character(character);
     delay.set_tape_tier(tier);
     delay.set_sample_rate(kSr);
@@ -415,25 +471,47 @@ TEST_CASE("reverse keeps the requested delay time on the clocked characters",
     }
 }
 
-TEST_CASE("time offset scales the right channel's delay", "[character-delay][time]") {
-    for (double offset : {0.5, 1.0, 1.5}) {
-        Engine delay;
-        configure(delay, Character::clean, 400.0, 0.0, 0.0);
-        delay.set_time_offset(static_cast<float>(offset));
-        delay.set_crossfeed(0.0f);
-        delay.reset();
-        settle(delay, 0.2);
+TEST_CASE("time offset scales every character's right-channel delay",
+          "[character-delay][time]") {
+    struct Case {
+        Character character;
+        double amount;
+        bool relative_tolerance;
+    };
+    const Case cases[] = {
+        {Character::clean, 0.0, false},
+        {Character::diffusion, 0.5, false},
+        {Character::tape, 0.0, false},
+        {Character::bbd, 0.5, true},
+        {Character::vintage_digital, 0.5, true},
+    };
 
-        auto buffers = make_stereo(static_cast<int>(kSr * 1.2));
-        buffers.left[0] = 1.0f;
-        buffers.right[0] = 1.0f;
-        render(delay, buffers);
+    for (const auto& c : cases) {
+        for (double time_ms : {400.0, cd::kMaxDelayMs}) {
+          for (double offset : {cd::kTimeOffsetMin, 1.0, cd::kTimeOffsetMax}) {
+            Engine delay;
+            configure(delay, c.character, time_ms, 0.0, c.amount);
+            delay.set_time_offset(static_cast<float>(offset));
+            delay.reset();
+            settle(delay, 4.0 * slew_seconds(c.character) + 0.4);
 
-        const int right_index =
-            peak_index(buffers.right, 1, static_cast<int>(buffers.right.size()));
-        const double expected = 400.0 * offset * 0.001 * kSr;
-        INFO("offset " << offset << ", right peak at " << right_index);
-        CHECK(std::abs(right_index - expected) <= 0.001 * kSr);
+            const double expected_ms = time_ms * offset;
+            const int frames = static_cast<int>(kSr * (expected_ms * 0.001 + 0.3));
+            auto buffers = burst_left(frames, 1000.0, 0.004, 0.5f);
+            buffers.right = buffers.left;
+            const int stimulus_onset = onset_index(buffers.right, 0.05);
+            render(delay, buffers);
+
+            const int measured = onset_index(buffers.right, 0.05) - stimulus_onset;
+            const double expected = expected_ms * 0.001 * kSr;
+            const double tolerance = c.relative_tolerance ? 0.02 * expected : 0.001 * kSr;
+            INFO("character index " << static_cast<int>(c.character) << ", time " << time_ms
+                                    << " ms, offset " << offset << ", onset " << measured
+                                    << ", expected " << expected);
+            REQUIRE(measured > 0);
+            CHECK(std::abs(measured - expected) <= tolerance);
+          }
+        }
     }
 }
 
@@ -739,7 +817,8 @@ TEST_CASE("tape instability appears at the modeled rates and vanishes at zero",
         if (psd[bin] > psd[best]) best = bin;
     const double peak_hz = psd_bin_hz(best, psd.size(), kTrackRate);
     INFO("wow peak at " << peak_hz << " Hz, expected " << cd::kWowRateHz);
-    CHECK(std::abs(peak_hz - cd::kWowRateHz) < 0.4);
+    CHECK(std::abs(peak_hz - cd::kWowRateHz) <= 0.2);
+
 }
 
 TEST_CASE("tape modulation does not shift the mean delay", "[character-delay][tape]") {
@@ -750,7 +829,7 @@ TEST_CASE("tape modulation does not shift the mean delay", "[character-delay][ta
     settle(delay, 4.0 * slew_seconds(Character::tape) + 0.6);
 
     double total = 0.0;
-    const int trials = 8;
+    const int trials = 64;
     for (int trial = 0; trial < trials; ++trial) {
         auto buffers = impulse_left(static_cast<int>(kSr * 1.2));
         render(delay, buffers);
@@ -759,7 +838,7 @@ TEST_CASE("tape modulation does not shift the mean delay", "[character-delay][ta
     const double mean_index = total / trials;
     const double expected = 0.5 * kSr;
     INFO("mean repeat index " << mean_index << ", expected " << expected);
-    CHECK(std::abs(mean_index - expected) < 0.0005 * kSr);  // +-0.5 ms
+    CHECK(std::abs(mean_index - expected) <= 0.0001 * kSr);  // +-0.1 ms
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -793,6 +872,22 @@ TEST_CASE("vintage band-limits to its internal rate", "[character-delay][vintage
     INFO("passband " << passband << " edge " << at_edge << " beyond " << beyond);
     CHECK(at_edge < passband);
     CHECK(beyond < at_edge * 0.5);
+}
+
+TEST_CASE("vintage wet audio crosses minus 3 dB at its converter edge",
+          "[character-delay][vintage][slow]") {
+    Engine law;
+    configure(law, Character::vintage_digital, 200.0, 0.0, 0.5);
+    settle(law, 1.0);
+    const double expected = cd::kVintageAntiAliasFraction * law.vintage_internal_rate_hz();
+    const double measured = measured_minus_3db_crossing(
+        expected, [](double hz) {
+            return measured_wet_tone_gain(Character::vintage_digital, 200.0, 0.5, hz);
+        });
+    INFO("measured wet crossing " << measured << " Hz, converter target " << expected
+                                  << " Hz");
+    REQUIRE(measured > 0.0);
+    CHECK(std::abs(measured - expected) <= 0.10 * expected);
 }
 
 TEST_CASE("vintage repeats darken as they recirculate", "[character-delay][vintage]") {
@@ -835,14 +930,17 @@ TEST_CASE("vintage quantization noise sits in the dithered PCM region",
         if (std::abs(f - 1000.0) < 50.0) continue;
         noise += psd[bin];
     }
-    double tone = 0.0;
-    for (std::size_t bin = 1; bin < psd.size(); ++bin)
-        if (std::abs(psd_bin_hz(bin, psd.size(), kSr) - 1000.0) < 50.0) tone += psd[bin];
-
-    const double noise_db = 10.0 * std::log10(noise / std::max(tone, 1e-30)) - 60.0;
+    // Welch uses an unnormalized FFT. Divide the integrated one-sided power
+    // by the Hann window's energy and segment length to recover mean-square
+    // amplitude in full-scale units. Interior positive-frequency bins carry
+    // the matching negative-frequency energy, hence the factor of two.
+    constexpr double kHannMeanSquare = 3.0 / 8.0;
+    const double segment = 32768.0;
+    const double noise_mean_square = 2.0 * noise / (segment * segment * kHannMeanSquare);
+    const double noise_db = 10.0 * std::log10(std::max(noise_mean_square, 1e-30));
     INFO("integrated wet noise floor " << noise_db << " dBFS");
-    CHECK(noise_db > -110.0);
-    CHECK(noise_db < -40.0);
+    CHECK(noise_db >= -80.0);
+    CHECK(noise_db <= -68.0);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1157,52 +1255,43 @@ TEST_CASE("the physical tier's chew sequence repeats exactly",
 
 TEST_CASE("process allocates nothing in any configuration",
           "[character-delay][rt-safety]") {
-    struct Config {
-        Character character;
-        TapeTier tier;
-        bool reverse;
-        bool freeze;
-    };
-    const Config configs[] = {
-        {Character::clean, TapeTier::standard, false, false},
-        {Character::vintage_digital, TapeTier::standard, false, false},
-        {Character::tape, TapeTier::standard, false, false},
-        {Character::tape, TapeTier::physical, false, false},
-        {Character::bbd, TapeTier::standard, false, false},
-        {Character::diffusion, TapeTier::standard, false, false},
-        {Character::clean, TapeTier::standard, true, false},
-        {Character::tape, TapeTier::physical, true, false},
-        {Character::bbd, TapeTier::standard, true, true},
-        {Character::diffusion, TapeTier::standard, false, true},
-    };
+    for (auto character : {Character::clean, Character::vintage_digital, Character::tape,
+                           Character::bbd, Character::diffusion}) {
+        const int tier_count = character == Character::tape ? 2 : 1;
+        for (int tier_index = 0; tier_index < tier_count; ++tier_index) {
+            const auto tier = tier_index == 0 ? TapeTier::standard : TapeTier::physical;
+            for (bool reverse : {false, true}) {
+                for (bool freeze : {false, true}) {
+                    Engine delay;
+                    configure(delay, character, 250.0, 0.6, 0.7, tier);
+                    delay.set_reverse(reverse);
+                    delay.set_freeze(freeze);
+                    delay.set_mod(0.4f, 0.5f);
+                    delay.set_duck(0.5f);
+                    delay.set_crossfeed(0.3f);
+                    delay.reset();
 
-    for (const auto& config : configs) {
-        Engine delay;
-        configure(delay, config.character, 250.0, 0.6, 0.7, config.tier);
-        delay.set_reverse(config.reverse);
-        delay.set_freeze(config.freeze);
-        delay.set_mod(0.4f, 0.5f);
-        delay.set_duck(0.5f);
-        delay.set_crossfeed(0.3f);
-        delay.reset();
+                    auto warmup = sine_both(kBlock * 8, 500.0, 0.4f);
+                    render(delay, warmup);
 
-        auto warmup = sine_both(kBlock * 8, 500.0, 0.4f);
-        render(delay, warmup);
-
-        auto buffers = sine_both(kBlock * 8, 500.0, 0.4f);
-        {
-            pulp::test::RtAllocationProbe probe;
-            render(delay, buffers);
-            // reset() is on the allocation-free path too.
-            delay.reset();
-            // Snapshot before INFO: building Catch2's message stream allocates,
-            // and the probe is still in scope.
-            const auto count = probe.allocation_count();
-            const auto bytes = probe.allocated_bytes();
-            INFO("character index " << static_cast<int>(config.character) << " reverse "
-                                    << config.reverse << " freeze " << config.freeze);
-            CHECK(count == 0);
-            CHECK(bytes == 0);
+                    auto buffers = sine_both(kBlock * 8, 500.0, 0.4f);
+                    {
+                        pulp::test::RtAllocationProbe probe;
+                        render(delay, buffers);
+                        // reset() is on the allocation-free path too.
+                        delay.reset();
+                        // Snapshot before INFO: building Catch2's message stream allocates,
+                        // and the probe is still in scope.
+                        const auto count = probe.allocation_count();
+                        const auto bytes = probe.allocated_bytes();
+                        INFO("character index " << static_cast<int>(character) << " tier "
+                                                << static_cast<int>(tier) << " reverse "
+                                                << reverse << " freeze " << freeze);
+                        CHECK(count == 0);
+                        CHECK(bytes == 0);
+                    }
+                }
+            }
         }
     }
 }

@@ -44,7 +44,7 @@ public:
         // the top table knots simply collapse onto it.
         const double highest_internal = std::min(kVintageInternalRateHz.front(), fs);
         const auto capacity = static_cast<std::size_t>(
-            std::ceil(kMaxDelayMs * 0.001 * highest_internal) + 8.0);
+            std::ceil(kMaxAddressableDelayMs * 0.001 * highest_internal) + 8.0);
         line_.prepare(capacity);
         update(0.0);
         reset();

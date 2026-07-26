@@ -88,12 +88,14 @@ public:
 
     // ── Configuration (control thread) ────────────────────────────────────
 
-    /// Allocates every buffer for the 2 s maximum, recomputes coefficients,
-    /// then resets. Must be called before process().
+    /// Allocates every buffer for the 2 s left-channel maximum times the
+    /// largest right-channel offset, recomputes coefficients, then resets.
+    /// Must be called before process().
     void set_sample_rate(double sample_rate) {
         sample_rate_ = std::max(sample_rate, 1000.0);
         const auto line_capacity =
-            static_cast<std::size_t>(std::ceil(chardelay::kMaxDelayMs * 0.001 * sample_rate_) + 4.0);
+            static_cast<std::size_t>(
+                std::ceil(chardelay::kMaxAddressableDelayMs * 0.001 * sample_rate_) + 4.0);
 
         for (auto& channel : channels_) {
             channel.line.prepare(line_capacity);
@@ -144,7 +146,9 @@ public:
     }
 
     void set_time_offset(SampleType multiplier) {
-        time_offset_ = std::clamp(static_cast<double>(multiplier), 0.5, 1.5);
+        time_offset_ = std::clamp(static_cast<double>(multiplier),
+                                  chardelay::kTimeOffsetMin,
+                                  chardelay::kTimeOffsetMax);
     }
 
     void set_feedback(SampleType feedback) {
@@ -227,7 +231,7 @@ public:
 
             const double character_amount = character_.process(character_target_);
             const double freeze = freeze_.process(freeze_on_ ? 1.0 : 0.0);
-            const double duck_amount = duck_.process(duck_target_);
+            duck_.process(duck_target_);
 
             // Crossfeed is forced to zero in reverse: the channels hold
             // independently segmented buffers there, so "bouncing" between them
