@@ -1,372 +1,26 @@
 // Multi-character delay — audio-domain acceptance suite.
 //
-// Every case here measures the module's OUTPUT rather than its internals: a
-// character is a claim about what happens to a repeat, and the only honest way
-// to check such a claim is to render audio and measure it. Where a case refers
-// to a calibration-table value it reads that value from the shipped table
-// rather than restating a number, so retuning a table cannot silently
-// invalidate the test that guards it.
-//
-// Two measurements deviate from the letter of the acceptance recipes, both
-// documented at the case that uses them:
-//
-//   * BBD delay time is measured from the ONSET of a burst, not from the peak.
-//     A compander's expander has a ~10 ms attack, so the peak of anything fed
-//     through one is displaced by the expander, not by the clock — the peak of
-//     an impulse measures the compander and the recipe is trying to measure the
-//     bucket chain.
-//   * The physical tier's loss FIR is compared against the analytic response
-//     only where a filter of the specified order can express it. See the case
-//     for the measured numbers and tape_physical.hpp for why the limit is
-//     structural rather than a defect.
+// Every case measures rendered output rather than implementation detail. Shared
+// deterministic stimuli and measurements live in support/character_delay_fixture.hpp.
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "harness/rt_allocation_probe.hpp"
-
-#include <pulp/audio/buffer.hpp>
-#include <pulp/format/processor.hpp>
-#include <pulp/host/baked_graph_processor.hpp>
-#include <pulp/host/forge_character_delay_catalog.hpp>
-#include <pulp/host/signal_graph.hpp>
-#include <pulp/midi/buffer.hpp>
-#include <pulp/signal/character_delay.hpp>
-#include <pulp/signal/fft.hpp>
+#include "support/character_delay_fixture.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <complex>
-#include <cstdint>
-#include <string>
+#include <limits>
 #include <vector>
 
-namespace cd = pulp::signal::chardelay;
-using Engine = pulp::signal::CharacterDelay;
-using Character = Engine::Character;
-using TapeTier = Engine::TapeTier;
+using namespace pulp::test::character_delay;
 
-namespace {
+#include "harness/rt_allocation_probe.hpp"
 
-constexpr double kSr = 48000.0;
-constexpr int kBlock = 128;
-
-struct Stereo {
-    std::vector<float> left;
-    std::vector<float> right;
-};
-
-Stereo make_stereo(int n) {
-    return {std::vector<float>(static_cast<std::size_t>(n), 0.0f),
-            std::vector<float>(static_cast<std::size_t>(n), 0.0f)};
-}
-
-/// Render in place, in blocks, the way a host would.
-void render(Engine& delay, Stereo& buffers) {
-    const auto n = static_cast<int>(buffers.left.size());
-    for (int i = 0; i < n; i += kBlock) {
-        const int count = std::min(kBlock, n - i);
-        delay.process(buffers.left.data() + i, buffers.right.data() + i, count);
-    }
-}
-
-/// Run `seconds` of silence through the delay to settle slews and envelopes.
-void settle(Engine& delay, double seconds) {
-    auto quiet = make_stereo(static_cast<int>(kSr * seconds));
-    render(delay, quiet);
-}
-
-Stereo impulse_left(int n, float amplitude = 1.0f) {
-    auto s = make_stereo(n);
-    s.left[0] = amplitude;
-    return s;
-}
-
-Stereo sine_both(int n, double hz, float amplitude) {
-    auto s = make_stereo(n);
-    for (int i = 0; i < n; ++i) {
-        const auto v = static_cast<float>(
-            amplitude * std::sin(2.0 * cd::kPi * hz * static_cast<double>(i) / kSr));
-        s.left[static_cast<std::size_t>(i)] = v;
-        s.right[static_cast<std::size_t>(i)] = v;
-    }
-    return s;
-}
-
-/// Hann-windowed tone burst in the left channel — the stimulus for characters
-/// whose level-dependent stages make a bare impulse unrepresentative.
-Stereo burst_left(int n, double hz, double seconds, float amplitude = 1.0f) {
-    auto s = make_stereo(n);
-    const int length = std::min(n, static_cast<int>(seconds * kSr));
-    for (int i = 0; i < length; ++i) {
-        const double window =
-            0.5 * (1.0 - std::cos(2.0 * cd::kPi * static_cast<double>(i) /
-                                  static_cast<double>(length)));
-        s.left[static_cast<std::size_t>(i)] = static_cast<float>(
-            amplitude * window *
-            std::sin(2.0 * cd::kPi * hz * static_cast<double>(i) / kSr));
-    }
-    return s;
-}
-
-double peak(const std::vector<float>& v, int from, int to) {
-    double best = 0.0;
-    const int end = std::min(to, static_cast<int>(v.size()));
-    for (int i = std::max(0, from); i < end; ++i)
-        best = std::max(best, std::abs(static_cast<double>(v[static_cast<std::size_t>(i)])));
-    return best;
-}
-
-int peak_index(const std::vector<float>& v, int from, int to) {
-    int best = from;
-    double best_value = -1.0;
-    const int end = std::min(to, static_cast<int>(v.size()));
-    for (int i = std::max(0, from); i < end; ++i) {
-        const double a = std::abs(static_cast<double>(v[static_cast<std::size_t>(i)]));
-        if (a > best_value) {
-            best_value = a;
-            best = i;
-        }
-    }
-    return best;
-}
-
-/// First index whose magnitude exceeds `fraction` of the buffer's peak.
-int onset_index(const std::vector<float>& v, double fraction) {
-    const double threshold = fraction * peak(v, 0, static_cast<int>(v.size()));
-    for (std::size_t i = 0; i < v.size(); ++i)
-        if (std::abs(static_cast<double>(v[i])) > threshold) return static_cast<int>(i);
-    return -1;
-}
-
-double rms(const std::vector<float>& v, int from, int to) {
-    double sum = 0.0;
-    int count = 0;
-    const int end = std::min(to, static_cast<int>(v.size()));
-    for (int i = std::max(0, from); i < end; ++i) {
-        const double s = static_cast<double>(v[static_cast<std::size_t>(i)]);
-        sum += s * s;
-        ++count;
-    }
-    return count > 0 ? std::sqrt(sum / static_cast<double>(count)) : 0.0;
-}
-
-bool all_finite(const std::vector<float>& v) {
-    for (float s : v)
-        if (!std::isfinite(s)) return false;
-    return true;
-}
-
-/// Largest sample-to-sample step in a window — the click detector.
-double max_step(const std::vector<float>& v, int from, int to) {
-    double worst = 0.0;
-    const int end = std::min(to, static_cast<int>(v.size()));
-    for (int i = std::max(1, from); i < end; ++i)
-        worst = std::max(worst, std::abs(static_cast<double>(v[static_cast<std::size_t>(i)]) -
-                                         static_cast<double>(v[static_cast<std::size_t>(i - 1)])));
-    return worst;
-}
-
-/// Welch power spectral density: Hann windows, 50% overlap, averaged.
-std::vector<double> welch_psd(const std::vector<float>& signal, int from, int to,
-                              int segment = 32768) {
-    const int available = std::min(to, static_cast<int>(signal.size())) - from;
-    while (segment > available && segment > 256) segment /= 2;
-    std::vector<double> window(static_cast<std::size_t>(segment));
-    for (int i = 0; i < segment; ++i)
-        window[static_cast<std::size_t>(i)] =
-            0.5 * (1.0 - std::cos(2.0 * cd::kPi * i / segment));
-
-    pulp::signal::FftT<double> fft(segment);
-    std::vector<double> psd(static_cast<std::size_t>(segment / 2 + 1), 0.0);
-    std::vector<std::complex<double>> scratch(static_cast<std::size_t>(segment));
-
-    int segments = 0;
-    for (int start = from; start + segment <= from + available; start += segment / 2) {
-        for (int i = 0; i < segment; ++i) {
-            const double s = static_cast<double>(signal[static_cast<std::size_t>(start + i)]);
-            scratch[static_cast<std::size_t>(i)] = {s * window[static_cast<std::size_t>(i)], 0.0};
-        }
-        fft.forward(scratch.data());
-        for (std::size_t bin = 0; bin < psd.size(); ++bin) psd[bin] += std::norm(scratch[bin]);
-        ++segments;
-    }
-    if (segments > 0)
-        for (double& value : psd) value /= segments;
-    return psd;
-}
-
-double psd_bin_hz(std::size_t bin, std::size_t bins, double rate) {
-    return static_cast<double>(bin) * rate / (2.0 * static_cast<double>(bins - 1));
-}
-
-/// Magnitude of a signal's spectrum at one frequency, by direct correlation.
-/// Cheaper and sharper than binning a PSD when only a handful of points matter.
-double magnitude_at(const std::vector<float>& v, int from, int to, double hz) {
-    double real = 0.0;
-    double imaginary = 0.0;
-    const int end = std::min(to, static_cast<int>(v.size()));
-    const int count = end - from;
-    for (int i = from; i < end; ++i) {
-        const double phase =
-            2.0 * cd::kPi * hz * static_cast<double>(i - from) / kSr;
-        const double s = static_cast<double>(v[static_cast<std::size_t>(i)]);
-        real += s * std::cos(phase);
-        imaginary -= s * std::sin(phase);
-    }
-    return 2.0 * std::hypot(real, imaginary) / std::max(count, 1);
-}
-
-/// Unwrapped phase of a tone near `carrier`, by quadrature demodulation:
-/// multiply down to baseband, lowpass, and unwrap.
-///
-/// Phase rather than instantaneous frequency, because the quantity under test
-/// is a DELAY modulation and phase converts back to it directly (dt =
-/// dphi / 2 pi f). Differentiating to frequency multiplies the demodulator's
-/// own noise by the sample rate and buries a sub-millisecond wobble in it.
-constexpr int kTrackDecimation = 64;
-constexpr double kTrackRate = kSr / kTrackDecimation;
-
-std::vector<double> phase_track(const std::vector<float>& v, int from, int to,
-                                double carrier) {
-    cd::OnePole in_phase_filter;
-    cd::OnePole quadrature_filter;
-    in_phase_filter.set_cutoff(120.0, kSr);
-    quadrature_filter.set_cutoff(120.0, kSr);
-
-    const int end = std::min(to, static_cast<int>(v.size()));
-    std::vector<double> track;
-    track.reserve(static_cast<std::size_t>(std::max(0, end - from)));
-
-    double previous_phase = 0.0;
-    double unwrapped = 0.0;
-    bool have_previous = false;
-    for (int i = from; i < end; ++i) {
-        const double t = static_cast<double>(i) / kSr;
-        const double s = static_cast<double>(v[static_cast<std::size_t>(i)]);
-        const double in_phase = in_phase_filter.lowpass(s * std::cos(2.0 * cd::kPi * carrier * t));
-        const double quadrature =
-            quadrature_filter.lowpass(-s * std::sin(2.0 * cd::kPi * carrier * t));
-        if ((i - from) % kTrackDecimation != 0) continue;
-        const double phase = std::atan2(quadrature, in_phase);
-        if (have_previous) {
-            double difference = phase - previous_phase;
-            while (difference > cd::kPi) difference -= 2.0 * cd::kPi;
-            while (difference < -cd::kPi) difference += 2.0 * cd::kPi;
-            unwrapped += difference;
-        }
-        track.push_back(unwrapped);
-        previous_phase = phase;
-        have_previous = true;
-    }
-    return track;
-}
-
-/// Spectral centroid over a window, in Hz.
-double spectral_centroid(const std::vector<float>& v, int from, int to) {
-    const auto psd = welch_psd(v, from, to, 4096);
-    double weighted = 0.0;
-    double total = 0.0;
-    for (std::size_t bin = 1; bin < psd.size(); ++bin) {
-        const double f = psd_bin_hz(bin, psd.size(), kSr);
-        weighted += f * psd[bin];
-        total += psd[bin];
-    }
-    return total > 0.0 ? weighted / total : 0.0;
-}
-
-void configure(Engine& delay, Character character, double time_ms, double feedback,
-               double character_amount, TapeTier tier = TapeTier::standard);
-double slew_seconds(Character character);
-
-double measured_wet_tone_gain(Character character, double time_ms, double amount,
-                              double hz) {
-    Engine delay;
-    configure(delay, character, time_ms, 0.0, amount);
-    settle(delay, 4.0 * slew_seconds(character) + 0.5);
-
-    const int n = static_cast<int>(kSr * 1.5);
-    constexpr float kAmplitude = 0.05f;
-    auto buffers = sine_both(n, hz, kAmplitude);
-    render(delay, buffers);
-    // BBD clock wander spreads a steady carrier into close sidebands. RMS
-    // measures the complete wet tone instead of mistaking that intentional
-    // modulation for filter loss by looking at one FFT bin.
-    return rms(buffers.left, static_cast<int>(kSr), n) * std::sqrt(2.0) / kAmplitude;
-}
-
-template <typename GainAt>
-double measured_minus_3db_crossing(double expected_hz, GainAt&& gain_at,
-                                   double high_factor = 1.8) {
-    const double reference_hz = std::max(80.0, expected_hz * 0.05);
-    const double reference = gain_at(reference_hz);
-    const double threshold = reference / std::sqrt(2.0);
-    REQUIRE(reference > 1e-6);
-
-    constexpr int kPoints = 17;
-    const double low = std::max(100.0, expected_hz * 0.35);
-    const double high = std::min(0.45 * kSr, expected_hz * high_factor);
-    double previous_hz = low;
-    double previous_gain = gain_at(previous_hz);
-    UNSCOPED_INFO("response reference " << reference_hz << " Hz=" << reference
-                                         << ", probe " << previous_hz << " Hz="
-                                         << previous_gain);
-    for (int point = 1; point < kPoints; ++point) {
-        const double fraction = static_cast<double>(point) / (kPoints - 1);
-        const double hz = low * std::pow(high / low, fraction);
-        const double gain = gain_at(hz);
-        UNSCOPED_INFO("response probe " << hz << " Hz=" << gain);
-        if (gain <= threshold && previous_gain > threshold) {
-            const double previous_db = 20.0 * std::log10(previous_gain / reference);
-            const double gain_db = 20.0 * std::log10(gain / reference);
-            const double mix = (-3.01029995664 - previous_db) / (gain_db - previous_db);
-            return std::exp(std::log(previous_hz) +
-                            std::clamp(mix, 0.0, 1.0) *
-                                (std::log(hz) - std::log(previous_hz)));
-        }
-        previous_hz = hz;
-        previous_gain = gain;
-    }
-    return 0.0;
-}
-
-/// Configure a delay with the common test defaults.
-void configure(Engine& delay, Character character, double time_ms, double feedback,
-               double character_amount, TapeTier tier) {
-    delay.set_character(character);
-    delay.set_tape_tier(tier);
-    delay.set_sample_rate(kSr);
-    delay.set_time_ms(static_cast<float>(time_ms));
-    delay.set_time_offset(1.0f);
-    delay.set_feedback(static_cast<float>(feedback));
-    delay.set_crossfeed(0.0f);
-    delay.set_character_amount(static_cast<float>(character_amount));
-    delay.set_mod(0.0f, 0.0f);
-    delay.set_duck(0.0f);
-    delay.set_freeze(false);
-    delay.set_reverse(false);
-    delay.reset();
-}
-
-/// Slew constant for a character, in seconds — read from the shipped table so
-/// the settle time a test uses always tracks the value it is settling.
-double slew_seconds(Character character) {
-    switch (character) {
-        case Character::vintage_digital: return cd::kTimeSlewVintageMs * 0.001;
-        case Character::tape: return cd::kTimeSlewTapeMs * 0.001;
-        case Character::bbd: return cd::kTimeSlewBbdMs * 0.001;
-        case Character::diffusion: return cd::kTimeSlewDiffusionMs * 0.001;
-        case Character::clean:
-        default: return cd::kTimeSlewCleanMs * 0.001;
-    }
-}
-
-}  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1 — Engine-time accuracy
 // ═══════════════════════════════════════════════════════════════════════════
-
 TEST_CASE("every character places its repeat at the requested time",
           "[character-delay][time]") {
     // R1, onset form. Delay time is measured from the ONSET of a short windowed
@@ -582,12 +236,13 @@ TEST_CASE("saturating characters self-oscillate bounded at maximum feedback",
         double amount;
         TapeTier tier;
     };
-    const Config configs[] = {
+    std::vector<Config> configs{
         {Character::tape, 0.7, TapeTier::standard},
-        {Character::tape, 1.0, TapeTier::physical},
         {Character::bbd, 0.7, TapeTier::standard},
         {Character::vintage_digital, 0.7, TapeTier::standard},
     };
+    for (double age : cd::kTapeAxis)
+        configs.push_back({Character::tape, age, TapeTier::physical});
     for (const auto& config : configs) {
         Engine delay;
         configure(delay, config.character, 250.0, 1.1, config.amount, config.tier);
@@ -616,26 +271,35 @@ TEST_CASE("saturating characters self-oscillate bounded at maximum feedback",
 
 TEST_CASE("physical tape keeps sub-unity feedback below oscillation",
           "[character-delay][feedback][tape][slow]") {
-    for (double feedback : {0.72, 0.9}) {
-        for (double age : {0.72, 1.0}) {
-            Engine delay;
-            configure(delay, Character::tape, 375.0, feedback, age, TapeTier::physical);
+    const auto verify_decay = [](double feedback, double age) {
+        Engine delay;
+        configure(delay, Character::tape, 375.0, feedback, age, TapeTier::physical);
 
-            // The worn physical loop can take more than 12 seconds to cross from
-            // a quiet tail into oscillation, so observe the same 20-second horizon
-            // used by the acceptance sweep rather than accepting an early lull.
-            auto seed = make_stereo(static_cast<int>(kSr * 20.0));
-            seed.left[0] = 0.3f;
-            seed.right[0] = 0.3f;
-            render(delay, seed);
+        // The worn physical loop can take more than 12 seconds to cross from
+        // a quiet tail into oscillation, so observe the same 20-second horizon
+        // used by the acceptance sweep rather than accepting an early lull.
+        auto seed = make_stereo(static_cast<int>(kSr * 20.0));
+        seed.left[0] = 0.3f;
+        seed.right[0] = 0.3f;
+        render(delay, seed);
 
-            const double level = rms(seed.left, static_cast<int>(kSr * 18.0),
-                                     static_cast<int>(seed.left.size()));
-            INFO("feedback " << feedback << ", age " << age << " tail rms " << level);
-            CHECK(all_finite(seed.left));
-            CHECK(level < 2e-3);
-        }
-    }
+        const double level = rms(seed.left, static_cast<int>(kSr * 18.0),
+                                 static_cast<int>(seed.left.size()));
+        INFO("feedback " << feedback << ", age " << age << " tail rms " << level);
+        CHECK(all_finite(seed.left));
+        CHECK(level < 2e-3);
+    };
+
+    // Acceptance points plus a no-feedback floor control.
+    for (double feedback : {0.0, 0.72})
+        for (double age : {0.72, 1.0})
+            verify_decay(feedback, age);
+
+    // The measured compensation is tabulated on this axis; pin every knot so
+    // an intermediate calibration cannot drift while only the worn endpoint
+    // remains green.
+    for (double age : cd::kTapeAxis)
+        verify_decay(0.9, age);
 }
 
 TEST_CASE("unsaturated characters always decay", "[character-delay][feedback][slow]") {
@@ -684,343 +348,6 @@ TEST_CASE("full crossfeed bounces repeats between channels", "[character-delay][
         CHECK(dominant > 0.0);
         CHECK(20.0 * std::log10((quiet + 1e-15) / dominant) < -20.0);
     }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 5 — BBD bandwidth law
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("BBD bandwidth follows the clock rate", "[character-delay][bbd]") {
-    for (double time_ms : {50.0, 500.0}) {
-        Engine delay;
-        configure(delay, Character::bbd, time_ms, 0.0, 0.5);
-        settle(delay, 4.0 * slew_seconds(Character::bbd) + 0.5);
-
-        // Expected value comes from the shipped table, not from a restated
-        // number: the law is N/t/3 clamped, whatever N and the clamps are.
-        const double stages = static_cast<double>(delay.bbd_stages());
-        const double clock = stages / (time_ms * 0.001);
-        const double expected = std::clamp(clock / cd::kBbdBandwidthDivisor,
-                                           cd::kBbdBandwidthMinHz, cd::kBbdBandwidthMaxHz);
-
-        INFO("time " << time_ms << " ms, stages " << stages << ", reported "
-                     << delay.bbd_bandwidth_hz() << ", expected " << expected);
-        CHECK(std::abs(delay.bbd_bandwidth_hz() - expected) < 0.15 * expected);
-    }
-
-    // And the relationship holds automatically as the time slews between them:
-    // short is bright, long is dark, with no curve drawn anywhere.
-    Engine delay;
-    configure(delay, Character::bbd, 50.0, 0.0, 0.5);
-    settle(delay, 1.0);
-    const double bright = delay.bbd_bandwidth_hz();
-    delay.set_time_ms(500.0f);
-    settle(delay, 2.0);
-    const double dark = delay.bbd_bandwidth_hz();
-    INFO("bright " << bright << " dark " << dark);
-    CHECK(dark < bright * 0.5);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 6 — BBD compander
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("the BBD compander suppresses the line's noise floor in gaps",
-          "[character-delay][bbd]") {
-    auto measure_gap_floor = [](bool compander) {
-        Engine delay;
-        configure(delay, Character::bbd, 100.0, 0.0, 1.0);
-        delay.set_bbd_compander_enabled(compander);
-        delay.reset();
-        settle(delay, 0.6);
-
-        // 0.5 s of tone, then 0.5 s of silence; measure the wet output in the
-        // second half of the gap, once the delayed tone has also stopped.
-        const int n = static_cast<int>(kSr * 1.0);
-        auto buffers = sine_both(n, 1000.0, 0.5f);
-        for (int i = n / 2; i < n; ++i) {
-            buffers.left[static_cast<std::size_t>(i)] = 0.0f;
-            buffers.right[static_cast<std::size_t>(i)] = 0.0f;
-        }
-        render(delay, buffers);
-        return rms(buffers.left, static_cast<int>(kSr * 0.8), n);
-    };
-
-    const double with_compander = measure_gap_floor(true);
-    const double without = measure_gap_floor(false);
-    INFO("gap floor with " << with_compander << " without " << without);
-    CHECK(20.0 * std::log10((with_compander + 1e-15) / (without + 1e-15)) < -10.0);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 7 — Tape wow and flutter
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("tape instability appears at the modeled rates and vanishes at zero",
-          "[character-delay][tape][slow]") {
-    constexpr double kCarrier = 1000.0;
-    constexpr double kDelayMs = 500.0;
-
-    auto delay_deviation_ms = [](double character_amount, std::vector<double>& track) {
-        Engine delay;
-        configure(delay, Character::tape, kDelayMs, 0.0, character_amount);
-        settle(delay, 4.0 * slew_seconds(Character::tape) + 0.6);
-
-        const int n = static_cast<int>(kSr * 20.0);
-        auto buffers = sine_both(n, kCarrier, 0.25f);
-        render(delay, buffers);
-        // Skip the first second so the demodulator's own filters have settled.
-        track = phase_track(buffers.left, static_cast<int>(kSr), n, kCarrier);
-
-        double mean = 0.0;
-        for (double p : track) mean += p;
-        mean /= static_cast<double>(track.size());
-        double variance = 0.0;
-        for (double& p : track) {
-            p -= mean;
-            variance += p * p;
-        }
-        variance /= static_cast<double>(track.size());
-        // Phase deviation back to a read-head displacement in milliseconds.
-        return 1000.0 * std::sqrt(variance) / (2.0 * cd::kPi * kCarrier);
-    };
-
-    std::vector<double> unstable_track;
-    std::vector<double> stable_track;
-    const double moving = delay_deviation_ms(0.67, unstable_track);
-    const double flat = delay_deviation_ms(0.0, stable_track);
-    REQUIRE(unstable_track.size() > 1000);
-
-    INFO("read-head deviation at character 0.67: " << moving << " ms, at 0: " << flat << " ms");
-    CHECK(moving > 10.0 * flat);
-
-    // Magnitude consistent with the shipped depths. Wow and flutter are
-    // independent, so their RMS contributions add in quadrature; the tolerance
-    // is wide because the drift term is stochastic by design.
-    const double wow = cd::interpolate_knots(cd::kTapeAxis, cd::kTapeWowDepthMs, 0.67);
-    const double flutter =
-        cd::interpolate_knots(cd::kTapeAxis, cd::kTapeFlutterDepthMs, 0.67);
-    const double nominal = std::sqrt(0.5 * wow * wow + 0.5 * flutter * flutter);
-    INFO("nominal deviation " << nominal << " ms");
-    CHECK(moving > 0.5 * nominal);
-    CHECK(moving < 2.0 * nominal);
-
-    // The deviation's own spectrum must peak at the modeled wow rate.
-    std::vector<float> as_float(unstable_track.size());
-    for (std::size_t i = 0; i < unstable_track.size(); ++i)
-        as_float[i] = static_cast<float>(unstable_track[i]);
-
-    const auto psd = welch_psd(as_float, 0, static_cast<int>(as_float.size()), 4096);
-    std::size_t best = 1;
-    for (std::size_t bin = 1; bin < psd.size() && psd_bin_hz(bin, psd.size(), kTrackRate) < 4.0;
-         ++bin)
-        if (psd[bin] > psd[best]) best = bin;
-    const double peak_hz = psd_bin_hz(best, psd.size(), kTrackRate);
-    INFO("wow peak at " << peak_hz << " Hz, expected " << cd::kWowRateHz);
-    CHECK(std::abs(peak_hz - cd::kWowRateHz) <= 0.2);
-
-}
-
-TEST_CASE("tape modulation does not shift the mean delay", "[character-delay][tape]") {
-    // The mean-delay rule: instability changes pitch, never tempo. Measured by
-    // where the repeat of an impulse lands with instability at maximum.
-    Engine delay;
-    configure(delay, Character::tape, 500.0, 0.0, 1.0);
-    settle(delay, 4.0 * slew_seconds(Character::tape) + 0.6);
-
-    double total = 0.0;
-    const int trials = 64;
-    for (int trial = 0; trial < trials; ++trial) {
-        auto buffers = impulse_left(static_cast<int>(kSr * 1.2));
-        render(delay, buffers);
-        total += peak_index(buffers.left, 1, static_cast<int>(kSr * 1.1));
-    }
-    const double mean_index = total / trials;
-    const double expected = 0.5 * kSr;
-    INFO("mean repeat index " << mean_index << ", expected " << expected);
-    CHECK(std::abs(mean_index - expected) <= 0.0001 * kSr);  // +-0.1 ms
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 8 — Vintage floor and darkening
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("vintage band-limits to its internal rate", "[character-delay][vintage]") {
-    Engine delay;
-    configure(delay, Character::vintage_digital, 200.0, 0.0, 0.5);
-    settle(delay, 1.0);
-
-    // The reported edge must be the table's fraction of the reported internal
-    // rate — a real relationship, not a value compared against itself.
-    const double edge = delay.vintage_band_edge_hz();
-    INFO("reported band edge " << edge);
-    CHECK(edge == Catch::Approx(cd::kVintageAntiAliasFraction * delay.vintage_internal_rate_hz()));
-
-    auto response_at = [&](double hz) {
-        Engine probe;
-        configure(probe, Character::vintage_digital, 200.0, 0.0, 0.5);
-        settle(probe, 1.0);
-        const int n = static_cast<int>(kSr * 1.0);
-        auto buffers = sine_both(n, hz, 0.5f);
-        render(probe, buffers);
-        return magnitude_at(buffers.left, static_cast<int>(kSr * 0.5), n, hz);
-    };
-
-    const double passband = response_at(300.0);
-    const double at_edge = response_at(edge);
-    const double beyond = response_at(std::min(edge * 1.8, 0.45 * kSr));
-    INFO("passband " << passband << " edge " << at_edge << " beyond " << beyond);
-    CHECK(at_edge < passband);
-    CHECK(beyond < at_edge * 0.5);
-}
-
-TEST_CASE("vintage wet audio crosses minus 3 dB at its converter edge",
-          "[character-delay][vintage][slow]") {
-    Engine law;
-    configure(law, Character::vintage_digital, 200.0, 0.0, 0.5);
-    settle(law, 1.0);
-    const double expected = cd::kVintageAntiAliasFraction * law.vintage_internal_rate_hz();
-    const double measured = measured_minus_3db_crossing(
-        expected, [](double hz) {
-            return measured_wet_tone_gain(Character::vintage_digital, 200.0, 0.5, hz);
-        });
-    INFO("measured wet crossing " << measured << " Hz, converter target " << expected
-                                  << " Hz");
-    REQUIRE(measured > 0.0);
-    CHECK(std::abs(measured - expected) <= 0.10 * expected);
-}
-
-TEST_CASE("vintage repeats darken as they recirculate", "[character-delay][vintage]") {
-    Engine delay;
-    configure(delay, Character::vintage_digital, 200.0, 0.6, 0.5);
-    settle(delay, 1.0);
-
-    // Broadband in: a narrow-band burst has no high frequencies for the
-    // converter loop to shed, so it cannot show darkening even when it happens.
-    auto buffers = impulse_left(static_cast<int>(kSr * 1.2), 0.9f);
-    render(delay, buffers);
-
-    double previous = 1e12;
-    for (int repeat = 1; repeat <= 4; ++repeat) {
-        const int centre = static_cast<int>(repeat * 0.2 * kSr);
-        const double centroid = spectral_centroid(buffers.left, centre - 2048, centre + 2048);
-        INFO("repeat " << repeat << " centroid " << centroid);
-        CHECK(centroid < previous);
-        previous = centroid;
-    }
-}
-
-TEST_CASE("vintage quantization noise sits in the dithered PCM region",
-          "[character-delay][vintage]") {
-    // At the 12-bit knot a -60 dBFS tone must come back with a noise floor set
-    // by the quantizer and its TPDF dither, not by the signal.
-    Engine delay;
-    configure(delay, Character::vintage_digital, 100.0, 0.0, 0.5);
-    settle(delay, 1.0);
-
-    const int n = static_cast<int>(kSr * 2.0);
-    auto buffers = sine_both(n, 1000.0, static_cast<float>(std::pow(10.0, -60.0 / 20.0)));
-    render(delay, buffers);
-
-    const auto psd = welch_psd(buffers.left, static_cast<int>(kSr), n, 32768);
-    // Integrate everything except the tone's own bins.
-    double noise = 0.0;
-    for (std::size_t bin = 1; bin < psd.size(); ++bin) {
-        const double f = psd_bin_hz(bin, psd.size(), kSr);
-        if (std::abs(f - 1000.0) < 50.0) continue;
-        noise += psd[bin];
-    }
-    // Welch uses an unnormalized FFT. Divide the integrated one-sided power
-    // by the Hann window's energy and segment length to recover mean-square
-    // amplitude in full-scale units. Interior positive-frequency bins carry
-    // the matching negative-frequency energy, hence the factor of two.
-    constexpr double kHannMeanSquare = 3.0 / 8.0;
-    const double segment = 32768.0;
-    const double noise_mean_square = 2.0 * noise / (segment * segment * kHannMeanSquare);
-    const double noise_db = 10.0 * std::log10(std::max(noise_mean_square, 1e-30));
-    INFO("integrated wet noise floor " << noise_db << " dBFS");
-    CHECK(noise_db >= -80.0);
-    CHECK(noise_db <= -68.0);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 9 — Diffusion
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("diffusion smears a repeat into a cluster", "[character-delay][diffusion]") {
-    auto count_above = [](Character character) {
-        Engine delay;
-        configure(delay, character, 100.0, 0.0, 0.5);
-        settle(delay, 0.3);
-        auto buffers = impulse_left(static_cast<int>(kSr * 0.4));
-        render(delay, buffers);
-
-        const int centre = peak_index(buffers.left, 1, static_cast<int>(buffers.left.size()));
-        const int span = static_cast<int>(0.03 * kSr);
-        const double top = peak(buffers.left, centre - span, centre + span);
-        int count = 0;
-        for (int i = std::max(1, centre - span);
-             i < centre + span && i < static_cast<int>(buffers.left.size()); ++i)
-            if (std::abs(static_cast<double>(buffers.left[static_cast<std::size_t>(i)])) >
-                0.05 * top)
-                ++count;
-        return count;
-    };
-
-    const int clean = count_above(Character::clean);
-    const int diffused = count_above(Character::diffusion);
-    INFO("clean " << clean << " diffused " << diffused);
-    CHECK(diffused >= 8 * std::max(clean, 1));
-}
-
-TEST_CASE("the diffuser is allpass in steady state", "[character-delay][diffusion]") {
-    Engine delay;
-    configure(delay, Character::diffusion, 20.0, 0.0, 0.5);
-    settle(delay, 0.3);
-
-    // White noise in; the allpass chain must not change the magnitude response
-    // between the loop filters' corners.
-    const int n = static_cast<int>(kSr * 4.0);
-    auto buffers = make_stereo(n);
-    cd::Xorshift32 rng(12345u);
-    for (int i = 0; i < n; ++i) {
-        const auto v = static_cast<float>(0.2 * rng.bipolar());
-        buffers.left[static_cast<std::size_t>(i)] = v;
-        buffers.right[static_cast<std::size_t>(i)] = v;
-    }
-    render(delay, buffers);
-
-    const auto psd = welch_psd(buffers.left, static_cast<int>(kSr), n, 8192);
-    double low = 1e30;
-    double high = 0.0;
-    for (std::size_t bin = 1; bin < psd.size(); ++bin) {
-        const double f = psd_bin_hz(bin, psd.size(), kSr);
-        if (f < 100.0 || f > 8000.0) continue;
-        low = std::min(low, psd[bin]);
-        high = std::max(high, psd[bin]);
-    }
-    // Compare smoothed octave-band energies rather than raw bins: a single
-    // realization of noise has its own several-dB bin-to-bin scatter, which is
-    // a property of the stimulus, not of the filter under test.
-    double worst = 0.0;
-    double reference = 0.0;
-    for (double centre = 141.0; centre < 8000.0; centre *= 2.0) {
-        double band = 0.0;
-        int count = 0;
-        for (std::size_t bin = 1; bin < psd.size(); ++bin) {
-            const double f = psd_bin_hz(bin, psd.size(), kSr);
-            if (f < centre / std::sqrt(2.0) || f > centre * std::sqrt(2.0)) continue;
-            band += psd[bin];
-            ++count;
-        }
-        if (count == 0) continue;
-        band /= count;
-        if (reference == 0.0) reference = band;
-        worst = std::max(worst, std::abs(10.0 * std::log10(band / reference)));
-    }
-    INFO("worst octave-band deviation " << worst << " dB (raw bin spread "
-                                        << 10.0 * std::log10(high / std::max(low, 1e-30)) << ")");
-    CHECK(worst < 1.5);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1195,20 +522,90 @@ TEST_CASE("ducking pushes the wet path down under a hot input",
     INFO("open " << open_level << " ducked " << ducked_level);
     CHECK(20.0 * std::log10((ducked_level + 1e-18) / open_level) < -12.0);
 
-    // Recovery: after the input stops, the wet path returns within a few
-    // release constants.
+    // Recovery means the FIRST point after which the wet path stays within
+    // 1 dB, not merely a long average that can hide a late bad interval.
     const auto released = measure(1.0f, true);
-    // The soft knee means the last decibel of recovery costs an extra release
-    // constant beyond the three the envelope itself needs.
-    const int recovery_start =
-        static_cast<int>(kSr * (2.0 + 4.0 * cd::kDuckReleaseS));
-    const double recovered =
-        rms(released.left, recovery_start, static_cast<int>(kSr * 2.9));
     const auto undocked = measure(0.0f, true);
-    const double reference =
-        rms(undocked.left, recovery_start, static_cast<int>(kSr * 2.9));
-    INFO("recovered " << recovered << " reference " << reference);
-    CHECK(std::abs(20.0 * std::log10((recovered + 1e-18) / (reference + 1e-18))) < 1.0);
+    constexpr double kWindowS = 0.02;
+    const int window = static_cast<int>(kWindowS * kSr);
+    const int stop = static_cast<int>(2.0 * kSr);
+    const int end = static_cast<int>(2.9 * kSr);
+    int last_bad_end = stop;
+    for (int begin = stop; begin + window <= end; begin += window) {
+        const double reference = rms(undocked.left, begin, begin + window);
+        REQUIRE(reference > 1e-6);
+        const double recovered = rms(released.left, begin, begin + window);
+        const double difference_db =
+            20.0 * std::log10((recovered + 1e-18) / reference);
+        if (std::abs(difference_db) >= 1.0)
+            last_bad_end = begin + window;
+    }
+    const double recovery_seconds = static_cast<double>(last_bad_end - stop) / kSr;
+    INFO("stable duck recovery at " << recovery_seconds << " s; three tau is "
+                                    << 3.0 * cd::kDuckReleaseS << " s");
+    CHECK(recovery_seconds <= 3.0 * cd::kDuckReleaseS);
+}
+
+TEST_CASE("non-finite parameter writes preserve the last valid state",
+          "[character-delay][api]") {
+    auto set_valid_state = [](Engine& delay) {
+        configure(delay, Character::tape, 437.0, 0.72, 0.83,
+                  TapeTier::physical);
+        delay.set_sample_rate(kSr);
+        delay.set_tape_speed_ips(15.0f);
+        delay.set_time_offset(1.27f);
+        delay.set_crossfeed(0.41f);
+        delay.set_mod(0.31f, 0.46f);
+        delay.set_duck(0.37f);
+    };
+
+    for (double bad : {std::numeric_limits<double>::quiet_NaN(),
+                       std::numeric_limits<double>::infinity(),
+                       -std::numeric_limits<double>::infinity()}) {
+        Engine candidate;
+        Engine reference;
+        set_valid_state(candidate);
+        set_valid_state(reference);
+
+        auto before_bad_rate = sine_both(static_cast<int>(0.25 * kSr), 521.0, 0.19f);
+        auto reference_before = before_bad_rate;
+        render(candidate, before_bad_rate);
+        render(reference, reference_before);
+        REQUIRE(before_bad_rate.left == reference_before.left);
+        candidate.set_sample_rate(bad);
+        auto after_bad_rate = sine_both(static_cast<int>(0.25 * kSr), 521.0, 0.19f);
+        auto reference_after = after_bad_rate;
+        render(candidate, after_bad_rate);
+        render(reference, reference_after);
+        CHECK(after_bad_rate.left == reference_after.left);
+        CHECK(after_bad_rate.right == reference_after.right);
+
+        candidate.set_tape_speed_ips(static_cast<float>(bad));
+        candidate.set_time_ms(static_cast<float>(bad));
+        candidate.set_time_offset(static_cast<float>(bad));
+        candidate.set_feedback(static_cast<float>(bad));
+        candidate.set_crossfeed(static_cast<float>(bad));
+        candidate.set_character_amount(static_cast<float>(bad));
+        candidate.set_duck(static_cast<float>(bad));
+
+        // A bad component must not discard the valid component beside it.
+        candidate.set_mod(static_cast<float>(bad), 0.73f);
+        reference.set_mod(0.31f, 0.73f);
+        candidate.set_mod(0.62f, static_cast<float>(bad));
+        reference.set_mod(0.62f, 0.73f);
+
+        candidate.reset();
+        reference.reset();
+        auto actual = sine_both(static_cast<int>(kSr * 1.5), 733.0, 0.27f);
+        auto expected = actual;
+        render(candidate, actual);
+        render(reference, expected);
+        INFO("invalid value " << bad);
+        CHECK(all_finite(actual.left));
+        CHECK(all_finite(actual.right));
+        CHECK(actual.left == expected.left);
+        CHECK(actual.right == expected.right);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1297,244 +694,6 @@ TEST_CASE("process allocates nothing in any configuration",
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 15 — Jiles-Atherton hysteresis
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("the hysteresis solver converges inside its iteration cap",
-          "[character-delay][hysteresis][slow]") {
-    // 4x the saturation onset: the Langevin function saturates around an
-    // argument of 3, and the argument is field/shape, so the onset field is
-    // 3 x shape and the drive level is four times that.
-    for (double drive : {cd::kTapeDrive.front(), cd::kTapeDrive[2], cd::kTapeDrive.back()}) {
-        cd::JilesAthertonHysteresis hysteresis;
-        hysteresis.prepare(kSr * 4.0);
-        hysteresis.set_character(drive, cd::kTapeBias[1]);
-        hysteresis.clear_solver_counters();
-
-        const int n = static_cast<int>(kSr * 4.0 * 10.0);
-        for (int i = 0; i < n; ++i)
-            hysteresis.process(0.75 * std::sin(2.0 * cd::kPi * 1000.0 * i / (kSr * 4.0)));
-
-        INFO("drive " << drive << " capped " << hysteresis.capped_steps());
-        CHECK(hysteresis.capped_steps() == 0);
-    }
-
-    // Bounded output at maximum drive, not just convergence.
-    cd::JilesAthertonHysteresis hot;
-    hot.prepare(kSr * 4.0);
-    hot.set_character(cd::kTapeDrive.back(), cd::kTapeBias.back());
-    const int n = static_cast<int>(kSr * 4.0 * 10.0);
-    double worst = 0.0;
-    for (int i = 0; i < n; ++i)
-        worst = std::max(worst, std::abs(hot.process(
-                                    0.75 * std::sin(2.0 * cd::kPi * 1000.0 * i / (kSr * 4.0)))));
-    INFO("max-drive peak " << worst);
-    CHECK(worst < 1.5);
-}
-
-TEST_CASE("hysteresis has loop area, unlike a waveshaper",
-          "[character-delay][hysteresis]") {
-    cd::JilesAthertonHysteresis hysteresis;
-    hysteresis.prepare(kSr);
-    hysteresis.set_character(cd::kTapeDrive[2], cd::kTapeBias[1]);
-
-    double area = 0.0;
-    double previous_field = 0.0;
-    double previous_magnetization = 0.0;
-    const int n = static_cast<int>(kSr);
-    for (int i = 0; i < n; ++i) {
-        const double field = 0.6 * std::sin(2.0 * cd::kPi * 2.0 * i / kSr);
-        const double magnetization = hysteresis.process(field);
-        area += 0.5 * (magnetization + previous_magnetization) * (field - previous_field);
-        previous_field = field;
-        previous_magnetization = magnetization;
-    }
-    INFO("loop area " << area);
-    CHECK(std::abs(area) > 1e-3);
-}
-
-TEST_CASE("hysteresis distortion grows with drive and silence clears it",
-          "[character-delay][hysteresis]") {
-    auto distortion = [](double drive) {
-        cd::JilesAthertonHysteresis hysteresis;
-        hysteresis.prepare(kSr);
-        hysteresis.set_character(drive, cd::kTapeBias[1]);
-        const int n = static_cast<int>(kSr);
-        std::vector<float> out(static_cast<std::size_t>(n), 0.0f);
-        for (int i = 0; i < n; ++i)
-            out[static_cast<std::size_t>(i)] = static_cast<float>(
-                hysteresis.process(0.4 * std::sin(2.0 * cd::kPi * 500.0 * i / kSr)));
-
-        const double fundamental = magnitude_at(out, n / 4, n, 500.0);
-        double harmonics = 0.0;
-        for (int h = 2; h <= 6; ++h) {
-            const double m = magnitude_at(out, n / 4, n, 500.0 * h);
-            harmonics += m * m;
-        }
-        return std::sqrt(harmonics) / std::max(fundamental, 1e-12);
-    };
-
-    const double soft = distortion(cd::kTapeDrive.front());
-    const double hard = distortion(cd::kTapeDrive.back());
-    INFO("THD soft " << soft << " hard " << hard);
-    CHECK(hard > soft);
-
-    cd::JilesAthertonHysteresis hysteresis;
-    hysteresis.prepare(kSr);
-    hysteresis.set_character(cd::kTapeDrive[2], cd::kTapeBias[2]);
-    for (int i = 0; i < 4800; ++i)
-        hysteresis.process(0.5 * std::sin(2.0 * cd::kPi * 100.0 * i / kSr));
-    double last = 1.0;
-    for (int i = 0; i < 4800; ++i) last = hysteresis.process(0.0);
-    INFO("magnetization after silence " << last);
-    CHECK(last == 0.0);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 16 — Wallace loss filter
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("the loss cascade realizes the modeled response",
-          "[character-delay][tape][loss]") {
-    // The stage is a cascade: a fitted IIR ladder carries the smooth
-    // spacing/thickness tilt and a minimum-phase FIR carries the gap null. This
-    // measures the COMBINED response against the analytic model, which is the
-    // only comparison that means anything to a listener.
-    cd::TapeLossDesign design;
-    design.prepare(kSr, 7.5);
-    const std::size_t taps = cd::tape_gap_fir_taps(kSr);
-
-    auto worst_error = [&](double ips, double spacing_um) {
-        cd::TapeLossGeometry geometry;
-        geometry.speed_ips = ips;
-        geometry.spacing_m = spacing_um * 1e-6;
-
-        const auto gap = cd::design_tape_gap_fir(kSr, taps, geometry);
-        const auto parameters = design.shapes().parameters_for(geometry);
-
-        double worst = 0.0;
-        for (int k = 0; k < 10; ++k) {
-            const double f = 20.0 * std::pow(0.45 * kSr / 20.0, k / 9.0);
-            std::complex<double> sum{0.0, 0.0};
-            for (std::size_t i = 0; i < taps; ++i)
-                sum += gap[i] * std::exp(std::complex<double>(0.0, -2.0 * cd::kPi * f * i / kSr));
-            const double realized = 20.0 * std::log10(std::max(std::abs(sum), 1e-12)) +
-                                    cd::tape_loss_iir_magnitude_db(parameters, f);
-            const double target = 20.0 * std::log10(std::max(
-                                             cd::tape_loss_magnitude_floored(f, geometry), 1e-12));
-            worst = std::max(worst, std::abs(std::max(realized, cd::kTapeLossFloorDb) -
-                                             std::max(target, cd::kTapeLossFloorDb)));
-        }
-        return worst;
-    };
-
-    // At and above 3.75 ips, within a decibel across the band — at every
-    // spacing on the age axis, not just the nominal one.
-    for (double ips : {3.75, 7.5, 15.0, 30.0}) {
-        for (double spacing : cd::kAgeSpacingUm) {
-            const double error = worst_error(ips, spacing);
-            INFO(ips << " ips at " << spacing << " um: worst error " << error << " dB");
-            CHECK(error < 1.0);
-        }
-    }
-
-    // The slowest speed at maximum wear is the hardest corner in the model —
-    // the analytic −3 dB point drops near 100 Hz there. Held to 2 dB.
-    const double worn = worst_error(1.875, cd::kAgeSpacingUm.back());
-    INFO("1.875 ips worn worst error " << worn << " dB");
-    CHECK(worn < 2.0);
-}
-
-TEST_CASE("the loss cascade is exact at every age, not just at fitted points",
-          "[character-delay][tape][loss]") {
-    // The age axis is a pure frequency SCALING of a fitted dimensionless shape,
-    // so there are no knots to fall between. This sweeps age continuously and
-    // asserts the accuracy never degrades — the case that would catch a
-    // regression back to fitting-and-interpolating, which measured inside 1 dB
-    // at its knots and 3-4 dB between them.
-    cd::TapeLossDesign design;
-    design.prepare(kSr, 7.5);
-
-    for (double age = 0.0; age <= 1.0; age += 0.03125) {
-        const auto geometry = design.geometry_at(age);
-        const auto parameters = design.parameters_at(age);
-
-        double worst = 0.0;
-        for (int k = 0; k < 12; ++k) {
-            const double f = 20.0 * std::pow(0.45 * kSr / 20.0, k / 11.0);
-            const double realized = cd::tape_loss_iir_magnitude_db(parameters, f);
-            const double target = 20.0 * std::log10(std::max(
-                                             cd::tape_loss_smooth_magnitude(f, geometry), 1e-12));
-            worst = std::max(worst, std::abs(std::max(realized, cd::kTapeLossFloorDb) -
-                                             std::max(target, cd::kTapeLossFloorDb)));
-        }
-        INFO("age " << age << " worst error " << worst << " dB");
-        CHECK(worst < 1.0);
-    }
-
-    // Scaling is monotone in age: more wear is never brighter.
-    double previous = 1e12;
-    for (double age = 0.0; age <= 1.0; age += 0.1) {
-        const auto parameters = design.parameters_at(age);
-        const double at_5k = cd::tape_loss_iir_magnitude_db(parameters, 5000.0);
-        INFO("age " << age << " response at 5 kHz " << at_5k << " dB");
-        CHECK(at_5k <= previous + 1e-9);
-        previous = at_5k;
-    }
-}
-
-TEST_CASE("the shipped loss shapes reproduce a fresh derivation",
-          "[character-delay][tape][loss][slow]") {
-    // The shapes in tables.hpp were derived offline by the fitter that still
-    // lives in tape_loss.hpp. This re-runs that derivation and checks the
-    // shipped values give the same RESPONSE — comparing responses rather than
-    // parameters because a minimax fit can reach the same curve through
-    // different parameter sets, and it is the curve that is the contract.
-    const auto fitted = cd::fit_tape_loss_shapes();
-    const auto shipped = cd::TapeLossShapes::tabulated();
-
-    auto magnitude = [](const auto& shape, double x) {
-        double db = 0.0;
-        for (double corner : shape.pole_x) {
-            const double r = x / corner;
-            db += -10.0 * std::log10(1.0 + r * r);
-        }
-        for (std::size_t i = 0; i < shape.shelf_x.size(); ++i) {
-            const double g = std::pow(10.0, shape.shelf_db[i] / 20.0);
-            const double r = x / shape.shelf_x[i];
-            db += 10.0 * std::log10((1.0 + g * g * r * r) / (1.0 + r * r));
-        }
-        return db;
-    };
-
-    double spacing_shipped = 0.0;
-    double spacing_fitted = 0.0;
-    double thickness_shipped = 0.0;
-    for (int k = 0; k < 40; ++k) {
-        const double x = cd::kLossShapeMinX *
-                         std::pow(cd::kLossShapeMaxX / cd::kLossShapeMinX, k / 39.0);
-        const auto clamp_db = [](double v) { return std::max(v, cd::kTapeLossFloorDb); };
-
-        spacing_shipped = std::max(spacing_shipped,
-                                   std::abs(clamp_db(magnitude(shipped.spacing, x)) -
-                                            clamp_db(cd::spacing_shape_db(x))));
-        spacing_fitted = std::max(spacing_fitted,
-                                  std::abs(clamp_db(magnitude(fitted.spacing, x)) -
-                                           clamp_db(cd::spacing_shape_db(x))));
-        thickness_shipped = std::max(thickness_shipped,
-                                     std::abs(clamp_db(magnitude(shipped.thickness, x)) -
-                                              clamp_db(cd::thickness_shape_db(x))));
-    }
-
-    INFO("shipped spacing " << spacing_shipped << " dB, fresh fit " << spacing_fitted
-                            << " dB, shipped thickness " << thickness_shipped << " dB");
-    CHECK(spacing_shipped < 0.5);
-    CHECK(thickness_shipped < 0.3);
-    // The shipped table must be at least as good as what the fitter produces
-    // now, with a little slack for the search's own run-to-run spread.
-    CHECK(spacing_shipped < spacing_fitted + 0.25);
-}
-
 TEST_CASE("the wet path stays inside a stated gain bound",
           "[character-delay][gain]") {
     // The bound a host or graph layer needs in order to size headroom, and the
@@ -1569,46 +728,6 @@ TEST_CASE("the wet path stays inside a stated gain bound",
     }
 }
 
-TEST_CASE("the gap-loss null lands where the physics predicts",
-          "[character-delay][tape][loss]") {
-    cd::TapeLossGeometry geometry;
-    geometry.speed_ips = 1.875;
-    geometry.spacing_m = 5e-6;
-    const double predicted = geometry.speed_ips * 0.0254 / geometry.gap_m;
-
-    double best_hz = 0.0;
-    double best = 1e30;
-    for (double f = 1000.0; f < 0.5 * kSr; f += 5.0) {
-        const double m = cd::tape_loss_magnitude(f, geometry);
-        if (m < best) {
-            best = m;
-            best_hz = f;
-        }
-    }
-    INFO("predicted " << predicted << " Hz, measured " << best_hz << " Hz");
-    CHECK(std::abs(best_hz - predicted) < 0.01 * predicted);
-}
-
-TEST_CASE("a tape speed change crossfades without a discontinuity",
-          "[character-delay][tape][loss]") {
-    Engine delay;
-    configure(delay, Character::tape, 300.0, 0.4, 0.5, TapeTier::physical);
-    settle(delay, 1.5);
-
-    auto before = sine_both(static_cast<int>(kSr * 0.5), 400.0, 0.4f);
-    render(delay, before);
-    const double baseline = max_step(before.left, 1000, static_cast<int>(before.left.size()));
-
-    delay.set_tape_speed_ips(15.0f);
-    auto after = sine_both(static_cast<int>(kSr * 0.5), 400.0, 0.4f);
-    render(delay, after);
-
-    INFO("baseline step " << baseline << " during crossfade "
-                          << max_step(after.left, 0, static_cast<int>(0.05 * kSr)));
-    CHECK(all_finite(after.left));
-    CHECK(max_step(after.left, 0, static_cast<int>(0.05 * kSr)) <= 2.0 * baseline);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 17 — Latency
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1635,125 +754,4 @@ TEST_CASE("the module reports zero latency in every configuration",
     const int index = peak_index(buffers.left, 1, static_cast<int>(buffers.left.size()));
     INFO("physical-tier repeat at " << index << ", expected " << 0.35 * kSr);
     CHECK(std::abs(index - 0.35 * kSr) <= 0.001 * kSr);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Catalog node
-// ═══════════════════════════════════════════════════════════════════════════
-
-TEST_CASE("every character registers as a distinct catalog node",
-          "[character-delay][catalog]") {
-    namespace catalog = pulp::host::character_delay;
-    pulp::host::SignalGraph graph;
-
-    const auto nodes = {
-        catalog::make_character_delay_node(Character::clean),
-        catalog::make_character_delay_node(Character::vintage_digital),
-        catalog::make_character_delay_node(Character::tape),
-        catalog::make_character_delay_node(Character::tape, TapeTier::physical),
-        catalog::make_character_delay_node(Character::bbd),
-        catalog::make_character_delay_node(Character::diffusion),
-    };
-
-    for (const auto& type : nodes) {
-        INFO("type " << type.type_id);
-        CHECK(type.num_input_ports == 2);
-        CHECK(type.num_output_ports == 2);
-        CHECK(type.lowerable);
-        CHECK(type.baked_params.size() == 10);
-        CHECK(static_cast<bool>(type.process_instance_baked_param));
-        CHECK(graph.register_custom_node_type(type));
-    }
-    // Each character must claim a DISTINCT id — that identity is what a baked
-    // artifact resolves against.
-    std::vector<std::string> ids;
-    for (const auto& type : nodes) ids.push_back(type.type_id);
-    std::sort(ids.begin(), ids.end());
-    CHECK(std::adjacent_find(ids.begin(), ids.end()) == ids.end());
-}
-
-TEST_CASE("configuring the tape speed before the sample rate is safe",
-          "[character-delay][catalog]") {
-    // The catalog node's prepare() sets character, tier and tape speed and only
-    // then the sample rate — so a speed change arrives while the physical
-    // tier's FIR banks and working buffer do not yet exist. Walking them there
-    // is an out-of-bounds write, and it only triggers for nodes constructed at
-    // a non-default speed, which is exactly the kind of thing that ships.
-    Engine delay;
-    delay.set_character(Character::tape);
-    delay.set_tape_tier(TapeTier::physical);
-    delay.set_tape_speed_ips(15.0f);
-    delay.set_sample_rate(kSr);
-    delay.set_time_ms(200.0f);
-    delay.set_feedback(0.4f);
-    delay.set_character_amount(0.5f);
-    delay.reset();
-
-    auto buffers = sine_both(static_cast<int>(kSr * 0.5), 500.0, 0.4f);
-    render(delay, buffers);
-    CHECK(all_finite(buffers.left));
-    CHECK(rms(buffers.left, 0, static_cast<int>(buffers.left.size())) > 0.0);
-    // The speed the caller asked for is the speed the banks were designed at.
-    CHECK(delay.tape_gap_coefficients(0).size() == cd::tape_gap_fir_taps(kSr));
-}
-
-TEST_CASE("the catalog node bakes and delays", "[character-delay][catalog]") {
-    namespace catalog = pulp::host::character_delay;
-    using namespace pulp::host;
-
-    const auto type = catalog::make_character_delay_node(Character::clean);
-    SignalGraph graph;
-    REQUIRE(graph.register_custom_node_type(type));
-    const auto input = graph.add_input_node(2, "In");
-    const auto node = graph.add_custom_node(type.type_id, 1, "Engine");
-    const auto output = graph.add_output_node(2, "Out");
-    for (PortIndex port = 0; port < 2; ++port) {
-        REQUIRE(graph.connect(input, port, node, port));
-        REQUIRE(graph.connect(node, port, output, port));
-    }
-    graph.set_canonical_executor_routing_enabled(true);
-    REQUIRE(graph.prepare(kSr, 512));
-
-    auto result = bake(graph);
-    REQUIRE(result.accepted);
-    REQUIRE(result.processor);
-
-    pulp::format::PrepareContext prepare_context;
-    prepare_context.sample_rate = kSr;
-    prepare_context.max_buffer_size = 512;
-    prepare_context.input_channels = 2;
-    prepare_context.output_channels = 2;
-    result.processor->prepare(prepare_context);
-
-    // The node defaults to 350 ms; render long enough to see the repeat.
-    const int frames = 512;
-    const int blocks = static_cast<int>(kSr * 0.5) / frames;
-    std::vector<float> left(static_cast<std::size_t>(frames), 0.0f);
-    std::vector<float> right(static_cast<std::size_t>(frames), 0.0f);
-    std::vector<float> captured;
-    captured.reserve(static_cast<std::size_t>(blocks * frames));
-
-    for (int block = 0; block < blocks; ++block) {
-        std::fill(left.begin(), left.end(), 0.0f);
-        std::fill(right.begin(), right.end(), 0.0f);
-        if (block == 0) left[0] = 1.0f;
-
-        const float* in_pointers[] = {left.data(), right.data()};
-        float* out_pointers[] = {left.data(), right.data()};
-        pulp::audio::BufferView<const float> in_view(in_pointers, 2,
-                                                     static_cast<std::uint32_t>(frames));
-        pulp::audio::BufferView<float> out_view(out_pointers, 2,
-                                                static_cast<std::uint32_t>(frames));
-        pulp::midi::MidiBuffer midi_in;
-        pulp::midi::MidiBuffer midi_out;
-        pulp::format::ProcessContext context;
-        context.sample_rate = kSr;
-        context.num_samples = frames;
-        result.processor->process(out_view, in_view, midi_in, midi_out, context);
-        captured.insert(captured.end(), left.begin(), left.end());
-    }
-
-    const int index = peak_index(captured, 1, static_cast<int>(captured.size()));
-    INFO("baked repeat at " << index << ", expected " << 0.35 * kSr);
-    CHECK(std::abs(index - 0.35 * kSr) <= 0.002 * kSr);
 }
