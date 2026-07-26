@@ -2133,15 +2133,85 @@ TEST_CASE("generate_pulp_js web-compat mode handles audio widgets", "[view][impo
     knob.audio_min = 0.0f;
     knob.audio_max = 1.0f;
     knob.audio_default = 0.75f;
+    knob.attributes["binding"] = "gain";
+    knob.stable_anchor_id = "figma:1:2";
     ir.root.children.push_back(knob);
 
     CodeGenOptions opts;
     opts.mode = CodeGenMode::web_compat;
     auto js = generate_pulp_js(ir, opts);
 
-    REQUIRE(js.find("createKnob") != std::string::npos);
-    REQUIRE(js.find("label: 'Gain'") != std::string::npos);
-    REQUIRE(js.find("defaultValue: 0.75") != std::string::npos);
+    // This asserted `createKnob({label, min, max, defaultValue})`, which is a
+    // shape the bridge it targets cannot run: `createKnob(id, parentId)` reads
+    // argument 0 as a string, so an options object lowered to an EMPTY id. The
+    // knob registered as widgets_[""], parented at the session root rather than
+    // its design parent, carried no anchor, and no binding was emitted at all —
+    // the lowering produced a control that drove nothing. The expectation was
+    // wrong, not the code.
+    REQUIRE(js.find("document.createElement('knob')") != std::string::npos);
+    REQUIRE(js.find("setLabel(") != std::string::npos);
+    REQUIRE(js.find("'Gain'") != std::string::npos);
+    REQUIRE(js.find("setValue(") != std::string::npos);
+    REQUIRE(js.find("0.75") != std::string::npos);
+    // A declared binding is why an audio widget exists.
+    REQUIRE(js.find("bindWidgetToParam(") != std::string::npos);
+    REQUIRE(js.find("'gain'") != std::string::npos);
+    REQUIRE(js.find("setAnchor(") != std::string::npos);
+    // Appended before configuring: web-compat materializes the native widget on
+    // mount, so property calls issued before appendChild are dropped.
+    REQUIRE(js.find(".appendChild(") < js.find("setLabel("));
+}
+
+TEST_CASE("web-compat audio widget escapes an authored label",
+          "[view][import]") {
+    // The label was interpolated raw into a single-quoted literal, so a design
+    // could terminate the string and inject executable bridge JavaScript. Every
+    // other emission in this file escapes; this one must too.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "name'); setTheme('light');//";
+    ir.root.children.push_back(knob);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;   // the live lowering Forge runs
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("setTheme('light');") == std::string::npos);
+    CHECK(js.find("\\'") != std::string::npos);
+}
+
+TEST_CASE("web-compat audio widget label cannot escape its own comment",
+          "[view][import]") {
+    // The other half of the same hole. With comments on, the label was written
+    // into a `//` line verbatim — and a comment is only a comment until the
+    // text ends the line, so a newline in an authored label closed it and the
+    // remainder became executable bridge JavaScript.
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain\nsetTheme('light');\n";
+    ir.root.children.push_back(knob);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = true;
+    const auto js = generate_pulp_js(ir, opts);
+
+    CHECK(js.find("\nsetTheme('light');\n") == std::string::npos);
 }
 
 TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
@@ -3262,4 +3332,54 @@ TEST_CASE("generated JS opts its layout pass into sub-pixel geometry",
     const auto js = generate_pulp_js(ir, opts);
     REQUIRE(js.find("if (typeof setSubpixelLayout === 'function') "
                     "setSubpixelLayout('', true);") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_cpp re-opens a promoted button so its interactive child stays reachable") {
+    // TextButton defaults to PointerEvents::box_only so a centred icon cannot
+    // swallow its own click — but hit_test() then never descends, which would
+    // make the box_none it emits for the child inert. The generated code must
+    // re-open the parent, exactly as the runtime materializer does, or baked
+    // output silently loses the interactive descendant the sibling Knob test
+    // above proves is preserved. Knob has no box_only default, which is why
+    // that test kept passing while the button path was broken.
+    DesignIR ir;
+    ir.root.type = "frame";
+    ir.root.style.width = 120.0f;
+    ir.root.style.height = 120.0f;
+    ir.root.layout.direction = LayoutDirection::column;
+
+    IRNode outer_button;
+    outer_button.type = "button";
+    outer_button.name = "Outer Button";
+    outer_button.text_content = "Outer";
+    outer_button.style.width = 80.0f;
+    outer_button.style.height = 80.0f;
+    outer_button.layout.direction = LayoutDirection::column;
+
+    IRNode container;
+    container.type = "frame";
+    container.name = "Interactive Container";
+    container.style.width = 80.0f;
+    container.style.height = 40.0f;
+    container.layout.direction = LayoutDirection::column;
+
+    IRNode nested_button;
+    nested_button.type = "button";
+    nested_button.name = "Nested Fine Button";
+    nested_button.text_content = "Fine";
+    nested_button.style.width = 60.0f;
+    nested_button.style.height = 20.0f;
+
+    container.children.push_back(std::move(nested_button));
+    outer_button.children.push_back(std::move(container));
+    ir.root.children.push_back(std::move(outer_button));
+
+    const auto result = generate_pulp_cpp(ir, ir.asset_manifest, {});
+    REQUIRE(count_occurrences(
+                result.source,
+                "->set_pointer_events(pulp::view::View::PointerEvents::box_none);") == 1);
+    // ...and the parent re-opened, or that box_none reaches nothing.
+    REQUIRE(count_occurrences(
+                result.source,
+                "->set_pointer_events(pulp::view::View::PointerEvents::auto_);") == 1);
 }

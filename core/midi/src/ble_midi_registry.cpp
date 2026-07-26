@@ -4,6 +4,11 @@
 
 #include <pulp/midi/ble_midi_registry.hpp>
 
+// Must precede choc_MIDI.h — see the note in pulp/midi/message.hpp. Stated
+// explicitly rather than relied on transitively, so reordering the includes
+// above cannot silently reintroduce the GCC/libstdc++ build break.
+#include <string.h>
+
 #include <choc/audio/choc_MIDI.h>
 
 #include <condition_variable>

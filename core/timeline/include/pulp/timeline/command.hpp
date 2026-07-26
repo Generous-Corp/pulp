@@ -192,11 +192,35 @@ struct SetTrackFreeze {
     std::optional<TrackFreeze> replacement;
 };
 
+// A marker or region enters (or leaves) a sequence as one owned identity. Both
+// are sequence-level annotations, so neither command names a track: the marker
+// or region carries its own position on the sequence timeline.
+struct InsertMarker {
+    ItemId sequence_id;
+    SequenceMarker marker;
+};
+
+struct RemoveMarker {
+    ItemId sequence_id;
+    ItemId marker_id;
+};
+
+struct InsertRegion {
+    ItemId sequence_id;
+    SequenceRegion region;
+};
+
+struct RemoveRegion {
+    ItemId sequence_id;
+    ItemId region_id;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
                  RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
-                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze>;
+                 SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker,
+                 InsertRegion, RemoveRegion>;
 
 struct CommandEnvelope {
     CommandId id;

@@ -19,6 +19,11 @@ pulp_add_test_suite(pulp-test-ara-scaffold LIBRARIES pulp::format)
 # MIDI 1.0 backend audit
 pulp_add_test_suite(pulp-test-midi1-backend-audit LIBRARIES pulp::midi)
 
+# pulp/midi/message.hpp stays self-sufficient for choc_MIDI.h's unqualified
+# memcmp — a compile-time guard, so this target failing to BUILD is the failure
+# mode it is designed to catch (see test_midi_message_header.cpp).
+pulp_add_test_suite(pulp-test-midi-message-header LIBRARIES pulp::midi)
+
 # BufferOps SIMD helpers
 pulp_add_test_suite(pulp-test-buffer-ops LIBRARIES pulp::audio pulp::runtime)
 

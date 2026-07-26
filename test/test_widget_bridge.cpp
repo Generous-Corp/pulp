@@ -4796,3 +4796,49 @@ TEST_CASE("WidgetBridge resolves script-relative asset paths against the script 
     std::error_code ec;
     fs::remove_all(base, ec);
 }
+
+// A drag tick reaches this channel as well as on_drag: the hosts deliver
+// phase=drag to on_mouse_event so a widget can read modifiers mid-drag. Typing
+// the JS event from `is_down` alone republished that tick as a second
+// pointerdown, and the standard knob idiom latches its drag origin on
+// pointerdown — `y0 = e.clientY; v0 = value`. Re-latching every tick made each
+// move measure its delta from the point it had just reached, so a scripted knob
+// stayed pinned to its starting value for the whole drag.
+TEST_CASE("WidgetBridge does not republish a drag tick as pointerdown",
+          "[view][bridge][drag]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var downs = 0, moves = 0;
+        createCol('knob', '');
+        on('knob', 'pointerdown', function() { downs += 1; });
+        on('knob', 'pointermove', function() { moves += 1; });
+    )");
+
+    auto* knob = bridge.widget("knob");
+    REQUIRE(knob != nullptr);
+    REQUIRE(static_cast<bool>(knob->on_pointer_event));
+
+    MouseEvent press;
+    press.position = {10, 10};
+    press.is_down = true;
+    press.phase = MousePhase::press;
+    knob->on_pointer_event(press);
+
+    // Two drag ticks. The button is still held, so is_down stays true.
+    MouseEvent tick;
+    tick.position = {10, 30};
+    tick.is_down = true;
+    tick.phase = MousePhase::drag;
+    knob->on_pointer_event(tick);
+    tick.position = {10, 50};
+    knob->on_pointer_event(tick);
+
+    CHECK(engine.evaluate("downs").getWithDefault<int>(-1) == 1);
+    // on_drag owns the pointermove stream; this channel contributes none.
+    CHECK(engine.evaluate("moves").getWithDefault<int>(-1) == 0);
+}

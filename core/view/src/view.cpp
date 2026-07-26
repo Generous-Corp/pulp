@@ -5,6 +5,7 @@
 #include <pulp/runtime/trace.hpp>
 #include <pulp/view/motion.hpp>
 #include <pulp/view/gesture.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/drag_drop.hpp>
@@ -253,7 +254,12 @@ void View::simulate_click(Point root_pos) {
     up.is_down = false;
     up.phase = MousePhase::release;
     const bool gesture_up = dispatch_gesture_pointer_event(up);
-    if (gesture_down || gesture_up) return;
+    // Only a real CLAIM takes the pointer. These returns are true whenever a
+    // recognizer is merely a candidate here, so bailing on them made every
+    // widget that registers a gesture unclickable in headless tests — the same
+    // defect the plugin host had.
+    const bool claimed = (gesture_down || gesture_up) && gesture_claimed_pointer();
+    if (claimed) return;
 
     // Convert to target's local coordinates
     Point local = root_pos;
@@ -305,7 +311,8 @@ void View::simulate_drag(Point start, Point end, int steps) {
     down.button = MouseButton::left;
     down.is_down = true;
     down.phase = MousePhase::press;
-    bool gesture_consumed = dispatch_gesture_pointer_event(down);
+    bool gesture_consumed =
+        dispatch_gesture_pointer_event(down) && gesture_claimed_pointer();
 
     if (gesture_consumed) {
         for (int i = 1; i <= steps; ++i) {
@@ -330,17 +337,25 @@ void View::simulate_drag(Point start, Point end, int steps) {
         return;
     }
 
-    auto to_target_local = [this, target](Point p) {
-        View* v = target;
-        while (v && v != this) {
-            p.x -= v->bounds().x;
-            p.y -= v->bounds().y;
-            v = v->parent();
-        }
-        return p;
-    };
-
-    target->on_mouse_down(to_target_local(start));
+    // Each phase goes through the same pointer_dispatch verb the platform hosts
+    // call, so a simulated drag and a real one deliver the identical channels in
+    // the identical order. Calling the point-only virtuals directly (as this
+    // did) reached on_mouse_down / on_mouse_drag / on_mouse_up but never the
+    // modern on_mouse_event channel or the on_drag bubble — which is precisely
+    // what registerPointer installs, so every scripted widget saw nothing. A
+    // headless drag test could assert its callbacks were installed and still
+    // never exercise them.
+    //
+    // The verbs also fix the local point. The lambda this replaces peeled
+    // ancestor bounds offsets only, while hit_test — which picked `target` a few
+    // lines above — is scale- and scroll-aware, so a drag inside a scaled or
+    // scrolled container found the right widget and handed it the wrong
+    // coordinates. point_to_local divides out the scale chain and ScrollView
+    // offsets, so both halves agree.
+    //
+    // Empty fire_click throughout: a release landing back on the press target
+    // would otherwise read as a click, and a drag has never synthesized one.
+    deliver_mouse_down(*this, target, start, /*modifiers=*/0, /*click_count=*/1);
     for (int i = 1; i <= steps; ++i) {
         float t = static_cast<float>(i) / steps;
         Point p = {start.x + (end.x - start.x) * t,
@@ -351,8 +366,16 @@ void View::simulate_drag(Point start, Point end, int steps) {
         move.button = MouseButton::left;
         move.is_down = true;
         move.phase = MousePhase::drag;
-        gesture_consumed = dispatch_gesture_pointer_event(move) || gesture_consumed;
-        target->on_mouse_drag(to_target_local(p));
+        if (dispatch_gesture_pointer_event(move) && gesture_claimed_pointer()) {
+            // A recognizer took the pointer partway through. The press was
+            // already delivered, so stop the raw drag but CLOSE the bracket —
+            // a control that opened a parameter gesture on press must see its
+            // release or the host holds an automation touch open.
+            deliver_mouse_up(*this, target, p, /*modifiers=*/0, /*click_count=*/1,
+                             MouseUpHost{});
+            return;
+        }
+        deliver_mouse_drag(*this, target, p, /*modifiers=*/0);
     }
     MouseEvent up;
     up.position = end;
@@ -360,9 +383,14 @@ void View::simulate_drag(Point start, Point end, int steps) {
     up.button = MouseButton::left;
     up.is_down = false;
     up.phase = MousePhase::release;
-    gesture_consumed = dispatch_gesture_pointer_event(up) || gesture_consumed;
-    if (gesture_consumed) return;
-    target->on_mouse_up(to_target_local(end));
+    // The release is delivered unconditionally. Whether a recognizer claims on
+    // this edge or was merely a candidate throughout, the press was delivered
+    // and its bracket has to close exactly once. OR-ing a candidacy result into
+    // the bail is what leaked it: a widget carrying a recognizer that never
+    // recognized got its press and its drags and then no release at all.
+    dispatch_gesture_pointer_event(up);
+    deliver_mouse_up(*this, target, end, /*modifiers=*/0, /*click_count=*/1,
+                     MouseUpHost{});
 }
 
 static void collect_focusable(View& root, std::vector<View*>& out) {
@@ -1148,6 +1176,10 @@ bool View::dispatch_gesture_pointer_event(const MouseEvent& root_event,
 void View::advance_gesture_recognizers(double timestamp_seconds) {
     if (gesture_arbiter_)
         gesture_arbiter_->advance_time(*this, timestamp_seconds);
+}
+
+bool View::gesture_claimed_pointer() const {
+    return gesture_arbiter_ && gesture_arbiter_->claimed_pointer();
 }
 
 bool View::has_time_driven_gestures() const {

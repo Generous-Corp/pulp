@@ -8,6 +8,8 @@
 // a continuous first derivative, which is what keeps a swept read position from
 // producing the zipper that linear interpolation gives on a slow sweep.
 
+#include <pulp/signal/interpolator.hpp>
+
 #include <array>
 #include <cstddef>
 
@@ -15,11 +17,15 @@ namespace pulp::signal::fdn {
 
 // y0..y3 straddle the read position; t in [0, 1) is the fraction between y1
 // and y2.
+//
+// The arithmetic is signal::Interpolator::hermite — this is an argument-order
+// adapter, not a second implementation. The shared entry point names its points
+// by position relative to the sample being read (ym1, y0, y1, y2), which reads
+// naturally at a call site that already has an index; a ring buffer walking
+// four consecutive taps has no such index, so the callers here are clearer with
+// a flat y0..y3. One curve, two spellings of the same four points.
 inline double hermite4(double y0, double y1, double y2, double y3, double t) {
-    const double c1 = 0.5 * (y2 - y0);
-    const double c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-    const double c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
-    return ((c3 * t + c2) * t + c1) * t + y1;
+    return Interpolator::hermite<double>(t, y0, y1, y2, y3);
 }
 
 // A 4-sample sliding window over a source stream, for consumers that pull

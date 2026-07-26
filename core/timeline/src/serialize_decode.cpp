@@ -29,6 +29,10 @@ runtime::Result<ItemKind, PersistenceError> decode_item_kind(std::string_view va
         return runtime::Ok(ItemKind::TakeLane);
     if (value == "take")
         return runtime::Ok(ItemKind::Take);
+    if (value == "marker")
+        return runtime::Ok(ItemKind::Marker);
+    if (value == "region")
+        return runtime::Ok(ItemKind::Region);
     return fail<ItemKind>(PersistenceErrorCode::InvalidSchema, std::move(path));
 }
 
