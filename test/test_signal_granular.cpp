@@ -48,6 +48,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <utility>
@@ -1361,5 +1362,130 @@ TEST_CASE("Granular parameters clamp to their declared ranges", "[granular][para
     CHECK(engine.active_grain_count() <= 32);
     for (int slot = 32; slot < GranularEngine64::kMaxGrainBudget; ++slot) {
         CHECK_FALSE(engine.grain(slot).active);
+    }
+}
+
+TEST_CASE("Granular numeric controls retain exact configuration after non-finite automation",
+          "[granular][params][nan-recovery]") {
+    const std::vector<double> source = noise_buffer(48000, 0x51A7E5u);
+    std::vector<double> input(8192);
+    for (int i = 0; i < static_cast<int>(input.size()); ++i) {
+        input[static_cast<std::size_t>(i)] =
+            0.2 * std::sin(kTwoPi * 173.0 * static_cast<double>(i) / kFs);
+    }
+
+    const auto configure = [&](GranularEngine64& engine) {
+        engine.prepare(kFs);
+        engine.set_source(GrainSource::buffer);
+        engine.set_buffer(source.data(), static_cast<int>(source.size()), 1);
+        engine.set_stretch(0.75);
+        engine.set_position(0.37);
+        engine.set_position_spray_ms(11.0);
+        engine.set_density_hz(137.0);
+        engine.set_grain_ms(23.0);
+        engine.set_async_jitter(0.42);
+        engine.set_window_taper(0.63);
+        engine.set_pitch_semitones(-5.0);
+        engine.set_pitch_spray_semitones(2.75);
+        engine.set_pan_spray(0.71);
+        engine.set_coherence(Coherence::incoherent);
+        engine.set_seed(0xC001D00Du);
+        engine.reset();
+        // Set these after reset so both smoothers are in flight when the bad
+        // automation arrives. Re-applying the old target would restart their
+        // ramps and would therefore fail the exact continuation below.
+        engine.set_level_db(-9.0);
+        engine.set_mix(0.36);
+    };
+
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+        CAPTURE(invalid);
+        GranularEngine64 reference;
+        GranularEngine64 retained;
+        configure(reference);
+        configure(retained);
+
+        constexpr int warmup_samples = 113;
+        std::vector<double> ref_warm_left(warmup_samples);
+        std::vector<double> ref_warm_right(warmup_samples);
+        std::vector<double> retained_warm_left(warmup_samples);
+        std::vector<double> retained_warm_right(warmup_samples);
+        reference.process(input.data(), ref_warm_left.data(), ref_warm_right.data(),
+                          warmup_samples);
+        retained.process(input.data(), retained_warm_left.data(), retained_warm_right.data(),
+                         warmup_samples);
+        REQUIRE(retained_warm_left == ref_warm_left);
+        REQUIRE(retained_warm_right == ref_warm_right);
+
+        retained.set_stretch(invalid);
+        retained.set_position(invalid);
+        retained.set_position_spray_ms(invalid);
+        retained.set_density_hz(invalid);
+        retained.set_grain_ms(invalid);
+        retained.set_async_jitter(invalid);
+        retained.set_window_taper(invalid);
+        retained.set_pitch_semitones(invalid);
+        retained.set_pitch_spray_semitones(invalid);
+        retained.set_pan_spray(invalid);
+        retained.set_level_db(invalid);
+        retained.set_mix(invalid);
+
+        // Direct state proves retention where the public surface exposes it.
+        CHECK(retained.stretch() == reference.stretch());
+        CHECK(retained.position() == reference.position());
+        CHECK(retained.position_spray_ms() == reference.position_spray_ms());
+        CHECK(retained.density_hz() == reference.density_hz());
+        CHECK(retained.grain_ms() == reference.grain_ms());
+        CHECK(retained.async_jitter() == reference.async_jitter());
+        CHECK(retained.window_taper() == reference.window_taper());
+        CHECK(retained.pitch_semitones() == reference.pitch_semitones());
+        CHECK(retained.mix() == reference.mix());
+
+        // The window setter must not rebuild from a rejected value. Checking
+        // the measured table catches poisoning even if later output happens to
+        // have no active grain on the sampled frame.
+        CHECK(retained.window_mean() == reference.window_mean());
+        CHECK(retained.window_rms() == reference.window_rms());
+        for (double phase : {0.0, 0.125, 0.5, 0.875, 1.0}) {
+            CHECK(retained.window_at(phase) == reference.window_at(phase));
+        }
+
+        std::vector<double> ref_left(input.size());
+        std::vector<double> ref_right(input.size());
+        std::vector<double> retained_left(input.size());
+        std::vector<double> retained_right(input.size());
+        reference.process(input.data(), ref_left.data(), ref_right.data(),
+                          static_cast<int>(input.size()));
+        retained.process(input.data(), retained_left.data(), retained_right.data(),
+                         static_cast<int>(input.size()));
+
+        // Exact render and scheduler equality covers controls without getters:
+        // pitch/pan spray, level, and every scheduler input. A default-reset or
+        // merely-finite substitution fails this comparison.
+        CHECK(retained_left == ref_left);
+        CHECK(retained_right == ref_right);
+        CHECK(retained.grain_index() == reference.grain_index());
+        CHECK(retained.active_grain_count() == reference.active_grain_count());
+        CHECK(retained.steal_count() == reference.steal_count());
+        CHECK(retained.clamp_count() == reference.clamp_count());
+    }
+}
+
+TEST_CASE("Granular prepare retains its finite sample rate on non-finite input",
+          "[granular][params][nan-recovery]") {
+    GranularEngine64 engine;
+    engine.prepare(kFs);
+    const int expected_ring_length = engine.ring_length();
+    const int expected_guard = engine.causality_guard_samples();
+
+    for (double invalid : {std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity(),
+                           -std::numeric_limits<double>::infinity()}) {
+        CAPTURE(invalid);
+        engine.prepare(invalid);
+        CHECK(engine.ring_length() == expected_ring_length);
+        CHECK(engine.causality_guard_samples() == expected_guard);
     }
 }

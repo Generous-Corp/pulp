@@ -250,7 +250,8 @@ public:
     /// Sizes the live ring and the window table. The only member that
     /// allocates.
     void prepare(double sample_rate) {
-        sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
+        sample_rate_ = std::isfinite(sample_rate) && sample_rate > 0.0 ? sample_rate
+                                                                       : sample_rate_;
         ring_length_ = static_cast<int>(std::ceil(kRingSeconds * sample_rate_));
         ring_.assign(static_cast<std::size_t>(ring_length_), SampleType{0});
         guard_samples_ = derived_guard_samples(sample_rate_);
@@ -308,13 +309,17 @@ public:
     /// times as fast. In live-ring mode there is no traversal to scale — the
     /// playhead IS the write head — so `stretch` acts purely as the freeze
     /// switch there: 0 holds the captured centre, anything above 0 tracks.
-    void set_stretch(double rate) { stretch_ = std::clamp(rate, 0.0, kMaxStretch); }
+    void set_stretch(double rate) {
+        if (!std::isfinite(rate)) return;
+        stretch_ = std::clamp(rate, 0.0, kMaxStretch);
+    }
     double stretch() const { return stretch_; }
 
     /// Playhead centre as a fraction of the source. In buffer mode this jumps
     /// the playhead; in live mode it is how far behind the write head grains
     /// sample, as a fraction of the ring.
     void set_position(double pos01) {
+        if (!std::isfinite(pos01)) return;
         position01_ = std::clamp(pos01, 0.0, 1.0);
         if (source_ == GrainSource::buffer) {
             playhead_ = position01_ * static_cast<double>(std::max(buffer_length_, 1));
@@ -323,6 +328,7 @@ public:
     double position() const { return position01_; }
 
     void set_position_spray_ms(double ms) {
+        if (!std::isfinite(ms)) return;
         position_spray_ms_ = std::clamp(ms, 0.0, kMaxPositionSprayMs);
     }
     double position_spray_ms() const { return position_spray_ms_; }
@@ -330,15 +336,22 @@ public:
     // ── Schedule ──────────────────────────────────────────────────────────
 
     void set_density_hz(double hz) {
+        if (!std::isfinite(hz)) return;
         density_hz_ = std::clamp(hz, kMinDensityHz, kMaxDensityHz);
     }
     double density_hz() const { return density_hz_; }
 
-    void set_grain_ms(double ms) { grain_ms_ = std::clamp(ms, kMinGrainMs, kMaxGrainMs); }
+    void set_grain_ms(double ms) {
+        if (!std::isfinite(ms)) return;
+        grain_ms_ = std::clamp(ms, kMinGrainMs, kMaxGrainMs);
+    }
     double grain_ms() const { return grain_ms_; }
 
     /// 0 is the exact clock; 1 is a true Poisson process.
-    void set_async_jitter(double j01) { jitter_ = std::clamp(j01, 0.0, 1.0); }
+    void set_async_jitter(double j01) {
+        if (!std::isfinite(j01)) return;
+        jitter_ = std::clamp(j01, 0.0, 1.0);
+    }
     double async_jitter() const { return jitter_; }
 
     /// Grains in slots above the new budget stop immediately, so lowering the
@@ -360,6 +373,7 @@ public:
     /// in between is a Tukey / flat-topped trapezoid whose tapers occupy
     /// `taper/2` of the grain at each end.
     void set_window_taper(double t01) {
+        if (!std::isfinite(t01)) return;
         taper_ = std::clamp(t01, 0.0, 1.0);
         rebuild_window();
     }
@@ -372,15 +386,20 @@ public:
     bool window_trapezoid() const { return trapezoid_; }
 
     void set_pitch_semitones(double st) {
+        if (!std::isfinite(st)) return;
         pitch_st_ = std::clamp(st, -kMaxPitchSemitones, kMaxPitchSemitones);
     }
     double pitch_semitones() const { return pitch_st_; }
 
     void set_pitch_spray_semitones(double st) {
+        if (!std::isfinite(st)) return;
         pitch_spray_st_ = std::clamp(st, 0.0, kMaxPitchSpraySemitones);
     }
 
-    void set_pan_spray(double s01) { pan_spray_ = std::clamp(s01, 0.0, 1.0); }
+    void set_pan_spray(double s01) {
+        if (!std::isfinite(s01)) return;
+        pan_spray_ = std::clamp(s01, 0.0, 1.0);
+    }
 
     void set_coherence(Coherence coherence) { coherence_ = coherence; }
     Coherence coherence() const { return coherence_; }
@@ -389,6 +408,7 @@ public:
     GrainInterp interp() const { return interp_; }
 
     void set_level_db(double db) {
+        if (!std::isfinite(db)) return;
         level_db_ = std::clamp(db, kMinLevelDb, kMaxLevelDb);
         level_.set_target(units::db_to_linear(level_db_));
     }
@@ -397,6 +417,7 @@ public:
     /// a dry signal to blend; the two-output overload is a pure source and
     /// ignores this.
     void set_mix(double mix01) {
+        if (!std::isfinite(mix01)) return;
         mix_target_ = std::clamp(mix01, 0.0, 1.0);
         mix_.set_target(mix_target_);
     }
