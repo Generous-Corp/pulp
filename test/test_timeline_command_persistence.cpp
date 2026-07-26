@@ -255,6 +255,23 @@ TEST_CASE("Typed InsertScene command enforces the slot quota before decoding ele
     REQUIRE(rejected.error().limit == 2);
 }
 
+TEST_CASE("Typed scene commands preserve exact nested field diagnostics") {
+    const auto registry = builtins();
+    auto invalid_follow = deserialize_commands(
+        R"([{"data":{"scene_id":"30","sequence_id":"5","slot":{"data":{"clip_id":"7","follow":null,"id":"31","launch_quantize":{"grid":"0","phase":"0"}},"type_name":"pulp.timeline.slot","version":1}},"type_name":"pulp.timeline.command.insert_slot","version":1}])",
+        registry);
+    REQUIRE_FALSE(invalid_follow);
+    REQUIRE(invalid_follow.error().code == PersistenceErrorCode::InvalidSchema);
+    REQUIRE(invalid_follow.error().path == "/0/data/slot/data/follow");
+
+    auto missing_slots = deserialize_commands(
+        R"([{"data":{"scene":{"data":{"id":"30","name":"launch"},"type_name":"pulp.timeline.scene","version":1},"sequence_id":"5"},"type_name":"pulp.timeline.command.insert_scene","version":1}])",
+        registry);
+    REQUIRE_FALSE(missing_slots);
+    REQUIRE(missing_slots.error().code == PersistenceErrorCode::MissingField);
+    REQUIRE(missing_slots.error().path == "/0/data/scene/data/slots");
+}
+
 TEST_CASE("Decoded command batch reduces through the authoritative document session") {
     const auto registry = builtins();
     auto commands = take(deserialize_commands(

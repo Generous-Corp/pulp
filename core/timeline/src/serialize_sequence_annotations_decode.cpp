@@ -60,12 +60,18 @@ decode_marker(const JsonValue& value, DecodeContext& context, std::string path) 
     auto id = required(*data.value(), "id", path + "/data");
     auto name = string_field(*data.value(), "name", path + "/data");
     auto position = required(*data.value(), "position", path + "/data");
-    if (!id || !name || !position)
-        return fail<SequenceMarker>(PersistenceErrorCode::MissingField, std::move(path));
+    if (!id)
+        return runtime::Err(id.error());
+    if (!name)
+        return runtime::Err(name.error());
+    if (!position)
+        return runtime::Err(position.error());
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
-    if (!decoded_id || !decoded_position)
-        return fail<SequenceMarker>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    if (!decoded_id)
+        return runtime::Err(decoded_id.error());
+    if (!decoded_position)
+        return runtime::Err(decoded_position.error());
     auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
     if (!decoded_color)
         return runtime::Err(decoded_color.error());
@@ -87,13 +93,23 @@ decode_region(const JsonValue& value, DecodeContext& context, std::string path) 
     auto name = string_field(*data.value(), "name", path + "/data");
     auto position = required(*data.value(), "position", path + "/data");
     auto duration = required(*data.value(), "duration", path + "/data");
-    if (!id || !name || !position || !duration)
-        return fail<SequenceRegion>(PersistenceErrorCode::MissingField, std::move(path));
+    if (!id)
+        return runtime::Err(id.error());
+    if (!name)
+        return runtime::Err(name.error());
+    if (!position)
+        return runtime::Err(position.error());
+    if (!duration)
+        return runtime::Err(duration.error());
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     auto decoded_position = parse_canonical_i64_string(*position.value(), path + "/data/position");
     auto decoded_duration = parse_canonical_i64_string(*duration.value(), path + "/data/duration");
-    if (!decoded_id || !decoded_position || !decoded_duration)
-        return fail<SequenceRegion>(PersistenceErrorCode::InvalidNumber, std::move(path));
+    if (!decoded_id)
+        return runtime::Err(decoded_id.error());
+    if (!decoded_position)
+        return runtime::Err(decoded_position.error());
+    if (!decoded_duration)
+        return runtime::Err(decoded_duration.error());
     auto decoded_color = decode_annotation_color(*data.value(), path + "/data");
     if (!decoded_color)
         return runtime::Err(decoded_color.error());
@@ -116,9 +132,20 @@ runtime::Result<Slot, PersistenceError> decode_slot(const JsonValue& value, Deco
     auto clip = required(*data.value(), "clip_id", path + "/data");
     auto follow = required(*data.value(), "follow", path + "/data");
     auto launch = required(*data.value(), "launch_quantize", path + "/data");
-    if (!id || !clip || !follow || !launch || follow.value()->kind != JsonValue::Kind::Object ||
-        launch.value()->kind != JsonValue::Kind::Object)
-        return fail<Slot>(PersistenceErrorCode::MissingField, std::move(path));
+    if (!id)
+        return runtime::Err(id.error());
+    if (!clip)
+        return runtime::Err(clip.error());
+    if (!follow)
+        return runtime::Err(follow.error());
+    if (!launch)
+        return runtime::Err(launch.error());
+    if (follow.value()->kind != JsonValue::Kind::Object)
+        return fail<Slot>(PersistenceErrorCode::InvalidSchema, path + "/data/follow",
+                          follow.value()->begin);
+    if (launch.value()->kind != JsonValue::Kind::Object)
+        return fail<Slot>(PersistenceErrorCode::InvalidSchema, path + "/data/launch_quantize",
+                          launch.value()->begin);
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     auto decoded_clip = parse_canonical_u64_string(*clip.value(), path + "/data/clip_id");
     auto choices = required(*follow.value(), "choices", path + "/data/follow");
@@ -168,8 +195,12 @@ runtime::Result<Slot, PersistenceError> decode_slot(const JsonValue& value, Deco
         auto kind = string_field(choice, "kind", choice_path);
         auto target = required(choice, "target", choice_path);
         auto weight = required(choice, "weight", choice_path);
-        if (!kind || !target || !weight)
-            return fail<Slot>(PersistenceErrorCode::MissingField, choice_path);
+        if (!kind)
+            return runtime::Err(kind.error());
+        if (!target)
+            return runtime::Err(target.error());
+        if (!weight)
+            return runtime::Err(weight.error());
         auto decoded_kind = decode_follow_action_kind(kind.value(), choice_path + "/kind");
         auto decoded_target = parse_canonical_u64_string(*target.value(), choice_path + "/target");
         auto decoded_weight = parse_u32_number(*weight.value(), choice_path + "/weight");
@@ -203,8 +234,15 @@ runtime::Result<Scene, PersistenceError> decode_scene(const JsonValue& value,
     auto id = required(*data.value(), "id", path + "/data");
     auto name = string_field(*data.value(), "name", path + "/data");
     auto slots = required(*data.value(), "slots", path + "/data");
-    if (!id || !name || !slots || slots.value()->kind != JsonValue::Kind::Array)
-        return fail<Scene>(PersistenceErrorCode::MissingField, std::move(path));
+    if (!id)
+        return runtime::Err(id.error());
+    if (!name)
+        return runtime::Err(name.error());
+    if (!slots)
+        return runtime::Err(slots.error());
+    if (slots.value()->kind != JsonValue::Kind::Array)
+        return fail<Scene>(PersistenceErrorCode::InvalidSchema, path + "/data/slots",
+                           slots.value()->begin);
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Scene>(decoded_id.error().code, decoded_id.error().path,
