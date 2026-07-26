@@ -36,11 +36,26 @@ inventory_log=$(mktemp -t pulp-auval-inventory.XXXXXX)
 auval_log=$(mktemp -t pulp-auval.XXXXXX)
 inventory_pid=0
 
-cleanup() {
-  if (( inventory_pid > 0 )); then
-    kill -TERM "$inventory_pid" 2>/dev/null || true
-    wait "$inventory_pid" 2>/dev/null || true
+stop_inventory() {
+  if (( inventory_pid <= 0 )); then
+    return
   fi
+
+  kill -TERM "$inventory_pid" 2>/dev/null || true
+  local grace_deadline=$((SECONDS + 2))
+  while kill -0 "$inventory_pid" 2>/dev/null &&
+        (( SECONDS < grace_deadline )); do
+    sleep 0.1
+  done
+  if kill -0 "$inventory_pid" 2>/dev/null; then
+    kill -KILL "$inventory_pid" 2>/dev/null || true
+  fi
+  wait "$inventory_pid" 2>/dev/null || true
+  inventory_pid=0
+}
+
+cleanup() {
+  stop_inventory
   rm -rf -- "$test_component"
   rm -f -- "$inventory_log"
   rm -f -- "$auval_log"
@@ -71,9 +86,7 @@ scan_inventory() {
 
   while kill -0 "$inventory_pid" 2>/dev/null; do
     if (( SECONDS >= attempt_deadline )); then
-      kill -TERM "$inventory_pid" 2>/dev/null || true
-      wait "$inventory_pid" 2>/dev/null || true
-      inventory_pid=0
+      stop_inventory
       return 124
     fi
     sleep 1
