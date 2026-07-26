@@ -22,6 +22,14 @@ JsonValue* mutable_member(JsonValue& object, std::string_view name) noexcept {
     return found == object.object.end() ? nullptr : &found->second;
 }
 
+const JsonValue* member(const JsonValue& object, std::string_view name) noexcept {
+    if (object.kind != JsonValue::Kind::Object)
+        return nullptr;
+    const auto found = std::find_if(object.object.begin(), object.object.end(),
+                                    [name](const auto& value) { return value.first == name; });
+    return found == object.object.end() ? nullptr : &found->second;
+}
+
 bool valid_version(const JsonValue& value, std::uint32_t expected) noexcept {
     if (value.kind != JsonValue::Kind::Number)
         return false;
@@ -65,6 +73,23 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
            (track_schema_policy.supports_mixer(version)
                 ? !mixer || mixer->kind == JsonValue::Kind::Object
                 : !mixer);
+}
+
+bool has_track_mixer_automation(JsonValue& data) noexcept {
+    const auto* lanes = mutable_member(data, "automation_lanes");
+    if (!lanes || lanes->kind != JsonValue::Kind::Array)
+        return false;
+    for (const auto& lane_envelope : lanes->array) {
+        if (lane_envelope.kind != JsonValue::Kind::Object)
+            continue;
+        const auto* lane_data = member(lane_envelope, "data");
+        const auto* target = lane_data ? member(*lane_data, "target") : nullptr;
+        const auto* type_name = target ? member(*target, "type_name") : nullptr;
+        if (type_name && type_name->kind == JsonValue::Kind::String &&
+            type_name->scalar == "pulp.timeline.automation_target.track_mixer")
+            return true;
+    }
+    return false;
 }
 
 struct RawEdit {
@@ -433,7 +458,8 @@ migrate_track_v7_to_v6(std::string_view source, BoundedJsonSink& output, const v
     if (!data || !version ||
         !valid_version(*version, track_schema_policy.mixer_introduced_version) ||
         !valid_track_data_shape(*data, track_schema_policy.mixer_introduced_version) ||
-        mutable_member(*data, "mixer") || version->begin >= version->end)
+        mutable_member(*data, "mixer") || has_track_mixer_automation(*data) ||
+        version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{version->begin, version->end, "6"}};
     if (!valid_raw_edits(source, edits))

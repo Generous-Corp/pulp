@@ -4,6 +4,8 @@
 #include <pulp/timebase/compiled_tempo_map.hpp>
 #include <pulp/timeline/model.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -120,6 +122,53 @@ class TrackMixerControlCursor {
         if (sample < program_->segments().front().start_sample)
             return program_->leading_value();
         return evaluate_automation_segment(*program_, segment_index_, sample, tick);
+    }
+
+    /// Evaluates a host-projected fractional document tick without first
+    /// quantizing it through the integer sample domain.
+    float value_at_tick(long double tick) noexcept {
+        if (!program_)
+            return constant_;
+        const auto segments = program_->segments();
+        if (cold_) {
+            const auto found = std::upper_bound(
+                segments.begin(), segments.end(), tick,
+                [](long double value, const AutomationProgramSegment& segment) {
+                    return value <
+                           static_cast<long double>(segment.end_tick.value);
+                });
+            segment_index_ =
+                found == segments.end()
+                    ? segments.size() - 1u
+                    : static_cast<std::size_t>(found - segments.begin());
+            cold_ = false;
+        } else {
+            while (segment_index_ + 1u < segments.size() &&
+                   tick >= static_cast<long double>(
+                               segments[segment_index_].end_tick.value))
+                ++segment_index_;
+        }
+        if (tick < static_cast<long double>(segments.front().start_tick.value))
+            return program_->leading_value();
+        const auto& segment = segments[segment_index_];
+        if (segment.start_tick == segment.end_tick)
+            return segment.end_value;
+        const auto start = static_cast<long double>(segment.start_tick.value);
+        const auto end = static_cast<long double>(segment.end_tick.value);
+        if (tick <= start)
+            return segment.start_value;
+        if (tick >= end)
+            return segment.end_value;
+        if (segment.interpolation == timeline::AutomationInterpolation::Hold)
+            return segment.start_value;
+        const auto fraction = std::clamp((tick - start) / (end - start), 0.0L, 1.0L);
+        const auto bend = static_cast<long double>(segment.curvature);
+        const auto quadratic =
+            bend >= 0.0L ? fraction * fraction : std::fma(-fraction, fraction, 2.0L * fraction);
+        const auto shaped = std::fma(std::abs(bend), quadratic - fraction, fraction);
+        return static_cast<float>(std::fma(static_cast<long double>(segment.end_value) -
+                                               static_cast<long double>(segment.start_value),
+                                           shaped, static_cast<long double>(segment.start_value)));
     }
 
   private:

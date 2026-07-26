@@ -23,9 +23,11 @@ struct TimelineGraphPreparedCandidate;
 } // namespace detail
 
 /// One phase-1 track's lowering into the desktop SignalGraph adapter.
-/// `audio_destination` is required and receives `audio_channels` consecutive
-/// ports. `midi_destination == 0` keeps the separately-rendered note stream
-/// available at the track's MidiInput node without connecting it onward.
+/// `audio_destination` is required and receives arrangement audio directly
+/// when an explicit post-device route exists; otherwise it receives the stable
+/// mixer node's output. `midi_destination == 0` keeps the separately-rendered
+/// note stream available at the track's MidiInput node without connecting it
+/// onward.
 struct TimelineDeviceGraphRoute {
     timeline::ItemId device_placement_id;
     NodeId plugin_node = 0;
@@ -37,6 +39,15 @@ struct TimelineTrackGraphRoute {
     PortIndex audio_destination_first_port = 0;
     NodeId midi_destination = 0;
     std::span<const TimelineDeviceGraphRoute> device_routes{};
+    /// Optional explicit end of a hosted device chain. When both nodes are
+    /// nonzero, arrangement audio still enters `audio_destination`, then this
+    /// source feeds the track mixer and `post_mixer_audio_destination` receives
+    /// its output. With both zero, the binding inserts the mixer directly
+    /// between arrangement audio and `audio_destination`.
+    NodeId post_device_audio_source = 0;
+    PortIndex post_device_audio_source_first_port = 0;
+    NodeId post_mixer_audio_destination = 0;
+    PortIndex post_mixer_audio_destination_first_port = 0;
 };
 
 struct TimelineGraphBindingConfig {
@@ -54,6 +65,9 @@ enum class TimelineGraphAdmissionCode : std::uint8_t {
     MissingTrack,
     MissingDestination,
     DestinationPortRange,
+    IncompletePostDeviceRoute,
+    MissingPostDeviceRoute,
+    SourcePortRange,
     NodeLimitExceeded,
     ConnectionLimitExceeded,
     PerNodePortLimitExceeded,

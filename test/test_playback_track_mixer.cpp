@@ -122,6 +122,48 @@ TEST_CASE("a gain curve moves within one rendered block", "[playback][mixer]") {
                  WithinAbs(511.0f / static_cast<float>(kQuarterSamples), 1e-4f));
 }
 
+TEST_CASE("host-mapped mixer automation preserves fractional document ticks",
+          "[playback][mixer][host-tempo]") {
+    constexpr std::uint64_t kFrames = 32'000;
+    auto source = std::make_shared<audio::AudioFileData>();
+    source->sample_rate = 48'000;
+    source->channels = {std::vector<float>(kFrames, 1.0f)};
+    auto clip = musical_media_clip(100, 0, kTicksPerQuarter, 3, kFrames);
+    auto track = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "fractional mixer",
+        .clips = {clip},
+        .automation_lanes =
+            {
+                mixer_lane(40, TrackMixerParameter::Gain, 0.0f, 1.0f),
+            },
+    }));
+    auto project = project_with_tracks({track}, {{3, "tone", kFrames, {48'000, 1}}});
+    CompiledFixture compiled(std::move(project), map_120(), pool({{3, std::move(source)}}));
+    auto program = compiled.store.read();
+
+    auto mapped = snapshot(*program, 4);
+    auto& range = mapped.ranges[0];
+    range.timeline_tick_start = {0};
+    range.timeline_tick_end = {1};
+    range.host_tick_start = 0.025;
+    range.host_tick_end = 0.105;
+    range.has_precise_host_ticks = true;
+    range.host_beat_mapping = true;
+    Output output(1, 4);
+    REQUIRE(ArrangementAudioRenderer::process(*program, mapped, output.view()) ==
+            AudioRenderStatus::Rendered);
+
+    for (std::size_t frame = 0; frame < 4; ++frame) {
+        const auto tick = 0.025 + 0.08 * static_cast<double>(frame) / 4.0;
+        REQUIRE_THAT(output.storage[0][frame],
+                     WithinAbs(static_cast<float>(tick / kTicksPerQuarter), 1.0e-7f));
+    }
+    REQUIRE(output.storage[0][0] < output.storage[0][1]);
+    REQUIRE(output.storage[0][1] < output.storage[0][2]);
+    REQUIRE(output.storage[0][2] < output.storage[0][3]);
+}
+
 TEST_CASE("automation targeting track pan reaches the audio output", "[playback][mixer]") {
     MixerFixture automated(TrackMixer{}, {mixer_lane(40, TrackMixerParameter::Pan, -1.0f, 1.0f)},
                            2);
@@ -160,6 +202,28 @@ TEST_CASE("rendering an automated mixer allocates nothing", "[playback][mixer][r
                 AudioRenderStatus::Rendered);
         REQUIRE(probe.allocation_count() == 0);
     }
+}
+
+TEST_CASE("post-device mixer automation stays parked while transport is stopped",
+          "[playback][mixer][transport]") {
+    MixerFixture automated(TrackMixer{},
+                           {mixer_lane(40, TrackMixerParameter::Gain, 0.0f, 1.0f)});
+    PlaybackProgramBlockLatch latch;
+    const auto block = latch.begin_block(automated.compiled->store);
+    REQUIRE(block);
+    TrackMixerTrackRenderer renderer({10});
+    audio::Buffer<float> input(1, 8);
+    std::fill(input.view().channel(0).begin(), input.view().channel(0).end(), 1.0f);
+    const auto& const_input = input;
+    Output output(1, 8);
+    auto stopped = snapshot(*block.program(), 8, kQuarterSamples / 2);
+    stopped.is_playing = false;
+
+    REQUIRE(renderer.process(block, stopped, output.view(), const_input.view()) ==
+            AudioRenderStatus::Rendered);
+    REQUIRE_THAT(output.storage[0].front(), WithinAbs(0.5f, 1.0e-3f));
+    REQUIRE(std::all_of(output.storage[0].begin(), output.storage[0].end(),
+                        [&](float sample) { return sample == output.storage[0].front(); }));
 }
 
 TEST_CASE("an out-of-range gain curve is bounded at the render", "[playback][mixer]") {

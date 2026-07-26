@@ -409,6 +409,11 @@ A track also carries a `TrackMixer` — `gain_linear` and a `pan` balance in
 of a device parameter; such a lane references no device placement and supersedes
 the authored constant while it plays. Both values are refused outside their
 range, including a NaN, so a document can never hold a level that has no meaning.
+The desktop graph binding applies this mixer after hosted devices. For a device
+chain with a nontransparent mixer, set `post_device_audio_source` and
+`post_mixer_audio_destination` on `TimelineTrackGraphRoute`; the binding
+transactionally replaces the direct device-to-bus edge and restores it when the
+route is removed. Adoption fails closed when that post-device route is absent.
 
 The realtime recorder is `<pulp/playback/capture_engine.hpp>`:
 

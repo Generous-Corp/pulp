@@ -819,6 +819,14 @@ Things that are easy to get wrong here:
   new field or a new registered type there fails serialization with
   `InvalidSchema` at path `/` until the table matches — an error that names
   nothing useful if you do not know to look.
+- **Graph-hosted mixing is post-device.** `TimelineGraphPlaybackBinding` owns a
+  stable mixer node per track. A hosted device chain with a nontransparent mixer
+  must provide `post_device_audio_source` and
+  `post_mixer_audio_destination`; the binding transactionally replaces that
+  exact direct audio edge and restores it when the route or binding goes away.
+  Program adoption fails closed if a hosted mixer becomes nontransparent
+  without that route. Keep stopped automation parked, and evaluate precise
+  host-mapped ticks without round-tripping through integer samples.
 
 ## Scope boundary
 

@@ -127,6 +127,24 @@ TEST_CASE("Downgrading a track that carries a mixer is refused", "[timeline][mix
     REQUIRE_FALSE(downgraded);
 }
 
+TEST_CASE("Downgrading a track with mixer automation is refused", "[timeline][mixer][migration]") {
+    const auto authored = track_envelope(serialized(mixer_project(
+        TrackMixer{}, {mixer_lane({40}, {41}, TrackMixerParameter::Gain, 0.25f, 0.75f)})));
+    REQUIRE(authored.find("pulp.timeline.automation_target.track_mixer") != std::string::npos);
+    const auto downgraded =
+        registry().migrate(SchemaDomain::Document, "pulp.timeline.track", 7, 6, authored, {});
+    REQUIRE_FALSE(downgraded);
+}
+
+TEST_CASE("Track mixer automation target rejects unknown enum values", "[timeline][mixer]") {
+    const auto invalid = static_cast<TrackMixerParameter>(255);
+    REQUIRE_FALSE(TrackMixerTarget{invalid}.valid());
+    auto curve = AutomationCurve::create({AutomationPoint{{41}, {0}, 0.5f}});
+    REQUIRE(curve);
+    REQUIRE_FALSE(
+        AutomationLane::create({40}, TrackMixerTarget{invalid}, std::move(curve).value()));
+}
+
 TEST_CASE("Track mixer refuses values outside its authored range", "[timeline][mixer]") {
     const auto rejected = [](TrackMixer mixer) {
         auto created = Track::create(TrackInput{.id = {4}, .name = "track", .mixer = mixer});

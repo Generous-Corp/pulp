@@ -942,9 +942,13 @@ artifact and never performs a hidden render.
 these mixer controls, so volume and pan automation is expressible without
 inventing an out-of-band convention for which device is the fader. Sends, mute,
 solo, and routing are not modeled. Playback applies the mixer where the track's
-audio is accumulated, so the offline mixdown and the graph-hosted per-track
-renderer agree; a lane supersedes the authored constant rather than multiplying
-with it, and pan attenuates the opposite side without ever boosting.
+audio is accumulated; the graph binding uses a stable post-device node so
+instrument output, effects, and tails are governed too. Hosted chains with a
+nontransparent mixer must identify their post-device source and post-mixer
+destination in `TimelineTrackGraphRoute`; the binding replaces and later
+restores the exact direct edge. A lane supersedes the authored constant rather
+than multiplying with it, and pan attenuates the opposite side without ever
+boosting.
 
 `assets.hpp` separates durable SHA-256 content identity from optional resolution
 hints and alternate representations. An audio asset may also carry typed

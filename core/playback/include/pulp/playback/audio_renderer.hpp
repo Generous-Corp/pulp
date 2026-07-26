@@ -179,7 +179,9 @@ class ArrangementAudioTrackRenderer {
     static constexpr audio::RtSafetyClass process_rt_safety_class =
         audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
 
-    explicit ArrangementAudioTrackRenderer(timeline::ItemId track_id) noexcept : shell_(track_id) {}
+    explicit ArrangementAudioTrackRenderer(timeline::ItemId track_id,
+                                           bool apply_track_mixer = true) noexcept
+        : shell_(track_id), apply_track_mixer_(apply_track_mixer) {}
 
     AudioRenderStatus process(const PlaybackProgramBlock& block, const TransportSnapshot& transport,
                               audio::BufferView<float> output,
@@ -191,6 +193,30 @@ class ArrangementAudioTrackRenderer {
     RendererCarryState state_snapshot() const noexcept {
         return shell_.state_snapshot();
     }
+    void reset() noexcept {
+        shell_.reset();
+    }
+
+  private:
+    StableRendererShell shell_;
+    bool apply_track_mixer_ = true;
+};
+
+/// Stable SignalGraph-facing post-device track mixer. The graph binding places
+/// this node after the hosted chain, so static and automated track controls
+/// govern arrangement audio, effects, instrument output, and device tails.
+class TrackMixerTrackRenderer {
+  public:
+    static constexpr audio::RtSafetyClass process_rt_safety_class =
+        audio::RtSafetyClass::AudioCallbackSafeAfterPrepare;
+
+    explicit TrackMixerTrackRenderer(timeline::ItemId track_id) noexcept : shell_(track_id) {}
+
+    AudioRenderStatus process(const PlaybackProgramBlock& block, const TransportSnapshot& transport,
+                              audio::BufferView<float> output,
+                              const audio::BufferView<const float>& input,
+                              AudioRendererLimits limits = {}) noexcept;
+
     void reset() noexcept {
         shell_.reset();
     }

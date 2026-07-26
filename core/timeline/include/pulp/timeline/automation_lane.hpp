@@ -66,7 +66,12 @@ struct TrackMixerTarget {
     TrackMixerParameter parameter = TrackMixerParameter::Gain;
 
     constexpr bool valid() const noexcept {
-        return true;
+        switch (parameter) {
+        case TrackMixerParameter::Gain:
+        case TrackMixerParameter::Pan:
+            return true;
+        }
+        return false;
     }
 
     constexpr bool operator==(const TrackMixerTarget&) const = default;
