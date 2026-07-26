@@ -179,7 +179,8 @@ protected:
     }
 
     void on_note_on(float velocity) override {
-        output_.reset();
+        // The modal bank carries its resonator state across strikes, so the
+        // shared output history belongs to the same continuing body.
         output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);

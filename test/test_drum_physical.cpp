@@ -14,6 +14,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/drum/cymbal.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/membrane.hpp>
 #include <pulp/signal/drum/string.hpp>
 #include <pulp/signal/drum/zap.hpp>
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -34,6 +36,8 @@ using pulp::signal::KarplusStrong;
 using pulp::signal::PhaseDistortionOsc;
 using pulp::signal::PhaseDistortionShape;
 using pulp::signal::drum::CymbalVoice;
+using pulp::signal::drum::HitLife;
+using pulp::signal::drum::HitLifeMode;
 using pulp::signal::drum::MembraneExciter;
 using pulp::signal::drum::MembraneVoice;
 using pulp::signal::drum::StringModulation;
@@ -624,6 +628,42 @@ TEST_CASE("Membrane velocity tension moves the body and sub together",
     REQUIRE(moved_sub > stale_sub * 4.0);
 }
 
+TEST_CASE("A membrane retrigger keeps the output filter ringing",
+          "[signal][drum][membrane][output][lifecycle]") {
+    auto prepare = [](MembraneVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_ms(3000.0);
+        voice.set_spread(0.0);
+        voice.set_exciter(MembraneExciter::pluck);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        voice.note_on(1.0f);
+        (void)render(voice, 6000);
+    };
+
+    MembraneVoice control;
+    MembraneVoice retriggered;
+    prepare(control);
+    prepare(retriggered);
+
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render(control, 32);
+    const auto after_retrigger = render(retriggered, 32);
+
+    auto energy = [](const std::vector<float>& samples) {
+        double sum = 0.0;
+        for (float sample : samples) {
+            sum += static_cast<double>(sample) *
+                   static_cast<double>(sample);
+        }
+        return sum;
+    };
+    const double uninterrupted_energy = energy(uninterrupted);
+    REQUIRE(uninterrupted_energy > 1e-8);
+    REQUIRE(energy(after_retrigger) > uninterrupted_energy * 0.5);
+}
+
 // -- Cymbal ------------------------------------------------------------------
 
 TEST_CASE("The cymbal's shifter is what removes the pitch",
@@ -675,10 +715,24 @@ TEST_CASE("Variation makes successive crashes differ",
     REQUIRE_FALSE(first == second);
 }
 
+TEST_CASE("Reapplying an advancing hit-life mode preserves its sequence",
+          "[signal][drum][life]") {
+    constexpr std::uint32_t seed = 0x12345678u;
+    HitLife life{HitLifeMode::advancing_seed};
+    const auto first = life.trigger(seed);
+
+    life.set_mode(HitLifeMode::advancing_seed);
+    const auto second = life.trigger(seed);
+
+    HitLife control{HitLifeMode::advancing_seed};
+    (void)control.trigger(seed);
+    const auto expected_second = control.trigger(seed);
+    REQUIRE(second.seed == expected_second.seed);
+    REQUIRE(second.seed != first.seed);
+}
+
 TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
           "[signal][drum][cymbal][life]") {
-    using pulp::signal::drum::HitLifeMode;
-
     CymbalVoice voice;
     voice.prepare(kFs);
     voice.set_variation(1.0);
@@ -1113,6 +1167,34 @@ TEST_CASE("The string crossfades FM, ring, and sync modulation",
         REQUIRE_FALSE(wet == dry);
         REQUIRE(peak(wet) > 1e-4);
     }
+}
+
+TEST_CASE("String sync modulation decays with the physical body",
+          "[signal][drum][string][modulation][lifecycle]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(180.0);
+    voice.set_decay_seconds(2.0);
+    voice.set_damping(0.2);
+    voice.set_restart_on_hit(true);
+    voice.set_lpg_amount(0.0);
+    voice.set_modulation(StringModulation::sync);
+    voice.set_modulation_mix(1.0);
+    voice.set_modulation_ratio(2.7);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    const auto y = hit(voice, 1.0f, 48000);
+
+    auto energy = [&y](std::size_t begin, std::size_t end) {
+        double sum = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            sum += static_cast<double>(y[i]) * static_cast<double>(y[i]);
+        }
+        return sum / static_cast<double>(end - begin);
+    };
+    const double early = energy(4800, 9600);
+    const double late = energy(38400, 43200);
+    REQUIRE(early > 1e-8);
+    REQUIRE(late < early * 0.3);
 }
 
 TEST_CASE("The string's lowpass gate darkens its release",

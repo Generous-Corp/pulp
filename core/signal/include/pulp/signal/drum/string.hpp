@@ -219,7 +219,8 @@ protected:
                         sync_phase_ -= std::floor(sync_phase_);
                     }
                 }
-                effected = 2.0 * sync_phase_ - 1.0;
+                effected =
+                    (2.0 * sync_phase_ - 1.0) * string_.level();
             }
             const double modulated =
                 dry + modulation_mix_ * (effected - dry);

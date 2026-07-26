@@ -144,6 +144,7 @@ public:
     }
 
     bool is_active() const { return active_; }
+    double level() const { return level_; }
 
     /// Advances one sample. `excitation` is the burst being injected; feed it
     /// noise for a pluck, silence once the burst is over.

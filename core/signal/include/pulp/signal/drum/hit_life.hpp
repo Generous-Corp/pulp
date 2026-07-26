@@ -29,6 +29,7 @@ public:
         : mode_(mode) {}
 
     void set_mode(HitLifeMode mode) {
+        if (mode_ == mode) return;
         mode_ = mode;
         hit_index_ = 0;
     }
