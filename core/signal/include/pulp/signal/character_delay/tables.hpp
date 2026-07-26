@@ -25,8 +25,12 @@ namespace pulp::signal::chardelay {
 
 // ── Engine-wide ───────────────────────────────────────────────────────────
 
-/// Longest addressable delay. Sizes every buffer at set_sample_rate().
+/// Maximum left-channel base delay and stereo-offset bounds. Buffer storage is
+/// sized from the derived maximum right-channel delay at set_sample_rate().
 inline constexpr double kMaxDelayMs = 2000.0;
+inline constexpr double kTimeOffsetMin = 0.5;
+inline constexpr double kTimeOffsetMax = 1.5;
+inline constexpr double kMaxAddressableDelayMs = kMaxDelayMs * kTimeOffsetMax;
 
 /// Coefficient recomputation and stochastic-walk stepping cadence, in samples.
 /// 32 at 48 kHz is 1.5 kHz of control bandwidth — far above any modulation in
