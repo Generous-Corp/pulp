@@ -18,4 +18,10 @@ CompileContextView::chord_scale_at(timebase::TickPosition position) const noexce
     return lane ? lane->at(position) : nullptr;
 }
 
+const GrooveTemplate* CompileContextView::groove() const noexcept {
+    if (!sequence_ || !subscriptions_.reads(CompileContextKind::Groove))
+        return nullptr;
+    return &sequence_->groove();
+}
+
 } // namespace pulp::timeline

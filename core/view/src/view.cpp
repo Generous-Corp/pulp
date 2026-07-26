@@ -261,33 +261,32 @@ void View::simulate_click(Point root_pos) {
     const bool claimed = (gesture_down || gesture_up) && gesture_claimed_pointer();
     if (claimed) return;
 
-    // Convert to target's local coordinates
-    Point local = root_pos;
-    View* v = target;
-    while (v && v != this) {
-        local.x -= v->bounds().x;
-        local.y -= v->bounds().y;
-        v = v->parent();
-    }
-
-    target->on_mouse_down(local);
-    target->on_mouse_up(local);
     // DOM-style click bubbling. `hit_test` returns the deepest
     // hit-testable view, which for `<button onClick=...>Label</button>` is
     // the inner Label child. Walk up the parent chain to find the nearest
-    // ancestor with a registered handler. Mirrors the same bubble pass the
-    // mac mouseUp path performs (see core/view/platform/mac/window_host_mac.mm).
+    // ancestor with a registered handler.
     //
     // Bound the bubble walk to `this` (inclusive). Walking past the receiver
     // into ancestors outside its subtree leaks synthetic clicks across
     // component boundaries, a false-positive hazard for tests / tooling that
-    // simulate interaction on isolated subtrees.
+    // simulate interaction on isolated subtrees. `deliver_mouse_up` resolves
+    // the same handler with an UNbounded walk (the hosts always dispatch from
+    // the window root, where there is nothing above to leak into), so resolve
+    // ours here and have the fire-click hook use it instead.
     View* click_target = target;
     while (click_target && !click_target->on_click) {
         if (click_target == this) break;  // stop at receiver, even if no handler
         click_target = click_target->parent();
     }
-    if (click_target && click_target->on_click) click_target->on_click();
+    auto bounded_click = click_target ? click_target->on_click : std::function<void()>{};
+
+    if (!deliver_mouse_down(*this, target, root_pos, /*modifiers=*/0)) return;
+    MouseUpHost up_host;
+    up_host.fire_click = [&bounded_click](const std::function<void()>&,
+                                          const std::string&, uint16_t) {
+        if (bounded_click) bounded_click();
+    };
+    deliver_mouse_up(*this, target, root_pos, /*modifiers=*/0, /*click_count=*/1, up_host);
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {
@@ -1320,16 +1319,38 @@ void View::request_repaint() {
     }
 }
 
+void View::request_repaint_self(float halo) {
+    // Bounded invalidation for a widget's own repaint. The rect-less
+    // request_repaint() marks the WHOLE surface dirty by design, which is right
+    // for a structural change and wrong for a value tick: a knob drag would
+    // re-composite a plug-in's entire static chrome on every mouse move, and a
+    // partial-repaint host could never engage because the damage is never
+    // bounded.
+    //
+    // The halo is a correctness requirement, not padding. A bounded repaint is
+    // only legal if it is pixel-identical to a full one, so the rect must cover
+    // every pixel the widget can touch — glow, focus ring, modulation arc.
+    // Mirrors the meter peak-overscan idiom in widgets/visualizers.cpp.
+    const auto b = local_bounds();
+    request_repaint(Rect{b.x - halo, b.y - halo,
+                         b.width + 2 * halo, b.height + 2 * halo});
+}
+
 void View::request_repaint(const Rect& local_dirty) {
     // Stale the subtree scene cache up the ancestor chain (see request_repaint()
     // above). Done here too because the bounded-success path below calls
     // mark_dirty() directly rather than request_repaint(), so it would not
     // otherwise reach the invalidation.
     invalidate_subtree_caches_up();
-    // Bounded invalidation is only wired for the window-host path; the
-    // plugin-view-host path (and no host) has no sub-region invalidator, so
-    // fall back to a full repaint there.
-    if (!window_host_) {
+    // Bounded invalidation needs a host that can accumulate a sub-region.
+    // Both hosts can now: WindowHost via mark_dirty(Rect), PluginViewHost via
+    // mark_dirty_region(Rect) (both back onto PendingDamage). With no host at
+    // all there is nowhere to put the rect, so fall back to a full repaint.
+    //
+    // The plug-in path used to fall through here unconditionally, which is why
+    // partial repaint was unreachable for every plug-in editor on every
+    // platform however the host was wired.
+    if (!window_host_ && !plugin_view_host_) {
         request_repaint();
         return;
     }
@@ -1358,8 +1379,13 @@ void View::request_repaint(const Rect& local_dirty) {
         off_x += v->bounds_.x;
         off_y += v->bounds_.y;
     }
-    window_host_->mark_dirty(Rect{off_x + local_dirty.x, off_y + local_dirty.y,
-                                  local_dirty.width, local_dirty.height});
+    const Rect root_rect{off_x + local_dirty.x, off_y + local_dirty.y,
+                         local_dirty.width, local_dirty.height};
+    if (window_host_) {
+        window_host_->mark_dirty(root_rect);
+    } else {
+        plugin_view_host_->mark_dirty_region(root_rect);
+    }
 }
 
 bool View::start_file_drag(const FileDragRequest& request) {

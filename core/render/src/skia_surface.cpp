@@ -37,12 +37,67 @@
 
 namespace pulp::render {
 
+namespace {
+
+// Map the presentable texture's ACTUAL format to the matching SkColorType.
+//
+// The swapchain format is negotiated at run time — GpuSurface::configure_surface
+// asks Dawn for the surface capabilities and takes BGRA8Unorm only when the
+// adapter advertises it, otherwise the adapter's first preferred format. So the
+// format is a property of the adapter, not of the operating system, and it must
+// be read back rather than assumed.
+//
+// This previously hardcoded RGBA8 on Android and BGRA8 everywhere else. When
+// that guess disagreed with the real format, SkSurfaces::WrapBackendTexture
+// returned null and begin_frame() silently fell through to the offscreen
+// target: every frame still rendered (so screenshot readback looked perfect)
+// but the texture actually being presented was never drawn into, leaving a
+// black editor with no error. Seen with the D3D12 WARP adapter that an x64
+// plug-in gets when hosted under Windows-on-ARM emulation.
+//
+// Returns kUnknown_SkColorType for formats Skia cannot wrap; the caller treats
+// that as a hard error rather than a silent downgrade.
+SkColorType sk_color_type_for(wgpu::TextureFormat format) {
+    switch (format) {
+        case wgpu::TextureFormat::BGRA8Unorm:
+        case wgpu::TextureFormat::BGRA8UnormSrgb:
+            // sRGB-ness rides on the SkColorSpace, not the SkColorType.
+            return kBGRA_8888_SkColorType;
+        case wgpu::TextureFormat::RGBA8Unorm:
+        case wgpu::TextureFormat::RGBA8UnormSrgb:
+            return kRGBA_8888_SkColorType;
+        case wgpu::TextureFormat::RGBA16Float:
+            return kRGBA_F16_SkColorType;
+        case wgpu::TextureFormat::RGB10A2Unorm:
+            return kRGBA_1010102_SkColorType;
+        default:
+            return kUnknown_SkColorType;
+    }
+}
+
+const char* wgpu_texture_format_name(wgpu::TextureFormat format) {
+    switch (format) {
+        case wgpu::TextureFormat::BGRA8Unorm:     return "BGRA8Unorm";
+        case wgpu::TextureFormat::BGRA8UnormSrgb: return "BGRA8UnormSrgb";
+        case wgpu::TextureFormat::RGBA8Unorm:     return "RGBA8Unorm";
+        case wgpu::TextureFormat::RGBA8UnormSrgb: return "RGBA8UnormSrgb";
+        case wgpu::TextureFormat::RGBA16Float:    return "RGBA16Float";
+        case wgpu::TextureFormat::RGB10A2Unorm:   return "RGB10A2Unorm";
+        default:                                  return "unsupported";
+    }
+}
+
+}  // namespace
+
 class SkiaSurfaceImpl : public SkiaSurface {
 public:
     SkiaSurfaceImpl(GpuSurface& gpu, uint32_t width, uint32_t height, float scale)
         : gpu_(gpu), width_(width), height_(height), scale_(scale) {}
 
     ~SkiaSurfaceImpl() override {
+        // Release retained GPU images while their recorder/context are alive.
+        canvas_.reset();
+        retained_layers_.reset();
         if (context_) {
             // Drain any outstanding GpuStats finished-with-stats callbacks
             // before `this` dies — they capture `this` as their context, so a
@@ -118,7 +173,8 @@ public:
             frame_surface_.reset();
             SkCanvas* sk_canvas = scene_surface_->getCanvas();
             if (!sk_canvas) return nullptr;
-            canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, recorder_.get());
+            canvas_ = std::make_unique<canvas::SkiaCanvas>(
+                sk_canvas, recorder_.get(), retained_layers_);
             return canvas_.get();
         }
 
@@ -139,27 +195,41 @@ public:
                 if (!backend_tex.isValid()) {
                     runtime::log_warn("SkiaSurface: BackendTexture::MakeDawn returned invalid texture");
                 } else {
-                    // Wrap it as an SkSurface for Skia drawing
-                    // Android Vulkan swapchains typically use RGBA8; desktop uses BGRA8
-#ifdef __ANDROID__
-                    auto surface_color_type = kRGBA_8888_SkColorType;
-#else
-                    auto surface_color_type = kBGRA_8888_SkColorType;
-#endif
-                    frame_surface_ = SkSurfaces::WrapBackendTexture(
-                        recorder_.get(),
-                        backend_tex,
-                        surface_color_type,
-                        SkColorSpace::MakeSRGB(),
-                        nullptr);  // props
+                    // Wrap it as an SkSurface for Skia drawing. The color type
+                    // comes from the texture itself — the swapchain format is
+                    // negotiated with the adapter at run time, so it cannot be
+                    // inferred from the platform (see sk_color_type_for).
+                    const wgpu::TextureFormat surface_format =
+                        texture_ptr->GetFormat();
+                    const SkColorType surface_color_type =
+                        sk_color_type_for(surface_format);
+
+                    if (surface_color_type == kUnknown_SkColorType) {
+                        runtime::log_error(
+                            "SkiaSurface: presentable texture format {} has no "
+                            "SkColorType mapping — the editor cannot present. "
+                            "Add it to sk_color_type_for().",
+                            wgpu_texture_format_name(surface_format));
+                    } else {
+                        frame_surface_ = SkSurfaces::WrapBackendTexture(
+                            recorder_.get(),
+                            backend_tex,
+                            surface_color_type,
+                            SkColorSpace::MakeSRGB(),
+                            nullptr);  // props
+                    }
 
                     if (frame_surface_) {
                         sk_canvas = frame_surface_->getCanvas();
                         if (sk_canvas && scale_ != 1.0f) {
                             sk_canvas->scale(scale_, scale_);
                         }
-                    } else {
-                        runtime::log_warn("SkiaSurface: WrapBackendTexture failed — falling back to offscreen");
+                    } else if (surface_color_type != kUnknown_SkColorType) {
+                        runtime::log_error(
+                            "SkiaSurface: WrapBackendTexture failed for format {} "
+                            "— rendering will go to the offscreen target and "
+                            "NOTHING will be presented.",
+                            wgpu_texture_format_name(surface_format));
                     }
                 }
             } else {
@@ -174,7 +244,8 @@ public:
 
         if (!sk_canvas) return nullptr;
 
-        canvas_ = std::make_unique<canvas::SkiaCanvas>(sk_canvas, recorder_.get());
+        canvas_ = std::make_unique<canvas::SkiaCanvas>(
+            sk_canvas, recorder_.get(), retained_layers_);
         return canvas_.get();
     }
 
@@ -222,6 +293,13 @@ public:
     }
 
     void resize(uint32_t width, uint32_t height, float scale) override {
+        if (scale != scale_) {
+            // Retained layers are rasterized at record-time device density.
+            // Force callers to rebuild them at the new backing scale.
+            canvas_.reset();
+            retained_layers_ =
+                canvas::SkiaCanvas::create_retained_layer_store();
+        }
         width_ = width;
         height_ = height;
         scale_ = scale;
@@ -417,6 +495,11 @@ private:
     bool persistent_scene_ = false;
     sk_sp<SkSurface> scene_surface_;
 
+    // Cacheable layer textures belong to the renderer, not the short-lived
+    // SkiaCanvas wrapper constructed around each frame's target surface.
+    std::shared_ptr<canvas::SkiaCanvas::RetainedLayerStore> retained_layers_ =
+        canvas::SkiaCanvas::create_retained_layer_store();
+
     std::unique_ptr<canvas::SkiaCanvas> canvas_;
 
     void create_offscreen_target() {
@@ -474,16 +557,25 @@ private:
             runtime::log_warn("SkiaSurface: invalid drawable texture for persistent-scene blit");
             return;
         }
-#ifdef __ANDROID__
-        auto surface_color_type = kRGBA_8888_SkColorType;
-#else
-        auto surface_color_type = kBGRA_8888_SkColorType;
-#endif
+        // Same contract as begin_frame(): the color type must come from the
+        // texture, not from the platform.
+        const wgpu::TextureFormat surface_format = texture_ptr->GetFormat();
+        const SkColorType surface_color_type = sk_color_type_for(surface_format);
+        if (surface_color_type == kUnknown_SkColorType) {
+            runtime::log_error(
+                "SkiaSurface: persistent-scene blit target format {} has no "
+                "SkColorType mapping — nothing will be presented.",
+                wgpu_texture_format_name(surface_format));
+            return;
+        }
         frame_surface_ = SkSurfaces::WrapBackendTexture(
             recorder_.get(), backend_tex, surface_color_type,
             SkColorSpace::MakeSRGB(), nullptr);
         if (!frame_surface_) {
-            runtime::log_warn("SkiaSurface: WrapBackendTexture failed for persistent-scene blit");
+            runtime::log_error(
+                "SkiaSurface: WrapBackendTexture failed for persistent-scene "
+                "blit (format {}) — nothing will be presented.",
+                wgpu_texture_format_name(surface_format));
             return;
         }
 

@@ -225,12 +225,21 @@ struct RemoveRegion {
     ItemId region_id;
 };
 
+// Replaces a sequence's whole groove under the same exact optimistic gate the
+// chord lane uses. A groove names no ItemIds either, so the swap needs no
+// identity plan and its inverse is the pair read back the other way.
+struct SetGroove {
+    ItemId sequence_id;
+    GrooveTemplate expected;
+    GrooveTemplate replacement;
+};
+
 using Command =
     std::variant<InsertClip, RemoveClip, InsertAutomationLane, RemoveAutomationLane, MoveClip,
                  SetNoteVelocity, SetClipPlaybackProperties, SetTempoMap, SetMeterMap, CreateAsset,
                  RemoveAsset, InsertTakeLane, RemoveTakeLane, SetRecordArm, InsertTake, RemoveTake,
                  SetActiveTakeLane, SetTakeComp, SetTrackFreeze, InsertMarker, RemoveMarker,
-                 InsertRegion, RemoveRegion, SetChordScaleLane>;
+                 InsertRegion, RemoveRegion, SetChordScaleLane, SetGroove>;
 
 struct CommandEnvelope {
     CommandId id;

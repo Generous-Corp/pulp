@@ -420,6 +420,63 @@ The paired version policy header (`sequence_schema_policy.hpp`, alongside
 three call sites agreeing about which version introduced which field. Add one
 rather than spelling version numbers inline.
 
+### `GrooveTemplate` composes two transforms that behave differently
+
+A groove is a `timebase` swing warp plus a repeating offset table. The warp is
+continuous and monotone (its contract and its round-trip bound live in the
+timebase skill); the table is a per-step displacement and **can** reorder
+material where adjacent steps lean opposite ways. Offsets are bounded to less
+than a step, which limits that but does not forbid it — so assert monotonicity
+of the swing half only, never of the composition.
+
+The table is indexed by the **authored** position, not the swung one, so
+changing the swing setting never re-assigns notes to different steps. A test for
+that has to pick a position swing carries across a step boundary; most positions
+land in the same step under either order and a test using one of those passes
+whichever way the code is written.
+
+### Downgrade refusals: refuse on *authored* data, not just audible data
+
+The recipe says a downgrade must refuse rather than lie. The narrower trap is
+deciding what "would lose data" means. `migrate_sequence_v2_to_v1` refuses on a
+non-empty chord lane, which is the whole of that type. A struct-shaped field
+(the groove) has several members that a downgrade would drop, and only some of
+them change what the document sounds like — a strength setting is inert while
+the feel it attenuates is absent, and a name is never audible at all. Refuse on
+**every** departure from the default value anyway. They are still data the user
+authored, and a downgrade that silently discards them is the same failure as one
+that silently retimes the music, just quieter.
+
+Check the members field by field rather than comparing the object's bytes
+against the canonical default: a hand-written document may carry them in any
+order and still say exactly the same thing. Write one refusal test per member —
+a single "a populated groove refuses" case passes even when the predicate only
+looks at one field, which is how a weakened refusal gets through review.
+
+### `Sequence` grows by overload, and each new owned field needs a version predicate
+
+`Sequence` is pimpl'd behind `shared_ptr<const Data>` and built through
+`create()` overloads, so a new owned field arrives as another overload whose
+older siblings chain forward by constructing the field's default. No existing
+call site changes and there is no positional brace-init hazard — do **not**
+convert `Sequence` to a `SequenceInput` struct to add one.
+
+What does need care is `sequence_schema_policy.hpp`: each owned field gets its
+own `<field>_introduced_version` plus a `requires_<field>(version)` predicate,
+because the decoder and the preflight both have to know which document versions
+carry it and which must *not*. Both sides are checked — a field present in a
+version that predates it is as much a rejection as one missing from a version
+that requires it — so reusing another field's predicate silently accepts
+malformed documents on one of the two paths.
+
+### `Command` `retained_size()` must account for heap the alternative owns
+
+`retained_size()` has a chain of `if constexpr` arms and a `sizeof(T)` fallback.
+A new alternative that owns a vector or a string falls into the fallback and
+reports only its inline size, so the journal's memory accounting silently
+under-counts and the bound it enforces stops meaning what it says. This does not
+fail to compile and no test notices unless one is written for it.
+
 ### Adding a `Command` alternative fails closed in one place and aborts in another
 
 `Command` has **no** exhaustive-visitor guard of the `ClipContentCases` kind.

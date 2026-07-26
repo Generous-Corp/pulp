@@ -45,8 +45,8 @@ _VALID_TS_IDENT = re.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
 # 64-bit-in-string kinds and U32 project to `number | string`: the wire form is
 # a JSON string for the 64-bit kinds (to survive JS number precision) while a
 # richer runtime may hand back a number, so the union accepts both. Object and
-# Array without a `$ref` have no element schema in the manifest, so they widen to
-# the safest structural type. A `$ref` on a field overrides the kind mapping
+# Arrays without an `items.$ref` have no element schema in the manifest, so they
+# widen to the safest structural type. A reference overrides the kind mapping
 # with the referenced interface (see `_field_type`).
 _KIND_TO_TS = {
     "Boolean": "boolean",
@@ -94,14 +94,18 @@ def _ref_target(ref: str) -> str:
 def _field_type(field: dict) -> str:
     """Project one field schema to a TS type string.
 
-    A `$ref` names another registered type, so it wins over the raw kind: an
+    A reference names another registered type, so it wins over the raw kind: an
     `Object` field with a `$ref` is the referenced interface; an `Array` field
-    with a `$ref` is an array of it.
+    with an `items.$ref` is an array of it.
     """
     kind = field.get("x-pulp-kind")
     if kind is None:
         raise ManifestError(f"field is missing x-pulp-kind: {field!r}")
     ref = field.get("$ref")
+    if ref is None and kind == "Array":
+        items = field.get("items")
+        if isinstance(items, dict):
+            ref = items.get("$ref")
     if ref is not None:
         target = _interface_name(_ref_target(ref))
         return f"readonly {target}[]" if kind == "Array" else target

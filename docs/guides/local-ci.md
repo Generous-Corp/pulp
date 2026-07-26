@@ -641,6 +641,8 @@ gh variable list -R Generous-Corp/pulp | grep RUNS_ON_JSON
 | `PULP_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs (m1 + m5) |
 | `PULP_INTEL_RELEASE_MACOS_RUNS_ON_JSON` | `["self-hosted","macOS","ARM64","pulp-build-vm-release"]` | JIT VMs |
 | `PULP_COVERAGE_MACOS_RUNS_ON_JSON` | `"macos-15"` | GitHub-hosted |
+| `PULP_ADVISORY_MACOS_RUNS_ON_JSON` | (unset; hosted `macos-15`) | example and format validation; required-pool labels rejected |
+| `PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON` | (unset; proof skipped) | distinct self-hosted GPU advisory lane; required-pool labels rejected |
 | `PULP_LOCAL_MAC_OVERFLOW_THRESHOLD` | `3` | busy count that triggers overflow |
 | `PULP_LOCAL_LINUX_PRIMARY_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-macstudio"]` | capacity 1 |
 | `PULP_LOCAL_LINUX_OVERFLOW_RUNS_ON_JSON` | `[…,"pulp-build-linux","pulp-host-m5"]` | capacity 1 |
@@ -1323,16 +1325,14 @@ sync.
 
 ## Switching a job's runner without a code change
 
-Every runner-selection decision in `.github/workflows/*.yml` is driven by
-`tools/scripts/resolve_runs_on.py`. That means the runner for any job
-below can be flipped between **GitHub-hosted**, **Namespace**, and **local
-self-hosted** by setting a repository variable — no workflow edit, no
-full-matrix re-run, no PR. This is the fluidity we want: move a job
-mid-incident without touching code.
+Provider-switchable build, release, coverage, and sanitizer decisions use
+`tools/scripts/resolve_runs_on.py`. Their runner can be flipped between
+**GitHub-hosted**, **Namespace**, and **local self-hosted** by setting a
+repository variable — no workflow edit or PR.
 
-### Precedence (identical for every variable below)
+### General selector precedence
 
-For each target the resolver checks, in this order:
+For each target handled by `resolve_runs_on.py`, the resolver checks:
 
 1. A `workflow_dispatch` input (if present on the workflow) — one-off override.
 2. The target's repository variable (the `PULP_*_RUNS_ON_JSON` values below).
@@ -1378,6 +1378,25 @@ once, in the LaunchAgent, via `--host-tag` / `PULP_RUNNER_HOST_TAG`
 A supervisor that cannot resolve one refuses to register rather than contribute
 a runner that is online, idle, and selectable by nothing. Declared tags live in
 `tools/scripts/runner_topology.json`.
+
+### Advisory macOS selectors
+
+| Variable | Precedence and behavior | Example |
+|---|---|---|
+| `PULP_ADVISORY_MACOS_RUNS_ON_JSON` | Repository variable, then hosted `macos-15`. No dispatch/provider override. | `gh variable set PULP_ADVISORY_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-advisory-macos"]'` |
+| `PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON` | Repository variable only; unset skips the proof. No dispatch/provider override. | `gh variable set PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON --body '["self-hosted","macOS","ARM64","pulp-advisory-gpu"]'` |
+
+These selectors are resolved by
+`tools/scripts/resolve_advisory_macos_runner.py`. The resolver fails closed if
+an operator points an advisory workflow at `pulp-build*` or `pulp-preamble*`,
+or if any configured self-hosted selector lacks an explicit
+`pulp-advisory-*` identity. Hosted strings are an explicit reviewed allowlist
+(`macos-14`, `macos-15`, `macos-26`, and `macos-latest`), so a typo fails
+during resolution instead of waiting forever for a nonexistent runner. Until a
+separately governed advisory supervisor is installed, leave the ordinary
+advisory selector unset (hosted macOS) and the GPU advisory selector unset
+(proof skipped). This repository does not use Orchard for placement; Shipyard,
+tartci, and GitHub runner labels are the complete control path.
 
 `.shipyard/ci-profiles/normal-local-fast.toml` is the repo-local, read-only
 policy mirror. Its PR-only `github.windows-x64-runtime` target records the

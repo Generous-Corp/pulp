@@ -19,6 +19,10 @@
 // drive frames explicitly (pulp_embed_tick), repaint() renders synchronously.
 
 #include <pulp/view/plugin_view_host.hpp>
+#include <pulp/view/pointer_dispatch.hpp>
+#include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
+#include <pulp/view/platform/win_pointer_input.hpp>
+#include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/window_host.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -35,10 +39,12 @@
 #endif
 
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace.hpp>  // no-op unless PULP_TRACING=ON
 
 // WIN32_LEAN_AND_MEAN + NOMINMAX, guarded, before <windows.h> so the min/max
 // macros don't collide with std::min/std::max or Skia (#384).
 #include <pulp/platform/win32_sane.hpp>
+
 #include <ole2.h>        // OleInitialize, RegisterDragDrop, IDropTarget, DoDragDrop
 #include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP, DROPFILES
 #include <shlobj.h>      // SHCreateStdEnumFmtEtc (outbound IDataObject enum)
@@ -46,6 +52,7 @@
 
 #include <pulp/view/drag_drop.hpp>
 
+#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <cwchar>
@@ -58,6 +65,15 @@
 namespace pulp::view {
 
 namespace {
+
+// win_pointer_input.hpp duplicates the MK_* mouse bits as plain constants so
+// the header parses off Windows. This TU is the one place both definitions are
+// visible, so pin them together — a Windows SDK change becomes a compile error
+// here instead of a silently wrong modifier at run time.
+static_assert(win_input::kMkLButton == MK_LBUTTON);
+static_assert(win_input::kMkRButton == MK_RBUTTON);
+static_assert(win_input::kMkShift == MK_SHIFT);
+static_assert(win_input::kMkControl == MK_CONTROL);
 
 constexpr const wchar_t* kChildClassName = L"PulpPluginViewHostChild";
 
@@ -254,9 +270,6 @@ public:
             return;
         }
         scale_ = detect_dpi_scale(hwnd_);
-#ifdef PULP_HAS_SKIA
-        init_gpu(static_cast<float>(size.width), static_cast<float>(size.height));
-#endif
         init_drag_drop();
     }
 
@@ -313,6 +326,16 @@ public:
         }
         ShowWindow(hwnd_, SW_SHOW);
         attached_.store(true, std::memory_order_release);
+#ifdef PULP_HAS_SKIA
+        // Dawn configures its presentation surface for the HWND's current
+        // native-window shape. Creating it while this HWND is still the hidden
+        // WS_POPUP used during construction leaves presentation stale after
+        // SetParent converts it into REAPER's WS_CHILD. Initialize only after
+        // the final parent/style/size are in place.
+        if (!gpu_surface_ || !skia_surface_)
+            init_gpu(static_cast<float>(size_.width),
+                     static_cast<float>(size_.height));
+#endif
         repaint();
     }
 
@@ -326,6 +349,13 @@ public:
 
     void detach() override {
         if (!hwnd_) return;
+#ifdef PULP_HAS_SKIA
+        // The presentation surface is tied to the attached native-window
+        // shape. Recreate it on the next attach rather than carrying a surface
+        // configured for the old parent across a detach/reparent cycle.
+        skia_surface_.reset();
+        gpu_surface_.reset();
+#endif
         ShowWindow(hwnd_, SW_HIDE);
         SetParent(hwnd_, nullptr);
         // Restore the top-level style so the detached window is a valid
@@ -348,6 +378,106 @@ public:
         EndPaint(hwnd_, &ps);
     }
 
+    void handle_mouse_down(LPARAM lp, WPARAM wp) {
+        if (!hwnd_) return;
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = true;
+            gesture_event.phase = MousePhase::press;
+            if (root_.dispatch_gesture_pointer_event(gesture_event)) {
+                drag_target_ = nullptr;
+                SetCapture(hwnd_);
+                return;
+            }
+
+            drag_target_ = root_.hit_test(pt);
+            ComboBox::notify_global_click(drag_target_);
+            if (!drag_target_) return;
+            SetFocus(hwnd_);
+            SetCapture(hwnd_);
+            if (!deliver_mouse_down(root_, drag_target_, pt,
+                                    gesture_event.modifiers, 1))
+                drag_target_ = nullptr;
+            request_repaint_from_input();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse down handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse down handler threw");
+            drag_target_ = nullptr;
+        }
+    }
+
+    void handle_mouse_move(LPARAM lp, WPARAM wp) {
+        PULP_TRACE_SCOPE_NAMED("state", "wm_mousemove");
+        // WM_MOUSEMOVE also fires for plain hover, and mouse capture keeps
+        // delivering moves after the button is released outside the window.
+        if (!drag_target_ ||
+            !win_input::drag_continues(static_cast<uint32_t>(wp)))
+            return;
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = true;
+            gesture_event.phase = MousePhase::drag;
+            if (!root_.dispatch_gesture_pointer_event(gesture_event))
+                deliver_mouse_drag(root_, drag_target_, pt,
+                                   gesture_event.modifiers);
+            request_repaint_from_input();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse move handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse move handler threw");
+            drag_target_ = nullptr;
+        }
+    }
+
+    void handle_mouse_up(LPARAM lp, WPARAM wp) {
+        if (GetCapture() == hwnd_) ReleaseCapture();
+        try {
+            const Point pt = mouse_point(lp);
+            MouseEvent gesture_event;
+            gesture_event.position = pt;
+            gesture_event.window_position = pt;
+            gesture_event.button = MouseButton::left;
+            gesture_event.modifiers = mouse_modifiers(wp);
+            gesture_event.is_down = false;
+            gesture_event.phase = MousePhase::release;
+            if (!root_.dispatch_gesture_pointer_event(gesture_event) &&
+                drag_target_) {
+                MouseUpHost up_host;
+                up_host.fire_click =
+                    [](const std::function<void()>& click_handler,
+                       const std::string&, uint16_t) {
+                        if (click_handler) click_handler();
+                    };
+                deliver_mouse_up(root_, drag_target_, pt,
+                                 gesture_event.modifiers, 1, up_host);
+            }
+            drag_target_ = nullptr;
+            request_repaint_from_input();
+        } catch (const std::exception& e) {
+            runtime::log_warn("WinPluginViewHost: mouse up handler threw: {}",
+                              e.what());
+            drag_target_ = nullptr;
+        } catch (...) {
+            runtime::log_warn("WinPluginViewHost: mouse up handler threw");
+            drag_target_ = nullptr;
+        }
+    }
+
     void repaint() override {
 #ifdef PULP_HAS_SKIA
         if (gpu_surface_ && skia_surface_) {
@@ -355,6 +485,26 @@ public:
             return;
         }
 #endif
+        if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    // Coalesced repaint for INPUT-driven updates (mouse down/move/up).
+    //
+    // repaint() renders synchronously on the GPU path, and the swapchain is
+    // configured Fifo (vsync) by default, so acquiring the next texture blocks
+    // until the next refresh. Rendering inline from the wndproc therefore costs
+    // a full vsync-blocked frame PER WM_MOUSEMOVE. Windows delivers moves far
+    // faster than that, so the queue backs up and a dragged control visibly
+    // trails the cursor — the lag is the queued input, not the render cost.
+    //
+    // Invalidating instead lets Windows collapse every move that arrived during
+    // a frame into ONE WM_PAINT, which repaints at the LATEST pointer position.
+    // Mouse handling becomes near-free and the control tracks the cursor.
+    //
+    // Safe for the embed path: these callers only reach us through the wndproc,
+    // which means a message pump exists to deliver the WM_PAINT. Callers that
+    // drive frames explicitly (pulp_embed_tick) still use repaint() directly.
+    void request_repaint_from_input() {
         if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
@@ -373,6 +523,7 @@ public:
         // GPU surface is sized at PHYSICAL pixels (logical × scale); SkiaSurface
         // takes LOGICAL dims + the scale factor and applies the logical→pixel
         // transform itself at paint (mirrors MacGpuWindowHost).
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(width, height, scale_);
 #endif
@@ -404,6 +555,7 @@ public:
 #ifdef PULP_HAS_SKIA
         // Mirror set_size()'s surface sizing (GPU at physical, Skia at logical +
         // scale) but WITHOUT the SetWindowPos.
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(logical_w, logical_h, scale_);
 #endif
@@ -423,6 +575,7 @@ public:
 #ifdef PULP_HAS_SKIA
         // Re-size surfaces at the new pixel resolution. Logical size is
         // unchanged, so the view tree layout is untouched.
+        damage_.mark_full();  // new surface size => first frame is full
         if (gpu_surface_) gpu_surface_->resize(pixel_w(), pixel_h());
         if (skia_surface_) skia_surface_->resize(size_.width, size_.height, scale_);
 #endif
@@ -514,6 +667,30 @@ private:
     // re-enters the wndproc synchronously on this thread, so this flag lets
     // handle_wm_size() distinguish a host-driven resize from our own echo.
     bool in_set_size_ = false;
+    View* drag_target_ = nullptr;
+    // FU-2: when true the host clips the repaint to the damaged rect and blits
+    // a retained persistent-scene target. Default OFF.
+    bool partial_repaint_enabled_ = false;
+
+    // Window-space mapping lives in win_pointer_input.hpp so the signed-word
+    // unpack and the physical→logical divide are unit-tested off Windows (the
+    // required CI gate is macOS). Only the design-viewport transform, which
+    // needs host state, stays here.
+    Point mouse_point(LPARAM lp) const {
+        return window_to_root_point(win_input::lparam_to_logical_point(
+            static_cast<uint32_t>(static_cast<uintptr_t>(lp)), scale_));
+    }
+
+    // Windows packs only Shift/Control into the message; Alt and the Windows
+    // key are keyboard state, so they are sampled here and passed to the pure
+    // mapper.
+    static uint16_t mouse_modifiers(WPARAM wp) {
+        const bool alt_down = (GetKeyState(VK_MENU) & 0x8000) != 0;
+        const bool meta_down = (GetKeyState(VK_LWIN) & 0x8000) != 0 ||
+                               (GetKeyState(VK_RWIN) & 0x8000) != 0;
+        return win_input::mouse_modifiers(
+            static_cast<uint32_t>(wp), alt_down, meta_down);
+    }
 
     // Physical pixel dimensions = logical × scale (min 1 to avoid 0-sized
     // surfaces). The GPU surface/swapchain is allocated at this resolution.
@@ -587,6 +764,9 @@ private:
     std::unique_ptr<render::SkiaSurface> skia_surface_;
 
     void init_gpu(float width, float height) {
+        runtime::log_info(
+            "WinPluginViewHost: init GPU logical={}x{} physical={}x{} scale={}",
+            width, height, pixel_w(), pixel_h(), scale_);
         gpu_surface_ = render::GpuSurface::create_dawn();
         if (!gpu_surface_) {
             runtime::log_warn("WinPluginViewHost: gpu create_dawn failed; cpu-capture only");
@@ -625,11 +805,40 @@ private:
         if (!skia_surface_) {
             runtime::log_warn("WinPluginViewHost: skia surface create failed; cpu-capture only");
             gpu_surface_.reset();
+            return;
         }
+        // FU-2 partial repaint (default OFF, PULP_PARTIAL_REPAINT=1). The Dawn
+        // swapchain does not preserve content between frames, so a clipped
+        // repaint is only correct against a retained scene target. If the
+        // backend cannot retain one, disable partial repaint outright — we must
+        // never clip a non-preserving surface.
+        if (const char* env = std::getenv("PULP_PARTIAL_REPAINT"))
+            partial_repaint_enabled_ = (env[0] == '1');
+        if (partial_repaint_enabled_ && skia_surface_ &&
+            !skia_surface_->set_persistent_scene(true)) {
+            partial_repaint_enabled_ = false;
+            runtime::log_warn("WinPluginViewHost: backend cannot retain a scene; "
+                              "partial repaint disabled");
+        }
+        // A newly created surface has no previous frame to preserve.
+        damage_.mark_full();
+        runtime::log_info("WinPluginViewHost: GPU and Skia surfaces ready");
     }
 
     // Shared scene paint (matches the macOS plugin GPU host).
-    void paint_scene(canvas::Canvas& canvas) {
+    void paint_scene(canvas::Canvas& canvas, const Rect* clip = nullptr) {
+        // Background fill + layout + view-tree paint. The nested
+        // layout/layout_children span from View::layout_children() lands inside
+        // this one, which is what makes layout-vs-paint attribution possible.
+        PULP_TRACE_SCOPE_NAMED("canvas", "paint");
+        // FU-2: clip the ENTIRE body, background fill included. Everything
+        // outside the clip must remain the retained scene's previous pixels;
+        // filling the background unclipped would erase them.
+        const int clip_save = canvas.save_count();
+        if (clip) {
+            canvas.save();
+            canvas.clip_rect(clip->x, clip->y, clip->width, clip->height);
+        }
         const float w = static_cast<float>(size_.width);
         const float h = static_cast<float>(size_.height);
         canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
@@ -657,9 +866,15 @@ private:
             root_.paint_all(canvas);
             View::paint_overlays(canvas, &root_);
         }
+        if (clip) canvas.restore_to_count(clip_save);
     }
 
     bool render_frame(std::vector<uint8_t>* cap, uint32_t* cap_w, uint32_t* cap_h) {
+        // The real per-frame drive point (paint -> submit -> present below).
+        // Mirrors the macOS host so a Windows trace is readable with the same
+        // queries; without it the Windows editor showed only gpu_submit /
+        // gpu_present and there was no frame span to attribute them to.
+        PULP_TRACE_SCOPE_NAMED("render", "frame");
         if (!gpu_surface_ || !skia_surface_) return false;
         if (idle_callback_) idle_callback_();
         // Swapchain acquire, instrumented because it is the one part of the
@@ -678,7 +893,56 @@ private:
             gpu_surface_->end_frame();
             return false;
         }
-        paint_scene(*canvas);
+        // Decide whether this frame can be clipped losslessly. The hazard model
+        // (compute_effective_damage) escalates to a full repaint if anything
+        // that SAMPLES at a distance — backdrop-filter, blur, mask, sampling
+        // effect, render transform — reaches the damage, which is what makes a
+        // clipped repaint pixel-identical to a full one.
+        //
+        // Skipped entirely under a design viewport: paint applies a letterbox
+        // scale+translate there, so root-space damage does not map to the
+        // clip space without further work.
+        Rect clip_rect{};
+        const Rect* clip = nullptr;
+        if (partial_repaint_enabled_ && !pending_repaint_is_full() &&
+            has_pending_dirty_bounds()) {
+            const auto b = pending_dirty_bounds();
+            // Hazard model runs in ROOT space (where the damage was produced).
+            const auto decision = compute_effective_damage(root_, b, scale_);
+            if (!decision.full) {
+                clip_rect = decision.bounds;
+                // Under a design viewport the paint body applies
+                // translate(tx,ty) + scale(sx,sy), but the clip below is
+                // installed in SURFACE space, before that transform. Map the
+                // root-space damage through the same letterbox transform so
+                // the two agree; without this the clip lands in the wrong
+                // place (which is why plug-in editors — which always set a
+                // design viewport — previously had to skip partial repaint
+                // entirely).
+                float sx, sy, tx, ty;
+                if (design_viewport_w_ > 0.0f && design_viewport_h_ > 0.0f &&
+                    WindowHost::compute_design_viewport_transform(
+                        static_cast<float>(size_.width),
+                        static_cast<float>(size_.height),
+                        design_viewport_w_, design_viewport_h_,
+                        sx, sy, tx, ty, design_top_align_) &&
+                    sx > 0.0f && sy > 0.0f) {
+                    clip_rect = Rect{tx + clip_rect.x * sx,
+                                     ty + clip_rect.y * sy,
+                                     clip_rect.width * sx,
+                                     clip_rect.height * sy};
+                    // Re-snap OUT to whole surface pixels after scaling: a
+                    // fractional edge would clip a partially covered pixel.
+                    const float x0 = std::floor(clip_rect.x);
+                    const float y0 = std::floor(clip_rect.y);
+                    clip_rect = Rect{x0, y0,
+                                     std::ceil(clip_rect.x + clip_rect.width) - x0,
+                                     std::ceil(clip_rect.y + clip_rect.height) - y0};
+                }
+                clip = &clip_rect;
+            }
+        }
+        paint_scene(*canvas, clip);
         bool readback_ok = true;
         if (cap) {
             // read_current_rgba finalizes + submits the open frame's recording
@@ -691,6 +955,7 @@ private:
         }
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
+        clear_pending_dirty();  // frame painted + submitted (mirrors DirtyTracker::clear)
         // A failed/empty readback must report false so capture_back_buffer_png()
         // falls back to the raster path instead of returning a blank frame.
         return cap ? readback_ok : true;
@@ -748,6 +1013,18 @@ LRESULT CALLBACK pulp_pvh_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (host && msg == WM_PAINT) {
         host->handle_wm_paint();
+        return 0;
+    }
+    if (host && msg == WM_LBUTTONDOWN) {
+        host->handle_mouse_down(lp, wp);
+        return 0;
+    }
+    if (host && msg == WM_MOUSEMOVE) {
+        host->handle_mouse_move(lp, wp);
+        return 0;
+    }
+    if (host && msg == WM_LBUTTONUP) {
+        host->handle_mouse_up(lp, wp);
         return 0;
     }
     if (host && msg == WM_DPICHANGED) {

@@ -357,7 +357,7 @@ TEST_CASE("timeline agent atomic render preserves a Linux POSIX ACL") {
 TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     const auto schema = tools::timeline::schema();
     REQUIRE(schema);
-    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") == 24);
+    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") == 25);
 
     const auto unknown = tools::timeline::command_apply(
         empty_project_json(),

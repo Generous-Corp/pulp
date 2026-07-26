@@ -76,5 +76,10 @@ decode_region(const JsonValue& value, DecodeContext& context, std::string path);
 // version means. `lane_path` is the full diagnostic path of the array itself.
 runtime::Result<ChordScaleLane, PersistenceError>
 decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::string lane_path);
+// A null value decodes as the groove that states no feel, which is what a
+// pre-groove sequence version means. `groove_path` is the full diagnostic path
+// of the object itself.
+runtime::Result<GrooveTemplate, PersistenceError>
+decode_groove(const JsonValue* value, DecodeContext& context, std::string groove_path);
 
 } // namespace pulp::timeline::detail

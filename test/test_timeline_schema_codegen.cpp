@@ -111,6 +111,7 @@ SchemaRegistry build_custom() {
     referrer.domain = SchemaDomain::Document;
     referrer.current_version = 1;
     referrer.fields.emplace_back("link", SchemaValueKind::Object, true, "pulp.test.target");
+    referrer.fields.emplace_back("links", SchemaValueKind::Array, true, "pulp.test.target");
 
     TypeSchema target;
     target.type_name = "pulp.test.target";
@@ -133,6 +134,8 @@ TEST_CASE("schema manifest emits $ref for referenced types", "[timeline][codegen
     auto manifest = emit_schema_manifest(registry);
     REQUIRE(manifest.has_value());
     REQUIRE(contains(manifest.value(), "#/$defs/pulp.test.target"));
+    REQUIRE(contains(manifest.value(),
+                     R"("items":{"$ref":"#/$defs/pulp.test.target"})"));
     // A non-required boolean field must not appear in a required set; the target
     // has only that field, so it carries no "required" key at all.
     auto parsed = parse_json(manifest.value());

@@ -53,9 +53,10 @@ enum class Concept : std::uint16_t {
     ContentOpaque = 39,
     EditRateNonAudio = 40,
     ContextChordScale = 41,
+    ContextGroove = 42,
 };
 
-inline constexpr std::size_t kConceptCount = 42;
+inline constexpr std::size_t kConceptCount = 43;
 
 namespace detail {
 struct ConceptRecord {
@@ -107,6 +108,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"content.opaque", "Uninterpreted clip content carried in a validated envelope.", true},
     {"edit-rate.non-audio", "Positions at a rate that does not convert exactly to the document's rate.", false},
     {"context.chord-scale", "A sequence-owned lane of chord and scale statements that other items read while compiling.", true},
+    {"context.groove", "A sequence-owned groove: a swing setting and a repeating table of per-step timing and accent that other items read while compiling.", true},
 };
 } // namespace detail
 

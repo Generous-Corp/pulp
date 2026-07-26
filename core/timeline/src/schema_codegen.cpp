@@ -124,8 +124,13 @@ emit_schema_manifest(const SchemaRegistry& registry, std::size_t maximum_bytes) 
             out += ",\"x-pulp-kind\":";
             out += quote_json_string(kind_name(field.kind));
             if (!field.referenced_type.empty()) {
-                out += ",\"$ref\":";
-                out += quote_json_string("#/$defs/" + field.referenced_type);
+                if (field.kind == SchemaValueKind::Array)
+                    out += ",\"items\":{\"$ref\":" +
+                           quote_json_string("#/$defs/" + field.referenced_type) + "}";
+                else {
+                    out += ",\"$ref\":";
+                    out += quote_json_string("#/$defs/" + field.referenced_type);
+                }
             }
             out.push_back('}');
         }

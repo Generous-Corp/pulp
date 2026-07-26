@@ -32,7 +32,8 @@ permissions:
 jobs:
   changes:
     name: Detect example changes
-    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    # Advisory bookkeeping must never wait behind the required macOS gate.
+    runs-on: ubuntu-latest
     outputs:
       examples: ${{ steps.filter.outputs.examples }}
     steps:
@@ -65,15 +66,30 @@ jobs:
             echo "no examples/**, core/format/**, or core/state/include change — skipping example validators."
           fi
 
+  resolve-advisory-macos:
+    name: Resolve isolated advisory macOS runner
+    runs-on: ubuntu-latest
+    outputs:
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --fallback-json '"macos-15"'
+
   validate:
     name: Validate examples (macOS)
-    needs: changes
+    needs: [changes, resolve-advisory-macos]
     if: needs.changes.outputs.examples == 'true'
-    # Route to the self-hosted studio runners where pluginval / auval actually
-    # exist (they are conditionally registered via find_program, so a runner
-    # WITHOUT the tools would register nothing and pass trivially — a false
-    # green). Falls back to macos-15 only for forks that set no local routing.
-    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON || '"macos-15"') }}
+    # The resolver rejects pulp-build* and pulp-preamble* labels. A dedicated
+    # advisory selector may use the fleet only when it cannot steal a required
+    # merge-gate runner; otherwise this uses GitHub-hosted macOS.
+    runs-on: ${{ fromJSON(needs.resolve-advisory-macos.outputs.selector_json) }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
@@ -128,7 +144,7 @@ jobs:
     name: example-validation
     needs: [changes, validate]
     if: always()
-    runs-on: ${{ fromJSON(vars.PULP_PREAMBLE_RUNS_ON_JSON || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     steps:
       - name: Report gate outcome
         shell: bash

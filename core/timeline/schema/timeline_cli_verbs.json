@@ -777,6 +777,37 @@
       "domain": "Command",
       "flags": [
         {
+          "kind": "Object",
+          "name": "expected",
+          "ref": "pulp.timeline.groove_template",
+          "required": true,
+          "schema_field": "expected",
+          "value_type": "json"
+        },
+        {
+          "kind": "Object",
+          "name": "replacement",
+          "ref": "pulp.timeline.groove_template",
+          "required": true,
+          "schema_field": "replacement",
+          "value_type": "json"
+        },
+        {
+          "kind": "U64String",
+          "name": "sequence-id",
+          "required": true,
+          "schema_field": "sequence_id",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:command:set-groove",
+      "schema_type": "pulp.timeline.command.set_groove",
+      "version": 1
+    },
+    {
+      "domain": "Command",
+      "flags": [
+        {
           "kind": "Array",
           "name": "expected",
           "required": true,
@@ -1052,6 +1083,92 @@
       "domain": "Document",
       "flags": [
         {
+          "kind": "I64String",
+          "name": "timing-offset",
+          "required": true,
+          "schema_field": "timing_offset",
+          "value_type": "int"
+        },
+        {
+          "kind": "U32",
+          "name": "velocity-scale",
+          "required": true,
+          "schema_field": "velocity_scale",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:groove-step",
+      "schema_type": "pulp.timeline.groove_step",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
+          "kind": "String",
+          "name": "name",
+          "required": true,
+          "schema_field": "name",
+          "value_type": "string"
+        },
+        {
+          "kind": "I64String",
+          "name": "step",
+          "required": true,
+          "schema_field": "step",
+          "value_type": "int"
+        },
+        {
+          "kind": "Array",
+          "name": "steps",
+          "required": true,
+          "schema_field": "steps",
+          "value_type": "json"
+        },
+        {
+          "kind": "I64String",
+          "name": "swing-denominator",
+          "required": true,
+          "schema_field": "swing_denominator",
+          "value_type": "int"
+        },
+        {
+          "kind": "I64String",
+          "name": "swing-grid",
+          "required": true,
+          "schema_field": "swing_grid",
+          "value_type": "int"
+        },
+        {
+          "kind": "I64String",
+          "name": "swing-numerator",
+          "required": true,
+          "schema_field": "swing_numerator",
+          "value_type": "int"
+        },
+        {
+          "kind": "U32",
+          "name": "timing-strength",
+          "required": true,
+          "schema_field": "timing_strength",
+          "value_type": "uint"
+        },
+        {
+          "kind": "U32",
+          "name": "velocity-strength",
+          "required": true,
+          "schema_field": "velocity_strength",
+          "value_type": "uint"
+        }
+      ],
+      "name": "timeline:groove-template",
+      "schema_type": "pulp.timeline.groove_template",
+      "version": 1
+    },
+    {
+      "domain": "Document",
+      "flags": [
+        {
           "kind": "U32",
           "name": "color",
           "required": false,
@@ -1223,6 +1340,14 @@
           "value_type": "json"
         },
         {
+          "kind": "Object",
+          "name": "groove",
+          "ref": "pulp.timeline.groove_template",
+          "required": true,
+          "schema_field": "groove",
+          "value_type": "json"
+        },
+        {
           "kind": "U64String",
           "name": "id",
           "required": true,
@@ -1267,7 +1392,7 @@
       ],
       "name": "timeline:sequence",
       "schema_type": "pulp.timeline.sequence",
-      "version": 3
+      "version": 4
     },
     {
       "domain": "Document",

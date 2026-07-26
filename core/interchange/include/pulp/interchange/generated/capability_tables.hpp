@@ -114,6 +114,7 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", ""}, // content.opaque
         {ImportLevel::None, "", ""}, // edit-rate.non-audio
         {ImportLevel::None, "", "chord and scale context lanes"}, // context.chord-scale
+        {ImportLevel::None, "", "groove templates and swing"}, // context.groove
     },
 };
 
@@ -162,6 +163,7 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::RoundtripOnly, Concept::Unknown, LossClass::Dropped, ""}, // content.opaque
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for edit-rate.non-audio"}, // edit-rate.non-audio
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.chord-scale"}, // context.chord-scale
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for context.groove"}, // context.groove
     },
 };
 } // namespace detail

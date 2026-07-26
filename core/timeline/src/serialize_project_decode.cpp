@@ -681,6 +681,93 @@ decode_chord_scale_lane(const JsonValue* value, DecodeContext& context, std::str
     return runtime::Result<ChordScaleLane, PersistenceError>(runtime::Ok(std::move(created).value()));
 }
 
+// A null groove value is the pre-groove shape: the sequence predates the field
+// and decodes as the groove that states no feel.
+//
+// The model owns every semantic range, and this deliberately does not restate
+// them. parse_u32_number refuses a negative or over-wide literal, and the
+// narrowing to the model's signed 32-bit fields is total over what survives —
+// a value above INT32_MAX arrives negative and is refused as out of range
+// either way. A second copy of the bounds here would be unreachable code that
+// read as though the model did not check.
+runtime::Result<GrooveTemplate, PersistenceError>
+decode_groove(const JsonValue* value, DecodeContext& context, std::string groove_path) {
+    GrooveTemplateInput input;
+    if (!value) {
+        auto straight = GrooveTemplate::create(std::move(input));
+        if (!straight)
+            return model_fail<GrooveTemplate>(straight.error(), std::move(groove_path));
+        return runtime::Result<GrooveTemplate, PersistenceError>(
+            runtime::Ok(std::move(straight).value()));
+    }
+    auto name = string_field(*value, "name", groove_path);
+    auto step = required(*value, "step", groove_path);
+    auto steps = required(*value, "steps", groove_path);
+    auto swing_denominator = required(*value, "swing_denominator", groove_path);
+    auto swing_grid = required(*value, "swing_grid", groove_path);
+    auto swing_numerator = required(*value, "swing_numerator", groove_path);
+    auto timing_strength = required(*value, "timing_strength", groove_path);
+    auto velocity_strength = required(*value, "velocity_strength", groove_path);
+    if (!name || !step || !steps || !swing_denominator || !swing_grid || !swing_numerator ||
+        !timing_strength || !velocity_strength ||
+        steps.value()->kind != JsonValue::Kind::Array ||
+        timing_strength.value()->kind != JsonValue::Kind::Number ||
+        velocity_strength.value()->kind != JsonValue::Kind::Number)
+        return fail<GrooveTemplate>(PersistenceErrorCode::MissingField, groove_path);
+
+    const auto& limits = context.limits;
+    auto& counts = context.counts;
+    if (steps.value()->array.size() >
+        limits.max_groove_steps - std::min(counts.groove_steps, limits.max_groove_steps))
+        return fail<GrooveTemplate>(PersistenceErrorCode::LimitExceeded, groove_path + "/steps",
+                                    steps.value()->begin,
+                                    counts.groove_steps + steps.value()->array.size(),
+                                    limits.max_groove_steps);
+    counts.groove_steps += steps.value()->array.size();
+
+    auto decoded_step = parse_canonical_i64_string(*step.value(), groove_path + "/step");
+    auto decoded_grid = parse_canonical_i64_string(*swing_grid.value(), groove_path + "/swing_grid");
+    auto decoded_numerator =
+        parse_canonical_i64_string(*swing_numerator.value(), groove_path + "/swing_numerator");
+    auto decoded_denominator =
+        parse_canonical_i64_string(*swing_denominator.value(), groove_path + "/swing_denominator");
+    if (!decoded_step || !decoded_grid || !decoded_numerator || !decoded_denominator)
+        return fail<GrooveTemplate>(PersistenceErrorCode::InvalidNumber, groove_path);
+    auto decoded_timing =
+        parse_u32_number(*timing_strength.value(), groove_path + "/timing_strength");
+    auto decoded_velocity =
+        parse_u32_number(*velocity_strength.value(), groove_path + "/velocity_strength");
+    if (!decoded_timing || !decoded_velocity)
+        return fail<GrooveTemplate>(PersistenceErrorCode::InvalidNumber, groove_path);
+
+    input.name = name.value();
+    input.step = timebase::TickDuration{decoded_step.value()};
+    input.swing_grid = timebase::TickDuration{decoded_grid.value()};
+    input.swing = timebase::SwingRatio{decoded_numerator.value(), decoded_denominator.value()};
+    input.timing_strength = static_cast<std::int32_t>(decoded_timing.value());
+    input.velocity_strength = static_cast<std::int32_t>(decoded_velocity.value());
+    input.steps.reserve(steps.value()->array.size());
+    for (std::size_t index = 0; index < steps.value()->array.size(); ++index) {
+        const auto& encoded = steps.value()->array[index];
+        const auto item_path = groove_path + "/steps/" + std::to_string(index);
+        auto offset = required(encoded, "timing_offset", item_path);
+        auto scale = required(encoded, "velocity_scale", item_path);
+        if (!offset || !scale || scale.value()->kind != JsonValue::Kind::Number)
+            return fail<GrooveTemplate>(PersistenceErrorCode::MissingField, item_path);
+        auto decoded_offset =
+            parse_canonical_i64_string(*offset.value(), item_path + "/timing_offset");
+        auto decoded_scale = parse_u32_number(*scale.value(), item_path + "/velocity_scale");
+        if (!decoded_offset || !decoded_scale)
+            return fail<GrooveTemplate>(PersistenceErrorCode::InvalidNumber, item_path);
+        input.steps.push_back(GrooveStep{timebase::TickDuration{decoded_offset.value()},
+                                         static_cast<std::int32_t>(decoded_scale.value())});
+    }
+    auto created = GrooveTemplate::create(std::move(input));
+    if (!created)
+        return model_fail<GrooveTemplate>(created.error(), groove_path);
+    return runtime::Result<GrooveTemplate, PersistenceError>(runtime::Ok(std::move(created).value()));
+}
+
 // Colour is optional on both annotation kinds: absent means the presentation
 // layer chooses, and a present value must be a whole 32-bit packed RGBA.
 runtime::Result<std::optional<std::uint32_t>, PersistenceError>
@@ -774,9 +861,14 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
     const auto* chord_lane = data->find("chord_scale_lane");
     const auto requires_chord_lane =
         sequence_schema_policy.requires_chord_scale_lane(structural.value().version);
+    const auto* groove = data->find("groove");
+    const auto requires_groove =
+        sequence_schema_policy.requires_groove(structural.value().version);
     if (!id || !name || !tracks || !musical || !absolute ||
         tracks.value()->kind != JsonValue::Kind::Array || (!requires_chord_lane && chord_lane) ||
-        (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)))
+        (requires_chord_lane && (!chord_lane || chord_lane->kind != JsonValue::Kind::Array)) ||
+        (!requires_groove && groove) ||
+        (requires_groove && (!groove || groove->kind != JsonValue::Kind::Object)))
         return fail<Sequence>(PersistenceErrorCode::MissingField, std::move(path));
     std::vector<SequenceMarker> decoded_markers;
     std::vector<SequenceRegion> decoded_regions;
@@ -808,6 +900,9 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
         decode_chord_scale_lane(chord_lane, context, path + "/data/chord_scale_lane");
     if (!decoded_lane)
         return runtime::Err(decoded_lane.error());
+    auto decoded_groove = decode_groove(groove, context, path + "/data/groove");
+    if (!decoded_groove)
+        return runtime::Err(decoded_groove.error());
     auto decoded_id = parse_canonical_u64_string(*id.value(), path + "/data/id");
     if (!decoded_id)
         return fail<Sequence>(decoded_id.error().code, decoded_id.error().path,
@@ -842,10 +937,15 @@ decode_sequence(const std::shared_ptr<const ParsedJson>& document, const JsonVal
             return runtime::Err(decoded.error());
         decoded_tracks.push_back(std::move(decoded).value());
     }
-    auto created = Sequence::create({decoded_id.value()}, std::move(name).value(), decoded_musical,
-                                    decoded_absolute, std::move(decoded_tracks),
-                                    std::move(decoded_markers), std::move(decoded_regions),
-                                    std::move(decoded_lane).value());
+    auto created = Sequence::create(SequenceInput{{decoded_id.value()},
+                                                 std::move(name).value(),
+                                                 decoded_musical,
+                                                 decoded_absolute,
+                                                 std::move(decoded_tracks),
+                                                 std::move(decoded_markers),
+                                                 std::move(decoded_regions),
+                                                 std::move(decoded_lane).value(),
+                                                 std::move(decoded_groove).value()});
     if (!created)
         return model_fail<Sequence>(created.error(), std::move(path));
     return runtime::Result<Sequence, PersistenceError>(runtime::Ok(std::move(created).value()));

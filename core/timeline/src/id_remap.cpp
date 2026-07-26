@@ -362,9 +362,15 @@ rebuild_sequence(const Sequence& sequence, const IdRemapTable& table, ExternalId
     std::vector<SequenceRegion> regions(sequence.regions().begin(), sequence.regions().end());
     for (auto& region : regions)
         region.id = *table.find(region.id);
-    return Sequence::create(*table.find(sequence.id()), sequence.name(), sequence.duration(),
-                            sequence.absolute_duration(), std::move(tracks), std::move(markers),
-                            std::move(regions), sequence.chord_scale_lane());
+    return Sequence::create(SequenceInput{.id = *table.find(sequence.id()),
+                                          .name = sequence.name(),
+                                          .musical_duration = sequence.duration(),
+                                          .absolute_duration = sequence.absolute_duration(),
+                                          .tracks = std::move(tracks),
+                                          .markers = std::move(markers),
+                                          .regions = std::move(regions),
+                                          .chord_scale_lane = sequence.chord_scale_lane(),
+                                          .groove = sequence.groove()});
 }
 
 } // namespace

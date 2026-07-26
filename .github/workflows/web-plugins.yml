@@ -342,21 +342,39 @@ jobs:
           if-no-files-found: ignore
 
   # ── THE REAL GPU GATE ───────────────────────────────────────────────────────
-  # Runs ONLY where a WebGPU adapter is measured to exist: the self-hosted macOS
-  # runners (PULP_LOCAL_MACOS_RUNS_ON_JSON). Probed 2026-07-12 on the Mac Studio
+  # Runs ONLY where a WebGPU adapter is measured to exist: a distinct advisory
+  # self-hosted lane (PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON). Probed 2026-07-12
+  # on the Mac Studio
   # host — headless Chrome there reports `apple / metal-3` with `timestamp-query`
   # among its adapter features, so PULP_REQUIRE_WEBGPU=1 makes a null adapter a
   # HARD FAILURE and the fixture cannot silently degrade into
   # always-skipped-always-green.
   #
-  # The job is skipped entirely when that repo variable is unset, so a fork
-  # without the runner pool does not see a permanently red check. It is advisory
-  # (not in branch protection) until it has run green for a while — but it is a
-  # REAL gate on the machines it runs on, not a decoration.
+  # The job is skipped entirely when that repo variable is unset. Its resolver
+  # rejects pulp-build* and pulp-preamble* so this proof cannot consume a
+  # required merge-gate runner.
+  resolve-gpu-advisory-macos:
+    name: Resolve isolated GPU advisory runner
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.resolve.outputs.enabled }}
+      selector_json: ${{ steps.resolve.outputs.selector_json }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: resolve
+        shell: bash
+        env:
+          CONFIGURED_JSON: ${{ vars.PULP_ADVISORY_GPU_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 tools/scripts/resolve_advisory_macos_runner.py \
+            --configured-json "$CONFIGURED_JSON" \
+            --require-self-hosted
+
   gpu-audio-macos:
     name: GPU audio proof (macOS, real WebGPU)
-    if: vars.PULP_LOCAL_MACOS_RUNS_ON_JSON != ''
-    runs-on: ${{ fromJSON(vars.PULP_LOCAL_MACOS_RUNS_ON_JSON) }}
+    needs: resolve-gpu-advisory-macos
+    if: needs.resolve-gpu-advisory-macos.outputs.enabled == 'true'
+    runs-on: ${{ fromJSON(needs.resolve-gpu-advisory-macos.outputs.selector_json) }}
     steps:
       - uses: actions/checkout@v4
 

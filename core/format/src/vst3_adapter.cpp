@@ -20,6 +20,7 @@
 #include <pulp/format/ara.hpp>
 #include <pulp/signal/scoped_flush_denormals.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/trace_session.hpp>
 #include <pulp/runtime/scoped_no_alloc.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivsteditcontroller.h>
@@ -227,6 +228,15 @@ inline void resize_sample_scratch(std::vector<std::vector<float>>& scratch,
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
+    // Reference-counted tracing attachment (no-op unless PULP_TRACING=ON).
+    // A plug-in has no main(), so this is where a dev build picks up
+    // $PULP_TRACE_PATH and starts recording; the matching detach() in the
+    // destructor flushes the .pftrace once the last instance goes away.
+    runtime::Tracing::attach();
+}
+
+PulpVst3Processor::~PulpVst3Processor() {
+    runtime::Tracing::detach();
 }
 
 tresult PLUGIN_API PulpVst3Processor::queryInterface(const TUID iid, void** obj) {
@@ -539,12 +549,41 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     // Wire gesture callbacks to VST3 host
     store_.set_gesture_callbacks(
         [this](state::ParamID id) {
+            editing_params_.insert(id);
             beginEdit(static_cast<ParamID>(id));
         },
         [this](state::ParamID id) {
+            // Report the final value before closing the gesture, so a host that
+            // latches on endEdit records where the control actually landed.
+            if (editing_params_.erase(id) > 0) {
+                performEdit(static_cast<ParamID>(id),
+                            static_cast<ParamValue>(store_.get_normalized(id)));
+            }
             endEdit(static_cast<ParamID>(id));
         }
     );
+
+    // Report editor-driven parameter edits to the host.
+    //
+    // The process() snapshot-diff below only catches changes made DURING
+    // process() (the snapshot is taken at the top of the block), so a value the
+    // editor wrote between two process calls is already in the snapshot and is
+    // never reported. Without this listener a knob drag moved the DSP while the
+    // host's own parameter — and therefore automation write, undo, and any
+    // generic UI — stayed frozen at the old value.
+    //
+    // Gated on an OPEN GESTURE so this only ever reports edits the editor is
+    // actually performing: host-driven changes are applied on the audio thread
+    // and have no gesture, so they can never be echoed back at the host.
+    editor_param_listener_ = store_.add_listener(
+        [this](state::ParamID id, float) {
+            if (editing_params_.find(id) == editing_params_.end()) return;
+            performEdit(static_cast<ParamID>(id),
+                        static_cast<ParamValue>(store_.get_normalized(id)));
+            setParamNormalized(static_cast<ParamID>(id),
+                               static_cast<ParamValue>(store_.get_normalized(id)));
+        },
+        state::ListenerThread::Main);
 
     // Add audio buses from descriptor (supports multi-bus: main, sidechain, aux)
     for (const auto& bus : desc.input_buses) {

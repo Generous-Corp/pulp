@@ -137,20 +137,24 @@ void BridgeRegistrars::register_pointer_event_api(WidgetBridge& self) {
                 if (me.is_wheel) {
                     return;
                 }
-                // Drag ticks arrive here too: the hosts deliver phase=drag on
-                // this channel so a widget can read modifiers mid-drag. The JS
-                // pointermove / mousemove stream is owned by on_drag below, so
-                // this channel publishes only the gesture's endpoints.
+                // This channel carries the press/release edges only. A move —
+                // `MousePhase::drag` (button held) or `hover` (button up) —
+                // reaches JS as `pointermove` through `on_drag` /
+                // `on_pointer_move` below, and the two must not both report it.
                 //
-                // Without this gate the type is derived from is_down alone, and
-                // a drag tick (is_down == true) reads as a second pointerdown.
-                // Every tick then re-runs the JS pointerdown handler, which
-                // re-latches whatever origin it captured — the standard knob
-                // idiom `y0 = e.clientY; v0 = value` — so each move computes its
-                // delta against the point it just reached and the control never
-                // leaves its starting value.
-                if (me.phase == MousePhase::drag) return;
-
+                // The type is otherwise inferred from `is_down`, which is what
+                // `MousePhase::automatic` asks for and what every press/release
+                // caller wants. But a drag tick carries `is_down == true` (the
+                // button IS still held), so inferring from it alone reported
+                // EVERY drag sample as a fresh `pointerdown`. A handler that
+                // latches its gesture origin on press — the standard knob idiom,
+                // `y0 = e.clientY` — re-latched on every sample, so its delta
+                // was always ~0 and the control never moved under a drag. A
+                // hover sample would likewise have reported a phantom
+                // `pointerup`.
+                if (me.phase == MousePhase::drag || me.phase == MousePhase::hover) {
+                    return;
+                }
                 std::string type;
                 if (me.is_down) type = "pointerdown";
                 else type = "pointerup";

@@ -275,6 +275,16 @@ if(PULP_HAS_SKIA)
 endif()
 catch_discover_tests(pulp-test-partial-repaint-equivalence)
 
+# Widgets must request a BOUNDED repaint on their hot value path. The rect-less
+# View::request_repaint() dirties the WHOLE surface by design, so a knob drag
+# would re-composite a plug-in's static chrome per mouse move and partial
+# repaint could never engage regardless of host wiring
+# (test/test_widget_bounded_repaint.cpp).
+add_executable(pulp-test-widget-bounded-repaint test_widget_bounded_repaint.cpp)
+target_link_libraries(pulp-test-widget-bounded-repaint PRIVATE
+    pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-bounded-repaint)
+
 # Canvas arcs / path-primitive Skia rasterization fixtures. Native
 # arc / arcTo / ellipse / roundRect cluster: RecordingCanvas
 # captures of native primitives + Skia rasterization fixtures (full /

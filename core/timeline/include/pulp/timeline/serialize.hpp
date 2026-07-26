@@ -37,6 +37,7 @@ struct ProjectSnapshotCounts {
     std::size_t markers = 0;
     std::size_t regions = 0;
     std::size_t chord_scale_events = 0;
+    std::size_t groove_steps = 0;
 };
 
 // Allocation-light metadata view for project browsers and admission checks.
