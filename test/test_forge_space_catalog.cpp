@@ -623,6 +623,21 @@ TEST_CASE("Forge space convolution rejects malformed registration IRs",
     auto bad_count = delta_ir(3);
     REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(bad_count)),
                       std::invalid_argument);
+
+    auto tiny_rate = delta_ir();
+    tiny_rate.sample_rate = std::numeric_limits<double>::denorm_min();
+    REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(tiny_rate)),
+                      std::invalid_argument);
+    auto huge_rate = delta_ir();
+    huge_rate.sample_rate = std::numeric_limits<double>::max();
+    REQUIRE_THROWS_AS(conv::make_convolution_reverb_node(std::move(huge_rate)),
+                      std::invalid_argument);
+
+    for (double valid_rate : {8000.0, 768000.0}) {
+        auto boundary = delta_ir();
+        boundary.sample_rate = valid_rate;
+        REQUIRE_NOTHROW(conv::make_convolution_reverb_node(std::move(boundary)));
+    }
 }
 
 // ══ Nonlin ambience ═══════════════════════════════════════════════════════

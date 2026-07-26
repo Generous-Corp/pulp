@@ -1270,6 +1270,12 @@ TEST_CASE("Convolver rejects malformed IRs and non-finite audio before history",
     taps[0] = 1.0;
     const double* valid[1] = {taps.data()};
     REQUIRE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()), kFs));
+    REQUIRE(ZeroLatencyConvolver64::valid_resample_geometry(
+        static_cast<int>(taps.size()), 8000.0, 384000.0,
+        ZeroLatencyConvolver64::kResampTapsPerPhaseMax));
+    REQUIRE_FALSE(ZeroLatencyConvolver64::valid_resample_geometry(
+        std::numeric_limits<int>::max(), kFs, kFs,
+        ZeroLatencyConvolver64::kResampTapsPerPhaseDefault));
 
     const double* null_child[1] = {nullptr};
     REQUIRE_FALSE(conv.load_impulse_response(null_child, 1, 32, kFs));
@@ -1278,6 +1284,13 @@ TEST_CASE("Convolver rejects malformed IRs and non-finite audio before history",
     taps[12] = 0.0;
     REQUIRE_FALSE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()),
                                               std::numeric_limits<double>::infinity()));
+    const int retained_length = conv.prepared_ir_length();
+    REQUIRE_FALSE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()),
+                                              std::numeric_limits<double>::denorm_min()));
+    REQUIRE_FALSE(conv.load_impulse_response(valid, 1, static_cast<int>(taps.size()),
+                                              std::numeric_limits<double>::max()));
+    REQUIRE(conv.is_loaded());
+    REQUIRE(conv.prepared_ir_length() == retained_length);
 
     conv.reset();
     conv.set_dry_percent(0.0);

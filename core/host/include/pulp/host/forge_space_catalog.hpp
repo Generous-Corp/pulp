@@ -166,6 +166,10 @@ inline bool valid_impulse_response(const ImpulseResponse& ir) {
     if (!std::isfinite(ir.sample_rate) || ir.sample_rate <= 0.0 || ir.channels[0].empty())
         return false;
     const std::size_t length = ir.channels[0].size();
+    if (length > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        !Engine::valid_resample_geometry(static_cast<int>(length), ir.sample_rate,
+                                         48000.0, Engine::kResampTapsPerPhaseDefault))
+        return false;
     for (const auto& channel : ir.channels) {
         if (channel.size() != length) return false;
         for (float sample : channel)
@@ -243,7 +247,7 @@ inline float convolution_reverb_worst_case_gain(const ImpulseResponse& ir,
 inline CustomNodeType make_convolution_reverb_node(ImpulseResponse ir,
                                                    IrPolicy policy = {}) {
     if (!valid_impulse_response(ir))
-        throw std::invalid_argument("convolution IR must be finite, non-empty, and have 1, 2, or 4 equal-length channels");
+        throw std::invalid_argument("convolution IR must have finite, representable rate/length geometry and 1, 2, or 4 equal-length channels");
     auto shared = std::make_shared<ImpulseResponse>(std::move(ir));
 
     CustomNodeType t;

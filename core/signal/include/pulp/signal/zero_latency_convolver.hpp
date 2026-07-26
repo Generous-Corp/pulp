@@ -145,6 +145,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace pulp::signal {
@@ -479,6 +480,39 @@ public:
     static constexpr int kResampTapsPerPhaseMin = 16;
     static constexpr int kResampTapsPerPhaseMax = 64;
 
+    /// Proves every resampler geometry value is finite and representable before
+    /// the ingest path casts it to `int` or allocates source/destination work.
+    /// Public so registration-time wrappers can reject unusable IR metadata
+    /// before retaining a shared copy.
+    static bool valid_resample_geometry(int source_length, double source_rate,
+                                        double destination_rate, int taps_per_phase) noexcept {
+        if (source_length <= 0 || taps_per_phase <= 0 ||
+            !std::isfinite(source_rate) || source_rate <= 0.0 ||
+            !std::isfinite(destination_rate) || destination_rate <= 0.0)
+            return false;
+        constexpr double int_max = static_cast<double>(std::numeric_limits<int>::max());
+        const double ratio = destination_rate / source_rate;
+        if (!std::isfinite(ratio) || ratio <= 0.0) return false;
+
+        const double destination_length =
+            std::ceil(static_cast<double>(source_length) * ratio);
+        if (!std::isfinite(destination_length) || destination_length < 1.0 ||
+            destination_length > int_max)
+            return false;
+
+        const double cutoff = std::min(1.0, ratio);
+        const double half_width = 0.5 * static_cast<double>(taps_per_phase) / cutoff;
+        const double reach = std::ceil(half_width) + 1.0;
+        if (!std::isfinite(half_width) || !std::isfinite(reach) || reach < 1.0 ||
+            reach > int_max)
+            return false;
+
+        // The kernel loop forms `i0 +/- reach` in signed-int arithmetic. Its
+        // largest possible centre is the final source sample; reserve one more
+        // value so the loop increment after the last iteration cannot overflow.
+        return reach <= int_max - static_cast<double>(source_length);
+    }
+
     /// House Kaiser window shape, fixed by the series contract's
     /// oversampling / resampling law — not a tunable of this module.
     static constexpr double kResampKaiserBeta = 8.0;
@@ -540,7 +574,9 @@ public:
         if (ir_channels == nullptr || ir_length <= 0) return false;
         if (ir_channel_count != 1 && ir_channel_count != 2 && ir_channel_count != 4)
             return false;
-        if (!std::isfinite(ir_sample_rate) || ir_sample_rate <= 0.0) return false;
+        if (!valid_resample_geometry(ir_length, ir_sample_rate, sample_rate_,
+                                     resample_taps_))
+            return false;
         for (int c = 0; c < ir_channel_count; ++c) {
             if (ir_channels[c] == nullptr) return false;
             for (int i = 0; i < ir_length; ++i)
