@@ -345,7 +345,12 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     # when the inspected archive needs it.
     set(_pulp_skia_support_libraries "")
     set(_pulp_skia_needs_raw_ptr_compat FALSE)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_NM AND EXISTS "${SKIA_LIBRARY}")
+    if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+        # The m151 Windows archive has the same standalone-packaging gap as
+        # Linux. MSVC's linker reports the three missing support symbols at
+        # final consumer link time, so include the no-PartitionAlloc shim.
+        set(_pulp_skia_needs_raw_ptr_compat TRUE)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_NM AND EXISTS "${SKIA_LIBRARY}")
         execute_process(
             COMMAND "${CMAKE_NM}" -uC "${SKIA_LIBRARY}"
             RESULT_VARIABLE _pulp_skia_nm_undefined_rc
@@ -450,7 +455,11 @@ if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
         )
 
         # Platform frameworks
-        if(APPLE)
+        if(WIN32)
+            # Dawn's D3D12 backend references WKPDID_D3DDebugObjectName.
+            set_property(TARGET skia::skia APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES dxguid)
+        elseif(APPLE)
             # Dawn's Metal archive contains Objective-C++ objects even when
             # final targets only link from C++ sources. Explicitly linking
             # `objc` lets osxcross/ld64.lld resolve the Objective-C runtime

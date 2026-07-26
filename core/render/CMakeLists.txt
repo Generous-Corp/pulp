@@ -114,7 +114,13 @@ endif()
 
 # Link WebGPU if available
 # On Android, Dawn is bundled in Skia — no separate webgpu target needed
-if(PULP_HAS_WEBGPU AND TARGET webgpu)
+# The Windows Skia archive includes Dawn and the Windows renderer uses
+# dawn::native::* symbols that wgpu_native.dll does not export. Linking both
+# implementations also defines every wgpu* C entry point twice. Prefer Skia's
+# co-built static Dawn on Windows whenever that archive is present.
+if(PULP_HAS_WEBGPU AND TARGET webgpu
+   AND NOT (WIN32 AND PULP_HAS_SKIA
+           AND NOT DAWN_LIBRARY STREQUAL "DAWN_LIBRARY-NOTFOUND"))
     target_link_libraries(pulp-render PUBLIC webgpu)
 endif()
 if(PULP_HAS_WEBGPU)

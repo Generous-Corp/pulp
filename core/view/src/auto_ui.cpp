@@ -277,8 +277,13 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             toggle->set_id(param.name);
             toggle->set_label(param.name);
             toggle->set_on(store.get_normalized(param.id) > 0.5f);
+            // A toggle is an instantaneous edit rather than a drag, so the
+            // whole gesture is opened and closed around the single write —
+            // the host still needs the begin/end bracket to record it.
             toggle->on_toggle = [&store, id = param.id](bool on) {
+                store.begin_gesture(id);
                 store.set_normalized(id, on ? 1.0f : 0.0f);
+                store.end_gesture(id);
             };
             toggle->flex().preferred_height = 30;
             toggle->flex().preferred_width = 54;
@@ -295,6 +300,16 @@ std::unique_ptr<View> AutoUi::build(state::StateStore& store) {
             knob->set_value(store.get_normalized(param.id));
             knob->on_change = [&store, id = param.id](float norm) {
                 store.set_normalized(id, norm);
+            };
+            // Bracket the drag in a host automation gesture. Without this the
+            // host is never told an edit is in progress, so a knob drag moves
+            // the DSP but the host's parameter (and any automation write /
+            // undo grouping) never follows it.
+            knob->on_gesture_begin = [&store, id = param.id] {
+                store.begin_gesture(id);
+            };
+            knob->on_gesture_end = [&store, id = param.id] {
+                store.end_gesture(id);
             };
             // Keep the physical-unit formatter on the Knob even though AutoUi
             // paints that value in its own row. AccessibilityValueInterface uses

@@ -158,8 +158,10 @@ public:
         //   Apple Metal supports the feature; iOS Sim with the Metal backend
         //   typically advertises it.
         std::vector<wgpu::FeatureName> required_device_features;
+        bool timestamp_query_requested = false;
         if (adapter_.HasFeature(wgpu::FeatureName::TimestampQuery)) {
             required_device_features.push_back(wgpu::FeatureName::TimestampQuery);
+            timestamp_query_requested = true;
             runtime::log_info("GpuSurface: enabling timestamp-query (GPU render time gated on Graphite supportedGpuStats)");
         }
         if (adapter_.HasFeature(wgpu::FeatureName::IndirectFirstInstance)) {
@@ -181,24 +183,48 @@ public:
         // GPU honors the feature natively.
         std::vector<const char*> enabled_toggles;
         wgpu::DawnTogglesDescriptor toggles_desc{};
+        bool needs_unsafe_apis = false;
 #if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
         enabled_toggles.push_back("skip_validation");
-        enabled_toggles.push_back("allow_unsafe_apis");
+        needs_unsafe_apis = true;
         runtime::log_info("GpuSurface: iOS Sim — enabling skip_validation + allow_unsafe_apis Dawn toggles");
-        toggles_desc.enabledToggleCount = enabled_toggles.size();
-        toggles_desc.enabledToggles = enabled_toggles.data();
-        device_desc.nextInChain = &toggles_desc;
 #endif
+        // TimestampQuery is only half the story: Skia Graphite records GPU
+        // elapsed time with writeTimestamp, and Dawn gates writeTimestamp
+        // behind allow_unsafe_apis on every backend. Requesting the FEATURE
+        // without the TOGGLE makes Dawn reject the timestamp write — and, with
+        // it, the entire command buffer — on EVERY frame. Nothing is ever
+        // presented, so the editor stays black while rendering itself looks
+        // healthy: offscreen readback still shows a correct frame, which is
+        // exactly how this hid behind a "first-frame readback" probe that
+        // appeared to fix it.
+        //
+        // Observed on the D3D12 adapter an x64 plug-in gets when hosted under
+        // Windows-on-ARM emulation, whose uncaptured-error callback repeats:
+        //   "writeTimestamp requires enabling toggle allow_unsafe_apis"
+        //
+        // Same failure shape as the iOS Simulator case above — an advertised
+        // feature that Dawn's validator then refuses to let Skia use.
+        if (timestamp_query_requested) needs_unsafe_apis = true;
+        if (needs_unsafe_apis) enabled_toggles.push_back("allow_unsafe_apis");
+
+        if (!enabled_toggles.empty()) {
+            toggles_desc.enabledToggleCount = enabled_toggles.size();
+            toggles_desc.enabledToggles = enabled_toggles.data();
+            device_desc.nextInChain = &toggles_desc;
+        }
 
         device_desc.SetUncapturedErrorCallback(
             [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
                 std::string msg(message.data, message.length);
-                // Filter known-benign Dawn first-frame / per-frame
-                // instanced-draw noise. Skia Graphite emits firstInstance>0
-                // instanced draws every frame on iOS Sim; Dawn validates as a
-                // warning but the underlying Metal draw still runs. Pre-filter
-                // so the noise doesn't drown out real WebGPU errors in the
-                // runtime log.
+                // These two are benign ONLY on the iOS Simulator, where Skia
+                // Graphite's firstInstance>0 instanced draws validate as a
+                // warning but the underlying Metal draw still runs. Everywhere
+                // else a rejected command buffer means the frame was DROPPED,
+                // and silencing it hides a permanently black editor behind a
+                // clean log — so the filter is scoped to the Simulator rather
+                // than applied globally.
+#if defined(TARGET_OS_SIMULATOR) && TARGET_OS_SIMULATOR
                 if (msg.find("First instance") != std::string::npos &&
                     msg.find("must be zero") != std::string::npos) {
                     return;
@@ -206,6 +232,7 @@ public:
                 if (msg.find("Invalid CommandBuffer") != std::string::npos) {
                     return;
                 }
+#endif
                 runtime::log_error("GpuSurface: WebGPU error ({}): {}",
                     static_cast<int>(type), msg);
             });

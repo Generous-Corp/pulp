@@ -1,9 +1,9 @@
 #include <cstdint>
 #include <limits>
 
-#if defined(__linux__) && UINTPTR_MAX > 0xffffffffULL
+#if (defined(__linux__) || defined(_WIN32)) && UINTPTR_MAX > 0xffffffffULL
 
-// Skia m151 Linux prebuilts can reference Chromium BackupRefPtr and
+// Skia m151 Linux and Windows prebuilts can reference Chromium BackupRefPtr and
 // PartitionAlloc support symbols even though the standalone bundle does not
 // ship PartitionAlloc. Pulp does not use Chromium PartitionAlloc, so these
 // definitions make Skia's raw_ptr use behave like ordinary pointer storage.
@@ -26,6 +26,7 @@ public:
         std::uintptr_t reserved_ = 0;
     };
 
+private:
     static PoolSetup setup_;
 };
 
@@ -36,18 +37,16 @@ PartitionAddressSpace::PoolSetup PartitionAddressSpace::setup_;
 namespace base::internal {
 
 template <bool AllowDangling>
-struct RawPtrBackupRefImpl {
-    static void AcquireInternal(unsigned long address);
-    static void ReleaseInternal(unsigned long address);
+class RawPtrBackupRefImpl {
+    static void AcquireInternal(std::uintptr_t address);
+    static void ReleaseInternal(std::uintptr_t address);
 };
 
-static_assert(sizeof(unsigned long) == sizeof(std::uintptr_t));
+template <>
+void RawPtrBackupRefImpl<false>::AcquireInternal(std::uintptr_t) {}
 
 template <>
-void RawPtrBackupRefImpl<false>::AcquireInternal(unsigned long) {}
-
-template <>
-void RawPtrBackupRefImpl<false>::ReleaseInternal(unsigned long) {}
+void RawPtrBackupRefImpl<false>::ReleaseInternal(std::uintptr_t) {}
 
 }  // namespace base::internal
 

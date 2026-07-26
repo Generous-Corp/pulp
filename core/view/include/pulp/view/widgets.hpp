@@ -590,7 +590,8 @@ public:
     // master/macro control or animate it from the host (e.g. an LFO).
     void set_modulation_phase(float p) {
         float c = std::clamp(p, -1.0f, 1.0f);
-        if (c != mod_phase_) { mod_phase_ = c; request_repaint(); }
+        // Also a hot path — a host/LFO can drive this every frame.
+        if (c != mod_phase_) { mod_phase_ = c; request_repaint_self(); }
     }
     float modulation_phase() const { return mod_phase_; }
 
@@ -650,12 +651,14 @@ private:
     /// The single place `value_` and `core_` are written. Clamps to [0,1], snaps
     /// through the core's interval, repaints on a real change, and notifies per
     /// the policy. Returns true if the stored value moved.
+
+
     bool store_normalized(float n, Notify notify) {
         core_.set_normalized(std::clamp(n, 0.0f, 1.0f), Notify::none);
         const float snapped = static_cast<float>(core_.normalized());
         if (snapped == value_) return false;
         value_ = snapped;
-        request_repaint();
+        request_repaint_self();
         if (notify == Notify::sync) {
             if (on_change) on_change(value_);
         } else if (notify == Notify::async && on_change) {
@@ -759,7 +762,7 @@ public:
         float clamped = std::clamp(v, 0.0f, 1.0f);
         if (clamped == value_) return;
         value_ = clamped;
-        request_repaint();
+        request_repaint_self();
     }
 
     /// Notifying overload. `Notify::none` matches the historical `set_value(v)`
@@ -773,7 +776,7 @@ public:
         float clamped = std::clamp(v, 0.0f, 1.0f);
         if (clamped == value_) return false;
         value_ = clamped;
-        request_repaint();
+        request_repaint_self();
         if (notify == Notify::sync) {
             if (on_change) on_change(value_);
         } else if (notify == Notify::async && on_change) {
@@ -869,6 +872,7 @@ public:
     const std::string& lottie_json() const { return lottie_json_; }
     void set_lottie_time(float t) { lottie_time_ = std::clamp(t, 0.0f, 1.0f); }
     float lottie_time() const { return lottie_time_; }
+
 
 private:
     float value_ = 0.0f;
@@ -1177,6 +1181,7 @@ public:
     void set_lottie_time(float t) { lottie_time_ = std::clamp(t, 0.0f, 1.0f); }
     float lottie_time() const { return lottie_time_; }
 
+
 private:
     bool on_ = false;
     std::string label_;
@@ -1210,7 +1215,7 @@ public:
         if (checked_ == v) return;
         checked_ = v;
         set_access_checked(v ? "true" : "false");
-        request_repaint();
+        request_repaint_self();
     }
 
     /// Notifying overload. The plain `set_checked(v)` is silent (the mouse
