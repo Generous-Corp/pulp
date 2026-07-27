@@ -124,10 +124,49 @@ T* find_by_id(std::vector<T>& entries, uint32_t id, GetId get_id) {
 }
 
 bool is_valid_custom_node_type(const CustomNodeType& type) {
-    return !type.type_id.empty()
-        && type.version > 0
-        && type.num_input_ports >= 0
-        && type.num_output_ports >= 0;
+    if (type.type_id.empty() || type.version <= 0
+        || type.num_input_ports < 0 || type.num_output_ports < 0) {
+        return false;
+    }
+
+    const bool declares_baked_params = !type.baked_params.empty();
+    const bool has_baked_param_process =
+        static_cast<bool>(type.process_instance_baked_param);
+    if (declares_baked_params != has_baked_param_process) return false;
+
+    if (declares_baked_params) {
+        // The callback takes an instance pointer, so a parameter-aware baked
+        // type without a complete instance lifecycle can never produce the
+        // runnable binding that bake() promises.
+        if (!type.create || !type.destroy) return false;
+        for (std::size_t i = 0; i < type.baked_params.size(); ++i) {
+            const auto& param = type.baked_params[i];
+            if (param.id == 0
+                || !std::isfinite(param.min_value)
+                || !std::isfinite(param.max_value)
+                || !std::isfinite(param.default_value)
+                || param.min_value > param.max_value
+                || param.default_value < param.min_value
+                || param.default_value > param.max_value) {
+                return false;
+            }
+            for (std::size_t j = 0; j < i; ++j) {
+                if (type.baked_params[j].id == param.id) return false;
+            }
+        }
+    }
+
+    if (type.lowerable) {
+        if (type.create) {
+            if (!type.destroy
+                || (!type.process_instance && !has_baked_param_process)) {
+                return false;
+            }
+        } else if (!type.process) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool custom_type_matches_node_shape(const CustomNodeType& type,

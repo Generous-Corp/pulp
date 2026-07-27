@@ -27,6 +27,25 @@ std::pair<int, int> derive_bus_arity(const SignalGraph& graph) {
     }
     return {input_channels, output_channels};
 }
+
+LowerabilityProof prepared_custom_bindings_of(const SignalGraph& graph) {
+    LowerabilityProof proof;
+    for (const auto& node : graph.nodes()) {
+        if (node.type != NodeType::Custom) continue;
+        if (graph.live_custom_processor(node.id)
+            || graph.live_custom_param_processor(node.id)) {
+            continue;
+        }
+        proof.reason = LowerRejectReason::CustomNotYetLowerable;
+        proof.offending_node = node.id;
+        proof.message =
+            "Custom node has no runnable prepared process binding; refusing to bake";
+        return proof;
+    }
+    proof.accepted = true;
+    proof.reason = LowerRejectReason::None;
+    return proof;
+}
 } // namespace
 
 LowerabilityProof lowerability_of(
@@ -174,6 +193,12 @@ static LowerResult bake_impl(const SignalGraph& graph,
         result.message = proof.message;
         return result;
     }
+    if (const auto proof = prepared_custom_bindings_of(graph); !proof.accepted) {
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
+        return result;
+    }
 
     // Accepted: capture the plan into owned storage. Copy each node's identity +
     // arity (the snapshot builder resolves connections by NodeId and reads ports
@@ -284,6 +309,12 @@ BakePlanResult bake_to_plan(const SignalGraph& graph) {
                 return graph.custom_node_type(type_id, version);
             });
         !proof.accepted) {
+        result.reason = proof.reason;
+        result.offending_node = proof.offending_node;
+        result.message = proof.message;
+        return result;
+    }
+    if (const auto proof = prepared_custom_bindings_of(graph); !proof.accepted) {
         result.reason = proof.reason;
         result.offending_node = proof.offending_node;
         result.message = proof.message;
