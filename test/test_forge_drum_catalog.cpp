@@ -164,16 +164,35 @@ TEST_CASE("Forge drum stable common parameter contract is honest",
     CHECK(parameter(fm2, drum::kControl11).max_value == 2.0f);
 }
 
-TEST_CASE("Forge drum preparation uses the graph zero-latency contract",
+TEST_CASE("Forge drum nodes declare the latency their voice actually has",
           "[host][forge][drum][latency]") {
-    const auto type = drum::make_drum_node(pulp::signal::drum::EngineId::cymbal_comb);
-    void* opaque = type.create();
-    REQUIRE(opaque != nullptr);
-    type.prepare(opaque, kSampleRate, kFrames);
-    const auto& instance = *static_cast<drum::detail::DrumInstance*>(opaque);
-    CHECK(instance.voice->output_oversampling() == pulp::signal::drum::OutputOversampling::bypass);
-    CHECK(instance.voice->latency_samples() == 0);
-    type.destroy(opaque);
+    // The number the graph compensates and the number the voice introduces have
+    // to be the same one. Asserting the declared value against a named
+    // oversampling factor would restate the assumption the declaration already
+    // makes, so this asserts it against the prepared voice itself: whatever the
+    // SDK default becomes, the two follow it together or this fails.
+    for (const auto& metadata : pulp::signal::drum::engine_registry) {
+        if (!metadata.available)
+            continue;
+        const auto type = drum::make_drum_node(metadata.id);
+        if (type.type_id.empty())
+            continue;
+
+        INFO("engine=" << type.type_id);
+        REQUIRE(type.latency_samples);
+        void* opaque = type.create();
+        REQUIRE(opaque != nullptr);
+        type.prepare(opaque, kSampleRate, kFrames);
+        const auto& instance = *static_cast<drum::detail::DrumInstance*>(opaque);
+
+        const int declared = type.latency_samples(kSampleRate);
+        CHECK(declared == instance.voice->latency_samples());
+        CHECK(declared >= 0);
+        CHECK(declared <= CustomNodeType::kMaxLatencySamples);
+        // Whatever quality the node chooses, the voice runs it.
+        CHECK(instance.voice->output_oversampling() == drum::kDrumNodeOversampling);
+        type.destroy(opaque);
+    }
 }
 
 TEST_CASE("Forge drum lowering injects a hit and remains deterministic",
@@ -305,4 +324,23 @@ TEST_CASE("Forge drum parameter table refuses to index on an undeclared id",
     CHECK(table.slot(highest + 1) == DrumParamTable::kNoSlot);
     CHECK(table.slot(highest + 1000) == DrumParamTable::kNoSlot);
     CHECK(table.slot(0) == DrumParamTable::kNoSlot);
+}
+
+TEST_CASE("A baked drum node's latency reaches the processor's compensation plan",
+          "[host][forge][drum][latency][pdc]") {
+    // Declaring a delay is only half of it; the point is that the host aligns
+    // paths around it. A drum node is baked-only -- it has no live `process`,
+    // so it is deliberately transparent on the live graph -- which means the
+    // path that must carry the number is the baked one.
+    const auto type = drum::make_drum_node(pulp::signal::drum::EngineId::cymbal_comb);
+    REQUIRE(type.latency_samples);
+    // Zero today, because the node bypasses oversampling on measurement (see
+    // the contract header). The assertion is not the value but the agreement:
+    // whatever `kDrumNodeOversampling` becomes, the number the node declares
+    // and the number the host plans for stay the same one.
+    const int declared = type.latency_samples(kSampleRate);
+    Fixture fixture(type);
+    CHECK(fixture.lowered.processor->latency_samples() >= declared);
+    CHECK(declared ==
+          pulp::signal::drum::OutputStage::latency_samples_for(drum::kDrumNodeOversampling));
 }

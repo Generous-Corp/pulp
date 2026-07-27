@@ -462,8 +462,15 @@ inline CustomNodeType make_drum_node_impl(EngineId id) {
     type.destroy = [](void* p) { delete static_cast<DrumInstance*>(p); };
     type.prepare = [](void* p, double sample_rate, int /*max_block*/) {
         auto& instance = *static_cast<DrumInstance*>(p);
-        instance.voice->set_output_oversampling(signal::drum::OutputOversampling::bypass);
+        instance.voice->set_output_oversampling(kDrumNodeOversampling);
         instance.voice->prepare(sample_rate);
+    };
+    // Declare the group delay this node's quality choice produces, derived
+    // from that one choice rather than restated. Today it resolves to zero;
+    // the point is that it stops being a promise and becomes a consequence, so
+    // flipping the quality above cannot leave a stale latency behind it.
+    type.latency_samples = [](double /*sample_rate*/) {
+        return signal::drum::OutputStage::latency_samples_for(kDrumNodeOversampling);
     };
     type.reset = [](void* p) {
         auto& instance = *static_cast<DrumInstance*>(p);
