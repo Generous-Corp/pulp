@@ -738,7 +738,7 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 std::move(current_note_events_), std::move(current_note_modifiers_),
                 std::move(audio_program),
                 std::move(current_automation_.ordered_device_placement_ids),
-                std::move(current_automation_.program), sequence_bookkeeping_.expanded_clip_count(),
+                std::move(automation_program), sequence_bookkeeping_.expanded_clip_count(),
                 sequence_bookkeeping_.expanded_note_event_count(),
                 sequence_bookkeeping_.generated_id_start(),
                 sequence_bookkeeping_.generated_id_count(), mixer)));

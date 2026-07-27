@@ -199,7 +199,14 @@ class SequenceContentLowerer::Impl {
         if (frame.clip_index == 0 &&
             (!track.device_chain().empty() || !track.automation_lanes().empty() ||
              !track.take_lanes().empty() || track.freeze() || track.active_take_lane_id().valid() ||
-             track.record_armed()))
+             track.record_armed() ||
+             // Flattening a nested track folds it into the parent, which has no
+             // place to put a child fader: the child's gain and pan would simply
+             // stop applying. Refuse rather than silently play the child at
+             // unity — the same choice the clip-level guard above makes for clip
+             // gain and fades. Composing mixer state through nesting is a
+             // separate feature, not a default.
+             !(track.mixer() == timeline::TrackMixer{})))
             return {.error = SequenceLoweringError{CompileErrorCode::NestedSequenceUnsupported,
                                                    track.id()}};
         if (frame.clip_index == track.clips().size()) {

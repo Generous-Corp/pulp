@@ -297,6 +297,8 @@ struct SetClipSequenceRef {
     ItemId clip_id;
     SequenceRef expected;
     SequenceRef replacement;
+};
+
 // Replaces the track's own level and stereo placement under an exact optimistic
 // gate. Carrying both values keeps undo and journal replay self-contained.
 struct SetTrackMixer {
