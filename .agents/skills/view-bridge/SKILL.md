@@ -1874,3 +1874,16 @@ sampler loading a new kit from its editor — must call
 `flag_note_names_changed()`. The adapter drains that flag on the host/main
 thread and tells the host to relabel. An editor that swaps the kit without
 raising the flag leaves the DAW's piano roll showing the previous kit's names.
+
+## Adapter tracing attachment does not touch the editor lifecycle (WAH-4)
+
+`clap_adapter.hpp` and `au_adapter.mm` each gained a
+`runtime::ScopedTracingAttachment` member so Perfetto captures work for every
+format, not just VST3. It is deliberately independent of the editor lifecycle
+documented above: it is owned by the PLUGIN INSTANCE, not by the ViewBridge or
+the editor host, and its lifetime brackets audio as well as UI work.
+
+If you are reordering members in either adapter, the tracing attachment must
+destroy LAST (after the bridge and the editor host), because the final detach
+flushes the trace and joins the auto-flush timer — it has to outlive every span
+those objects can still emit.

@@ -118,6 +118,11 @@ pulp_add_test_suite(pulp-test-step-grid-view LIBRARIES pulp::view pulp::state)
 pulp_add_test_suite(pulp-test-headless LIBRARIES pulp::format)
 pulp_add_test_suite(pulp-test-format-hardening LIBRARIES pulp::format)
 
+# Editor parameter-write provenance: host automation interleaved with editor
+# edits during an open gesture, exact begin/value/end ordering, one normalized
+# snapshot per reported edit, and no host-originated echo.
+pulp_add_test_suite(pulp-test-host-parameter-edit LIBRARIES pulp::format pulp::state)
+
 # Plugin registry: legacy single global slot + keyed multi-plugin-bundle table.
 pulp_add_test_suite(pulp-test-plugin-registry LIBRARIES pulp::format)
 

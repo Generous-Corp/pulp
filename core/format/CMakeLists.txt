@@ -36,6 +36,7 @@ target_sources(pulp-format PRIVATE
     $<$<PLATFORM_ID:Darwin,iOS,tvOS,watchOS>:src/host_version_mac.mm>
     $<$<PLATFORM_ID:Windows>:src/host_version_win.cpp>
     src/host_quirks.cpp
+    src/host_parameter_edit.cpp
     src/ara.cpp
     src/ara_factory.cpp
     src/ios_audio_session.cpp
