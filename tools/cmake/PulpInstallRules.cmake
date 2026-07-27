@@ -343,6 +343,12 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+    # Every plist template a format helper can reach must ship. PulpPluginFormats
+    # selects them with `elseif(EXISTS ...)`, so one left out of this list does
+    # not error — the helper silently falls through and the bundle is built with
+    # an empty CFBundleIdentifier and type APPL. That is invisible until a host
+    # rejects the plugin or codesign names it `<name>-<hash>`.
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.clap.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
