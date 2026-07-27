@@ -107,7 +107,9 @@ public:
     /// True while the linear-phase pair still owns delayed output after the
     /// source layers have finished. Drum voices include this in their activity
     /// predicate so the final few dozen samples are drained instead of cut.
-    bool has_tail() const noexcept { return tail_samples_remaining_ > 0; }
+    bool has_tail() const noexcept {
+        return tail_samples_remaining_ > 0 || lofi_.has_tail();
+    }
 
     /// Saturation amount, 0 (clean) to 1. Maps to a pre-gain of 1 to 10 into a
     /// tanh, so the control reaches obvious distortion without the top of its

@@ -203,8 +203,10 @@ protected:
 
     void render_add_stereo(float* left, float* right,
                            int num_samples) override {
-        if (!stereo_path_active_) {
-            burst_output_.sync_configuration_from(output_);
+        const bool quality_changed =
+            burst_output_.oversampling() != output_.oversampling();
+        burst_output_.sync_configuration_from(output_);
+        if (!stereo_path_active_ || quality_changed) {
             burst_output_.reset();
             burst_output_.trigger();
             stereo_path_active_ = true;

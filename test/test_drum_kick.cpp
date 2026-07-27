@@ -827,6 +827,25 @@ TEST_CASE("Bypassed clean drum output is sample-exact and deterministic",
     REQUIRE_FALSE(output.has_tail());
 }
 
+TEST_CASE("Bypassed drum output drains its lo-fi held sample",
+          "[signal][drum][output][bypass][lofi][lifecycle]") {
+    OutputStage output;
+    output.prepare(kFs);
+    output.set_oversampling(OutputOversampling::bypass);
+    output.lofi().set_hold_rate_hz(100.0);
+
+    REQUIRE(output.process(1.0f) == 1.0f);
+    REQUIRE(output.has_tail());
+    int drained = 0;
+    while (output.has_tail() && drained < 1000) {
+        (void)output.process(0.0f);
+        ++drained;
+    }
+    REQUIRE(drained > 1);
+    REQUIRE(drained < 1000);
+    REQUIRE_FALSE(output.has_tail());
+}
+
 TEST_CASE("The post-output AHD has exact attack, hold, and decay regions",
           "[signal][drum][output][ahd]") {
     OutputStage output;
