@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace pulp::host;
@@ -40,6 +41,14 @@ double harmonic(const std::vector<float>& x, int k) {
 
 double third_harmonic_ratio(const std::vector<float>& x) {
     return harmonic(x, 3) / harmonic(x, 1);
+}
+
+double max_difference(const std::vector<float>& a, const std::vector<float>& b) {
+    REQUIRE(a.size() == b.size());
+    double difference = 0.0;
+    for (std::size_t i = 0; i < a.size(); ++i)
+        difference = std::max(difference, std::abs(static_cast<double>(a[i] - b[i])));
+    return difference;
 }
 
 float peak(const std::vector<float>& b) {
@@ -78,18 +87,39 @@ TEST_CASE("Forge saturator: every musical tone control is stable and injected",
     has(sat::kToneDeHz, 0.0f, 8000.0f, 3000.0f);
     has(sat::kPreBoostDb, 0.0f, 18.0f, 9.0f);
 
-    auto fx = make_fixture(type);
-    auto inj = fx.claim_injector();
     const auto t = sine(0.2f);
-    REQUIRE(inj.inject(immediate(sat::kDriveDb, 18.0f)) == InjectStatus::Ok);
-    REQUIRE(inj.inject(immediate(sat::kTonePreHz, 500.0f)) == InjectStatus::Ok);
-    REQUIRE(inj.inject(immediate(sat::kToneTracking, 1.0f)) == InjectStatus::Ok);
-    const auto tracked = settle(fx, t);
-    REQUIRE(inj.inject(immediate(sat::kToneTracking, 0.0f)) == InjectStatus::Ok);
-    REQUIRE(inj.inject(immediate(sat::kToneDeHz, 7000.0f)) == InjectStatus::Ok);
-    REQUIRE(inj.inject(immediate(sat::kPreBoostDb, 18.0f)) == InjectStatus::Ok);
-    const auto untracked = settle(fx, t);
-    REQUIRE(tracked != untracked);
+    const auto render = [&](float tracking, float de_hz, float boost_db) {
+        auto fx = make_fixture(type);
+        auto inj = fx.claim_injector();
+        REQUIRE(inj.inject(immediate(sat::kDriveDb, 18.0f)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(sat::kTonePreHz, 500.0f)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(sat::kToneTracking, tracking)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(sat::kToneDeHz, de_hz)) == InjectStatus::Ok);
+        REQUIRE(inj.inject(immediate(sat::kPreBoostDb, boost_db)) == InjectStatus::Ok);
+        return settle(fx, t, 32);
+    };
+
+    const auto tracked = render(1.0f, 7000.0f, 18.0f);
+    const auto untracked = render(0.0f, 7000.0f, 18.0f);
+    REQUIRE(max_difference(tracked, untracked) > 1e-4);
+
+    const auto de_low = render(0.0f, 500.0f, 18.0f);
+    const auto de_high = render(0.0f, 7000.0f, 18.0f);
+    REQUIRE(max_difference(de_low, de_high) > 1e-4);
+
+    const auto no_boost = render(0.0f, 7000.0f, 0.0f);
+    const auto full_boost = render(0.0f, 7000.0f, 18.0f);
+    REQUIRE(max_difference(no_boost, full_boost) > 1e-4);
+}
+
+TEST_CASE("Forge saturator: hostile non-finite injections fall back to finite defaults",
+          "[host][baked][forge][forge-saturator][non-finite]") {
+    auto fx = make_fixture(sat::make_saturator_node(sat::Shape::tanh_soft));
+    auto inj = fx.claim_injector();
+    for (auto id : {sat::kToneTracking, sat::kToneDeHz, sat::kPreBoostDb})
+        REQUIRE(inj.inject(immediate(id, std::numeric_limits<float>::quiet_NaN())) ==
+                InjectStatus::Ok);
+    for (float sample : settle(fx, sine(0.4f))) REQUIRE(std::isfinite(sample));
 }
 
 TEST_CASE("Forge saturator: injecting drive changes harmonic content",

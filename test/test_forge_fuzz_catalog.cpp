@@ -7,6 +7,7 @@
 #include <pulp/signal/units.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace fuzz = pulp::host::fuzz;
@@ -37,16 +38,32 @@ TEST_CASE("Forge fuzz: every realization bakes, runs, and declares the contract"
 
 TEST_CASE("Forge fuzz: seeded drift is injectable and deterministic",
           "[host][baked][param-injection][forge][forge-fuzz][determinism]") {
-    const auto render = [] {
+    const auto render = [](bool drift_enabled) {
         auto type = fuzz::make_fuzz_node(fuzz::Device::germanium, false);
         Fixture fx(type, 48000.0, 128);
         auto injector = fx.claim_injector();
-        REQUIRE(injector.inject(pulp::test::immediate(fuzz::kDriftEnabled, 1.0f)) ==
+        REQUIRE(injector.inject(pulp::test::immediate(
+                    fuzz::kDriftEnabled, drift_enabled ? 1.0f : 0.0f)) ==
                 pulp::host::InjectStatus::Ok);
         const auto input = pulp::test::sine_block(128, 750.0, 48000.0, 0.4f);
         return fx.settle({input}, 64).front();
     };
-    REQUIRE(render() == render());
+    const auto drift_a = render(true);
+    const auto drift_b = render(true);
+    REQUIRE(drift_a == drift_b);
+    REQUIRE(drift_a != render(false));
+}
+
+TEST_CASE("Forge fuzz: non-finite drift injection is finite and uses its default",
+          "[host][baked][forge][forge-fuzz][non-finite]") {
+    Fixture fx(fuzz::make_fuzz_node(fuzz::Device::germanium, false), 48000.0, 128);
+    auto injector = fx.claim_injector();
+    REQUIRE(injector.inject(pulp::test::immediate(
+                fuzz::kDriftEnabled, std::numeric_limits<float>::quiet_NaN())) ==
+            pulp::host::InjectStatus::Ok);
+    const auto input = pulp::test::sine_block(128, 750.0, 48000.0, 0.4f);
+    const auto output = fx.settle({input}, 16).front();
+    for (float sample : output) REQUIRE(std::isfinite(sample));
 }
 
 TEST_CASE("Forge fuzz: injection changes the realized circuit and remains RT safe",
