@@ -216,6 +216,20 @@ set_tests_properties(cmake-pulp-install-skia-compat-source PROPERTIES
 # justified. Skips (77) when no wasm slice is unpacked or llvm-nm is absent.
 find_program(PULP_PYTHON3_FOR_TESTS NAMES python3 python)
 if(PULP_PYTHON3_FOR_TESTS)
+    if(UNIX)
+        add_test(NAME agent-hook-paths
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_agent_hook_paths.py)
+        set_tests_properties(agent-hook-paths PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
+        add_test(NAME prepush-gate-output
+            COMMAND ${PULP_PYTHON3_FOR_TESTS}
+                ${CMAKE_SOURCE_DIR}/tools/scripts/test_prepush_gate_output.py)
+        set_tests_properties(prepush-gate-output PROPERTIES
+            LABELS "tooling;hooks"
+            TIMEOUT 30)
+    endif()
     add_test(NAME wasm-skia-slice-invariants
         COMMAND ${PULP_PYTHON3_FOR_TESTS}
             ${CMAKE_SOURCE_DIR}/tools/scripts/verify_wasm_skia_slice.py)

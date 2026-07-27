@@ -123,52 +123,6 @@ T* find_by_id(std::vector<T>& entries, uint32_t id, GetId get_id) {
     return it == entries.end() ? nullptr : &*it;
 }
 
-bool is_valid_custom_node_type(const CustomNodeType& type) {
-    if (type.type_id.empty() || type.version <= 0
-        || type.num_input_ports < 0 || type.num_output_ports < 0) {
-        return false;
-    }
-
-    const bool declares_baked_params = !type.baked_params.empty();
-    const bool has_baked_param_process =
-        static_cast<bool>(type.process_instance_baked_param);
-    if (declares_baked_params != has_baked_param_process) return false;
-
-    if (declares_baked_params) {
-        // The callback takes an instance pointer, so a parameter-aware baked
-        // type without a complete instance lifecycle can never produce the
-        // runnable binding that bake() promises.
-        if (!type.create || !type.destroy) return false;
-        for (std::size_t i = 0; i < type.baked_params.size(); ++i) {
-            const auto& param = type.baked_params[i];
-            if (param.id == 0
-                || !std::isfinite(param.min_value)
-                || !std::isfinite(param.max_value)
-                || !std::isfinite(param.default_value)
-                || param.min_value > param.max_value
-                || param.default_value < param.min_value
-                || param.default_value > param.max_value) {
-                return false;
-            }
-            for (std::size_t j = 0; j < i; ++j) {
-                if (type.baked_params[j].id == param.id) return false;
-            }
-        }
-    }
-
-    if (type.lowerable) {
-        if (type.create) {
-            if (!type.destroy
-                || (!type.process_instance && !has_baked_param_process)) {
-                return false;
-            }
-        } else if (!type.process) {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool custom_type_matches_node_shape(const CustomNodeType& type,
                                     const GraphNode& node) {
     return type.num_input_ports == node.num_input_ports
@@ -416,7 +370,7 @@ NodeId SignalGraph::add_midi_output_node(const std::string& name) {
 }
 
 bool SignalGraph::register_custom_node_type(CustomNodeType type) {
-    if (!is_valid_custom_node_type(type)) return false;
+    if (!type.is_valid_registration()) return false;
     // Scans nodes_ and mutates custom_node_types_; serialize against a concurrent
     // prepare()/mutator. custom_node_type() reads custom_node_types_ lock-free and
     // assumes the caller holds this mutex (true for every internal caller below).
@@ -503,7 +457,7 @@ NodeId SignalGraph::add_unresolved_custom_node(std::string_view type_id,
     type.num_input_ports = num_inputs;
     type.num_output_ports = num_outputs;
     type.default_name = name;
-    if (!is_valid_custom_node_type(type)) return 0;
+    if (!type.is_valid_registration()) return 0;
 
     // The single locked leaf for the add_custom_node family — serializes the
     // nodes_ push against a concurrent prepare()/mutator.
@@ -1158,6 +1112,9 @@ const CustomNodeTransportProcessFn* SignalGraph::live_custom_transport_processor
 }
 
 int SignalGraph::live_custom_latency_samples(NodeId id) const noexcept {
+    // Read-guarded rather than a bare live() deref: this one is read by the
+    // PDC/bake paths while a re-prepare can be publishing a new snapshot, and
+    // the guard keeps the map alive for the lookup.
     auto read_guard = live_slot_.read();
     const auto* cg = read_guard.get();
     if (cg == nullptr) return 0;
@@ -1428,6 +1385,10 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
                    cit != cg.custom_latency_samples.end()) {
             added = std::max<int64_t>(0, cit->second);
         }
+        if (auto cit = cg.custom_latency_samples.find(id);
+            cit != cg.custom_latency_samples.end()) {
+            added = cit->second;
+        }
         rt.output_latency = rt.input_latency + added;
     }
 
@@ -1510,6 +1471,11 @@ bool SignalGraph::build_routing_snapshot_locked_(
                 auto it = cg.custom_transport_processors.find(id);
                 return it == cg.custom_transport_processors.end() ? nullptr
                                                                   : &it->second;
+            },
+        .custom_latency_for =
+            [&cg](NodeId id) -> int {
+                auto it = cg.custom_latency_samples.find(id);
+                return it == cg.custom_latency_samples.end() ? 0 : it->second;
             },
         // Cached plugin metadata so the routing build makes no live PluginSlot
         // metadata call (safe for a swap-time recompile).
@@ -1721,10 +1687,6 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
             if (const auto* type = custom_node_type(n.custom_type_id,
                                                     n.custom_type_version);
                 type && custom_type_matches_node_shape(*type, n)) {
-                if (type->latency_samples) {
-                    cg->custom_latency_samples[n.id] =
-                        std::max(0, type->latency_samples(sample_rate));
-                }
                 if (n.custom_instance && type->process_instance) {
                     // Bind the stateful processor. The lambda captures the
                     // instance shared_ptr BY VALUE, so this snapshot keeps the
@@ -1741,6 +1703,17 @@ SignalGraph::compile_(double sample_rate, int max_block_size, CompileMode mode) 
                         };
                 } else if (type->process) {
                     cg->custom_processors[n.id] = type->process;
+                }
+                // A registered type with no live callback is transparent on the
+                // live graph, so it must not add latency there. Baked-only
+                // callbacks capture their latency separately during lowering.
+                // Evaluated once here, off the audio thread, at the graph's own
+                // rate, and clamped into the declared range — the value is not
+                // knowable at registration, so this is where it gets checked.
+                if (cg->custom_processors.contains(n.id) && type->latency_samples) {
+                    cg->custom_latency_samples[n.id] =
+                        std::clamp(type->latency_samples(sample_rate), 0,
+                                   CustomNodeType::kMaxLatencySamples);
                 }
                 // Bake-layer param injection: if the type declared baked_params
                 // and a param-aware process, bind a closure that captures the

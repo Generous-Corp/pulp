@@ -82,6 +82,16 @@ public:
 
     LowpassGate& gate() { return gate_; }
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {
@@ -108,6 +118,8 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        output_.reset_nonlinear_state();
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         applied_bend_ = pitch_sweep_oct_ + response.bend(velocity);
@@ -141,7 +153,9 @@ protected:
         amp_env_.trigger();
     }
 
-    bool on_is_active() const override { return amp_env_.is_active(); }
+    bool on_is_active() const override {
+        return amp_env_.is_active() || output_.has_tail();
+    }
 
     void render_add(float* out, int num_samples) override {
         const double detune = std::pow(2.0, detune_cents_ / 1200.0);

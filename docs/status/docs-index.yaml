@@ -209,6 +209,11 @@ docs:
     kind: guide
     summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
 
+  - slug: analog-vcf
+    path: guides/analog-vcf.md
+    kind: guide
+    summary: Measured Analog VCF voicings, low-level OTA cascade design, real-time use, and latency/PDC contracts
+
   - slug: character-delay
     path: guides/character-delay.md
     kind: guide
@@ -248,6 +253,11 @@ docs:
     path: guides/fdn-reverb.md
     kind: guide
     summary: Multirate FDN reverb usage, controls, lifecycle, architecture boundaries, finite-state recovery, and validation ownership
+
+  - slug: percussion-synthesis
+    path: reference/percussion-synthesis.md
+    kind: reference
+    summary: Synthesized drum voices — concepts, cookbook, exhaustive API, engine registry, and Forge bake-layer controls
 
   - slug: oscillators
     path: guides/oscillators.md

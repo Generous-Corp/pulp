@@ -147,10 +147,11 @@ LowerabilityProof lowerability_of(
         }
     }
 
-    if (!signal_graph_topology_executor_eligible(nodes, connections)) {
+    if (!validate_signal_graph_executor_topology(nodes, connections)) {
         proof.reason = LowerRejectReason::NotExecutorEligible;
         proof.message =
-            "graph is outside the routed executor's bit-exact subset; refusing to bake";
+            "graph is outside the routed executor's supported topology or resource "
+            "limits; refusing to bake";
         return proof;
     }
 
@@ -200,11 +201,8 @@ static LowerResult bake_impl(const SignalGraph& graph,
         return result;
     }
 
-    // Accepted: capture the plan into owned storage. Copy each node's identity +
-    // arity (the snapshot builder resolves connections by NodeId and reads ports
-    // off these specs), the gain for each Gain node via the public node_gain()
-    // accessor, and the connection list verbatim. Derive the bus arity from the
-    // AudioInput/AudioOutput nodes.
+    // Capture owned node specs, Gain values, connections, and bus arity for the
+    // immutable baked plan.
     std::vector<GraphNode> nodes;
     nodes.reserve(graph.nodes().size());
     // For each lowerable Custom node, capture a COPY of the live resolved process
@@ -216,6 +214,10 @@ static LowerResult bake_impl(const SignalGraph& graph,
     // host's real rate/block — otherwise stale state (e.g. a delay line's
     // contents) would survive into the baked stream, breaking the fresh-stream
     // contract documented in the header.
+    // One record per lowerable Custom node: process callback, intrinsic latency,
+    // lifecycle hooks, and any bake-layer param-injection binding. The bound
+    // callbacks captured the instance keepalive (self-contained), and declared
+    // params come from the registered type — never from the graph node.
     std::unordered_map<NodeId, BakedCustomNodeBinding> custom_nodes;
     const auto [input_channels, output_channels] = derive_bus_arity(graph);
     for (const auto& src : graph.nodes()) {
@@ -228,17 +230,12 @@ static LowerResult bake_impl(const SignalGraph& graph,
         if (src.type == NodeType::Gain) {
             n.gain = graph.node_gain(src.id);
         } else if (src.type == NodeType::Custom) {
-            if (const CustomNodeType* type = graph.custom_node_type(
-                    src.custom_type_id, src.custom_type_version);
-                type != nullptr && type->latency_samples) {
-                custom_nodes[src.id].latency_samples = type->latency_samples;
-            }
+            const CustomNodeType* type = graph.custom_node_type(
+                src.custom_type_id, src.custom_type_version);
             if (const CustomNodeProcessFn* fn = graph.live_custom_processor(src.id)) {
                 custom_nodes[src.id].process = *fn;
             }
             if (src.custom_instance) {
-                const CustomNodeType* type =
-                    graph.custom_node_type(src.custom_type_id, src.custom_type_version);
                 const std::vector<std::uint8_t>* restore_state = nullptr;
                 if (restore_states) {
                     const auto restore_it = restore_states->find(src.id);
@@ -271,10 +268,21 @@ static LowerResult bake_impl(const SignalGraph& graph,
             }
             if (const CustomNodeParamProcessFn* pfn =
                     graph.live_custom_param_processor(src.id)) {
-                if (const CustomNodeType* type = graph.custom_node_type(
-                        src.custom_type_id, src.custom_type_version)) {
+                if (type) {
                     custom_nodes[src.id].params =
                         BakedCustomParamBinding{*pfn, type->baked_params};
+                }
+            }
+            // Mirror the live rule: attach latency only when a plain or
+            // baked-param callback will actually execute. A registered type
+            // with neither is transparent here, so it must not add latency.
+            // Evaluated at the graph's own rate and clamped into the declared
+            // range, exactly as the live compile path does.
+            if (type && type->latency_samples) {
+                if (auto it = custom_nodes.find(src.id);
+                    it != custom_nodes.end()
+                    && (it->second.process || it->second.params.process)) {
+                    it->second.latency_samples = type->latency_samples;
                 }
             }
         }
@@ -523,6 +531,10 @@ BakedGraphProcessor::BakedGraphProcessor(
       bundle_id_(std::move(bundle_id)),
       input_channels_(input_channels),
       output_channels_(output_channels) {
+    // Latency is NOT computed here. A Custom node's intrinsic latency is a
+    // function of the sample rate, which the constructor does not have, so the
+    // graph total is derived in prepare() into prepared_latency_samples_.
+    //
     // One single-writer mailbox per param-declaring node, allocated here (not in
     // prepare()) so a control-side claim/inject is valid before the first
     // prepare() and survives every re-prepare — the mailbox is fixed-capacity, so
@@ -657,7 +669,7 @@ void BakedGraphProcessor::prepare(const fmt::PrepareContext& context) {
     }
 
     prepared_max_block_ = max_block;
-    const auto routed_latency = snapshot_.buffer_assignment().routed_output_latency_samples;
+    const auto routed_latency = snapshot_.buffer_assignment().total_latency_samples;
     prepared_latency_samples_.store(
         static_cast<int>(std::min<std::uint32_t>(
             routed_latency, static_cast<std::uint32_t>(std::numeric_limits<int>::max()))),

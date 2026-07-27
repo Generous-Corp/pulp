@@ -172,7 +172,8 @@ struct SignalGraphExecutorRouting {
 //     node with no live slot (unresolved/placeholder) routes as
 //     pass-through-or-zero, exactly as SignalGraph's walk does for a slot-less
 //     plugin node. A Custom node is audio-only (no MIDI/automation), and may
-//     carry prepare-stable intrinsic latency through its registered type;
+//     carry prepare-stable intrinsic latency through its registered type, which
+//     participates in PDC;
 //     its binding invokes the resolved process callback, or — for an unresolved
 //     type / shape mismatch — pass-through-or-zero, so it matches the walk either
 //     way;
@@ -218,6 +219,17 @@ ExecutorTopologyValidation validate_signal_graph_executor_topology(
 // As above, plus requiring the graph be prepared (a live snapshot exists).
 bool signal_graph_executor_eligible(const SignalGraph& graph);
 
+// Calculate host-visible latency for a lowerable audio graph using the exact
+// runtime-plan lane classification and buffer-assignment PDC pass. `custom_latency_for`
+// supplies fixed latency only for Custom nodes that will execute. The result is
+// clamped to INT_MAX; returns 0 if the plan/assignment cannot be built. Callers
+// admitting a graph must validate the topology first so failure cannot be
+// mistaken for genuine zero latency.
+int calculate_lowerable_graph_latency_samples(
+    std::span<const GraphNode> nodes,
+    std::span<const Connection> connections,
+    const std::function<int(NodeId)>& custom_latency_for);
+
 // The per-node value resolvers build_executor_snapshot binds a plan against.
 // One named field per resolver, so two same-shaped resolvers cannot be swapped
 // by argument position and a caller that needs only some of them leaves the rest
@@ -247,6 +259,11 @@ struct ExecutorSnapshotBinders {
     // transport-sensitive (consistent with GraphNode::transport_sensitive
     // resolved at compile).
     std::function<const CustomNodeTransportProcessFn*(NodeId)> custom_transport_for;
+    // Prepare-stable intrinsic latency for a resolved Custom node, resolved from
+    // CustomNodeType once at compile/prepare (the caller has already evaluated
+    // it at the snapshot's sample rate). Empty, or a non-positive result, means
+    // zero latency.
+    std::function<int(NodeId)> custom_latency_for;
     // Cached plugin-metadata accessors so a swap-time build makes NO live
     // PluginSlot metadata call. Empty → fall back to `plugin_for`'s live slot
     // (baked / anticipation callers, which are not on the swap path).
@@ -256,9 +273,6 @@ struct ExecutorSnapshotBinders {
     // parameter-event mailbox. Empty means this snapshot has no injected
     // parameter events (for example baked/external routing callers).
     std::function<ParameterEventInjectionBinding(NodeId)> parameter_events_for;
-    // Cached Custom-node intrinsic latency, resolved from CustomNodeType once at
-    // compile/prepare. Empty means zero.
-    std::function<int(NodeId)> custom_latency_for;
 };
 
 // Build the executor snapshot (plan + bindings) for an eligible topology,

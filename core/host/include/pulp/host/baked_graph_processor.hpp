@@ -225,9 +225,14 @@ public:
                         int output_channels,
                         std::string name,
                         std::string bundle_id,
-                        // One complete binding per Custom node. Callback copies
+                        // One complete binding per Custom node, consolidating
+                        // what were four parallel NodeId-keyed maps (process
+                        // callback, intrinsic latency, lifecycle hooks, and
+                        // bake-layer param injection) into a single record that
+                        // cannot fall out of step across them. Callback copies
                         // capture their instance keepalive, so the baked
-                        // Processor owns all required runtime state.
+                        // Processor owns all required runtime state and holds no
+                        // reference back into the source graph.
                         std::unordered_map<NodeId, BakedCustomNodeBinding>
                             custom_nodes = {});
 
@@ -279,7 +284,9 @@ private:
     std::vector<PluginBindingContext> plugin_ctx_;
     PluginRoutingScratch plugin_scratch_;
     // One owned runtime record per Custom node, consolidating its process,
-    // lifecycle, parameter injection, mailbox/state, and latency callback.
+    // lifecycle, parameter injection, mailbox/state, and latency callback. Each
+    // record holds its own instance keepalive. Empty for a custom-free graph;
+    // prepare() binds custom_ctx_ from these records.
     std::unordered_map<NodeId, std::unique_ptr<detail::BakedCustomNodeRuntime>>
         custom_nodes_;
     std::vector<CustomBindingContext> custom_ctx_;
@@ -296,6 +303,8 @@ private:
     int input_channels_ = 2;
     int output_channels_ = 2;
     int prepared_max_block_ = 0;
+    // Resolved at prepare(), not at construction: a Custom node's intrinsic
+    // latency is a function of the sample rate, which is not known until then.
     std::atomic<int> prepared_latency_samples_{0};
     bool prepared_ = false;
 };

@@ -110,10 +110,25 @@ public:
     void set_snap_decay_ms(double ms) { snap_.set_decay_ms(ms); }
 
     /// Level of the shell resonance applied to the noise path, and its Q.
-    void set_shell_level(double level) { shell_level_ = std::max(level, 0.0); }
-    void set_shell_resonance(double q) { shell_q_ = std::clamp(q, 1.0, 30.0); }
+    void set_shell_level(double level) { shell_.set_level(level); }
+    void set_shell_resonance(double q) { shell_.set_resonance(q); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
+
+    /// Degradation applied to the pitched shell before it meets the wires.
+    /// Keeping this separate from both the wire path and the shared output
+    /// stage lets a preset age either half of the instrument independently.
+    LofiChain& tone_lofi() { return tone_lofi_; }
 
     /// A second degradation chain on the noise path alone. Crushing the wires
     /// harder than the shell is a distinct and much-used sound, and one shared
@@ -128,9 +143,9 @@ protected:
         noise_env_.set_sample_rate(sample_rate);
         snap_.prepare(sample_rate);
         noise_filter_.set_sample_rate(static_cast<float>(sample_rate));
-        shell_.set_sample_rate(static_cast<float>(sample_rate));
-        shell_.set_mode(Svf::Mode::bandpass);
+        shell_.prepare(sample_rate);
         snap_hp_.prepare(static_cast<float>(sample_rate));
+        tone_lofi_.set_sample_rate(sample_rate);
         noise_lofi_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
     }
@@ -143,6 +158,7 @@ protected:
         noise_filter_.reset();
         shell_.reset();
         snap_hp_.reset();
+        tone_lofi_.reset();
         noise_lofi_.reset();
         output_.reset();
         noise_.reset();
@@ -153,6 +169,9 @@ protected:
     }
 
     void on_note_on(float velocity) override {
+        // The shell keeps ringing across hits; preserve the shared output
+        // history with it so a retrigger cannot truncate the pending FIR.
+        output_.trigger();
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         bend_octaves_ = pitch_sweep_oct_ + response.bend(velocity);
@@ -192,13 +211,14 @@ protected:
         }
 
         snap_.trigger(brightness_);
-        shell_.set_frequency(static_cast<float>(std::min(tune_hz_, 0.49 * sample_rate())));
-        shell_.set_resonance(static_cast<float>(shell_q_));
+        shell_.set_frequency_hz(tune_hz_);
     }
 
     bool on_is_active() const override {
         return (tone_level_ > 0.0 && tone_env_.is_active()) ||
-               (noise_level_ > 0.0 && noise_env_.is_active()) || snap_.is_active();
+               (noise_level_ > 0.0 && noise_env_.is_active()) || snap_.is_active() ||
+               shell_.is_ringing() || tone_lofi_.has_tail() ||
+               noise_lofi_.has_tail() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -206,9 +226,11 @@ protected:
         const double wire_gain = noise_level_ * (1.0 + noise_tilt_);
 
         for (int i = 0; i < num_samples; ++i) {
+            const auto tone = tone_lofi_.process(
+                static_cast<float>(render_tone(tone_gain)));
             out[i] += static_cast<float>(
                 output_.process(static_cast<float>(
-                    render_tone(tone_gain) + render_wires(wire_gain))) *
+                    static_cast<double>(tone) + render_wires(wire_gain))) *
                 velocity_gain_);
         }
     }
@@ -264,10 +286,7 @@ private:
             }
         }
 
-        double path = wires + snap;
-        if (shell_level_ > 0.0) {
-            path += shell_level_ * shell_.process(static_cast<float>(path));
-        }
+        const double path = shell_.process(wires + snap);
         return noise_lofi_.process(static_cast<float>(path));
     }
 
@@ -287,8 +306,6 @@ private:
     double noise_sweep_oct_ = 0.0;
     double rattle_ = 0.0;
     double rattle_hz_ = 45.0;
-    double shell_level_ = 0.0;
-    double shell_q_ = 12.0;
 
     NoiseSource noise_;
     DecayEnvelope64 tone_env_;
@@ -296,8 +313,9 @@ private:
     DecayEnvelope64 noise_env_;
     ClickLayer snap_;
     Svf noise_filter_;
-    Svf shell_;
+    ShellLayer shell_;
     TptFilter snap_hp_;
+    LofiChain tone_lofi_;
     LofiChain noise_lofi_;
     OutputStage output_;
 

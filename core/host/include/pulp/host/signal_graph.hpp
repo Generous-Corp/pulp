@@ -41,6 +41,7 @@
 #include <unordered_set>
 #include <string>
 #include <string_view>
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 
@@ -273,7 +274,86 @@ struct CustomNodeType {
     // only on registration-time realization choices and `sample_rate` — a
     // control that can change it requires a new type / re-prepare. Empty
     // preserves the historical zero-latency custom-node contract.
+    //
+    // A callback rather than a fixed count because intrinsic latency is
+    // routinely rate-dependent: a lookahead declared in milliseconds and an
+    // oversampler's half-band group delay both resolve to different sample
+    // counts per rate, so a fixed count could only ever be right at one of them.
+    // A rate-independent latency stays expressible as `[](double) { return n; }`.
+    //
+    // Kept last to preserve source compatibility for positional aggregate
+    // initializers written before the latency contract was added. The graph
+    // captures it at prepare; changing it requires re-registration/re-prepare
+    // and an identity version bump for persisted graphs.
+    //
+    // The EVALUATED result is range-checked against `kMaxLatencySamples` at
+    // compile time. It cannot be checked at registration, because it is not
+    // known until the sample rate is.
+    static constexpr int kMaxLatencySamples = 65535;
     std::function<int(double /*sample_rate*/)> latency_samples;
+
+    bool is_valid_registration() const noexcept {
+        const bool has_plain_callback =
+            static_cast<bool>(process) ||
+            (static_cast<bool>(create) && static_cast<bool>(process_instance));
+        const bool has_transport_callback =
+            static_cast<bool>(process_transport) ||
+            (static_cast<bool>(create) &&
+             static_cast<bool>(process_instance_transport));
+        // A latent transport-aware execution path must have a resolvable plain
+        // fallback: PDC is prepare-stable and cannot change when a block gains
+        // or loses a transport context. Declaring ANY latency callback is the
+        // registration-time stand-in for a non-zero fixed latency, since the
+        // value itself is not resolvable this early.
+        if (type_id.empty() || version <= 0 || num_input_ports < 0 ||
+            num_output_ports < 0 ||
+            (latency_samples && has_transport_callback && !has_plain_callback)) {
+            return false;
+        }
+
+        // Bake-layer obligations live here too, so that every registrar — the
+        // direct one, the transactional edit, and the node-adding leaf — applies
+        // ONE rule. A descriptor that passes shape but declares an incoherent
+        // bake surface would otherwise stay `lowerable`, be accepted by baking,
+        // and silently degrade to passthrough.
+        const bool declares_baked_params = !baked_params.empty();
+        const bool has_baked_param_process =
+            static_cast<bool>(process_instance_baked_param);
+        if (declares_baked_params != has_baked_param_process) return false;
+
+        if (declares_baked_params) {
+            // The callback takes an instance pointer, so a parameter-aware baked
+            // type without a complete instance lifecycle can never produce the
+            // runnable binding that bake() promises.
+            if (!create || !destroy) return false;
+            for (std::size_t i = 0; i < baked_params.size(); ++i) {
+                const auto& param = baked_params[i];
+                if (param.id == 0
+                    || !std::isfinite(param.min_value)
+                    || !std::isfinite(param.max_value)
+                    || !std::isfinite(param.default_value)
+                    || param.min_value > param.max_value
+                    || param.default_value < param.min_value
+                    || param.default_value > param.max_value) {
+                    return false;
+                }
+                for (std::size_t j = 0; j < i; ++j) {
+                    if (baked_params[j].id == param.id) return false;
+                }
+            }
+        }
+
+        if (lowerable) {
+            if (create) {
+                if (!destroy || (!process_instance && !has_baked_param_process)) {
+                    return false;
+                }
+            } else if (!process) {
+                return false;
+            }
+        }
+        return true;
+    }
 };
 
 // ── Connection ──────────────────────────────────────────────────────────
@@ -770,7 +850,8 @@ public:
     const CustomNodeTransportProcessFn* live_custom_transport_processor(
         NodeId id) const noexcept;
     // Prepare-stable intrinsic latency cached in the live compiled snapshot.
-    // Returns zero for an unresolved/zero-latency node or without a snapshot.
+    // Returns zero for an unresolved/zero-latency/non-Custom node, or without a
+    // snapshot.
     int live_custom_latency_samples(NodeId id) const noexcept;
     // The live compiled snapshot's bound param-aware custom callback for a Custom
     // node whose type declared baked_params + process_instance_baked_param, or
@@ -1272,6 +1353,11 @@ private:
         std::unordered_map<NodeId, NodeRuntime> runtime;
         std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
         std::unordered_map<NodeId, CustomNodeProcessFn> custom_processors;
+        // Prepare-stable intrinsic latency for each resolved, shape-matched
+        // Custom node, resolved once from the registered type at THIS snapshot's
+        // sample rate and clamped into the declared range. Shared by the legacy
+        // PDC pass and the routed snapshot builder.
+        std::unordered_map<NodeId, int> custom_latency_samples;
         // Bound param-aware custom callbacks (bake-layer injection). Populated for
         // any Custom node whose type declared baked_params +
         // process_instance_baked_param. Consumed only by bake(); the live routed
@@ -1283,9 +1369,6 @@ private:
         // that node (both resolved from the same compile-time condition), so the
         // routed binding and the anticipation analysis stay consistent.
         std::unordered_map<NodeId, CustomNodeTransportProcessFn> custom_transport_processors;
-        // Custom intrinsic latencies resolved once from the registered type at
-        // this snapshot's sample rate. Shared by legacy and routed PDC.
-        std::unordered_map<NodeId, int> custom_latency_samples;
         struct NodeShape {
             NodeType type;
             int num_input_ports;

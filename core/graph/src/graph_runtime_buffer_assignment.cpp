@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <vector>
 
 namespace pulp::graph {
@@ -195,10 +196,13 @@ GraphRuntimeBufferAssignment build_graph_runtime_buffer_assignment(
                 max_upstream = std::max(max_upstream, output_latency[conn.source_index]);
             }
             input_latency[node_index] = max_upstream;
-            output_latency[node_index] = max_upstream + node.latency_samples;
+            output_latency[node_index] = static_cast<std::uint32_t>(
+                std::min<std::uint64_t>(
+                    static_cast<std::uint64_t>(max_upstream) + node.latency_samples,
+                    std::numeric_limits<std::uint32_t>::max()));
             if (node.kind == GraphRuntimeNodeKind::AudioOutput) {
-                assignment.routed_output_latency_samples = std::max(
-                    assignment.routed_output_latency_samples, max_upstream);
+                assignment.total_latency_samples =
+                    std::max(assignment.total_latency_samples, max_upstream);
             }
         }
         for (std::size_t i = 0; i < plan.connections.size(); ++i) {

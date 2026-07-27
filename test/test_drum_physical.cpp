@@ -14,6 +14,7 @@
 #include "harness/rt_allocation_probe.hpp"
 
 #include <pulp/signal/drum/cymbal.hpp>
+#include <pulp/signal/drum/hit_life.hpp>
 #include <pulp/signal/drum/membrane.hpp>
 #include <pulp/signal/drum/string.hpp>
 #include <pulp/signal/drum/zap.hpp>
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -34,7 +36,11 @@ using pulp::signal::KarplusStrong;
 using pulp::signal::PhaseDistortionOsc;
 using pulp::signal::PhaseDistortionShape;
 using pulp::signal::drum::CymbalVoice;
+using pulp::signal::drum::HitLife;
+using pulp::signal::drum::HitLifeMode;
+using pulp::signal::drum::MembraneExciter;
 using pulp::signal::drum::MembraneVoice;
+using pulp::signal::drum::StringModulation;
 using pulp::signal::drum::StringVoice;
 using pulp::signal::drum::VelocityResponse;
 using pulp::signal::drum::Voice;
@@ -534,6 +540,153 @@ TEST_CASE("Strike position removes the modes with a node there",
     REQUIRE(centre.first > off_centre.first);     // and the first mode is stronger
 }
 
+TEST_CASE("Membrane strike position preserves total mode-gain energy",
+          "[signal][drum][membrane]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_spread(0.0);
+    voice.set_brightness(0.8);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    constexpr double expected = 1.0 / MembraneVoice::mode_count;
+    for (double position : {0.08, 0.21, 0.35, 0.5}) {
+        voice.set_position(position);
+        voice.note_on(1.0f);
+        REQUIRE(std::fabs(voice.mode_gain_energy() - expected) < 1e-7);
+        voice.reset();
+    }
+}
+
+TEST_CASE("The membrane can be struck by a single-sample pluck",
+          "[signal][drum][membrane]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_spread(0.0);
+    voice.set_exciter(MembraneExciter::pluck);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+
+    const auto first = hit(voice, 1.0f, 24000);
+    voice.reset();
+    const auto second = hit(voice, 1.0f, 24000);
+    REQUIRE(peak(first) > 1e-4);
+    REQUIRE(first == second);
+
+    voice.reset();
+    voice.set_exciter(MembraneExciter::noise_burst);
+    const auto burst = hit(voice, 1.0f, 24000);
+    REQUIRE_FALSE(first == burst);
+}
+
+TEST_CASE("The membrane's sub, air, and click layers reach emitted audio",
+          "[signal][drum][membrane]") {
+    auto layer = [](int selected) {
+        MembraneVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(100.0);
+        voice.set_spread(0.0);
+        voice.set_brightness(0.0);
+        voice.set_exciter_cutoff_hz(500.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        if (selected == 1) voice.set_sub_level(1.0);
+        if (selected == 2) voice.set_air_level(1.0);
+        if (selected == 3) voice.set_click_level(3.0);
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto body = layer(0);
+    const auto sub = layer(1);
+    const auto air = layer(2);
+    const auto click = layer(3);
+    REQUIRE(tone_amplitude(sub, 50.0) > tone_amplitude(body, 50.0) * 3.0);
+    REQUIRE(high_fraction(air, 4000.0) > high_fraction(body, 4000.0) * 2.0);
+
+    const std::vector<float> body_attack(body.begin(), body.begin() + 1000);
+    const std::vector<float> click_attack(click.begin(), click.begin() + 1000);
+    REQUIRE(peak(click_attack) > peak(body_attack) * 1.5);
+}
+
+TEST_CASE("Muted membrane layers drain instead of resuming stale transients",
+          "[signal][drum][membrane][lifecycle]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_decay_ms(20.0);
+    voice.set_sub_level(1.0);
+    voice.set_air_level(1.0);
+    voice.set_air_decay_ms(10.0);
+    voice.set_click_level(1.0);
+    voice.set_click_decay_ms(5.0);
+    voice.note_on(1.0f);
+
+    voice.set_sub_level(0.0);
+    voice.set_air_level(0.0);
+    voice.set_click_level(0.0);
+    (void)render(voice, 96000);
+
+    voice.set_sub_level(1.0);
+    voice.set_air_level(1.0);
+    voice.set_click_level(1.0);
+    REQUIRE_FALSE(voice.is_active());
+}
+
+TEST_CASE("Membrane velocity tension moves the body and sub together",
+          "[signal][drum][membrane][velocity]") {
+    MembraneVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(100.0);
+    voice.set_structure(0.0);
+    voice.set_spread(0.0);
+    voice.set_position(0.5);
+    voice.set_brightness(0.0);
+    voice.set_sub_level(8.0);
+    voice.set_air_level(0.0);
+    voice.set_click_level(0.0);
+    voice.set_velocity_response(
+        VelocityResponse{0.0f, 0.25f, 0.0f, 0.0f});
+
+    const auto y = hit(voice, 1.0f, 48000);
+    const double tension = std::exp2(0.25);
+    const double moved_sub = tone_amplitude(y, 50.0 * tension);
+    const double stale_sub = tone_amplitude(y, 50.0);
+    INFO("moved sub=" << moved_sub << " stale sub=" << stale_sub);
+    REQUIRE(moved_sub > stale_sub * 4.0);
+}
+
+TEST_CASE("A membrane retrigger keeps the output filter ringing",
+          "[signal][drum][membrane][output][lifecycle]") {
+    auto prepare = [](MembraneVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_ms(3000.0);
+        voice.set_spread(0.0);
+        voice.set_exciter(MembraneExciter::pluck);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        voice.note_on(1.0f);
+        (void)render(voice, 6000);
+    };
+
+    MembraneVoice control;
+    MembraneVoice retriggered;
+    prepare(control);
+    prepare(retriggered);
+
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render(control, 32);
+    const auto after_retrigger = render(retriggered, 32);
+
+    auto energy = [](const std::vector<float>& samples) {
+        double sum = 0.0;
+        for (float sample : samples) {
+            sum += static_cast<double>(sample) *
+                   static_cast<double>(sample);
+        }
+        return sum;
+    };
+    const double uninterrupted_energy = energy(uninterrupted);
+    REQUIRE(uninterrupted_energy > 1e-8);
+    REQUIRE(energy(after_retrigger) > uninterrupted_energy * 0.5);
+}
+
 // -- Cymbal ------------------------------------------------------------------
 
 TEST_CASE("The cymbal's shifter is what removes the pitch",
@@ -585,6 +738,74 @@ TEST_CASE("Variation makes successive crashes differ",
     REQUIRE_FALSE(first == second);
 }
 
+TEST_CASE("Cymbal variation preserves the ringing body",
+          "[signal][drum][cymbal][life]") {
+    auto configure = [](CymbalVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_decay_ms(8000.0);
+        voice.set_variation(1.0);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+    };
+
+    CymbalVoice control;
+    CymbalVoice retriggered;
+    configure(control);
+    configure(retriggered);
+    REQUIRE(hit(control, 0.8f, 6000) ==
+            hit(retriggered, 0.8f, 6000));
+
+    control.set_noise_level(0.0);
+    control.set_strike_level(0.0);
+    retriggered.set_noise_level(0.0);
+    retriggered.set_strike_level(0.0);
+    retriggered.note_on(0.8f);
+
+    const auto uninterrupted = render(control, 512);
+    const auto after_retrigger = render(retriggered, 512);
+    REQUIRE(peak(uninterrupted) > 1.0e-4);
+    REQUIRE(peak(after_retrigger) > peak(uninterrupted) * 0.5);
+}
+
+TEST_CASE("Reapplying an advancing hit-life mode preserves its sequence",
+          "[signal][drum][life]") {
+    constexpr std::uint32_t seed = 0x12345678u;
+    HitLife life{HitLifeMode::advancing_seed};
+    const auto first = life.trigger(seed);
+
+    life.set_mode(HitLifeMode::advancing_seed);
+    const auto second = life.trigger(seed);
+
+    HitLife control{HitLifeMode::advancing_seed};
+    (void)control.trigger(seed);
+    const auto expected_second = control.trigger(seed);
+    REQUIRE(second.seed == expected_second.seed);
+    REQUIRE(second.seed != first.seed);
+}
+
+TEST_CASE("Cymbal hit-life policy exposes fixed advancing and preserved modes",
+          "[signal][drum][cymbal][life]") {
+    CymbalVoice voice;
+    voice.prepare(kFs);
+    voice.set_variation(1.0);
+    REQUIRE(voice.hit_life() == HitLifeMode::advancing_seed);
+
+    voice.set_hit_life(HitLifeMode::fixed_seed);
+    const auto fixed_a = hit(voice, 0.8f, 12000);
+    voice.reset();
+    const auto fixed_b = hit(voice, 0.8f, 12000);
+    REQUIRE(fixed_a == fixed_b);
+
+    voice.reset();
+    const auto fixed_after_reset = hit(voice, 0.8f, 12000);
+    REQUIRE(fixed_after_reset == fixed_a);
+
+    voice.set_hit_life(HitLifeMode::preserved_state);
+    const auto living_a = hit(voice, 0.8f, 12000);
+    const auto living_b = hit(voice, 0.8f, 12000);
+    REQUIRE_FALSE(living_a == living_b);
+}
+
 TEST_CASE("Cymbal decay controls how long the wash lasts",
           "[signal][drum][cymbal]") {
     auto length_for = [](double decay_ms) {
@@ -597,6 +818,64 @@ TEST_CASE("Cymbal decay controls how long the wash lasts",
     };
 
     REQUIRE(length_for(3000.0) > length_for(200.0) * 3);
+}
+
+TEST_CASE("Upper cymbal combs carry their own high-pass damping",
+          "[signal][drum][cymbal]") {
+    auto render_with_corner = [](double corner_hz) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_ms(1200.0);
+        voice.set_shift_hz(0.0);
+        voice.set_variation(0.0);
+        voice.set_low_cut_hz(20.0);
+        voice.set_tone_hz(20000.0);
+        voice.set_upper_highpass_hz(corner_hz);
+        voice.set_velocity_feedback(0.0);
+        voice.set_velocity_high_mode_db(0.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 48000);
+    };
+
+    const auto bypassed = render_with_corner(0.0);
+    const auto damped = render_with_corner(3000.0);
+    REQUIRE(bypassed != damped);
+    REQUIRE(high_fraction(damped, 1200.0) >
+            high_fraction(bypassed, 1200.0) * 1.05);
+}
+
+TEST_CASE("Cymbal velocity excites feedback and upper modes",
+          "[signal][drum][cymbal][velocity]") {
+    auto pair_for = [](double feedback, double high_mode_db) {
+        CymbalVoice voice;
+        voice.prepare(kFs);
+        voice.set_variation(0.0);
+        voice.set_shift_hz(0.0);
+        voice.set_velocity_feedback(feedback);
+        voice.set_velocity_high_mode_db(high_mode_db);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        const auto soft = hit(voice, 0.1f, 48000);
+        voice.reset();
+        const auto loud = hit(voice, 1.0f, 48000);
+        return std::pair{soft, loud};
+    };
+
+    // With level, generic brightness, and both cymbal-specific couplings off,
+    // velocity is a sample-exact no-op. This is the detector's negative
+    // control: either positive case can differ only through the named path.
+    const auto neutral = pair_for(0.0, 0.0);
+    REQUIRE(neutral.first == neutral.second);
+
+    const auto emphasized = pair_for(0.0, 10.0);
+    REQUIRE_FALSE(emphasized.first == emphasized.second);
+
+    const auto ringing = pair_for(1.0, 0.0);
+    const std::vector<float> soft_tail(ringing.first.begin() + 24000,
+                                       ringing.first.end());
+    const std::vector<float> loud_tail(ringing.second.begin() + 24000,
+                                       ringing.second.end());
+    REQUIRE(peak(loud_tail) > peak(soft_tail) * 1.1);
 }
 
 // -- Zap ---------------------------------------------------------------------
@@ -664,6 +943,10 @@ TEST_CASE("Every physical voice stays finite at extreme settings",
           "[signal][drum]") {
     MembraneVoice membrane;
     membrane.prepare(kFs);
+    membrane.set_exciter(MembraneExciter::pluck);
+    membrane.set_sub_level(0.5);
+    membrane.set_air_level(0.5);
+    membrane.set_click_level(0.5);
     membrane.set_tune_hz(2000.0);
     membrane.set_stretch(1.0);
     membrane.set_spread(1.0);
@@ -704,6 +987,10 @@ TEST_CASE("The physical voices allocate nothing on the audio thread",
           "[signal][drum][rt-safety]") {
     MembraneVoice membrane;
     membrane.prepare(kFs);
+    membrane.set_exciter(MembraneExciter::pluck);
+    membrane.set_sub_level(0.5);
+    membrane.set_air_level(0.5);
+    membrane.set_click_level(0.5);
     CymbalVoice cymbal;
     cymbal.prepare(kFs);
     ZapVoice zap;
@@ -903,6 +1190,175 @@ TEST_CASE("Stiffness stretches the partials sharp", "[signal][drum][string]") {
     REQUIRE(stiff_at_800 < rigid_at_800 * 0.8);
 }
 
+TEST_CASE("The string crossfades FM, ring, and sync modulation",
+          "[signal][drum][string]") {
+    auto modulated = [](StringModulation mode, double mix) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(1.0);
+        voice.set_damping(0.2);
+        voice.set_restart_on_hit(true);
+        voice.set_lpg_amount(0.0);
+        voice.set_modulation(mode);
+        voice.set_modulation_mix(mix);
+        voice.set_modulation_ratio(2.7);
+        voice.set_fm_depth_octaves(0.4);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 12000);
+    };
+
+    const auto dry = modulated(StringModulation::none, 0.0);
+    // A zero crossfade is the sample-exact detector floor for every mode.
+    REQUIRE(modulated(StringModulation::fm, 0.0) == dry);
+    REQUIRE(modulated(StringModulation::ring, 0.0) == dry);
+    REQUIRE(modulated(StringModulation::sync, 0.0) == dry);
+
+    for (auto mode : {StringModulation::fm, StringModulation::ring,
+                      StringModulation::sync}) {
+        const auto wet = modulated(mode, 1.0);
+        REQUIRE_FALSE(wet == dry);
+        REQUIRE(peak(wet) > 1e-4);
+    }
+
+    const auto fm_wet = modulated(StringModulation::fm, 1.0);
+    const auto fm_half = modulated(StringModulation::fm, 0.5);
+    REQUIRE(fm_half.size() == dry.size());
+    for (std::size_t i = 0; i < fm_half.size(); ++i) {
+        const float expected = 0.5f * (dry[i] + fm_wet[i]);
+        REQUIRE(std::fabs(fm_half[i] - expected) < 1e-6f);
+    }
+}
+
+TEST_CASE("String sync modulation decays with the physical body",
+          "[signal][drum][string][modulation][lifecycle]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_tune_hz(180.0);
+    voice.set_decay_seconds(2.0);
+    voice.set_damping(0.2);
+    voice.set_restart_on_hit(true);
+    voice.set_lpg_amount(0.0);
+    voice.set_modulation(StringModulation::sync);
+    voice.set_modulation_mix(1.0);
+    voice.set_modulation_ratio(2.7);
+    voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    const auto y = hit(voice, 1.0f, 48000);
+
+    auto energy = [&y](std::size_t begin, std::size_t end) {
+        double sum = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            sum += static_cast<double>(y[i]) * static_cast<double>(y[i]);
+        }
+        return sum / static_cast<double>(end - begin);
+    };
+    const double early = energy(4800, 9600);
+    const double late = energy(38400, 43200);
+    REQUIRE(early > 1e-8);
+    REQUIRE(late < early * 0.3);
+}
+
+TEST_CASE("Short string sync notes follow the configured decay",
+          "[signal][drum][string][modulation][lifecycle]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_decay_seconds(0.05);
+    voice.set_modulation(StringModulation::sync);
+    voice.set_modulation_mix(1.0);
+    voice.set_velocity_response(
+        VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    const auto y = hit(voice, 1.0f, 48000);
+    const std::vector<float> tail(y.begin() + 24000, y.end());
+    REQUIRE(peak(tail) < 1.0e-4);
+}
+
+TEST_CASE("Rearming string FM cannot revive a dormant auxiliary tail",
+          "[signal][drum][string][modulation][lifecycle]") {
+    auto configure = [](StringVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_modulation_mix(1.0);
+        voice.set_fm_depth_octaves(0.4);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    };
+
+    StringVoice recovered;
+    configure(recovered);
+    recovered.set_modulation(StringModulation::fm);
+    (void)hit(recovered, 1.0f, 1000);
+    recovered.set_modulation(StringModulation::none);
+    (void)hit(recovered, 1.0f, 1000);
+    recovered.set_modulation(StringModulation::fm);
+    const auto rearmed = hit(recovered, 1.0f, 12000);
+
+    StringVoice fresh;
+    configure(fresh);
+    fresh.set_modulation(StringModulation::fm);
+    REQUIRE(rearmed == hit(fresh, 1.0f, 12000));
+
+    StringVoice reentered;
+    StringVoice stayed_dry;
+    configure(reentered);
+    configure(stayed_dry);
+    reentered.set_modulation(StringModulation::fm);
+    stayed_dry.set_modulation(StringModulation::fm);
+    REQUIRE(hit(reentered, 1.0f, 1000) ==
+            hit(stayed_dry, 1.0f, 1000));
+    reentered.set_modulation(StringModulation::none);
+    stayed_dry.set_modulation(StringModulation::none);
+    REQUIRE(render(reentered, 1000) == render(stayed_dry, 1000));
+    reentered.set_modulation(StringModulation::fm);
+    REQUIRE(render(reentered, 12000) == render(stayed_dry, 12000));
+}
+
+TEST_CASE("The string's lowpass gate darkens its release",
+          "[signal][drum][string]") {
+    auto gated = [](double amount) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_damping(0.05);
+        voice.set_lpg_amount(amount);
+        voice.gate().set_colour(1.0);
+        voice.gate().set_fall_ms(120.0);
+        voice.set_velocity_response(VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 24000);
+    };
+
+    const auto bypassed = gated(0.0);
+    const auto full = gated(1.0);
+    REQUIRE_FALSE(bypassed == full);
+    const std::vector<float> bypassed_tail(bypassed.begin() + 12000,
+                                            bypassed.end());
+    const std::vector<float> full_tail(full.begin() + 12000, full.end());
+    REQUIRE(high_fraction(full_tail, 1200.0) <
+            high_fraction(bypassed_tail, 1200.0) * 0.8);
+}
+
+TEST_CASE("The optional string lowpass gate is bypassed by default",
+          "[signal][drum][string][compatibility]") {
+    auto render_default = [](bool explicit_bypass) {
+        StringVoice voice;
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_damping(0.05);
+        if (explicit_bypass) voice.set_lpg_amount(0.0);
+        voice.gate().set_colour(1.0);
+        voice.gate().set_fall_ms(120.0);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+        return hit(voice, 1.0f, 24000);
+    };
+
+    REQUIRE(render_default(false) == render_default(true));
+}
+
 TEST_CASE("A second hit adds to the ringing string by default",
           "[signal][drum][string]") {
     // The physical behaviour, and why a fast repeated figure does not sound
@@ -932,12 +1388,48 @@ TEST_CASE("A second hit adds to the ringing string by default",
     REQUIRE(differs);
 }
 
+TEST_CASE("An additive string retrigger keeps the output filter ringing",
+          "[signal][drum][string][output][lifecycle]") {
+    auto prepare = [](StringVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(220.0);
+        voice.set_decay_seconds(3.0);
+        voice.set_restart_on_hit(false);
+        voice.note_on(1.0f);
+        (void)render(voice, 6000);
+    };
+
+    StringVoice control;
+    StringVoice retriggered;
+    prepare(control);
+    prepare(retriggered);
+
+    retriggered.note_on(1.0f);
+    const auto uninterrupted = render(control, 32);
+    const auto after_retrigger = render(retriggered, 32);
+
+    auto energy = [](const std::vector<float>& samples) {
+        double sum = 0.0;
+        for (float sample : samples) {
+            sum += static_cast<double>(sample) *
+                   static_cast<double>(sample);
+        }
+        return sum;
+    };
+    const double uninterrupted_energy = energy(uninterrupted);
+    REQUIRE(uninterrupted_energy > 1e-8);
+    REQUIRE(energy(after_retrigger) > uninterrupted_energy * 0.5);
+}
+
 TEST_CASE("The string voice allocates nothing on the audio thread",
           "[signal][drum][string][rt-safety]") {
     StringVoice voice;
     voice.prepare(kFs);
     voice.set_stiffness(0.4);
     voice.set_pick_direction(0.3);
+    voice.set_modulation(StringModulation::fm);
+    voice.set_modulation_mix(0.7);
+    voice.set_lpg_amount(1.0);
     voice.output().set_drive(0.3);
 
     std::vector<float> buffer(256, 0.0f);
