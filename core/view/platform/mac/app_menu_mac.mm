@@ -26,6 +26,11 @@ namespace pulp::view::mac_menu {
 
 namespace {
 
+// Printable-ASCII KeyCodes only. The non-ASCII KeyCodes (escape 274, arrows
+// 256..259, f1 290, …) have no single-character equivalent and would need the
+// NSxxxFunctionKey constants, so a MenuCommand carrying one currently gets NO
+// visible shortcut rather than a wrong one. Extend this mapping before wiring a
+// menu command to a function or navigation key.
 NSString* key_equivalent(KeyCode key) {
     const int value = static_cast<int>(key);
     if (value < 32 || value > 126)
