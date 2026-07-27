@@ -44,6 +44,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # SDL3 is fetched unconditionally by PulpDependencies.cmake -- it is not
+      # behind PULP_ENABLE_GPU -- and its configure step hard-fails when neither
+      # X11 nor Wayland development headers are present. So even a
+      # GPU-off, tests-off build needs the same system packages every other
+      # Linux lane installs.
+      #
+      # This mirrors build.yml's list deliberately rather than trimming to the
+      # minimum or setting SDL_UNIX_CONSOLE_BUILD. A differently-configured SDL
+      # would make any future failure here ambiguous between "our code does not
+      # compile under GCC" and "this lane configures its dependencies
+      # differently from every other lane", and the whole point of the gate is
+      # that a red result has exactly one meaning.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libdbus-1-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libjack-jackd2-dev \
+            libx11-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxss-dev \
+            libxtst-dev \
+            libwayland-dev \
+            wayland-protocols
+
       - name: Report the compiler under test
         run: |
           g++ --version
