@@ -15,11 +15,11 @@ namespace pulp::signal {
 /// is defined by; the implementation is validated against those slopes rather
 /// than against a particular filter topology.
 enum class NoiseColor {
-    white,   ///<   0 dB/octave — the raw generator output.
-    pink,    ///<  -3 dB/octave — equal power per octave.
-    brown,   ///<  -6 dB/octave — integrated white ("red" noise).
-    blue,    ///<  +3 dB/octave — the mirror of pink.
-    violet   ///<  +6 dB/octave — differentiated white ("purple" noise).
+    white, ///<   0 dB/octave — the raw generator output.
+    pink,  ///<  -3 dB/octave — equal power per octave.
+    brown, ///<  -6 dB/octave — integrated white ("red" noise).
+    blue,  ///<  +3 dB/octave — the mirror of pink.
+    violet ///<  +6 dB/octave — differentiated white ("purple" noise).
 };
 
 /// A deterministic, colourable noise generator.
@@ -48,9 +48,8 @@ enum class NoiseColor {
 /// are bounded work rather than constant work, so call them from `prepare()`
 /// or a parameter-change path, not per sample. `process()`, `white()`,
 /// `reset()`, and `set_seed()` allocate nothing and take no locks.
-template <typename SampleType = float>
-class NoiseSourceT {
-public:
+template <typename SampleType = float> class NoiseSourceT {
+  public:
     /// Default seed. Any non-zero value works; xorshift is degenerate at zero,
     /// so `set_seed(0)` is remapped to this value.
     static constexpr std::uint32_t default_seed = 0x1D872B41u;
@@ -58,32 +57,49 @@ public:
     /// A default-constructed source is immediately usable at 44.1 kHz, so a
     /// voice that forgets to call `prepare()` produces noise rather than
     /// silence and the mistake is audible instead of subtle.
-    NoiseSourceT() { prepare(sample_rate_); }
+    NoiseSourceT() {
+        prepare(sample_rate_);
+    }
 
     /// Fixes the sample rate and re-measures the per-colour normalisation.
     /// Leaves the generator rewound to its seed.
     void prepare(double sample_rate) {
         sample_rate_ = sample_rate > 0.0 ? sample_rate : sample_rate_;
         update_coefficients();
-        measure_normalisation();
+        const NoiseColor selected = color_;
+        for (std::size_t index = 0; index < normalisations_.size(); ++index) {
+            color_ = static_cast<NoiseColor>(index);
+            measure_normalisation();
+            normalisations_[index] = norm_;
+        }
+        color_ = selected;
+        norm_ = normalisations_[static_cast<std::size_t>(color_)];
         reset();
     }
 
-    /// Selects the spectral tilt. Re-measures normalisation so the perceived
-    /// level is stable across colours, and rewinds the colour filter state.
+    /// Selects the spectral tilt. `prepare()` measures every colour at the
+    /// current sample rate, so this RT setter only selects the cached gain and
+    /// rewinds the colour-filter state.
     void set_color(NoiseColor c) {
-        color_ = c;
-        measure_normalisation();
+        const auto index = std::min(static_cast<std::size_t>(c), normalisations_.size() - 1);
+        color_ = static_cast<NoiseColor>(index);
+        norm_ = normalisations_[index];
         reset_filters();
     }
 
-    NoiseColor color() const { return color_; }
+    NoiseColor color() const {
+        return color_;
+    }
 
     /// Sets the seed used by `reset()`. Does not itself rewind — call `reset()`
     /// (or `note_on`-equivalent) to take the new seed into use.
-    void set_seed(std::uint32_t seed) { seed_ = seed == 0 ? default_seed : seed; }
+    void set_seed(std::uint32_t seed) {
+        seed_ = seed == 0 ? default_seed : seed;
+    }
 
-    std::uint32_t seed() const { return seed_; }
+    std::uint32_t seed() const {
+        return seed_;
+    }
 
     /// Rewinds the generator to its seed and clears the colour filter state.
     void reset() {
@@ -92,18 +108,23 @@ public:
     }
 
     /// Next sample, normalised so every colour has approximately the same RMS.
-    SampleType process() { return static_cast<SampleType>(norm_ * colorise(white_next())); }
+    SampleType process() {
+        return static_cast<SampleType>(norm_ * colorise(white_next()));
+    }
 
     void process(SampleType* buffer, int num_samples) {
-        for (int i = 0; i < num_samples; ++i) buffer[i] = process();
+        for (int i = 0; i < num_samples; ++i)
+            buffer[i] = process();
     }
 
     /// Raw uniform white sample in [-1, 1), bypassing the colour filter and the
     /// normalisation. Voices that want an unfiltered burst (a click, a modal
     /// exciter) use this so they do not pay for a filter they will replace.
-    SampleType white() { return static_cast<SampleType>(white_next()); }
+    SampleType white() {
+        return static_cast<SampleType>(white_next());
+    }
 
-private:
+  private:
     // These poles are deliberately open-coded rather than built from
     // TptFilterT, which is the repository's shared one-pole. They are not
     // standalone filters: their weights are derived from the same
@@ -128,7 +149,7 @@ private:
     static constexpr double kBrownHz = 12.0;
 
     // Target RMS for every colour, matching a uniform white source in [-1, 1).
-    static constexpr double kTargetRms = 0.57735026918962576;  // 1/sqrt(3)
+    static constexpr double kTargetRms = 0.57735026918962576; // 1/sqrt(3)
 
     double white_next() {
         state_ ^= state_ << 13;
@@ -140,11 +161,16 @@ private:
 
     double colorise(double w) {
         switch (color_) {
-            case NoiseColor::white: return w;
-            case NoiseColor::pink: return pink(w);
-            case NoiseColor::brown: return brown(w);
-            case NoiseColor::blue: return differentiate(pink(w));
-            case NoiseColor::violet: return differentiate(w);
+        case NoiseColor::white:
+            return w;
+        case NoiseColor::pink:
+            return pink(w);
+        case NoiseColor::brown:
+            return brown(w);
+        case NoiseColor::blue:
+            return differentiate(pink(w));
+        case NoiseColor::violet:
+            return differentiate(w);
         }
         return w;
     }
@@ -188,7 +214,8 @@ private:
         }
         // Scale the weights to O(1) so the measured normalisation constant does
         // not have to absorb an arbitrary magnitude.
-        for (std::size_t k = 0; k < kPinkPoles; ++k) pink_w_[k] /= weight_sum;
+        for (std::size_t k = 0; k < kPinkPoles; ++k)
+            pink_w_[k] /= weight_sum;
 
         brown_a_ = 1.0 - std::exp(-2.0 * 3.14159265358979323846 * kBrownHz / sample_rate_);
     }
@@ -217,7 +244,8 @@ private:
 
         state_ = seed_;
         reset_filters();
-        for (int i = 0; i < kWarmup; ++i) colorise(white_next());
+        for (int i = 0; i < kWarmup; ++i)
+            colorise(white_next());
 
         double sum_sq = 0.0;
         for (int i = 0; i < kBurst; ++i) {
@@ -238,6 +266,7 @@ private:
     std::uint32_t seed_ = default_seed;
     std::uint32_t state_ = default_seed;
     double norm_ = 1.0;
+    std::array<double, 5> normalisations_{1.0, 1.0, 1.0, 1.0, 1.0};
 
     std::array<double, kPinkPoles> pink_a_{};
     std::array<double, kPinkPoles> pink_w_{};
@@ -250,4 +279,4 @@ private:
 using NoiseSource = NoiseSourceT<float>;
 using NoiseSource64 = NoiseSourceT<double>;
 
-}  // namespace pulp::signal
+} // namespace pulp::signal

@@ -126,7 +126,7 @@ TEST_CASE("FM wave tables omit harmonics above Nyquist",
     const double second = std::sin(4.0 * kPi * phase);
     const double expected = 0.5 * (fundamental + second);
 
-    // Wave 20 has four equal harmonics. At a 0.2-cycle increment only its
+    // Table index 20 has four equal harmonics. At a 0.2-cycle increment only its
     // first two fit below Nyquist, so the reader renormalizes that pair.
     REQUIRE(std::fabs(FmWaveTable::read(20, phase, increment) - expected) <
             1.0e-12);
