@@ -442,8 +442,10 @@ export const timelineSchema = Object.freeze({
   "pulp.timeline.content.notes": Object.freeze({
     schemaType: "pulp.timeline.content.notes",
     domain: "Content",
-    version: 1,
+    version: 2,
     fields: Object.freeze([
+      Object.freeze({ name: "modifier_seed", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "modifiers", kind: "Array", jsType: "array", required: true }),
       Object.freeze({ name: "notes", kind: "Array", jsType: "array", required: true }),
     ]),
   }),

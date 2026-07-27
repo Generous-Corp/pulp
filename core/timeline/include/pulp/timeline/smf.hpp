@@ -48,7 +48,9 @@ namespace pulp::timeline {
 //
 // Export covers note content plus the tempo and meter maps. Device chains,
 // automation lanes, takes, freezes, and media assets have no SMF
-// representation and are outside the format's scope.
+// representation and are outside the format's scope. Per-note probability,
+// conditions, and ratchets are playback semantics rather than fixed MIDI
+// events, so exporting a clip that authors them fails with UnsupportedFeature.
 
 enum class SmfErrorCode : std::uint8_t {
     Truncated,             // The data ended inside a chunk, event, or payload.

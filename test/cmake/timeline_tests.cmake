@@ -5,6 +5,7 @@
 pulp_add_test_suite(pulp-test-timeline-model
     SOURCES test_timeline_model.cpp test_timeline_device_placement.cpp
         test_timeline_automation_attachment.cpp
+        test_timeline_note_modifiers.cpp
         test_timeline_take_comp.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-dawproject-import
@@ -80,6 +81,7 @@ if(PULP_BENCHMARK)
 endif()
 pulp_add_test_suite(pulp-test-playback-note-renderer
     SOURCES test_playback_note_renderer.cpp
+        test_playback_note_modifiers.cpp
         $<$<BOOL:${UNIX}>:${CMAKE_CURRENT_SOURCE_DIR}/native_components/rt_intercept_test_support.cpp>
         $<$<NOT:$<BOOL:${UNIX}>>:${CMAKE_CURRENT_SOURCE_DIR}/harness/rt_allocation_probe.cpp>
     LIBRARIES pulp::playback pulp::native-components ${CMAKE_DL_LIBS}
@@ -198,6 +200,7 @@ pulp_add_test_suite(pulp-test-timeline-persistence
         test_timeline_asset_loop_info.cpp
         test_timeline_command_persistence.cpp
         test_timeline_device_placement_persistence.cpp
+        test_timeline_note_modifier_persistence.cpp
         test_timeline_marker_persistence.cpp
         test_timeline_session_persistence.cpp
         test_timeline_persistence_limits.cpp

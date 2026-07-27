@@ -11,6 +11,7 @@
 #include <pulp/timeline/clip_launch.hpp>
 #include <pulp/timeline/device_placement.hpp>
 #include <pulp/timeline/item_id.hpp>
+#include <pulp/timeline/note_modifier.hpp>
 
 #include <compare>
 #include <cstddef>
@@ -75,6 +76,7 @@ enum class ModelErrorCode : std::uint8_t {
     InvalidChordScaleEvent,
     UnorderedChordScaleLane,
     InvalidGrooveTemplate,
+    InvalidNoteModifier,
     MissingSequenceReference,
     SequenceReferenceCycle,
     SequenceNestingTooDeep,
@@ -178,18 +180,46 @@ struct NoteEvent {
 
 class NoteContent {
   public:
+    /// Notes alone: no modifiers, and a zero seed. Every note plays once,
+    /// unconditionally.
     static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes);
+    /// Notes plus their sparse modifier companion array. Each modifier must
+    /// name a note in `notes`, must be well-formed, and must not be neutral —
+    /// a neutral entry is a second encoding of a note that already plays that
+    /// way. `modifier_seed` is the document's authored seed for probability
+    /// draws; the same seed always reproduces the same decisions.
+    static runtime::Result<NoteContent, ModelError> create(std::vector<NoteEvent> notes,
+                                                           std::vector<NoteModifier> modifiers,
+                                                           std::uint64_t modifier_seed);
     runtime::Result<NoteContent, ModelError> replace_note(NoteEvent note) const;
 
     std::span<const NoteEvent> notes() const noexcept {
-        return *notes_;
+        return data_->notes;
     }
 
-  private:
-    explicit NoteContent(std::shared_ptr<const std::vector<NoteEvent>> notes)
-        : notes_(std::move(notes)) {}
+    /// Sorted by note id and containing only notes whose playback differs from
+    /// the default, so a document that authors no modifiers carries none.
+    std::span<const NoteModifier> modifiers() const noexcept {
+        return data_->modifiers;
+    }
 
-    std::shared_ptr<const std::vector<NoteEvent>> notes_;
+    std::uint64_t modifier_seed() const noexcept {
+        return data_->modifier_seed;
+    }
+
+    /// The modifier for `note_id`, or nullptr when the note plays by default.
+    const NoteModifier* modifier_for(ItemId note_id) const noexcept;
+
+  private:
+    struct Data {
+        std::vector<NoteEvent> notes;
+        std::vector<NoteModifier> modifiers;
+        std::uint64_t modifier_seed = 0;
+    };
+
+    explicit NoteContent(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+
+    std::shared_ptr<const Data> data_;
 };
 
 // Registered content is an extension-defined typed C++ value. The schema

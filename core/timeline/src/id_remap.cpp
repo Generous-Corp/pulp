@@ -162,7 +162,15 @@ runtime::Result<Clip, ModelError> rebuild_clip(const Clip& clip, const IdRemapTa
                                                     old_notes.notes().end());
                        for (auto& note : notes)
                            note.id = *table.find(note.id);
-                       auto rebuilt = NoteContent::create(std::move(notes));
+                       // Modifiers reference notes by id, so they follow the
+                       // same rewrite; the seed is copy-invariant identity, not
+                       // an id, and is carried across unchanged.
+                       std::vector<NoteModifier> modifiers(old_notes.modifiers().begin(),
+                                                           old_notes.modifiers().end());
+                       for (auto& modifier : modifiers)
+                           modifier.note_id = *table.find(modifier.note_id);
+                       auto rebuilt = NoteContent::create(std::move(notes), std::move(modifiers),
+                                                          old_notes.modifier_seed());
                        if (!rebuilt)
                            content_error = rebuilt.error();
                        else

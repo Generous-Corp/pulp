@@ -337,8 +337,13 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
     // between are not: they recur many times a second, and a per-grain state
     // reset would wipe consumer state that the plain discontinuity already
     // describes correctly.
-    snapshot.reset_requested = seeked || scrub_entered || scrub_exited;
+    snapshot.reset_requested =
+        seeked || scrub_entered || scrub_exited || desired.loop != previous_loop_;
     snapshot.time_sig_changed = !first_block_ && desired.meter != previous_meter_;
+    if (seeked || snapshot.transport_started || scrub_entered || scrub_exited ||
+        desired.loop != previous_loop_ || !advancing || desired.scrubbing ||
+        !desired.loop.enabled)
+        loop_pass_index_ = 0;
 
     auto make_range = [&](std::uint8_t index, std::uint32_t offset, std::uint32_t count,
                           bool discontinuity,
@@ -355,6 +360,8 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
         range.tempo_changed = index == 0 ? !first_block_ && range.tempo_bpm != previous_tempo_bpm_
                                          : range.tempo_bpm != snapshot.ranges[index - 1].tempo_bpm;
         range.discontinuity = discontinuity;
+        range.loop_pass_index =
+            advancing && !desired.scrubbing && desired.loop.enabled ? loop_pass_index_ : 0;
         if (advancing) {
             const timebase::SamplePosition end_sample{
                 saturating_add(timeline_sample_.value, count)};
@@ -439,12 +446,14 @@ TransportError MasterTransport::begin_block(std::uint32_t frame_count,
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
+            ++loop_pass_index_;
             make_range(snapshot.range_count, first_count, remaining, true);
             ++snapshot.range_count;
         } else if (timeline_sample_ == loop_end) {
             timeline_sample_ = loop_start;
             timeline_tick_ = desired.loop.start;
             tempo_cursor_.seek(loop_start);
+            ++loop_pass_index_;
             pending_discontinuity_ = true;
         }
     }
@@ -474,6 +483,7 @@ void MasterTransport::reset() noexcept {
     applied_seek_generation_ = 0;
     applied_scrub_generation_ = 0;
     block_index_ = 0;
+    loop_pass_index_ = 0;
     scrub_window_remaining_ = 0;
     previous_scrubbing_ = false;
     previous_playing_ = false;

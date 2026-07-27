@@ -1317,6 +1317,20 @@
       "domain": "Content",
       "flags": [
         {
+          "kind": "U64String",
+          "name": "modifier-seed",
+          "required": true,
+          "schema_field": "modifier_seed",
+          "value_type": "uint"
+        },
+        {
+          "kind": "Array",
+          "name": "modifiers",
+          "required": true,
+          "schema_field": "modifiers",
+          "value_type": "json"
+        },
+        {
           "kind": "Array",
           "name": "notes",
           "required": true,
@@ -1326,7 +1340,7 @@
       ],
       "name": "timeline:content:notes",
       "schema_type": "pulp.timeline.content.notes",
-      "version": 1
+      "version": 2
     },
     {
       "domain": "Content",
