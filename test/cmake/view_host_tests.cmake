@@ -367,7 +367,15 @@ pulp_add_test_suite(pulp-test-background-scanner LIBRARIES pulp::host)
 
 # Right-click routing + root->local coordinate conversion shared by the window
 # hosts (test/test_pointer_dispatch.cpp).
-pulp_add_test_suite(pulp-test-pointer-dispatch LIBRARIES pulp::view)
+# Pointer dispatch, split into four focused suites (WAH-7). The single file
+# was ~1,370 lines spanning focus, coordinate mapping, delivery/capture/
+# reentrancy, and gestures — four subjects with four reasons to change, where a
+# failure in one told you little about where to look. Fixtures stayed LOCAL to
+# each suite rather than moving to a shared helper.
+pulp_add_test_suite(pulp-test-pointer-focus-lifecycle LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-coordinate-mapping LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-delivery LIBRARIES pulp::view)
+pulp_add_test_suite(pulp-test-pointer-gestures LIBRARIES pulp::view)
 
 # Windows plug-in editor host: LPARAM coordinate unpacking, physical->logical
 # scaling, WPARAM modifier mapping, and the GPU surface attach/detach contract
