@@ -252,6 +252,25 @@ install(FILES
     DESTINATION "."
 )
 
+# DSP capability registry.
+#
+# Ships the committed snapshot so a downstream consumer can discover the SDK's
+# DSP capability surface WITHOUT a Pulp source checkout. Forge is the motivating
+# case: it hand-maintains its own effect-node registry against these catalogs,
+# and when Pulp's modulation nodes grew 21 runtime controls, nothing reconciled
+# the two — the drift was found by a Forge-side contract test, one repository
+# downstream and one merge late. Reading `share/pulp/dsp-capabilities.json` from
+# $PULP_SDK_DIR lets a consumer diff its own coverage against the SDK it is
+# actually built against.
+#
+# The snapshot is generated, and `pulp dsp capabilities --check` keeps it honest
+# in Pulp's own CI, so what installs here is the same artifact that gate proves
+# fresh — not a second copy that can rot.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/status/dsp-capabilities.json"
+            DESTINATION "share/pulp")
+endif()
+
 # SDK version file
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
 install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
