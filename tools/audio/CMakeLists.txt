@@ -42,4 +42,21 @@ if(APPLE AND TARGET pulp-host)
             pulp::runtime
     )
     install(TARGETS pulp-au-instrument-probe RUNTIME DESTINATION bin)
+
+    # Offline A/B probe for delay EFFECTS: renders one deterministic source
+    # through either an installed AU effect or Pulp's own CharacterDelay and
+    # captures each to a WAV, so the audio quality lab can compare sample-
+    # aligned renders. Same category as the instrument probe above — the AUs it
+    # can address are third-party and machine-local, so it stays a manual dev
+    # tool and is not registered as a test.
+    add_executable(pulp-au-effect-ab host-probe/au_effect_ab.cpp)
+    target_link_libraries(pulp-au-effect-ab
+        PRIVATE
+            pulp::host
+            pulp::audio
+            pulp::midi
+            pulp::signal
+            pulp::runtime
+    )
+    install(TARGETS pulp-au-effect-ab RUNTIME DESTINATION bin)
 endif()
