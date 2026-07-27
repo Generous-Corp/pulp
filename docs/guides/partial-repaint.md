@@ -1,9 +1,14 @@
 # Partial Repaint (experimental)
 
-Partial repaint lets the macOS GPU window host repaint **only the region that
-changed** instead of the whole window, so a single live sub-view — a meter, a
-value readout, a knob strip — updating on an otherwise static panel no longer
-forces every pixel of chrome to re-composite.
+Partial repaint lets a GPU host repaint **only the region that changed**
+instead of the whole window, so a single live sub-view — a meter, a value
+readout, a knob strip — updating on an otherwise static panel no longer forces
+every pixel of chrome to re-composite.
+
+Three hosts implement it: the macOS GPU **window** host, and the Windows and
+Linux **plug-in** hosts. The plug-in hosts share one implementation
+(`PluginFrameRenderer`), so their damage-clipping behaviour is the same code,
+not two descriptions of the same intent.
 
 It is **off by default** and gated behind an environment variable while it
 soaks. With the flag unset there is zero behavior change: the host paints the
@@ -39,6 +44,12 @@ When enabled, the host does three things per frame:
    scene is blitted 1:1 onto the drawable each frame. Everything outside the clip
    is the previous frame's pixels.
 
+   The negotiation is not optional: if the backend refuses to retain a scene,
+   the host turns partial repaint **off** rather than clipping anyway. Clipping
+   a non-preserving swapchain leaves whatever the driver last had outside the
+   clip, which reads as flicker or stale garbage rather than as a bug in the
+   damage model.
+
 The first frame after launch, a resize, or a backing-scale (DPI) change is always
 a full repaint. Partial repaint only engages when the pending damage is bounded:
 the animation pump and any widget that calls the rect-less `repaint()` mark the
@@ -64,12 +75,22 @@ win is nullified there. This is deliberate for correctness; caching and partial
 repaint are best used on different parts of the tree (cache the static panels,
 partial-repaint the live meters).
 
-## Limitations (v1)
+## Design-viewport (letterboxed) mode
 
-- macOS GPU host only. The embed plugin-view hosts and non-Apple hosts always
-  full-repaint.
-- Design-viewport (fixed-aspect letterboxed) mode always full-repaints — damage
-  is in root space but paint applies a scale + letterbox that v1 does not map.
+Plug-in editors always set a design viewport, so this used to exclude them
+entirely. Damage is produced in ROOT space, but the clip is installed in
+SURFACE space — *before* the paint body applies its letterbox
+`translate(tx, ty) + scale(sx, sy)`. An unmapped root-space rect therefore
+clipped the wrong part of the surface.
+
+`compute_frame_clip()` now maps the rect through the same transform and re-snaps
+the result OUT to whole surface pixels (a fractional edge would clip a partially
+covered pixel). Letterboxed editors get partial repaint like anything else.
+
+## Limitations
+
+- The macOS **plug-in** host (as distinct from the macOS window host) still
+  full-repaints.
 - The damage model **escalates** on any hazard rather than growing the clip to
   cover it. A grow-to-fixpoint expansion is possible future work.
 - A host that draws into the Pulp surface out of band while the flag is on would
