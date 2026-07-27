@@ -102,8 +102,19 @@ TEST_CASE("capturing a launch performance flattens into ordinary clip-insert com
 
     REQUIRE(session.sounding_slot_count() == 0);
     REQUIRE_FALSE(session.history().empty());
+    // The capture is complete, not truncated — otherwise the assertions below
+    // would be measuring a partial take.
+    REQUIRE(session.dropped_capture_count() == 0);
     for (const auto& record : session.history())
         REQUIRE(record.duration.value > 0);
+
+    // Both ends of a captured span are exact musical boundaries. The stop was
+    // quantized to the bar, so every captured duration lands on a bar multiple
+    // measured from its own launch beat — a block-quantized end would not.
+    constexpr std::int64_t kBar = 4 * timebase::kTicksPerQuarter;
+    for (const auto& record : session.history()) {
+        REQUIRE((record.start.value + record.duration.value) % kBar == 0);
+    }
 
     const auto* sequence = session.project().find_sequence(kSequenceId);
     REQUIRE(sequence != nullptr);

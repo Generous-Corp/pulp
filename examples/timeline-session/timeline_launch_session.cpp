@@ -88,6 +88,7 @@ struct TimelineLaunchSession::Impl {
     std::vector<bool> slot_sounding;
 
     std::vector<LaunchRecord> history;
+    std::size_t dropped_captures = 0;
     std::array<playback::ProviderKind, kTrackIds.size()> providers{
         playback::ProviderKind::Launcher, playback::ProviderKind::Launcher,
         playback::ProviderKind::Arrangement};
@@ -306,10 +307,22 @@ void TimelineLaunchSession::process(std::uint32_t frames) noexcept {
             continue;
         impl_->slot_sounding[index] = false;
         const auto start = impl_->slot_started_at[index];
-        const auto end = snapshot.ranges[0].monotonic_start.position;
-        if (end > start && impl_->history.size() < impl_->history.capacity())
-            impl_->history.push_back({impl_->slot_ids[index], impl_->slot_track_ids[index],
-                                      impl_->slot_clip_ids[index], start, end - start});
+        // A stop resolves to an exact boundary too, and the handle keeps that
+        // beat after firing — so the captured span is bounded by two exact
+        // musical positions, not by the block the events happened to land in.
+        const auto end = impl_->handles[index].target().position;
+        if (end <= start)
+            continue;
+        // push_back stays allocation-free only while the vector is inside the
+        // capacity reserved in prepare(). Dropping the guard would allocate on
+        // the audio thread; counting the overflow keeps the truncation visible
+        // instead of silently losing a launch.
+        if (impl_->history.size() == impl_->history.capacity()) {
+            ++impl_->dropped_captures;
+            continue;
+        }
+        impl_->history.push_back({impl_->slot_ids[index], impl_->slot_track_ids[index],
+                                  impl_->slot_clip_ids[index], start, end - start});
     }
 }
 
@@ -342,6 +355,10 @@ const timeline::Project& TimelineLaunchSession::project() const noexcept {
 
 const timebase::CompiledTempoMap& TimelineLaunchSession::tempo_map() const noexcept {
     return *impl_->tempo_map;
+}
+
+std::size_t TimelineLaunchSession::dropped_capture_count() const noexcept {
+    return impl_->dropped_captures;
 }
 
 std::size_t TimelineLaunchSession::sounding_slot_count() const noexcept {

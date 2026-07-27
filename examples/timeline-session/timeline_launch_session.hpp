@@ -74,6 +74,10 @@ class TimelineLaunchSession {
     /// result. Used to commit a captured performance into the arrangement.
     bool apply(std::span<const timeline::Command> commands);
     std::size_t sounding_slot_count() const noexcept;
+    /// Launches that resolved but could not be recorded because the history was
+    /// at its reserved capacity. Non-zero means the capture is incomplete — the
+    /// example reports it rather than letting a truncation pass as a full take.
+    std::size_t dropped_capture_count() const noexcept;
 
   private:
     struct Impl;
