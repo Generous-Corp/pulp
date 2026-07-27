@@ -20,6 +20,23 @@ modules:
     dependencies: [runtime, timebase]
     docs: reference/modules.md#timeline
 
+  - name: interchange
+    summary: Format-neutral interchange capability tables loss manifests and the export plan/run seam that refuses any concept a writer cannot represent unless the caller accepts it by name
+    status: experimental
+    dependencies:
+      - timeline
+      - timebase
+      - runtime
+    docs: reference/modules.md#interchange
+  - name: dawproject
+    summary: Bounded DAWproject reader and writer over a flat beats-timed subset with sealed media identity an in-band loss manifest and fail-closed refusal of unsupported constructs
+    status: experimental
+    dependencies:
+      - interchange
+      - timeline
+      - audio
+      - runtime
+    docs: reference/modules.md#dawproject
   - name: runtime
     summary: Core utilities — SIMD (Highway), XML/JSON, ZIP, HTTP client, sockets, IPC pipes, crypto (SHA-256/AES/RSA via mbedTLS), i18n, analytics, licensing
     status: stable

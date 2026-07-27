@@ -1023,6 +1023,54 @@ and launch slots are durable document state. The compiler accepts Arrangement
 only; the embedding application owns runtime launcher interpretation and
 scene-to-track arbitration.
 
+## interchange
+
+Format-neutral interchange machinery shared by every exporter and importer.
+A **capability table** declares, per concept, what a given format can represent;
+`plan_export()` walks a `Project` against that table and returns an
+`ExportPlan` carrying a `LossManifest` of everything the format cannot hold.
+
+The seam is deliberately **consent-based and fail-closed**: `run_export()`
+refuses a plan whose losses the caller has not accepted **concept by concept**.
+There is no force flag, so an export cannot silently discard authored material.
+Writers plug in as an `ExportWriter` callable, which keeps the planning and
+loss accounting in one place rather than duplicated per format.
+
+A census pass records which concepts a project actually uses, so a document that
+never uses a lossy concept is reported lossless rather than being flagged on the
+format's theoretical limits.
+
+**Depends on:** `timeline`, `timebase`, `runtime`
+
+## dawproject
+
+Reader and writer for the [DAWproject](https://github.com/bitwig/dawproject)
+interchange format, implemented clean-room against the published specification
+over pugixml. Ships as two libraries so a consumer can take only what it needs:
+`pulp::dawproject-import` and `pulp::dawproject-export`.
+
+Both sides cover the same **bounded linear subset** — flat tracks, beats-timed
+clips, inline notes, referenced audio, one tempo and one meter — and both fail
+closed outside it. The importer refuses nested groups, warps, seconds-timed
+lanes, and unknown elements rather than dropping them. The exporter routes every
+unrepresentable concept through the `interchange` consent seam and writes an
+in-band loss manifest into the package alongside `project.xml`, so the losses
+travel with the file instead of scrolling past in a console.
+
+A track's `<Channel>` is admitted on import only when neutral, and refused by its
+own concept when it states a volume or pan. On export a neutral channel is
+written so a receiving DAW registers the track at all; that is a structural
+requirement of the format, not an export of authored mixer state, which the loss
+manifest still reports as dropped.
+
+Media identity is sealed by content hash, and package-relative asset paths are
+confined to the package at two layers — a lexical check in the model and a
+canonicalizing beneath-the-base check in the loader, which is what catches a
+symlink that points outside.
+
+**Depends on:** `interchange`, `timeline`, `audio`, `runtime`
+
+
 ## playback
 
 The master timeline transport publishes integer-authoritative block snapshots.
