@@ -202,7 +202,12 @@ docs:
   - slug: signal-processing
     path: guides/signal-processing.md
     kind: guide
-    summary: DSP algorithm reference — 20 processors with usage examples and parameter docs
+    summary: DSP algorithm reference — 30+ processors with usage examples and parameter docs
+
+  - slug: character-delay
+    path: guides/character-delay.md
+    kind: guide
+    summary: Multi-character wet-only stereo delay — lifecycle, complete API, character selection, and recipes
 
   - slug: fdn-reverb
     path: guides/fdn-reverb.md
