@@ -256,21 +256,28 @@ Pulp implements or builds on these open standards:
 | [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
 | [WebGPU](https://www.w3.org/TR/webgpu/) | W3C | GPU rendering API |
 
-!!! note "These are specifications, not fetched code"
+!!! note "DAWproject and SMF: specifications, not fetched code"
 
-    Every format above is implemented **clean-room against its published
-    specification**. Pulp fetches no SDK, vendors no source, and bundles no
-    schema for them, so they carry no `NOTICE.md` entry and no `DEPENDENCIES.md`
-    row — there is nothing third-party being redistributed. That is why they sit
-    here rather than under [Optional Fetched Third-Party
+    Listing a standard here does **not** by itself say whether Pulp uses a
+    vendor SDK for it — several do. VST3 ships against the Steinberg SDK, Audio
+    Unit against Apple's AudioUnitSDK, and CLAP is fetched via FetchContent;
+    those are covered under [Plugin Format SDKs](#plugin-format-sdks) and carry
+    their own attribution.
+
+    **DAWproject** and **Standard MIDI File** are different: both are
+    implemented **clean-room against the published specification**. Pulp fetches
+    no SDK, vendors no source, and bundles no schema for either, so neither
+    carries a `NOTICE.md` entry or a `DEPENDENCIES.md` row — there is nothing
+    third-party being redistributed. That is why they are not under [Optional
+    Fetched Third-Party
     Integrations](#optional-fetched-third-party-integrations), where the
     distinguishing fact is that Pulp *does* redistribute the dependency through
     the build.
 
-    **DAWproject** is a concrete example. Pulp's reader and writer are its own
-    code over [pugixml](https://github.com/zeux/pugixml) (MIT, already a core
-    dependency and attributed as one). Support is a deliberately **bounded,
-    fail-closed subset**, not full-format coverage:
+    Pulp's DAWproject reader and writer are its own code over
+    [pugixml](https://github.com/zeux/pugixml) (MIT, already a core dependency
+    and attributed as one). Support is a deliberately **bounded, fail-closed
+    subset**, not full-format coverage:
 
     - **Import** accepts flat, beats-timed note and audio tracks. Nested groups,
       warps, seconds-timed lanes, and any construct outside the subset **fail the
