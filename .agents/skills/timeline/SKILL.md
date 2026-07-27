@@ -30,28 +30,6 @@ Apply edits as one expected-revision transaction, validate the result, use
 `explain` to inspect playback lowering/PDC, then render only when an audio
 artifact is needed. Never modify canonical project JSON text directly.
 
-## Header layout
-
-`model.hpp` is no longer the whole document model. The public surface is split
-across 28 headers under `core/timeline/include/pulp/timeline/` — `clip.hpp`,
-`assets.hpp`, `automation_lane.hpp`, `note_modifier.hpp`, `production_mode.hpp`,
-`clip_launch.hpp`, and so on — with `api_groups.hpp` defining the doxygen groups
-they file into.
-
-Two consequences when adding a type:
-
-- Put it in the header that owns its concept, not in `model.hpp` by default.
-  `model.hpp` still carries `Project`, `Sequence`, `Track`, and the identity
-  tokens; a new clip-shaped type belongs in `clip.hpp`.
-- Every public entity needs a doc comment. `tools/scripts/timeline_api_docs_check.py`
-  fails the build on an undocumented one, so an addition that compiles can still
-  stop the gate.
-
-A declaration that ends up in no header at all fails closed at compile time,
-which is the useful property when moving things between them. A declaration that
-ends up in the *wrong* header does not — so when relocating a type, compare the
-public type set before and after rather than trusting a green build.
-
 ## Contracts
 
 - `Project`, `Sequence`, `Track`, and `Clip` are immutable snapshots. Validate
