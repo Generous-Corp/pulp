@@ -776,6 +776,30 @@ TEST_CASE("Clap stereo alternates bursts and preserves the mono sum",
     }
 }
 
+TEST_CASE("Clap burst panning follows the oversampled audio latency",
+          "[signal][drum][clap][stereo][latency]") {
+    ClapVoice voice;
+    voice.prepare(kFs);
+    voice.set_burst_count(6);
+    voice.set_burst_spacing_ms(1.0);
+    voice.set_burst_decay_ms(0.5);
+    voice.set_burst_falloff(1.0);
+    voice.set_tail_level(0.0);
+    voice.set_gap_jitter(1.0);
+    voice.set_stereo_width(1.0);
+    voice.output().set_oversampling(
+        pulp::signal::drum::OutputOversampling::x4);
+    const auto stereo = stereo_hit(voice, 1.0f, 512);
+
+    double left = 0.0;
+    double right = 0.0;
+    for (std::size_t i = 206; i < 218; ++i) {
+        left += static_cast<double>(stereo.left[i]) * stereo.left[i];
+        right += static_cast<double>(stereo.right[i]) * stereo.right[i];
+    }
+    REQUIRE(right > left * 2.0);
+}
+
 TEST_CASE("Clap stereo keeps its room tail centred",
           "[signal][drum][clap][stereo]") {
     ClapVoice voice;

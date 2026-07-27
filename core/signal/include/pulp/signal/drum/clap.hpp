@@ -6,6 +6,7 @@
 #include <pulp/signal/svf.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -144,6 +145,7 @@ protected:
         burst_gain_ = 1.0;
         burst_sign_ = 1.0;
         burst_pan_ = -1.0;
+        reset_pan_delay();
         jitter_state_ = kJitterSeed;
     }
 
@@ -213,6 +215,7 @@ protected:
         if (!stereo_path_active_ || quality_changed) {
             burst_output_.reset();
             burst_output_.trigger();
+            reset_pan_delay();
             stereo_path_active_ = true;
         }
         for (int i = 0; i < num_samples; ++i) {
@@ -269,8 +272,25 @@ private:
             frame.burst =
                 burst_output_.process(static_cast<float>(train)) * velocity_gain_;
         }
-        frame.burst_pan = burst_pan_;
+        frame.burst_pan = delayed_burst_pan();
         return frame;
+    }
+
+    void reset_pan_delay() {
+        burst_pan_delay_.fill(burst_pan_);
+        burst_pan_write_ = 0;
+    }
+
+    double delayed_burst_pan() {
+        burst_pan_delay_[static_cast<std::size_t>(burst_pan_write_)] =
+            burst_pan_;
+        const int size = static_cast<int>(burst_pan_delay_.size());
+        const int delay = burst_output_.latency_samples();
+        const int read = (burst_pan_write_ - delay + size) % size;
+        const double delayed =
+            burst_pan_delay_[static_cast<std::size_t>(read)];
+        burst_pan_write_ = (burst_pan_write_ + 1) % size;
+        return delayed;
     }
 
     // A fixed seed for the gap sequence, kept separate from the voice's audio
@@ -314,6 +334,10 @@ private:
     OutputStage output_;
     OutputStage burst_output_;
     bool stereo_path_active_ = false;
+    static constexpr int kMaxOutputLatency =
+        OutputStage::latency_samples_for(OutputOversampling::x4);
+    std::array<double, kMaxOutputLatency + 1> burst_pan_delay_{};
+    int burst_pan_write_ = 0;
 
     double velocity_gain_ = 1.0;
     double brightness_ = 1.0;
