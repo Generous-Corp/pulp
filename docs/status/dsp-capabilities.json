@@ -1,7 +1,7 @@
 {
   "_doc": "Canonical DSP capability surface, extracted statically from the Forge bake catalog headers by tools/scripts/dsp_capability_registry.py. Regenerate with `pulp dsp capabilities --write`. Construction-time values (notably rate-dependent latency) are deliberately absent \u2014 a static reader cannot evaluate them.",
   "counts": {
-    "catalogs": 21,
+    "catalogs": 22,
     "type_ids": 100,
     "factories": 62,
     "baked_params": 374
@@ -58,6 +58,11 @@
           ]
         }
       ]
+    },
+    {
+      "header": "core/host/include/pulp/host/forge_catalog_index.hpp",
+      "type_ids": [],
+      "nodes": []
     },
     {
       "header": "core/host/include/pulp/host/forge_character_delay_catalog.hpp",

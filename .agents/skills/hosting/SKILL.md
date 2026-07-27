@@ -829,6 +829,27 @@ Two things that bite when baking analog VCF nodes:
   `LoadResult::missing_custom_node_types`, so do not coerce unknown node
   strings to a built-in type. Runtime callbacks are attached only when the
   registered version and shape match the node.
+- **A duplicate designator in `ExecutorSnapshotBinders` compiles on macOS and
+  fails the build on Linux.** The binders are built with designated
+  initializers, and a merge that brings the same binder in from both sides
+  produces the member listed twice. Clang accepts the repeat silently; GCC
+  rejects it:
+
+      error: '.custom_latency_for' designator used multiple times
+             in the same initializer list
+
+  Pulp's only GCC lane is the **advisory** Linux job, and the required gate is
+  macOS — so this class of break lands on main without any required check
+  going red. It happened exactly that way once: resolving a duplicate binder
+  MEMBER during a merge did not remove the duplicate INITIALIZER, and every
+  local build and the required gate stayed green.
+
+  After any merge that touches the binder lists, count the designators. There
+  are three such initialisers — `signal_graph.cpp`,
+  `baked_graph_processor.cpp`, `signal_graph_executor_routing.cpp` — and a
+  duplicate in any of them is a Linux-only failure you cannot reproduce on a
+  Mac.
+
 - **Custom-node intrinsic latency is a CALLBACK, not a count.**
   `CustomNodeType::latency_samples` is `std::function<int(double sample_rate)>`,
   returning a prepare-stable base-rate sample count regardless of internal

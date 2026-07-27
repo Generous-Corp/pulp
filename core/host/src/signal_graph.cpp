@@ -1510,11 +1510,6 @@ bool SignalGraph::build_routing_snapshot_locked_(
                             : nullptr,
                 };
             },
-        .custom_latency_for =
-            [&cg](NodeId id) -> int {
-                auto it = cg.custom_latency_samples.find(id);
-                return it == cg.custom_latency_samples.end() ? 0 : it->second;
-            },
     };
     return build_executor_snapshot(nodes_, connections_, binders, plugin_ctx,
                                    cg.routed.plugin_scratch, out, parallel_safe,
