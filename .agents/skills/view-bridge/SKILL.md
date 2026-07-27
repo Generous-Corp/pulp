@@ -1822,3 +1822,20 @@ is harmless (no adapter sets a handler, so `request_editor_resize` returns
 false). Reaching a downstream SDK (e.g. Forge on M5) with WORKING resize still
 needs a full SDK rebuild + reinstall (the adapters that install the handler live
 in the libs), but it will not crash in the meantime.
+
+## An editor-driven state load is gated against the audio thread
+
+`Processor::deserialize_plugin_state()` is documented as running "on a
+host/main thread with the audio thread stopped". Format adapters now enforce
+that with `format::StateRestoreGate`: the restoring thread takes a unique lock,
+the audio thread takes a non-blocking shared lock around its call into the
+Processor, and a contended block passes through instead of rendering.
+
+What this means for editor code: a preset load or state restore driven from the
+UI briefly makes the audio thread pass through. Keep the deserialize bounded —
+the audio thread degrades for as long as the gate is held, so a multi-second
+sample reload belongs on a worker with the heavy payload published afterwards,
+not inside `deserialize_plugin_state()`.
+
+`Processor::suspend()` / `resume()` remain opt-in and are still not called
+automatically by the adapters; the gate is what actually protects the restore.
