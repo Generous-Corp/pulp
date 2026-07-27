@@ -112,36 +112,6 @@ static void request_hidden_cocoa_window_close(NSWindow* window) {
     });
 }
 
-@interface PulpAppTerminationHandler : NSObject
-+ (instancetype)sharedHandler;
-- (void)quit:(id)sender;
-@end
-
-@implementation PulpAppTerminationHandler
-
-+ (instancetype)sharedHandler {
-    static PulpAppTerminationHandler* handler = nil;
-    static dispatch_once_t once_token;
-    dispatch_once(&once_token, ^{
-        handler = [[PulpAppTerminationHandler alloc] init];
-    });
-    return handler;
-}
-
-- (void)quit:(id)sender {
-    (void)sender;
-    // cmd+Q / Quit terminates the WHOLE app in one press. Previously this did
-    // performClose on only the KEY window, so with the floating inspector
-    // focused cmd+Q closed just the inspector and a second cmd+Q was needed.
-    // [NSApp stop:nil] returns from the [NSApp run] in run_event_loop, main()
-    // unwinds, and every WindowHost destructor closes its window (canvas +
-    // inspector + any others) — a single, clean quit. (cmd+W still closes one
-    // window via the standard responder chain.)
-    request_cocoa_app_stop();
-}
-
-@end
-
 // Window setup, geometry, event, and gesture helpers live in
 // window_host_mac_geometry.mm; use them via pulp::view::mac_geometry.
 using namespace pulp::view::mac_geometry;
@@ -171,25 +141,6 @@ static pulp::events::MainThreadDispatcher::Backend make_cocoa_main_thread_backen
             return [NSThread isMainThread];
         },
     };
-}
-
-static void install_app_menu(
-    NSString* appName,
-    const std::vector<pulp::view::WindowOptions::MenuCommand>& commands) {
-    NSMenu* menuBar = [[NSMenu alloc] init];
-    NSMenuItem* appItem = [[NSMenuItem alloc] init];
-    [menuBar addItem:appItem];
-    [NSApp setMainMenu:menuBar];
-
-    NSMenu* appMenu = [[NSMenu alloc] init];
-    (void)appName;  // available for override if needed
-    NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit"
-                                                      action:@selector(quit:)
-                                               keyEquivalent:@"q"];
-    [quitItem setTarget:[PulpAppTerminationHandler sharedHandler]];
-    [appMenu addItem:quitItem];
-    [appItem setSubmenu:appMenu];
-    pulp::view::mac_menu::append_commands(commands);
 }
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
@@ -1672,7 +1623,8 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title], menu_commands_);
+                mac_menu::install_application_menu(
+                    menu_commands_, [] { request_cocoa_app_stop(); });
                 show();
                 [NSApp activateIgnoringOtherApps:YES];
             }
@@ -2044,7 +1996,8 @@ public:
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             } else {
                 [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-                install_app_menu([window_ title], menu_commands_);
+                mac_menu::install_application_menu(
+                    menu_commands_, [] { request_cocoa_app_stop(); });
             }
 
             // Start display-linked render loop

@@ -49,10 +49,23 @@ NSEventModifierFlags modifier_mask(std::uint16_t modifiers) {
 
 } // namespace
 
-void append_commands(const std::vector<WindowOptions::MenuCommand>& commands) {
-    NSMenu* menu_bar = [NSApp mainMenu];
-    if (menu_bar == nil)
-        return;
+void install_application_menu(const std::vector<WindowOptions::MenuCommand>& commands,
+                              std::function<void()> quit_action) {
+    NSMenu* menu_bar = [[[NSMenu alloc] init] autorelease];
+    NSMenuItem* app_item = [[[NSMenuItem alloc] init] autorelease];
+    [menu_bar addItem:app_item];
+    [NSApp setMainMenu:menu_bar];
+
+    NSMenu* app_menu = [[[NSMenu alloc] init] autorelease];
+    PulpMenuCommandTarget* quit_target = [[[PulpMenuCommandTarget alloc] init] autorelease];
+    quit_target->action = std::move(quit_action);
+    NSMenuItem* quit_item = [[[NSMenuItem alloc] initWithTitle:@"Quit"
+                                                        action:@selector(performMenuCommand:)
+                                                 keyEquivalent:@"q"] autorelease];
+    [quit_item setTarget:quit_target];
+    [quit_item setRepresentedObject:quit_target];
+    [app_menu addItem:quit_item];
+    [app_item setSubmenu:app_menu];
 
     std::vector<std::pair<std::string, NSMenu*>> menus;
     for (const auto& command : commands) {

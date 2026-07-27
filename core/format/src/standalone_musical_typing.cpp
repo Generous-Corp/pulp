@@ -394,7 +394,11 @@ bool StandaloneMusicalTyping::route_app_key(const view::KeyEvent& event) {
         release.modifiers = view::kModNone;
         return keyboard_->on_key_event(release);
     }
-    if (auto* focused = view::View::focused_input_; focused && focused->accepts_text_input())
+    const auto has_text_focus = [](view::View* root) {
+        auto* focused = root ? root->interaction().focused_input : nullptr;
+        return focused && focused->accepts_text_input();
+    };
+    if (has_text_focus(routed_root_) || has_text_focus(keyboard_.get()))
         return false;
     if ((event.modifiers & (view::kModCmd | view::kModCtrl | view::kModAlt | view::kModMeta)) !=
             0 ||

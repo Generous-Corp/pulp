@@ -278,17 +278,45 @@ TEST_CASE("standalone musical typing releases held keys after modifiers change",
 TEST_CASE("standalone musical typing releases held keys after text focus changes",
           "[format][standalone][musical-typing]") {
     Harness harness;
-    TestTextInput text_input;
+    auto text_input = std::make_unique<TestTextInput>();
+    auto* text_input_ptr = text_input.get();
+    harness.root.add_child(std::move(text_input));
     REQUIRE(harness.typing.show());
     REQUIRE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::a)));
 
-    view::View::focused_input_ = &text_input;
+    text_input_ptr->claim_input_focus();
     REQUIRE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::a, false)));
-    view::View::focused_input_ = nullptr;
+    text_input_ptr->release_input_focus();
 
     REQUIRE(harness.events.size() == 2);
     CHECK(harness.events[1].is_note_off());
     CHECK(harness.events[1].note() == 48);
+}
+
+TEST_CASE("standalone musical typing scopes text focus to its own windows",
+          "[format][standalone][musical-typing][multiinstance]") {
+    Harness harness;
+    auto own_text_input = std::make_unique<TestTextInput>();
+    auto* own_text_input_ptr = own_text_input.get();
+    harness.root.add_child(std::move(own_text_input));
+
+    view::View unrelated_root;
+    auto unrelated_text_input = std::make_unique<TestTextInput>();
+    auto* unrelated_text_input_ptr = unrelated_text_input.get();
+    unrelated_root.add_child(std::move(unrelated_text_input));
+
+    REQUIRE(harness.typing.show());
+
+    own_text_input_ptr->claim_input_focus();
+    CHECK_FALSE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::a)));
+    CHECK(harness.events.empty());
+    own_text_input_ptr->release_input_focus();
+
+    unrelated_text_input_ptr->claim_input_focus();
+    REQUIRE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::a)));
+    REQUIRE(harness.events.size() == 1);
+    CHECK(harness.events.front().is_note_on());
+    unrelated_text_input_ptr->release_input_focus();
 }
 
 TEST_CASE("standalone musical typing preserves failed note offs for recovery",

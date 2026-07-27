@@ -60,12 +60,6 @@ struct StandaloneConfig {
     // built-in Settings tab.
     bool show_settings_tab = true;
 
-    // Adds Pulp's floating Musical Typing Keyboard to this standalone app.
-    // The keyboard is hidden until the user chooses Window > Musical Typing
-    // Keyboard or presses Cmd+K (Ctrl+K on non-Apple platforms). Notes enter
-    // through the standalone host's lock-free UI MIDI path.
-    bool enable_musical_typing_keyboard = false;
-
     // Remember the user's audio/MIDI device selection (+ sample rate, buffer, transport)
     // across launches, keyed by the plugin name. On by default; a developer can set this
     // false to always start from the configured defaults. Saved whenever settings change,
@@ -134,6 +128,12 @@ struct StandaloneConfig {
     int time_sig_denominator = 4;
     bool transport_playing = true;  // default-on so MIDI/tempo plugins are immediately useful
     bool transport_recording = false;
+
+    // Adds Pulp's floating Musical Typing Keyboard to this standalone app.
+    // The keyboard is hidden until the user chooses Window > Musical Typing
+    // Keyboard or presses Cmd+K (Ctrl+K on non-Apple platforms). Notes enter
+    // through the standalone host's lock-free UI MIDI path.
+    bool enable_musical_typing_keyboard = false;
 };
 
 namespace detail {

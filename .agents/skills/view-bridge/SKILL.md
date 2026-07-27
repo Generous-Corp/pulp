@@ -1463,6 +1463,27 @@ same `#if PULP_ENABLE_AUDIO_PROBES` guard. Wiring gotchas:
   every native editor is sized correctly without per-plugin hardcoding — do not
   reintroduce per-plugin window-size constants to work around clipped editors.
 
+### Standalone tool-window commands share one shell registry
+
+Standalone-owned floating tools (the Audio Inspector and the opt-in Musical
+Typing Keyboard) register with one shell-owned `CommandRegistry`. Register every
+handler first, then call `route_global_keys(window_root, registry)` once; each
+call replaces `window_root.on_global_key`, so independently routing each tool
+silently disconnects the previous shortcut. `WindowOptions::menu_commands` is
+only the native menu's discoverability/action surface. It does not install the
+root key route, and non-macOS hosts may ignore it, so Cmd/Ctrl shortcuts still
+dispatch through the registry.
+
+The Musical Typing helper is created before standalone audio starts because the
+audio callback drains its lock-free failed-note-off recovery. Keep that helper
+object stable until after the callback has stopped; `shutdown()` may release UI
+state while audio is live because the recovery handoff is atomic, but destroying
+the helper would leave the callback with a dangling pointer. Its application key
+monitor must consult each owned root's `interaction().focused_input`, never the
+process-global `View::focused_input_` shim: a text field in another editor/window
+must not suppress notes in this standalone. Key-up remains routable after focus
+changes so every accepted note-on can still receive its note-off.
+
 ## In-DAW scripted-UI hot reload is opt-in (dev only)
 
 The DAW editor paths (`au_view_controller_mac.mm`, `au_v2_cocoa_view.mm`,
