@@ -279,6 +279,11 @@ docs:
     kind: guide
     summary: Creative Timeline Engine audio-file, step-pattern, and multitrack graph/PDC worked examples
 
+  - slug: example-timeline-session
+    path: examples/timeline-session.md
+    kind: guide
+    summary: Creative Timeline Engine clip-launching session and full DAW-style project worked examples
+
   - slug: timeline-sdk
     path: guides/timeline-sdk.md
     kind: guide
