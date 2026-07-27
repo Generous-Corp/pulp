@@ -36,6 +36,29 @@
 
 namespace pulp::signal::chardelay {
 
+/// Apply the physical tier's measured whole-loop stability calibration.
+///
+/// Sub-unity feedback retains the measured margin at the selected tape age.
+/// The explicit 1.0–1.1 range releases that margin continuously so the maximum
+/// setting still reaches the physical model's bounded self-oscillation point.
+/// `requested_feedback` is clamped to that 0–1.1 character contract first: the
+/// release ramp is defined only across it, and extrapolating past 1.1 would
+/// hand the loop more than unity gain with no saturator margin left to bound it.
+inline double physical_tape_effective_feedback(double requested_feedback,
+                                               double age) noexcept {
+    const double feedback = std::clamp(requested_feedback, 0.0,
+                                       kSaturatedFeedbackMax);
+    double loop_gain = interpolate_knots(kTapeAxis,
+                                         kTapePhysicalFeedbackCompensation,
+                                         age);
+    if (feedback > 1.0) {
+        const double over_unity =
+            (feedback - 1.0) / (kSaturatedFeedbackMax - 1.0);
+        loop_gain += (1.0 - loop_gain) * over_unity;
+    }
+    return feedback * loop_gain;
+}
+
 /// Intermittent dropout. Two states with randomly drawn durations and
 /// raised-cosine transitions, so the artifact arrives and leaves the way a
 /// crease in the tape passes the head rather than switching on a sample edge.
