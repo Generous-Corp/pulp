@@ -187,6 +187,24 @@ TEST_CASE("DelayVibrato lifecycle delays then fades the depth in", "[vibrato][de
     CHECK(broken > 0);
 }
 
+TEST_CASE("DelayVibrato delay-only lifecycle uses its declared zero fade",
+          "[vibrato][delay][lifecycle]") {
+    constexpr double kDelayMs = 20.0;
+    const auto delay_samples = static_cast<int>(kDelayMs * 0.001 * kFs);
+
+    DelayVibrato64 engine;
+    engine.prepare(kFs);
+    engine.set_delay_ms(kDelayMs);
+    engine.reset();
+
+    for (int i = 0; i + 1 < delay_samples; ++i) {
+        engine.process(0.0);
+        CHECK(engine.depth_envelope() == 0.0);
+    }
+    engine.process(0.0);
+    CHECK(engine.depth_envelope() == 1.0);
+}
+
 TEST_CASE("PhaseVibrato wobble depends strongly on frequency", "[vibrato][phase]") {
     // The counterpart of the DelayVibrato frequency-independence test, at the
     // engine's documented default blend. The spec asks for at least 6 dB of
