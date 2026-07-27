@@ -4,6 +4,7 @@
 #include <pulp/signal/drum/layers.hpp>
 #include <pulp/signal/drum/voice.hpp>
 #include <pulp/signal/ladder_filter.hpp>
+#include <pulp/signal/lofi_chain.hpp>
 #include <pulp/signal/noise_source.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 
@@ -160,6 +161,17 @@ public:
         set_click_level(it->click_level);
     }
 
+    /// Independent degradation for the two halves of the drum. A tom is an
+    /// oscillator body under a filtered noise skin, and the machines this
+    /// voice descends from crushed those paths separately -- a bit-reduced
+    /// body under clean hiss reads as a different instrument from a clean
+    /// body under a decimated skin. One shared chain could only ever produce
+    /// the average of the two.
+    LofiChain& body_lofi() { return body_lofi_; }
+    const LofiChain& body_lofi() const { return body_lofi_; }
+    LofiChain& noise_lofi() { return noise_lofi_; }
+    const LofiChain& noise_lofi() const { return noise_lofi_; }
+
     OutputStage& output() { return output_; }
     const OutputStage& output() const { return output_; }
     OutputStage* output_stage() noexcept override { return &output_; }
@@ -181,6 +193,8 @@ protected:
         click_.prepare(sample_rate);
         noise_filter_.set_sample_rate(static_cast<float>(sample_rate));
         click_hp_.prepare(static_cast<float>(sample_rate));
+        body_lofi_.set_sample_rate(sample_rate);
+        noise_lofi_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
     }
 
@@ -189,6 +203,14 @@ protected:
         bend_env_.reset();
         click_.reset();
         click_hp_.reset();
+        // The skin's 4-pole ladder holds four stages of state and a saturated
+        // feedback sample. Leaving them behind made reset() a partial clear: a
+        // voice reset to silence still carried the previous hit inside its
+        // filter, so the same hit rendered twice from a reset voice did not
+        // produce the same samples.
+        noise_filter_.reset();
+        body_lofi_.reset();
+        noise_lofi_.reset();
         output_.reset();
         noise_.reset();
         phase_ = 0.0;
@@ -225,7 +247,8 @@ protected:
     }
 
     bool on_is_active() const override {
-        return amp_env_.is_active() || click_.is_active() || output_.has_tail();
+        return amp_env_.is_active() || click_.is_active() || body_lofi_.has_tail() ||
+               noise_lofi_.has_tail() || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
@@ -248,11 +271,17 @@ protected:
                                              : std::sin(2.0 * 3.14159265358979323846 * phase_));
             }
 
+            // Each path is degraded before the mix, which is the whole point
+            // of carrying two chains: crushing the sum could not tell the body
+            // from the skin.
+            body = static_cast<double>(body_lofi_.process(static_cast<float>(body)));
+
             double hiss = 0.0;
             if (noise_balance_ > 0.0) {
                 hiss = noise_balance_ *
                        static_cast<double>(noise_filter_.process(noise_.process()));
             }
+            hiss = static_cast<double>(noise_lofi_.process(static_cast<float>(hiss)));
 
             const double beater =
                 click_hp_.process_highpass(static_cast<float>(
@@ -279,6 +308,8 @@ private:
     DecayEnvelope64 bend_env_;
     ClickLayer click_;
     LadderFilter noise_filter_;
+    LofiChain body_lofi_;
+    LofiChain noise_lofi_;
     TptFilter click_hp_;
     OutputStage output_;
 
