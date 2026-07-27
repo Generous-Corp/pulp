@@ -474,7 +474,7 @@ public:
 
     double shift_hz() const { return shift_hz_; }
 
-    /// Barberpole feedback depth, `0 .. kMaxFeedback`.
+    /// Barberpole feedback depth, in the range [0, kMaxFeedback].
     void set_feedback(double g) {
         if (!std::isfinite(g)) return;
         feedback_ = std::clamp(g, 0.0, kMaxFeedback);
@@ -483,7 +483,7 @@ public:
 
     double feedback() const { return feedback_; }
 
-    /// Feedback-loop delay in ms, `kMinDelayMs .. kMaxLoopMs`. Sets the comb
+    /// Feedback-loop delay in ms, in the range [kMinDelayMs, kMaxLoopMs]. Sets the comb
     /// spacing that colours the spiral: short reads as a continuous glide,
     /// long as individually audible passes.
     void set_feedback_delay_ms(double ms) {

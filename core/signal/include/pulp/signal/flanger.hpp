@@ -359,7 +359,7 @@ public:
         apply_lfo_settings();
     }
 
-    /// Stereo spread in CYCLES of the sweep, `0 .. 0.5`. The house default is a
+    /// Stereo spread in CYCLES of the sweep, in the range [0, 0.5]. The house default is a
     /// quarter cycle: far enough apart that the two channels decorrelate into
     /// real width. This is a PHASE control, not a waveform-normalized width
     /// control: a half-cycle is exact inversion for sine, triangle and square,
@@ -393,7 +393,7 @@ public:
     }
     double offset_ms() const { return offset_ms_; }
 
-    /// Resonance, `−kFbClamp .. +kFbClamp`. A negative coefficient is a
+    /// Resonance, in the range [-kFbClamp, +kFbClamp]. A negative coefficient is a
     /// different resonance colour, not a polarity control — `set_polarity`
     /// owns that.
     void set_feedback(double fb) {
@@ -402,7 +402,7 @@ public:
     }
     double feedback() const { return feedback_; }
 
-    /// Equal-power dry/wet, `0 .. 1`. At 0.5 both gains are `1/√2`, which is
+    /// Equal-power dry/wet, in the range [0, 1]. At 0.5 both gains are `1/√2`, which is
     /// the setting the comb algebra is written for: equal dry and wet weights
     /// give exact nulls.
     void set_mix(double wet01) {

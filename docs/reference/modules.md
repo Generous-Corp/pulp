@@ -439,7 +439,11 @@ send_sysex(inquiry);  // Send over MIDI port
 
 ## signal
 
-30+ real-time-safe DSP processors. Process methods operate on single samples or buffers and are safe for the audio thread after the helper's documented construction/configuration/`prepare()` step. Setup methods that allocate storage must run off the audio thread.
+Real-time-safe DSP processors, generators, analysis helpers, and composition
+primitives. Process methods operate on single samples or buffers and are safe
+for the audio thread after the helper's documented
+construction/configuration/`prepare()` step. Setup methods that allocate
+storage must run off the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
 
@@ -457,6 +461,22 @@ comp.set_sample_rate(48000);
 for (int i = 0; i < num_samples; ++i)
     buffer[i] = comp.process(buffer[i]);
 ```
+
+### Advanced DSP guides
+
+The advanced processors are documented by authoring responsibility. Each guide
+includes selection advice, lifecycle and real-time boundaries, and a focused
+composition example. The [advanced DSP API](advanced-dsp-api.md) is the
+exhaustive public-method inventory across these families.
+
+| Guide | Algorithms covered |
+|---|---|
+| [Dynamics processors](../guides/dsp-dynamics.md) | Feedforward, VCA, diode-bridge, and FET compressors |
+| [Nonlinear and tone processors](../guides/dsp-nonlinear-tone.md) | Saturation, circuit clippers, fuzz, tape, and speaker modeling |
+| [Modulation effects](../guides/dsp-modulation-effects.md) | Phaser, three vibrato mechanisms, chorus, flanger, SSB shifting, rotary, and scanner |
+| [Pitch, time, and granular](../guides/dsp-pitch-time-granular.md) | Pitch shifting, YIN tracking, harmony, cyclic stretch, and granular clouds |
+| [Synthesis and sequencing](../guides/dsp-synthesis-sequencing.md) | Additive synthesis, vocoding, stage/grid/rungler sequencing, scale quantization, and gate utilities |
+| [Nonlinear space and convolution](../guides/dsp-space-convolution.md) | Gated/reverse ambience and zero-latency multilevel convolution |
 
 ### Applying a mono processor to stereo
 
