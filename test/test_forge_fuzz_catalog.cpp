@@ -56,14 +56,17 @@ TEST_CASE("Forge fuzz: seeded drift is injectable and deterministic",
 
 TEST_CASE("Forge fuzz: non-finite drift injection is finite and uses its default",
           "[host][baked][forge][forge-fuzz][non-finite]") {
-    Fixture fx(fuzz::make_fuzz_node(fuzz::Device::germanium, false), 48000.0, 128);
-    auto injector = fx.claim_injector();
-    REQUIRE(injector.inject(pulp::test::immediate(
-                fuzz::kDriftEnabled, std::numeric_limits<float>::quiet_NaN())) ==
-            pulp::host::InjectStatus::Ok);
     const auto input = pulp::test::sine_block(128, 750.0, 48000.0, 0.4f);
-    const auto output = fx.settle({input}, 16).front();
-    for (float sample : output) REQUIRE(std::isfinite(sample));
+    const auto render = [&](float value) {
+        Fixture fx(fuzz::make_fuzz_node(fuzz::Device::germanium, false), 48000.0, 128);
+        auto injector = fx.claim_injector();
+        REQUIRE(injector.inject(pulp::test::immediate(fuzz::kDriftEnabled, value)) ==
+                pulp::host::InjectStatus::Ok);
+        return fx.settle({input}, 16).front();
+    };
+    const auto hostile = render(std::numeric_limits<float>::quiet_NaN());
+    REQUIRE(hostile == render(0.0f));
+    for (float sample : hostile) REQUIRE(std::isfinite(sample));
 }
 
 TEST_CASE("Forge fuzz: injection changes the realized circuit and remains RT safe",

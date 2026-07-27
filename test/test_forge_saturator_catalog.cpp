@@ -114,12 +114,18 @@ TEST_CASE("Forge saturator: every musical tone control is stable and injected",
 
 TEST_CASE("Forge saturator: hostile non-finite injections fall back to finite defaults",
           "[host][baked][forge][forge-saturator][non-finite]") {
-    auto fx = make_fixture(sat::make_saturator_node(sat::Shape::tanh_soft));
-    auto inj = fx.claim_injector();
-    for (auto id : {sat::kToneTracking, sat::kToneDeHz, sat::kPreBoostDb})
+    const auto input = sine(0.4f);
+    auto defaults = make_fixture(sat::make_saturator_node(sat::Shape::tanh_soft));
+    const auto expected = settle(defaults, input);
+
+    auto hostile = make_fixture(sat::make_saturator_node(sat::Shape::tanh_soft));
+    auto inj = hostile.claim_injector();
+    for (const auto id : {sat::kToneTracking, sat::kToneDeHz, sat::kPreBoostDb})
         REQUIRE(inj.inject(immediate(id, std::numeric_limits<float>::quiet_NaN())) ==
                 InjectStatus::Ok);
-    for (float sample : settle(fx, sine(0.4f))) REQUIRE(std::isfinite(sample));
+    const auto output = settle(hostile, input);
+    REQUIRE(output == expected);
+    for (float sample : output) REQUIRE(std::isfinite(sample));
 }
 
 TEST_CASE("Forge saturator: injecting drive changes harmonic content",

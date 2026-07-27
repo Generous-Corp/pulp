@@ -103,8 +103,9 @@
 /// `process()`, `process_block()` and `reset()` never allocate, never lock, and
 /// never perform I/O. The implicit solve runs a COMPILE-TIME-FIXED iteration
 /// count, so the worst-case time per sample is bounded and not data-dependent.
-/// All randomness is the seeded house `OuWalkT`, rewound by `reset()` and never
-/// automatable (series law 2).
+/// All randomness is the seeded house `OuWalkT`, rewound by `reset()`. The seed
+/// is fixed and never automated (series law 2); hosts may toggle the separate
+/// drift-enable setup control without changing the deterministic sequence.
 ///
 /// References: Ebers & Moll, "Large-Signal Behavior of Junction Transistors",
 /// Proc. IRE 42(12):1761–1772, 1954, for the forward-active junction law.

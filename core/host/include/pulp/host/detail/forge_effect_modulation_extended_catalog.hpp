@@ -8,6 +8,7 @@
 // preserving its existing include and symbol surface.
 
 #include <pulp/host/signal_graph.hpp>
+#include <pulp/host/detail/forge_realization_identity.hpp>
 
 #include <pulp/signal/flanger.hpp>
 #include <pulp/signal/leslie.hpp>
@@ -59,7 +60,10 @@ struct Instance {
 inline std::string type_id(Mode mode, double offset_ms) {
     if (mode == Mode::classic) return kTypeId;
     if (mode == Mode::barberpole) return std::string{kTypeId} + ".barberpole";
-    return std::string{kTypeId} + ".through_zero." + std::to_string(offset_ms);
+    const double frozen_offset =
+        std::clamp(offset_ms, Engine::kOffsetMinMs, Engine::kOffsetMaxMs);
+    return std::string{kTypeId} + ".through_zero." +
+           detail::realization_real_token(frozen_offset);
 }
 
 inline int latency_samples(Mode mode, double offset_ms, double sample_rate) {

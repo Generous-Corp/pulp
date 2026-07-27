@@ -62,6 +62,31 @@ TYPES: dict[str, tuple[str, str]] = {
     "ZeroLatencyConvolver": ("zero_latency_convolver.hpp", "ZeroLatencyConvolverT"),
 }
 
+# Types that intentionally share one conceptual section. The check remains
+# type-local: a method mentioned under a different family cannot satisfy it.
+SECTION_HEADINGS: dict[str, str] = {
+    "DiodeBridgeGain": "`DiodeBridgeCompressor`",
+    "TransformerBracket": "`DiodeBridgeCompressor`",
+    "DiodeClipper": "Circuit clippers and tone stack",
+    "FeedbackClipper": "Circuit clippers and tone stack",
+    "ToneStack": "Circuit clippers and tone stack",
+    "DelayVibrato": "Vibrato family",
+    "PhaseVibrato": "Vibrato family",
+    "UniVibe": "Vibrato family",
+    "LeslieRotary": "`LeslieRotary` and `ScannerVibrato`",
+    "ScannerVibrato": "`LeslieRotary` and `ScannerVibrato`",
+    "DiatonicMap": "`HarmonyEngine` and `DiatonicMap`",
+    "HarmonyEngine": "`HarmonyEngine` and `DiatonicMap`",
+    "SpectralEnvelope": "`AdditiveBank`",
+    "VoiceTable": "`AdditiveBank`",
+    "StageSeq": "Modular sequencing",
+    "CartesianWalk": "Modular sequencing",
+    "Rungler": "Modular sequencing",
+    "QuantizeScale": "Modular sequencing",
+    "ProbGate": "Modular sequencing",
+    "GateLogic": "Modular sequencing",
+}
+
 # Class-scope language/library calls that have function syntax but are not
 # members. Real public methods with these names are not used by the selected API.
 NON_METHOD_CALLS = {"static_assert", "min", "max"}
@@ -121,6 +146,16 @@ def public_methods(text: str, class_name: str) -> set[str]:
     return methods
 
 
+def documented_section(documented: str, public_name: str) -> str:
+    heading = SECTION_HEADINGS.get(public_name, f"`{public_name}`")
+    match = re.search(rf"^### {re.escape(heading)}\s*$", documented, re.MULTILINE)
+    if match is None:
+        raise ValueError(f"documentation section {heading!r} not found")
+    following = re.search(r"^### ", documented[match.end():], re.MULTILINE)
+    end = len(documented) if following is None else match.end() + following.start()
+    return documented[match.end():end]
+
+
 def main() -> int:
     documented = REFERENCE.read_text(encoding="utf-8")
     signal = ROOT / "core/signal/include/pulp/signal"
@@ -129,11 +164,12 @@ def main() -> int:
         source = (signal / header_name).read_text(encoding="utf-8")
         try:
             methods = public_methods(source, class_name)
+            section = documented_section(documented, public_name)
         except ValueError as error:
             print(f"advanced DSP API check: {header_name}: {error}", file=sys.stderr)
             return 1
         for method in sorted(methods):
-            if re.search(rf"`{re.escape(method)}\s*\(", documented) is None:
+            if re.search(rf"`{re.escape(method)}\s*\(", section) is None:
                 missing.append(f"{public_name}::{method}() ({header_name})")
     if missing:
         print("advanced DSP API reference is missing public methods:", file=sys.stderr)

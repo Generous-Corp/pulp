@@ -82,12 +82,12 @@ resistances, or transfer values and never expose owned mutable state.
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls: `set_threshold_db()`, `set_ratio()`, `set_knee_db()`, `set_attack_ms()`, `set_release_ms()`, `set_makeup_db()`, `set_character()`, `set_mix_percent()`, `set_sc_hpf_hz()`, `set_auto_release()`, `set_feedback()`, `set_adaa()`.
 - Processing: `process()`, `process_block()`.
-- Inspection: `latency_samples()`, `gain_reduction_db()`, `control_drive()`, `static_curve_db()`, `static_curve_feedback_db()`.
+- Inspection: `latency_samples()`, `worst_case_gain()`, `gain_reduction_db()`, `control_drive()`, `static_curve_db()`, `static_curve_feedback_db()`.
 
 `DiodeBridgeGain` additionally provides `prepare()`, `reset()`, `set_character()`,
 `set_adaa()`, `drive()`, `control_drive_for_current()`, `dynamic_resistance()`,
 `control_drive_for_gain_db()`, `gain_for_control_drive()`, `curvature()`,
-`max_operating_amplitude()`, `shape_antiderivative()`, `third_harmonic_ratio()`,
+`max_operating_amplitude()`, `shape()`, `shape_antiderivative()`, `third_harmonic_ratio()`,
 and `process()`. `TransformerBracket` provides `prepare()`, `reset()`,
 `set_character()`, `set_adaa()`, `saturate()`, `saturate_antiderivative()`, and
 `process()` for callers that need the exposed circuit stages independently.
@@ -142,7 +142,7 @@ and topology/gain inspectors are const diagnostics and do not advance the DSP.
 ### `FuzzPair`
 
 `prepare(double sample_rate)` sizes its optional oversampler. Device is
-`TransistorDevice::{silicon,germanium}`, fuzz/bias-starve/mix are `[0,1]`,
+`FuzzDevice::{silicon,germanium}`, fuzz/bias-starve/mix are `[0,1]`,
 source impedance is positive kOhm, and output level is dB. Oversampling and
 drift toggles are topology/validation choices and should change while stopped;
 `set_seed(uint32_t)` makes drift deterministic. `process()` returns one sample
@@ -187,7 +187,7 @@ the model.
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls: `set_driver_archetype()`, `set_box_type()`, `set_box_volume_l()`, `set_resonance_trim_semitones()`, `set_q_resonance()`, `set_cone_breakup_amount()`, `set_treble_rolloff_hz()`, `set_drive_db()`, `set_compression_amount()`, `set_mic_distance_cm()`, `set_mic_position_pct()`, `set_mic_axis_deg()`, `set_diffraction_amount()`, `set_output_trim_db()`.
 - Processing: `process(sample)`, `process(in, out, frames)`.
-- Response and bound inspection: `latency_samples()`, `worst_case_gain()`, `compliance_ratio()`, `resonance_fc_hz()`, `resonance_q()`, `resonance_peak_db()`, `resonance_peak_hz()`, `baffle_step_hz()`, `ripple_hz()`, `dipole_hz()`, `breakup_mode()`, `breakup_mode_hz()`, `offaxis_corner_hz()`, `proximity_gain_db()`, `presence_shelf_db()`, `air_loss_db()`, `inductance_magnitude_db()`, `bl_beta()`, `cms_gamma()`, `excursion()`, `dynamic_fc_hz()`, `archetype_index()`, `box_type()`, `sample_rate()`.
+- Response and bound inspection: `latency_samples()`, `worst_case_gain()`, `compliance_ratio()`, `resonance_fc_hz()`, `resonance_q()`, `resonance_peak_db()`, `resonance_peak_hz()`, `baffle_step_hz()`, `ripple_hz()`, `dipole_hz()`, `breakup_mode()`, `breakup_mode_hz()`, `offaxis_corner_hz()`, `proximity_gain_db()`, `presence_shelf_db()`, `air_loss_db()`, `inductance_magnitude_db()`, `bl_beta()`, `cms_gamma()`, `excursion()`, `dynamic_fc_hz()`, `archetype()`, `archetype_index()`, `box_type()`, `sample_rate()`.
 
 ## Modulation effects
 
@@ -202,7 +202,7 @@ returns mono. `sweep_frequency_hz(channel)` is the current realized all-pass cor
 
 - Lifecycle: `prepare(sample_rate)`, `reset()`.
 - Controls and paired accessors: `set_stage_count()`/`stage_count()`, `set_rate_hz()`/`rate_hz()`, `set_depth()`/`depth()`, `set_center_hz()`/`center_hz()`, `set_feedback()`/`feedback()`, `set_mix()`/`mix()`, `set_stereo_spread()`/`stereo_spread()`, `set_wave()`/`wave()`, `set_stagger_ratio()`/`stagger_ratio()`, plus `set_seed()`.
-- Processing and observation: `process()`, `process_mono()`, `sweep_frequency_hz()`, `notch_count()`, `notch_frequency_hz()`, `notch_frequency_analog_hz()`.
+- Processing and observation: `process()`, `process_mono()`, `latency_samples()`, `worst_case_gain()`, `sweep_frequency_hz()`, `notch_count()`, `notch_frequency_hz()`, `notch_frequency_analog_hz()`.
 
 ### Vibrato family
 
@@ -245,7 +245,7 @@ additional host latency.
 
 - Lifecycle: `prepare()`, `reset()`, `discard_history()`.
 - Controls and accessors: `set_mode()`/`mode()`, `set_polarity()`/`polarity()`, `set_delay_engine()`/`delay_engine()`, `set_rate_hz()`, `set_waveform()`, `set_stereo_spread()`, `set_depth_ms()`/`depth_ms()`, `set_center_delay_ms()`/`center_delay_ms()`, `set_offset_ms()`/`offset_ms()`, `set_feedback()`/`feedback()`, `set_mix()`/`mix()`, `set_barberpole_shift_hz()`/`barberpole_shift_hz()`.
-- Processing and inspection: `process()`, `process_stereo()`, `latency_samples()`, `effective_depth_ms()`, `instantaneous_delay_ms()`, `fixed_delay_samples()`, `mix_gains()`, `notch_hz()`, `notch_spacing_hz()`.
+- Processing and inspection: `process()`, `process_stereo()`, `latency_samples()`, `worst_case_gain()`, `effective_depth_ms()`, `instantaneous_delay_ms()`, `fixed_delay_samples()`, `mix_gains()`, `notch_hz()`, `notch_spacing_hz()`.
 
 ### `SsbFrequencyShifter`
 
@@ -258,7 +258,7 @@ feedback delay remains an artistic loop time.
 
 - Lifecycle: `prepare()`, `reset()`, `discard_history()`.
 - Controls and accessors: `set_shift_hz()`/`shift_hz()`, `set_feedback()`/`feedback()`, `set_feedback_delay_ms()`/`feedback_delay_ms()`, `set_mode()`/`mode()`, `set_mix()`, `set_stereo_spread()`.
-- Processing, mappings, and host contract: `process()`, `process_stereo()`, `latency_samples()`, `shift_hz_from_knob()`, `knob_from_shift_hz()`, `feedback_delay_ms_from_knob()`.
+- Processing, mappings, and host contract: `process()`, `process_stereo()`, `latency_samples()`, `worst_case_gain()`, `shift_hz_from_knob()`, `knob_from_shift_hz()`, `feedback_delay_ms_from_knob()`.
 
 ### `LeslieRotary` and `ScannerVibrato`
 
@@ -274,8 +274,8 @@ chorus mix are normalized; its depth/pitch inspectors describe the realized scan
 
 - `LeslieRotary` lifecycle and mode: `prepare()`, `reset()`, `discard_history()`, `set_speed()`, `speed()`.
 - `LeslieRotary` controls: `set_horn_fast_hz()`, `set_horn_slow_hz()`, `set_drum_fast_hz()`, `set_drum_slow_hz()`, `set_horn_accel_s()`, `set_horn_decel_s()`, `set_drum_accel_s()`, `set_drum_decel_s()`, `set_crossover_hz()`, `set_horn_radius_m()`, `set_drum_radius_m()`, `set_mic_distance_m()`, `set_mic_angle_deg()`, `set_am_depth()`, `set_dir_depth_db()`, `set_drum_dir_depth_db()`, `set_dir_corner_hz()`, `set_d_bias_ms()`, `set_reflection_db()`, `set_num_reflections()`, `set_refl_delay_ms()`, `set_refl_spacing_ms()`, `set_refl_corner_hz()`, `set_drift_cents()`, `set_seed()`, `set_mix()`.
-- `LeslieRotary` inspection and processing: `horn_rate_hz()`, `drum_rate_hz()`, `target_horn_hz()`, `target_drum_hz()`, `horn_phase()`, `drum_phase()`, `mic_face_offset()`, `horn_delay_seconds()`, `drum_delay_seconds()`, `worst_case_delay_samples()`, both `process()` overloads, and both `process_block()` overloads.
-- `ScannerVibrato`: `prepare()`, `reset()`, `discard_history()`, `set_mode()`, `mode()`, `set_scan_hz()`, `set_line_ms()`, `set_v1_frac()`, `set_v2_frac()`, `set_v3_frac()`, `set_chorus_mix()`, `depth_fraction()`, `dry_mix()`, `peak_pitch_shift_ratio()`, `worst_case_delay_samples()`, `process()`, `process_block()`.
+- `LeslieRotary` inspection and processing: `latency_samples()`, `horn_rate_hz()`, `drum_rate_hz()`, `target_horn_hz()`, `target_drum_hz()`, `horn_phase()`, `drum_phase()`, `mic_face_offset()`, `horn_delay_seconds()`, `drum_delay_seconds()`, `worst_case_delay_samples()`, both `process()` overloads, and both `process_block()` overloads.
+- `ScannerVibrato`: `prepare()`, `reset()`, `discard_history()`, `set_mode()`, `mode()`, `set_scan_hz()`, `set_line_ms()`, `set_v1_frac()`, `set_v2_frac()`, `set_v3_frac()`, `set_chorus_mix()`, `depth_fraction()`, `dry_mix()`, `latency_samples()`, `peak_pitch_shift_ratio()`, `worst_case_delay_samples()`, `process()`, `process_block()`.
 
 ## Pitch, time, and granular
 
@@ -305,7 +305,7 @@ values are samples, `min_cmnd()` is confidence/error, and cost is MAC/sample.
 
 `prepare()`, `reset()`, `discard_history()`, `set_f0_range()`, `f0_min_hz()`,
 `f0_max_hz()`, `process()`, `f0_hz()`, `tau_samples()`, `voiced()`, `min_cmnd()`,
-`latency_samples()`, `window_samples()`, `integration_samples()`, `tau_min()`,
+`latency_samples()`, `hop_samples()`, `window_samples()`, `integration_samples()`, `tau_min()`,
 `tau_max()`, and `cost_mac_per_sample()`.
 
 ### `HarmonyEngine` and `DiatonicMap`
@@ -372,7 +372,7 @@ methods are pure realized-frequency/gain queries.
 - Lifecycle and note events: `prepare()`, `reset()`, `retrigger()`, `release()`, `active()`.
 - Voice controls and accessors: `set_fundamental_hz()`/`fundamental_hz()`, `set_partial_count()`/`partial_count()`, `max_partials()`, `set_inharmonicity_b()`/`inharmonicity_b()`, `set_spectral_tilt_db_oct()`/`spectral_tilt_db_oct()`, `set_master_gain_db()`/`master_gain_db()`, `load_voice()`/`voice()`, `set_partial()`.
 - Envelope and variation controls: `set_envelope_a()`, `set_envelope_b()`, `set_morph()`/`morph()`, `set_spectral_domain()`/`spectral_domain()`, `envelope_db_at()`, `set_envelope_mode()`/`envelope_mode()`, `set_attack_ms()`, `set_release_ms()`, `set_detune_cents()`/`detune_cents()`, `doublet_active()`, `set_pitch_glide()`, `set_retrig_phase()`/`retrig_phase()`, `set_seed()`.
-- Processing and realized pitch: `next()`, `process()`, `partial_frequency()`, `partial_frequency_hz()`, `nyquist_guard_gain()`.
+- Processing and realized pitch: `next()`, `process()`, `latency_samples()`, `worst_case_gain()`, `partial_frequency()`, `partial_frequency_hz()`, `nyquist_guard_gain()`.
 - `SpectralEnvelope`: `clear()`, `size()`, `add()`, `tilt()`, `gain_db_at()`. `VoiceTable`: `clear()`, `add()`.
 
 ### `Vocoder`
@@ -404,12 +404,12 @@ semitones as named; slide/refractory values are ms; probabilities/duty are
 quantizer mode, gate operation, and gate mode are enums. Inspectors return the
 last emitted stage/cell/register/step/draw result and never consume a new edge.
 
-- `StageSeq`: `prepare()`, `set_num_stages()`/`num_stages()`, `set_direction()`/`direction()`, `set_stage_pitch()`/`stage_pitch()`, `set_stage_pulse_count()`/`stage_pulse_count()`, `set_stage_gate_mode()`/`stage_gate_mode()`, `set_stage_slide()`/`stage_slide()`, `set_stage_skip()`/`stage_skip()`, `set_slide_ms()`/`slide_ms()`, `set_repeat_duty()`/`repeat_duty()`, `set_seed()`, `apply_reset_edge()`, `reset()`, `gate()`, `pitch_v()`, `stage()`, `pulse()`, `started()`, `process()`.
-- `CartesianWalk`: `prepare()`, `set_size()`, `width()`, `height()`, `set_value()`, `value()`, `set_access()`, `access()`, `set_offsets()`, `apply_reset_edge()`, `reset()`, `x()`, `y()`, `cell_x()`, `cell_y()`, `gate()`, `cv()`, `process()`.
-- `Rungler`: `prepare()`, `set_reg_bits()`/`reg_bits()`, `set_dac_bits()`/`dac_bits()`, `set_feedback_tap()`/`feedback_tap()`, `set_range_v()`/`range_v()`, `set_external_data()`/`external_data()`, `set_seed_pattern()`/`seed_pattern()`, `apply_reset_edge()`, `reset()`, `register_bits()`, `dac_code()`, `value()`, `process()`.
+- `StageSeq`: `prepare()`, `set_num_stages()`/`num_stages()`, `set_direction()`/`direction()`, `set_stage_pitch()`/`stage_pitch()`, `set_stage_pulse_count()`/`stage_pulse_count()`, `set_stage_gate_mode()`/`stage_gate_mode()`, `set_stage_slide()`/`stage_slide()`, `set_stage_skip()`/`stage_skip()`, `set_slide_ms()`/`slide_ms()`, `set_repeat_duty()`/`repeat_duty()`, `set_seed()`, `apply_reset_edge()`, `reset()`, `latency_samples()`, `gate()`, `pitch_v()`, `stage()`, `pulse()`, `started()`, `process()`.
+- `CartesianWalk`: `prepare()`, `set_size()`, `width()`, `height()`, `set_value()`, `value()`, `set_access()`, `access()`, `set_offsets()`, `apply_reset_edge()`, `reset()`, `latency_samples()`, `x()`, `y()`, `cell_x()`, `cell_y()`, `gate()`, `cv()`, `process()`.
+- `Rungler`: `prepare()`, `set_reg_bits()`/`reg_bits()`, `set_dac_bits()`/`dac_bits()`, `set_feedback_tap()`/`feedback_tap()`, `set_range_v()`/`range_v()`, `set_external_data()`/`external_data()`, `set_seed_pattern()`/`seed_pattern()`, `apply_reset_edge()`, `reset()`, `latency_samples()`, `register_bits()`, `dac_code()`, `value()`, `process()`.
 - `QuantizeScale`: `prepare()`, `set_mode()`/`mode()`, `set_edo()`/`edo()`, `set_scale_mask()`/`scale_mask()`, `set_root_pc()`/`root_pc()`, `set_hysteresis_cents()`/`hysteresis_cents()`, `apply_reset_edge()`, `reset()`, `latched_step()`, `process()`.
-- `ProbGate`: `prepare()`, `set_probability()`/`probability()`, `set_seed()`, `apply_reset_edge()`, `reset()`, `draw_count()`, `process_edge()`, `process()`.
-- `GateLogic`: `prepare()`, `set_op()`/`op()`, `apply_reset_edge()`, `reset()`, both `process()` overloads, `process_levels()`.
+- `ProbGate`: `prepare()`, `set_probability()`/`probability()`, `set_seed()`, `apply_reset_edge()`, `reset()`, `latency_samples()`, `draw_count()`, `process_edge()`, `process()`.
+- `GateLogic`: `prepare()`, `set_op()`/`op()`, `apply_reset_edge()`, `reset()`, `latency_samples()`, both `process()` overloads, `process_levels()`.
 
 ## Space and convolution
 
@@ -429,7 +429,7 @@ topology rebuild; swap/work counters are atomic/read-only diagnostics.
 - Topology: `set_program()`, `set_length_ms()`, `set_predelay_ms()`, `set_density_pct()`, `set_density_growth()`, `set_gate_hold_pct()`, `set_attack_pct()`, `set_topology()`, `request_topology()`.
 - Color and output: `set_seed()`, `set_diffusion()`, `set_tone()`, `set_hf_damp_hz()`, `set_width_pct()`, `set_converter_amount()`, `set_output_gain_db()`, `set_mix_pct()`.
 - Processing: `process_sample()`, `process()`.
-- Topology, response, and bound inspection: `topology_rebuild_count()`, `topology_work_units_last_sample()`, `tap_count()`, `tap()`, `tap_norm()`, `window_samples()`, `predelay_samples()`, `allpass_length()`, `worst_case_gain()`, `program()`, `length_ms()`, `tone()`, `swap_in_progress()`, `envelope()`.
+- Topology, response, and bound inspection: `latency_samples()`, `topology_rebuild_count()`, `topology_work_units_last_sample()`, `tap_count()`, `tap()`, `tap_norm()`, `window_samples()`, `predelay_samples()`, `allpass_length()`, `worst_case_gain()`, `program()`, `length_ms()`, `tone()`, `swap_in_progress()`, `envelope()`.
 
 ### `ZeroLatencyConvolver`
 

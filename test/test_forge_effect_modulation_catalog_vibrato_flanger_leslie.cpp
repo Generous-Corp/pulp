@@ -361,13 +361,15 @@ TEST_CASE("Forge modulation: flanger waveform injection changes the baked DSP",
 
 TEST_CASE("Forge modulation: non-finite flanger waveform injection stays finite",
           "[host][baked][forge][forge-modulation][flanger][non-finite]") {
-    auto fx = Fixture(mod::flanger::make_flanger_node(), kSr, kFrames);
-    auto inj = fx.claim_injector();
-    REQUIRE(inj.inject(immediate(mod::flanger::kWave,
-                                 std::numeric_limits<float>::quiet_NaN())) ==
-            InjectStatus::Ok);
     const auto t = tone();
-    const auto out = fx.settle({t, t}, 8);
+    const auto render = [&](float value) {
+        auto fx = Fixture(mod::flanger::make_flanger_node(), kSr, kFrames);
+        auto inj = fx.claim_injector();
+        REQUIRE(inj.inject(immediate(mod::flanger::kWave, value)) == InjectStatus::Ok);
+        return fx.settle({t, t}, 8);
+    };
+    const auto out = render(std::numeric_limits<float>::quiet_NaN());
+    REQUIRE(out == render(0.0f));
     for (const auto& channel : out)
         for (float sample : channel) REQUIRE(std::isfinite(sample));
 }
@@ -382,6 +384,14 @@ TEST_CASE("Forge modulation: flanger latency controls are frozen realizations",
     REQUIRE(mod::flanger::latency_samples(Mode::through_zero, 4.0, kSr) == 192);
     REQUIRE(classic.latency_samples(kSr) == 0);
     REQUIRE(through_zero.latency_samples(kSr) == 192);
+
+    const double adjacent_offset = std::nextafter(4.0, 5.0);
+    REQUIRE(mod::flanger::type_id(Mode::through_zero, 4.0) !=
+            mod::flanger::type_id(Mode::through_zero, adjacent_offset));
+    REQUIRE(mod::flanger::make_flanger_node(Mode::through_zero, adjacent_offset).type_id ==
+            mod::flanger::type_id(Mode::through_zero, adjacent_offset));
+    REQUIRE(mod::flanger::type_id(Mode::through_zero, 1000.0) ==
+            mod::flanger::make_flanger_node(Mode::through_zero, 1000.0).type_id);
 
     for (const auto& row : classic.baked_params) {
         REQUIRE(row.id != mod::flanger::kMode);
