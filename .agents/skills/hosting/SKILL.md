@@ -1872,3 +1872,31 @@ voice: reset, render a hit, reset, render the same hit, require the two buffers
 equal. Run it with the voice's *noisiest* path at full level — a path that is
 silent in the test cannot carry stale filter state into the output, which is how
 a partial reset passes a determinism test that looks thorough.
+
+## A repeated designated initializer compiles on macOS and breaks Linux
+
+`ExecutorSnapshotBinders` and the other binder structs are filled with designated
+initializers, which makes them pleasant to extend and makes one mistake invisible
+locally: naming the same field twice.
+
+Clang accepts a repeated designator as an extension and silently keeps the LAST
+one. GCC rejects it — `error: '.field' designator used multiple times in the same
+initializer list`. So the whole macOS lane, including the required gate, stays
+green while every Linux build in the repository fails. On a merge queue that
+groups on all-green, that blocks PRs which never touched the host.
+
+It arrives through merges rather than through typing: a hunk that adds a binder
+gets applied to both sides of a merge and lands twice. `git diff` on the merge
+looks unremarkable because each copy is individually correct.
+
+When a binder initializer grows, or after resolving a merge that touched one,
+count the designators:
+
+```bash
+grep -c '\.custom_latency_for' core/host/src/signal_graph.cpp   # expect 1
+```
+
+If the duplicated bodies are identical, removing either is behaviour-preserving —
+clang was already using the last. If they differ, clang has been running the
+second and GCC has never compiled it at all, so decide which is correct before
+deleting.
