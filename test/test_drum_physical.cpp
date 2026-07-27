@@ -1270,6 +1270,20 @@ TEST_CASE("Rearming string FM cannot revive a dormant auxiliary tail",
     configure(fresh);
     fresh.set_modulation(StringModulation::fm);
     REQUIRE(rearmed == hit(fresh, 1.0f, 12000));
+
+    StringVoice reentered;
+    StringVoice stayed_dry;
+    configure(reentered);
+    configure(stayed_dry);
+    reentered.set_modulation(StringModulation::fm);
+    stayed_dry.set_modulation(StringModulation::fm);
+    REQUIRE(hit(reentered, 1.0f, 1000) ==
+            hit(stayed_dry, 1.0f, 1000));
+    reentered.set_modulation(StringModulation::none);
+    stayed_dry.set_modulation(StringModulation::none);
+    REQUIRE(render(reentered, 1000) == render(stayed_dry, 1000));
+    reentered.set_modulation(StringModulation::fm);
+    REQUIRE(render(reentered, 12000) == render(stayed_dry, 12000));
 }
 
 TEST_CASE("The string's lowpass gate darkens its release",

@@ -104,7 +104,8 @@ public:
     void set_modulation(StringModulation mode) {
         if (modulation_ == StringModulation::fm &&
             mode != StringModulation::fm) {
-            fm_string_.set_frequency(base_frequency_);
+            fm_string_.reset();
+            fm_path_active_ = false;
         }
         modulation_ = mode;
     }
