@@ -66,7 +66,7 @@
     { "id": "asset.referenced-media", "detect": "model", "summary": "Media referenced by locator, stored outside the document." },
 
     { "id": "sequence.multiple", "detect": "model", "summary": "More than one sequence in the document." },
-    { "id": "sequence.nested", "detect": "format", "summary": "A clip whose content is another sequence." },
+    { "id": "sequence.nested", "detect": "model", "summary": "A clip whose content is another sequence." },
 
     { "id": "content.registered", "detect": "model", "summary": "Typed extension clip content serialized through the schema registry." },
     { "id": "content.opaque", "detect": "model", "summary": "Uninterpreted clip content carried in a validated envelope." },

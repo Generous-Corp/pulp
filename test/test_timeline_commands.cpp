@@ -275,3 +275,67 @@ TEST_CASE("Asset commands include audio loop metadata in equality and retained s
     asset.loop_info.reset();
     REQUIRE_FALSE(equivalent(with_loop, Command{CreateAsset{asset}}));
 }
+
+TEST_CASE("Sequence commands include groove state in equality and retained size") {
+    auto first_groove = GrooveTemplate::create(
+        {.name = "first", .step = TickDuration{120}, .steps = {{TickDuration{10}, 1100}}});
+    auto second_groove = GrooveTemplate::create(
+        {.name = "second", .step = TickDuration{120}, .steps = {{TickDuration{-10}, 900}}});
+    REQUIRE(first_groove);
+    REQUIRE(second_groove);
+
+    auto first = Sequence::create(SequenceInput{.id = {50},
+                                                .name = "sequence",
+                                                .musical_duration = TickDuration{480},
+                                                .groove = std::move(first_groove).value()});
+    auto second = Sequence::create(SequenceInput{.id = {50},
+                                                 .name = "sequence",
+                                                 .musical_duration = TickDuration{480},
+                                                 .groove = std::move(second_groove).value()});
+    auto plain = Sequence::create(SequenceInput{
+        .id = {50}, .name = "sequence", .musical_duration = TickDuration{480}});
+    REQUIRE(first);
+    REQUIRE(second);
+    REQUIRE(plain);
+
+    const Command first_insert = InsertSequence{first.value()};
+    REQUIRE_FALSE(equivalent(first_insert, Command{InsertSequence{second.value()}}));
+    const auto dynamic_groove_size =
+        first->groove().name().size() + first->groove().steps().size() * sizeof(GrooveStep);
+    REQUIRE(retained_size(first_insert) >=
+            retained_size(Command{InsertSequence{plain.value()}}) + dynamic_groove_size);
+}
+
+TEST_CASE("Sequence command retained size includes derived outgoing references") {
+    auto reference_clips = [](bool distinct_targets) {
+        std::vector<Clip> clips;
+        for (std::uint64_t index = 0; index < 4; ++index) {
+            auto clip = Clip::create(
+                {100 + index},
+                TickPosition{static_cast<std::int64_t>(index * 120)},
+                TickDuration{120},
+                SequenceRef{{200 + (distinct_targets ? index : 0)}, TickPosition{0}});
+            REQUIRE(clip);
+            clips.push_back(std::move(clip).value());
+        }
+        return clips;
+    };
+
+    auto unique_track =
+        Track::create({60}, "references", reference_clips(true));
+    auto repeated_track =
+        Track::create({60}, "references", reference_clips(false));
+    REQUIRE(unique_track);
+    REQUIRE(repeated_track);
+    auto unique = Sequence::create(
+        {50}, "sequence", TickDuration{480}, {std::move(unique_track).value()});
+    auto repeated = Sequence::create(
+        {50}, "sequence", TickDuration{480}, {std::move(repeated_track).value()});
+    REQUIRE(unique);
+    REQUIRE(repeated);
+    REQUIRE(unique->outgoing_sequence_refs().size() == 4);
+    REQUIRE(repeated->outgoing_sequence_refs().size() == 1);
+    REQUIRE(retained_size(Command{InsertSequence{unique.value()}}) ==
+            retained_size(Command{InsertSequence{repeated.value()}}) +
+                3 * sizeof(ItemId));
+}

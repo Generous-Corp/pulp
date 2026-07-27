@@ -184,6 +184,10 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
     static constexpr ExpectedField notes_fields[] = {
         {"notes", SchemaValueKind::Array},
     };
+    static constexpr ExpectedField sequence_ref_fields[] = {
+        {"sequence_id", SchemaValueKind::U64String},
+        {"source_start", SchemaValueKind::I64String},
+    };
     constexpr RequiredSchema required[] = {
         {SchemaDomain::Document, project_schema_policy.type_name, project_fields,
          project_schema_policy.current_version, project_schema_policy.oldest_readable_version},
@@ -212,6 +216,7 @@ validate_structural_registry(const SchemaRegistry& registry) noexcept {
         {SchemaDomain::Content, "pulp.timeline.content.empty", {}},
         {SchemaDomain::Content, "pulp.timeline.content.media", media_fields},
         {SchemaDomain::Content, "pulp.timeline.content.notes", notes_fields},
+        {SchemaDomain::Content, "pulp.timeline.content.sequence_ref", sequence_ref_fields},
     };
     for (const auto& expected : required) {
         const auto* schema = registry.find(expected.domain, expected.type_name);

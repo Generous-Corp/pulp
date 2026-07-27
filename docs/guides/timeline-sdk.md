@@ -216,6 +216,43 @@ For native crash-consistent storage, call `FileJournal::open()` first. Use
 project beside the session independently; the journal sink is the durability
 boundary.
 
+### Reusing and diverging sequences
+
+A musical clip may contain `SequenceRef{sequence_id, source_start}` instead of
+notes or media. The clip places the referenced sequence's source window at the
+clip start; multiple clips can share one sequence. Project construction and
+command reduction reject missing targets, cycles, and nesting deeper than
+eight reference edges.
+
+Edits to a shared sequence intentionally affect every placement. Before a
+placement-specific edit, call `build_diverge_transaction()` with the reference
+clip's `ItemLocation` and two command IDs allocated from the session's
+`WriterToken`. It allocates a complete clone from `next_item_id` and returns one
+atomic `CloneSequence` plus `SetClipSequenceRef` transaction, so journal replay
+and undo reproduce the exact copy-on-edit boundary without synthesizing or
+reusing writer-scoped command IDs.
+
+`PlaybackProgramCompiler` expands supported child notes and audio away from the
+audio thread. Stage 1 fails closed when a child contains device processing,
+automation, takes, freeze/record state, absolute clips, or when a reference has
+gain/fades. A source window that cuts through a child audio fade also fails
+closed because Stage 1 has no envelope-offset representation. Set
+`ProgramCompileRequest::max_expanded_note_events` to bound note expansion and
+`ProgramCompileRequest::max_expanded_clips` to bound total clip materialization
+and reference traversal, including charges carried by reused track programs.
+`AudioRendererLimits::max_clips` remains the separate ceiling for compiled audio
+regions. When compiling incrementally, build and retain one snapshot-scoped
+`CompileInvalidationIndex` from the project, root sequence, and
+`CompileContextRegistry`, then pass each transaction dirty set through
+`resolve_dirty_tracks()`. The bundled index combines direct edits, transitive
+sequence dependencies, and nested context readers so every affected root track
+is rebuilt. Resolution compares an O(1) immutable Project structure token plus
+the root identity and registry generation; it fails closed to a full recompile
+when any of them is stale or mismatched. Rebuild the index after a relevant
+structural edit or registry declaration. Context lane contents, ordinary
+note/audio edits, freeze selection, and active-take selection preserve the
+structure token.
+
 `pulp seq apply`, `pulp seq explain`, and `pulp render` expose the same
 load/edit/compile/render path for headless workflows. Their source-tree
 CLI/MCP facade uses `pulp::tools::timeline::ProjectSource` to distinguish
@@ -223,6 +260,45 @@ inline JSON from native file paths; that tooling facade is not part of the
 installed SDK. Installed embedders should deserialize through
 `pulp::timeline`, compile through `pulp::playback`, and render through the
 public playback program APIs described above.
+
+## Preview and commit pure note transforms
+
+`NoteTransformRegistry` registers control-thread, pure note functions by
+`SchemaIdentity`. A function receives the clip's immutable note span, canonical
+parameter JSON, and an explicit seed, and returns a zero-to-many note array.
+Preparation requires an object parameter payload, parses it under the
+registry's 1 MiB bound, and canonicalizes it before invoking the function.
+Returning an input note's `ItemId` preserves that identity; returning an invalid
+ID asks the engine to allocate a fresh one. Foreign and duplicate output IDs,
+expected plus output note arrays exceeding the five-million-note durable-command
+quota, invalid notes, missing clips, and non-note clips fail closed.
+
+An `ApplyNoteTransform` is a typed preparation request, not a journal entry:
+
+```cpp
+auto preview = transforms.preview(
+    session->current(), writer,
+    pulp::timeline::ApplyNoteTransform{
+        .sequence_id = sequence_id,
+        .track_id = track_id,
+        .clip_id = clip_id,
+        .transform = {"example.note.octave_echo", 1},
+        .canonical_params_json = R"({"interval":12})",
+        .seed = 42,
+    });
+
+// Render or inspect preview.value().snapshot without changing the session.
+auto committed =
+    session->submit(writer, std::move(preview.value().transaction));
+```
+
+Preparation invokes extension code exactly once and lowers its result to an
+ordinary `ReplaceNoteContent` transaction. The preview snapshot is the result
+of reducing that exact transaction without publishing it. If another edit
+lands first, submission rejects the preview as stale; it never reruns the
+transform with a different input. The durable journal therefore contains only
+canonical expected/replacement note arrays, and undo/redo use ordinary inverse
+commands with the identity directory's tombstone rules.
 
 ## Scrubbing the playhead
 

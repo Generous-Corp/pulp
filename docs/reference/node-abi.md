@@ -272,8 +272,8 @@ rules:
 
 | Area | Helps a future C ABI | Complicates or blocks a future C ABI |
 |------|----------------------|---------------------------------------|
-| `SignalGraph` lifecycle | Graph editing and `prepare()` are UI-thread operations; `process()` runs on an immutable snapshot. | `CustomNodeType` has no independent create/prepare/release lifecycle yet. |
-| Custom node identity | `type_id` plus `version` are serialized, and unresolved custom nodes survive reload. | The current callback is metadata plus process only; parameter, MIDI, state, reset, and latency surfaces are not modeled. |
+| `SignalGraph` lifecycle | Graph editing and `prepare()` are UI-thread operations; `process()` runs on an immutable snapshot. Stateful custom-node lifecycle and fixed latency are captured before publication. | Runtime-changing latency is intentionally not modeled; it requires invalidation and re-prepare. |
+| Custom node identity | `type_id` plus `version` are serialized, and unresolved custom nodes survive reload. | Authors must bump the version when a persisted node's shape, state, or fixed-latency timing contract changes incompatibly. |
 | Processor/plugin boundary | `PluginSlot::process()` already separates audio-thread processing from UI-thread load/state/editor work. | `Processor` and `PluginSlot` are C++ virtual interfaces and must not be treated as binary-stable. |
 | Buffers/audio I/O | `BufferView` is a clear borrowed-buffer model. | `BufferView` is a C++ template type; a C ABI needs explicit pointer/count/channel structs. |
 | Params/events | `ParameterEventQueue` gives per-block event transport and sample offsets. | Custom nodes do not yet have a C-shaped param/event stream or capability query. |
@@ -352,6 +352,19 @@ process callback, then instantiate it with `add_custom_node(type_id)` or
 `add_custom_node(type_id, version)`. A callback is attached only when the
 registered `(type_id, version)` and port shape match the node; mismatched or
 unresolved nodes use placeholder passthrough behavior.
+
+Source-level custom types may append a fixed `latency_samples` declaration.
+Units are base-rate graph samples, regardless of internal oversampling. Both
+registrars reject negative values and values above
+`CustomNodeType::kMaxLatencySamples`; the graph captures the value at
+`prepare()`, uses it for PDC and host reporting only when a live callback is
+resolved, and carries it into a lowerable baked processor when the baked
+callback is resolved. Latency is prepare-stable metadata, not an audio-thread
+query. A transport-aware execution path with non-zero latency must also resolve
+a plain fallback because graph PDC cannot vary with per-block transport
+presence. Changing latency requires re-registration/re-prepare and should bump
+the custom type `version` whenever serialized graphs must distinguish the old
+timing contract.
 
 The node type enum only appends `NodeType::Custom`; built-in enum values stay
 stable. Serialized graphs store the custom `type_id` and `version`, and loads

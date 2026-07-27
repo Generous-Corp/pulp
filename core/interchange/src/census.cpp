@@ -26,6 +26,9 @@ void record_clip(ConceptCensus& out, const timeline::Clip& clip, const CensusLim
                 out.record(Concept::ContentRegistered, id, limits);
             },
             [&](const timeline::OpaqueContent&) { out.record(Concept::ContentOpaque, id, limits); },
+            [&](const timeline::SequenceRef&) {
+                out.record(Concept::SequenceNested, id, limits);
+            },
         },
         clip.content());
 

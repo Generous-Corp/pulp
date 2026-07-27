@@ -56,7 +56,7 @@ is not a reason to add a model feature.
 | `asset.embedded-media` | yes | Media bytes carried inside the document package. |
 | `asset.referenced-media` | yes | Media referenced by locator, stored outside the document. |
 | `sequence.multiple` | yes | More than one sequence in the document. |
-| `sequence.nested` | format-only | A clip whose content is another sequence. |
+| `sequence.nested` | yes | A clip whose content is another sequence. |
 | `content.registered` | yes | Typed extension clip content serialized through the schema registry. |
 | `content.opaque` | yes | Uninterpreted clip content carried in a validated envelope. |
 | `edit-rate.non-audio` | format-only | Positions at a rate that does not convert exactly to the document's rate. |

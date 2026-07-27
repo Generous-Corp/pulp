@@ -103,7 +103,7 @@ inline constexpr ConceptRecord kConceptRecords[kConceptCount] = {
     {"asset.embedded-media", "Media bytes carried inside the document package.", true},
     {"asset.referenced-media", "Media referenced by locator, stored outside the document.", true},
     {"sequence.multiple", "More than one sequence in the document.", true},
-    {"sequence.nested", "A clip whose content is another sequence.", false},
+    {"sequence.nested", "A clip whose content is another sequence.", true},
     {"content.registered", "Typed extension clip content serialized through the schema registry.", true},
     {"content.opaque", "Uninterpreted clip content carried in a validated envelope.", true},
     {"edit-rate.non-audio", "Positions at a rate that does not convert exactly to the document's rate.", false},

@@ -2,6 +2,7 @@
 
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/playback/audio_renderer.hpp>
+#include "sequence_preflight.hpp"
 #include <pulp/runtime/crypto.hpp>
 #include <pulp/runtime/url.hpp>
 #include <pulp/timeline/asset_path.hpp>
@@ -199,32 +200,27 @@ load_assets(const LoadedProject& project,
     return playback::DecodedAudioAssetPool::create(std::move(decoded));
 }
 
-std::unordered_set<std::uint64_t> reachable_assets(const pulp::timeline::Sequence& sequence) {
-    std::unordered_set<std::uint64_t> result;
-    for (const auto& track : sequence.tracks()) {
-        if (const auto& freeze = track.freeze()) {
-            result.insert(freeze->media.asset_id.value);
-            continue;
-        }
-        if (track.active_take_lane_id().valid()) {
-            const auto* lane = track.find_take_lane(track.active_take_lane_id());
-            if (!lane)
-                continue;
-            for (const auto& segment : lane->comp_segments()) {
-                const auto* take = lane->find_take(segment.take_id);
-                if (take)
-                    result.insert(take->media().asset_id.value);
-            }
-            continue;
-        }
-        for (const auto& clip : track.clips())
-            if (const auto* media = std::get_if<pulp::timeline::MediaRef>(&clip.content()))
-                result.insert(media->asset_id.value);
-    }
-    return result;
-}
-
 } // namespace
+
+runtime::Result<std::unordered_set<std::uint64_t>,
+                playback::CompileError>
+reachable_assets(
+    const pulp::timeline::Project& project,
+    const pulp::timeline::Sequence& root,
+    const timebase::CompiledTempoMap& tempo_map,
+    std::uint64_t max_expanded_note_events,
+    std::uint64_t max_expanded_clips) {
+    auto ids = playback::collect_reachable_asset_ids(
+        project, root, tempo_map, max_expanded_note_events,
+        max_expanded_clips);
+    if (!ids)
+        return runtime::Err(ids.error());
+    std::unordered_set<std::uint64_t> result;
+    result.reserve(ids->size());
+    for (const auto id : *ids)
+        result.insert(id.value);
+    return runtime::Ok(std::move(result));
+}
 
 runtime::Result<LoadedProject, pulp::timeline::PersistenceError>
 load_project(const ProjectSource& source, const pulp::timeline::SchemaRegistry& registry) {
@@ -283,7 +279,14 @@ compile_project(const LoadedProject& loaded, std::uint32_t sample_rate) {
         error.item = loaded.value.root_sequence_id();
         return runtime::Err(error);
     }
-    auto assets = load_assets(loaded, reachable_assets(*sequence));
+    const playback::AudioRendererLimits audio_limits;
+    auto reachable = reachable_assets(
+        loaded.value, *sequence, tempo.value(),
+        playback::ProgramCompileRequest{}.max_expanded_note_events,
+        audio_limits.max_clips);
+    if (!reachable)
+        return runtime::Err(reachable.error());
+    auto assets = load_assets(loaded, reachable.value());
     if (!assets) {
         playback::CompileError error;
         error.code = playback::CompileErrorCode::AudioProgramInvalid;
@@ -305,6 +308,7 @@ compile_project(const LoadedProject& loaded, std::uint32_t sample_rate) {
     request.document_revision = 1;
     request.dirty.all = true;
     request.audio_assets = std::move(assets).value();
+    request.audio_limits = audio_limits;
     auto submitted = compiler.submit(std::move(request));
     if (!submitted)
         return runtime::Err(submitted.error());

@@ -211,10 +211,7 @@ TEST_CASE("host-tempo audio decimation rejects aliases without muting the passba
     const auto assets = pool({{3, audio_data({source})}});
     CompiledFixture compiled(project, map, assets);
     auto program = compiled.store.read();
-    REQUIRE(program->find_track({10})
-                ->audio_program()
-                ->clips()[0]
-                .uses_host_rate_conversion());
+    REQUIRE(program->find_track({10})->audio_program()->clips()[0].uses_host_rate_conversion());
 
     auto render = [&](std::int64_t tick_end) {
         auto mapped = snapshot(*program, 100);
@@ -323,8 +320,10 @@ TEST_CASE("active take comp lowers to a derived artifact and renders exact selec
     auto project = project_with_tracks({track}, {{3, "takes", 32, {48'000, 1}}});
     CompiledFixture compiled(project, map_120(), pool({{3, audio_data({source})}}));
     auto program = compiled.store.read();
-    const auto regions = program->find_track({10})->audio_program()->clips();
-    REQUIRE(program->find_track({10})->ordered_clip_ids().empty());
+    const auto* compiled_track = program->find_track({10});
+    REQUIRE(compiled_track->expanded_clip_count() == 3);
+    const auto regions = compiled_track->audio_program()->clips();
+    REQUIRE(compiled_track->ordered_clip_ids().empty());
     REQUIRE(regions.size() == 3);
     REQUIRE(regions[0].source_kind == AudioClipRendererProgram::SourceKind::TakeCompSegment);
     REQUIRE(regions[0].source_ordinal == 1);
@@ -410,7 +409,9 @@ TEST_CASE("take comp compilation validates asset rate and whole program capacity
     request.audio_limits.max_clips = 2;
     REQUIRE(compiler.submit(std::move(request)));
     REQUIRE_FALSE(store.has_value());
+    REQUIRE(compiler.status().last_error.code == CompileErrorCode::AudioProgramInvalid);
     REQUIRE(compiler.status().last_error.audio_detail == AudioRendererErrorCode::CapacityExceeded);
+    REQUIRE(compiler.status().last_error.item == ItemId{30});
 }
 
 TEST_CASE("take comp boundary projection is exact beyond floating point integer precision") {

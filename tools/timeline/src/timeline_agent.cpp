@@ -2,7 +2,9 @@
 
 #include "timeline_agent_internal.hpp"
 
+#include <pulp/playback/production_class.hpp>
 #include <pulp/timeline/document_session.hpp>
+#include <pulp/timeline/production_mode.hpp>
 #include <pulp/timeline/schema_json.hpp>
 #include <pulp/timeline/schema_codegen.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -154,10 +156,15 @@ OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate)
     if (!program)
         return failure("explain", "compiled program was not published");
 
-    std::string json = "{\"generation\":\"" + std::to_string(program->generation()) +
-                       "\",\"ok\":true,\"project_id\":\"" +
-                       std::to_string(program->project_id().value) + "\",\"sequence_id\":\"" +
-                       std::to_string(program->sequence_id().value) + "\",\"tracks\":[";
+    // The weakest claim any track is entitled to make, so a caller reading only
+    // the top level never over-reads a render as bit-reproducible.
+    const auto program_class = pulp::playback::program_reproducibility(*program);
+    std::string json =
+        "{\"generation\":\"" + std::to_string(program->generation()) +
+        "\",\"ok\":true,\"project_id\":\"" + std::to_string(program->project_id().value) +
+        "\",\"reproducibility\":\"" +
+        std::string(pulp::timeline::reproducibility_class_name(program_class)) +
+        "\",\"sequence_id\":\"" + std::to_string(program->sequence_id().value) + "\",\"tracks\":[";
     bool first_track = true;
     for (const auto& track : program->tracks()) {
         if (!first_track)
@@ -177,7 +184,12 @@ OperationResult explain(const ProjectSource& project, std::uint32_t sample_rate)
         }
         json += "],\"note_events\":";
         json += std::to_string(track->arrangement_note_events().size());
-        json += ",\"pdc_offset_samples\":null,\"track_id\":\"";
+        const auto declaration = pulp::playback::track_production_declaration(*track);
+        json += ",\"pdc_offset_samples\":null,\"production_mode\":\"";
+        json += pulp::timeline::production_mode_name(declaration.mode);
+        json += "\",\"reproducibility\":\"";
+        json += pulp::timeline::reproducibility_class_name(declaration.reproducibility);
+        json += "\",\"track_id\":\"";
         json += std::to_string(track->id().value);
         json += "\"}";
     }

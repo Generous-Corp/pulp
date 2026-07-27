@@ -33,12 +33,15 @@ Project rich_project() {
         Clip::create({5}, {200}, {100}, take_value(NoteContent::create({{{8}, {20}, {10}, 0x8000, 64, 1}}))));
     auto media_clip = take_value(Clip::create({4}, {0}, {100}, MediaRef{{11}, {25}, 100},
                                               ClipPlaybackProperties{0.5f, 16, 32}));
+    auto nested_clip =
+        take_value(Clip::create({13}, {400}, {100}, SequenceRef{{7}, {0}}));
     auto absolute = take_value(
         Clip::create_absolute({9}, {0}, 480, {48'000, 1}, MediaRef{{12}, {0}, 480}));
 
     // A track anchors all of its clips the same way, so the sample-anchored
     // clip needs its own.
-    auto musical_track = take_value(Track::create({6}, "musical", {note_clip, media_clip}));
+    auto musical_track =
+        take_value(Track::create({6}, "musical", {note_clip, media_clip, nested_clip}));
     auto absolute_track = take_value(Track::create({10}, "absolute", {absolute}));
     auto lane = take_value(ChordScaleLane::create({}));
     auto sequence = take_value(Sequence::create(SequenceInput{
@@ -47,7 +50,7 @@ Project rich_project() {
         .musical_duration = TickDuration{4'000},
         .tracks = {musical_track, absolute_track},
         .chord_scale_lane = std::move(lane),
-        .scenes = {Scene{{13}, "launcher", {Slot{{14}, {4}, launch_immediate(), {}}}}},
+        .scenes = {Scene{{16}, "launcher", {Slot{{17}, {4}, launch_immediate(), {}}}}},
     }));
     auto other = take_value(Sequence::create({7}, "other", TickDuration{100}, {}));
 
@@ -72,10 +75,11 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
     const std::vector<Concept> present = counted.present();
 
     SECTION("clip anchors, content, gain, and fades are each observed separately") {
-        REQUIRE(counted.count(Concept::ClipMusical) == 2);
+        REQUIRE(counted.count(Concept::ClipMusical) == 3);
         REQUIRE(counted.count(Concept::ClipAbsolute) == 1);
         REQUIRE(counted.count(Concept::ClipNote) == 1);
         REQUIRE(counted.count(Concept::ClipMedia) == 2);
+        REQUIRE(counted.count(Concept::SequenceNested) == 1);
         REQUIRE(counted.count(Concept::ClipGain) == 1);
         REQUIRE(counted.count(Concept::ClipFades) == 1);
     }
@@ -125,7 +129,7 @@ TEST_CASE("a census records what a document uses, and only that", "[interchange]
         REQUIRE(owners[0] == ItemId{4});
         const auto launch_owners = counted.owners(Concept::ClipLaunch);
         REQUIRE(launch_owners.size() == 1);
-        REQUIRE(launch_owners[0] == ItemId{13});
+        REQUIRE(launch_owners[0] == ItemId{16});
     }
 }
 

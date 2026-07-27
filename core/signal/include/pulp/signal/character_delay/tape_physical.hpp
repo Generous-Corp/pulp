@@ -106,7 +106,6 @@ class TapePhysicalChannel {
 public:
     void prepare(double fs) {
         sample_rate_ = fs;
-        solver_rate_ = fs * 4.0;  // the oversampler's factor
 
         const double emphasis_gain = std::pow(10.0, kTapeEmphasisDb / 20.0);
         record_eq_.set(kTapeEmphasisHz, emphasis_gain, fs);
@@ -114,8 +113,7 @@ public:
         dc_blocker_.set_cutoff(kTapeDcBlockHz, fs);
         hiss_filter_.set_cutoff(kHissLpHz, fs);
 
-        oversampler_.prepare();
-        hysteresis_.prepare(solver_rate_);
+        hysteresis_.prepare(fs);
         chew_.prepare(fs);
 
         design_.prepare(fs, speed_ips_);
@@ -139,7 +137,6 @@ public:
         hiss_filter_.reset();
         degrade_filter_.reset();
         head_bump_.reset();
-        oversampler_.reset();
         hysteresis_.reset();
         chew_.reset();
         active_.reset();
@@ -185,7 +182,6 @@ public:
 
     double speed_ips() const noexcept { return speed_ips_; }
     const std::vector<double>& gap_coefficients() const noexcept { return design_.gap_taps(); }
-    TapeLossIirParams loss_parameters() const noexcept { return active_.parameters(); }
 
     /// Control-rate update. In this tier `character_amount` IS the age axis.
     void update(double age) noexcept {
@@ -222,8 +218,7 @@ public:
     /// Record EQ → oversampled hysteresis → makeup → playback EQ.
     double pre_process(double x) noexcept {
         const double emphasized = record_eq_.process(x);
-        const double magnetized = oversampler_.process(
-            emphasized, [this](double sample) { return hysteresis_.process(sample); });
+        const double magnetized = hysteresis_.process(emphasized);
         return playback_eq_.process(magnetized * makeup_);
     }
 
@@ -253,7 +248,7 @@ public:
 
     /// Group delay the oversampling wrap adds inside the loop, in host samples.
     static int oversampler_latency_samples() noexcept {
-        return HalfBandOversampler4x::latency_samples();
+        return OversampledHysteresis8x::latency_samples();
     }
 
     /// Total in-loop delay this tier contributes ahead of the delay line's
@@ -266,8 +261,6 @@ public:
                active_.dc_group_delay_seconds() * sample_rate_;
     }
 
-    const JilesAthertonHysteresis& hysteresis() const noexcept { return hysteresis_; }
-    JilesAthertonHysteresis& hysteresis() noexcept { return hysteresis_; }
     std::size_t chew_state_index() const noexcept { return chew_.state_index(); }
 
 private:
@@ -286,14 +279,14 @@ private:
             const double drive = interpolate_knots(kTapeAxis, kTapeDrive, age);
             const double bias = interpolate_knots(kTapeAxis, kTapeBias, age);
 
-            JilesAthertonHysteresis probe;
-            probe.prepare(solver_rate_);
+            OversampledHysteresis8x probe;
+            probe.prepare(sample_rate_);
             probe.set_character(drive, bias);
 
             constexpr double kProbeAmplitude = 0.02;
             constexpr double kProbeHz = 1000.0;
             const auto period_samples =
-                static_cast<int>(std::llround(solver_rate_ / kProbeHz));
+                static_cast<int>(std::llround(sample_rate_ / kProbeHz));
             double input_energy = 0.0;
             double output_energy = 0.0;
             for (int n = 0; n < period_samples * 8; ++n) {
@@ -327,8 +320,7 @@ private:
     OnePole hiss_filter_;
     OnePole degrade_filter_;
     Svf2 head_bump_;
-    HalfBandOversampler4x oversampler_;
-    JilesAthertonHysteresis hysteresis_;
+    OversampledHysteresis8x hysteresis_;
     TapeChew chew_;
     TapeLossDesign design_;
     TapeLossDesign previous_design_;
@@ -340,7 +332,6 @@ private:
     std::array<double, kMakeupKnots> makeup_table_{};
 
     double sample_rate_ = 48000.0;
-    double solver_rate_ = 192000.0;
     double speed_ips_ = 7.5;
     double age_ = 0.0;
     double makeup_ = 1.0;

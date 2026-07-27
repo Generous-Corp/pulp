@@ -89,8 +89,9 @@ public:
         // both published models. The pre-filter runs at the host rate (it
         // band-limits before the clocked write); the post-filter runs at the
         // internal oversampled rate, where it smooths the stepped read-out.
-        pre_lowpass_.set_lowpass(bandwidth_hz_, 0.70710678, sample_rate_);
-        post_lowpass_.set_lowpass(bandwidth_hz_, 0.70710678, oversampled_rate_);
+        const double filter_cutoff = bandwidth_hz_ * kBbdFilterCutoffScale;
+        pre_lowpass_.set_lowpass(filter_cutoff, 0.70710678, sample_rate_);
+        post_lowpass_.set_lowpass(filter_cutoff, 0.70710678, oversampled_rate_);
 
         const double effective_drive = drive_ * kBbdCompanderDriveScale;
         shaper_gain_ = 1.0 + effective_drive * kBbdDriveGainSpan;

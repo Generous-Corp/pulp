@@ -17,6 +17,8 @@
 // γ-Fe2O3 material constants, Dattorro's published diffuser network) and moving
 // them would make the model wrong rather than differently tuned.
 
+#include <pulp/signal/oversampling_fir.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -119,11 +121,13 @@ inline constexpr std::array<double, 4> kTapeFlutterDepthMs = {0.0, 0.05, 0.15, 0
 inline constexpr std::array<double, 4> kTapeLossLpHz = {12000.0, 9000.0, 6000.0, 3500.0};
 inline constexpr std::array<double, 4> kTapeBumpDb = {1.5, 2.0, 3.0, 4.0};
 
-/// Inverse linear gains for kTapeBumpDb. The physical tier applies these in
-/// the feedback path through unity, then releases the compensation across the
-/// explicit 1.0–1.1 over-unity range so maximum feedback still oscillates.
-inline constexpr std::array<double, 4> kTapeBumpFeedbackCompensation = {
-    0.8413951416, 0.7943282347, 0.7079457844, 0.6309573445};
+/// Physical-loop compensation at each age knot. This combines the inverse
+/// head-bump gain with the measured 4/9 stability margin required by the exact
+/// 8x oversampled hysteresis path. The engine applies it through unity, then
+/// releases it across the explicit 1.0–1.1 over-unity range so maximum
+/// feedback still self-oscillates deliberately.
+inline constexpr std::array<double, 4> kTapePhysicalFeedbackCompensation = {
+    0.3739533963, 0.3530347705, 0.3146425708, 0.2804254864};
 
 /// Record/playback EQ bracketing the saturator: boost HF into saturation, cut
 /// it after, so the saturator works the highs harder than the lows. The pair
@@ -184,6 +188,11 @@ inline constexpr int kBbdOversample = 16;
 inline constexpr double kBbdBandwidthDivisor = 3.0;
 inline constexpr double kBbdBandwidthMinHz = 300.0;
 inline constexpr double kBbdBandwidthMaxHz = 10000.0;
+/// The clock law names the complete wet path's audible -3 dB edge. Two
+/// cascaded filters plus the clocked hold place that edge below either
+/// filter's coefficient cutoff, so calibrate the implementation cutoff upward
+/// while leaving `bandwidth_hz()` as the externally meaningful target.
+inline constexpr double kBbdFilterCutoffScale = 2.1;
 
 /// Compander: hardware τ is set by an external capacitor, so real units vary.
 /// [1–20 ms]. The floor is a divide-by-near-zero guard, not a tuned value.
@@ -291,8 +300,8 @@ inline constexpr double kJaSilenceThreshold = 1e-7;
 /// "good across the range" finding; ≥8× shows diminishing returns. 65 taps at
 /// Kaiser β ≈ 8 is the house half-band design — the stopband figure below is
 /// the β = 8 point of the standard Kaiser formula, not an independent choice.
-inline constexpr std::size_t kHysteresisHalfBandTaps = 65;
-inline constexpr double kHysteresisHalfBandStopbandDb = 81.3;  // → β ≈ 8
+inline constexpr std::size_t kHysteresisHalfBandTaps = kHouseHalfBandTaps;
+inline constexpr double kHysteresisHalfBandStopbandDb = kHouseHalfBandStopbandDb;
 
 /// Makeup-gain tolerance around unity small-signal gain, in dB.
 inline constexpr double kJaMakeupToleranceDb = 1.0;

@@ -55,33 +55,56 @@
 
 namespace pulp::signal {
 
+/// Measured panel voicings backed by a four-pole nonlinear OTA cascade.
+///
+/// The default state is a Juno voicing at 44.1 kHz and 2x oversampling, with
+/// cutoff 0.5 (262 Hz requested corner), zero resonance, zero dB drive, and no
+/// coefficient smoothing. Processing and configuration use fixed storage and
+/// allocate no memory. Configuration methods that clear DSP history say so
+/// explicitly below.
+/// @tparam SampleType Floating-point sample scalar; normally float or double.
 template <typename SampleType = float>
 class AnalogVcfT {
 public:
+    /// Selects the complete measured cutoff, resonance, headroom, compensation,
+    /// saturation, cross-modulation, makeup, and drift law.
     enum class Voicing {
+        /// Roland Juno-style IR3109 voicing; the default.
         juno,
+        /// Roland Jupiter-8-style IR3109 voicing.
         jupiter,
+        /// Sequential Prophet-5-style SSM/CEM voicing.
         prophet5,
+        /// Minimoog-style transistor-ladder voicing.
         minimoog,
     };
 
+    /// Constructs the default configuration and clears all DSP history.
     AnalogVcfT() noexcept {
         update_voicing();
         engine_.reset();
     }
 
+    /// Sets the base sample rate in Hz, with values below 64 Hz clamped to 64.
+    /// Reapplies the active voicing and clears filter, oversampler, and drift
+    /// history, even when the supplied rate equals the current rate.
     void set_sample_rate(double sample_rate) noexcept {
         engine_.set_sample_rate(sample_rate);
         update_voicing();
         engine_.reset();
     }
 
+    /// Sets the oversampling factor to 1, 2, 4, 8, or 16.
+    /// Invalid factors select 2x through the underlying engine. Every call
+    /// reapplies the active voicing and clears DSP history.
     void set_oversampling(int factor) noexcept {
         engine_.set_oversampling(factor);
         update_voicing();
         engine_.reset();
     }
 
+    /// Selects a measured voicing and clears DSP history when it changes.
+    /// Passing the active voicing is a no-op.
     void set_voicing(Voicing voicing) noexcept {
         if (voicing_ == voicing) return;
         voicing_ = voicing;
@@ -89,6 +112,10 @@ public:
         engine_.reset();
     }
 
+    /// Sets panel cutoff and modulation without clearing DSP history.
+    /// @param knob01 Panel position, clamped to [0, 1].
+    /// @param modulation_octaves Pitch-domain offset in octaves, clamped to
+    ///        [-16, 16]; defaults to zero.
     void set_cutoff(SampleType knob01, SampleType modulation_octaves = 0) noexcept {
         const double cutoff = std::clamp(static_cast<double>(knob01), 0.0, 1.0);
         const double modulation =
@@ -100,6 +127,8 @@ public:
         update_voicing();
     }
 
+    /// Sets the panel resonance position, clamped to [0, 1].
+    /// The measured voicing law is updated without clearing DSP history.
     void set_resonance(SampleType knob01) noexcept {
         const double resonance = std::clamp(static_cast<double>(knob01), 0.0, 1.0);
         if (resonance_knob_ == resonance) return;
@@ -107,6 +136,8 @@ public:
         update_voicing();
     }
 
+    /// Sets input drive in dB; the underlying engine clamps it to [-96, 72] dB.
+    /// This updates the smoothed target without clearing DSP history.
     void set_drive_db(SampleType drive_db) noexcept {
         const double drive = static_cast<double>(drive_db);
         if (drive_db_ == drive) return;
@@ -114,9 +145,15 @@ public:
         engine_.set_drive_db(drive_db_);
     }
 
-    // Host adapters commonly receive all four sample-accurate controls
-    // together. Updating them as one transaction avoids evaluating the
-    // calibration laws once for cutoff and again for resonance every sample.
+    /// Updates all sample-accurate controls as one transaction.
+    /// @param cutoff_knob01 Panel cutoff, clamped to [0, 1].
+    /// @param modulation_octaves Cutoff offset in octaves, clamped to [-16, 16].
+    /// @param resonance_knob01 Panel resonance, clamped to [0, 1].
+    /// @param drive_db Input drive in dB, clamped by the engine to [-96, 72].
+    ///
+    /// This is equivalent to the individual setters but avoids evaluating the
+    /// measured laws twice when cutoff and resonance arrive together. It does
+    /// not clear DSP history.
     void set_parameters(SampleType cutoff_knob01, SampleType modulation_octaves,
                         SampleType resonance_knob01, SampleType drive_db) noexcept {
         const double cutoff =
@@ -146,42 +183,60 @@ public:
             engine_.set_drive_db(drive_db_);
     }
 
+    /// Sets coefficient smoothing time in milliseconds.
+    /// Negative values select zero, so targets are reached on the next processed
+    /// sample. This does not clear DSP history.
     void set_smoothing_time_ms(double milliseconds) noexcept {
         engine_.set_smoothing_time_ms(milliseconds);
     }
 
+    /// Processes one base-rate sample and advances filter, oversampling,
+    /// smoothing, and deterministic drift state.
     SampleType process(SampleType input) noexcept {
         return engine_.process(input);
     }
 
+    /// Processes @p num_samples in place at the base sample rate.
+    /// A null @p buffer or non-positive count is a no-op.
     void process(SampleType* buffer, int num_samples) noexcept {
         engine_.process(buffer, num_samples);
     }
 
+    /// Clears filter and oversampler history, restores deterministic drift
+    /// state, and snaps smoothed values to their current targets.
+    /// Control settings, voicing, sample rate, and oversampling are preserved.
     void reset() noexcept {
         engine_.reset();
     }
 
+    /// Returns the current fixed oversampling delay in base-rate samples.
     int latency_samples() const noexcept {
         return engine_.latency_samples();
     }
 
-    // The -3 dB corner the voicing table asks for, in Hz. This is the
-    // *requested* corner, not necessarily the realised one: the engine clamps
-    // the derived pole to [20 Hz, 0.45 * fs], so near the top of the knob at
-    // low sample rates the audible corner sits below this value. Callers
-    // computing an expected ring or drawing a response curve should treat it
-    // as the panel's intent; anything that must match the audio needs a
-    // measured corner instead.
+    /// Returns fixed base-rate latency for an oversampling factor.
+    /// The mapping is 1x/2x/4x/8x/16x to 0/32/48/56/60 samples. Returns -1 for
+    /// any invalid factor; unlike set_oversampling(), this does not apply the
+    /// invalid-factor fallback.
+    static constexpr int latency_samples_for_oversampling(int factor) noexcept {
+        return OtaCascadeFilterT<SampleType>::latency_samples_for_oversampling(factor);
+    }
+
+    /// Returns the table-derived requested corner in Hz.
+    /// This is panel intent, not necessarily the realized -3 dB corner: the
+    /// derived engine pole is clamped to [20 Hz, 0.45 * sample_rate]. Code that
+    /// must match rendered audio should measure the realized response.
     double cutoff_hz() const noexcept {
         return corner_hz_;
     }
 
-    // Translate the panel-domain cutoff control into the same requested Hz
-    // value used by the processor. Hosts can use this for a truthful readout
-    // without constructing a processor or duplicating the measured tables.
-    // Modulation is included because it is part of the requested corner, but
-    // callers displaying the cutoff knob normally leave it at zero.
+    /// Converts panel cutoff to the requested corner in Hz without an instance.
+    /// @param voicing Measured cutoff table to use.
+    /// @param knob01 Panel position, clamped to [0, 1].
+    /// @param modulation_octaves Pitch-domain offset in octaves, clamped to
+    ///        [-16, 16]; defaults to zero.
+    /// @return The requested, sample-rate-independent corner in Hz. Engine pole
+    ///         clamping is intentionally not represented.
     static double requested_cutoff_hz_for(Voicing voicing, double knob01,
                                           double modulation_octaves = 0.0) noexcept {
         const double cutoff = std::clamp(knob01, 0.0, 1.0);
@@ -190,10 +245,12 @@ public:
                std::exp2(modulation);
     }
 
+    /// Returns the active oversampling factor: 1, 2, 4, 8, or 16.
     int oversampling() const noexcept {
         return engine_.oversampling();
     }
 
+    /// Returns the active measured voicing.
     Voicing voicing() const noexcept {
         return voicing_;
     }
@@ -427,7 +484,9 @@ private:
     double corner_hz_ = 262.0;
 };
 
+/// Single-precision measured analog VCF.
 using AnalogVcf = AnalogVcfT<float>;
+/// Double-precision measured analog VCF.
 using AnalogVcf64 = AnalogVcfT<double>;
 
 }  // namespace pulp::signal

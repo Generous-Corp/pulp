@@ -49,10 +49,28 @@ constexpr std::array release_v0_748_0{
     Target{Domain::Content, "pulp.timeline.content.notes", 1},
 };
 
+constexpr std::array release_v0_750_0{
+    Target{Domain::Document, "pulp.timeline.project", 1},
+    Target{Domain::Document, "pulp.timeline.asset", 1},
+    Target{Domain::AssetRepresentation, "pulp.timeline.asset_representation", 1},
+    Target{Domain::Document, "pulp.timeline.sequence", 1},
+    Target{Domain::Document, "pulp.timeline.track", 4},
+    Target{Domain::Document, "pulp.timeline.automation_lane", 1},
+    Target{Domain::Document, "pulp.timeline.automation_target.device_parameter", 1},
+    Target{Domain::Document, "pulp.timeline.device_placement", 1},
+    Target{Domain::Document, "pulp.timeline.clip", 1},
+    Target{Domain::Document, "pulp.timeline.take", 1},
+    Target{Domain::Document, "pulp.timeline.take_lane", 1},
+    Target{Domain::Content, "pulp.timeline.content.empty", 1},
+    Target{Domain::Content, "pulp.timeline.content.media", 1},
+    Target{Domain::Content, "pulp.timeline.content.notes", 1},
+};
+
 constexpr std::array releases{
     SchemaReleaseMap{"v0.736.0", release_v0_736_0},
     SchemaReleaseMap{"v0.744.0", release_v0_744_0},
     SchemaReleaseMap{"v0.748.0", release_v0_748_0},
+    SchemaReleaseMap{"v0.750.0", release_v0_750_0},
 };
 
 } // namespace

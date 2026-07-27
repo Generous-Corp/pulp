@@ -128,8 +128,9 @@ void render_track(const AudioTrackRendererProgram& track, const TransportRange& 
             for (std::size_t frame = 0; frame < count; ++frame) {
                 const auto relative = relative_start + frame;
                 const auto source_position =
+                    static_cast<long double>(clip->source_frame_offset) +
                     static_cast<long double>(relative) *
-                    static_cast<long double>(clip->source_frames_per_timeline_frame);
+                        static_cast<long double>(clip->source_frames_per_timeline_frame);
                 const auto source_offset = std::min(static_cast<std::uint64_t>(source_position),
                                                     clip->source_frame_count - 1u);
                 const auto source_frame = clip->source_start + source_offset;
@@ -193,6 +194,7 @@ void render_host_beat_mapped_track(const AudioTrackRendererProgram& track,
                 relative >= static_cast<long double>(clip->renderable_timeline_frames))
                 continue;
             const auto source_position =
+                static_cast<long double>(clip->source_frame_offset) +
                 relative * static_cast<long double>(clip->source_frames_per_timeline_frame);
             const auto next_document_position =
                 host_mapped_document_sample_at_output_offset(range, tempo_map, output_frame + 1u);

@@ -72,6 +72,16 @@ public:
         update();
     }
 
+    /// Uses the delay line's continuously interpolated reader for audio-rate
+    /// pitch modulation. Decay and damping remain tied to the static frequency;
+    /// returning to `set_frequency()` restores the lossless allpass path.
+    void set_modulated_frequency(double hz) {
+        const double frequency =
+            std::clamp(hz, 20.0, 0.25 * sample_rate_);
+        modulated_loop_length_ = sample_rate_ / frequency;
+        modulated_ = true;
+    }
+
     /// Time for the note to fall by 60 dB, in seconds.
     void set_decay_seconds(double seconds) {
         decay_seconds_ = std::max(seconds, 0.01);
@@ -144,6 +154,7 @@ public:
     }
 
     bool is_active() const { return active_; }
+    double level() const { return level_; }
 
     /// Advances one sample. `excitation` is the burst being injected; feed it
     /// noise for a pluck, silence once the burst is over.
@@ -175,15 +186,24 @@ public:
         }
         shaped = dynamic_.process_lowpass(shaped);
 
-        SampleType y = loop_.read(static_cast<SampleType>(integer_delay_));
+        SampleType y = modulated_
+                           ? loop_.read(
+                                 static_cast<SampleType>(modulated_loop_length_))
+                           : loop_.read(
+                                 static_cast<SampleType>(integer_delay_));
         y = damping_.process_lowpass(y);
 
-        // First-order allpass carrying the fractional part of the loop length.
-        // Unity magnitude, so unlike an interpolator it costs the decay nothing.
-        const SampleType out = static_cast<SampleType>(tuning_coefficient_) * y +
-                               tuning_state_;
-        tuning_state_ = y - static_cast<SampleType>(tuning_coefficient_) * out;
-        y = out;
+        if (!modulated_) {
+            // First-order allpass carrying the fractional part of the static
+            // loop length. The variable-delay FM reader above is interpolated
+            // instead so crossing an integer tap cannot zipper.
+            const SampleType out =
+                static_cast<SampleType>(tuning_coefficient_) * y +
+                tuning_state_;
+            tuning_state_ =
+                y - static_cast<SampleType>(tuning_coefficient_) * out;
+            y = out;
+        }
 
         // First-order allpass: delays low frequencies more than high ones, so
         // the partials stretch sharp.
@@ -205,22 +225,9 @@ public:
 
 private:
     void update() {
-        loop_length_ = sample_rate_ / frequency_;
+        modulated_ = false;
+        update_tuning(frequency_);
 
-        // Split the loop into an integer delay plus an allpass whose delay sits
-        // in [0.1, 1.1) samples. Keeping it off zero is deliberate: at zero the
-        // allpass's pole and zero cancel on the unit circle and its delay is no
-        // longer continuous in the coefficient.
-        constexpr double kMinFractional = 0.1;
-        double fractional = loop_length_ - std::floor(loop_length_);
-        integer_delay_ = std::floor(loop_length_);
-        if (fractional < kMinFractional) {
-            fractional += 1.0;
-            integer_delay_ -= 1.0;
-        }
-        integer_delay_ = std::max(integer_delay_, 1.0);
-        // Delay d of a first-order allpass with coefficient c is (1-c)/(1+c).
-        tuning_coefficient_ = (1.0 - fractional) / (1.0 + fractional);
         // The loop runs f0 times a second, so reaching -60 dB after
         // `decay_seconds` means losing 3/(f0 * decay) decades per trip. Deriving
         // it this way is what makes a high note decay faster than a low one at
@@ -256,6 +263,25 @@ private:
         loop_gain_ = std::min(loop_gain_ * std::sqrt(1.0 + ratio * ratio), 0.9999);
     }
 
+    void update_tuning(double frequency) {
+        loop_length_ = sample_rate_ / frequency;
+
+        // Split the loop into an integer delay plus an allpass whose delay sits
+        // in [0.1, 1.1) samples. Keeping it off zero is deliberate: at zero the
+        // allpass's pole and zero cancel on the unit circle and its delay is no
+        // longer continuous in the coefficient.
+        constexpr double kMinFractional = 0.1;
+        double fractional = loop_length_ - std::floor(loop_length_);
+        integer_delay_ = std::floor(loop_length_);
+        if (fractional < kMinFractional) {
+            fractional += 1.0;
+            integer_delay_ -= 1.0;
+        }
+        integer_delay_ = std::max(integer_delay_, 1.0);
+        // Delay d of a first-order allpass with coefficient c is (1-c)/(1+c).
+        tuning_coefficient_ = (1.0 - fractional) / (1.0 + fractional);
+    }
+
     DelayLineT<SampleType> loop_;
     DelayLineT<SampleType> excitation_;
     TptFilterT<SampleType> damping_;
@@ -269,11 +295,13 @@ private:
     double pluck_position_ = 0.25;
 
     double loop_length_ = 200.0;
+    double modulated_loop_length_ = 200.0;
     double integer_delay_ = 200.0;
     double tuning_coefficient_ = 0.0;
     double loop_gain_ = 0.99;
     double dynamic_hz_ = 12000.0;
     double pick_direction_ = 0.0;
+    bool modulated_ = false;
     SampleType pick_state_ = 0;
     SampleType tuning_state_ = 0;
     SampleType stiffness_state_ = 0;

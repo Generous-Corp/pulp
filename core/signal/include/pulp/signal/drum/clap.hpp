@@ -6,6 +6,7 @@
 #include <pulp/signal/svf.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 
@@ -29,10 +30,11 @@ namespace pulp::signal::drum {
 /// The schedule is computed at `note_on` and is deterministic, so a clap
 /// renders identically for a given parameter set.
 ///
-/// This voice is mono. The alternating left-right placement some hardware
-/// claps use is width gloss rather than part of the clap's identity -- the
-/// burst timing and the tail fusion are what make it a clap, and both survive
-/// a mono sum -- so panning belongs to whatever places the voice.
+/// `process()` is the canonical mono realization. `process_stereo()` places
+/// successive bursts on alternating sides while keeping the tail and optional
+/// body in the centre. The two stereo channels sum to the canonical mono
+/// signal sample for sample, so a host can collapse the result without a level
+/// or timbre change.
 ///
 /// What a mono sum does cost is decorrelation. Identically spaced, identically
 /// signed bursts are coherent with each other, so summing them combs: the train
@@ -82,6 +84,12 @@ public:
     /// other's comb even at exactly even spacing.
     void set_alternate_polarity(bool alternate) { alternate_polarity_ = alternate; }
 
+    /// Alternating burst width, 0 for mono through 1 for hard left/right. The
+    /// room tail and optional tonal body remain centred at every setting.
+    void set_stereo_width(double width) {
+        stereo_width_ = std::clamp(width, 0.0, 1.0);
+    }
+
     /// Level and decay of the tail that fuses the train.
     void set_tail_level(double level) { tail_level_ = std::max(level, 0.0); }
     void set_tail_decay_ms(double ms) { tail_decay_ms_ = std::clamp(ms, 10.0, 3000.0); }
@@ -101,6 +109,17 @@ public:
     void set_body_hz(double hz) { body_hz_ = std::clamp(hz, 40.0, 2000.0); }
 
     OutputStage& output() { return output_; }
+    const OutputStage& output() const { return output_; }
+    OutputStage* output_stage() noexcept override { return &output_; }
+    int latency_samples() const noexcept override {
+        return output_.latency_samples();
+    }
+    OutputOversampling output_oversampling() const noexcept override {
+        return output_.oversampling();
+    }
+    void set_output_oversampling(OutputOversampling factor) override {
+        output_.set_oversampling(factor);
+    }
 
 protected:
     void on_prepare(double sample_rate) override {
@@ -110,6 +129,7 @@ protected:
         filter_.set_sample_rate(static_cast<float>(sample_rate));
         filter_.set_mode(Svf::Mode::bandpass);
         output_.prepare(sample_rate);
+        burst_output_.prepare(sample_rate);
     }
 
     void on_reset() override {
@@ -117,16 +137,27 @@ protected:
         tail_env_.reset();
         filter_.reset();
         output_.reset();
+        burst_output_.reset();
+        stereo_path_active_ = false;
         noise_.reset();
         body_phase_ = 0.0;
         next_burst_ = 0;
         samples_until_burst_ = 0;
         burst_gain_ = 1.0;
         burst_sign_ = 1.0;
+        burst_pan_ = -1.0;
+        reset_pan_delay();
         jitter_state_ = kJitterSeed;
     }
 
     void on_note_on(float velocity) override {
+        output_.reset_nonlinear_state();
+        output_.trigger();
+        if (stereo_path_active_) {
+            burst_output_.sync_configuration_from(output_);
+            burst_output_.reset_nonlinear_state();
+            burst_output_.trigger();
+        }
         const auto& response = velocity_response();
         velocity_gain_ = response.gain(velocity);
         brightness_ = response.brightness_scale(velocity);
@@ -155,6 +186,7 @@ protected:
         // from the same instant so it is already present under burst one.
         burst_gain_ = 1.0;
         burst_sign_ = 1.0;
+        burst_pan_ = -1.0;
         jitter_state_ = kJitterSeed;
         burst_env_.trigger();
         tail_env_.trigger();
@@ -163,41 +195,105 @@ protected:
     }
 
     bool on_is_active() const override {
-        return burst_env_.is_active() || tail_env_.is_active() || next_burst_ < burst_count_;
+        return burst_env_.is_active() || tail_env_.is_active() ||
+               next_burst_ < burst_count_ || output_.has_tail();
     }
 
     void render_add(float* out, int num_samples) override {
+        // A later switch back to stereo must start from fresh side-path state;
+        // the optional processor is deliberately not advanced by mono blocks.
+        stereo_path_active_ = false;
         for (int i = 0; i < num_samples; ++i) {
-            if (next_burst_ < burst_count_) {
-                if (--samples_until_burst_ <= 0) {
-                    burst_gain_ *= falloff_;
-                    if (alternate_polarity_) burst_sign_ = -burst_sign_;
-                    burst_env_.trigger();
-                    ++next_burst_;
-                    samples_until_burst_ = next_gap();
-                }
-            }
+            out[i] += render_frame(false).mono;
+        }
+    }
 
-            const double filtered = filter_.process(noise_.process());
-            const double train =
-                filtered * burst_env_.process() * burst_gain_ * burst_sign_;
-            const double tail_env = tail_env_.process();
-            const double room = filtered * tail_env * tail_level_;
-
-            double body = 0.0;
-            if (body_level_ > 0.0) {
-                body_phase_ += body_hz_ / sample_rate();
-                if (body_phase_ >= 1.0) body_phase_ -= std::floor(body_phase_);
-                body = std::sin(2.0 * 3.14159265358979323846 * body_phase_) * tail_env *
-                       body_level_;
-            }
-
-            out[i] += static_cast<float>(
-                output_.process(static_cast<float>(train + room + body)) * velocity_gain_);
+    void render_add_stereo(float* left, float* right,
+                           int num_samples) override {
+        const bool quality_changed =
+            burst_output_.oversampling() != output_.oversampling();
+        burst_output_.sync_configuration_from(output_);
+        if (!stereo_path_active_ || quality_changed) {
+            burst_output_.reset();
+            burst_output_.trigger();
+            reset_pan_delay();
+            stereo_path_active_ = true;
+        }
+        for (int i = 0; i < num_samples; ++i) {
+            const RenderFrame frame = render_frame(true);
+            const double pan = frame.burst_pan * stereo_width_;
+            left[i] += static_cast<float>(
+                0.5 * frame.mono - 0.5 * pan * frame.burst);
+            right[i] += static_cast<float>(
+                0.5 * frame.mono + 0.5 * pan * frame.burst);
         }
     }
 
 private:
+    struct RenderFrame {
+        float mono = 0.0f;
+        double burst = 0.0;
+        double burst_pan = 0.0;
+    };
+
+    RenderFrame render_frame(bool render_burst_side) {
+        if (next_burst_ < burst_count_ && --samples_until_burst_ <= 0) {
+            burst_gain_ *= falloff_;
+            if (alternate_polarity_) burst_sign_ = -burst_sign_;
+            burst_pan_ = (next_burst_ & 1) != 0 ? 1.0 : -1.0;
+            burst_env_.trigger();
+            ++next_burst_;
+            samples_until_burst_ = next_gap();
+        }
+
+        const double filtered = filter_.process(noise_.process());
+        const double train =
+            filtered * burst_env_.process() * burst_gain_ * burst_sign_;
+        const double tail_env = tail_env_.process();
+        const double room = filtered * tail_env * tail_level_;
+
+        double body = 0.0;
+        if (body_level_ > 0.0) {
+            body_phase_ += body_hz_ / sample_rate();
+            if (body_phase_ >= 1.0) body_phase_ -= std::floor(body_phase_);
+            body = std::sin(2.0 * 3.14159265358979323846 * body_phase_) *
+                   tail_env * body_level_;
+        }
+
+        const double centre = room + body;
+
+        RenderFrame frame;
+        frame.mono = static_cast<float>(
+            output_.process(static_cast<float>(train + centre)) * velocity_gain_);
+        // The side channel carries only the burst train. Any nonlinear
+        // interaction between the train and centred layers remains in the
+        // mid channel, which preserves the canonical mono sum exactly without
+        // allowing room or body energy to leak into stereo width.
+        if (render_burst_side) {
+            frame.burst =
+                burst_output_.process(static_cast<float>(train)) * velocity_gain_;
+        }
+        frame.burst_pan = delayed_burst_pan();
+        return frame;
+    }
+
+    void reset_pan_delay() {
+        burst_pan_delay_.fill(burst_pan_);
+        burst_pan_write_ = 0;
+    }
+
+    double delayed_burst_pan() {
+        burst_pan_delay_[static_cast<std::size_t>(burst_pan_write_)] =
+            burst_pan_;
+        const int size = static_cast<int>(burst_pan_delay_.size());
+        const int delay = burst_output_.latency_samples();
+        const int read = (burst_pan_write_ - delay + size) % size;
+        const double delayed =
+            burst_pan_delay_[static_cast<std::size_t>(read)];
+        burst_pan_write_ = (burst_pan_write_ + 1) % size;
+        return delayed;
+    }
+
     // A fixed seed for the gap sequence, kept separate from the voice's audio
     // noise so that changing the jitter does not also change the noise the
     // bursts are made of.
@@ -224,6 +320,7 @@ private:
     // a control turned on to stop sounding wrong is a clap with a bad default.
     double gap_jitter_ = 0.35;
     bool alternate_polarity_ = false;
+    double stereo_width_ = 1.0;
     double tail_level_ = 0.35;
     double tail_decay_ms_ = 180.0;
     double cutoff_hz_ = 1400.0;
@@ -236,6 +333,12 @@ private:
     DecayEnvelope64 tail_env_;
     Svf filter_;
     OutputStage output_;
+    OutputStage burst_output_;
+    bool stereo_path_active_ = false;
+    static constexpr int kMaxOutputLatency =
+        OutputStage::latency_samples_for(OutputOversampling::x4);
+    std::array<double, kMaxOutputLatency + 1> burst_pan_delay_{};
+    int burst_pan_write_ = 0;
 
     double velocity_gain_ = 1.0;
     double brightness_ = 1.0;
@@ -246,6 +349,7 @@ private:
     int samples_until_burst_ = 0;
     double burst_gain_ = 1.0;
     double burst_sign_ = 1.0;
+    double burst_pan_ = -1.0;
     std::uint32_t jitter_state_ = kJitterSeed;
 };
 

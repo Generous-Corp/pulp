@@ -24,6 +24,7 @@ precision rather than only widening the final return value.
 #include <pulp/signal/lfo.hpp>       // or the umbrella <pulp/signal/signal.hpp>
 #include <pulp/signal/envelope.hpp>
 #include <pulp/signal/lpg.hpp>
+#include <pulp/signal/mod_tools.hpp>
 ```
 
 ## What is in it
@@ -32,7 +33,7 @@ precision rather than only widening the final return value.
 |--------|-------------------|
 | `rng.hpp` | `Xorshift32`, `gaussian()`, `unit_from()`, `OuWalkT`, `DriftT` |
 | `lfo.hpp` | `LfoT` — the full-option low-frequency oscillator |
-| `mod_tools.hpp` | `SlewLimiterT`, `SampleHoldT`, `AttenuverterT`, `RectifierT`, `ComparatorT`, `QuantizerT`, `CurveT`, `stage_curve()` |
+| `mod_tools.hpp` | `SlewLimiterT`, `SampleHoldT`, `AttenuverterT`, `RectifierT`, `ComparatorT`, `QuantizerT`, `CurveT`, the shared curve functions, and bipolar/unipolar conversions |
 | `trigger.hpp` | `TriggerDetectT`, `GateGenT`, `ClockDividerT`, `ClockMultT`, `BurstGenT`, `TrigDelayT` |
 | `envelope.hpp` | `ArT`, `AdT`, `AhdT`, `DahdsrT`, `ModEnvT`, `TransientDetectorT` |
 | `vca.hpp` | `VcaT` |
@@ -63,6 +64,127 @@ means them — on a *rising* stage that is slow-then-fast, and on a *falling* on
 it is fast-then-tailing. `curve_rise()` and `curve_fall()` apply the law with the
 sign each direction needs, so `+1` means the same thing on every stage of every
 envelope. Use those two rather than `stage_curve()` directly.
+
+## Control-signal utility API
+
+The utility types in `mod_tools.hpp` are available as `FooT<SampleType>`
+templates, with `Foo` and `Foo64` aliases for `float` and `double`. The free
+curve and conversion functions use `float`. Setters are control-side operations.
+`process()`, `reset()`, accessors, and the free functions allocate nothing and
+are safe to call from the audio thread.
+
+### Curve functions
+
+The four shaping functions accept normalized progress and clamp `p` to `[0, 1]`.
+`bi_to_uni()` and `uni_to_bi()` accept signal values and deliberately do not
+clamp, so values outside their nominal input ranges remain outside the nominal
+output ranges.
+
+| Function | Behavior |
+|----------|----------|
+| `stage_curve(p, curve)` | Applies the raw stage law. Both arguments are clamped (`p` to `[0, 1]`, `curve` to `[-1, 1]`); `curve = 0` is linear. Prefer the direction-specific helpers for envelope stages. |
+| `curve_rise(p, curve)` | Maps progress to a rising `0 -> 1` stage. `+1` is slow-then-fast exponential; `-1` is fast-then-easing logarithmic. |
+| `curve_fall(p, curve)` | Maps progress to a falling `1 -> 0` stage. `+1` drops quickly into a long exponential tail; `-1` holds and then falls. |
+| `smoothstep(p)` | Applies `3p² - 2p³` after clamping `p` to `[0, 1]`, producing zero slope at both ends. |
+| `bi_to_uni(x)` | Converts bipolar to unipolar with `x * 0.5 + 0.5`. |
+| `uni_to_bi(x)` | Converts unipolar to bipolar with `x * 2 - 1`. |
+
+`kCurveSpan` is the fixed strength of the shared stage law (`8.0f`).
+
+### `SlewLimiterT`
+
+Rate-limits a target with independent rise and fall times. The default is
+linear mode, a value of `0`, and `10 ms` in both directions. Call `prepare()`
+with the actual sample rate before processing.
+
+| Method | Behavior |
+|--------|----------|
+| `prepare(sample_rate)` | Sets the sample rate and updates the time coefficients. A non-positive value is normalized to `1 Hz`. |
+| `set_mode(mode)` | Selects `Mode::linear` or `Mode::exponential`. |
+| `set_rise_ms(ms)` | Sets the upward time; negative values become `0`. In linear mode this is the duration of a full-scale `0 -> 1` move. In exponential mode it is the one-pole time constant. |
+| `set_fall_ms(ms)` | Sets the downward time with the same clamping and mode-dependent meaning as `set_rise_ms()`. |
+| `set_times_ms(rise, fall)` | Sets both directional times. |
+| `reset(value = 0)` | Moves the current output to `value` without a ramp. |
+| `process(target)` | Advances one sample toward `target` and returns the new value. Zero or sub-sample times jump immediately. |
+| `current()` | Returns the current output without advancing. |
+| `mode()` | Returns the active mode. |
+
+### `SampleHoldT`
+
+Latches an input on a clock's low-to-high transition. Its default held value is
+`0` and glide is disabled.
+
+| Method | Behavior |
+|--------|----------|
+| `prepare(sample_rate)` | Prepares the internal slew limiter. Required before using a non-zero glide time. |
+| `set_glide_ms(ms)` | Sets equal rise and fall glide times; `0` or a negative value disables glide and produces steps. |
+| `set_glide_mode(mode)` | Selects the internal `SlewLimiterT::Mode`. |
+| `reset(value = 0)` | Sets the held and output values and clears the remembered clock state. A high clock on the next call is therefore a new rising edge. |
+| `process(input, clock)` | Latches `input` only on a rising edge, then returns either the held value or the next glided value. |
+| `held()` | Returns the value captured at the last rising edge, before glide. |
+
+### `AttenuverterT`
+
+Applies `y = x * gain + offset`. It defaults to identity (`gain = 1`,
+`offset = 0`).
+
+| Method or constant | Behavior |
+|--------------------|----------|
+| `kMaxGain` | Maximum gain magnitude, `2`. |
+| `set_gain(gain)` | Sets gain, clamped to `[-2, 2]`; negative values invert. |
+| `set_offset(offset)` | Sets the additive offset without clamping. |
+| `process(x)` | Returns `x * gain + offset`. |
+| `gain()` | Returns the effective, clamped gain. |
+| `offset()` | Returns the offset. |
+
+### `RectifierT`
+
+Defaults to `Mode::full_wave`.
+
+| Method | Behavior |
+|--------|----------|
+| `set_mode(mode)` | Selects `Mode::full_wave` (`abs(x)`) or `Mode::half_wave` (`max(0, x)`). |
+| `process(x)` | Applies the selected rectification mode. |
+
+### `ComparatorT`
+
+Turns a signal into a stateful gate with hysteresis. It defaults to threshold
+`0`, gate low, and an automatic margin on each side of the threshold of
+`max(0.001, 0.05 * abs(threshold))`.
+
+| Method or constant | Behavior |
+|--------------------|----------|
+| `kDefaultHysteresisFraction` | Automatic hysteresis fraction, `0.05`. |
+| `kMinAutoHysteresis` | Automatic hysteresis floor, `0.001`. |
+| `set_threshold(threshold)` | Sets the threshold and recomputes automatic hysteresis unless `set_hysteresis()` has selected an explicit value. |
+| `set_hysteresis(hysteresis)` | Uses the absolute value as the margin on each side of the threshold and keeps it fixed across later threshold changes. The full dead band is twice this value. Construct or assign a fresh instance to return to automatic hysteresis. |
+| `reset(gate = false)` | Sets the current gate state. |
+| `process(x)` | Goes high only above `threshold + hysteresis` and low only below `threshold - hysteresis`; equality preserves the current state. |
+| `gate()` | Returns the current gate state without processing. |
+| `hysteresis()` | Returns the active margin on either side of the threshold. |
+
+### `QuantizerT`
+
+Snaps a value to evenly spaced levels. It defaults to eight levels across
+`[0, 1]`.
+
+| Method | Behavior |
+|--------|----------|
+| `set_range(lo, hi)` | Sets the output endpoints. Use ascending endpoints (`lo <= hi`); equal endpoints produce the single value `lo`. |
+| `set_steps(count)` | Sets the number of output levels, clamped to `[1, 1024]`. Two levels means the two endpoints, not two intervals. |
+| `process(x)` | Clamps to the configured range and returns the nearest level. With one level it always returns `lo`; ties follow `std::lround`. |
+| `steps()` | Returns the effective, clamped level count. |
+
+### `CurveT`
+
+Shapes a normalized control value. It defaults to `Shape::stage_curve` with a
+linear curve value of `0`.
+
+| Method | Behavior |
+|--------|----------|
+| `set_shape(shape)` | Selects `Shape::stage_curve` or `Shape::smoothstep`. |
+| `set_curve(curve)` | Stores the stage curve, clamped to `[-1, 1]`. It does not affect output while smoothstep mode is active and applies again after switching back. |
+| `process(x)` | Clamps `x` to `[0, 1]` and applies the selected shape. Stage-curve mode uses the rising-stage convention. |
 
 ## Choosing an envelope
 
@@ -154,7 +276,7 @@ LfoT clock;      clock.set_period_samples(/* 1/16 */);
 ComparatorT cmp; cmp.set_threshold(0.0f);
 SampleHoldT sh;  sh.prepare(sr);
 QuantizerT q;    q.set_range(200.0f, 6000.0f); q.set_steps(12);
-SlewLimiterT glide; glide.prepare(sr); glide.set_mode(Slew::Mode::exponential);
+SlewLimiterT glide; glide.prepare(sr); glide.set_mode(SlewLimiter::Mode::exponential);
                     glide.set_times_ms(20.0f, 20.0f);
 ```
 
@@ -244,8 +366,28 @@ sound. Each migration needs its own compatibility proof.
 
 ## In Forge
 
-Five of these primitives are exposed to Forge's effect lane as catalog nodes
-(`pulp/host/forge_modulation_catalog.hpp`): `mod_lfo`, `lpg`, `slew`,
-`transient`, and `trig_env`. They follow the existing CV convention, where a
-control signal is a unipolar `[0, 1]` signal on an ordinary audio port, so
-modulation stays ordinary graph topology.
+Five primitives are exposed by
+`pulp/host/forge_modulation_catalog.hpp` as lowerable catalog nodes. They follow
+the existing CV convention: a control signal is a unipolar `[0, 1]` signal on
+an ordinary audio port, so modulation remains ordinary graph topology.
+
+Node type IDs and node-local parameter IDs are stable bake-layer contracts:
+
+| Node type ID | Injectable runtime parameters (`ParamID: control`) |
+|--------------|----------------------------------------------------|
+| `forge_mod_lfo` | `1: rate`, `2: depth`, `3: wave`, `4: pulse width`, `5: random blend`, `6: delay`, `7: fade in`, `8: shape morph`, `9: morph enabled`, `10: triangle bias`, `11: random segments`, `12: phase`, `13: fade out`, `14: quadratic fade`, `15: repeat count` |
+| `forge_mod_lpg` | `1: decay`, `2: colour`, `3: droop`, `4: brightness`, `5: struck mode`, `6: rise`, `7: darkness`, `8: strike threshold`, `9: refractory time` |
+| `forge_mod_slew` | `1: rise`, `2: fall`, `3: curved mode` |
+| `forge_mod_transient` | `1: fast time`, `2: slow time`, `3: sensitivity`, `4: invert` |
+| `forge_mod_env` | `1: attack`, `2: hold`, `3: decay`, `4: linked curve`, `5: threshold`, `6: delay`, `7: depth`, `8: loop`, `9: loop count`, `10: refractory time`, `11: velocity sensitivity`, `12: independent curves`, `13: attack curve`, `14: decay curve` |
+
+All listed controls consume sample-accurate `BakedParamView` automation in
+plain parameter domains. The catalog metadata in the header is authoritative
+for their minimum, maximum, and default values.
+
+Port topology is fixed by each node type. Choices that would change topology or
+reset identity are deliberately not runtime parameters: triggered or stereo /
+quadrature LFO variants require different ports, and the deterministic random
+seed belongs to instance construction/reset. Add a distinct, versioned node
+type for such variants instead of changing the meaning or port shape of an
+existing type ID.

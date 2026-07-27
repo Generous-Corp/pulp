@@ -36,8 +36,7 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
             [](const EmptyContent&) { return true; },
             [&](const MediaRef& left) {
                 const auto& right = std::get<MediaRef>(rhs);
-                return left.asset_id == right.asset_id &&
-                       left.source_start == right.source_start &&
+                return left.asset_id == right.asset_id && left.source_start == right.source_start &&
                        left.frame_count == right.frame_count;
             },
             [&](const NoteContent& left) {
@@ -54,6 +53,9 @@ bool equal_content(const ClipContent& lhs, const ClipContent& rhs) noexcept {
             [&](const OpaqueContent& left) {
                 const auto& right = std::get<OpaqueContent>(rhs);
                 return left.schema() == right.schema() && left.raw_json() == right.raw_json();
+            },
+            [&](const SequenceRef& left) {
+                return left == std::get<SequenceRef>(rhs);
             },
         },
         lhs);
@@ -88,13 +90,14 @@ std::size_t clip_retained_size(const Clip& clip) noexcept {
             [](const OpaqueContent& opaque) {
                 return saturated_add(sizeof(Clip), opaque.raw_json().size());
             },
+            [](const SequenceRef&) { return sizeof(Clip); },
         },
         clip.content());
 }
 
 std::size_t automation_lane_retained_size(const AutomationLane& lane) noexcept {
     return saturated_add(sizeof(AutomationLane),
-        saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
+                         saturated_multiply(lane.curve().points().size(), sizeof(AutomationPoint)));
 }
 
 bool equal_take(const Take& lhs, const Take& rhs) noexcept {
@@ -107,8 +110,8 @@ bool equal_take(const Take& lhs, const Take& rhs) noexcept {
 std::size_t take_lane_retained_size(const TakeLane& lane) noexcept {
     auto size = saturated_add(saturated_add(sizeof(TakeLane), lane.name().size()),
                               saturated_multiply(lane.takes().size(), sizeof(Take)));
-    return saturated_add(
-        size, saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
+    return saturated_add(size,
+                         saturated_multiply(lane.comp_segments().size(), sizeof(TakeCompSegment)));
 }
 
 bool equal_marker(const SequenceMarker& lhs, const SequenceMarker& rhs) noexcept {
@@ -128,10 +131,8 @@ bool equal_locators(std::span<const AssetLocator> lhs, std::span<const AssetLoca
 bool equal_asset(const MediaAsset& lhs, const MediaAsset& rhs) noexcept {
     if (lhs.id != rhs.id || lhs.name != rhs.name || lhs.frame_count != rhs.frame_count ||
         lhs.sample_rate != rhs.sample_rate || lhs.content_hash != rhs.content_hash ||
-        lhs.storage_policy != rhs.storage_policy ||
-        !equal_locators(lhs.locators, rhs.locators) ||
-        lhs.representations.size() != rhs.representations.size() ||
-        lhs.loop_info != rhs.loop_info)
+        lhs.storage_policy != rhs.storage_policy || !equal_locators(lhs.locators, rhs.locators) ||
+        lhs.representations.size() != rhs.representations.size() || lhs.loop_info != rhs.loop_info)
         return false;
     for (std::size_t i = 0; i < lhs.representations.size(); ++i) {
         const auto& left = lhs.representations[i];
@@ -156,15 +157,147 @@ std::size_t asset_retained_size(const MediaAsset& asset) noexcept {
     if (asset.loop_info) {
         size = saturated_add(
             size, saturated_multiply(asset.loop_info->points.size(), sizeof(AudioLoopPoint)));
-        size = saturated_add(
-            size, saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
+        size = saturated_add(size,
+                             saturated_multiply(asset.loop_info->tags.size(), sizeof(std::string)));
         for (const auto& tag : asset.loop_info->tags)
             size = saturated_add(size, tag.size());
     }
     return size;
 }
 
+bool equal_absolute_duration(const std::optional<AbsoluteTimelineDuration>& lhs,
+                             const std::optional<AbsoluteTimelineDuration>& rhs) noexcept {
+    return lhs.has_value() == rhs.has_value() &&
+           (!lhs || (lhs->sample_count == rhs->sample_count &&
+                     lhs->sample_rate == rhs->sample_rate));
+}
+
+bool equal_sequence(const Sequence& lhs, const Sequence& rhs) noexcept {
+    if (lhs.id() != rhs.id() || lhs.name() != rhs.name() || lhs.duration() != rhs.duration() ||
+        !equal_absolute_duration(lhs.absolute_duration(), rhs.absolute_duration()) ||
+        lhs.tracks().size() != rhs.tracks().size() ||
+        lhs.markers().size() != rhs.markers().size() ||
+        lhs.regions().size() != rhs.regions().size() ||
+        lhs.chord_scale_lane() != rhs.chord_scale_lane() ||
+        lhs.groove() != rhs.groove() ||
+        !std::equal(lhs.markers().begin(), lhs.markers().end(), rhs.markers().begin(),
+                    equal_marker) ||
+        !std::equal(lhs.regions().begin(), lhs.regions().end(), rhs.regions().begin(),
+                    equal_region))
+        return false;
+    for (std::size_t index = 0; index < lhs.tracks().size(); ++index) {
+        const auto& left = lhs.tracks()[index];
+        const auto& right = rhs.tracks()[index];
+        if (left.id() != right.id() || left.name() != right.name() ||
+            left.device_chain().size() != right.device_chain().size() ||
+            left.clips().size() != right.clips().size() ||
+            left.automation_lanes().size() != right.automation_lanes().size() ||
+            left.take_lanes().size() != right.take_lanes().size() ||
+            left.record_armed() != right.record_armed() ||
+            left.active_take_lane_id() != right.active_take_lane_id() ||
+            left.freeze() != right.freeze() ||
+            !std::equal(left.device_chain().begin(), left.device_chain().end(),
+                        right.device_chain().begin()) ||
+            !std::equal(left.take_lanes().begin(), left.take_lanes().end(),
+                        right.take_lanes().begin(),
+                        [](const TakeLane& a, const TakeLane& b) {
+                            return equivalent(a, b);
+                        }))
+            return false;
+        for (std::size_t clip = 0; clip < left.clips().size(); ++clip)
+            if (!equivalent(left.clips()[clip], right.clips()[clip]))
+                return false;
+        for (std::size_t lane = 0; lane < left.automation_lanes().size(); ++lane)
+            if (!equivalent(left.automation_lanes()[lane], right.automation_lanes()[lane]))
+                return false;
+    }
+    return true;
+}
+
+std::size_t sequence_retained_size(const Sequence& sequence) noexcept {
+    auto size = saturated_add(sizeof(Sequence), sequence.name().size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.markers().size(), sizeof(SequenceMarker)));
+    for (const auto& marker : sequence.markers())
+        size = saturated_add(size, marker.name.size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.regions().size(), sizeof(SequenceRegion)));
+    for (const auto& region : sequence.regions())
+        size = saturated_add(size, region.name.size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.chord_scale_lane().events().size(),
+                                 sizeof(ChordScaleEvent)));
+    size = saturated_add(size, sequence.groove().name().size());
+    size = saturated_add(
+        size, saturated_multiply(sequence.groove().steps().size(), sizeof(GrooveStep)));
+    size = saturated_add(
+        size, saturated_multiply(sequence.outgoing_sequence_refs().size(), sizeof(ItemId)));
+    for (const auto& track : sequence.tracks()) {
+        size = saturated_add(size, sizeof(Track));
+        size = saturated_add(size, track.name().size());
+        size = saturated_add(
+            size, saturated_multiply(track.device_chain().size(), sizeof(DevicePlacement)));
+        for (const auto& clip : track.clips())
+            size = saturated_add(size, clip_retained_size(clip));
+        for (const auto& lane : track.automation_lanes())
+            size = saturated_add(size, automation_lane_retained_size(lane));
+        for (const auto& lane : track.take_lanes())
+            size = saturated_add(size, take_lane_retained_size(lane));
+    }
+    return size;
+}
+
 } // namespace
+
+runtime::Result<Transaction, ModelError>
+build_diverge_transaction(const Project& project, ItemLocation location,
+                          TransactionId transaction_id, DocumentRevision expected_revision,
+                          CommandId clone_command_id, CommandId retarget_command_id,
+                          std::optional<UndoGroupId> undo_group) {
+    const auto invalid = [&](ModelErrorCode code, ItemId item = {}, ItemId related = {}) {
+        return runtime::Result<Transaction, ModelError>(
+            runtime::Err(ModelError{code, item, related}));
+    };
+    if (!transaction_id.valid() || !clone_command_id.valid() ||
+        !retarget_command_id.valid() ||
+        transaction_id.writer != clone_command_id.writer ||
+        transaction_id.writer != retarget_command_id.writer ||
+        clone_command_id == retarget_command_id)
+        return invalid(ModelErrorCode::InvalidItemId);
+    if (!location.active || location.kind != ItemKind::Clip)
+        return invalid(ModelErrorCode::MissingItem, location.clip_id);
+    const auto* sequence = project.find_sequence(location.sequence_id);
+    const auto* track = sequence ? sequence->find_track(location.track_id) : nullptr;
+    const auto* clip = track ? track->find_clip(location.clip_id) : nullptr;
+    const auto* reference =
+        clip ? std::get_if<SequenceRef>(&clip->content()) : nullptr;
+    if (!reference)
+        return invalid(ModelErrorCode::MissingSequenceReference, location.clip_id);
+    const auto* source = project.find_sequence(reference->sequence_id);
+    if (!source)
+        return invalid(ModelErrorCode::MissingSequenceReference, location.clip_id,
+                       reference->sequence_id);
+    auto allocator = project.item_id_allocator();
+    auto cloned = remap_ids(*source, allocator);
+    if (!cloned)
+        return runtime::Result<Transaction, ModelError>(runtime::Err(cloned.error()));
+    const auto cloned_id = cloned->sequence.id();
+    std::vector<std::pair<ItemId, ItemId>> mapping(cloned->ids.entries().begin(),
+                                                   cloned->ids.entries().end());
+    Transaction result;
+    result.id = transaction_id;
+    result.expected_revision = expected_revision;
+    result.undo_group = undo_group;
+    result.gesture_phase = GesturePhase::Single;
+    result.commands.push_back(
+        {clone_command_id,
+         CloneSequence{source->id(), cloned_id, std::move(mapping)}});
+    result.commands.push_back(
+        {retarget_command_id,
+         SetClipSequenceRef{location.sequence_id, location.track_id, location.clip_id,
+                            *reference, SequenceRef{cloned_id, reference->source_start}}});
+    return runtime::Ok(std::move(result));
+}
 
 bool equivalent(const ClipTimeRange& lhs, const ClipTimeRange& rhs) noexcept {
     if (lhs.index() != rhs.index())
@@ -229,6 +362,15 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                        left.clip_id == right.clip_id && left.note_id == right.note_id &&
                        left.expected_velocity == right.expected_velocity &&
                        left.replacement_velocity == right.replacement_velocity;
+            } else if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
+                       left.clip_id == right.clip_id &&
+                       left.expected.size() == right.expected.size() &&
+                       std::equal(left.expected.begin(), left.expected.end(),
+                                  right.expected.begin(), equal_note) &&
+                       left.replacement.size() == right.replacement.size() &&
+                       std::equal(left.replacement.begin(), left.replacement.end(),
+                                  right.replacement.begin(), equal_note);
             } else if constexpr (std::is_same_v<T, SetClipPlaybackProperties>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -290,6 +432,19 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
             } else if constexpr (std::is_same_v<T, RemoveSlot>) {
                 return left.sequence_id == right.sequence_id && left.scene_id == right.scene_id &&
                        left.slot_id == right.slot_id;
+            } else if constexpr (std::is_same_v<T, InsertSequence>) {
+                return equal_sequence(left.sequence, right.sequence);
+            } else if constexpr (std::is_same_v<T, CloneSequence>) {
+                return left.source_sequence_id == right.source_sequence_id &&
+                       left.cloned_sequence_id == right.cloned_sequence_id &&
+                       left.id_remap == right.id_remap;
+            } else if constexpr (std::is_same_v<T, RemoveSequence>) {
+                return left.sequence_id == right.sequence_id;
+            } else if constexpr (std::is_same_v<T, SetClipSequenceRef>) {
+                return left.sequence_id == right.sequence_id &&
+                       left.track_id == right.track_id && left.clip_id == right.clip_id &&
+                       left.expected == right.expected &&
+                       left.replacement == right.replacement;
             } else {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.clip_id == right.clip_id && left.expected == right.expected &&
@@ -334,17 +489,29 @@ std::size_t retained_size(const Command& command) noexcept {
                 return saturated_add(
                     saturated_add(sizeof(T), value.scene.name.size()),
                     detail::launcher_slot_list_owned_storage(value.scene.slots));
+            if constexpr (std::is_same_v<T, InsertSequence>)
+                return saturated_add(sizeof(T), sequence_retained_size(value.sequence));
+            if constexpr (std::is_same_v<T, CloneSequence>)
+                return saturated_add(
+                    sizeof(T),
+                    saturated_multiply(value.id_remap.size(),
+                                       sizeof(std::pair<ItemId, ItemId>)));
             if constexpr (std::is_same_v<T, SetTakeComp>) {
                 const auto segment_count =
                     saturated_add(value.expected.size(), value.replacement.size());
-                return saturated_add(
-                    sizeof(T), saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+                return saturated_add(sizeof(T),
+                                     saturated_multiply(segment_count, sizeof(TakeCompSegment)));
+            }
+            if constexpr (std::is_same_v<T, ReplaceNoteContent>) {
+                const auto note_count =
+                    saturated_add(value.expected.size(), value.replacement.size());
+                return saturated_add(sizeof(T), saturated_multiply(note_count, sizeof(NoteEvent)));
             }
             if constexpr (std::is_same_v<T, SetTempoMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::TempoPoint)));
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::TempoPoint)));
             if constexpr (std::is_same_v<T, SetChordScaleLane>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.events().size(),
@@ -361,8 +528,8 @@ std::size_t retained_size(const Command& command) noexcept {
             if constexpr (std::is_same_v<T, SetMeterMap>)
                 return saturated_add(
                     sizeof(T), saturated_multiply(saturated_add(value.expected.points().size(),
-                                                       value.replacement.points().size()),
-                                         sizeof(timebase::MeterPoint)));
+                                                                value.replacement.points().size()),
+                                                  sizeof(timebase::MeterPoint)));
             return sizeof(T);
         },
         command);

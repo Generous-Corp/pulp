@@ -80,6 +80,7 @@ struct AudioClipRendererProgram {
     std::uint64_t timeline_frame_count = 0;
     std::uint64_t source_start = 0;
     std::uint64_t source_frame_count = 0;
+    double source_frame_offset = 0.0;
     std::uint64_t renderable_timeline_frames = 0;
     double source_frames_per_timeline_frame = 1.0;
     std::shared_ptr<const AudioClipConversionArtifact> conversion_artifact;

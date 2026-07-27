@@ -1,5 +1,6 @@
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/runtime/crypto.hpp>
+#include <pulp/timeline/command.hpp>
 #include <pulp/timeline/model.hpp>
 #include <pulp/timeline/schema_registry.hpp>
 #include <pulp/timeline/serialize.hpp>
@@ -168,6 +169,13 @@ TEST_CASE("timeline agent applies typed commands and renders the resulting proje
     REQUIRE(explained.json.find(R"("audio_regions":1)") != std::string::npos);
     REQUIRE(explained.json.find(R"("clip_ids":["4"])") != std::string::npos);
     REQUIRE(explained.json.find(R"("pdc_offset_samples":null)") != std::string::npos);
+    // Replay honesty is reported per track and aggregated for the render, so a
+    // caller can see which parts of it are bit-reproducible.
+    REQUIRE(explained.json.find(R"("production_mode":"synchronous")") != std::string::npos);
+    REQUIRE(explained.json.find(R"("reproducibility":"deterministic","track_id")") !=
+            std::string::npos);
+    REQUIRE(explained.json.find(R"("reproducibility":"deterministic","sequence_id")") !=
+            std::string::npos);
 
     const auto changed =
         tools::timeline::command_apply(original_project, gain_command(1'056'964'608));
@@ -352,7 +360,8 @@ TEST_CASE("timeline agent atomic render preserves a Linux POSIX ACL") {
 TEST_CASE("timeline agent schema and errors are typed and fail closed") {
     const auto schema = tools::timeline::schema();
     REQUIRE(schema);
-    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") == 29);
+    REQUIRE(count_occurrences(schema.json, R"("x-pulp-domain":"Command")") ==
+            std::variant_size_v<Command>);
 
     const auto unknown = tools::timeline::command_apply(
         empty_project_json(),

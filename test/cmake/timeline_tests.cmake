@@ -19,6 +19,14 @@ target_compile_definitions(pulp-test-timeline-dawproject-import PRIVATE
 pulp_add_test_suite(pulp-test-timeline-smf
     SOURCES test_timeline_smf.cpp
     LIBRARIES pulp::smf-interop pulp::midi)
+pulp_add_test_suite(pulp-test-timeline-production-mode
+    SOURCES test_timeline_production_mode.cpp
+    LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-playback-production
+    SOURCES test_playback_production_class.cpp
+        test_playback_buffered_content_source.cpp
+        harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::playback pulp::audio pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-curve LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-automation-lane LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-playback-transport
@@ -51,6 +59,12 @@ pulp_add_test_suite(pulp-test-playback-program
     COMPILE_DEFINITIONS
         $<$<BOOL:${UNIX}>:PULP_NATIVE_CORE_PROCESS_RT_TRAP_TESTS=1>
         $<$<BOOL:${PULP_SANITIZER}>:PULP_TEST_WITH_SANITIZER=1>)
+pulp_add_test_suite(pulp-test-timeline-nesting
+    SOURCES test_timeline_nesting_model.cpp
+        test_timeline_nesting_playback.cpp
+        harness/rt_allocation_probe.cpp
+    LIBRARIES pulp::playback pulp::audio-analysis pulp::audio pulp::timeline pulp::timebase
+        pulp::runtime)
 if(PULP_BENCHMARK)
     set(PULP_TIMELINE_SCALE_SANITIZED OFF)
     if(PULP_SANITIZER OR CMAKE_CXX_FLAGS MATCHES "(^|[ ;])-fsanitize")
@@ -150,6 +164,7 @@ pulp_add_test_suite(pulp-test-timeline-commands
         test_timeline_marker_commands.cpp
     LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-transactions LIBRARIES pulp::timeline)
+pulp_add_test_suite(pulp-test-timeline-note-transform LIBRARIES pulp::timeline)
 pulp_add_test_suite(pulp-test-timeline-journal
     SOURCES test_timeline_journal.cpp test_timeline_file_journal.cpp
         harness/rt_allocation_probe.cpp
@@ -322,53 +337,11 @@ if(Python3_Interpreter_FOUND)
             ${CMAKE_SOURCE_DIR}/core/timeline/tools/test_schema_mcp_emit.py)
 endif()
 
+include(${CMAKE_SOURCE_DIR}/core/timeline/PulpTimelineSources.cmake)
+pulp_resolve_timeline_sources(
+    "${CMAKE_SOURCE_DIR}" _PULP_TIMELINE_NO_EXCEPTIONS_SOURCES)
 add_library(pulp-test-timeline-no-exceptions OBJECT
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/asset_schema_migrations.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/assets.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_curve.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_document_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/automation_lane.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/command.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/compile_context.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/document_session.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/identity_directory.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/id_remap.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/journal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/model.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_context.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_scene_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/project_schema_migrations.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_codegen.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_canonical.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_parser.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_preflight.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_release.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_json_validation.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/schema_registry.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/sequence_schema_migrations.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_asset_loop_decode.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_automation_decode.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode_support.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_decode.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_encode.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_release.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/serialize_sequence_annotations_decode.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/snapshot_equivalence.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/structural_registry_validation.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/track.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/track_schema_migrations.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/take_lane_schema_migrations.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/take_lane.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_automation_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_marker_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_scene_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_take_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_track_state_internal.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/transaction_reduction_support.cpp
-    ${CMAKE_SOURCE_DIR}/core/timeline/src/undo.cpp)
+    ${_PULP_TIMELINE_NO_EXCEPTIONS_SOURCES})
 target_link_libraries(pulp-test-timeline-no-exceptions PRIVATE
     pulp::runtime pulp::timebase)
 target_include_directories(pulp-test-timeline-no-exceptions PRIVATE

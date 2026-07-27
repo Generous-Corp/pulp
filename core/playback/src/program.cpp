@@ -19,12 +19,20 @@ TrackProgram::TrackProgram(timeline::ItemId id, ProgramGeneration generation,
                            std::vector<NoteProgramEvent> note_events,
                            std::shared_ptr<const AudioTrackRendererProgram> audio_program,
                            std::vector<timeline::ItemId> device_placement_ids,
-                           std::shared_ptr<const TrackAutomationProgram> automation_program) noexcept
+                           std::shared_ptr<const TrackAutomationProgram> automation_program,
+                           std::uint64_t expanded_clip_count,
+                           std::uint64_t expanded_note_event_count,
+                           std::uint64_t generated_id_start,
+                           std::uint64_t generated_id_count) noexcept
     : id_(id), generation_(generation), provider_(provider), state_policy_(state_policy),
       clip_ids_(std::move(clip_ids)), note_events_(std::move(note_events)),
       audio_program_(std::move(audio_program)),
       device_placement_ids_(std::move(device_placement_ids)),
-      automation_program_(std::move(automation_program)) {}
+      automation_program_(std::move(automation_program)),
+      expanded_clip_count_(expanded_clip_count),
+      expanded_note_event_count_(expanded_note_event_count),
+      generated_id_start_(generated_id_start),
+      generated_id_count_(generated_id_count) {}
 
 PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t document_revision,
                                  timeline::ItemId project_id, timeline::ItemId sequence_id,
@@ -32,11 +40,13 @@ PlaybackProgram::PlaybackProgram(ProgramGeneration generation, std::uint64_t doc
                                  std::shared_ptr<const DecodedAudioAssetPool> audio_assets,
                                  AudioRendererLimits audio_limits,
                                  AutomationPlaybackLimits automation_limits,
+                                 std::uint64_t generated_id_base,
                                  std::vector<std::shared_ptr<const TrackProgram>> tracks) noexcept
     : generation_(generation), document_revision_(document_revision), project_id_(project_id),
       sequence_id_(sequence_id), tempo_map_(std::move(tempo_map)),
       audio_assets_(std::move(audio_assets)), audio_limits_(audio_limits),
       automation_limits_(automation_limits),
+      generated_id_base_(generated_id_base),
       tracks_(std::move(tracks)) {}
 
 const std::shared_ptr<const TrackProgram>*
