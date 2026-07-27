@@ -265,6 +265,18 @@ export const timelineSchema = Object.freeze({
       Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
     ]),
   }),
+  "pulp.timeline.command.replace_note_content": Object.freeze({
+    schemaType: "pulp.timeline.command.replace_note_content",
+    domain: "Command",
+    version: 1,
+    fields: Object.freeze([
+      Object.freeze({ name: "clip_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "expected", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "replacement", kind: "Array", jsType: "array", required: true }),
+      Object.freeze({ name: "sequence_id", kind: "U64String", jsType: "string", required: true }),
+      Object.freeze({ name: "track_id", kind: "U64String", jsType: "string", required: true }),
+    ]),
+  }),
   "pulp.timeline.command.set_active_take_lane": Object.freeze({
     schemaType: "pulp.timeline.command.set_active_take_lane",
     domain: "Command",
@@ -576,6 +588,7 @@ export const timelineSchemaTypeNames = Object.freeze([
   "pulp.timeline.command.remove_slot",
   "pulp.timeline.command.remove_take",
   "pulp.timeline.command.remove_take_lane",
+  "pulp.timeline.command.replace_note_content",
   "pulp.timeline.command.set_active_take_lane",
   "pulp.timeline.command.set_chord_scale_lane",
   "pulp.timeline.command.set_clip_playback_properties",

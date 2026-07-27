@@ -4,6 +4,7 @@
 #include "transaction_internal.hpp"
 #include "transaction_marker_internal.hpp"
 #include "transaction_scene_internal.hpp"
+#include "transaction_note_internal.hpp"
 #include "transaction_reduction_support.hpp"
 #include "transaction_take_internal.hpp"
 #include "transaction_track_state_internal.hpp"
@@ -34,7 +35,7 @@ std::optional<ModelError> validate_media(const Project& project, const Clip& cli
 // detail::target_error compares a located identity against this expectation.
 ItemLocation expected_location(ItemKind kind, const Project& project, ItemId sequence,
                                ItemId track = {}, ItemId clip = {}) {
-    return ItemLocation{kind, immediate_parent_id(kind, project.id(), sequence, track, clip),
+    return ItemLocation{kind,     immediate_parent_id(kind, project.id(), sequence, track, clip),
                         sequence, track,
                         clip,     true};
 }
@@ -142,17 +143,17 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             auto next_track = track->insert_clip(insert->clip);
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_track.error())));
+                    detail::model_failure(transaction, envelope.id, next_track.error())));
             auto next_sequence = sequence->replace_track(std::move(next_track).value());
             if (!next_sequence)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_sequence.error())));
+                    detail::model_failure(transaction, envelope.id, next_sequence.error())));
             auto next_project = ProjectEditAccess::replace_sequence(
                 project, std::move(next_sequence).value(), identity_plan->mutations,
                 identity_plan->next_item_id);
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(
                 RemoveClip{insert->sequence_id, insert->track_id, insert->clip.id()});
@@ -176,16 +177,16 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             auto next_track = track->erase_clip(remove->clip_id);
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_track.error())));
+                    detail::model_failure(transaction, envelope.id, next_track.error())));
             auto next_sequence = sequence->replace_track(std::move(next_track).value());
             if (!next_sequence)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_sequence.error())));
+                    detail::model_failure(transaction, envelope.id, next_sequence.error())));
             auto next_project = ProjectEditAccess::replace_sequence(
                 project, std::move(next_sequence).value(), identity_changes);
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(InsertClip{remove->sequence_id, remove->track_id, removed});
             dirty.push_back({remove->clip_id, remove->track_id, remove->sequence_id,
@@ -249,73 +250,34 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             auto replacement = clip->with_time_range(move->replacement_range);
             if (!replacement)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, replacement.error())));
+                    detail::model_failure(transaction, envelope.id, replacement.error())));
             auto next_track = track->replace_clip(std::move(replacement).value());
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_track.error())));
+                    detail::model_failure(transaction, envelope.id, next_track.error())));
             auto next_sequence = sequence->replace_track(std::move(next_track).value());
             if (!next_sequence)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_sequence.error())));
+                    detail::model_failure(transaction, envelope.id, next_sequence.error())));
             auto next_project =
                 ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(MoveClip{move->sequence_id, move->track_id, move->clip_id,
                                            move->replacement_range, move->expected_range});
             dirty.push_back({move->clip_id, move->track_id, move->sequence_id, DirtyFlags::Timing});
-        } else if (const auto* velocity_value = std::get_if<SetNoteVelocity>(&envelope.command)) {
-            const auto& velocity = *velocity_value;
-            if (const auto code = detail::target_error(
-                    project, velocity.note_id,
-                    expected_location(ItemKind::Note, project, velocity.sequence_id,
-                                      velocity.track_id, velocity.clip_id)))
-                return fail_target(*code, velocity.note_id, velocity.clip_id);
-            const auto* sequence = project.find_sequence(velocity.sequence_id);
-            const auto* track = sequence->find_track(velocity.track_id);
-            const auto* clip = track->find_clip(velocity.clip_id);
-            const auto* notes = std::get_if<NoteContent>(&clip->content());
-            if (!notes)
-                return fail_target(ConflictCode::WrongTargetKind, velocity.clip_id);
-            const auto found =
-                std::find_if(notes->notes().begin(), notes->notes().end(),
-                             [&](const NoteEvent& note) { return note.id == velocity.note_id; });
-            if (found == notes->notes().end())
-                return fail_target(ConflictCode::TargetMissing, velocity.note_id);
-            if (found->velocity != velocity.expected_velocity)
-                return fail_target(ConflictCode::ExpectedValueMismatch, velocity.note_id);
-            NoteEvent replacement = *found;
-            replacement.velocity = velocity.replacement_velocity;
-            auto next_notes = notes->replace_note(replacement);
-            if (!next_notes)
-                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_notes.error())));
-            auto next_clip = clip->with_content(std::move(next_notes).value());
-            if (!next_clip)
-                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_clip.error())));
-            auto next_track = track->replace_clip(std::move(next_clip).value());
-            if (!next_track)
-                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_track.error())));
-            auto next_sequence = sequence->replace_track(std::move(next_track).value());
-            if (!next_sequence)
-                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_sequence.error())));
-            auto next_project =
-                ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
-            if (!next_project)
-                return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
-            project = std::move(next_project).value();
-            inverses.emplace_back(SetNoteVelocity{
-                velocity.sequence_id, velocity.track_id, velocity.clip_id, velocity.note_id,
-                velocity.replacement_velocity, velocity.expected_velocity});
-            dirty.push_back({velocity.note_id, velocity.track_id, velocity.sequence_id,
-                             DirtyFlags::Content | DirtyFlags::Notes});
+        } else if (detail::is_note_command(envelope.command)) {
+            auto reduced = detail::reduce_note_command(
+                project, envelope.command, transaction, envelope.id,
+                allow_tombstone_restore);
+            if (!reduced)
+                return runtime::Result<ReducedTransaction, TransactionError>(
+                    runtime::Err(reduced.error()));
+            project = std::move(reduced->project);
+            inverses.push_back(std::move(reduced->inverse));
+            dirty.push_back(reduced->dirty);
         } else if (const auto* tempo = std::get_if<SetTempoMap>(&envelope.command)) {
             if (project.tempo_map() != tempo->expected)
                 return fail_target(ConflictCode::ExpectedValueMismatch, project.id());
@@ -343,7 +305,7 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 project, create->asset, identity_plan->mutations, identity_plan->next_item_id);
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(RemoveAsset{create->asset.id});
             dirty.push_back({create->asset.id, {}, {}, DirtyFlags::Structure | DirtyFlags::Added});
@@ -363,7 +325,7 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 ProjectEditAccess::remove_asset(project, drop_asset->asset_id, identity_changes);
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(CreateAsset{removed});
             dirty.push_back(
@@ -382,7 +344,7 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
                 project, sequence->with_chord_scale_lane(chord->replacement));
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(
                 SetChordScaleLane{chord->sequence_id, chord->replacement, chord->expected});
@@ -423,20 +385,20 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
             auto next_clip = clip->with_playback_properties(playback.replacement);
             if (!next_clip)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_clip.error())));
+                    detail::model_failure(transaction, envelope.id, next_clip.error())));
             auto next_track = track->replace_clip(std::move(next_clip).value());
             if (!next_track)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_track.error())));
+                    detail::model_failure(transaction, envelope.id, next_track.error())));
             auto next_sequence = sequence->replace_track(std::move(next_track).value());
             if (!next_sequence)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_sequence.error())));
+                    detail::model_failure(transaction, envelope.id, next_sequence.error())));
             auto next_project =
                 ProjectEditAccess::replace_sequence(project, std::move(next_sequence).value());
             if (!next_project)
                 return runtime::Result<ReducedTransaction, TransactionError>(runtime::Err(
-                        detail::model_failure(transaction, envelope.id, next_project.error())));
+                    detail::model_failure(transaction, envelope.id, next_project.error())));
             project = std::move(next_project).value();
             inverses.emplace_back(SetClipPlaybackProperties{playback.sequence_id, playback.track_id,
                                                             playback.clip_id, playback.replacement,
@@ -446,10 +408,9 @@ detail::reduce_transaction(const Project& original, const Transaction& transacti
         }
     }
     std::reverse(inverses.begin(), inverses.end());
-    return runtime::Result<ReducedTransaction, TransactionError>(
-        runtime::Ok(ReducedTransaction{std::move(project),
-                                       DirtySet(std::move(dirty), std::move(dirty_contexts)),
-                                       std::move(inverses)}));
+    return runtime::Result<ReducedTransaction, TransactionError>(runtime::Ok(ReducedTransaction{
+        std::move(project), DirtySet(std::move(dirty), std::move(dirty_contexts)),
+        std::move(inverses)}));
 }
 
 runtime::Result<ReducedTransaction, TransactionError>
