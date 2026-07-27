@@ -365,32 +365,17 @@ TEST_CASE("The stage reproduces the spec's published worked trace",
     REQUIRE_THAT(G, WithinAbs(0.0255177, 5e-8));
     REQUIRE(std::abs(G - 0.025519) > 1e-6);
 
-    // The shipped stage agrees with the correct arithmetic to 1.4e-9 — and
-    // that residual is itself a finding, not noise. `tpt_filter.hpp` spells its
-    // pi as `SampleType{3.14159265358979323846f}`; the `f` suffix makes the
-    // literal a FLOAT even in the `double` instantiation, so `TptFilter64`
-    // computes its coefficient from a pi that is 2.78e-8 too large. The
-    // effective corner frequency carries that same relative error.
-    //
-    // It is pre-existing, in a shared header this module does not own, and it
-    // is 4.7e-7 of a cent of frequency — far below anything audible and four
-    // orders below the 1e-4 the notch-position tests assert to. Recorded here
-    // rather than worked around silently, and asserted against the exact
-    // float-pi prediction so that FIXING the suffix fails this test loudly
-    // instead of drifting past it.
-    constexpr double kPiAsFloat = 3.14159274101257324219;   // (float) pi, widened
-    const double wa_f = 2.0 * kSr * std::tan(2.0 * kPiAsFloat * kRefCenterHz /
-                                             (2.0 * kSr));
-    const double g_float_pi = wa_f / (2.0 * kSr + wa_f);
-
+    // The shipped double stage uses the same double-precision pi and TPT
+    // coefficient law as the independent calculation above. Keep this
+    // comparison at arithmetic precision: a float-pi expectation would make
+    // the test compiler/platform-sensitive and would no longer describe the
+    // implementation contract.
     TptFilter64 stage;
     stage.prepare(kSr);
     stage.set_cutoff(kRefCenterHz);
     const double y_ap = stage.process_allpass(1.0);
 
-    REQUIRE_THAT(y_ap, WithinAbs(2.0 * g_float_pi - 1.0, 1e-15));
-    REQUIRE_THAT(y_ap, WithinAbs(2.0 * G - 1.0, 2e-9));
-    REQUIRE_THAT(kPiAsFloat / kPi - 1.0, WithinAbs(2.78e-8, 1e-10));
+    REQUIRE_THAT(y_ap, WithinAbs(2.0 * G - 1.0, 1e-15));
 
     // ...and the stage still differs from the SPEC's published figure by
     // essentially twice the slip in G, which is the signature that says "the
