@@ -1,12 +1,97 @@
 // cmd_sdk.cpp — pulp sdk command
 
 #include "cli_common.hpp"
+#include "local_sdk_install.hpp"
+#include "local_sdk_profile.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <iostream>
 #include <regex>
 #include <vector>
+
+#if defined(_WIN32)
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+class ScopedStdoutRedirect {
+public:
+    explicit ScopedStdoutRedirect(bool redirect) {
+        if (!redirect)
+            return;
+        std::cout.flush();
+        std::fflush(stdout);
+#if defined(_WIN32)
+        saved_fd_ = _dup(_fileno(stdout));
+        active_ = saved_fd_ >= 0 && _dup2(_fileno(stderr), _fileno(stdout)) == 0;
+#else
+        saved_fd_ = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 0);
+        active_ = saved_fd_ >= 0 && dup2(STDERR_FILENO, STDOUT_FILENO) >= 0;
+#endif
+        if (!active_ && saved_fd_ >= 0)
+            close_saved_fd();
+    }
+
+    ~ScopedStdoutRedirect() {
+        if (!active_)
+            return;
+        std::cout.flush();
+        std::fflush(stdout);
+#if defined(_WIN32)
+        (void)_dup2(saved_fd_, _fileno(stdout));
+#else
+        (void)dup2(saved_fd_, STDOUT_FILENO);
+#endif
+        close_saved_fd();
+    }
+
+    bool ready() const { return active_; }
+
+    bool write_original(const std::string& text) const {
+        if (!active_)
+            return false;
+        std::size_t written = 0;
+        while (written < text.size()) {
+#if defined(_WIN32)
+            const auto count =
+                _write(saved_fd_, text.data() + written,
+                       static_cast<unsigned int>(text.size() - written));
+#else
+            const auto count = write(saved_fd_, text.data() + written, text.size() - written);
+#endif
+            if (count < 0 && errno == EINTR)
+                continue;
+            if (count <= 0)
+                return false;
+            written += static_cast<std::size_t>(count);
+        }
+        return true;
+    }
+
+    ScopedStdoutRedirect(const ScopedStdoutRedirect&) = delete;
+    ScopedStdoutRedirect& operator=(const ScopedStdoutRedirect&) = delete;
+
+private:
+    void close_saved_fd() {
+#if defined(_WIN32)
+        (void)_close(saved_fd_);
+#else
+        (void)close(saved_fd_);
+#endif
+        saved_fd_ = -1;
+    }
+
+    int saved_fd_ = -1;
+    bool active_ = false;
+};
+
+} // namespace
 
 int cmd_sdk(const std::vector<std::string>& args) {
     if (args.empty()) {
@@ -14,6 +99,8 @@ int cmd_sdk(const std::vector<std::string>& args) {
         std::cout << "Subcommands:\n";
         std::cout << "  install [--version X.Y.Z]   Download and cache the SDK from GitHub releases\n";
         std::cout << "  install --local             Build and install the SDK from the current checkout\n";
+        std::cout << "  install --local --profile forge-dev [--print-path]\n";
+        std::cout << "                              Build an immutable arm64 Forge development SDK\n";
         std::cout << "  available                   List SDK versions available on GitHub releases\n";
         std::cout << "  status                      Show installed SDK versions\n";
         std::cout << "  clean                       Remove all cached SDK versions\n";
@@ -29,46 +116,50 @@ int cmd_sdk(const std::vector<std::string>& args) {
     std::string sub = args[0];
 
     if (sub == "install") {
-        bool from_local = false;
-        std::string version = PULP_SDK_VERSION;
-        for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--local") from_local = true;
-            else if (args[i] == "--version") {
-                if (i + 1 >= args.size() || (!args[i + 1].empty() && args[i + 1][0] == '-')) {
-                    std::cerr << "pulp sdk install: --version requires a value\n";
-                    return 2;
-                }
-                version = args[++i];
-            } else if (!args[i].empty() && args[i][0] == '-') {
-                std::cerr << "pulp sdk install: unknown flag: " << args[i] << "\n";
-                return 2;
-            } else {
-                std::cerr << "pulp sdk install: unknown argument: " << args[i] << "\n";
-                return 2;
-            }
+        std::vector<std::string> install_args(args.begin() + 1, args.end());
+        const auto request =
+            pulp::cli::local_sdk::parse_install_arguments(install_args, PULP_SDK_VERSION);
+        if (!request.ok) {
+            std::cerr << "pulp sdk install: " << request.error << "\n";
+            return 2;
         }
 
-        if (from_local) {
+        if (request.from_local) {
             auto repo_root = find_project_root();
             if (repo_root.empty()) {
                 std::cerr << "Error: --local requires running from inside a Pulp checkout.\n";
                 return 1;
             }
-            std::cout << "Building SDK from local checkout...\n";
-            auto sdk = ensure_checkout_sdk(repo_root, version);
+            ScopedStdoutRedirect redirect_progress(request.print_path);
+            if (request.print_path && !redirect_progress.ready()) {
+                std::cerr << "Error: could not reserve stdout for --print-path.\n";
+                return 1;
+            }
+            if (!request.print_path)
+                std::cout << "Building SDK from local checkout...\n";
+            auto sdk = request.profile == "forge-dev"
+                           ? ensure_forge_dev_sdk(repo_root)
+                           : ensure_checkout_sdk(repo_root, request.version);
             if (sdk.empty()) {
                 std::cerr << "SDK build failed.\n";
                 return 1;
             }
-            std::cout << "SDK v" << version << " installed at " << sdk.string() << "\n";
+            if (request.print_path) {
+                if (!redirect_progress.write_original(sdk.string() + "\n")) {
+                    std::cerr << "Error: could not write the SDK path to stdout.\n";
+                    return 1;
+                }
+            } else {
+                std::cout << "SDK v" << request.version << " installed at " << sdk.string() << "\n";
+            }
         } else {
-            std::cout << "Downloading SDK v" << version << "...\n";
-            auto sdk = ensure_sdk(version);
+            std::cout << "Downloading SDK v" << request.version << "...\n";
+            auto sdk = ensure_sdk(request.version);
             if (sdk.empty()) {
                 std::cerr << "SDK download failed.\n";
                 return 1;
             }
-            std::cout << "SDK v" << version << " installed at " << sdk.string() << "\n";
+            std::cout << "SDK v" << request.version << " installed at " << sdk.string() << "\n";
         }
         return 0;
     }
@@ -105,6 +196,17 @@ int cmd_sdk(const std::vector<std::string>& args) {
                         found = true;
                     }
                 }
+            }
+        }
+
+        auto dev_base = home / "sdk-dev";
+        if (fs::exists(dev_base)) {
+            for (auto& entry : fs::recursive_directory_iterator(dev_base)) {
+                if (!entry.is_regular_file() || entry.path().filename() != "sdk-provenance.json")
+                    continue;
+                std::cout << "  forge-dev (development-only) — "
+                          << entry.path().parent_path().string() << "\n";
+                found = true;
             }
         }
 
@@ -203,8 +305,12 @@ int cmd_sdk(const std::vector<std::string>& args) {
         auto sdk_base = home / "sdk";
         auto local_base = home / "sdk-local";
         auto build_base = home / "sdk-build";
+        auto dev_base = home / "sdk-dev";
+        auto dev_build_base = home / "sdk-build-dev";
+        auto dev_source_base = home / "sdk-source-dev";
         int removed = 0;
-        for (auto* dir : {&sdk_base, &local_base, &build_base}) {
+        for (auto* dir :
+             {&sdk_base, &local_base, &build_base, &dev_base, &dev_build_base, &dev_source_base}) {
             if (fs::exists(*dir)) {
                 fs::remove_all(*dir);
                 ++removed;

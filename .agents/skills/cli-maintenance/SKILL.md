@@ -2240,6 +2240,28 @@ Gotchas:
   configures local SDK builds with `-DPULP_ENABLE_AUDIO_PROBES=OFF` so
   `pulp sdk install --local` and checkout-backed standalone resolution do not
   export the dev standalone audio-probe surface in cached SDK artifacts.
+- **`--profile forge-dev` is an immutable development SDK, not a release
+  shortcut.** `pulp sdk install --local --profile forge-dev --print-path`
+  requires a completely clean committed Apple Silicon checkout, creates a
+  temporary detached clone of that exact commit, prepares the normal external
+  dependencies inside the snapshot, and addresses the install by full source SHA
+  plus a profile/toolchain/dependency fingerprint under
+  `$PULP_HOME/sdk-dev/forge-v1/darwin-arm64/`. It configures Release arm64 with
+  GPU + design import ON and audio probes + in-plugin inspector OFF, then
+  requires Skia, AU, VST3, CLAP, and the standalone format runtime before an
+  atomic staging rename. The root `sdk-provenance.json` always carries
+  `kind=development` and `distribution_eligible=false`; release consumers must
+  fail closed on that marker. `PulpSdkProvenance.cmake` exports the canonical
+  CMake contract, and `pulp ship package|notarize|release|share` rejects a
+  development SDK recorded in the consumer cache. The source checkout's
+  `project(Pulp VERSION ...)` is authoritative (`--version` is refused).
+  `--print-path` keeps stdout to the final prefix
+  and sends build progress to stderr so command substitution is reliable.
+  Do not turn this into runtime DSP loading: the downstream plugin still
+  recompiles against the exact printed `Pulp_DIR`, preserving header/library
+  coherence. Profile policy lives in `local_sdk_profile.{hpp,cpp}`; build and
+  atomic-publish orchestration stays in `local_sdk_install.{hpp,cpp}` rather
+  than growing the general `cli_sdk.cpp` module.
 - **If you bump `PULP_SDK_VERSION`, you do NOT need to manually
   invalidate `~/.pulp/cache`.** The new version means the filename
   misses on the old cache and the user gets a fresh download

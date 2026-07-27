@@ -255,6 +255,15 @@ if(UNIX)
         LABELS "cmake;sdk;issue-1817;slow"
         TIMEOUT 600)
 endif()
+
+add_test(NAME cmake-sdk-provenance-contract
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_SRC_DIR=${CMAKE_SOURCE_DIR}
+        -DFIXTURE_DIR=${CMAKE_BINARY_DIR}/test-sdk-provenance-contract
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_sdk_provenance_contract.cmake)
+set_tests_properties(cmake-sdk-provenance-contract PROPERTIES
+    LABELS "cmake;sdk;provenance"
+    TIMEOUT 30)
 # PULP_ENABLE_SWIFT is intentionally retained only as a compatibility/reserved
 # option. ON must produce a clear configure warning rather than silently doing
 # nothing or implying Swift is globally enabled.

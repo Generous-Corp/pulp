@@ -463,6 +463,25 @@ target_link_libraries(pulp-test-cli-sdk-tarball-filename PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-sdk-tarball-filename)
 
+# Immutable checkout-backed SDK profile policy and provenance validation.
+add_executable(pulp-test-cli-local-sdk-profile
+    test_cli_local_sdk_profile.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/local_sdk_profile.cpp
+)
+target_include_directories(pulp-test-cli-local-sdk-profile PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-local-sdk-profile PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-local-sdk-profile)
+
+add_executable(pulp-test-sdk-distribution-guard
+    test_sdk_distribution_guard.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/sdk_distribution_guard.cpp)
+target_include_directories(pulp-test-sdk-distribution-guard PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-sdk-distribution-guard PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdk-distribution-guard)
+
 # CLI package commands: local-only tests for target/search/list/
 # update/suggest/audit/add/remove behavior against staged project files
 # and registry fixtures. Stays off remote fetch / archive extraction; links

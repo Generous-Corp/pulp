@@ -148,6 +148,9 @@ it through the governor), not the machine's core count.
 ./build/pulp version             # show SDK and project version
 ./build/pulp version bump patch  # bump version
 ./build/pulp version check       # verify version consistency
+./build/pulp sdk install --local --profile forge-dev --print-path
+                                # immutable arm64 SDK for local Forge iteration
+                                # Forge configure must opt in; ship/release refuses it
 ./build/pulp dev --test          # watch + rebuild + test loop
 ./build/pulp build --watch       # watch + rebuild loop
 ```
