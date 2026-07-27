@@ -7,13 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash hooks/scripts/docs-reminder.sh",
+            "command": "bash -c 'root=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-superproject-working-tree 2>/dev/null)}\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/docs-reminder.sh\"'",
             "timeout": 3000
           },
           {
             "type": "command",
-            "command": "bash hooks/scripts/cli-plugin-sync.sh",
-            "timeout": 3000
+            "command": "bash -c 'root=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-superproject-working-tree 2>/dev/null)}\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/cli-plugin-sync.sh\"'",
+            "timeout": 10000
           }
         ]
       }
