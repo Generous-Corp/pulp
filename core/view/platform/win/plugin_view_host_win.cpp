@@ -23,6 +23,7 @@
 #include <pulp/view/pointer_dispatch.hpp>
 #include <pulp/view/ui_components.hpp>  // ComboBox::notify_global_click
 #include <pulp/view/platform/win_pointer_input.hpp>
+#include <pulp/view/platform/win_surface_lifecycle.hpp>
 #include <pulp/view/repaint_damage.hpp>  // compute_effective_damage (platform-free)
 #include <pulp/view/window_host.hpp>
 
@@ -50,6 +51,9 @@
 #include <shellapi.h>    // DragQueryFileW, HDROP, CF_HDROP, DROPFILES
 #include <shlobj.h>      // SHCreateStdEnumFmtEtc (outbound IDataObject enum)
 #include "win_file_drag.hpp"  // shared OLE drag source (win_drag::win_run_file_drag)
+// After win32_sane.hpp + the OLE headers, matching where this code sat
+// before it was extracted — the include ORDER is load-bearing here.
+#include <pulp/view/platform/win_plugin_drop_target.hpp>
 
 #include <pulp/view/drag_drop.hpp>
 
@@ -130,131 +134,6 @@ ATOM ensure_window_class() {
     });
     return atom;
 }
-
-// UTF-16 → UTF-8 for dropped text / paths.
-std::string wide_to_utf8(const wchar_t* w, int wlen) {
-    if (!w || wlen <= 0) return {};
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, wlen, nullptr, 0, nullptr, nullptr);
-    if (n <= 0) return {};
-    std::string out(static_cast<size_t>(n), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w, wlen, out.data(), n, nullptr, nullptr);
-    return out;
-}
-
-// Pull a DropData out of an OLE IDataObject (files take priority over text,
-// matching the SDL + macOS producers).
-DropData extract_idata_drop(IDataObject* data) {
-    DropData out;
-    if (!data) return out;
-
-    // CF_HDROP — a list of file paths.
-    FORMATETC fmt_files{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    STGMEDIUM stg{};
-    if (data->GetData(&fmt_files, &stg) == S_OK) {
-        if (auto hdrop = static_cast<HDROP>(GlobalLock(stg.hGlobal))) {
-            const UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
-            out.type = DropData::Type::files;
-            for (UINT i = 0; i < count; ++i) {
-                const UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
-                std::wstring buf(len + 1, L'\0');
-                const UINT got = DragQueryFileW(hdrop, i, buf.data(),
-                                                static_cast<UINT>(buf.size()));
-                if (got > 0) out.file_paths.push_back(wide_to_utf8(buf.data(),
-                                                                   static_cast<int>(got)));
-            }
-            GlobalUnlock(stg.hGlobal);
-        }
-        ReleaseStgMedium(&stg);
-        if (!out.file_paths.empty()) return out;
-    }
-
-    // CF_UNICODETEXT — a single text payload.
-    FORMATETC fmt_text{CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    STGMEDIUM stg_text{};
-    if (data->GetData(&fmt_text, &stg_text) == S_OK) {
-        if (auto* w = static_cast<const wchar_t*>(GlobalLock(stg_text.hGlobal))) {
-            out.type = DropData::Type::text;
-            out.text = wide_to_utf8(w, static_cast<int>(wcslen(w)));
-            GlobalUnlock(stg_text.hGlobal);
-        }
-        ReleaseStgMedium(&stg_text);
-    }
-    return out;
-}
-
-// Minimal IDropTarget that routes OLE drops on the child HWND into the shared
-// cross-platform view-tree dispatch core (drag_drop.cpp) — the same core the SDL
-// and macOS producers use. Owned by WinPluginViewHost; registered via
-// RegisterDragDrop on the child HWND.
-class PulpWinDropTarget : public IDropTarget {
-public:
-    PulpWinDropTarget(View& root, HWND hwnd, std::function<Point(Point)> to_root)
-        : root_(root), hwnd_(hwnd), to_root_(std::move(to_root)) {}
-
-    // Screen POINTL → client → root coordinates (mirrors the mouse path).
-    Point to_root_point(POINTL pt) const {
-        POINT p{pt.x, pt.y};
-        ScreenToClient(hwnd_, &p);
-        Point client{static_cast<float>(p.x), static_cast<float>(p.y)};
-        return to_root_ ? to_root_(client) : client;
-    }
-
-    // ── IUnknown ──────────────────────────────────────────────────────────
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
-        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
-            *ppv = static_cast<IDropTarget*>(this);
-            AddRef();
-            return S_OK;
-        }
-        *ppv = nullptr;
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override {
-        return static_cast<ULONG>(++ref_);
-    }
-    ULONG STDMETHODCALLTYPE Release() override {
-        const long r = --ref_;
-        if (r == 0) delete this;
-        return static_cast<ULONG>(r);
-    }
-
-    // ── IDropTarget ───────────────────────────────────────────────────────
-    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD, POINTL pt,
-                                        DWORD* effect) override {
-        pending_ = extract_idata_drop(data);
-        const bool ok = dispatch_drag_enter(root_, session_, pending_,
-                                            to_root_point(pt));
-        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL pt, DWORD* effect) override {
-        const bool ok = dispatch_drag_enter(root_, session_, pending_,
-                                            to_root_point(pt));
-        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE DragLeave() override {
-        dispatch_drag_exit(root_, session_);
-        pending_ = {};
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data, DWORD, POINTL pt,
-                                   DWORD* effect) override {
-        DropData d = extract_idata_drop(data);
-        const bool ok = dispatch_drop(root_, session_, d, to_root_point(pt));
-        *effect = ok ? DROPEFFECT_COPY : DROPEFFECT_NONE;
-        pending_ = {};
-        return S_OK;
-    }
-
-private:
-    View& root_;
-    HWND hwnd_;
-    std::function<Point(Point)> to_root_;
-    DragSession session_;
-    DropData pending_;  // payload cached between DragEnter and Drop
-    long ref_ = 1;
-};
 
 // ── Outbound file drag (source side) ────────────────────────────────────────
 // The OLE drag SOURCE (CF_HDROP IDataObject + IDropSource + DoDragDrop) now
@@ -711,7 +590,12 @@ public:
             utf16[0] = unit;
         }
         pending_high_surrogate_ = 0;
-        const std::string text = wide_to_utf8(utf16, count);
+        // Lives in the drop-target header: the OLE path owns the only other
+        // caller, and this codebase's Windows TUs each carry their own copy of
+        // this WideCharToMultiByte wrapper (winmidi_device, clipboard_win,
+        // file_dialog_win, environment_win, wasapi_device all do). Sharing it
+        // across those five is a worthwhile cleanup but a separate one.
+        const std::string text = win_drop::wide_to_utf8(utf16, count);
         if (text.empty()) return true;
         focused->on_text_input(TextInputEvent{.text = text});
         request_repaint_from_input();
@@ -1050,7 +934,7 @@ private:
     // brought up COM (so we balance OleUninitialize). drop_target_ is ref-counted
     // by OLE; we hold one reference and Release it on teardown.
     bool ole_initialized_ = false;
-    PulpWinDropTarget* drop_target_ = nullptr;
+    win_drop::PulpWinDropTarget* drop_target_ = nullptr;
 
     void init_drag_drop() {
         if (!hwnd_) return;
@@ -1068,7 +952,7 @@ private:
         // (ScreenToClient output). Convert pixels→logical (÷ scale) before the
         // logical-space design-viewport inverse, so HiDPI hit-testing lands on
         // the right widget.
-        drop_target_ = new PulpWinDropTarget(
+        drop_target_ = new win_drop::PulpWinDropTarget(
             root_, hwnd_, [this](Point px) {
                 const float s = scale_ > 0.0f ? scale_ : 1.0f;
                 return window_to_root_point({px.x / s, px.y / s});

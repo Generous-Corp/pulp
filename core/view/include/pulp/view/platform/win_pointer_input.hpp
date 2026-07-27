@@ -11,6 +11,12 @@
 //
 // Same split as pulp/view/platform/ns_role_mapping.hpp (Apple) and
 // pulp/view/platform/uia_mapping.hpp (Windows accessibility).
+//
+// This header is about INPUT. The host's GPU-surface create/destroy state
+// machine used to live here too and now has its own home in
+// win_surface_lifecycle.hpp (WAH-9) — a reader looking for surface lifetime had
+// no reason to open a header called "pointer input", and a reader changing
+// pointer dispatch had no reason to expect surface lifetime under their hands.
 
 #include <pulp/view/geometry.hpp>      // Point
 #include <pulp/view/input_events.hpp>  // Modifier flags
@@ -266,51 +272,5 @@ constexpr KeyCode key_code_from_virtual_key(uint32_t vk) noexcept {
         default: return KeyCode::unknown;
     }
 }
-
-// ── GPU surface lifecycle ────────────────────────────────────────────────
-
-// Dawn configures its presentation surface for the HWND's native-window shape
-// at creation time. The editor HWND is created as a hidden top-level WS_POPUP
-// and only becomes the DAW's WS_CHILD inside attach_to_parent(), so a surface
-// created in the constructor presents against a window shape that no longer
-// exists. The symptom is a black editor that only refreshes when something
-// else forces the host to repaint (dragging the DAW's own scrollbar).
-//
-// This tracks the "create after reparent, destroy on detach" contract so an
-// attach/detach/attach cycle is asserted without needing an HWND. Encoding it
-// as state rather than an inline `if (!gpu_ || !skia_)` also keeps a partially
-// constructed surface pair (GPU created, Skia failed) from being mistaken for
-// "already initialized" on the next attach.
-class SurfaceLifecycle {
-public:
-    // True once note_attached() has asked for creation and no detach has
-    // reclaimed it. Must be false on a freshly constructed host.
-    constexpr bool surfaces_created() const noexcept { return created_; }
-
-    // Call after the HWND's final parent, style, and size are in place.
-    // Returns true when the caller must create the GPU/Skia surfaces now.
-    constexpr bool note_attached() noexcept {
-        if (created_) return false;
-        created_ = true;
-        return true;
-    }
-
-    // Call on detach, before the HWND leaves its parent. Returns true when the
-    // caller must tear the surfaces down so the next attach rebuilds them for
-    // the new native-window shape.
-    constexpr bool note_detached() noexcept {
-        if (!created_) return false;
-        created_ = false;
-        return true;
-    }
-
-    // Surface creation is allowed to fail (no Dawn adapter, Skia surface
-    // creation returned null). Recording that keeps the next attach from
-    // assuming a live surface pair.
-    constexpr void note_creation_failed() noexcept { created_ = false; }
-
-private:
-    bool created_ = false;
-};
 
 }  // namespace pulp::view::win_input
