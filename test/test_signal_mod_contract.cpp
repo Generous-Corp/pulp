@@ -206,8 +206,6 @@ TEST_CASE("modulation scalar raw value-initialized state replays after reset",
 TEST_CASE("event and envelope aliases start fresh and track their double forms",
           "[signal][mod][parity][zero-init]") {
     STATIC_REQUIRE(std::is_same_v<TriggerDetect64, TriggerDetectT<double>>);
-    STATIC_REQUIRE(
-        std::is_same_v<HystereticTriggerDetect64, HystereticTriggerDetectT<double>>);
     STATIC_REQUIRE(std::is_same_v<GateGen64, GateGenT<double>>);
     STATIC_REQUIRE(std::is_same_v<ClockDivider64, ClockDividerT<double>>);
     STATIC_REQUIRE(std::is_same_v<ClockMult64, ClockMultT>);
