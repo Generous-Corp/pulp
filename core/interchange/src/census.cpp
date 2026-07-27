@@ -152,6 +152,14 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
             out.record(Concept::ContextChordScale, sequence.id(), limits);
         if (!sequence.groove().is_canonical_default())
             out.record(Concept::ContextGroove, sequence.id(), limits);
+        // Markers and regions share one concept: its vocabulary entry is "a
+        // named point or range on the timeline", so a span is the same concept
+        // as a point rather than a second atom. Both are named locations a
+        // format either carries or drops.
+        for (const timeline::SequenceMarker& marker : sequence.markers())
+            out.record(Concept::Marker, marker.id, limits);
+        for (const timeline::SequenceRegion& region : sequence.regions())
+            out.record(Concept::Marker, region.id, limits);
         for (const timeline::Scene& scene : sequence.scenes())
             out.record(Concept::ClipLaunch, scene.id, limits);
         for (const timeline::Track& track : sequence.tracks())
@@ -159,6 +167,10 @@ ConceptCensus census(const timeline::Project& project, const CensusLimits& limit
     }
     if (project.sequences().size() > 1)
         out.record(Concept::SequenceMultiple, project_id, limits);
+    // The wall-clock origin the document's zero represents. A format without it
+    // opens the session at zero, silently moving every timecode reference.
+    if (project.session_start())
+        out.record(Concept::TimecodeOrigin, project_id, limits);
 
     // One point is a constant governing the whole document; more than one is a
     // map, and formats that carry only a constant lose the difference.

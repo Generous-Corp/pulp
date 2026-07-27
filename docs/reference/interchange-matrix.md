@@ -37,8 +37,8 @@ is not a reason to add a model feature.
 | `tempo.map` | yes | Tempo changing over the document at more than one point. |
 | `meter.single` | yes | One time signature governing the whole document. |
 | `meter.map` | yes | Time signature changing over the document at more than one point. |
-| `marker` | format-only | A named point or range on the timeline. |
-| `timecode.origin` | format-only | The wall-clock timecode the document's zero position represents. |
+| `marker` | yes | A named point or range on the timeline. |
+| `timecode.origin` | yes | The wall-clock timecode the document's zero position represents. |
 | `media.provenance` | format-only | Where a media asset came from: source timecode, reel or tape name, original locator. |
 | `mixer.track-gain` | yes | Static per-track gain. |
 | `mixer.track-pan` | yes | Static per-track pan position. |
