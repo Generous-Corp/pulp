@@ -2590,6 +2590,58 @@ You can also keep the SSH targets enabled and request Mac-only while iterating:
 pulp ci-local run --targets mac
 ```
 
+## Compiler coverage: which lanes use which compiler
+
+Worth knowing before you trust a green PR, because the answer is not symmetric.
+
+Every Linux lane in PR CI compiles with **Clang** — "Public headers compile
+standalone (Linux Clang)", "IWYU (Linux, Clang)", "RealtimeSanitizer (Linux
+x86_64, Clang 18)". macOS is Clang by definition. Windows is MSVC.
+
+That left **GCC** compiled in exactly one place: `release-path-pr-gate.yml`,
+which is *path-triggered* on release files (Skia pins, `tools/deps/manifest.json`,
+`tools/cmake/Pulp*.cmake`, the top-level `CMakeLists.txt`). Most PRs never
+trigger it, so a GCC-only error inside `core/` could sit on `main` indefinitely.
+
+It did, and not once. `core/host/src/signal_graph.cpp` keeps acquiring two
+identical `.custom_latency_for` entries in one designated-initializer list —
+Clang accepts that and silently takes the last, so nothing on the Apple or
+Clang-Linux lanes notices. `git log -S '.custom_latency_for'` shows the same
+defect fixed **four separate times**:
+
+```
+4371eebce  fix(host): remove a duplicate binder designator that GCC rejects
+1bdd0434a  fix(host): drop the duplicated custom-latency binder
+402620df4  fix(host): drop a duplicate designator that breaks every non-Apple release build
+077ffabda  build(host): drop a duplicate designator that breaks the MSVC build
+```
+
+Every one of those was caught *late* — by MSVC, by a non-Apple release build, or
+by the release-path gate firing on an unrelated PR. The binder list is long and
+sits where merges collide, so the duplicate keeps coming back; what was missing
+was a PR-time lane that says so immediately.
+
+`gcc-compile-gate.yml` closes that hole. It triggers on `core/**` and compiles
+the core libraries with `g++` and nothing else:
+
+| Option | Value | Why |
+|---|---|---|
+| `PULP_ENABLE_GPU` | `OFF` | no Dawn/Skia fetch or build — this is what keeps the gate in minutes rather than a full release build |
+| `PULP_BUILD_TESTS` | `OFF` | the gate asks "does `core/` compile under GCC", not "does it work" |
+| `PULP_BUILD_EXAMPLES` | `OFF` | same |
+| `PULP_ENABLE_DESIGN_IMPORT` | `OFF` | authoring subsystem, not core portability |
+| `PULP_ENABLE_INSPECTOR` | `OFF` | dev surface, not core portability |
+
+**Read a failure here literally.** The lane runs no tests and touches no
+hardware, so it cannot flake on load or timing the way the GPU-perf lanes can.
+A red result is a real compiler divergence. Clang accepting the same code does
+not make it portable.
+
+**What it deliberately does not cover:** GCC *behavior*. Nothing is executed, so
+a construct both compilers accept but implement differently is still only caught
+by the Clang test lanes. Widening this to run tests under GCC is a separate
+decision with a real time cost.
+
 ## For contributors
 
 You don't need the same VM setup as the original developer. Options:

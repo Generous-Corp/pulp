@@ -1,0 +1,151 @@
+name: GCC compile gate
+
+# Every Linux lane in PR CI compiles with Clang — "Public headers compile
+# standalone (Linux Clang)", "IWYU (Linux, Clang)", "RealtimeSanitizer
+# (Clang 18)". The only GCC compile anywhere in the PR path is
+# release-path-pr-gate.yml, and that is path-triggered on release files
+# (Skia pins, Pulp*.cmake, the top-level CMakeLists.txt). A GCC-only error
+# inside core/ is therefore invisible unless a PR happens to touch one of
+# those.
+#
+# Found the hard way on 2026-07-27: core/host/src/signal_graph.cpp carried two
+# identical `.custom_latency_for` entries in one designated-initializer list.
+# Clang accepts that and silently takes the last; GCC rejects it outright. It
+# sat on main until an unrelated docs PR touched tools/cmake/PulpInstallRules.cmake
+# and tripped the release-path gate by accident.
+#
+# This gate closes that hole cheaply. It compiles the core libraries with g++
+# and nothing else — no tests, no examples, no GPU. With PULP_ENABLE_GPU=OFF
+# there is no Dawn/Skia fetch or build, which is what keeps it minutes rather
+# than a full release build. It is a COMPILER-DIVERGENCE check, not a second
+# functional lane: the Clang lanes still own correctness.
+
+on:
+  pull_request:
+    paths:
+      - 'core/**'
+      - '.github/workflows/gcc-compile-gate.yml'
+  workflow_dispatch:
+
+# A new commit supersedes the previous compile of the same branch.
+concurrency:
+  group: gcc-compile-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-core:
+    name: GCC compile (core, Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # SDL3 is fetched unconditionally by PulpDependencies.cmake -- it is not
+      # behind PULP_ENABLE_GPU -- and its configure step hard-fails when neither
+      # X11 nor Wayland development headers are present. So even a
+      # GPU-off, tests-off build needs the same system packages every other
+      # Linux lane installs.
+      #
+      # This mirrors build.yml's list deliberately rather than trimming to the
+      # minimum or setting SDL_UNIX_CONSOLE_BUILD. A differently-configured SDL
+      # would make any future failure here ambiguous between "our code does not
+      # compile under GCC" and "this lane configures its dependencies
+      # differently from every other lane", and the whole point of the gate is
+      # that a red result has exactly one meaning.
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libdbus-1-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libjack-jackd2-dev \
+            libx11-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxss-dev \
+            libxtst-dev \
+            libwayland-dev \
+            wayland-protocols
+
+      - name: Report the compiler under test
+        run: |
+          g++ --version
+          cmake --version
+
+      # GPU off is what makes this cheap: no Dawn, no Skia, no prebuilt fetch.
+      # Tests and examples off because this gate asks "does core/ compile under
+      # GCC", not "does everything work" — the Clang lanes answer that.
+      - name: Configure (g++, core only)
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          # Ask CMake for a codemodel reply so the build step can discover the
+          # core library targets instead of hard-coding a list that goes stale.
+          mkdir -p build-gcc/.cmake/api/v1/query
+          touch build-gcc/.cmake/api/v1/query/codemodel-v2
+          cmake -S . -B build-gcc \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DCMAKE_CXX_COMPILER=g++ \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF \
+            -DPULP_ENABLE_DESIGN_IMPORT=OFF \
+            -DPULP_ENABLE_INSPECTOR=OFF
+
+      # Build the core LIBRARIES, not the `all` target.
+      #
+      # `all` also links the repo's tools, and those drag in option
+      # combinations this lane deliberately turns off -- `pulp-import-design`
+      # is built unconditionally but its `pulp::view` design-IR sources are
+      # behind PULP_ENABLE_DESIGN_IMPORT, so `all` fails at LINK with
+      # undefined references that say nothing about GCC. That is a real
+      # pre-existing repo defect (tracked separately), not this lane's
+      # question. Compiling the libraries is the question.
+      #
+      # The target list is discovered from CMake's codemodel rather than
+      # hard-coded, so a new library under core/ is covered the day it lands.
+      # Two guards, because the dangerous failure here is a SILENT one: an
+      # empty --target list makes cmake build the default target, and a
+      # discovery bug that finds nothing would otherwise exit 0 and read as a
+      # pass. So the count is asserted and the list is printed.
+      - name: Discover core library targets
+        run: |
+          python3 tools/scripts/list_core_library_targets.py --self-test
+          python3 tools/scripts/list_core_library_targets.py build-gcc --minimum 20 > targets.txt
+          echo "building $(wc -l < targets.txt) core library target(s):"
+          cat targets.txt
+
+      # An explicit job count, per the repo-wide rule that no build may fan out
+      # unbounded on a shared machine.
+      - name: Build core libraries
+        run: |
+          # Word splitting is intended: one target name per line.
+          # shellcheck disable=SC2046
+          cmake --build build-gcc --parallel 4 --target $(cat targets.txt)
+
+      - name: Summarize
+        if: always()
+        run: |
+          {
+            echo "GCC compiled the core libraries with tests, examples, and GPU disabled."
+            echo ""
+            echo "A failure here is a real compiler divergence, not a flake: this lane"
+            echo "runs no tests and touches no hardware. Clang accepting the same code"
+            echo "does not make it portable."
+          } >> "$GITHUB_STEP_SUMMARY"
