@@ -1243,6 +1243,35 @@ TEST_CASE("Short string sync notes follow the configured decay",
     REQUIRE(peak(tail) < 1.0e-4);
 }
 
+TEST_CASE("Rearming string FM cannot revive a dormant auxiliary tail",
+          "[signal][drum][string][modulation][lifecycle]") {
+    auto configure = [](StringVoice& voice) {
+        voice.prepare(kFs);
+        voice.set_tune_hz(180.0);
+        voice.set_decay_seconds(2.0);
+        voice.set_modulation_mix(1.0);
+        voice.set_fm_depth_octaves(0.4);
+        voice.output().set_oversampling(
+            pulp::signal::drum::OutputOversampling::bypass);
+        voice.set_velocity_response(
+            VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    };
+
+    StringVoice recovered;
+    configure(recovered);
+    recovered.set_modulation(StringModulation::fm);
+    (void)hit(recovered, 1.0f, 1000);
+    recovered.set_modulation(StringModulation::none);
+    (void)hit(recovered, 1.0f, 1000);
+    recovered.set_modulation(StringModulation::fm);
+    const auto rearmed = hit(recovered, 1.0f, 12000);
+
+    StringVoice fresh;
+    configure(fresh);
+    fresh.set_modulation(StringModulation::fm);
+    REQUIRE(rearmed == hit(fresh, 1.0f, 12000));
+}
+
 TEST_CASE("The string's lowpass gate darkens its release",
           "[signal][drum][string]") {
     auto gated = [](double amount) {

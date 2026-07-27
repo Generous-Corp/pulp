@@ -186,8 +186,10 @@ protected:
         string_.set_dynamic_bandwidth_hz(
             brightness_hz_ * static_cast<double>(response.brightness_scale(velocity)));
         string_.pluck(restart_on_hit_);
+        const bool was_fm_path_active = fm_path_active_;
         fm_path_active_ = modulation_ == StringModulation::fm;
         if (fm_path_active_) {
+            if (!was_fm_path_active) fm_string_.reset();
             fm_string_.set_frequency(base_frequency_);
             fm_string_.set_decay_seconds(decay_s_);
             fm_string_.set_damping(damping_);
@@ -198,6 +200,8 @@ protected:
                 brightness_hz_ *
                 static_cast<double>(response.brightness_scale(velocity)));
             fm_string_.pluck(restart_on_hit_);
+        } else if (was_fm_path_active) {
+            fm_string_.reset();
         }
 
         exciter_env_.set_attack_ms(0.0);
