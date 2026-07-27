@@ -55,18 +55,14 @@ std::vector<double> hysteresis_alias_spectrum(int oversampling) {
         eight_times.set_character(cd::kTapeDrive.back(), cd::kTapeBias.back());
     }
 
-    // The 16x reference extends the shipping 8x wrapper with one more stage,
-    // but owns a separate solver because it is intentionally not a production
-    // realization.
-    cd::HysteresisOversampler8x reference_wrapper;
-    pulp::signal::detail::LinearPhaseOversamplingStage2x<double> reference_stage;
+    // The 16x reference extends the shipping topology by one stage, but remains
+    // test-local because 8x is the production realization.
+    using OversampledHysteresis16x =
+        cd::OversampledHysteresis<cd::HysteresisHalfBandOversampler<4>>;
+    OversampledHysteresis16x sixteen_times;
     if (oversampling == 16) {
-        reference_wrapper.prepare();
-        // This fourth stage extends the SHIPPING 8x topology rather than
-        // replacing it, so every filter through 8x is identical in DUT and
-        // reference. At an 8x input rate, 0.05625 preserves 0.45 * host fs.
-        reference_stage.configure(0.05625, cd::kHysteresisHalfBandStopbandDb,
-                                  cd::kHysteresisHalfBandTaps);
+        sixteen_times.prepare(kSr);
+        sixteen_times.set_character(cd::kTapeDrive.back(), cd::kTapeBias.back());
     }
 
     double stimulus_peak = 0.0;
@@ -92,14 +88,7 @@ std::vector<double> hysteresis_alias_spectrum(int oversampling) {
             output = eight_times.process(input);
             break;
         case 16:
-            output = reference_wrapper.process(input, [&](double value) {
-                double even = 0.0;
-                double odd = 0.0;
-                reference_stage.upsample(value, even, odd);
-                const double processed_even = hysteresis.process(even);
-                const double processed_odd = hysteresis.process(odd);
-                return reference_stage.downsample(processed_even, processed_odd);
-            });
+            output = sixteen_times.process(input);
             break;
         default:
             break;
@@ -247,6 +236,112 @@ TEST_CASE("hysteresis distortion grows with drive and silence clears it",
     for (int i = 0; i < 4800; ++i) last = hysteresis.process(0.0);
     INFO("magnetization after silence " << last);
     CHECK(last == 0.0);
+}
+
+TEST_CASE("hysteresis oversampler depth owns factor, phase count, and latency",
+          "[character-delay][hysteresis]") {
+    using FourTimes = cd::HysteresisHalfBandOversampler<2>;
+    using EightTimes = cd::HysteresisHalfBandOversampler<3>;
+    static_assert(FourTimes::oversampling_factor() == 4);
+    static_assert(EightTimes::oversampling_factor() == 8);
+
+    const auto taps = static_cast<int>(cd::kHysteresisHalfBandTaps);
+    CHECK(FourTimes::latency_samples() == (taps - 1) / 2 + (taps - 1) / 4);
+    CHECK(EightTimes::latency_samples() ==
+          (taps - 1) / 2 + (taps - 1) / 4 + (taps - 1) / 8);
+
+    FourTimes four;
+    EightTimes eight;
+    four.prepare();
+    eight.prepare();
+    int four_phases = 0;
+    int eight_phases = 0;
+    (void)four.process(0.0, [&](double value) {
+        ++four_phases;
+        return value;
+    });
+    (void)eight.process(0.0, [&](double value) {
+        ++eight_phases;
+        return value;
+    });
+    CHECK(four_phases == FourTimes::oversampling_factor());
+    CHECK(eight_phases == EightTimes::oversampling_factor());
+}
+
+TEST_CASE("hysteresis oversampler presents phases in chronological order",
+          "[character-delay][hysteresis]") {
+    // The callback owns time-dependent magnetic state, so the cascade is only
+    // correct if it hands over the oversampled phases in time order. C++ leaves
+    // function-argument evaluation order unspecified, which means the ordering
+    // is a property the cascade must sequence deliberately rather than one the
+    // language supplies — exactly the invariant a recursive rewrite can lose
+    // while every factor, latency and phase-count check stays green.
+    //
+    // A linear-phase symmetric FIR reproduces a ramp exactly, delayed and
+    // scaled, so the recorded phase sequence of a rising ramp must itself rise
+    // monotonically at the oversampled rate. Any transposed pair is a step
+    // backwards. Checked on the shipping 8x depth, whose three stages exercise
+    // both the recursion and its leaf.
+    cd::HysteresisHalfBandOversampler<3> eight;
+    eight.prepare();
+
+    constexpr int kHostSamples = 256;
+    constexpr int kSettleHostSamples = 64;  // past the cascade's group delay
+    const auto factor = static_cast<std::size_t>(
+        cd::HysteresisHalfBandOversampler<3>::oversampling_factor());
+
+    std::vector<double> phases;
+    phases.reserve(static_cast<std::size_t>(kHostSamples) * factor);
+    for (int sample = 0; sample < kHostSamples; ++sample) {
+        (void)eight.process(static_cast<double>(sample), [&](double value) {
+            phases.push_back(value);
+            return value;
+        });
+    }
+    REQUIRE(phases.size() == static_cast<std::size_t>(kHostSamples) * factor);
+
+    const std::size_t settled = static_cast<std::size_t>(kSettleHostSamples) * factor;
+    double smallest_step = phases[settled + 1] - phases[settled];
+    for (std::size_t i = settled + 1; i < phases.size(); ++i)
+        smallest_step = std::min(smallest_step, phases[i] - phases[i - 1]);
+    CHECK(smallest_step > 0.0);
+}
+
+TEST_CASE("physical tape feedback calibration is continuous and releases above unity",
+          "[character-delay][feedback][tape]") {
+    static_assert(noexcept(cd::physical_tape_effective_feedback(0.0, 0.0)));
+
+    for (std::size_t knot = 0; knot < cd::kTapeAxis.size(); ++knot) {
+        const double age = cd::kTapeAxis[knot];
+        const double compensation = cd::kTapePhysicalFeedbackCompensation[knot];
+        CAPTURE(age, compensation);
+        CHECK(cd::physical_tape_effective_feedback(0.0, age) == 0.0);
+        CHECK(cd::physical_tape_effective_feedback(0.5, age) ==
+              Catch::Approx(0.5 * compensation));
+        CHECK(cd::physical_tape_effective_feedback(1.0, age) ==
+              Catch::Approx(compensation));
+        CHECK(cd::physical_tape_effective_feedback(1.05, age) ==
+              Catch::Approx(1.05 * (compensation + 0.5 * (1.0 - compensation))));
+        CHECK(cd::physical_tape_effective_feedback(1.1, age) == Catch::Approx(1.1));
+    }
+
+    const double midpoint_age = 0.5;
+    const double midpoint_compensation = cd::interpolate_knots(
+        cd::kTapeAxis, cd::kTapePhysicalFeedbackCompensation, midpoint_age);
+    CHECK(cd::physical_tape_effective_feedback(0.8, midpoint_age) ==
+          Catch::Approx(0.8 * midpoint_compensation));
+
+    constexpr double epsilon = 1e-9;
+    const double below =
+        cd::physical_tape_effective_feedback(1.0 - epsilon, midpoint_age);
+    const double at_unity =
+        cd::physical_tape_effective_feedback(1.0, midpoint_age);
+    const double above =
+        cd::physical_tape_effective_feedback(1.0 + epsilon, midpoint_age);
+    CHECK(below < at_unity);
+    CHECK(above > at_unity);
+    CHECK(at_unity - below < 1e-8);
+    CHECK(above - at_unity < 1e-8);
 }
 
 TEST_CASE("physical hysteresis oversampling suppresses max-drive aliasing",

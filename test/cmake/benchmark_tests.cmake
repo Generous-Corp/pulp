@@ -54,4 +54,13 @@ if(PULP_BENCHMARK)
         LIBRARIES pulp::signal
         INCLUDE_DIRS ${choc_SOURCE_DIR}
         LABELS "bench")
+
+    # CharacterDelay catalog-adapter cost. Advisory Release measurement only:
+    # the test reports medians and comparative ratios but has no timing budget,
+    # so host load and CI jitter cannot turn performance evidence into a flaky
+    # correctness failure.
+    pulp_add_test_suite(pulp-test-character-delay-adapter-bench
+        LIBRARIES pulp::host pulp::signal
+        LABELS "bench"
+        TIMEOUT 120)
 endif()

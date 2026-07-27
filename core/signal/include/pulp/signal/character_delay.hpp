@@ -267,17 +267,9 @@ public:
             const double crossfeed = crossfeed_.process(reverse_on_ ? 0.0 : crossfeed_target_);
 
             double feedback = std::min(feedback_.process(feedback_target_), feedback_ceiling());
-            if (physical_tape()) {
-                double physical_gain = chardelay::interpolate_knots(
-                    chardelay::kTapeAxis, chardelay::kTapePhysicalFeedbackCompensation,
-                    character_amount);
-                if (feedback > 1.0) {
-                    const double over_unity =
-                        (feedback - 1.0) / (chardelay::kSaturatedFeedbackMax - 1.0);
-                    physical_gain += (1.0 - physical_gain) * over_unity;
-                }
-                feedback *= physical_gain;
-            }
+            if (physical_tape())
+                feedback = chardelay::physical_tape_effective_feedback(
+                    feedback, character_amount);
             // Freeze overrides the parameter AND the per-character clamp: the
             // loop must be exactly unity for the frozen content to hold.
             feedback += freeze * (1.0 - feedback);
