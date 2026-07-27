@@ -1557,6 +1557,14 @@ audio-region counts, and automation presence. Plugin latency is a host-binding
 property, so the headless report returns `pdc_offset_samples: null` rather than
 claiming a value it cannot measure.
 
+Each track also reports a `production_mode` (`synchronous` or `buffered` — where
+its content is produced relative to the audio callback) and a `reproducibility`
+class (`deterministic`, `tolerance`, `materialized`, or `best_effort` — what a
+second render of the same document may claim about the first). The top-level
+`reproducibility` is the weakest claim any track makes, so a caller reading only
+that field never over-reads a render as bit-reproducible. Every content path the
+compiler lowers today is produced in band, so tracks report `synchronous`.
+
 See [One typed edit through CLI and MCP](../guides/timeline-sdk.md#one-typed-edit-through-cli-and-mcp)
 for a generated-schema lookup, complete command envelope, transactional apply,
 validation, explanation, render, and the equivalent five-tool MCP flow.

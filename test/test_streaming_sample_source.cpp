@@ -793,6 +793,33 @@ TEST_CASE("StreamingSampleSource terminates when a streamed source ends early",
     REQUIRE(src.stats().read_errors > 0);
 }
 
+TEST_CASE("deadline-bound streaming finishes only after its declared interval",
+          "[audio][streaming][production]") {
+    constexpr std::uint64_t declared = 2048;
+    constexpr std::uint64_t block = 512;
+
+    StreamingSampleSourceConfig cfg;
+    cfg.channels = 1;
+    cfg.total_frames = declared;
+    cfg.preload_frames = 0;
+    cfg.ring_capacity_frames = block;
+    cfg.read_chunk_frames = block;
+    cfg.start_background_thread = false;
+    cfg.underrun_policy =
+        pulp::audio::StreamingUnderrunPolicy::AdvancePosition;
+
+    StreamingSampleSource src;
+    REQUIRE(src.prepare(cfg, make_synth_reader(1, 0)));
+    REQUIRE_FALSE(src.finished());
+
+    Buffer<float> out(1, block);
+    for (std::uint64_t pulled = 0; pulled < declared; pulled += block) {
+        REQUIRE(src.pull(out.view(), block) == 0);
+        REQUIRE(src.finished() == (pulled + block == declared));
+    }
+    REQUIRE(src.position() == declared);
+}
+
 TEST_CASE("StreamingSampleSource zero-fills surplus destination channels",
           "[audio][streaming][issue-streaming]") {
     // A mono source pulled into a stereo destination must leave the extra channel

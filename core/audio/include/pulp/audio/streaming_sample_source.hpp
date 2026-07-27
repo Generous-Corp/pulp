@@ -92,6 +92,11 @@ struct FrameReaderBinding {
     FrameReaderStopMode stop_mode = FrameReaderStopMode::JoinOnly;
 };
 
+enum class StreamingUnderrunPolicy : std::uint8_t {
+    PreservePosition = 0,
+    AdvancePosition,
+};
+
 struct StreamingSampleSourceConfig {
     std::uint32_t channels = 0;          ///< Source channel count (1 or 2 typical).
     std::uint64_t total_frames = 0;      ///< Total length of the source in frames.
@@ -119,6 +124,18 @@ struct StreamingSampleSourceConfig {
     /// Spawn the owned background reader thread in prepare(). Set false to drive
     /// refills manually via pump_background() (deterministic testing).
     bool start_background_thread = true;
+
+    /// Whether a streaming underrun preserves the source cursor or consumes its
+    /// missing interval. Generated deadline-bound content advances; ordinary
+    /// sample playback preserves every frame.
+    StreamingUnderrunPolicy underrun_policy =
+        StreamingUnderrunPolicy::PreservePosition;
+
+    /// Maximum distance the reader may produce ahead of the play cursor. Zero
+    /// leaves read-ahead bounded only by ring capacity. Deadline-bound sources
+    /// use this to separate callback-sized storage from their production
+    /// lookahead horizon.
+    std::uint64_t max_read_ahead_frames = 0;
 };
 
 class StreamingSampleSource {
@@ -181,12 +198,43 @@ public:
         std::uint64_t underrun_frames = 0;   ///< Frames the audio thread had to zero-fill mid-stream.
         std::uint64_t ring_available_frames = 0;
         std::uint64_t streamed_frames = 0;   ///< Source frames pushed through the ring since prepare/reset.
-        std::uint64_t read_errors = 0;       ///< Background reader short/zero returns.
+        /// Reader exceptions, plus zero returns when preserve-position mode
+        /// treats them as terminal. Deadline-mode backpressure is not an error.
+        std::uint64_t read_errors = 0;
         bool streaming_active = false;       ///< Tail not yet fully streamed.
     };
     Stats stats() const noexcept;
 
 private:
+    struct DeadlinePolicy {
+        bool enabled = false;
+        std::uint64_t max_read_ahead_frames = 0;
+        std::atomic<std::uint64_t> ring_start_frame{0};
+
+        void configure(const StreamingSampleSourceConfig& config,
+                       std::uint64_t initial_frame) noexcept;
+        void clear() noexcept;
+        std::uint64_t effective_end(std::uint64_t total_frames,
+                                    std::uint64_t eos_frame) const noexcept;
+        void apply_underrun(std::atomic<std::uint64_t>& play_pos,
+                            std::uint64_t next_position) const noexcept;
+        bool zero_is_backpressure() const noexcept;
+        std::uint64_t producer_cursor(std::uint64_t play_pos,
+                                      std::uint64_t reader_pos) const noexcept;
+        bool discard_stale(PlanarAudioRingBuffer& ring,
+                           std::uint64_t play_pos) noexcept;
+        void consumed(std::uint64_t ring_start,
+                      std::uint64_t frames) noexcept;
+        bool align_reader(PlanarAudioRingBuffer& ring,
+                          std::uint64_t play_pos,
+                          std::uint64_t& reader_pos) noexcept;
+        std::uint64_t read_ahead_room(std::uint64_t total_frames,
+                                      std::uint64_t play_pos,
+                                      std::uint64_t reader_pos) const noexcept;
+        void publish_start_if_empty(PlanarAudioRingBuffer& ring,
+                                    std::uint64_t frame) noexcept;
+    };
+
     void stop_thread() noexcept;
     void reader_loop() noexcept;
     void notify_reader() noexcept;
@@ -207,6 +255,7 @@ private:
     bool fully_resident_ = false;
     bool prepared_ = false;
     bool use_thread_ = false;
+    DeadlinePolicy deadline_;
 
     Buffer<float> preload_;          ///< Resident head, frames [0, preload_valid_).
     PlanarAudioRingBuffer ring_;     ///< Streamed tail, frames [preload_valid_, ...).

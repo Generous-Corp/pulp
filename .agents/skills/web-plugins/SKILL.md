@@ -819,6 +819,15 @@ does not sweep it into the wasm DSP binary. If a timeline source genuinely
 belongs in the web plugin, add it to BOTH lane lists (and provide any dependency
 the lanes don't already compile).
 
+For `core/timeline` and `core/playback` specifically, both lanes consume the
+shared manifests (`PulpTimelineSources.cmake`, `PulpPlaybackSources.cmake`) by
+variable, so adding a TU to one manifest sweeps it into BOTH wasm binaries with
+no lane edit and no review prompt. That is a one-line change with a wasm-sized
+consequence: a source needing `std::thread`, exceptions, or a dependency the
+lanes don't compile (only `rolling_audio_capture_buffer.cpp` and `sha256.cpp`
+are carried from outside the three engine modules) must be header-only or live
+outside `src/`.
+
 The closure globs `src/*.cpp` only, so a header-only engine addition — a new
 `core/timeline/include/**` type, or new inline logic on an existing one — needs
 no lane-list edit and cannot break the gate. Skill-sync still flags such a
