@@ -22,6 +22,14 @@ JsonValue* mutable_member(JsonValue& object, std::string_view name) noexcept {
     return found == object.object.end() ? nullptr : &found->second;
 }
 
+const JsonValue* member(const JsonValue& object, std::string_view name) noexcept {
+    if (object.kind != JsonValue::Kind::Object)
+        return nullptr;
+    const auto found = std::find_if(object.object.begin(), object.object.end(),
+                                    [name](const auto& value) { return value.first == name; });
+    return found == object.object.end() ? nullptr : &found->second;
+}
+
 bool valid_version(const JsonValue& value, std::uint32_t expected) noexcept {
     if (value.kind != JsonValue::Kind::Number)
         return false;
@@ -42,6 +50,7 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
     const auto* record = mutable_member(data, "record_armed");
     const auto* active = mutable_member(data, "active_take_lane_id");
     const auto* freeze = mutable_member(data, "freeze");
+    const auto* mixer = mutable_member(data, "mixer");
     return id && id->kind == JsonValue::Kind::String && name &&
            name->kind == JsonValue::Kind::String && clips &&
            clips->kind == JsonValue::Kind::Array &&
@@ -60,7 +69,27 @@ bool valid_track_data_shape(JsonValue& data, std::uint32_t version) noexcept {
                 : !active) &&
            (track_schema_policy.supports_freeze(version)
                 ? !freeze || freeze->kind == JsonValue::Kind::Object
-                : !freeze);
+                : !freeze) &&
+           (track_schema_policy.supports_mixer(version)
+                ? !mixer || mixer->kind == JsonValue::Kind::Object
+                : !mixer);
+}
+
+bool has_track_mixer_automation(JsonValue& data) noexcept {
+    const auto* lanes = mutable_member(data, "automation_lanes");
+    if (!lanes || lanes->kind != JsonValue::Kind::Array)
+        return false;
+    for (const auto& lane_envelope : lanes->array) {
+        if (lane_envelope.kind != JsonValue::Kind::Object)
+            continue;
+        const auto* lane_data = member(lane_envelope, "data");
+        const auto* target = lane_data ? member(*lane_data, "target") : nullptr;
+        const auto* type_name = target ? member(*target, "type_name") : nullptr;
+        if (type_name && type_name->kind == JsonValue::Kind::String &&
+            type_name->scalar == "pulp.timeline.automation_target.track_mixer")
+            return true;
+    }
+    return false;
 }
 
 struct RawEdit {
@@ -387,6 +416,52 @@ migrate_track_v6_to_v5(std::string_view source, BoundedJsonSink& output, const v
         mutable_member(*data, "freeze") || version->begin >= version->end)
         return migration_fail<SchemaWriteSuccess>();
     std::array edits{RawEdit{version->begin, version->end, "5"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v6_to_v7(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // A v6 track has no mixer, and an absent mixer is exactly how v7 spells the
+    // default one, so the upgrade is the version stamp and nothing else.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.freeze_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.freeze_introduced_version) ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "7"}};
+    if (!valid_raw_edits(source, edits))
+        return migration_fail<SchemaWriteSuccess>();
+    apply_raw_edits(source, edits, output);
+    return runtime::Ok(SchemaWriteSuccess{});
+}
+
+runtime::Result<SchemaWriteSuccess, PersistenceError>
+migrate_track_v7_to_v6(std::string_view source, BoundedJsonSink& output, const void*) noexcept {
+    auto parsed = parse_json(source);
+    if (!parsed)
+        return migration_fail<SchemaWriteSuccess>();
+    auto root = parsed.value()->root();
+    auto* data = mutable_member(root, "data");
+    auto* version = mutable_member(root, "version");
+    // An authored gain or pan has no v6 spelling. Dropping it would silently
+    // change how the document sounds, so a track carrying one refuses to
+    // downgrade rather than losing its levels.
+    if (!data || !version ||
+        !valid_version(*version, track_schema_policy.mixer_introduced_version) ||
+        !valid_track_data_shape(*data, track_schema_policy.mixer_introduced_version) ||
+        mutable_member(*data, "mixer") || has_track_mixer_automation(*data) ||
+        version->begin >= version->end)
+        return migration_fail<SchemaWriteSuccess>();
+    std::array edits{RawEdit{version->begin, version->end, "6"}};
     if (!valid_raw_edits(source, edits))
         return migration_fail<SchemaWriteSuccess>();
     apply_raw_edits(source, edits, output);

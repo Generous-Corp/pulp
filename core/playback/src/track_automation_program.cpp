@@ -10,8 +10,9 @@ namespace {
 
 runtime::Result<std::shared_ptr<const TrackAutomationProgram>, TrackAutomationProgramError>
 fail(TrackAutomationProgramErrorCode code, timeline::ItemId track, timeline::ItemId lane = {},
-     timeline::ItemId related_lane = {}, timeline::DeviceParameterTarget target = {}) {
-    return runtime::Err(TrackAutomationProgramError{code, track, lane, related_lane, target});
+     timeline::ItemId related_lane = {}, timeline::AutomationTarget target = {}) {
+    return runtime::Err(
+        TrackAutomationProgramError{code, track, lane, related_lane, std::move(target)});
 }
 
 } // namespace

@@ -248,3 +248,45 @@ TEST_CASE("a census records per-note modifiers so an export cannot drop them sil
         Project::create(ProjectInput{{1}, "seeded", 100, {2}, {}, {seeded_sequence}}));
     REQUIRE(census(seeded).count(Concept::ClipNoteModifier) == 1);
 }
+
+TEST_CASE("a census records track mixer state and the lanes that automate it",
+          "[interchange]") {
+    // Without this the export loss manifest for a mixed session would claim
+    // nothing was lost while dropping its levels — a lying manifest, which is
+    // worse than a refusal.
+    const auto lane = [](ItemId id, TrackMixerParameter parameter) {
+        auto curve = AutomationCurve::create(
+            {AutomationPoint{{id.value + 1}, {0}, 0.5f, AutomationInterpolation::Continuous,
+                             0.0f}});
+        REQUIRE(curve.has_value());
+        auto created =
+            AutomationLane::create(id, TrackMixerTarget{parameter}, std::move(curve).value());
+        REQUIRE(created.has_value());
+        return std::move(created).value();
+    };
+    auto track = take_value(Track::create(
+        TrackInput{.id = {6},
+                   .name = "mixed",
+                   .automation_lanes = {lane({20}, TrackMixerParameter::Gain),
+                                        lane({30}, TrackMixerParameter::Pan)},
+                   .mixer = TrackMixer{0.5f, -0.25f}}));
+    auto sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {track}));
+    const ConceptCensus counted = census(
+        take_value(Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {sequence}})));
+
+    REQUIRE(counted.contains(Concept::MixerTrackGain));
+    REQUIRE(counted.contains(Concept::MixerTrackPan));
+    REQUIRE(counted.contains(Concept::AutomationTrackGain));
+    REQUIRE(counted.contains(Concept::AutomationTrackPan));
+    REQUIRE(counted.owners(Concept::AutomationTrackGain)[0] == ItemId{20});
+    REQUIRE_FALSE(counted.contains(Concept::AutomationDeviceParam));
+
+    // A track that was never touched must not report mixer state, or every
+    // document would claim to carry levels it does not have.
+    auto plain = take_value(Track::create({6}, "plain", {}));
+    auto plain_sequence = take_value(Sequence::create({3}, "sequence", TickDuration{100}, {plain}));
+    const ConceptCensus untouched = census(take_value(
+        Project::create(ProjectInput{{1}, "project", 100, {3}, {}, {plain_sequence}})));
+    REQUIRE_FALSE(untouched.contains(Concept::MixerTrackGain));
+    REQUIRE_FALSE(untouched.contains(Concept::MixerTrackPan));
+}

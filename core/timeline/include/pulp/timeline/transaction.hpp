@@ -28,6 +28,7 @@ enum class DirtyFlags : std::uint16_t {
     // from the item. DirtySet::contexts() names the kind that changed; the
     // compiler resolves the readers through its subscription reverse index.
     Context = 1 << 10,
+    Mixer = 1 << 11,
 };
 
 constexpr DirtyFlags operator|(DirtyFlags lhs, DirtyFlags rhs) noexcept {

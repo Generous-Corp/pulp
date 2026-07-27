@@ -619,3 +619,70 @@ TEST_CASE("A nested note clip carries its modifiers through a partial clip") {
     // Note 13 survives partially and still ratchets twice; note 15 survives once.
     REQUIRE(note_ons == 3);
 }
+
+namespace {
+
+// A nested project whose CHILD track carries the supplied mixer state. A default
+// TrackMixer is transparent, so the same builder produces both the refusal case
+// and its positive control.
+Project nested_project_with_child_mixer(TrackMixer child_mixer) {
+    auto child_clip = take(Clip::create({12}, {0}, {960}, note_content(13)));
+    TrackInput child_input;
+    child_input.id = {11};
+    child_input.name = "child";
+    child_input.clips = {child_clip};
+    child_input.mixer = child_mixer;
+    auto child_track = take(Track::create(std::move(child_input)));
+    auto child = take(Sequence::create({10}, "child", TickDuration{960}, {child_track}));
+    auto root = take(Sequence::create({2}, "root", std::nullopt, {track(3, {nested_clip(4, 10)})}));
+    ProjectInput input;
+    input.id = {1};
+    input.name = "nested-mixer";
+    input.next_item_id = 100;
+    input.root_sequence_id = {2};
+    input.sequences = {root, child};
+    return take(Project::create(std::move(input)));
+}
+
+CompileError compile_error_for(const Project& project) {
+    PlaybackProgramStore store;
+    InlineExecutor executor;
+    PlaybackProgramCompiler compiler(store, executor, std::chrono::microseconds(0));
+    ProgramCompileRequest request;
+    request.project = shared(project);
+    request.sequence_id = {2};
+    request.tempo_map = map_120();
+    request.document_revision = 1;
+    request.dirty.all = true;
+    REQUIRE(compiler.submit(std::move(request)));
+    const auto status = compiler.status();
+    REQUIRE(status.has_error);
+    return status.last_error;
+}
+
+} // namespace
+
+TEST_CASE("A nested child track carrying a non-transparent mixer is refused") {
+    // Flattening would fold the child into the parent with nowhere to put its
+    // fader, so its gain would silently stop applying. The compiler must refuse
+    // and name the offending track rather than play it at unity.
+    const auto gained = nested_project_with_child_mixer(TrackMixer{0.5f, 0.0f});
+    const auto gain_error = compile_error_for(gained);
+    REQUIRE(gain_error.code == CompileErrorCode::NestedSequenceUnsupported);
+    REQUIRE(gain_error.item == ItemId{11});
+
+    // Pan is refused on the same grounds as gain.
+    const auto panned = nested_project_with_child_mixer(TrackMixer{1.0f, -0.5f});
+    const auto pan_error = compile_error_for(panned);
+    REQUIRE(pan_error.code == CompileErrorCode::NestedSequenceUnsupported);
+    REQUIRE(pan_error.item == ItemId{11});
+}
+
+TEST_CASE("A nested child track with a transparent mixer still lowers") {
+    // The positive control for the refusal above: without it, a guard that
+    // rejected every nested track would pass the refusal test just as well.
+    const auto project = nested_project_with_child_mixer(TrackMixer{});
+    auto program = compile(shared(project));
+    const auto events = program->find_track({3})->arrangement_note_events();
+    REQUIRE_FALSE(events.empty());
+}

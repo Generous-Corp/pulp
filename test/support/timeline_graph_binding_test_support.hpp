@@ -222,6 +222,24 @@ NoteEvent note(const CompiledTempoMap& map, std::uint64_t id, std::int64_t start
         take(Project::create(ProjectInput{{1}, "notes", 1'000, {2}, {}, {std::move(sequence)}})));
 }
 
+[[maybe_unused]] std::shared_ptr<const Project>
+instrument_mixer_project(const CompiledTempoMap& map) {
+    auto content = take(NoteContent::create({note(map, 101, 5, 20)}));
+    auto clip = take(Clip::create({100}, {0}, map.samples_to_ticks({128}) - TickPosition{0},
+                                  std::move(content)));
+    auto track = take(Track::create(TrackInput{
+        .id = {10},
+        .name = "instrument",
+        .clips = {std::move(clip)},
+        .device_chain = {{{20}}},
+        .mixer = {0.25f, 0.0f},
+    }));
+    auto sequence = take(Sequence::create({2}, "root", std::nullopt, std::nullopt,
+                                          std::vector<Track>{std::move(track)}));
+    return std::make_shared<const Project>(take(Project::create(
+        ProjectInput{{1}, "instrument mixer", 1'000, {2}, {}, {std::move(sequence)}})));
+}
+
 class InlineExecutor final : public CompileExecutor {
   public:
     bool submit(std::unique_ptr<CompileTask> task, std::chrono::steady_clock::time_point) override {
@@ -354,6 +372,70 @@ class MidiCountingSlot final : public PluginSlot {
 
     std::size_t last_event_count = 0;
     std::array<std::uint32_t, 8> last_offsets{};
+
+  private:
+    PluginInfo info_;
+};
+
+class ConstantInstrumentSlot final : public PluginSlot {
+  public:
+    ConstantInstrumentSlot() {
+        info_.name = "timeline constant instrument";
+        info_.unique_id = "pulp.test.timeline-constant-instrument";
+        info_.format = PluginFormat::CLAP;
+        info_.is_effect = false;
+        info_.num_inputs = 0;
+        info_.num_outputs = 1;
+    }
+    const PluginInfo& info() const override {
+        return info_;
+    }
+    bool is_loaded() const override {
+        return true;
+    }
+    bool prepare(double, int) override {
+        return true;
+    }
+    void release() override {}
+    void process(audio::BufferView<float>& output, const audio::BufferView<const float>&,
+                 const midi::MidiBuffer& events, midi::MidiBuffer&, const ParameterEventQueue&,
+                 int) override {
+        event_count = events.size();
+        for (std::size_t channel = 0; channel < output.num_channels(); ++channel)
+            std::fill(output.channel(channel).begin(), output.channel(channel).end(), 2.0f);
+    }
+    std::vector<HostParamInfo> parameters() const override {
+        return {};
+    }
+    float get_parameter(std::uint32_t) const override {
+        return 0.0f;
+    }
+    void set_parameter(std::uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override {
+        return false;
+    }
+    std::vector<std::uint8_t> save_state() const override {
+        return {};
+    }
+    bool restore_state(const std::vector<std::uint8_t>&) override {
+        return true;
+    }
+    int latency_samples() const override {
+        return 0;
+    }
+    int tail_samples() const override {
+        return 0;
+    }
+    bool has_editor() const override {
+        return false;
+    }
+    void* create_editor_view() override {
+        return nullptr;
+    }
+    void destroy_editor_view() override {}
+
+    std::size_t event_count = 0;
 
   private:
     PluginInfo info_;
@@ -527,6 +609,8 @@ TimelineGraphBindingConfig config(std::uint32_t channels = 2) {
 static_assert(TimelineGraphPlaybackBinding::process_rt_safety_class ==
               audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
 static_assert(ArrangementAudioTrackRenderer::process_rt_safety_class ==
+              audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
+static_assert(TrackMixerTrackRenderer::process_rt_safety_class ==
               audio::RtSafetyClass::AudioCallbackSafeAfterPrepare);
 
 // Exact-generation injection must stay gated by its passkey: callable only with

@@ -6,6 +6,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 
@@ -27,9 +29,57 @@ struct DeviceParameterTarget {
     constexpr bool operator==(const DeviceParameterTarget&) const = default;
 };
 
+/// The mixer controls a track owns directly, independent of any device it
+/// hosts. They are named rather than numbered so a document never has to agree
+/// with a host on which control a numeric index meant.
+enum class TrackMixerParameter : std::uint8_t {
+    Gain,
+    Pan,
+};
+
+/// The canonical persisted spelling of a mixer parameter, shared by the encoder,
+/// the decoder, and every interchange reader so no surface invents its own.
+constexpr std::string_view track_mixer_parameter_name(TrackMixerParameter value) noexcept {
+    switch (value) {
+    case TrackMixerParameter::Gain:
+        return "gain";
+    case TrackMixerParameter::Pan:
+        return "pan";
+    }
+    return "gain";
+}
+
+constexpr std::optional<TrackMixerParameter>
+track_mixer_parameter_from_name(std::string_view name) noexcept {
+    if (name == "gain")
+        return TrackMixerParameter::Gain;
+    if (name == "pan")
+        return TrackMixerParameter::Pan;
+    return std::nullopt;
+}
+
+/// Format-neutral document target for one of the owning track's own mixer
+/// controls. The track identity is implicit: a lane already lives on exactly one
+/// track, so carrying a track ID here would let a document express a lane whose
+/// target disagrees with its owner.
+struct TrackMixerTarget {
+    TrackMixerParameter parameter = TrackMixerParameter::Gain;
+
+    constexpr bool valid() const noexcept {
+        switch (parameter) {
+        case TrackMixerParameter::Gain:
+        case TrackMixerParameter::Pan:
+            return true;
+        }
+        return false;
+    }
+
+    constexpr bool operator==(const TrackMixerTarget&) const = default;
+};
+
 /// Exhaustive authored-target set. Later target categories extend this variant
 /// without changing AutomationLane's factory signature or observer API.
-using AutomationTarget = std::variant<DeviceParameterTarget>;
+using AutomationTarget = std::variant<DeviceParameterTarget, TrackMixerTarget>;
 
 /// Overload set for visiting an AutomationTarget with **no generic fallback**.
 ///
@@ -51,11 +101,12 @@ template <class... Fs> struct AutomationTargetCases : Fs... {
 };
 template <class... Fs> AutomationTargetCases(Fs...) -> AutomationTargetCases<Fs...>;
 
-/// Guard for code that can only be correct while the variant has exactly one
-/// alternative — chiefly `std::get<DeviceParameterTarget>` on a target, which
-/// under this module's `-fno-exceptions` build calls `std::terminate` rather
-/// than throwing when the alternative does not match. Widening the variant trips
-/// this at compile time instead of aborting the process at run time.
+/// Guard for code that can only be correct for a known set of alternatives —
+/// chiefly `std::get<T>` on a target, which under this module's
+/// `-fno-exceptions` build calls `std::terminate` rather than throwing when the
+/// alternative does not match. Anything that cannot be expressed as an
+/// AutomationTargetCases visit should assert on this count so widening the
+/// variant trips at compile time instead of aborting the process at run time.
 inline constexpr std::size_t kAutomationTargetAlternativeCount =
     std::variant_size_v<AutomationTarget>;
 

@@ -666,6 +666,24 @@ decode_command(const std::shared_ptr<const ParsedJson>& document, const JsonValu
             decoded.value()[0], decoded.value()[1], decoded.value()[2],
             decoded_expected.value(), decoded_replacement.value()}));
     }
+    if (type.value() == "pulp.timeline.command.set_track_mixer") {
+        auto sequence = decode_command_item_id(command, "sequence_id", data_path);
+        auto track = decode_command_item_id(command, "track_id", data_path);
+        const auto* expected_value = command.find("expected");
+        const auto* replacement_value = command.find("replacement");
+        // Absence means "the default mixer" on a track, but on this command it
+        // would silently assert an expectation the author never wrote, so both
+        // sides of the optimistic gate are required here.
+        if (!sequence || !track || !expected_value || !replacement_value)
+            return fail<Command>(PersistenceErrorCode::MissingField, data_path);
+        auto expected = detail::decode_track_mixer(expected_value, data_path + "/expected");
+        auto replacement =
+            detail::decode_track_mixer(replacement_value, data_path + "/replacement");
+        if (!expected || !replacement)
+            return fail<Command>(PersistenceErrorCode::InvalidSchema, data_path);
+        return runtime::Ok(Command(SetTrackMixer{sequence.value(), track.value(), expected.value(),
+                                                 replacement.value()}));
+    }
     return fail<Command>(PersistenceErrorCode::UnsupportedStructuralType, std::move(path),
                          value.begin);
 }

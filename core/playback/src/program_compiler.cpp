@@ -29,6 +29,32 @@ constexpr std::int64_t ratchet_boundary(std::int64_t duration, std::int64_t inde
     return quotient * index + (remainder * index) / count;
 }
 
+// Binds the track's authored constants to the lanes that automate them. A lane
+// is matched by which control it names, not by position, so lane ordering in the
+// document never decides which fader moves.
+TrackMixerProgram resolve_track_mixer(const timeline::Track& track,
+                                      const TrackAutomationProgram* automation) {
+    TrackMixerProgram mixer;
+    mixer.gain_linear = track.mixer().gain_linear;
+    mixer.pan = track.mixer().pan;
+    if (!automation)
+        return mixer;
+    for (const auto& program : automation->programs()) {
+        const auto* target = std::get_if<timeline::TrackMixerTarget>(&program->target());
+        if (!target)
+            continue;
+        switch (target->parameter) {
+        case timeline::TrackMixerParameter::Gain:
+            mixer.gain_automation = program.get();
+            break;
+        case timeline::TrackMixerParameter::Pan:
+            mixer.pan_automation = program.get();
+            break;
+        }
+    }
+    return mixer;
+}
+
 } // namespace
 
 struct PlaybackProgramCompilerCore;
@@ -705,15 +731,17 @@ CompileTaskStatus ProgramCompilerTask::run_slice(const CompileSliceBudget& budge
                 audio_program = std::shared_ptr<const AudioTrackRendererProgram>(
                     new AudioTrackRendererProgram(track.id(), std::move(current_audio_clips_)));
             }
+            auto automation_program = std::move(current_automation_.program);
+            const auto mixer = resolve_track_mixer(track, automation_program.get());
             tracks_.push_back(std::shared_ptr<const TrackProgram>(new TrackProgram(
                 track.id(), generation_, provider, state_policy, std::move(current_clip_ids_),
                 std::move(current_note_events_), std::move(current_note_modifiers_),
                 std::move(audio_program),
                 std::move(current_automation_.ordered_device_placement_ids),
-                std::move(current_automation_.program), sequence_bookkeeping_.expanded_clip_count(),
+                std::move(automation_program), sequence_bookkeeping_.expanded_clip_count(),
                 sequence_bookkeeping_.expanded_note_event_count(),
                 sequence_bookkeeping_.generated_id_start(),
-                sequence_bookkeeping_.generated_id_count())));
+                sequence_bookkeeping_.generated_id_count(), mixer)));
             core_->track_completed();
             current_clip_ids_.clear();
             current_note_events_.clear();

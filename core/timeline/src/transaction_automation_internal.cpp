@@ -2,20 +2,26 @@
 
 #include "transaction_reduction_support.hpp"
 
+#include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace pulp::timeline::detail {
 namespace {
 
-static_assert(kAutomationTargetAlternativeCount == 1,
-              "AutomationTarget gained an alternative: std::get<DeviceParameterTarget> "
-              "below terminates under -fno-exceptions when the target is a different "
-              "kind. Dispatch through AutomationTargetCases and decide what the new "
-              "target means here before widening the variant.");
-
-const DeviceParameterTarget& device_target(const AutomationLane& lane) noexcept {
-    return std::get<DeviceParameterTarget>(lane.target());
+// The document identity a lane's target references, or none when the target
+// names a control the owning track always has. Only a referenced identity has to
+// be proven live in the project before the lane can be inserted.
+std::optional<ItemId> referenced_device_placement(const AutomationLane& lane) noexcept {
+    return std::visit(
+        AutomationTargetCases{
+            [](const DeviceParameterTarget& target) -> std::optional<ItemId> {
+                return target.device_placement_id;
+            },
+            [](const TrackMixerTarget&) -> std::optional<ItemId> { return std::nullopt; },
+        },
+        lane.target());
 }
 
 std::vector<OwnedIdentity> owned_identities(const AutomationLane& lane, ItemId sequence,
@@ -53,15 +59,16 @@ reduce_insert(const Project& project, const InsertAutomationLane& insert,
                          insert.sequence_id, insert.track_id, {}, true}))
         return reject_reduction<AutomationCommandReduction>(
             *code, transaction, command, insert.track_id, insert.sequence_id);
-    const auto placement_id = device_target(insert.lane).device_placement_id;
-    if (const auto code = target_error(
-            project, placement_id,
-            ItemLocation{ItemKind::DevicePlacement,
-                         immediate_parent_id(ItemKind::DevicePlacement, project.id(),
-                                             insert.sequence_id, insert.track_id, {}),
-                         insert.sequence_id, insert.track_id, {}, true}))
-        return reject_reduction<AutomationCommandReduction>(
-            *code, transaction, command, placement_id, insert.track_id);
+    if (const auto placement_id = referenced_device_placement(insert.lane)) {
+        if (const auto code = target_error(
+                project, *placement_id,
+                ItemLocation{ItemKind::DevicePlacement,
+                             immediate_parent_id(ItemKind::DevicePlacement, project.id(),
+                                                 insert.sequence_id, insert.track_id, {}),
+                             insert.sequence_id, insert.track_id, {}, true}))
+            return reject_reduction<AutomationCommandReduction>(
+                *code, transaction, command, *placement_id, insert.track_id);
+    }
 
     const auto identities = owned_identities(insert.lane, insert.sequence_id, insert.track_id);
     if (const auto duplicate = duplicate_owned_identity(identities))

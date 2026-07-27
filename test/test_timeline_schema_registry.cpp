@@ -143,6 +143,7 @@ TEST_CASE("Built-in command registry covers the complete mutation variant") {
         "pulp.timeline.command.set_take_comp",
         "pulp.timeline.command.set_tempo_map",
         "pulp.timeline.command.set_track_freeze",
+        "pulp.timeline.command.set_track_mixer",
     };
     static_assert(expected.size() == std::variant_size_v<Command>);
 

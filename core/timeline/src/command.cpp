@@ -414,7 +414,8 @@ bool equivalent(const Command& lhs, const Command& rhs) noexcept {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.lane_id == right.lane_id && left.expected == right.expected &&
                        left.replacement == right.replacement;
-            } else if constexpr (std::is_same_v<T, SetTrackFreeze>) {
+            } else if constexpr (std::is_same_v<T, SetTrackFreeze> ||
+                                 std::is_same_v<T, SetTrackMixer>) {
                 return left.sequence_id == right.sequence_id && left.track_id == right.track_id &&
                        left.expected == right.expected && left.replacement == right.replacement;
             } else if constexpr (std::is_same_v<T, SetChordScaleLane> ||

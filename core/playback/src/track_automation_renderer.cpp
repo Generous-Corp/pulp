@@ -90,6 +90,11 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
     std::vector<LaneState> next_lanes;
     next_lanes.reserve(program->programs().size());
     for (const auto& next_program : program->programs()) {
+        // This renderer exists to fill device parameter queues. A lane driving a
+        // control the track owns itself has no device to address, and is
+        // evaluated where that control is applied instead.
+        if (!next_program->device_target())
+            continue;
         LaneState state;
         state.program = next_program;
         const auto found = std::lower_bound(
@@ -113,7 +118,8 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
     std::vector<timeline::ItemId> device_ids;
     device_ids.reserve(program->programs().size());
     for (const auto& next_program : program->programs())
-        device_ids.push_back(next_program->target().device_placement_id);
+        if (const auto* device = next_program->device_target())
+            device_ids.push_back(device->device_placement_id);
     std::sort(device_ids.begin(), device_ids.end());
     device_ids.erase(std::unique(device_ids.begin(), device_ids.end()), device_ids.end());
     if (device_ids.size() > limits_.max_device_placements_per_track)
@@ -125,7 +131,8 @@ TrackAutomationRenderer::adopt(std::shared_ptr<const TrackAutomationProgram> pro
     for (const auto device_id : device_ids)
         next_devices.push_back(DeviceState{device_id, {}, {}});
     for (std::size_t lane_index = 0; lane_index < next_lanes.size(); ++lane_index) {
-        const auto device_id = next_lanes[lane_index].program->target().device_placement_id;
+        const auto device_id =
+            next_lanes[lane_index].program->device_target()->device_placement_id;
         const auto found = std::lower_bound(
             next_devices.begin(), next_devices.end(), device_id,
             [](const DeviceState& device, timeline::ItemId id) {
@@ -296,7 +303,7 @@ TrackAutomationRenderer::process(const TransportSnapshot& transport) noexcept {
                     sample_offset = lane.selected_sample_offset;
                     ramp_duration = event.sample_offset - lane.selected_sample_offset;
                 }
-                queued = {{lane.program->lane_id(), lane.program->target().param_id,
+                queued = {{lane.program->lane_id(), lane.program->device_target()->param_id,
                            sample_offset, event.value, ramp_duration},
                           lane_sequence};
                 lane.selected_sample_offset = event.sample_offset;

@@ -60,14 +60,25 @@ void record_track(ConceptCensus& out, const timeline::Track& track, const Census
     for (const timeline::DevicePlacement& device : track.device_chain())
         out.record(Concept::DevicePlacement, device.id, limits);
 
+    const timeline::TrackMixer mixer = track.mixer();
+    if (mixer.gain_linear != 1.0f)
+        out.record(Concept::MixerTrackGain, id, limits);
+    if (mixer.pan != 0.0f)
+        out.record(Concept::MixerTrackPan, id, limits);
+
     for (const timeline::AutomationLane& lane : track.automation_lanes()) {
-        std::visit(
-            timeline::AutomationTargetCases{
-                [&](const timeline::DeviceParameterTarget&) {
-                    out.record(Concept::AutomationDeviceParam, lane.id(), limits);
-                },
-            },
-            lane.target());
+        std::visit(timeline::AutomationTargetCases{
+                       [&](const timeline::DeviceParameterTarget&) {
+                           out.record(Concept::AutomationDeviceParam, lane.id(), limits);
+                       },
+                       [&](const timeline::TrackMixerTarget& target) {
+                           out.record(target.parameter == timeline::TrackMixerParameter::Gain
+                                          ? Concept::AutomationTrackGain
+                                          : Concept::AutomationTrackPan,
+                                      lane.id(), limits);
+                       },
+                   },
+                   lane.target());
     }
 
     for (const timeline::TakeLane& lane : track.take_lanes()) {

@@ -362,6 +362,7 @@ struct Track::Data {
     bool record_armed = false;
     ItemId active_take_lane_id;
     std::optional<TrackFreeze> freeze;
+    TrackMixer mixer;
 };
 
 std::optional<ModelErrorCode> track_freeze_error(const TrackFreeze& freeze) noexcept {
@@ -375,6 +376,15 @@ std::optional<ModelErrorCode> track_freeze_error(const TrackFreeze& freeze) noex
     const auto source_start = static_cast<std::uint64_t>(freeze.media.source_start.value);
     if (source_start > std::numeric_limits<std::uint64_t>::max() - freeze.media.frame_count)
         return ModelErrorCode::InvalidMediaRange;
+    return std::nullopt;
+}
+
+std::optional<ModelErrorCode> track_mixer_error(const TrackMixer& mixer) noexcept {
+    // NaN fails every comparison, so the range tests below also reject it.
+    if (!(mixer.gain_linear >= 0.0f) || !(mixer.gain_linear <= kMaximumTrackGainLinear))
+        return ModelErrorCode::InvalidTrackMixer;
+    if (!(mixer.pan >= -1.0f) || !(mixer.pan <= 1.0f))
+        return ModelErrorCode::InvalidTrackMixer;
     return std::nullopt;
 }
 
@@ -455,6 +465,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
             return fail<Track>(*error, input.id, input.freeze->media.asset_id);
         }
     }
+    if (const auto error = track_mixer_error(input.mixer))
+        return fail<Track>(*error, input.id, input.id);
     auto take_lanes = std::make_shared<const std::vector<TakeLane>>(std::move(input.take_lanes));
     auto take_owned_ids = canonical_take_owned_ids(*take_lanes);
     return runtime::Result<Track, ModelError>(runtime::Ok(Track(std::make_shared<const Data>(
@@ -471,7 +483,8 @@ runtime::Result<Track, ModelError> Track::create(TrackInput input) {
              .take_owned_ids = std::move(take_owned_ids),
              .record_armed = input.record_armed,
              .active_take_lane_id = input.active_take_lane_id,
-             .freeze = std::move(input.freeze)}))));
+             .freeze = std::move(input.freeze),
+             .mixer = input.mixer}))));
 }
 
 runtime::Result<Track, ModelError> Track::replace_clip(Clip replacement) const {
@@ -738,6 +751,14 @@ runtime::Result<Track, ModelError> Track::with_freeze(std::optional<TrackFreeze>
     return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
 }
 
+runtime::Result<Track, ModelError> Track::with_mixer(TrackMixer mixer) const {
+    if (const auto error = track_mixer_error(mixer))
+        return fail<Track>(*error, data_->id, data_->id);
+    auto next_data = *data_;
+    next_data.mixer = mixer;
+    return runtime::Ok(Track(std::make_shared<const Data>(std::move(next_data))));
+}
+
 ItemId Track::id() const noexcept {
     return data_->id;
 }
@@ -794,6 +815,9 @@ ItemId Track::active_take_lane_id() const noexcept {
 }
 const std::optional<TrackFreeze>& Track::freeze() const noexcept {
     return data_->freeze;
+}
+const TrackMixer& Track::mixer() const noexcept {
+    return data_->mixer;
 }
 std::size_t Track::shared_index_nodes_with(const Track& other) const {
     std::unordered_set<const ClipIndexNode*> addresses;

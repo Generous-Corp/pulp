@@ -97,8 +97,8 @@ inline constexpr ImportRow kImportRows[kFormatCount][kConceptCount] = {
         {ImportLevel::None, "", "channel pan"}, // mixer.track-pan
         {ImportLevel::None, "", ""}, // mixer.sends
         {ImportLevel::None, "", "automation lanes"}, // automation.device-param
-        {ImportLevel::None, "", ""}, // automation.track-gain
-        {ImportLevel::None, "", ""}, // automation.track-pan
+        {ImportLevel::None, "", "volume automation lanes"}, // automation.track-gain
+        {ImportLevel::None, "", "pan automation lanes"}, // automation.track-pan
         {ImportLevel::None, "", "device chains"}, // device.placement
         {ImportLevel::None, "", "plugin state"}, // device.payload
         {ImportLevel::None, "", ""}, // effect.timewarp
@@ -143,12 +143,12 @@ inline constexpr ExportRow kExportRows[kFormatCount][kConceptCount] = {
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for marker"}, // marker
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for timecode.origin"}, // timecode.origin
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for media.provenance"}, // media.provenance
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for mixer.track-gain"}, // mixer.track-gain
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for mixer.track-pan"}, // mixer.track-pan
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a channel volume, so an authored track gain is dropped and the track exports at unity"}, // mixer.track-gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "the writer does not emit a channel pan, so an authored track pan is dropped and the track exports centred"}, // mixer.track-pan
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for mixer.sends"}, // mixer.sends
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "device identity does not survive without a device payload, so its automation has no target"}, // automation.device-param
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for automation.track-gain"}, // automation.track-gain
-        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for automation.track-pan"}, // automation.track-pan
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "a volume automation lane has no export target while channel volume itself is dropped"}, // automation.track-gain
+        {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "a pan automation lane has no export target while channel pan itself is dropped"}, // automation.track-pan
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "devices are identity-only in the document; DAWproject requires a device type to place one"}, // device.placement
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for device.payload"}, // device.payload
         {ExportLevel::Drop, Concept::Unknown, LossClass::Dropped, "DAWproject declares no support for effect.timewarp"}, // effect.timewarp

@@ -85,7 +85,7 @@ TEST_CASE("automation program validates identity and preserves same-sample knots
 
     const auto compiled = program(source, map);
     REQUIRE(compiled->lane_id() == ItemId{1});
-    REQUIRE(compiled->target() == DeviceParameterTarget{{99}, 7});
+    REQUIRE(*compiled->device_target() == DeviceParameterTarget{{99}, 7});
     REQUIRE(compiled->segments().size() == 3);
     REQUIRE(compiled->segments()[0].start_tick == TickPosition{0});
     REQUIRE(compiled->segments()[0].end_tick == TickPosition{1});

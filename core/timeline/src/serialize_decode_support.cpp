@@ -1,5 +1,8 @@
 #include "serialize_decode_support.hpp"
 
+#include <bit>
+#include <limits>
+
 namespace pulp::timeline::detail {
 
 runtime::Result<const JsonValue*, PersistenceError>
@@ -82,6 +85,37 @@ decode_track_freeze(const JsonValue* freeze, std::string path) {
                  decoded_frames.value()},
         timebase::SamplePosition{decoded_placement.value()}, decoded_rate.value(),
         *decoded_render_plan}});
+}
+
+runtime::Result<TrackMixer, PersistenceError> decode_track_mixer(const JsonValue* mixer,
+                                                                 std::string path) {
+    if (!mixer)
+        return runtime::Ok(TrackMixer{});
+    const auto mixer_path = path + "/data/mixer";
+    auto gain = required_decode_member(*mixer, "gain_linear_bits", mixer_path);
+    auto pan = required_decode_member(*mixer, "pan_bits", mixer_path);
+    if (!gain || !pan)
+        return decode_fail<TrackMixer>(PersistenceErrorCode::MissingField, mixer_path);
+    auto gain_bits =
+        parse_canonical_u64_string(*gain.value(), mixer_path + "/gain_linear_bits");
+    auto pan_bits = parse_canonical_u64_string(*pan.value(), mixer_path + "/pan_bits");
+    if (!gain_bits)
+        return decode_fail<TrackMixer>(gain_bits.error().code, gain_bits.error().path,
+                                       gain_bits.error().byte_offset);
+    if (!pan_bits)
+        return decode_fail<TrackMixer>(pan_bits.error().code, pan_bits.error().path,
+                                       pan_bits.error().byte_offset);
+    if (gain_bits.value() > std::numeric_limits<std::uint32_t>::max())
+        return decode_fail<TrackMixer>(PersistenceErrorCode::InvalidNumber,
+                                       mixer_path + "/gain_linear_bits");
+    if (pan_bits.value() > std::numeric_limits<std::uint32_t>::max())
+        return decode_fail<TrackMixer>(PersistenceErrorCode::InvalidNumber,
+                                       mixer_path + "/pan_bits");
+    // Range and NaN rejection belong to the model, which every decoded track
+    // must pass through anyway; decoding only recovers the authored bits.
+    return runtime::Ok(
+        TrackMixer{std::bit_cast<float>(static_cast<std::uint32_t>(gain_bits.value())),
+                   std::bit_cast<float>(static_cast<std::uint32_t>(pan_bits.value()))});
 }
 
 } // namespace pulp::timeline::detail
