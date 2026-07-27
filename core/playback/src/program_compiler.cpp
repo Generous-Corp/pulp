@@ -16,6 +16,20 @@
 #include <variant>
 
 namespace pulp::playback {
+namespace {
+
+// Where the `index`-th of `count` ratchet repeats begins within a note of
+// `duration` ticks. Distributing the remainder as `(remainder * index) / count`
+// keeps every boundary exact in integer ticks and the repeats within one tick of
+// equal length, so a ratcheted note never drifts off its own end.
+constexpr std::int64_t ratchet_boundary(std::int64_t duration, std::int64_t index,
+                                        std::int64_t count) noexcept {
+    const auto quotient = duration / count;
+    const auto remainder = duration % count;
+    return quotient * index + (remainder * index) / count;
+}
+
+} // namespace
 
 struct PlaybackProgramCompilerCore;
 

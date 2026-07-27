@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace pulp::playback {
 
@@ -332,8 +333,31 @@ class SequenceContentLowerer::Impl {
         pending_leaf_.reset();
         timeline::ClipContent content = pending.child.content();
         double source_frame_offset = 0.0;
-        if (std::holds_alternative<timeline::NoteContent>(content)) {
-            auto rebuilt = timeline::NoteContent::create(std::move(pending.clipped_notes));
+        if (const auto* notes = std::get_if<timeline::NoteContent>(&content)) {
+            // A nested note clip keeps its modifiers and its authored seed.
+            // Rebuilding with the notes alone would leave the notes sounding
+            // unconditionally inside a SequenceRef while they honour their
+            // probability / condition / ratchet everywhere else — a silent
+            // difference, because the notes-only overload still compiles.
+            //
+            // Clipping drops notes that fall entirely outside the audible
+            // window, and a modifier must name a note that is still present, so
+            // the companion array is filtered to the retained ids rather than
+            // passed through. The seed is carried verbatim: it selects the
+            // replay, so changing it would change which notes sound.
+            const auto retained = [&](timeline::ItemId note_id) {
+                return std::any_of(pending.clipped_notes.begin(), pending.clipped_notes.end(),
+                                   [&](const timeline::NoteEvent& note) {
+                                       return note.id == note_id;
+                                   });
+            };
+            std::vector<timeline::NoteModifier> modifiers;
+            for (const auto& modifier : notes->modifiers())
+                if (retained(modifier.note_id))
+                    modifiers.push_back(modifier);
+            const auto seed = notes->modifier_seed();
+            auto rebuilt = timeline::NoteContent::create(std::move(pending.clipped_notes),
+                                                         std::move(modifiers), seed);
             if (!rebuilt)
                 return {.error = SequenceLoweringError{CompileErrorCode::InvalidStructure,
                                                        pending.child.id()}};
