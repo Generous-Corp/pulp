@@ -721,7 +721,6 @@ TEST_CASE("Analog VCF stays finite at worst-case drive and oversampling",
             Vcf filter;
             configure(filter, voicing, 1.0, 1.0, 48.0, oversampling);
             double maximum = 0.0;
-            double final_jupiter = 0.0;
             bool all_finite = true;
             const int driven_samples = static_cast<int>(30.0 * kSampleRate);
             for (int sample = 0; sample < driven_samples; ++sample) {
@@ -736,9 +735,16 @@ TEST_CASE("Analog VCF stays finite at worst-case drive and oversampling",
             CHECK(maximum < 32.0);
 
             if (voicing == Voicing::jupiter) {
-                for (int sample = 0; sample < static_cast<int>(2.0 * kSampleRate); ++sample)
-                    final_jupiter = filter.process(0.0);
-                CHECK(std::abs(final_jupiter) < 1.0e-3);
+                const int tail_samples = static_cast<int>(2.0 * kSampleRate);
+                const int terminal_window_samples = static_cast<int>(0.1 * kSampleRate);
+                double terminal_peak = 0.0;
+                for (int sample = 0; sample < tail_samples; ++sample) {
+                    const double output = filter.process(0.0);
+                    if (sample >= tail_samples - terminal_window_samples)
+                        terminal_peak = std::max(terminal_peak, std::abs(output));
+                }
+                INFO("Jupiter terminal 100 ms peak=" << terminal_peak);
+                CHECK(terminal_peak < 1.0e-3);
             }
         }
     }
