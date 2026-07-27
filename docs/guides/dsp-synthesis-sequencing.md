@@ -56,4 +56,3 @@ See the [modulation toolkit](../reference/modulation-toolkit.md) for clock,
 trigger, envelope, VCA, and routing primitives. The
 [complete advanced DSP API](../reference/advanced-dsp-api.md#synthesis-and-sequencing)
 lists every method on the types above.
-

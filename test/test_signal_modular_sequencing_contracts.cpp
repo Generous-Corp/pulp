@@ -433,4 +433,3 @@ TEST_CASE("Latency is zero and effects land on the clock sample",
         REQUIRE_THAT(r.process(true, false, true), WithinAbs(ref.out(), 1e-12));
     }
 }
-

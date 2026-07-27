@@ -569,4 +569,3 @@ TEST_CASE("Rungler holds its output while the transport is stopped",
     for (int i = 0; i < 64; ++i) REQUIRE_THAT(r.process(false, false, true), WithinAbs(held, 1e-12));
     REQUIRE(r.register_bits() == reg);
 }
-

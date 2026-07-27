@@ -254,4 +254,3 @@ TEST_CASE("Leslie and scanner recover from non-finite audio with controls retain
         Scanner sa,sb;for(auto* x:{&sa,&sb}){x->prepare(kSr);x->set_scan_hz(7.1);x->set_line_ms(1.3);x->set_v1_frac(.2);x->set_v2_frac(.5);x->set_v3_frac(.8);x->set_chorus_mix(.4);x->reset();}sa.set_scan_hz(bad);sa.set_line_ms(bad);sa.set_v1_frac(bad);sa.set_v2_frac(bad);sa.set_v3_frac(bad);sa.set_chorus_mix(bad);REQUIRE(sa.process(bad)==0);sb.reset();for(int i=0;i<64;++i)REQUIRE(sa.process(.2)==sb.process(.2));
     }
 }
-

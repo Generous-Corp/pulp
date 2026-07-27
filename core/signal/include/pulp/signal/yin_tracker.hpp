@@ -316,4 +316,3 @@ using YinTracker = YinTrackerT<float>;
 using YinTracker64 = YinTrackerT<double>;
 
 }  // namespace pulp::signal
-

@@ -516,4 +516,3 @@ private:
 };
 
 }  // namespace pulp::signal
-

@@ -412,29 +412,29 @@ private:
 struct ZeroLatencyConvolverDesign {
     // ── Design parameters ────────────────────────────────────────────────────
     // Every value below is ours to tune and is declared with default + range.
-    
+
     /// Head length N0, in taps. [design parameter, default = host block size,
     /// range 64..512] Tying N0 to the block size is what lets the head be a
     /// plain dot product over samples that are all present in the current
     /// block, which is the zero-latency property (see the file doc block).
     static constexpr int kHeadLenMin = 64;
     static constexpr int kHeadLenMax = 512;
-    
+
     /// IR trim on the convolved path. [dp, default 0 dB, range -24..+24 dB]
     static constexpr double kIrGainDbDefault = 0.0;
     static constexpr double kIrGainDbMin = -24.0;
     static constexpr double kIrGainDbMax = 24.0;
-    
+
     /// Pre-IR delay of the wet path. [dp, default 0 ms, range 0..250 ms]
     /// Signal delay, not I/O latency — `latency_samples()` is 0 regardless.
     static constexpr double kPredelayMsDefault = 0.0;
     static constexpr double kPredelayMsMin = 0.0;
     static constexpr double kPredelayMsMax = 250.0;
-    
+
     /// Wet / dry mix, in percent. [dp, defaults 100 % / 0 %, range 0..100 %]
     static constexpr double kWetPercentDefault = 100.0;
     static constexpr double kDryPercentDefault = 0.0;
-    
+
     /// Send-EQ corners. [dp, defaults 20 Hz / 20 kHz, ranges 20..500 Hz and
     /// 1 k..20 kHz] Each endpoint is defined as OFF: at `lowcut_hz == 20` the
     /// high-pass is bypassed and at `highcut_hz == 20000` the low-pass is
@@ -448,24 +448,24 @@ struct ZeroLatencyConvolverDesign {
     static constexpr double kHighcutHzDefault = 20000.0;
     static constexpr double kHighcutHzMin = 1000.0;
     static constexpr double kHighcutHzMax = 20000.0;
-    
+
     /// Mid/side width of the wet output. [dp, default 100 %, range 0..200 %]
     static constexpr double kWidthPercentDefault = 100.0;
     static constexpr double kWidthPercentMin = 0.0;
     static constexpr double kWidthPercentMax = 200.0;
-    
+
     /// IR truncation floor on the Schroeder backward-energy curve.
     /// [dp, default -72 dB, range -90..-40 dB]
     static constexpr double kTailTrimDbDefault = -72.0;
     static constexpr double kTailTrimDbMin = -90.0;
     static constexpr double kTailTrimDbMax = -40.0;
-    
+
     /// Raised-cosine fade applied to the last part of the kept IR so the
     /// truncation cannot click. [dp, default 5 ms, range 2..20 ms]
     static constexpr double kTailFadeMsDefault = 5.0;
     static constexpr double kTailFadeMsMin = 2.0;
     static constexpr double kTailFadeMsMax = 20.0;
-    
+
     /// Resampler kernel width, in taps per polyphase branch.
     /// [dp, default 32, range 16..64] More taps tighten the stopband at
     /// proportionally higher load-time cost; load-time only, never on the
@@ -473,7 +473,7 @@ struct ZeroLatencyConvolverDesign {
     static constexpr int kResampTapsPerPhaseDefault = 32;
     static constexpr int kResampTapsPerPhaseMin = 16;
     static constexpr int kResampTapsPerPhaseMax = 64;
-    
+
     /// Proves every resampler geometry value is finite and representable before
     /// the ingest path casts it to `int` or allocates source/destination work.
     /// Public so registration-time wrappers can reject unusable IR metadata
@@ -487,30 +487,30 @@ struct ZeroLatencyConvolverDesign {
         constexpr double int_max = static_cast<double>(std::numeric_limits<int>::max());
         const double ratio = destination_rate / source_rate;
         if (!std::isfinite(ratio) || ratio <= 0.0) return false;
-    
+
         const double destination_length =
             std::ceil(static_cast<double>(source_length) * ratio);
         if (!std::isfinite(destination_length) || destination_length < 1.0 ||
             destination_length > int_max)
             return false;
-    
+
         const double cutoff = std::min(1.0, ratio);
         const double half_width = 0.5 * static_cast<double>(taps_per_phase) / cutoff;
         const double reach = std::ceil(half_width) + 1.0;
         if (!std::isfinite(half_width) || !std::isfinite(reach) || reach < 1.0 ||
             reach > int_max)
             return false;
-    
+
         // The kernel loop forms `i0 +/- reach` in signed-int arithmetic. Its
         // largest possible centre is the final source sample; reserve one more
         // value so the loop increment after the last iteration cannot overflow.
         return reach <= int_max - static_cast<double>(source_length);
     }
-    
+
     /// House Kaiser window shape, fixed by the series contract's
     /// oversampling / resampling law — not a tunable of this module.
     static constexpr double kResampKaiserBeta = 8.0;
-    
+
     /// Peak-to-mean per-block cost slack the distributed schedule is allowed.
     /// [dp, default 1.5, range 1.2..2.0] Absorbs the fact that a sliced
     /// transform's phases (permuted gather, butterfly stages, conjugate passes)
@@ -519,13 +519,13 @@ struct ZeroLatencyConvolverDesign {
     static constexpr double kBlockCostSlackDefault = 1.5;
     static constexpr double kBlockCostSlackMin = 1.2;
     static constexpr double kBlockCostSlackMax = 2.0;
-    
+
     /// Below this, energies are treated as zero. Guards a divide and a log of
     /// an all-silent IR; any value far below the single-precision noise floor
     /// works, range 1e-30..1e-18.
     static constexpr double kSilenceEpsilon = 1e-24;
-    
-    
+
+
 };
 
 namespace detail {

@@ -382,4 +382,3 @@ TEST_CASE("the mic pair produces a real stereo image, not a doubled mono",
         REQUIRE_THAT(a, WithinAbs(b, 1e-12));
     }
 }
-

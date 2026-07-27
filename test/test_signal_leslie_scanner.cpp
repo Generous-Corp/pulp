@@ -231,4 +231,3 @@ TEST_CASE("the constructive-sum bound holds across the parameter space",
     REQUIRE(scanner_max <= Scanner::kWorstCaseGain);
     REQUIRE(scanner_max > 0.5 * Scanner::kWorstCaseGain);
 }
-

@@ -421,4 +421,3 @@ TEST_CASE("ProbGate extremes and stream discipline", "[signal][sequencing][probg
         REQUIRE(p.draw_count() == 100u);
     }
 }
-

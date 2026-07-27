@@ -51,4 +51,3 @@ budget-aware hosts; normal plugins do not need to schedule partitions themselves
 
 The [complete advanced DSP API](../reference/advanced-dsp-api.md#space-and-convolution)
 lists every method on both processors.
-
