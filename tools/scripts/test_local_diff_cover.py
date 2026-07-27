@@ -422,15 +422,15 @@ class TargetedCtestTests(unittest.TestCase):
             "coverage runs don't execute the entire CTest registry.",
         )
         self.assertIn(
-            'CTEST_ARGS+=(-R "${PULP_DIFF_COVER_CTEST_REGEX}")',
+            'run_coverage_ctest "${BUILD_DIR}" "${PULP_DIFF_COVER_CTEST_REGEX:-}"',
             text,
-            "local_diff_cover.sh must pass the regex through ctest -R.",
+            "local_diff_cover.sh must pass the regex through its shared "
+            "label-filtered CTest helper.",
         )
         self.assertIn(
-            'ctest "${CTEST_ARGS[@]}"',
+            'args+=(-R "${test_regex}")',
             text,
-            "local_diff_cover.sh should assemble ctest arguments once so "
-            "the regex selector and default full-suite path share the same call.",
+            "run_coverage_ctest must pass the selector through ctest -R.",
         )
 
     def test_profraw_cleanup_does_not_expand_a_large_glob(self) -> None:
@@ -462,6 +462,71 @@ class TargetedCtestTests(unittest.TestCase):
             "per-PID profraw files are too noisy for the full CTest registry "
             "and can lose attribution when PIDs recycle.",
         )
+
+
+class RequiredGateCtestSelectionTests(unittest.TestCase):
+    """The local coverage lane runs ordinary tests and excludes slow work."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.test_dir = pathlib.Path(self.tmp.name)
+        python = str(pathlib.Path(os.sys.executable)).replace("\\", "\\\\").replace(
+            '"', '\\"'
+        )
+        (self.test_dir / "CTestTestfile.cmake").write_text(
+            f'add_test([=[ordinary-coverage-smoke]=] "{python}" "-c" '
+            '"raise SystemExit(0)")\n'
+            "set_tests_properties([=[ordinary-coverage-smoke]=] PROPERTIES "
+            'LABELS "coverage")\n'
+            f'add_test([=[slow-platform-smoke]=] "{python}" "-c" '
+            '"raise SystemExit(1)")\n'
+            "set_tests_properties([=[slow-platform-smoke]=] PROPERTIES "
+            'LABELS "slow")\n'
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _run_fixture(
+        self, label_exclude: str | None = None
+    ) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["PULP_DIFF_COVER_LIB_ONLY"] = "1"
+        if label_exclude is None:
+            env.pop("PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE", None)
+        else:
+            env["PULP_DIFF_COVER_CTEST_LABEL_EXCLUDE"] = label_exclude
+        return subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{SCRIPT}"\nrun_coverage_ctest "{self.test_dir}"',
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def test_default_selection_runs_ordinary_and_excludes_slow(self) -> None:
+        result = self._run_fixture()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("ordinary-coverage-smoke", result.stdout)
+        self.assertNotIn(
+            "slow-platform-smoke",
+            result.stdout,
+            "the local diff-coverage lane selected a slow platform smoke",
+        )
+
+    def test_negative_control_fails_when_slow_exclusion_is_removed(self) -> None:
+        result = self._run_fixture("__matches_no_test_label__")
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            "the fixture cannot detect selection of the intentionally failing "
+            "slow test, so the exclusion proof would be a false positive",
+        )
+        self.assertIn("slow-platform-smoke", result.stdout)
 
 
 class CoverageConfigureTests(unittest.TestCase):
