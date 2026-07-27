@@ -148,6 +148,7 @@ protected:
         fm_string_.prepare(sample_rate, 20.0);
         exciter_env_.set_sample_rate(sample_rate);
         gate_env_.set_sample_rate(sample_rate);
+        sync_env_.set_sample_rate(sample_rate);
         gate_.set_sample_rate(sample_rate);
         output_.prepare(sample_rate);
     }
@@ -158,6 +159,7 @@ protected:
         fm_path_active_ = false;
         exciter_env_.reset();
         gate_env_.reset();
+        sync_env_.reset();
         gate_.reset();
         output_.reset();
         noise_.reset();
@@ -206,6 +208,10 @@ protected:
         gate_env_.set_attack_ms(0.5);
         gate_env_.set_decay_t60_ms(decay_s_ * 1000.0);
         gate_env_.trigger();
+        sync_env_.reset();
+        sync_env_.set_attack_ms(0.0);
+        sync_env_.set_decay_t60_ms(decay_s_ * 1000.0);
+        sync_env_.trigger();
         modulation_phase_ = 0.0;
         master_phase_ = 0.0;
         sync_phase_ = 0.0;
@@ -244,6 +250,8 @@ protected:
                     ? static_cast<double>(
                           fm_string_.process(static_cast<float>(burst)))
                     : dry;
+            const double sync_level =
+                sync_env_.is_active() ? sync_env_.process() : 0.0;
 
             double effected = dry;
             if (modulation_ == StringModulation::fm) {
@@ -264,7 +272,7 @@ protected:
                     }
                 }
                 effected =
-                    (2.0 * sync_phase_ - 1.0) * string_.level();
+                    (2.0 * sync_phase_ - 1.0) * sync_level;
             }
             const double modulated =
                 dry + modulation_mix_ * (effected - dry);
@@ -302,6 +310,7 @@ private:
     KarplusStrong fm_string_;
     DecayEnvelope64 exciter_env_;
     DecayEnvelope64 gate_env_;
+    DecayEnvelope64 sync_env_;
     LowpassGate gate_;
     OutputStage output_;
 

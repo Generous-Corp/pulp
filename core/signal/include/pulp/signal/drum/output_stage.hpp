@@ -4,6 +4,7 @@
 #include <pulp/signal/oversampling_fir.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 
@@ -61,8 +62,8 @@ public:
         stage_b_.reset();
         tail_samples_remaining_ = 0;
         nonlinear_activity_this_sample_ = false;
-        ahd_delay_remaining_ = 0;
-        ahd_trigger_pending_ = false;
+        ahd_triggers_.fill(false);
+        ahd_trigger_cursor_ = 0;
         ahd_phase_ = AhdPhase::inactive;
         ahd_gain_ = ahd_enabled_ ? 0.0 : 1.0;
     }
@@ -136,7 +137,7 @@ public:
     void set_ahd_enabled(bool enabled) {
         ahd_enabled_ = enabled;
         if (!enabled) {
-            ahd_trigger_pending_ = false;
+            ahd_triggers_.fill(false);
             ahd_phase_ = AhdPhase::inactive;
             ahd_gain_ = 1.0;
         }
@@ -173,26 +174,16 @@ public:
     /// Start the AHD for a new hit. Every drum voice calls this from note-on.
     void trigger() {
         if (!ahd_enabled_) {
-            ahd_trigger_pending_ = false;
+            ahd_triggers_.fill(false);
             ahd_phase_ = AhdPhase::inactive;
             ahd_gain_ = 1.0;
             return;
         }
-        // Hits closer than the FIR latency share the contour that is already
-        // queued for the first hit. Restarting this countdown would keep the
-        // envelope inactive while that first hit reaches the output and erase
-        // its pending samples.
-        if (ahd_trigger_pending_) return;
-        ahd_delay_remaining_ = latency_samples();
-        if (ahd_delay_remaining_ > 0) {
-            // Keep an active preceding contour audible while its delayed
-            // samples leave the shared FIR. A first trigger is already silent:
-            // process_ahd() returns zero for the inactive phase regardless of
-            // the stored gain. One shared FIR cannot distinguish an old tail
-            // from a new hit's causal precursor on retrigger, so preserving the
-            // established contour is the only policy that does not truncate
-            // already-pending output.
-            ahd_trigger_pending_ = true;
+        const int delay = latency_samples();
+        if (delay > 0) {
+            const int size = static_cast<int>(ahd_triggers_.size());
+            const int arrival = (ahd_trigger_cursor_ + delay) % size;
+            ahd_triggers_[static_cast<std::size_t>(arrival)] = true;
             return;
         }
         start_ahd();
@@ -301,7 +292,6 @@ private:
     }
 
     void start_ahd() {
-        ahd_trigger_pending_ = false;
         if (ahd_attack_samples_ > 0) {
             ahd_phase_ = AhdPhase::attack;
             ahd_remaining_ = ahd_attack_samples_;
@@ -317,15 +307,16 @@ private:
 
     double process_ahd() {
         if (!ahd_enabled_) return 1.0;
-        if (ahd_trigger_pending_ && ahd_delay_remaining_ > 0) {
-            --ahd_delay_remaining_;
-        } else if (ahd_trigger_pending_) {
+        if (ahd_triggers_[static_cast<std::size_t>(ahd_trigger_cursor_)]) {
+            ahd_triggers_[static_cast<std::size_t>(ahd_trigger_cursor_)] =
+                false;
             start_ahd();
         }
-        const double current = ahd_gain_;
+        const double current =
+            ahd_phase_ == AhdPhase::inactive ? 0.0 : ahd_gain_;
         switch (ahd_phase_) {
             case AhdPhase::inactive:
-                return 0.0;
+                break;
             case AhdPhase::attack:
                 ahd_gain_ = std::min(ahd_gain_ + ahd_attack_step_, 1.0);
                 if (--ahd_remaining_ <= 0) {
@@ -349,6 +340,9 @@ private:
                 }
                 break;
         }
+        ahd_trigger_cursor_ =
+            (ahd_trigger_cursor_ + 1) %
+            static_cast<int>(ahd_triggers_.size());
         return current;
     }
 
@@ -369,9 +363,11 @@ private:
     int ahd_hold_samples_ = 0;
     int ahd_decay_samples_ = 1;
     int ahd_remaining_ = 0;
-    int ahd_delay_remaining_ = 0;
     bool ahd_enabled_ = false;
-    bool ahd_trigger_pending_ = false;
+    static constexpr int kMaxLatency =
+        latency_samples_for(OutputOversampling::x4);
+    std::array<bool, kMaxLatency + 1> ahd_triggers_{};
+    int ahd_trigger_cursor_ = 0;
     AhdPhase ahd_phase_ = AhdPhase::inactive;
     OutputOversampling oversampling_ = OutputOversampling::x2;
     std::size_t tail_samples_remaining_ = 0;

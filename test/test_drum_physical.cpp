@@ -1229,6 +1229,20 @@ TEST_CASE("String sync modulation decays with the physical body",
     REQUIRE(late < early * 0.3);
 }
 
+TEST_CASE("Short string sync notes follow the configured decay",
+          "[signal][drum][string][modulation][lifecycle]") {
+    StringVoice voice;
+    voice.prepare(kFs);
+    voice.set_decay_seconds(0.05);
+    voice.set_modulation(StringModulation::sync);
+    voice.set_modulation_mix(1.0);
+    voice.set_velocity_response(
+        VelocityResponse{0.0f, 0.0f, 0.0f, 0.0f});
+    const auto y = hit(voice, 1.0f, 48000);
+    const std::vector<float> tail(y.begin() + 24000, y.end());
+    REQUIRE(peak(tail) < 1.0e-4);
+}
+
 TEST_CASE("The string's lowpass gate darkens its release",
           "[signal][drum][string]") {
     auto gated = [](double amount) {

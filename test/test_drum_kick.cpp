@@ -902,11 +902,11 @@ TEST_CASE("A delayed AHD attack does not leak stale unity gain",
     }
 }
 
-TEST_CASE("A close AHD retrigger does not postpone the pending contour",
+TEST_CASE("Close AHD retriggers keep distinct pending contours",
           "[signal][drum][output][ahd][latency][lifecycle]") {
     OutputStage output;
     output.prepare(kFs);
-    output.set_ahd_ms(0.0, 1000.0, 1.0);
+    output.set_ahd_ms(0.0, 0.0, 0.01);
     output.trigger();
 
     std::vector<float> y(96, 0.0f);
@@ -916,9 +916,18 @@ TEST_CASE("A close AHD retrigger does not postpone the pending contour",
     }
     output.trigger();
     for (std::size_t i = 16; i < y.size(); ++i) {
-        y[i] = output.process(0.0f);
+        y[i] = output.process(i == 16 ? 1.0f : 0.0f);
     }
-    REQUIRE(peak(y) > 0.5);
+    auto window_peak = [&y](std::size_t begin, std::size_t end) {
+        double result = 0.0;
+        for (std::size_t i = begin; i < end; ++i) {
+            result = std::max(
+                result, std::fabs(static_cast<double>(y[i])));
+        }
+        return result;
+    };
+    REQUIRE(window_peak(30, 36) > 0.5);
+    REQUIRE(window_peak(46, 52) > 0.5);
 }
 
 TEST_CASE("A delayed AHD retrigger preserves the preceding output tail",
