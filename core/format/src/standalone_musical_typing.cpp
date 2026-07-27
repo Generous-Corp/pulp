@@ -1,5 +1,6 @@
 #include <pulp/format/detail/standalone_musical_typing.hpp>
 
+#include <pulp/runtime/log.hpp>
 #include <pulp/view/view.hpp>
 
 #include <algorithm>
@@ -196,8 +197,21 @@ void StandaloneMusicalTyping::note_off(int note) {
 }
 
 void StandaloneMusicalTyping::release_all_notes() {
-    if (keyboard_)
+    if (keyboard_) {
         keyboard_->set_input_capture(false);
+        // Let the keyboard drop its OWN latched state (QWERTY-held notes, the
+        // sustain hold, a deflected pitch bend) rather than only emitting the
+        // MIDI for it. Emitting CC64=0 without clearing the view leaves the
+        // sustain pad lit and `sustain_` true, so re-opening shows a control
+        // that is on while the synth's is off, and the next press/release emits
+        // a stray CC64=0 with no preceding CC64=127.
+        //
+        // This runs FIRST and routes back through our own on_note_off /
+        // on_sustain / on_pitch_bend callbacks, so the residual sweep below
+        // sees already-zeroed hold counts and cleared sustain/pitch flags and
+        // does not emit anything twice.
+        keyboard_->on_focus_changed(false);
+    }
 
     for (std::size_t note = 0; note < note_hold_counts_.size(); ++note) {
         if (note_hold_counts_[note] == 0)
@@ -322,6 +336,14 @@ bool StandaloneMusicalTyping::show() {
         options.resizable = true;
         window_ = host_factory_(*keyboard_, options);
         if (!window_ || !window_->is_gpu_backed()) {
+            // The keyboard paints through Skia, so a CPU-only WindowHost cannot
+            // show it. Say so: the Window menu item and Cmd+K are already
+            // installed by the time we get here, and a silent bail-out reads as
+            // a dead menu item rather than an unsupported build.
+            runtime::log_warn(
+                "[musical-typing] cannot open: this build's WindowHost is not GPU-backed "
+                "(Skia/Dawn unavailable). The Window > Musical Typing Keyboard command "
+                "will not work.");
             window_.reset();
             keyboard_.reset();
             return false;

@@ -342,6 +342,61 @@ TEST_CASE("standalone musical typing preserves failed note offs for recovery",
     CHECK(recovery[1].sample_offset == 63);
 }
 
+// The audio thread drains into the host's real MIDI buffer, which runs with a
+// reserved capacity and set_realtime_capacity_limit(true) so it drops instead of
+// allocating. Every other test here uses a default-constructed MidiBuffer, which
+// grows without limit — so add() never fails and the drain's retry branch never
+// executes. Reserve zero events to force that branch.
+TEST_CASE("standalone musical typing keeps recovery pending when the drain buffer is full",
+          "[format][standalone][musical-typing][rt-safety]") {
+    Harness harness;
+    REQUIRE(harness.typing.show());
+    REQUIRE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::a)));
+    harness.reject_note_off = true;
+    harness.typing.keyboard_for_test()->on_focus_changed(false);
+
+    midi::MidiBuffer full;
+    full.reserve_events(0);
+    full.set_realtime_capacity_limit(true);
+    harness.typing.drain_recovery_into(full, 64);
+    CHECK(full.empty());
+
+    // The recovery must survive a rejected append, not be consumed by it.
+    midi::MidiBuffer roomy;
+    harness.typing.drain_recovery_into(roomy, 64);
+    REQUIRE(roomy.size() == 1);
+    CHECK(roomy[0].is_note_off());
+    CHECK(roomy[0].note() == 48);
+    CHECK(roomy[0].sample_offset == 63);
+
+    // ...and is not delivered a second time once it has landed.
+    midi::MidiBuffer after;
+    harness.typing.drain_recovery_into(after, 64);
+    CHECK(after.empty());
+}
+
+// hide() must clear the KEYBOARD's latched control state, not just emit the
+// matching MIDI. Otherwise the sustain pad stays lit across a hide/show cycle
+// while the synth's sustain is off.
+TEST_CASE("standalone musical typing hide clears latched keyboard controls",
+          "[format][standalone][musical-typing]") {
+    Harness harness;
+    REQUIRE(harness.typing.show());
+    auto* keyboard = harness.typing.keyboard_for_test();
+    REQUIRE(keyboard != nullptr);
+
+    const int pad = keyboard->element_for_action("sustain");
+    REQUIRE(pad >= 0);
+
+    // Hold tab (momentary sustain) and hide while it is still down, so the
+    // key-up can never route back to the keyboard.
+    REQUIRE(harness.typing.route_app_key_for_test(harness.key(view::KeyCode::tab)));
+    REQUIRE(keyboard->element_value(pad) == 1.0f);
+
+    harness.typing.hide();
+    CHECK(keyboard->element_value(pad) == 0.0f);
+}
+
 TEST_CASE("standalone musical typing releases a note after its final overlapping hold",
           "[format][standalone][musical-typing]") {
     Harness harness;
