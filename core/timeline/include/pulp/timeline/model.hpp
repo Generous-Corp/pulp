@@ -765,6 +765,15 @@ class SequenceCompileStructureToken {
   public:
     SequenceCompileStructureToken() noexcept = default;
 
+    /// Whether this token names a real structure snapshot.
+    ///
+    /// A default-constructed token is invalid and compares equal only to other
+    /// default-constructed tokens, so it can be held as "no snapshot observed
+    /// yet" without a separate flag. Comparing two *invalid* tokens therefore
+    /// says nothing about structure — check `valid()` before treating equality
+    /// as evidence that subscribers need no recompile.
+    ///
+    /// @returns true when the token was issued by a Project snapshot.
     bool valid() const noexcept {
         return value_ != 0;
     }
