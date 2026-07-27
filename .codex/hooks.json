@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'root=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-superproject-working-tree 2>/dev/null)}\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-pointer.sh\"'",
+          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-pointer.sh\"'",
             "timeout": 3000
           }
         ]
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'root=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-superproject-working-tree 2>/dev/null)}\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-hint.sh\"'",
+          "command": "bash -c 'candidate=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; root=\"$(git -C \"$candidate\" rev-parse --show-superproject-working-tree 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git -C \"$candidate\" rev-parse --show-toplevel 2>/dev/null)\"; [ -n \"$root\" ] || root=\"$(git rev-parse --show-toplevel)\"; cd \"$root\" && exec bash \"$root/hooks/scripts/decisions-contract-hint.sh\"'",
             "timeout": 3000
           }
         ]

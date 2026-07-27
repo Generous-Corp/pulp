@@ -77,7 +77,6 @@ def make_nested_submodule_fixture(temp_root: Path) -> tuple[Path, Path]:
 
 def main() -> int:
     environment = os.environ.copy()
-    environment.pop("CLAUDE_PROJECT_DIR", None)
     environment["TOOL_INPUT"] = json.dumps(
         {"file_path": str(ROOT / "docs/guides/claude-code-plugin.md")}
     )
@@ -110,40 +109,47 @@ def main() -> int:
             return 1
 
         checked = 0
-        for config_path in CONFIGS:
-            for hook in configured_hooks(config_path):
-                command = str(hook["command"])
-                result = subprocess.run(
-                    command,
-                    cwd=nested_cwd,
-                    env=environment,
-                    shell=True,
-                    text=True,
-                    capture_output=True,
-                    timeout=15,
-                    check=False,
-                )
-                if result.returncode != 0:
-                    print(
-                        f"FAIL: {config_path.relative_to(ROOT)} hook exited "
-                        f"{result.returncode} from an initialized submodule\n"
-                        f"command: {command}\n"
-                        f"stdout: {result.stdout}\n"
-                        f"stderr: {result.stderr}",
-                        file=sys.stderr,
+        for project_dir in (None, nested_cwd):
+            if project_dir is None:
+                environment.pop("CLAUDE_PROJECT_DIR", None)
+            else:
+                environment["CLAUDE_PROJECT_DIR"] = str(project_dir)
+            for config_path in CONFIGS:
+                for hook in configured_hooks(config_path):
+                    command = str(hook["command"])
+                    result = subprocess.run(
+                        command,
+                        cwd=nested_cwd,
+                        env=environment,
+                        shell=True,
+                        text=True,
+                        capture_output=True,
+                        timeout=15,
+                        check=False,
                     )
-                    return 1
-                if (
-                    "decisions-contract-pointer.sh" in command
-                    and "decisions contract" not in result.stdout
-                ):
-                    print(
-                        "FAIL: decisions-contract pointer silently no-op'd "
-                        "from an initialized submodule",
-                        file=sys.stderr,
-                    )
-                    return 1
-                checked += 1
+                    if result.returncode != 0:
+                        env_case = "unset" if project_dir is None else "nested"
+                        print(
+                            f"FAIL: {config_path.relative_to(ROOT)} hook exited "
+                            f"{result.returncode} from an initialized submodule "
+                            f"with CLAUDE_PROJECT_DIR {env_case}\n"
+                            f"command: {command}\n"
+                            f"stdout: {result.stdout}\n"
+                            f"stderr: {result.stderr}",
+                            file=sys.stderr,
+                        )
+                        return 1
+                    if (
+                        "decisions-contract-pointer.sh" in command
+                        and "decisions contract" not in result.stdout
+                    ):
+                        print(
+                            "FAIL: decisions-contract pointer silently no-op'd "
+                            "from an initialized submodule",
+                            file=sys.stderr,
+                        )
+                        return 1
+                    checked += 1
 
     if checked == 0:
         print("FAIL: no project hook commands were discovered", file=sys.stderr)
